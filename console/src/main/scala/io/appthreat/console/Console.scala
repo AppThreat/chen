@@ -348,7 +348,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
                  |""",
     example = """importCpg("app.atom")"""
   )
-  def importCpg(inputPath: String, projectName: String = "", enhance: Boolean = false): Option[Cpg] = {
+  def importCpg(inputPath: String, projectName: String = "", enhance: Boolean = true): Option[Cpg] = {
     val name =
       Option(projectName).filter(_.nonEmpty).getOrElse(deriveNameFromInputPath(inputPath, workspace))
     val cpgFile = File(inputPath)

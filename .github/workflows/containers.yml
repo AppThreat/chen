@@ -1,8 +1,11 @@
 name: Upload Container image
 
 on:
-  schedule:
-    - cron: "0 8 * * *" # run once daily
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:    # allow to manually trigger this workflow
 
 env:
@@ -18,6 +21,23 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '20'
+      - name: Delete `.rustup` directory
+        run: rm -rf /home/runner/.rustup # to save disk space
+        if: runner.os == 'Linux'
+      - name: Delete `.cargo` directory # to save disk space
+        run: rm -rf /home/runner/.cargo
+        if: runner.os == 'Linux'
+      - run: |
+          sbt createDistribution
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx

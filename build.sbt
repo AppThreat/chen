@@ -55,6 +55,8 @@ ThisBuild / scalacOptions ++= Seq(
   "17",
 )
 
+enablePlugins(JavaAppPackaging)
+
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
 createDistribution := {
   val distributionFile = file("target/chen.zip")
@@ -72,7 +74,6 @@ ThisBuild / resolvers ++= Seq(
 )
 
 ThisBuild / Test / fork := true
-
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 githubOwner := "appthreat"
