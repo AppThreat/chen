@@ -71,7 +71,6 @@ COPY target/chen.zip /opt/ \
 RUN cd /opt/ && unzip chen.zip \
     && rm chen.zip \
     && chmod a-w -R /opt \
-    && rm -rf /var/cache/yum \
     && microdnf clean all
 
 CMD ["chen"]
