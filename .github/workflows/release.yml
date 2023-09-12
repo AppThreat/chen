@@ -26,8 +26,9 @@ jobs:
       - name: Delete `.cargo` directory # to save disk space
         run: rm -rf /home/runner/.cargo
         if: runner.os == 'Linux'
-      - run: sbt scalafmtCheck +test
-      - run: sbt createDistribution publish
+      - run: |
+          sbt scalafmtCheck +test
+          sbt createDistribution publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: sha512sum target/chen.zip > target/chen.zip.sha512
