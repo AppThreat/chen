@@ -54,7 +54,7 @@ astGenBinaryNames := {
   if (hasCompatibleAstGenVersion(astGenVersion.value)) {
     Seq.empty
   } else if (sys.props.get("ALL_PLATFORMS").contains("TRUE")) {
-    Seq(AstgenWin, AstgenLinux)
+    Seq(AstgenWin, AstgenLinux, AstgenMac, AstgenMacArm)
   } else {
     Environment.operatingSystem match {
       case Environment.OperatingSystemType.Windows =>
@@ -67,7 +67,7 @@ astGenBinaryNames := {
           case Environment.ArchitectureType.ARM => Seq(AstgenMacArm)
         }
       case Environment.OperatingSystemType.Unknown =>
-        Seq(AstgenWin, AstgenLinux)
+        Seq(AstgenWin, AstgenLinux, AstgenMac, AstgenMacArm)
     }
   }
 }
