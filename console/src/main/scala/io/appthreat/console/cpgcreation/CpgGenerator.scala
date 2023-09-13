@@ -50,7 +50,7 @@ abstract class CpgGenerator() {
   protected lazy val performanceParameter = {
     if (isJvmBased) {
       val maxValueInGigabytes = Math.floor(Runtime.getRuntime.maxMemory.toDouble / 1024 / 1024 / 1024).toInt
-      val minValueInGigabytes = Math.floor(maxValueInGigabytes.toDouble / 2).toInt
+      val minValueInGigabytes = Math.max(Math.floor(maxValueInGigabytes.toDouble / 2).toInt, 1)
       Seq(
         s"-J-Xms${minValueInGigabytes}G",
         s"-J-Xmx${maxValueInGigabytes}G",
