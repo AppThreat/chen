@@ -9,7 +9,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
-      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chen"
+      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
 
 ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
@@ -68,11 +68,11 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
     && mkdir -p /opt
-COPY target/chen.zip /opt/ \
+WORKDIR /opt
+COPY ./target/chen.zip .
 RUN cd /opt/ \
-    && unzip chen.zip \
+    && unzip -q chen.zip \
     && rm chen.zip \
-    && chmod a-w -R /opt \
     && microdnf clean all
 
-CMD ["chen"]
+CMD ["chennai"]
