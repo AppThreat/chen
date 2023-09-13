@@ -73,18 +73,11 @@ ThisBuild / resolvers ++= Seq(
   "Gradle Releases" at "https://repo.gradle.org/gradle/libs-releases/"
 )
 
+ThisBuild / versionScheme := Some("early-semver")
+
 ThisBuild / Test / fork := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-githubOwner := "appthreat"
-githubRepository := "chen"
-credentials +=
-  Credentials(
-    "GitHub Package Registry",
-    "maven.pkg.github.com",
-    "appthreat",
-    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
-  )
 publish / skip := true // don't publish the root project
 
 // Avoids running root tasks on the benchmarks project

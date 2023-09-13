@@ -17,3 +17,12 @@ Antlr4 / antlr4PackageName := Some("io.appthreat.dataflowengineoss")
 Antlr4 / antlr4Version     := Versions.antlr
 Antlr4 / javaSource        := (Compile / sourceManaged).value
 Compile / doc / sources ~= (_ filter (_ => false))
+githubOwner := "appthreat"
+githubRepository := "chen"
+credentials +=
+  Credentials(
+    "GitHub Package Registry",
+    "maven.pkg.github.com",
+    "appthreat",
+    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+  )

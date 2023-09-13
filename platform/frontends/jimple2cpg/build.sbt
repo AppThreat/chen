@@ -11,3 +11,12 @@ libraryDependencies ++= Seq(
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 trapExit    := false
 Test / fork := true
+githubOwner := "appthreat"
+githubRepository := "chen"
+credentials +=
+  Credentials(
+    "GitHub Package Registry",
+    "maven.pkg.github.com",
+    "appthreat",
+    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+  )
