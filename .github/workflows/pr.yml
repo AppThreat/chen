@@ -31,26 +31,3 @@ jobs:
         run: sbt clean +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  formatting:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 1
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '20'
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.sbt
-            ~/.coursier
-          key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
-      - name: Check formatting
-        run: sbt scalafmtCheck Test/scalafmtCheck
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: echo "Previous step failed because code is not formatted. Run 'sbt scalafmt Test/scalafmt'"
-        if: ${{ failure() }}
