@@ -216,7 +216,7 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
           case Some(value) => value
           case None =>
             throw new RuntimeException(
-              s"No CPG loaded for project ${p.name} - try e.g. `help|importCode|importCpg|open`"
+              s"No Atom loaded for exploration - try importing one using `importCode|importAtom`"
             )
         }
       case None => throw new RuntimeException("No projects loaded")
