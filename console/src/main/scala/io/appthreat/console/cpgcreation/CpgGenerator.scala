@@ -51,7 +51,16 @@ abstract class CpgGenerator() {
     if (isJvmBased) {
       val maxValueInGigabytes = Math.floor(Runtime.getRuntime.maxMemory.toDouble / 1024 / 1024 / 1024).toInt
       val minValueInGigabytes = Math.floor(maxValueInGigabytes.toDouble / 2).toInt
-      Seq(s"-J-Xms${minValueInGigabytes}G", s"-J-Xmx${maxValueInGigabytes}G", "-J-XX:+ExplicitGCInvokesConcurrent", "-J-XX:+ParallelRefProcEnabled", "-J-XX:+UnlockExperimentalVMOptions", "-J-XX:G1NewSizePercent=20", "-J-XX:+UnlockDiagnosticVMOptions", "-J-XX:G1SummarizeRSetStatsPeriod=1")
+      Seq(
+        s"-J-Xms${minValueInGigabytes}G",
+        s"-J-Xmx${maxValueInGigabytes}G",
+        "-J-XX:+ExplicitGCInvokesConcurrent",
+        "-J-XX:+ParallelRefProcEnabled",
+        "-J-XX:+UnlockExperimentalVMOptions",
+        "-J-XX:G1NewSizePercent=20",
+        "-J-XX:+UnlockDiagnosticVMOptions",
+        "-J-XX:G1SummarizeRSetStatsPeriod=1"
+      )
     } else Nil
   }
 

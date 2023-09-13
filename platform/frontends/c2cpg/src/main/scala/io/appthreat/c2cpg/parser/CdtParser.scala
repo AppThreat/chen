@@ -47,11 +47,11 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private val log              = new DefaultLogService
 
   // Setup indexing
-  var index: IIndex = null
+  var index: Option[IIndex] = Option(EmptyCIndex.INSTANCE)
   if (config.useProjectIndex) {
     try {
-      val allProjects: Array[ICProject] = CoreModel.getDefault.getCModel.getCProjects;
-      index = CCorePlugin.getIndexManager.getIndex(allProjects);
+      val allProjects: Array[ICProject] = CoreModel.getDefault.getCModel.getCProjects
+      index = Option(CCorePlugin.getIndexManager.getIndex(allProjects))
     } catch {
       case e: Throwable =>
     }
@@ -87,9 +87,13 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         val fileContentProvider = new CustomFileContentProvider(headerFileFinder)
         val lang                = createParseLanguage(realPath.path)
         val scannerInfo         = createScannerInfo(realPath.path)
-        if (index != null) index.acquireReadLock()
-        val translationUnit = lang.getASTTranslationUnit(fileContent, scannerInfo, fileContentProvider, index, opts, log)
-        val problems        = CPPVisitor.getProblems(translationUnit)
+        index match {
+          case Some(x) => if (x.isFullyInitialized) x.acquireReadLock()
+          case _       =>
+        }
+        val translationUnit =
+          lang.getASTTranslationUnit(fileContent, scannerInfo, fileContentProvider, index.get, opts, log)
+        val problems = CPPVisitor.getProblems(translationUnit)
         if (parserConfig.logProblems) logProblems(problems.toList)
         if (parserConfig.logPreprocessor) logPreprocessorStatements(translationUnit)
         ParseResult(
@@ -105,7 +109,10 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         case e: Throwable =>
           ParseResult(None, failure = Option(e))
       } finally {
-        if (index != null) index.releaseReadLock()
+        index match {
+          case Some(x) => x.releaseReadLock()
+          case _       =>
+        }
       }
     } else {
       ParseResult(

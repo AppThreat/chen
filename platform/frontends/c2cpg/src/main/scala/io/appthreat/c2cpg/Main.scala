@@ -99,9 +99,7 @@ private object Frontend {
         )
         .action((_, c) => c.withNoImageLocations(true)),
       opt[Unit]("with-project-index")
-        .text(
-          "performance optimization, allows the parser to use an existing eclipse project(s) index(es)."
-        )
+        .text("performance optimization, allows the parser to use an existing eclipse project(s) index(es).")
         .action((_, c) => c.withProjectIndexes(true)),
       opt[String]("define")
         .unbounded()
