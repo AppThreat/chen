@@ -19,7 +19,7 @@ object ReplBridge extends BridgeBase {
 
   override def greeting = ChenConsole.banner()
 
-  override def promptStr: String = "chen"
+  override def promptStr: String = "chennai"
 
   override def onExitCode: String = "workspace.projects.foreach(_.close)"
 

@@ -136,6 +136,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     example = "cpg.method.l"
   )
   implicit def cpg: Cpg = workspace.cpg
+  implicit def atom: Cpg = workspace.cpg
 
   /** All cpgs loaded in the workspace
     */

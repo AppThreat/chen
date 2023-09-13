@@ -45,7 +45,7 @@ RUN set -e; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
     && microdnf install -y gcc git-core \
         python3.11 python3.11-devel python3.11-pip \
-        pcre2 which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
+        pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && curl -s "https://get.sdkman.io" | bash \
@@ -68,7 +68,8 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux
 COPY target/chen.zip /opt/ \
-RUN cd /opt/ && unzip chen.zip \
+RUN cd /opt/ \
+    && unzip chen.zip \
     && rm chen.zip \
     && chmod a-w -R /opt \
     && microdnf clean all

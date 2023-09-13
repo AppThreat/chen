@@ -3,17 +3,20 @@ package io.appthreat.c2cpg.parser
 import better.files.File
 import io.appthreat.c2cpg.Config
 import io.shiftleft.utils.IOUtils
+import org.eclipse.cdt.core.CCorePlugin
 import org.eclipse.cdt.core.dom.ast.gnu.c.GCCLanguage
 import org.eclipse.cdt.core.dom.ast.gnu.cpp.GPPLanguage
 import org.eclipse.cdt.core.dom.ast.{IASTPreprocessorStatement, IASTTranslationUnit}
-import org.eclipse.cdt.core.model.ILanguage
+import org.eclipse.cdt.core.index.IIndex
+import org.eclipse.cdt.core.model.{CoreModel, ICProject, ILanguage}
 import org.eclipse.cdt.core.parser.{DefaultLogService, ScannerInfo}
 import org.eclipse.cdt.core.parser.FileContent
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPVisitor
+import org.eclipse.cdt.internal.core.index.EmptyCIndex
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{NoSuchFileException, Path}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object CdtParser {
 
@@ -42,6 +45,17 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private val definedSymbols   = parserConfig.definedSymbols.asJava
   private val includePaths     = parserConfig.userIncludePaths
   private val log              = new DefaultLogService
+
+  // Setup indexing
+  var index: IIndex = null
+  if (config.useProjectIndex) {
+    try {
+      val allProjects: Array[ICProject] = CoreModel.getDefault.getCModel.getCProjects;
+      index = CCorePlugin.getIndexManager.getIndex(allProjects);
+    } catch {
+      case e: Throwable =>
+    }
+  }
 
   // enables parsing of code behind disabled preprocessor defines:
   private var opts: Int = ILanguage.OPTION_PARSE_INACTIVE_CODE
@@ -73,7 +87,8 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         val fileContentProvider = new CustomFileContentProvider(headerFileFinder)
         val lang                = createParseLanguage(realPath.path)
         val scannerInfo         = createScannerInfo(realPath.path)
-        val translationUnit = lang.getASTTranslationUnit(fileContent, scannerInfo, fileContentProvider, null, opts, log)
+        if (index != null) index.acquireReadLock()
+        val translationUnit = lang.getASTTranslationUnit(fileContent, scannerInfo, fileContentProvider, index, opts, log)
         val problems        = CPPVisitor.getProblems(translationUnit)
         if (parserConfig.logProblems) logProblems(problems.toList)
         if (parserConfig.logPreprocessor) logPreprocessorStatements(translationUnit)
@@ -89,6 +104,8 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
           ParseResult(None, failure = Option(u)) // return value to make the compiler happy
         case e: Throwable =>
           ParseResult(None, failure = Option(e))
+      } finally {
+        if (index != null) index.releaseReadLock()
       }
     } else {
       ParseResult(
