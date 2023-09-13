@@ -16,7 +16,8 @@ final case class Config(
   printIfDefsOnly: Boolean = false,
   includePathsAutoDiscovery: Boolean = false,
   skipFunctionBodies: Boolean = false,
-  noImageLocations: Boolean = false
+  noImageLocations: Boolean = false,
+  useProjectIndex: Boolean = false
 ) extends X2CpgConfig[Config] {
   def withIncludePaths(includePaths: Set[String]): Config = {
     this.copy(includePaths = includePaths).withInheritedFields(this)
@@ -52,6 +53,10 @@ final case class Config(
 
   def withNoImageLocations(value: Boolean): Config = {
     this.copy(noImageLocations = value).withInheritedFields(this)
+  }
+
+  def withProjectIndexes(value: Boolean): Config = {
+    this.copy(useProjectIndex = value).withInheritedFields(this)
   }
 }
 
@@ -93,6 +98,9 @@ private object Frontend {
           "performance optimization, allows the parser not to create image-locations. An image location explains how a name made it into the translation unit. Eg: via macro expansion or preprocessor."
         )
         .action((_, c) => c.withNoImageLocations(true)),
+      opt[Unit]("with-project-index")
+        .text("performance optimization, allows the parser to use an existing eclipse project(s) index(es).")
+        .action((_, c) => c.withProjectIndexes(true)),
       opt[String]("define")
         .unbounded()
         .text("define a name")

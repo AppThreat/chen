@@ -27,18 +27,18 @@ abstract class CpgGenerator() {
 
   protected def runShellCommand(program: String, arguments: Seq[String]): Try[Unit] =
     Try {
-      assert(File(program).exists, s"CPG generator does not exist at: $program")
+      assert(File(program).exists, s"Atom generator does not exist at: $program")
 
-      val cmd       = Seq(program) ++ maxMemoryParameter ++ arguments
+      val cmd       = Seq(program) ++ performanceParameter ++ arguments
       val cmdString = cmd.mkString(" ")
 
       println(
         s"""=======================================================================================================
-           |Invoking CPG generator in a separate process. Note that the new process will consume additional memory.
+           |Invoking Atom generator in a separate process. Note that the new process will consume additional memory.
            |If you are importing a large codebase (and/or running into memory issues), please try the following:
            |1) exit chen
            |2) invoke the frontend: $cmdString
-           |3) start chen, import the atom: `importAtom("path/to/atom")`
+           |3) start chennai, import the atom: `importAtom("path/to/atom")`
            |=======================================================================================================
            |""".stripMargin
       )
@@ -47,10 +47,10 @@ abstract class CpgGenerator() {
       assert(exitValue == 0, s"Error running shell command: exitValue=$exitValue; $cmd")
     }
 
-  protected lazy val maxMemoryParameter = {
+  protected lazy val performanceParameter = {
     if (isJvmBased) {
-      val maxValueInMegabytes = Runtime.getRuntime.maxMemory / 1024 / 1024
-      Seq(s"-J-Xmx${maxValueInMegabytes}m")
+      val maxValueInGigabytes = Math.floor(Runtime.getRuntime.maxMemory.toDouble / 1024 / 1024 / 1024).toInt
+      Seq(s"-J-Xmx${maxValueInGigabytes}G")
     } else Nil
   }
 

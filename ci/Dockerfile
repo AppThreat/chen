@@ -9,7 +9,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
-      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chen"
+      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
 
 ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
@@ -45,7 +45,7 @@ RUN set -e; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
     && microdnf install -y gcc git-core \
         python3.11 python3.11-devel python3.11-pip \
-        pcre2 which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
+        pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && curl -s "https://get.sdkman.io" | bash \
@@ -66,11 +66,13 @@ RUN set -e; \
     && yes | /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
-    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux
-COPY target/chen.zip /opt/ \
-RUN cd /opt/ && unzip chen.zip \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
+    && mkdir -p /opt
+WORKDIR /opt
+COPY ./target/chen.zip .
+RUN cd /opt/ \
+    && unzip -q chen.zip \
     && rm chen.zip \
-    && chmod a-w -R /opt \
     && microdnf clean all
 
-CMD ["chen"]
+CMD ["chennai"]

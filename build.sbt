@@ -78,8 +78,13 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 
 githubOwner := "appthreat"
 githubRepository := "chen"
-githubTokenSource := TokenSource.Environment("GITHUB_TOKEN")
-
+credentials +=
+  Credentials(
+    "GitHub Package Registry",
+    "maven.pkg.github.com",
+    "appthreat",
+    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+  )
 publish / skip := true // don't publish the root project
 
 // Avoids running root tasks on the benchmarks project

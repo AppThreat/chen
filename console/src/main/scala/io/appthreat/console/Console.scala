@@ -135,7 +135,8 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
                  |""",
     example = "cpg.method.l"
   )
-  implicit def cpg: Cpg = workspace.cpg
+  implicit def cpg: Cpg  = workspace.cpg
+  implicit def atom: Cpg = workspace.cpg
 
   /** All cpgs loaded in the workspace
     */
@@ -358,7 +359,6 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
       return None
     }
 
-    System.err.println(s"Creating project `$name` for CPG at `$inputPath`")
     val pathToProject         = workspace.createProject(inputPath, name)
     val cpgDestinationPathOpt = pathToProject.map(_.resolve(nameOfCpgInProject))
 

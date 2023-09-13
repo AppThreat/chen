@@ -51,11 +51,9 @@ object ChenConsole {
   def banner(): String =
     s"""
         |
-        |      /             
-        | ___ (___  ___  ___ 
-        ||    |   )|___)|   )
-        ||__  |  / |__  |  / 
-        | 
+        |/~`|_  _  _  _  _ .
+        |\\_,| |(/_| || |(_||
+        |
         |Version: $version
         |$helpMsg
       """.stripMargin
