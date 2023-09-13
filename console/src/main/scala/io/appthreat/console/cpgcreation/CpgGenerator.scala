@@ -27,7 +27,7 @@ abstract class CpgGenerator() {
 
   protected def runShellCommand(program: String, arguments: Seq[String]): Try[Unit] =
     Try {
-      assert(File(program).exists, s"CPG generator does not exist at: $program")
+      assert(File(program).exists, s"Atom generator does not exist at: $program")
 
       val cmd       = Seq(program) ++ performanceParameter ++ arguments
       val cmdString = cmd.mkString(" ")
@@ -50,17 +50,7 @@ abstract class CpgGenerator() {
   protected lazy val performanceParameter = {
     if (isJvmBased) {
       val maxValueInGigabytes = Math.floor(Runtime.getRuntime.maxMemory.toDouble / 1024 / 1024 / 1024).toInt
-      val minValueInGigabytes = Math.max(Math.floor(maxValueInGigabytes.toDouble / 2).toInt, 1)
-      Seq(
-        s"-J-Xms${minValueInGigabytes}G",
-        s"-J-Xmx${maxValueInGigabytes}G",
-        "-J-XX:+ExplicitGCInvokesConcurrent",
-        "-J-XX:+ParallelRefProcEnabled",
-        "-J-XX:+UnlockExperimentalVMOptions",
-        "-J-XX:G1NewSizePercent=20",
-        "-J-XX:+UnlockDiagnosticVMOptions",
-        "-J-XX:G1SummarizeRSetStatsPeriod=1"
-      )
+      Seq(s"-J-Xmx${maxValueInGigabytes}G")
     } else Nil
   }
 
