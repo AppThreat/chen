@@ -6,7 +6,7 @@ import java.io.PrintStream
 
 object ReplBridge extends BridgeBase {
 
-  override val slProduct = ChenProduct
+  override val jProduct = ChenProduct
 
   def main(args: Array[String]): Unit = {
     run(parseConfig(args))
