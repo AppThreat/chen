@@ -15,9 +15,9 @@ final case class Config(
   logPreprocessor: Boolean = false,
   printIfDefsOnly: Boolean = false,
   includePathsAutoDiscovery: Boolean = false,
-  skipFunctionBodies: Boolean = false,
-  noImageLocations: Boolean = false,
-  useProjectIndex: Boolean = false
+  includeFunctionBodies: Boolean = false,
+  includeImageLocations: Boolean = false,
+  useProjectIndex: Boolean = true
 ) extends X2CpgConfig[Config] {
   def withIncludePaths(includePaths: Set[String]): Config = {
     this.copy(includePaths = includePaths).withInheritedFields(this)
@@ -47,12 +47,12 @@ final case class Config(
     this.copy(includePathsAutoDiscovery = value).withInheritedFields(this)
   }
 
-  def withSkipFunctionBodies(value: Boolean): Config = {
-    this.copy(skipFunctionBodies = value).withInheritedFields(this)
+  def withFunctionBodies(value: Boolean): Config = {
+    this.copy(includeFunctionBodies = value).withInheritedFields(this)
   }
 
-  def withNoImageLocations(value: Boolean): Config = {
-    this.copy(noImageLocations = value).withInheritedFields(this)
+  def withImageLocations(value: Boolean): Config = {
+    this.copy(includeImageLocations = value).withInheritedFields(this)
   }
 
   def withProjectIndexes(value: Boolean): Config = {
@@ -90,14 +90,14 @@ private object Frontend {
       opt[Unit]("with-include-auto-discovery")
         .text("enables auto discovery of system header include paths")
         .action((_, c) => c.withIncludePathsAutoDiscovery(true)),
-      opt[Unit]("skip-function-bodies")
-        .text("instructs the parser to skip function and method bodies.")
-        .action((_, c) => c.withSkipFunctionBodies(true)),
-      opt[Unit]("no-image-locations")
+      opt[Unit]("with-function-bodies")
+        .text("instructs the parser to parse function and method bodies.")
+        .action((_, c) => c.withFunctionBodies(true)),
+      opt[Unit]("with-image-locations")
         .text(
-          "performance optimization, allows the parser not to create image-locations. An image location explains how a name made it into the translation unit. Eg: via macro expansion or preprocessor."
+          "allows the parser to create image-locations. An image location explains how a name made it into the translation unit. Eg: via macro expansion or preprocessor."
         )
-        .action((_, c) => c.withNoImageLocations(true)),
+        .action((_, c) => c.withImageLocations(true)),
       opt[Unit]("with-project-index")
         .text("performance optimization, allows the parser to use an existing eclipse project(s) index(es).")
         .action((_, c) => c.withProjectIndexes(true)),
