@@ -1,6 +1,6 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "0.0.1"
+ThisBuild / version      := "0.0.2"
 ThisBuild / scalaVersion := "3.3.0"
 
 val cpgVersion = "1.4.22"
@@ -55,6 +55,7 @@ ThisBuild / scalacOptions ++= Seq(
   "17",
 )
 
+
 enablePlugins(JavaAppPackaging)
 
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
@@ -73,18 +74,19 @@ ThisBuild / resolvers ++= Seq(
   "Gradle Releases" at "https://repo.gradle.org/gradle/libs-releases/"
 )
 
+ThisBuild / assemblyMergeStrategy := {
+  case PathList("javax", "servlet", xs @ _*)         => MergeStrategy.first
+  case PathList(ps @ _*) if ps.last endsWith ".html" => MergeStrategy.first
+  case "application.conf"                            => MergeStrategy.concat
+  case "unwanted.txt"                                => MergeStrategy.discard
+  case x => MergeStrategy.preferProject
+}
+
+ThisBuild / versionScheme := Some("early-semver")
+
 ThisBuild / Test / fork := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-githubOwner := "appthreat"
-githubRepository := "chen"
-credentials +=
-  Credentials(
-    "GitHub Package Registry",
-    "maven.pkg.github.com",
-    "appthreat",
-    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
-  )
 publish / skip := true // don't publish the root project
 
 // Avoids running root tasks on the benchmarks project

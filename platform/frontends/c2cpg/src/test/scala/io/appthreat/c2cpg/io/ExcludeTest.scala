@@ -52,6 +52,7 @@ class ExcludeTest extends AnyWordSpec with Matchers with TableDrivenPropertyChec
       .withOutputPath(cpgOutFile.toString)
       .withIgnoredFiles(exclude)
       .withIgnoredFilesRegex(excludeRegex)
+      .withFunctionBodies(true)
     val c2cpg = new C2Cpg()
     val cpg   = c2cpg.createCpg(config).get
 

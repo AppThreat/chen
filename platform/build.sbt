@@ -118,3 +118,12 @@ generateScaladocs := {
 Universal / packageBin / mappings ++= sbt.Path.directory(new File("platform/src/main/resources/scripts"))
 
 maintainer := "cloud@appthreat.com"
+githubOwner := "appthreat"
+githubRepository := "chen"
+credentials +=
+  Credentials(
+    "GitHub Package Registry",
+    "maven.pkg.github.com",
+    "appthreat",
+    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+  )

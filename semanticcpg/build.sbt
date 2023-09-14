@@ -8,3 +8,12 @@ libraryDependencies ++= Seq(
 )
 
 Compile / doc / scalacOptions ++= Seq("-doc-title", "semanticcpg apidocs", "-doc-version", version.value)
+githubOwner := "appthreat"
+githubRepository := "chen"
+credentials +=
+  Credentials(
+    "GitHub Package Registry",
+    "maven.pkg.github.com",
+    "appthreat",
+    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+  )

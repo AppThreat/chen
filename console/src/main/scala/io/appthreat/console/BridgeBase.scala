@@ -43,10 +43,10 @@ case class Config(
   */
 trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandling with ServerHandling {
 
-  def slProduct: JProduct
+  def jProduct: JProduct
 
   protected def parseConfig(args: Array[String]): Config = {
-    val parser = new scopt.OptionParser[Config](slProduct.name) {
+    val parser = new scopt.OptionParser[Config](jProduct.name) {
       override def errorOnUnknownArgument = false
 
       note("Script execution")
@@ -155,7 +155,7 @@ trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandli
       arg[java.io.File]("<cpg.bin>")
         .optional()
         .action((x, c) => c.copy(cpgToLoad = Some(x.toScala)))
-        .text("CPG to load")
+        .text("Atom to load")
 
       opt[String]("for-input-path")
         .action((x, c) => c.copy(forInputPath = Some(x)))
@@ -199,7 +199,7 @@ trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandli
       GlobalReporting.enable()
       startHttpServer(config)
     } else if (config.pluginToRun.isDefined) {
-      runPlugin(config, slProduct.name)
+      runPlugin(config, jProduct.name)
     } else {
       startInteractiveShell(config)
     }
@@ -299,7 +299,7 @@ trait PluginHandling { this: BridgeBase =>
     new PluginManager(InstallConfig().rootPath).listPlugins().foreach(println)
     println("Available layer creators")
     println()
-    withTemporaryScript(codeToListPlugins(), slProduct.name) { file =>
+    withTemporaryScript(codeToListPlugins(), jProduct.name) { file =>
       runScript(config.copy(scriptFile = Some(file.path))).get
     }
   }

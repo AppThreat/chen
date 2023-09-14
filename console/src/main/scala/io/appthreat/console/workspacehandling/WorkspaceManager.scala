@@ -51,7 +51,6 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
       val pathToProject = projectNameToDir(projectName)
 
       if (project(projectName).isDefined) {
-        System.err.println(s"Project with name $projectName already exists - overwriting")
         removeProject(projectName)
       }
 
@@ -268,13 +267,11 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
       setActiveProject(name)
       project(name)
     } else {
-      val cpgFilename = baseCpgFilename(name)
-      report("Creating working copy of CPG to be safe")
+      val cpgFilename     = baseCpgFilename(name)
       val cpgFile         = File(cpgFilename)
       val workingCopyPath = projectDir(name).resolve(Project.workCpgFileName)
       val workingCopyName = workingCopyPath.toAbsolutePath.toString
       cp(cpgFile, workingCopyPath)
-      report(s"Loading base CPG from: $workingCopyName")
 
       val result = {
         val newCpg      = loader(workingCopyName)
