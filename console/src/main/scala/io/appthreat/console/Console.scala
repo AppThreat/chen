@@ -1,13 +1,10 @@
 package io.appthreat.console
 
 import better.files.File
-import dotty.tools.repl.State
 import io.appthreat.console.cpgcreation.{CpgGeneratorFactory, ImportCode}
 import io.appthreat.console.workspacehandling.{Project, WorkspaceLoader, WorkspaceManager}
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
 import io.appthreat.x2cpg.X2Cpg.defaultOverlayCreators
-import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.Overlays
