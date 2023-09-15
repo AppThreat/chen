@@ -20,7 +20,12 @@ object Predefined {
       "import overflowdb.traversal.{`package` => _, help => _, _}",
       "import scala.jdk.CollectionConverters._",
       "implicit val resolver: ICallResolver = NoResolve",
-      "implicit val finder: NodeExtensionFinder = DefaultNodeExtensionFinder"
+      "implicit val finder: NodeExtensionFinder = DefaultNodeExtensionFinder",
+      "import me.shadaj.scalapy.py",
+      "import me.shadaj.scalapy.py.SeqConverters",
+      "import py.PyQuote",
+      "import me.shadaj.scalapy.interpreter.CPythonInterpreter",
+      "implicit val pyGlobal: me.shadaj.scalapy.py.Dynamic.global.type = py.Dynamic.global"
     )
 
   val forInteractiveShell: Seq[String] = {

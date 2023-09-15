@@ -27,10 +27,21 @@ libraryDependencies ++= Seq(
   "com.lihaoyi"          %% "os-lib"            % "0.9.1",
   "com.lihaoyi"          %% "pprint"            % "0.7.3",
   "com.lihaoyi"          %% "cask"              % CaskVersion,
+  "me.shadaj"            %% "scalapy-core"      % "0.5.2",
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test
 )
 
 Test / compile := (Test / compile).dependsOn((Projects.c2cpg / stage)).value
+
+import ai.kien.python.Python
+
+lazy val python = Python()
+
+lazy val javaOpts = python.scalapyProperties.get.map {
+  case (k, v) => s"""-D$k=$v"""
+}.toSeq
+
+javaOptions ++= javaOpts
 
 githubOwner := "appthreat"
 githubRepository := "chen"

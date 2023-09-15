@@ -25,9 +25,15 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     PYTHON_CMD=python3 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8" \
+    JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1" \
+    JOERN_DATAFLOW_TRACKED_WIDTH=128 \
+    SCALAPY_PYTHON_LIBRARY=python3.11 \
     ANDROID_HOME=/opt/android-sdk-linux
 ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
+WORKDIR /opt
+COPY ./ci/requirements.txt /opt/
+COPY ./ci/kernel.json /opt/
 RUN set -e; \
     ARCH_NAME="$(rpm --eval '%{_arch}')"; \
     url=; \
@@ -48,6 +54,7 @@ RUN set -e; \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
+    && python3.11 -m pip install -r /opt/requirements.txt notebook owasp-depscan \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -67,12 +74,16 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
-    && mkdir -p /opt
-WORKDIR /opt
+    && curl -Lo coursier https://git.io/coursier-cli \
+    && chmod +x coursier \
+    && ./coursier launch --fork almond -- --install \
+    && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
+    && sudo npm install -g @cyclonedx/cdxgen --no-optional \
+    && rm -f coursier
 COPY ./target/chen.zip .
-RUN cd /opt/ \
-    && unzip -q chen.zip \
-    && rm chen.zip \
+COPY ./notebooks /opt/notebooks
+RUN unzip -q chen.zip \
+    && rm chen.zip kernel.json requirements.txt \
     && microdnf clean all
 
 CMD ["chennai"]

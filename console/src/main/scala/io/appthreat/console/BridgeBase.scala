@@ -136,19 +136,19 @@ trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandli
 
       opt[String]("server-host")
         .action((x, c) => c.copy(serverHost = x))
-        .text("Hostname on which to expose the CPGQL server")
+        .text("Hostname on which to expose the Chen server")
 
       opt[Int]("server-port")
         .action((x, c) => c.copy(serverPort = x))
-        .text("Port on which to expose the CPGQL server")
+        .text("Port on which to expose the Chen server")
 
       opt[String]("server-auth-username")
         .action((x, c) => c.copy(serverAuthUsername = Option(x)))
-        .text("Basic auth username for the CPGQL server")
+        .text("Basic auth username for the Chen server")
 
       opt[String]("server-auth-password")
         .action((x, c) => c.copy(serverAuthPassword = Option(x)))
-        .text("Basic auth password for the CPGQL server")
+        .text("Basic auth password for the Chen server")
 
       note("Misc")
 
@@ -181,7 +181,7 @@ trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandli
     parser.parse(args, Config()).get
   }
 
-  /** Entry point for Joern's integrated REPL and plugin manager */
+  /** Entry point for Chen's integrated REPL and plugin manager */
   protected def run(config: Config): Unit = {
     if (config.listPlugins) {
       printPluginsAndLayerCreators(config)
@@ -206,7 +206,7 @@ trait BridgeBase extends InteractiveShell with ScriptExecution with PluginHandli
   }
 
   protected def createPredefFile(additionalLines: Seq[String] = Nil): Path = {
-    val tmpFile = Files.createTempFile("joern-predef", "sc")
+    val tmpFile = Files.createTempFile("chen-predef", "sc")
     Files.write(tmpFile, (predefLines ++ additionalLines).asJava)
     tmpFile.toAbsolutePath
   }

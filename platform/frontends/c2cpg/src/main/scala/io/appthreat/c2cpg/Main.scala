@@ -8,7 +8,9 @@ import scopt.OParser
 import scala.util.control.NonFatal
 
 final case class Config(
+  includeFiles: Set[String] = Set.empty,
   includePaths: Set[String] = Set.empty,
+  macroFiles: Set[String] = Set.empty,
   defines: Set[String] = Set.empty,
   includeComments: Boolean = false,
   logProblems: Boolean = false,
@@ -19,10 +21,16 @@ final case class Config(
   includeImageLocations: Boolean = false,
   useProjectIndex: Boolean = true
 ) extends X2CpgConfig[Config] {
+  def withIncludeFiles(includeFiles: Set[String]): Config = {
+    this.copy(includeFiles = includeFiles).withInheritedFields(this)
+  }
   def withIncludePaths(includePaths: Set[String]): Config = {
     this.copy(includePaths = includePaths).withInheritedFields(this)
   }
 
+  def withMacroFiles(macroFiles: Set[String]): Config = {
+    this.copy(macroFiles = macroFiles).withInheritedFields(this)
+  }
   def withDefines(defines: Set[String]): Config = {
     this.copy(defines = defines).withInheritedFields(this)
   }
@@ -84,6 +92,14 @@ private object Frontend {
         .unbounded()
         .text("header include paths")
         .action((incl, c) => c.withIncludePaths(c.includePaths + incl)),
+      opt[String]("include-files")
+        .unbounded()
+        .text("header include files")
+        .action((inclf, c) => c.withIncludeFiles(c.includeFiles + inclf)),
+      opt[String]("macro-files")
+        .unbounded()
+        .text("macro files")
+        .action((macrof, c) => c.withMacroFiles(c.macroFiles + macrof)),
       opt[Unit]("no-include-auto-discovery")
         .text("disables auto discovery of system header include paths")
         .hidden(),

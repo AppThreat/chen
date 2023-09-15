@@ -11,6 +11,11 @@ import java.util.List as JList
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
+import me.shadaj.scalapy.py
+import me.shadaj.scalapy.py.SeqConverters
+import py.PyQuote
+import me.shadaj.scalapy.interpreter.CPythonInterpreter
+
 /** Base class for our DSL These are the base steps available in all steps of the query language. There are no
   * constraints on the element types, unlike e.g. [[NodeSteps]]
   */
@@ -76,6 +81,9 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal {
     else write(results)
   }
 
+  private def pyJson = py.module("json")
+  @Doc(info = "execute traversal and convert the result to python object")
+  def toPy: me.shadaj.scalapy.py.Dynamic = pyJson.loads(toJson(false))
 }
 
 object Steps {

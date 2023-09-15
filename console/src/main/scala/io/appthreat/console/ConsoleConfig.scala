@@ -21,8 +21,8 @@ class InstallConfig(environment: Map[String, String] = sys.env) {
     *   - running a unit/integration test (note: the jars would be in the local cache, e.g. in ~/.coursier/cache)
     */
   lazy val rootPath: File = {
-    if (environment.contains("SHIFTLEFT_OCULAR_INSTALL_DIR")) {
-      environment("SHIFTLEFT_OCULAR_INSTALL_DIR").toFile
+    if (environment.contains("CHEN_INSTALL_DIR")) {
+      environment("CHEN_INSTALL_DIR").toFile
     } else {
       val uriToLibDir  = classOf[InstallConfig].getProtectionDomain.getCodeSource.getLocation.toURI
       val pathToLibDir = File(uriToLibDir).parent
