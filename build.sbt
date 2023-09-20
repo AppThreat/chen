@@ -1,6 +1,6 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "0.0.3"
+ThisBuild / version      := "0.0.4"
 ThisBuild / scalaVersion := "3.3.0"
 
 val cpgVersion = "1.4.22"

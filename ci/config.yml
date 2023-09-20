@@ -1,0 +1,14 @@
+listen:
+  host: 0.0.0.0
+
+storage:
+  dir: /opt/notebooks
+
+dependencies:
+  python:
+    - GitPython
+    - pandas
+    - matplotlib
+    - graphviz
+    - pydotplus
+    - networkx[default,extra]

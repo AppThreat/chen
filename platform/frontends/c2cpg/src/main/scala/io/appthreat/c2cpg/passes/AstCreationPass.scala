@@ -38,22 +38,18 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit = {
     val path    = Paths.get(filename).toAbsolutePath
     val relPath = SourceFiles.toRelativePath(path.toString, config.inputPath)
-    val fileLOC = io.shiftleft.utils.IOUtils.readLinesInFile(path).size
-    val (gotCpg, duration) = TimeUtils.time {
+    try {
       val parseResult = parser.parse(path)
       parseResult match {
         case Some(translationUnit) =>
-          report.addReportInfo(relPath, fileLOC, parsed = true)
           val localDiff =
             new AstCreator(relPath, config, translationUnit, file2OffsetTable)(config.schemaValidation).createAst()
           diffGraph.absorb(localDiff)
-          true
         case None =>
-          report.addReportInfo(relPath, fileLOC)
-          false
       }
+    } catch {
+      case e: Throwable =>
     }
-    report.updateReport(relPath, gotCpg, duration)
   }
 
 }

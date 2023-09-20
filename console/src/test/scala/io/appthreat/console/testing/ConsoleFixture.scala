@@ -40,7 +40,7 @@ object TestWorkspaceLoader extends WorkspaceLoader[Project] {
 
 class TestConsole(workspaceDir: String) extends Console[Project](TestWorkspaceLoader, File(workspaceDir)) {
   override def config =
-    new ConsoleConfig(install = new InstallConfig(Map("SHIFTLEFT_OCULAR_INSTALL_DIR" -> workspaceDir)))
+    new ConsoleConfig(install = new InstallConfig(Map("CHEN_INSTALL_DIR" -> workspaceDir)))
 
   override def importCode: ImportCode[Project] = new ImportCode(this) {
     override val generatorFactory = new TestCpgGeneratorFactory(config)

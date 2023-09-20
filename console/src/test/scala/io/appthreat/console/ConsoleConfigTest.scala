@@ -12,8 +12,8 @@ class ConsoleConfigTest extends AnyWordSpec with Matchers {
       config.rootPath shouldBe ProjectRoot.find
     }
 
-    "set the rootPath to SHIFTLEFT_OCULAR_INSTALL_DIR if it is defined" in {
-      val config = new InstallConfig(environment = Map("SHIFTLEFT_OCULAR_INSTALL_DIR" -> "/tmp"))
+    "set the rootPath to CHEN_INSTALL_DIR if it is defined" in {
+      val config = new InstallConfig(environment = Map("CHEN_INSTALL_DIR" -> "/tmp"))
       config.rootPath shouldBe File("/tmp")
     }
 

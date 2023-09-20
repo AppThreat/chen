@@ -9,8 +9,7 @@ import org.eclipse.cdt.core.dom.ast.gnu.cpp.GPPLanguage
 import org.eclipse.cdt.core.dom.ast.{IASTPreprocessorStatement, IASTTranslationUnit}
 import org.eclipse.cdt.core.index.IIndex
 import org.eclipse.cdt.core.model.{CoreModel, ICProject, ILanguage}
-import org.eclipse.cdt.core.parser.{DefaultLogService, ScannerInfo}
-import org.eclipse.cdt.core.parser.FileContent
+import org.eclipse.cdt.core.parser.{DefaultLogService, ExtendedScannerInfo, FileContent}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPVisitor
 import org.eclipse.cdt.internal.core.index.EmptyCIndex
 import org.slf4j.LoggerFactory
@@ -72,11 +71,16 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
     }
   }
 
-  private def createScannerInfo(file: Path): ScannerInfo = {
+  private def createScannerInfo(file: Path): ExtendedScannerInfo = {
     val additionalIncludes =
       if (FileDefaults.isCPPFile(file.toString)) parserConfig.systemIncludePathsCPP
       else parserConfig.systemIncludePathsC
-    new ScannerInfo(definedSymbols, (includePaths ++ additionalIncludes).map(_.toString).toArray)
+    new ExtendedScannerInfo(
+      definedSymbols,
+      (includePaths ++ additionalIncludes).map(_.toString).toArray,
+      parserConfig.macroFiles.map(_.toString).toArray,
+      parserConfig.includeFiles.map(_.toString).toArray
+    )
   }
 
   private def parseInternal(file: Path): ParseResult = {
@@ -130,7 +134,6 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
     val parseResult = parseInternal(file)
     parseResult match {
       case ParseResult(Some(t), c, p, _) =>
-        logger.debug(s"Parsed '${t.getFilePath}' ($c preprocessor error(s), $p problems)")
         Option(t)
       case ParseResult(_, _, _, maybeThrowable) =>
         logger.warn(

@@ -9,11 +9,14 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
-      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
+      org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -p 8192:8192 -v $(pwd):/opt/notebooks:rw -t ghcr.io/appthreat/chen-note --config /opt/config.yml"
 
 ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
 ARG GRADLE_VERSION=8.2.1
+ARG POLYNOTE_VERSION="0.5.1"
+ARG SCALA_VERSION="2.12"
+ARG DIST_TAR="polynote-dist.tar.gz"
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
@@ -22,6 +25,8 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     JAVA_HOME="/opt/java/${JAVA_VERSION}" \
     MAVEN_HOME="/opt/maven/${MAVEN_VERSION}" \
     GRADLE_HOME="/opt/gradle/${GRADLE_VERSION}" \
+    POLYNOTE_SCALA_VERSION=${SCALA_VERSION} \
+    POLYNOTE_VERSION=${POLYNOTE_VERSION} \
     PYTHON_CMD=python3 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8" \
@@ -32,8 +37,6 @@ ENV JAVA_VERSION=$JAVA_VERSION \
 ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
 WORKDIR /opt
-COPY ./ci/requirements.txt /opt/
-COPY ./ci/kernel.json /opt/
 RUN set -e; \
     ARCH_NAME="$(rpm --eval '%{_arch}')"; \
     url=; \
@@ -49,18 +52,11 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core \
+    && microdnf install -y gcc git-core wget \
         python3.11 python3.11-devel python3.11-pip graphviz graphviz-gd graphviz-python3 \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
-    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && python3.11 -m pip install -r /opt/requirements.txt notebook owasp-depscan \
-    && python3.11 -m pip install virtualenv numpy GitPython pandas graphviz pydotplus networkx[default,extra] \
-    && python3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cpu \
-    && python3.11 -m pip install torch_geometric pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -70,6 +66,17 @@ RUN set -e; \
     && sdk offline enable \
     && mv /root/.sdkman/candidates/* /opt/ \
     && rm -rf /root/.sdkman \
+    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && python3.11 -m pip install owasp-depscan virtualenv ipython nbconvert numpy jedi jep GitPython pandas matplotlib graphviz pydotplus networkx[default,extra] \
+    && python3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cpu \
+    && python3.11 -m pip install torch_geometric pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html \
+    && wget -q https://github.com/polynote/polynote/releases/download/$POLYNOTE_VERSION/$DIST_TAR \
+    && tar xfzp $DIST_TAR \
+    && echo "DIST_TAR=$DIST_TAR" \
+    && rm $DIST_TAR \
+    && useradd -ms /bin/bash polly \
     && microdnf install -y epel-release \
     && mkdir -p ${ANDROID_HOME}/cmdline-tools \
     && curl -L https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
@@ -80,16 +87,12 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
-    && curl -Lo coursier https://git.io/coursier-cli \
-    && chmod +x coursier \
-    && ./coursier launch almond:0.14.0-RC13 --scala 3.3.0 -- --install \
-    && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
-    && sudo npm install -g @cyclonedx/cdxgen --omit=optional \
-    && rm -f coursier
+    && sudo npm install -g @cyclonedx/cdxgen --omit=optional
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
+COPY ./ci/config.yml /opt/config.yml
 RUN unzip -q chen.zip \
-    && rm chen.zip kernel.json requirements.txt \
+    && chown -R polly:polly /opt \
     && microdnf clean all
-ENV CLASSPATH=$CLASSPATH:/opt/platform/lib/*.jar:
-CMD ["chennai"]
+EXPOSE 8192
+ENTRYPOINT ["/opt/polynote/polynote.py"]

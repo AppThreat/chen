@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "java",
+    "-Djna.library.path=/usr/lib64",
+    "-cp",
+    "/root/.local/share/jupyter/kernels/scala/launcher.jar:/opt/platform/lib/*.jar",
+    "coursier.bootstrap.launcher.Launcher",
+    "--connection-file",
+    "{connection_file}"
+  ],
+  "display_name": "Scala",
+  "language": "scala"
+}

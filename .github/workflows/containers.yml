@@ -67,3 +67,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=chen
           cache-to: type=gha,mode=max,scope=chen
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta2
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ghcr.io/appthreat/chen-note
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ci/Dockerfile-note
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta2.outputs.tags }}
+          labels: ${{ steps.meta2.outputs.labels }}
+          cache-from: type=gha,scope=chen-note
+          cache-to: type=gha,mode=max,scope=chen-note
