@@ -15,6 +15,7 @@ import overflowdb.traversal.help.Doc
 import scala.sys.process.Process
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
+import scala.collection.mutable.ListBuffer
 
 class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.currentWorkingDirectory)
     extends Reporting {
@@ -132,8 +133,8 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
                  |""",
     example = "cpg.method.l"
   )
-  implicit def cpg: Cpg  = workspace.cpg
-  implicit def atom: Cpg = workspace.cpg
+  implicit def cpg: Cpg = workspace.cpg
+  def atom: Cpg         = workspace.cpg
 
   /** All cpgs loaded in the workspace
     */

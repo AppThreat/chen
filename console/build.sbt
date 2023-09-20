@@ -31,6 +31,7 @@ libraryDependencies ++= Seq(
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test
 )
 
+
 Test / compile := (Test / compile).dependsOn((Projects.c2cpg / stage)).value
 
 import ai.kien.python.Python

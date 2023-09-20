@@ -11,7 +11,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=21-graalce
+ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
 ARG GRADLE_VERSION=8.2.1
 
@@ -82,7 +82,7 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
     && curl -Lo coursier https://git.io/coursier-cli \
     && chmod +x coursier \
-    && ./coursier launch almond --scala 3.3.0 -- --install \
+    && ./coursier launch almond:0.14.0-RC13 --scala 3.3.0 -- --install \
     && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
     && sudo npm install -g @cyclonedx/cdxgen --omit=optional \
     && rm -f coursier
