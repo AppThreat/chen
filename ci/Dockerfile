@@ -11,7 +11,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=20.0.2-graalce
+ARG JAVA_VERSION=21-graalce
 ARG MAVEN_VERSION=3.9.3
 ARG GRADLE_VERSION=8.2.1
 
@@ -50,11 +50,17 @@ RUN set -e; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
     && microdnf install -y gcc git-core \
-        python3.11 python3.11-devel python3.11-pip \
+        python3.11 python3.11-devel python3.11-pip graphviz graphviz-gd graphviz-python3 \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
+    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && python3.11 -m pip install -r /opt/requirements.txt notebook owasp-depscan \
+    && python3.11 -m pip install virtualenv numpy GitPython pandas graphviz pydotplus networkx[default,extra] \
+    && python3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cpu \
+    && python3.11 -m pip install torch_geometric pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -76,14 +82,14 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
     && curl -Lo coursier https://git.io/coursier-cli \
     && chmod +x coursier \
-    && ./coursier launch --fork almond -- --install \
+    && ./coursier launch almond --scala 3.3.0 -- --install \
     && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
-    && sudo npm install -g @cyclonedx/cdxgen --no-optional \
+    && sudo npm install -g @cyclonedx/cdxgen --omit=optional \
     && rm -f coursier
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
 RUN unzip -q chen.zip \
     && rm chen.zip kernel.json requirements.txt \
     && microdnf clean all
-
+ENV CLASSPATH=$CLASSPATH:/opt/platform/lib/*.jar:
 CMD ["chennai"]
