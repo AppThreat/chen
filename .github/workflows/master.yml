@@ -31,3 +31,4 @@ jobs:
       - run: sbt scalafmtCheck +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
