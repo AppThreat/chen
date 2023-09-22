@@ -6,6 +6,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        jvm: ['17', '19', '20', '21']
     steps:
       - uses: actions/checkout@v3
         with:
@@ -13,8 +14,8 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
-          java-version: '20'
+          distribution: 'zulu'
+          java-version: ${{ matrix.jvm }}
       - name: Delete `.rustup` directory
         run: rm -rf /home/runner/.rustup # to save disk space
         if: runner.os == 'Linux'
@@ -31,3 +32,4 @@ jobs:
         run: sbt clean +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"

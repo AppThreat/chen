@@ -28,6 +28,7 @@ libraryDependencies ++= Seq(
   "com.lihaoyi"          %% "pprint"            % "0.7.3",
   "com.lihaoyi"          %% "cask"              % CaskVersion,
   "me.shadaj"            %% "scalapy-core"      % "0.5.2",
+  "org.scala-lang.modules" % "scala-asm"        % "9.5.0-scala-1",
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test
 )
 
