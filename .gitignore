@@ -51,4 +51,5 @@ flake.lock
 
 chen.zip
 .metals/
-
+*.pyc
+**/__pycache__/

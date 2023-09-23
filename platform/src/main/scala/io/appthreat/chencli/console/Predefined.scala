@@ -66,44 +66,6 @@ object Predefined {
         |
         |    findCallee(lastCallerMethod, tree)
         |  }
-        |""".stripMargin,
-      """
-        |import overflowdb.formats.ExportResult
-        |import overflowdb.formats.graphml.GraphMLExporter
-        |import java.nio.file.{Path, Paths}
-        |
-        |case class MethodSubGraph(methodName: String, nodes: Set[Node]) {
-        |  def edges: Set[Edge] = {
-        |    for {
-        |      node <- nodes
-        |      edge <- node.bothE.asScala
-        |      if nodes.contains(edge.inNode) && nodes.contains(edge.outNode)
-        |    } yield edge
-        |  }
-        |}
-        |
-        |def plus(resultA: ExportResult, resultB: ExportResult): ExportResult = {
-        |  ExportResult(
-        |    nodeCount = resultA.nodeCount + resultB.nodeCount,
-        |    edgeCount = resultA.edgeCount + resultB.edgeCount,
-        |    files = resultA.files ++ resultB.files,
-        |    additionalInfo = resultA.additionalInfo
-        |  )
-        |}
-        |
-        |def splitByMethod(atom: Cpg): IterableOnce[MethodSubGraph] = {
-        |  atom.method.map { method =>
-        |    MethodSubGraph(methodName = method.name, nodes = method.ast.toSet)
-        |  }
-        |}
-        |
-        |def toGraphML(methodFullName: String, gmlFileName: String)(implicit atom: Cpg) = {
-        | splitByMethod(atom).iterator
-        |  .map { case subGraph @ MethodSubGraph(methodName, nodes) =>
-        |    GraphMLExporter.runExport(nodes, subGraph.edges, Paths.get(gmlFileName))
-        |  }
-        |  .reduce(plus)
-        |}
         |""".stripMargin
     )
 

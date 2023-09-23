@@ -25,8 +25,9 @@ class Engine(context: EngineContext) {
 
   import Engine.*
 
-  private val logger: Logger                   = LoggerFactory.getLogger(this.getClass)
-  private val executorService: ExecutorService = Executors.newWorkStealingPool()
+  private val logger: Logger = LoggerFactory.getLogger(this.getClass)
+  private val executorService: ExecutorService =
+    Executors.newWorkStealingPool(2)
   private val completionService =
     new ExecutorCompletionService[TaskSummary](executorService)
 
@@ -102,10 +103,8 @@ class Engine(context: EngineContext) {
           case Success(resultsOfTask) =>
             numberOfTasksRunning -= 1
             handleSummary(resultsOfTask)
-          case Failure(exception) =>
+          case Failure(_) =>
             numberOfTasksRunning -= 1
-            logger.warn(s"SolveTask failed with exception:", exception)
-            exception.printStackTrace()
         }
       }
     }

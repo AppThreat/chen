@@ -4,18 +4,25 @@ import better.files.File
 import io.appthreat.console.cpgcreation.{CpgGeneratorFactory, ImportCode}
 import io.appthreat.console.workspacehandling.{Project, WorkspaceLoader, WorkspaceManager}
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.appthreat.x2cpg.X2Cpg.defaultOverlayCreators
 import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.Overlays
+import io.shiftleft.semanticcpg.language.types.structure.MethodTraversal
 import io.shiftleft.semanticcpg.language.dotextension.ImageViewer
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
+import io.shiftleft.semanticcpg.utils.Torch
 import overflowdb.traversal.help.Doc
+import me.shadaj.scalapy.py
+import me.shadaj.scalapy.py.SeqConverters
+import py.PyQuote
+import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
+import scala.collection.mutable
 import scala.sys.process.Process
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
-import scala.collection.mutable.ListBuffer
 
 class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.currentWorkingDirectory)
     extends Reporting {
@@ -31,6 +38,37 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
   protected def workspacePathName: String = workspaceManager.getPath
 
   private val nameOfCpgInProject = "cpg.bin"
+
+  implicit val pyGlobal: me.shadaj.scalapy.py.Dynamic.global.type = py.Dynamic.global
+  private val richTableLib                                        = py.module("rich.table")
+  private val richConsoleLib                                      = py.module("rich.console")
+  private val richTreeLib                                         = py.module("rich.tree")
+  private val richPrettyLib                                       = py.module("rich.pretty")
+  private val richProgressLib                                     = py.module("rich.progress")
+  private val richSyntaxLib                                       = py.module("rich.syntax")
+  private val richHighlighterLib                                  = py.module("rich.highlighter")
+  private val richThemeLib                                        = py.module("rich.theme")
+
+  CPythonInterpreter.execManyLines("""
+      |from rich.highlighter import RegexHighlighter
+      |from rich.theme import Theme
+      |
+      |class CustomHighlighter(RegexHighlighter):
+      |  base_style = "atom."
+      |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
+      |
+      |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
+      |""".stripMargin)
+  private val richConsole =
+    richConsoleLib.Console(
+      log_time = false,
+      log_path = false,
+      force_interactive = true,
+      color_system = "256",
+      highlight = true,
+      highlighter = py.Dynamic.global.CustomHighlighter(),
+      theme = py.Dynamic.global.custom_theme
+    )
 
   implicit object ConsoleImageViewer extends ImageViewer {
     def view(imagePathStr: String): Try[String] = {
@@ -321,8 +359,9 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
         |""",
     example = """importAtom("app.atom")"""
   )
-  def importAtom(inputPath: String, projectName: String = ""): Option[Cpg] = {
+  def importAtom(inputPath: String, projectName: String = ""): Unit = {
     importCpg(inputPath, projectName, false)
+    summary
   }
   @Doc(
     info = "Create new project from existing CPG",
@@ -416,6 +455,256 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     */
   def reload(name: String): Option[Project] = {
     close(name).flatMap(p => open(p.name))
+  }
+
+  @Doc(
+    info = "Display summary information",
+    longInfo = """|Displays summary about the loaded atom such as the number of files, methods, annotations etc.
+         |Requires the python modules to be installed.
+         |""",
+    example = "summary"
+  )
+  def summary: Unit = {
+    try {
+      val table = richTableLib.Table(title = "Atom Summary")
+      table.add_column("Node Type")
+      table.add_column("Count")
+      table.add_row("Files", "" + atom.file.size)
+      table.add_row("Methods", "" + atom.method.size)
+      table.add_row("Annotations", "" + atom.annotation.size)
+      table.add_row("Imports", "" + atom.imports.size)
+      table.add_row("Literals", "" + atom.literal.size)
+      table.add_row("Config Files", "" + atom.configFile.size)
+      val appliedOverlays = Overlays.appliedOverlays(atom)
+      if (appliedOverlays.nonEmpty) table.add_row("Overlays", "" + appliedOverlays.size)
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+
+  @Doc(
+    info = "List files",
+    longInfo = """|Lists the files from the loaded atom.
+         |Requires the python modules to be installed.
+         |""",
+    example = "files"
+  )
+  def files(title: String = "Files"): Unit = {
+    try {
+      val table = richTableLib.Table(title = title, highlight = true)
+      table.add_column("File Name")
+      table.add_column("Method Count")
+      atom.file.whereNot(_.name("<unknown>")).foreach { f => table.add_row(f.name, "" + f.method.size) }
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+  def files: Unit = files("Files")
+
+  @Doc(
+    info = "List methods",
+    longInfo = """|Lists the methods by files from the loaded atom.
+         |Requires the python modules to be installed.
+         |
+         |Parameters:
+         |
+         |title: Title for the table. Default Methods.
+         |tree: Display as a tree instead of table
+         |""",
+    example = "methods('Methods', includeCalls=true, tree=true)"
+  )
+  def methods(title: String = "Methods", includeCalls: Boolean = false, tree: Boolean = false): Unit = {
+    try {
+      if (tree) {
+        val rootTree = richTreeLib.Tree(title, highlight = true)
+        atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+          val childTree = richTreeLib.Tree(f.name, highlight = true)
+          f.method.foreach(m => {
+            val mtree = childTree.add(m.fullName)
+            if (includeCalls)
+              m.call
+                .filterNot(_.name.startsWith("<operator"))
+                .toSet
+                .foreach(c =>
+                  mtree
+                    .add(
+                      c.methodFullName + (if (c.callee(NoResolve).head.isExternal) " :right_arrow_curving_up:" else "")
+                    )
+                )
+          })
+          rootTree.add(childTree)
+        }
+        richConsole.print(rootTree)
+      } else {
+        val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+        table.add_column("File Name")
+        table.add_column("Methods")
+        atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+          table.add_row(f.name, f.method.fullName.l.mkString("\n"))
+        }
+        richConsole.print(table)
+      }
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+  def methods: Unit = methods("Methods")
+
+  @Doc(
+    info = "List annotations",
+    longInfo = """|Lists the method annotations by files from the loaded atom.
+         |Requires the python modules to be installed.
+         |""",
+    example = "annotations"
+  )
+  def annotations(title: String = "Annotations"): Unit = {
+    try {
+      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+      table.add_column("File Name")
+      table.add_column("Methods")
+      table.add_column("Annotations")
+      atom.file.whereNot(_.name("<unknown>")).method.filter(_.annotation.nonEmpty).foreach { m =>
+        table.add_row(m.location.filename, m.fullName, m.annotation.fullName.l.mkString("\n"))
+      }
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+
+  def annotations: Unit = annotations("Annotations")
+
+  @Doc(
+    info = "List imports",
+    longInfo = """|Lists the imports by files from the loaded atom.
+         |Requires the python modules to be installed.
+         |""",
+    example = "imports"
+  )
+  def imports(title: String = "Imports"): Unit = {
+    try {
+      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+      table.add_column("File Name")
+      table.add_column("Import")
+      atom.imports.foreach { i =>
+        table.add_row(i.file.name.l.mkString("\n"), i.importedEntity.getOrElse(""))
+      }
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+
+  def imports: Unit = imports("Imports")
+
+  @Doc(
+    info = "List declarations",
+    longInfo = """|Lists the declarations by files from the loaded atom.
+         |Requires the python modules to be installed.
+         |""",
+    example = "declarations"
+  )
+  def declarations(title: String = "Declarations"): Unit = {
+    try {
+      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+      table.add_column("File Name")
+      table.add_column("Declarations")
+      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+        val dec: Set[Declaration] =
+          (f.assignment.argument(1).filterNot(_.code == "this").isIdentifier.refsTo ++ f.method.parameter
+            .filterNot(_.code == "this")
+            .filter(_.typeFullName != "ANY")).toSet
+        table.add_row(f.name, dec.name.toSet.mkString("\n"))
+      }
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+
+  def declarations: Unit = declarations("Declarations")
+
+  @Doc(
+    info = "List sensitive literals",
+    longInfo = """|Lists the sensitive literals by files from the loaded atom.
+         |Requires the python modules to be installed.
+         |""",
+    example = "sensitive"
+  )
+  def sensitive(
+    title: String = "Sensitive Literals",
+    pattern: String = "(secret|password|token|key|admin|root)"
+  ): Unit = {
+    try {
+      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+      table.add_column("File Name")
+      table.add_column("Sensitive Literals")
+      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+        val slits: Set[Literal] =
+          f.assignment.where(_.argument.order(1).code(s"(?i).*${pattern}.*")).argument.order(2).isLiteral.toSet
+        table.add_row(f.name, if (slits.nonEmpty) slits.code.mkString("\n") else "N/A")
+      }
+      richConsole.print(table)
+    } catch {
+      case exc: Exception => report(exc.getMessage)
+    }
+  }
+
+  def sensitive: Unit = sensitive("Sensitive Literals")
+
+  @Doc(
+    info = "Show graph edit distance from the source method to the comparison methods",
+    longInfo = """|Compute graph edit distance from the source method to the comparison methods.
+         |""",
+    example = "distance(source method iterator, comparison method iterators)"
+  )
+  def distance(sourceTrav: Iterator[Method], sourceTravs: Iterator[Method]*): Seq[Double] = {
+    val first_method = new MethodTraversal(sourceTrav.iterator).gml
+    sourceTravs.map { compareTrav =>
+      val second_method = new MethodTraversal(compareTrav.iterator).gml
+      Torch.edit_distance(first_method, second_method)
+    }
+  }
+
+  case class MethodDistance(filename: String, fullName: String, editDistance: Double)
+
+  @Doc(
+    info = "Show methods similar to the given method",
+    longInfo = """|List methods to similar to the one based on graph edit distance.
+         |""",
+    example = "showSimilar(method full name)"
+  )
+  def showSimilar(
+    methodFullName: String,
+    comparePattern: String = "",
+    upper_bound: Int = 500,
+    timeout: Int = 5
+  ): Unit = {
+    val table =
+      richTableLib.Table(title = s"Similarity analysis for `${methodFullName}`", highlight = true, show_lines = true)
+    val progress     = richProgressLib.Progress(transient = true)
+    val first_method = atom.method.fullNameExact(methodFullName).gml
+    table.add_column("File Name")
+    table.add_column("Method Name")
+    table.add_column("Edit Distance")
+    val methodDistances = mutable.ArrayBuffer[MethodDistance]()
+    val base = if (comparePattern.nonEmpty) atom.method.fullName(s".*${comparePattern}.*") else atom.method.internal
+    base.whereNot(_.fullNameExact(methodFullName)).foreach { method =>
+      py.`with`(progress) { mprogress =>
+        val task = mprogress.add_task(s"Analyzing ${method.fullName}", start = false)
+        val edit_distance =
+          Torch.edit_distance(first_method, method.iterator.gml, upper_bound = upper_bound, timeout = timeout)
+        if (edit_distance != -1) {
+          methodDistances += MethodDistance(method.location.filename, method.fullName, edit_distance)
+        }
+        mprogress.update(task, advance = 100)
+      }
+    }
+    methodDistances.sortInPlaceBy[Double](x => x.editDistance)
+    methodDistances.foreach(row => table.add_row(row.filename, row.fullName, "" + row.editDistance))
+    richConsole.print(table)
   }
 
   def applyPostProcessingPasses(cpg: Cpg): Cpg = {

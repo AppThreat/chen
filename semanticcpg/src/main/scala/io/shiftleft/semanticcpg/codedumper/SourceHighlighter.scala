@@ -19,6 +19,7 @@ object SourceHighlighter {
       case Languages.C | Languages.NEWC | Languages.GHIDRA => "-sC"
       case Languages.JAVA | Languages.JAVASRC              => "-sJava"
       case Languages.JSSRC | Languages.JAVASCRIPT          => "-sJavascript"
+      case Languages.PYTHON | Languages.PYTHONSRC          => "-sPython"
       case other => throw new RuntimeException(s"Attempting to call highlighter on unsupported language: $other")
     }
 

@@ -3,9 +3,34 @@ package io.shiftleft.semanticcpg.language.types.structure
 import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.utils.Fingerprinting
 import overflowdb.*
 import overflowdb.traversal.help
 import overflowdb.traversal.help.Doc
+import overflowdb.formats.ExportResult
+import overflowdb.formats.graphml.GraphMLExporter
+
+import scala.jdk.CollectionConverters.*
+import java.nio.file.{Files, Path, Paths}
+
+case class MethodSubGraph(methodName: String, methodFullName: String, nodes: Set[Node]) {
+  def edges: Set[Edge] = {
+    for {
+      node <- nodes
+      edge <- node.bothE.asScala
+      if nodes.contains(edge.inNode) && nodes.contains(edge.outNode)
+    } yield edge
+  }
+}
+
+def plus(resultA: ExportResult, resultB: ExportResult): ExportResult = {
+  ExportResult(
+    nodeCount = resultA.nodeCount + resultB.nodeCount,
+    edgeCount = resultA.edgeCount + resultB.edgeCount,
+    files = resultA.files ++ resultB.files,
+    additionalInfo = resultA.additionalInfo
+  )
+}
 
 /** A method, function, or procedure
   */
@@ -171,4 +196,32 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal {
 
   def numberOfLines: Iterator[Int] = traversal.map(_.numberOfLines)
 
+  @Doc(info = "Export the methods to graphml")
+  def gml(gmlDir: String = null): ExportResult = {
+    var pathToUse = gmlDir
+    traversal
+      .map { method =>
+        MethodSubGraph(methodName = method.name, methodFullName = method.fullName, nodes = method.ast.toSet)
+      }
+      .map { case subGraph @ MethodSubGraph(methodName, methodFullName, nodes) =>
+        val methodHash = Fingerprinting.calculate_hash(methodFullName)
+        try {
+          if (pathToUse == null) {
+            pathToUse = Files.createTempDirectory("gml-export").toAbsolutePath.toString
+          } else {
+            Paths.get(pathToUse).toFile.mkdirs()
+          }
+        } catch {
+          case exc: Exception =>
+        }
+        GraphMLExporter.runExport(
+          nodes,
+          subGraph.edges,
+          Paths.get(pathToUse, s"${methodName}-${methodHash.getOrElse("")}.graphml")
+        )
+      }
+      .reduce(plus)
+  }
+
+  def gml: ExportResult = gml(null)
 }

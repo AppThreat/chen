@@ -20,7 +20,7 @@ object SourcesToStartingPoints {
   private val log = LoggerFactory.getLogger(SourcesToStartingPoints.getClass)
 
   def sourceTravsToStartingPoints[NodeType](sourceTravs: IterableOnce[NodeType]*): List[StartingPointWithSource] = {
-    val fjp = ForkJoinPool.commonPool()
+    val fjp = new ForkJoinPool(Runtime.getRuntime.availableProcessors() / 2)
     try {
       fjp.invoke(new SourceTravsToStartingPointsTask(sourceTravs: _*)).distinct
     } catch {

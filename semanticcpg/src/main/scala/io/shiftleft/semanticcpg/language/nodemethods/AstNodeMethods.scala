@@ -64,8 +64,13 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
                        })
   }
 
-  def astParent: AstNode =
-    node._astIn.onlyChecked.asInstanceOf[AstNode]
+  def astParent: AstNode = {
+    try {
+      node._astIn.onlyChecked.asInstanceOf[AstNode]
+    } catch {
+      case _: Throwable => node._astIn.asInstanceOf[AstNode]
+    }
+  }
 
   /** Direct children of node in the AST. Siblings are ordered by their `order` fields
     */

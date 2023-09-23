@@ -28,6 +28,10 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
       - name: Delete `.rustup` directory
         run: rm -rf /home/runner/.rustup # to save disk space
         if: runner.os == 'Linux'
@@ -35,9 +39,10 @@ jobs:
         run: rm -rf /home/runner/.cargo
         if: runner.os == 'Linux'
       - run: |
-          sbt assembly createDistribution
+          sbt createDistribution
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCALAPY_PYTHON_LIBRARY: "python3.11"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
@@ -55,33 +60,3 @@ jobs:
         with:
           images: |
             ghcr.io/appthreat/chen
-
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ci/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=chen
-          cache-to: type=gha,mode=max,scope=chen
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta2
-        uses: docker/metadata-action@v4
-        with:
-          images: |
-            ghcr.io/appthreat/chen-note
-
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ci/Dockerfile-note
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta2.outputs.tags }}
-          labels: ${{ steps.meta2.outputs.labels }}
-          cache-from: type=gha,scope=chen-note
-          cache-to: type=gha,mode=max,scope=chen-note

@@ -43,6 +43,10 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal {
     reachedSources.cast[NodeType]
   }
 
+  def df[A](sourceTrav: IterableOnce[A], sourceTravs: IterableOnce[A]*)(implicit
+    context: EngineContext
+  ): Iterator[Path] = reachableByFlows(sourceTrav, sourceTravs)
+
   def reachableByFlows[A](sourceTrav: IterableOnce[A], sourceTravs: IterableOnce[A]*)(implicit
     context: EngineContext
   ): Iterator[Path] = {
