@@ -66,5 +66,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python3"
+          SCALAPY_PYTHON_LIBRARY: "python311"
         if: runner.os == 'Windows'
