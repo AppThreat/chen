@@ -10,12 +10,12 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: appthreat/chen-platform
 
 jobs:
   deploy:
     if: github.repository_owner == 'appthreat'
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
       contents: write
       packages: write
@@ -38,17 +38,24 @@ jobs:
       - name: Delete `.cargo` directory # to save disk space
         run: rm -rf /home/runner/.cargo
         if: runner.os == 'Linux'
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.sbt
+            ~/.coursier
+          key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
       - run: |
-          sbt createDistribution
+          sbt stage createDistribution
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCALAPY_PYTHON_LIBRARY: "python3.11"
       - name: Upload chen to ghcr
         run: |
+          cd target
           echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
-          oras push ghcr.io/appthreat/chen:v1 \
-            --artifact-type application/vnd.oras.config.v1+json \
-            ./target/chen.zip:application/vnd.appthreat.chen.layer.v1+tar+zip
+          oras push ghcr.io/$IMAGE_NAME:v1 \
+            --annotation-file ../ci/annotations.json \
+            ./chen.zip:application/vnd.appthreat.chen.layer.v1+tar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_USERNAME: ${{ github.actor }}
