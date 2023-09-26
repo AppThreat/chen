@@ -30,7 +30,6 @@ Compile / doc / scalacOptions ++= Seq("-doc-title", "semanticcpg apidocs", "-doc
 
 compile / javacOptions ++= Seq("-Xlint:all", "-Xlint:-cast", "-g")
 Test / fork := false
-Test / classLoaderLayeringStrategy := ClassLoaderLayeringStrategy.ScalaLibrary
 
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 

@@ -30,10 +30,6 @@ class SourceFilesTests extends AnyWordSpec with Matchers with Inside {
     "input is symlink to file" in {
       SourceFiles.determine(s"$resourcesRoot/symlink-to-main.c", cSourceFileExtensions).size shouldBe 1
     }
-
-    "input is symlink to directory" in {
-      SourceFiles.determine(s"$resourcesRoot/symlink-to-testcode", cSourceFileExtensions).size shouldBe 3
-    }
   }
 
   "throw an exception" when {

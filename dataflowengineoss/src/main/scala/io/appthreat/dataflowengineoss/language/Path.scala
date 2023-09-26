@@ -5,6 +5,8 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.Show
 import org.apache.commons.lang.StringUtils
 
+import scala.collection.mutable.{ArrayBuffer, Set}
+
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.SeqConverters
 import py.PyQuote
@@ -32,29 +34,6 @@ object Path {
   // TODO replace with dynamic rendering based on the terminal's width, e.g. in scala-repl-pp
   lazy val maxTrackedWidth = sys.env.get("CHEN_DATAFLOW_TRACKED_WIDTH").map(_.toInt).getOrElse(DefaultMaxTrackedWidth)
 
-  private val richTableLib   = py.module("rich.table")
-  private val richConsoleLib = py.module("rich.console")
-  CPythonInterpreter.execManyLines("""
-      |from rich.highlighter import RegexHighlighter
-      |from rich.theme import Theme
-      |
-      |class CustomHighlighter(RegexHighlighter):
-      |  base_style = "atom."
-      |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
-      |
-      |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
-      |""".stripMargin)
-  private val richConsole =
-    richConsoleLib.Console(
-      log_time = false,
-      log_path = false,
-      force_interactive = true,
-      color_system = "256",
-      highlight = true,
-      highlighter = py.Dynamic.global.CustomHighlighter(),
-      theme = py.Dynamic.global.custom_theme
-    )
-
   implicit val show: Show[Path] = { path =>
     var caption = ""
     if (path.elements.size > 2) {
@@ -68,9 +47,8 @@ object Path {
       }
       caption = s"Source: ${srcNode.code}\nSink: ${sinkCode}\n"
     }
-    val table = richTableLib.Table(highlight = true, expand = true, caption = caption)
-    Array("Location", "Method", "Parameter", "Tracked").foreach(c => table.add_column(c))
-    val addedPaths = scala.collection.mutable.Set[String]()
+    val tableRows  = ArrayBuffer[Array[String]]()
+    val addedPaths = Set[String]()
     path.elements.foreach { astNode =>
       val nodeType     = astNode.getClass.getSimpleName
       val lineNumber   = astNode.lineNumber.getOrElse("").toString
@@ -80,7 +58,8 @@ object Path {
       astNode match {
         case methodParameterIn: MethodParameterIn =>
           val methodName = methodParameterIn.method.name
-          table.add_row(
+          tableRows += Array[String](
+            "methodParameterIn",
             fileLocation,
             methodName,
             s"[bold red]${methodParameterIn.name}[/bold red]",
@@ -90,7 +69,8 @@ object Path {
         case identifier: Identifier =>
           val methodName = identifier.method.name
           if (!addedPaths.contains(s"${fileName}#${lineNumber}")) {
-            table.add_row(
+            tableRows += Array[String](
+              "identifier",
               fileLocation,
               methodName,
               identifier.name,
@@ -101,7 +81,7 @@ object Path {
           }
         case member: Member =>
           val methodName = "<not-in-method>"
-          table.add_row(fileLocation, methodName, nodeType, member.name, member.code)
+          tableRows += Array[String]("member", fileLocation, methodName, nodeType, member.name, member.code)
         case call: Call =>
           if (!call.code.startsWith("<operator") || !call.methodFullName.startsWith("<operator")) {
             var callIcon =
@@ -111,7 +91,13 @@ object Path {
               ) " :right_arrow_curving_up:"
               else ""
             if (call.methodFullName.startsWith("<operator")) callIcon = " :curly_loop:"
-            table.add_row(fileLocation, call.method.name, call.code, call.methodFullName + callIcon, end_section = true)
+            tableRows += Array[String](
+              "call",
+              fileLocation,
+              call.method.name,
+              call.code,
+              call.methodFullName + callIcon
+            )
           }
         case cfgNode: CfgNode =>
           val method     = cfgNode.method
@@ -123,12 +109,50 @@ object Path {
             case _ => cfgNode.statement.repr
           }
           val tracked = StringUtils.normalizeSpace(StringUtils.abbreviate(statement, maxTrackedWidth))
-          table.add_row(fileLocation, methodName, "", tracked)
+          tableRows += Array[String]("cfgNode", fileLocation, methodName, "", tracked)
       }
       addedPaths += s"${fileName}#${lineNumber}"
     }
-    richConsole.print(table)
-    ""
+    try {
+      printFlows(tableRows, caption)
+    } catch {
+      case exc: Exception =>
+    }
+    caption
   }
 
+  def printFlows(tableRows: ArrayBuffer[Array[String]], caption: String): Unit = {
+    val richTableLib   = py.module("rich.table")
+    val richConsoleLib = py.module("rich.console")
+    CPythonInterpreter.execManyLines("""
+        |from rich.highlighter import RegexHighlighter
+        |from rich.theme import Theme
+        |
+        |class CustomHighlighter(RegexHighlighter):
+        |  base_style = "atom."
+        |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
+        |
+        |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
+        |""".stripMargin)
+    val richConsole =
+      richConsoleLib.Console(
+        log_time = false,
+        log_path = false,
+        force_interactive = true,
+        color_system = "256",
+        highlight = true,
+        highlighter = py.Dynamic.global.CustomHighlighter(),
+        theme = py.Dynamic.global.custom_theme
+      )
+    val table = richTableLib.Table(highlight = true, expand = true, caption = caption)
+    Array("Location", "Method", "Parameter", "Tracked").foreach(c => table.add_column(c))
+    tableRows.foreach { row =>
+      {
+        val end_section         = row.head == "call"
+        val trow: Array[String] = row.tail
+        table.add_row(trow(0), trow(1), trow(2), trow(3), end_section = end_section)
+      }
+    }
+    richConsole.print(table)
+  }
 }

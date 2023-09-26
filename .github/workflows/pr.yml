@@ -54,14 +54,17 @@ jobs:
         run: |
           pip install rich
           sbt clean +test
-        if: runner.os == 'macOS'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=/usr/local/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/lib/python3.11/config-3.11-darwin"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
           SCALAPY_PYTHON_LIBRARY: "python3.11"
-      - run: sbt clean +test
-        if: runner.os != 'macOS'
+        if: runner.os != 'Windows'
+      - name: Compile and run tests
+        run: |
+          pip install rich
+          sbt clean +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-          SCALAPY_PYTHON_LIBRARY: "python3.11"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
+          SCALAPY_PYTHON_LIBRARY: "python3"
+        if: runner.os == 'Windows'

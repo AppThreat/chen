@@ -40,27 +40,36 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
   private val nameOfCpgInProject = "cpg.bin"
 
   implicit val pyGlobal: me.shadaj.scalapy.py.Dynamic.global.type = py.Dynamic.global
-  private val richTableLib                                        = py.module("rich.table")
-  private val richConsoleLib                                      = py.module("rich.console")
-  private val richTreeLib                                         = py.module("rich.tree")
-  private val richPrettyLib                                       = py.module("rich.pretty")
-  private val richProgressLib                                     = py.module("rich.progress")
-  private val richSyntaxLib                                       = py.module("rich.syntax")
-  private val richHighlighterLib                                  = py.module("rich.highlighter")
-  private val richThemeLib                                        = py.module("rich.theme")
-
-  CPythonInterpreter.execManyLines("""
-      |from rich.highlighter import RegexHighlighter
-      |from rich.theme import Theme
-      |
-      |class CustomHighlighter(RegexHighlighter):
-      |  base_style = "atom."
-      |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
-      |
-      |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
-      |""".stripMargin)
-  private val richConsole =
-    richConsoleLib.Console(
+  var richTableLib: me.shadaj.scalapy.py.Dynamic                  = py.module("logging")
+  var richConsoleLib: me.shadaj.scalapy.py.Dynamic                = py.module("logging")
+  var richTreeLib: me.shadaj.scalapy.py.Dynamic                   = py.module("logging")
+  var richPrettyLib: me.shadaj.scalapy.py.Dynamic                 = py.module("logging")
+  var richProgressLib: me.shadaj.scalapy.py.Dynamic               = py.module("logging")
+  var richSyntaxLib: me.shadaj.scalapy.py.Dynamic                 = py.module("logging")
+  var richHighlighterLib: me.shadaj.scalapy.py.Dynamic            = py.module("logging")
+  var richThemeLib: me.shadaj.scalapy.py.Dynamic                  = py.module("logging")
+  var richConsole: me.shadaj.scalapy.py.Dynamic                   = py.module("logging")
+  var richAvailable                                               = true
+  try {
+    richTableLib = py.module("rich.table")
+    richConsoleLib = py.module("rich.console")
+    richTreeLib = py.module("rich.tree")
+    richPrettyLib = py.module("rich.pretty")
+    richProgressLib = py.module("rich.progress")
+    richSyntaxLib = py.module("rich.syntax")
+    richHighlighterLib = py.module("rich.highlighter")
+    richThemeLib = py.module("rich.theme")
+    CPythonInterpreter.execManyLines("""
+        |from rich.highlighter import RegexHighlighter
+        |from rich.theme import Theme
+        |
+        |class CustomHighlighter(RegexHighlighter):
+        |  base_style = "atom."
+        |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
+        |
+        |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
+        |""".stripMargin)
+    richConsole = richConsoleLib.Console(
       log_time = false,
       log_path = false,
       force_interactive = true,
@@ -69,6 +78,9 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
       highlighter = py.Dynamic.global.CustomHighlighter(),
       theme = py.Dynamic.global.custom_theme
     )
+  } catch {
+    case exc: Exception => richAvailable = false
+  }
 
   implicit object ConsoleImageViewer extends ImageViewer {
     def view(imagePathStr: String): Try[String] = {

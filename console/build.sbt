@@ -43,7 +43,8 @@ lazy val javaOpts = python.scalapyProperties.get.map {
   case (k, v) => s"""-D$k=$v"""
 }.toSeq
 
-javaOptions ++= javaOpts
+javaOptions ++= (if (javaOpts.isEmpty && System.getenv("Python3_ROOT_DIR").nonEmpty) Seq("-Djna.library.path=" + System.getenv("Python3_ROOT_DIR")) else javaOpts)
+
 
 githubOwner := "appthreat"
 githubRepository := "chen"
