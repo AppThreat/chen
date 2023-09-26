@@ -43,6 +43,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCALAPY_PYTHON_LIBRARY: "python3.11"
+      - name: Upload chen to ghcr
+        run: |
+          echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
+          oras push ghcr.io/appthreat/chen:v1 \
+            --artifact-type application/vnd.oras.config.v1+json \
+            ./target/chen.zip:application/vnd.appthreat.chen.layer.v1+tar+zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME: ${{ github.actor }}
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
