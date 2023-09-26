@@ -1,6 +1,7 @@
 package io.shiftleft.semanticcpg.language
 
-import io.shiftleft.codepropertygraph.generated.nodes.AbstractNode
+import io.shiftleft.codepropertygraph.generated.nodes.{AbstractNode, Method}
+import io.shiftleft.semanticcpg.utils.Torch
 import org.json4s.native.Serialization.{write, writePretty}
 import org.json4s.{CustomSerializer, Extraction, Formats}
 import overflowdb.traversal.help.Doc
@@ -10,11 +11,12 @@ import replpp.Operators.*
 import java.util.List as JList
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
-
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.SeqConverters
 import py.PyQuote
 import me.shadaj.scalapy.interpreter.CPythonInterpreter
+
+import java.nio.file.Files
 
 /** Base class for our DSL These are the base steps available in all steps of the query language. There are no
   * constraints on the element types, unlike e.g. [[NodeSteps]]
@@ -55,6 +57,11 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal {
   def p(implicit show: Show[A] = Show.default): List[String] =
     traversal.toList.map(show.apply)
 
+  @Doc(info = "execute this traversal and print tabular result")
+  def t(implicit show: Show[A] = Show.default): Unit = {
+    traversal.toList.map(show.apply)
+  }
+
   @Doc(info = "execute this traversal and show the pretty-printed results in `less`")
   // uses scala-repl-pp's `#|^` operator which let's `less` inherit stdin and stdout
   def browse: Unit = {
@@ -84,6 +91,16 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal {
   private def pyJson = py.module("json")
   @Doc(info = "execute traversal and convert the result to python object")
   def toPy: me.shadaj.scalapy.py.Dynamic = pyJson.loads(toJson(false))
+
+  def pyg = {
+    val tmpDir = Files.createTempDirectory("pyg-gml-export").toFile.getAbsolutePath
+    traversal match {
+      case methods: Iterator[Method] => {
+        val exportResult = methods.gml(tmpDir)
+        exportResult.files.map(Torch.to_pyg)
+      }
+    }
+  }
 }
 
 object Steps {

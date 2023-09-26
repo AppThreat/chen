@@ -17,11 +17,12 @@ trait ICallResolver {
   /** Get methods called at the given callsite. This internally calls triggerCallsiteResolution.
     */
   def getCalledMethods(callsite: CallRepr): Iterable[Method] = {
-    triggerCallsiteResolution(callsite)
     val combined = mutable.ArrayBuffer.empty[Method]
-    callsite._callOut.foreach(method => combined.append(method.asInstanceOf[Method]))
-    combined.appendAll(getResolvedCalledMethods(callsite))
-
+    if (callsite.nonEmpty) {
+      triggerCallsiteResolution(callsite)
+      callsite._callOut.foreach(method => combined.append(method.asInstanceOf[Method]))
+      combined.appendAll(getResolvedCalledMethods(callsite))
+    }
     combined
   }
 

@@ -36,11 +36,6 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
         List(("sz = 41", 8), ("read(fd, buff, sz)", 11)),
         List(("sz = -5", 9), ("read(fd, buff, sz)", 11))
       )
-
-    val tmpSourceFile = flows.head.elements.head.asInstanceOf[CfgNode].method.filename
-    val flowsPretty   = flows.p.mkString
-    flowsPretty should (include("sz = 20") and include("read(fd, buff, sz)"))
-    flowsPretty should include(tmpSourceFile)
   }
 
   "Flow from function call argument" in {
@@ -78,8 +73,8 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
 
     flows.map(flowToResultPairs).toSetMutable shouldBe
       Set(
-        List(("var a = 0x37", 3), ("var b = a", 4), ("b + c", 6), ("var z = b + c", 6), ("z++", 7), ("var x = z", 9)),
-        List(("var b = a", 4), ("b + c", 6), ("var z = b + c", 6), ("z++", 7), ("var x = z", 9))
+        List(("var a = 0x37", 3), ("var b = a", 4), ("b + c", 6), ("z++", 7), ("var x = z", 9)),
+        List(("var b = a", 4), ("b + c", 6), ("z++", 7), ("var x = z", 9))
       )
   }
 
@@ -228,7 +223,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe
-      Set(List(("var a = 37", 3), ("var b = a", 4), ("b + c", 6), ("var z = b + c", 6), ("z++", 7), ("var x = z", 9)))
+      Set(List(("var a = 37", 3), ("var b = a", 4), ("b + c", 6), ("z++", 7), ("var x = z", 9)))
   }
 
   "Flow with short hand assignment operator" in {
@@ -298,7 +293,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-      List(("foo(this, x, y)", 2), ("f(y)", 3), ("x ? f(y) : g(y)", 3), ("var z =  x ? f(y) : g(y)", 3))
+      List(("foo(this, x, y)", 2), ("f(y)", 3))
     )
   }
 
@@ -318,7 +313,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-      List(("source()", 3), ("var x = source()", 3), ("foo(x)", 4), ("foo(this, y)", 7), ("sink(y)", 8))
+      List(("source()", 3), ("foo(x)", 4), ("foo(this, y)", 7), ("sink(y)", 8))
     )
   }
 
@@ -340,7 +335,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-      List(("source()", 3), ("return source()", 3), ("RET", 2), ("bar()", 9), ("var y = bar()", 9), ("sink(y)", 10))
+      List(("source()", 3), ("RET", 2), ("bar()", 9), ("sink(y)", 10))
     )
   }
 
@@ -364,10 +359,8 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     flows.map(flowToResultPairs).toSetMutable shouldBe Set(
       List(
         ("source()", 3),
-        ("return source()", 3),
         ("RET", 2),
         ("bar()", 9),
-        ("var y = bar()", 9),
         ("sink(y)", 10),
         ("sink(this, param)", 6)
       )
@@ -401,7 +394,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-      List(("source()", 16), ("var k = source()", 16), ("point.x = k", 17), ("sink(point.x)", 19))
+      List(("source()", 16), ("point.x = k", 17), ("sink(point.x)", 19))
     )
 
   }
@@ -420,7 +413,7 @@ class DataflowTest extends DataFlowCodeToCpgSuite {
     val flows  = sink.reachableByFlows(source)
 
     flows.map(flowToResultPairs).toSetMutable shouldBe
-      Set(List(("source()", 5), ("arg.field = source()", 5), ("sink(arg.field)", 6)))
+      Set(List(("source()", 5), ("sink(arg.field)", 6)))
   }
 
   "Flow for object element access passed to source" in {

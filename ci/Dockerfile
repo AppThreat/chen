@@ -11,7 +11,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=21-graalce
+ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
 ARG GRADLE_VERSION=8.2.1
 
@@ -26,7 +26,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8" \
     JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1" \
-    JOERN_DATAFLOW_TRACKED_WIDTH=128 \
+    CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.11 \
     ANDROID_HOME=/opt/android-sdk-linux
 ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
@@ -34,6 +34,11 @@ ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}
 WORKDIR /opt
 COPY ./ci/requirements.txt /opt/
 COPY ./ci/kernel.json /opt/
+COPY ./pyproject.toml /opt/
+COPY ./poetry.lock /opt/
+COPY ./chenpy /opt/chenpy
+COPY README.md /opt/
+
 RUN set -e; \
     ARCH_NAME="$(rpm --eval '%{_arch}')"; \
     url=; \
@@ -57,10 +62,10 @@ RUN set -e; \
     && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && python3.11 -m pip install -r /opt/requirements.txt notebook owasp-depscan \
-    && python3.11 -m pip install virtualenv numpy GitPython pandas graphviz pydotplus networkx[default,extra] \
-    && python3.11 -m pip install torch --index-url https://download.pytorch.org/whl/cpu \
-    && python3.11 -m pip install torch_geometric pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html \
+    && python3.11 -m pip install --no-cache-dir -r /opt/requirements.txt notebook poetry virtualenv \
+    && python3.11 -m poetry config virtualenvs.create false \
+    && cd /opt/chenpy && python3.11 -m poetry install --no-cache --without dev && cd ../ \
+    && python3.11 -m pip install --no-cache-dir numpy GitPython pandas graphviz networkx[default,extra] \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -91,5 +96,4 @@ COPY ./notebooks /opt/notebooks
 RUN unzip -q chen.zip \
     && rm chen.zip kernel.json requirements.txt \
     && microdnf clean all
-ENV CLASSPATH=$CLASSPATH:/opt/platform/lib/*.jar:
 CMD ["chennai"]

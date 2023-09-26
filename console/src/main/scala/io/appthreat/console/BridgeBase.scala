@@ -400,7 +400,7 @@ trait ServerHandling { this: BridgeBase =>
       predefFiles = predefFile +: config.additionalImports,
       dependencies = config.dependencies,
       resolvers = config.resolvers,
-      verbose = true // always print what's happening - helps debugging
+      verbose = false
     )
 
     replpp.server.ReplServer.startHttpServer(

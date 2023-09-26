@@ -12,6 +12,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Call, Expression, Method}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
+import scala.collection.mutable
+
 class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyVal {
 
   /** Determine whether evaluation of the call this argument is a part of results in usage of this argument.
@@ -88,7 +90,7 @@ class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyV
 
   private def argToMethods(arg: Expression): Iterator[Method] = {
     arg.inCall.flatMap { call =>
-      NoResolve.getCalledMethods(call)
+      if (call.nonEmpty) NoResolve.getCalledMethods(call) else mutable.ArrayBuffer.empty[Method]
     }
   }
 
