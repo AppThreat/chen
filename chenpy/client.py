@@ -8,6 +8,9 @@ import tempfile
 import httpx
 import oras.client
 import oras.provider
+from oras.logger import setup_logger
+
+setup_logger(quiet=True, debug=False)
 
 UVLOOP_AVAILABLE = True
 try:

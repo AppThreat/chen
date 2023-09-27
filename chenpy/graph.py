@@ -5,15 +5,14 @@ import json
 import tempfile
 from collections import Counter, defaultdict
 
-import networkx as nx
-from networkx.readwrite import json_graph, read_graphml
-
 from chenpy.utils import calculate_hash
 
 SCIENCE_PACK_AVAILABLE = True
 try:
     import pydotplus
     import torch
+    import networkx as nx
+    from networkx.readwrite import json_graph, read_graphml
     from torch import Tensor
     from torch_geometric.data import Data
 except ImportError:
@@ -332,7 +331,7 @@ def to_pyg(
     :class:`torch_geometric.data.Data` instance."""
     if not SCIENCE_PACK_AVAILABLE:
         return RuntimeError(
-            "Scientific dependencies missing. Please reinstall with 'pip install chen[science]'"
+            "Scientific dependencies missing. Please refer to the documentation to install the science pack or use the official chen container image."
         )
     G = G.to_directed() if not nx.is_directed(G) else G
 

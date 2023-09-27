@@ -3,12 +3,13 @@
 
 import argparse
 import os
+import sys
 
 import oras.client
 
 import chenpy.config as config
 from chenpy.client import ChenDistributionRegistry
-from chenpy.logger import LOG
+from chenpy.logger import LOG, console
 from chenpy.utils import get_version, unzip_unsafe
 
 try:
@@ -59,7 +60,33 @@ def find_jars(lib_dir):
 
 
 def fix_envs():
-    if not os.getenv("CHEN_HOME"):
+    if not os.getenv("CHEN_HOME") or config.chen_home not in os.getenv("PATH"):
+        platform_dir = os.path.join(config.chen_home, "platform")
+        platform_bin_dir = os.path.join(config.chen_home, "platform", "bin")
+        if sys.platform == "win32":
+            LOG.info(
+                "To run chennai console, set the following user environment variables:"
+            )
+        else:
+            LOG.info(
+                "To run chennai console, add the following environment variables to your .zshrc or .bashrc:"
+            )
+        console.print(
+            f"""export CHEN_HOME={config.chen_home}\nexport PATH=$PATH{os.pathsep}{platform_dir + os.pathsep + platform_bin_dir + os.pathsep}"""
+        )
+        if not os.getenv("JAVA_HOME"):
+            LOG.info(
+                "Ensure Java >= 17 up to 20 is installed. Set the environment variable JAVA_HOME to point the correct java directory."
+            )
+        try:
+            import networkx
+        except Exception:
+            LOG.info(
+                "Scientific dependencies missing. Please refer to the documentation to install the science pack or use the official chen container image."
+            )
+        LOG.info(
+            "After setting the values, restart the terminal and type chennai to launch the console."
+        )
         os.environ["CHEN_HOME"] = config.chen_home
         os.environ["CLASSPATH"] = (
             find_jars(os.path.join(config.chen_home, "platform", "lib"))
@@ -67,10 +94,7 @@ def fix_envs():
             + os.getenv("CLASSPATH", "")
         )
         os.environ["PATH"] = (
-            os.environ["PATH"]
-            + os.path.join(config.chen_home, "platform")
-            + os.pathsep
-            + os.path.join(config.chen_home, "platform", "bin")
+            os.environ["PATH"] + platform_dir + os.pathsep + platform_bin_dir
         )
 
 

@@ -566,4 +566,7 @@ def unzip_unsafe(zf, to_dir):
     """Method to unzip the file in an unsafe manne"""
     with zipfile.ZipFile(zf, "r") as zip_ref:
         zip_ref.extractall(to_dir)
-    shutil.rmtree(zf, ignore_errors=True)
+    try:
+        os.remove(zf)
+    except Exception:
+        pass

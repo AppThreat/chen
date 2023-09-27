@@ -29,7 +29,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.11 \
     ANDROID_HOME=/opt/android-sdk-linux
-ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
+ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/opt/miniconda3/bin:
 
 WORKDIR /opt
 COPY ./ci/requirements.txt /opt/
@@ -54,7 +54,7 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core \
+    && microdnf install -y gcc git-core wget \
         python3.11 python3.11-devel python3.11-pip graphviz graphviz-gd graphviz-python3 \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
@@ -63,9 +63,17 @@ RUN set -e; \
     && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && python3.11 -m pip install --no-cache-dir -r /opt/requirements.txt notebook poetry virtualenv \
+    && python3.11 -m poetry config installer.max-workers 10 \
     && python3.11 -m poetry config virtualenvs.create false \
-    && cd /opt/chenpy && python3.11 -m poetry install --no-cache --without dev && cd ../ \
+    && cd /opt/chenpy && python3.11 -m poetry install --no-interaction --no-ansi -vvv --no-cache --with=science && cd ../ \
     && python3.11 -m pip install --no-cache-dir numpy GitPython pandas graphviz networkx[default,extra] \
+    && mkdir -p /opt/miniconda3 \
+    && wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
+    && bash /opt/miniconda3/miniconda.sh -b -u -p /opt/miniconda3 \
+    && rm -rf /opt/miniconda3/miniconda.sh \
+    && /opt/miniconda3/bin/conda init bash \
+    && /opt/miniconda3/bin/conda update -n base -c defaults conda -y \
+    && /opt/miniconda3/bin/conda config --set restore_free_channel true \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
