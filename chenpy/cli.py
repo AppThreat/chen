@@ -3,29 +3,18 @@
 
 import argparse
 import os
-import shutil
-import sys
-import zipfile
 
 import oras.client
-from oras.logger import logger, setup_logger
-import pkg_resources
 
 import chenpy.config as config
+from chenpy.client import ChenDistributionRegistry
+from chenpy.logger import LOG
+from chenpy.utils import get_version, unzip_unsafe
 
-
-def get_version():
-    """
-    Returns the version of depscan
-    """
-    return pkg_resources.get_distribution("appthreat-chen").version
-
-
-def unzip_unsafe(zf, to_dir):
-    """Method to unzip the file in an unsafe manne"""
-    with zipfile.ZipFile(zf, "r") as zip_ref:
-        zip_ref.extractall(to_dir)
-    shutil.rmtree(zf, ignore_errors=True)
+try:
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+except Exception:
+    pass
 
 
 def build_args():
@@ -44,6 +33,13 @@ def build_args():
         "user_data_dir",
     )
     parser.add_argument(
+        "--server",
+        action="store_true",
+        default=False,
+        dest="server_mode",
+        help="Start chen server",
+    )
+    parser.add_argument(
         "-v",
         "--version",
         help="Display the version",
@@ -53,15 +49,72 @@ def build_args():
     return parser.parse_args()
 
 
-def download_chen_distribution():
-    oras_client = oras.client.OrasClient()
+def find_jars(lib_dir):
+    jars = []
+    for dirname, subdirs, files in os.walk(lib_dir):
+        for filename in files:
+            if filename.endswith(".jar"):
+                jars.append(os.path.join(dirname, filename))
+    return ":".join(jars)
+
+
+def fix_envs():
+    if not os.getenv("CHEN_HOME"):
+        os.environ["CHEN_HOME"] = config.chen_home
+        os.environ["CLASSPATH"] = (
+            find_jars(os.path.join(config.chen_home, "platform", "lib"))
+            + os.pathsep
+            + os.getenv("CLASSPATH", "")
+        )
+        os.environ["PATH"] = (
+            os.environ["PATH"]
+            + os.path.join(config.chen_home, "platform")
+            + os.pathsep
+            + os.path.join(config.chen_home, "platform", "bin")
+        )
+
+
+def download_chen_distribution(overwrite=False):
+    if os.path.exists(os.path.join(config.chen_home, "platform")):
+        if not overwrite:
+            fix_envs()
+            return
+        LOG.debug(
+            "Existing chen distribution at %s would be overwritten", config.chen_home
+        )
+    LOG.debug(
+        "About to download chen distribution from %s", config.chen_distribution_url
+    )
+    oras_client = oras.client.OrasClient(registry=ChenDistributionRegistry())
     paths_list = oras_client.pull(
         target=config.chen_distribution_url,
         outdir=config.chen_home,
         allowed_media_type=[],
-        overwrite=True,
+        overwrite=overwrite,
     )
-    print(paths_list)
+    if paths_list:
+        LOG.debug("Extracting chen to %s", config.chen_home)
+        unzip_unsafe(paths_list[0], config.chen_home)
+        # Add execute permissions
+        for dirname, subdirs, files in os.walk(config.chen_home):
+            for filename in files:
+                if (
+                    not filename.endswith(".zip")
+                    and not filename.endswith(".jar")
+                    and not filename.endswith(".json")
+                    and not filename.endswith(".dll")
+                    and (
+                        filename.endswith(".sh")
+                        or "2cpg" in filename
+                        or "chen" in filename
+                        or "repl" in filename
+                    )
+                ):
+                    try:
+                        os.chmod(os.path.join(dirname, filename), 0o755)
+                    except Exception:
+                        pass
+        fix_envs()
 
 
 def main():
@@ -70,9 +123,7 @@ def main():
     and generates reports based on the results.
     """
     args = build_args()
-    if args.download:
-        setup_logger(quiet=False, debug=True)
-        download_chen_distribution()
+    download_chen_distribution(args.download)
 
 
 if __name__ == "__main__":

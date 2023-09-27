@@ -6,6 +6,8 @@ import platform
 import tempfile
 
 import httpx
+import oras.client
+import oras.provider
 
 UVLOOP_AVAILABLE = True
 try:
@@ -431,3 +433,24 @@ def splitByMethod(cpg: Cpg): IterableOnce[MethodSubGraph] = {
             ],
         )
         return fp.name
+
+
+class ChenDistributionRegistry(oras.provider.Registry):
+    def get_manifest(self, container, allowed_media_type=None):
+        """
+        Retrieve a manifest for a package.
+
+        :param container:  parsed container URI
+        :type container: oras.container.Container or str
+        :param allowed_media_type: one or more allowed media types
+        :type allowed_media_type: str
+        """
+        if not allowed_media_type:
+            allowed_media_type = [oras.defaults.default_manifest_media_type]
+        headers = {"Accept": ";".join(allowed_media_type)}
+
+        get_manifest = f"{self.prefix}://{container.manifest_url()}"  # type: ignore
+        response = self.do_request(get_manifest, "GET", headers=headers)
+        self._check_200_response(response)
+        manifest = response.json()
+        return manifest

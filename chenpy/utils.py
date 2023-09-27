@@ -3,9 +3,15 @@ import base64
 import mimetypes
 import os
 import re
+import shutil
+import sys
+import zipfile
 from hashlib import blake2b
 
 import orjson
+import pkg_resources
+import psutil
+from psutil._common import bytes2human
 from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
@@ -14,6 +20,18 @@ from rich.table import Table
 from rich.tree import Tree
 
 mimetypes.init()
+
+svmem = psutil.virtual_memory()
+max_memory = bytes2human(getattr(svmem, "available"), format="%(value).0f%(symbol)s")
+CPU_COUNT = str(psutil.cpu_count())
+
+if not os.getenv("JAVA_OPTS"):
+    os.environ["JAVA_OPTS"] = f"-Xmx{max_memory}"
+
+only_bat_ext = ".bat" if sys.platform == "win32" else ""
+bin_ext = ".bat" if sys.platform == "win32" else ".sh"
+exe_ext = ".exe" if sys.platform == "win32" else ""
+USE_SHELL = True if sys.platform == "win32" else False
 
 console = Console(
     log_time=False,
@@ -535,3 +553,17 @@ def colorize_dot_data(
                 fdot_list.append(d)
         return fdot_list[0] if fdot_list and len(fdot_list) == 1 else fdot_list
     return dot_data
+
+
+def get_version():
+    """
+    Returns the version of depscan
+    """
+    return pkg_resources.get_distribution("appthreat-chen").version
+
+
+def unzip_unsafe(zf, to_dir):
+    """Method to unzip the file in an unsafe manne"""
+    with zipfile.ZipFile(zf, "r") as zip_ref:
+        zip_ref.extractall(to_dir)
+    shutil.rmtree(zf, ignore_errors=True)

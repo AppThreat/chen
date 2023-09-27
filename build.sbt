@@ -56,7 +56,7 @@ ThisBuild / scalacOptions ++= Seq(
 )
 
 
-enablePlugins(JavaAppPackaging)
+enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
 
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
 createDistribution := {

@@ -163,7 +163,7 @@ object JoernVectors {
   }
 
   private def parseConfig(args: Array[String]): Option[Config] =
-    new scopt.OptionParser[Config]("joern-vectors") {
+    new scopt.OptionParser[Config]("chen-vectors") {
       head("Extract vector representations of code from CPG")
       help("help")
       arg[String]("cpg")
