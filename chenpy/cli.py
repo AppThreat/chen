@@ -11,7 +11,7 @@ import oras.client
 import chenpy.config as config
 from chenpy.client import ChenDistributionRegistry
 from chenpy.logger import LOG, console
-from chenpy.utils import get_version, unzip_unsafe
+from chenpy.utils import USE_SHELL, get_version, max_memory, unzip_unsafe
 
 try:
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -62,6 +62,10 @@ def find_jars(lib_dir):
 
 def fix_envs():
     if not os.getenv("CHEN_HOME") or config.chen_home not in os.getenv("PATH"):
+        py_version = "python" + sys.version[:4]
+        # On Windows, there is no dot
+        if sys.platform == "win32":
+            py_version = py_version.replace(".", "")
         platform_dir = os.path.join(config.chen_home, "platform")
         platform_bin_dir = os.path.join(config.chen_home, "platform", "bin")
         if sys.platform == "win32":
@@ -73,7 +77,7 @@ def fix_envs():
                 "To run chennai console, add the following environment variables to your .zshrc or .bashrc:"
             )
         console.print(
-            f"""export CHEN_HOME={config.chen_home}\nexport PATH=$PATH{os.pathsep}{platform_dir + os.pathsep + platform_bin_dir + os.pathsep}"""
+            f"""export JAVA_OPTS="-Xmx{max_memory}"\nexport SCALAPY_PYTHON_LIBRARY={py_version}\nexport CHEN_HOME={config.chen_home}\nexport PATH=$PATH{os.pathsep}{platform_dir + os.pathsep + platform_bin_dir + os.pathsep}"""
         )
         if not os.getenv("JAVA_HOME"):
             LOG.info(
@@ -88,6 +92,7 @@ def fix_envs():
         LOG.info(
             "After setting the values, restart the terminal and type chennai to launch the console."
         )
+        os.environ["SCALAPY_PYTHON_LIBRARY"] = py_version
         os.environ["CHEN_HOME"] = config.chen_home
         os.environ["CLASSPATH"] = (
             find_jars(os.path.join(config.chen_home, "platform", "lib"))
@@ -143,19 +148,24 @@ def download_chen_distribution(overwrite=False):
                         os.chmod(os.path.join(dirname, filename), 0o755)
                     except Exception:
                         pass
-        fix_envs()
         # Install the science pack
         if req_files:
             install_science_modules()
+        fix_envs()
 
 
 def install_science_modules():
     """
     Install the required science modules
     """
+    LOG.debug("About to install the science pack using cpu-only configuration")
     req_file = os.path.join(config.chen_home, "chen-science-requirements.txt")
     if os.path.exists(req_file):
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-r", req_file],
+            stdout=subprocess.DEVNULL,
+            shell=USE_SHELL,
+        )
 
 
 def main():
