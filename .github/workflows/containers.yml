@@ -49,13 +49,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCALAPY_PYTHON_LIBRARY: "python3.11"
+      - name: Export python requirements
+        run: |
+          python3.11 -m pip install --upgrade pip
+          python3.11 -m pip install poetry
+          python3.11 -m poetry install --no-cache --with=science
+          python3.11 -m poetry export -f requirements.txt --output target/chen-science-requirements.txt
       - name: Upload chen to ghcr
         run: |
           cd target
           echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
           oras push ghcr.io/$IMAGE_NAME:v1 \
             --annotation-file ../ci/annotations.json \
-            ./chen.zip:application/vnd.appthreat.chen.layer.v1+tar
+            ./chen.zip:application/vnd.appthreat.chen.layer.v1+tar \
+            ./chen-science-requirements.txt:application/vnd.appthreat.chen.layer.v1+tar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_USERNAME: ${{ github.actor }}
