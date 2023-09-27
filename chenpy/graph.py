@@ -9,9 +9,9 @@ from chenpy.utils import calculate_hash
 
 SCIENCE_PACK_AVAILABLE = True
 try:
+    import networkx as nx
     import pydotplus
     import torch
-    import networkx as nx
     from networkx.readwrite import json_graph, read_graphml
     from torch import Tensor
     from torch_geometric.data import Data

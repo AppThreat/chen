@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import subprocess
 import sys
 
 import oras.client
@@ -118,7 +119,11 @@ def download_chen_distribution(overwrite=False):
     )
     if paths_list:
         LOG.debug("Extracting chen to %s", config.chen_home)
-        unzip_unsafe(paths_list[0], config.chen_home)
+        zip_files = [file for file in paths_list if file.endswith(".zip")]
+        req_files = [file for file in paths_list if file.endswith(".txt")]
+        if not zip_files:
+            return
+        unzip_unsafe(zip_files[0], config.chen_home)
         # Add execute permissions
         for dirname, subdirs, files in os.walk(config.chen_home):
             for filename in files:
@@ -139,6 +144,18 @@ def download_chen_distribution(overwrite=False):
                     except Exception:
                         pass
         fix_envs()
+        # Install the science pack
+        if req_files:
+            install_science_modules()
+
+
+def install_science_modules():
+    """
+    Install the required science modules
+    """
+    req_file = os.path.join(config.chen_home, "chen-science-requirements.txt")
+    if os.path.exists(req_file):
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
 
 
 def main():
