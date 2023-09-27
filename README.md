@@ -74,7 +74,6 @@ command          | description                                                  
 ==============================================================================================================================================================|
 annotations      | List annotations                                                          | annotations                                                   |
 close            | Close project by name                                                     | close(projectName)                                            |
-cpg              | CPG of the active project                                                 | cpg.method.l                                                  |
 declarations     | List declarations                                                         | declarations                                                  |
 delete           | Close and remove project from disk                                        | delete(projectName)                                           |
 distance         | Show graph edit distance from the source method to the comparison methods | distance(source method iterator, comparison method iterators) |
@@ -82,19 +81,12 @@ exit             | Exit the REPL                                                
 files            | List files                                                                | files                                                         |
 importAtom       | Create new project from existing atom                                     | importAtom("app.atom")                                        |
 importCode       | Create new project from code                                              | importCode("example.jar")                                     |
-importCpg        | Create new project from existing CPG                                      | importCpg("app.atom")                                         |
 imports          | List imports                                                              | imports                                                       |
 methods          | List methods                                                              | methods('Methods', includeCalls=true, tree=true)              |
-open             | Open project by name                                                      | open("projectName")                                           |
 openForInputPath | Open project for input path                                               |                                                               |
-project          | Currently active project                                                  | project                                                       |
-run              | Run analyzer on active CPG                                                | run.securityprofile                                           |
-save             | Write all changes to disk                                                 | save                                                          |
 sensitive        | List sensitive literals                                                   | sensitive                                                     |
 showSimilar      | Show methods similar to the given method                                  | showSimilar(method full name)                                 |
 summary          | Display summary information                                               | summary                                                       |
-switchWorkspace  | Close current workspace and open a different one                          |                                                               |
-workspace        | Access to the workspace directory                                         | workspace                                                     |
 ```
 
 Refer to the documentation site to learn more about the commands.
