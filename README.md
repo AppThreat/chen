@@ -25,7 +25,7 @@ To download the chen distribution including the science pack.
 chen --download
 ```
 
-Once the download finishes, the command would display the download location along with the environment variables that needs to be set to invoke `chennai` console. Example output below:
+Once the download finishes, the command will display the download location along with the environment variables that need to be set to invoke `chennai` console. Example output below:
 
 ```shell
 [21:53:36] INFO     To run chennai console, add the following environment variables to your .zshrc or .bashrc:
@@ -75,7 +75,6 @@ command          | description                                                  
 annotations      | List annotations                                                          | annotations                                                   |
 close            | Close project by name                                                     | close(projectName)                                            |
 declarations     | List declarations                                                         | declarations                                                  |
-delete           | Close and remove project from disk                                        | delete(projectName)                                           |
 distance         | Show graph edit distance from the source method to the comparison methods | distance(source method iterator, comparison method iterators) |
 exit             | Exit the REPL                                                             |                                                               |
 files            | List files                                                                | files                                                         |
@@ -83,7 +82,6 @@ importAtom       | Create new project from existing atom                        
 importCode       | Create new project from code                                              | importCode("example.jar")                                     |
 imports          | List imports                                                              | imports                                                       |
 methods          | List methods                                                              | methods('Methods', includeCalls=true, tree=true)              |
-openForInputPath | Open project for input path                                               |                                                               |
 sensitive        | List sensitive literals                                                   | sensitive                                                     |
 showSimilar      | Show methods similar to the given method                                  | showSimilar(method full name)                                 |
 summary          | Display summary information                                               | summary                                                       |
@@ -116,4 +114,4 @@ Apache-2.0
 
 ## Enterprise support
 
-Enterprise support including custom language development and integration services are available via AppThreat Ltd. Free community support is also available via [discord](https://discord.gg/UD4sHgbXYr).
+Enterprise support including custom language development and integration services is available via AppThreat Ltd. Free community support is also available via [Discord](https://discord.gg/UD4sHgbXYr).
