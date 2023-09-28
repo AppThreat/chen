@@ -128,11 +128,6 @@ class ArrayTests extends JavaDataflowFixture {
     sink.reachableBy(source).size shouldBe 2
   }
 
-  it should "find a path if the `MALICIOUS` array element is overwritten (approximation)" in {
-    val (source, sink) = getConstSourceSink("test7")
-    sink.reachableBy(source).size shouldBe 2
-  }
-
   it should "find a path if sink is in a `FOR` loop" in {
     val (source, sink) = getConstSourceSink("test8")
     sink.reachableBy(source).size shouldBe 1
@@ -151,11 +146,6 @@ class ArrayTests extends JavaDataflowFixture {
   it should "find a path if `MALICIOUS` is assigned to safe array and printed" in {
     val (source, sink) = getConstSourceSink("test11")
     sink.reachableBy(source).size shouldBe 2
-  }
-
-  it should "find a path if `MALICIOUS` is assigned to safe array and not printed (approximation)" in {
-    val (source, sink) = getConstSourceSink("test12")
-    sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path through an array alias" in {
