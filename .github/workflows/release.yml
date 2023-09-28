@@ -47,7 +47,7 @@ jobs:
           SCALAPY_PYTHON_LIBRARY: "python3.11"
       - name: Install and test
         run: |
-          sudo npm install -g @appthreat/atom
+          npm install -g @appthreat/atom
           python -m pip install --upgrade pip
           pip install poetry
           sudo apt install -y graphviz-dev

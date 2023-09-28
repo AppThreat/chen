@@ -44,7 +44,7 @@ jobs:
         if: runner.os == 'macOS'
       - name: Install and test
         run: |
-          sudo npm install -g @appthreat/atom
+          npm install -g @appthreat/atom
           python3.11 -m pip install --upgrade pip
           python3.11 -m pip install poetry
           python3.11 -m poetry config virtualenvs.create false
