@@ -38,7 +38,6 @@ class CpgGeneratorFactory(config: ConsoleConfig) {
       language     <- guessLanguage(inputPath)
       cpgGenerator <- cpgGeneratorForLanguage(language, config.frontend, config.install.rootPath.path, args = Nil)
     } yield {
-      report(s"Using generator for language: $language: ${cpgGenerator.getClass.getSimpleName}")
       cpgGenerator
     }
 
@@ -60,13 +59,11 @@ class CpgGeneratorFactory(config: ConsoleConfig) {
     outputFileOpt.map { outFile =>
       val parentPath = outFile.parent.path.toAbsolutePath
       if (isZipFile(outFile)) {
-        report("Creating database from bin.zip")
         val srcFilename = outFile.path.toAbsolutePath.toString
         val dstFilename = parentPath.resolve("cpg.bin").toAbsolutePath.toString
         // MemoryHelper.hintForInsufficientMemory(srcFilename).map(report)
         convertProtoCpgToOverflowDb(srcFilename, dstFilename)
       } else {
-        report("moving cpg.bin.zip to cpg.bin because it is already a database file")
         val srcPath = parentPath.resolve("app.atom")
         if (srcPath.toFile.exists()) {
           mv(srcPath, parentPath.resolve("cpg.bin"))
