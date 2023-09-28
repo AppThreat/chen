@@ -57,7 +57,6 @@ case class Project(projectFile: ProjectFile, var path: Path, var cpg: Option[Cpg
   def close: Project = {
     cpg.foreach { c =>
       c.close()
-      System.err.println(s"closing/saving project `$name`")
       val workingCopy = path.resolve(workCpgFileName)
       val persistent  = path.resolve(persistentCpgFileName)
       cp(workingCopy, persistent)

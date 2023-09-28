@@ -1,6 +1,6 @@
 package io.shiftleft.semanticcpg.language.android
 
-import io.joern.semanticcpg.utils.SecureXmlParsing
+import io.shiftleft.semanticcpg.utils.SecureXmlParsing
 import io.shiftleft.codepropertygraph.generated.nodes
 
 class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends AnyVal {

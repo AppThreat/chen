@@ -142,12 +142,8 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
     }
 
     cpgMaybe
-      .map { cpg =>
-        report("""|Code successfully imported. You can now query it using `cpg`.
-          |For an overview of all imported code, type `workspace`.""".stripMargin)
-        console.applyDefaultOverlays(cpg)
-        generator.applyPostProcessingPasses(cpg)
-      }
+      .map(cpg => console.summary)
       .getOrElse(throw new ConsoleException(s"Error creating project for input path: `$inputPath`"))
+    cpgMaybe.get
   }
 }
