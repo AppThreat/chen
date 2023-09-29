@@ -53,3 +53,5 @@ chen.zip
 .metals/
 *.pyc
 **/__pycache__/
+.vscode/
+project/metals.sbt

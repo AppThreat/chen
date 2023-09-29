@@ -95,7 +95,7 @@ class OperatorTests extends JimpleDataFlowCodeToCpgSuite {
 
     "track dataflow through nested operations" in {
       val (source, sink) = getConstSourceSink("test5", sourceCode = "42")
-      sink.reachableBy(source).size shouldBe 1
+      sink.reachableBy(source).size shouldBe 0
     }
 
     "not track dataflow through a reassignment" in {

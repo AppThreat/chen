@@ -42,7 +42,7 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
     file.createIfNotExists(createParents = true)
     file.write("""
         |// 😼
-        |logger.error()
+        |logger.debug()
         |""".stripMargin)
     dir
   }
@@ -80,7 +80,7 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
     }
 
     "handle utf8 correctly" in ProjectParseTestsFixture(projectWithUtf8) { cpg =>
-      cpg.fieldAccess.argument(2).code.l shouldBe List("error")
+      cpg.fieldAccess.argument(2).code.l shouldBe List("debug")
     }
 
   }

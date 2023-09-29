@@ -132,7 +132,7 @@ object ProgramHandlingUtil {
     private def getPackagePathFromByteCode(file: File): Option[String] =
       Try(file.fileInputStream.apply(getPackagePathFromByteCode))
         .recover { case e: Throwable =>
-          logger.error(s"Error reading class file ${file.canonicalPath}", e)
+          logger.debug(s"Error reading class file ${file.canonicalPath}", e)
           None
         }
         .getOrElse(None)

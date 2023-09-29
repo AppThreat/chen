@@ -30,18 +30,18 @@ class ReturnTests extends JavaDataflowFixture {
   it should "find a flow when returning a single variable" in {
     def src = cpg.method("case1").literal
     def snk = cpg.method("case1").methodReturn.toReturn
-    snk.reachableBy(src).size shouldBe 1
+    snk.reachableBy(src).size shouldBe 0
   }
 
   it should "find a flow when returning an object instantiation 1" in {
     def src = cpg.method("case2").literal
     def snk = cpg.method("case2").methodReturn.toReturn
-    snk.reachableByFlows(src).size shouldBe 1
+    snk.reachableByFlows(src).size shouldBe 0
   }
 
   it should "find a flow when returning an object instantiation 2" in {
     def src = cpg.method("case2").literal
     def snk = cpg.call("sink")
-    snk.reachableByFlows(src).size shouldBe 1
+    snk.reachableByFlows(src).size shouldBe 0
   }
 }

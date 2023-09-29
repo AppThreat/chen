@@ -113,11 +113,11 @@ object SourceFiles {
 
     pathsArray.lengthCompare(1) match {
       case cmp if cmp < 0  => // pathsArray is empty, so don't log anything
-      case cmp if cmp == 0 => logger.error(s"$message: ${paths.head}")
+      case cmp if cmp == 0 => logger.debug(s"$message: ${paths.head}")
 
       case cmp =>
         val errorMessage = (message +: pathsArray.map(path => s"- $path")).mkString("\n")
-        logger.error(errorMessage)
+        logger.debug(errorMessage)
     }
   }
 

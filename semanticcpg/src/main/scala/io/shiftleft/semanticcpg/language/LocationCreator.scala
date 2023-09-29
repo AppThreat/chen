@@ -17,7 +17,7 @@ object LocationCreator {
       location(node)
     } catch {
       case exc @ (_: NoSuchElementException | _: ClassCastException) =>
-        logger.error(s"Cannot determine location for ${node.label} due to broken CPG", exc)
+        logger.debug(s"Cannot determine location for ${node.label} due to broken CPG", exc)
         emptyLocation(node.label, Some(node))
     }
   }

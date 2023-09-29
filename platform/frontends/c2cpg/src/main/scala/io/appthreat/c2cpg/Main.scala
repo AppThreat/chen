@@ -136,7 +136,7 @@ object Main extends X2CpgMain(cmdLineParser, new C2Cpg()) {
         c2cpg.printIfDefsOnly(config)
       } catch {
         case NonFatal(ex) =>
-          logger.error("Failed to print preprocessor statements.", ex)
+          logger.debug("Failed to print preprocessor statements.", ex)
           throw ex
       }
     } else {

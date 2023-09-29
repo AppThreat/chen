@@ -49,7 +49,7 @@ trait TypeParser extends TokenParser {
       case Some("+") ~ typeSignature => model.BoundWildcard(BoundAbove, typeSignature)
 
       case Some(symbol) ~ typeSignature =>
-        logger.error(s"Invalid wildcard indicator `$symbol`. Treating as unbound wildcard")
+        logger.debug(s"Invalid wildcard indicator `$symbol`. Treating as unbound wildcard")
         UnboundWildcard
 
       case None ~ typeSignature => SimpleTypeArgument(typeSignature)

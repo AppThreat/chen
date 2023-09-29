@@ -17,10 +17,34 @@ import logging
 import os
 
 from rich.console import Console
+from rich.highlighter import RegexHighlighter
 from rich.logging import RichHandler
 from rich.theme import Theme
 
-custom_theme = Theme({"info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
+
+class CustomHighlighter(RegexHighlighter):
+    base_style = "atom."
+    highlights = [
+        r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)",
+        r"(?P<path>(\w+\/.*\.[\w:]+))",
+        r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)",
+        r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))",
+    ]
+
+
+custom_theme = Theme(
+    {
+        "atom.path": "#7c8082",
+        "atom.params": "#5a7c90",
+        "atom.opers": "#7c8082",
+        "atom.method": "#FF753D",
+        "info": "#5A7C90",
+        "warning": "#FF753D",
+        "danger": "bold red",
+    }
+)
+
+
 console = Console(
     log_time=False,
     log_path=False,
@@ -28,6 +52,8 @@ console = Console(
     width=int(os.getenv("COLUMNS", "270")),
     color_system="256",
     force_terminal=True,
+    highlight=True,
+    highlighter=CustomHighlighter(),
     record=True,
 )
 

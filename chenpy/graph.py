@@ -7,14 +7,25 @@ from collections import Counter, defaultdict
 
 from chenpy.utils import calculate_hash
 
+DATABASE_PACK_AVAILABLE = True
 SCIENCE_PACK_AVAILABLE = True
 try:
     import networkx as nx
+    from networkx.readwrite import json_graph, read_graphml
+except ImportError:
+    DATABASE_PACK_AVAILABLE = False
+
+try:
     import pydotplus
     import torch
-    from networkx.readwrite import json_graph, read_graphml
     from torch import Tensor
     from torch_geometric.data import Data
+    from torchtext.data.functional import (
+        generate_sp_model,
+        load_sp_model,
+        sentencepiece_numericalizer,
+        sentencepiece_tokenizer,
+    )
 except ImportError:
     SCIENCE_PACK_AVAILABLE = False
 
@@ -226,19 +237,20 @@ def node_match_fn(n1, n2):
 
 
 def gep(first_graph, second_graph, upper_bound=500):
-    """Function to compute the difference based on optimal edit path algorithm"""
-    return nx.optimal_edit_paths(
+    distance = nx.optimal_edit_paths(
         first_graph,
         second_graph,
         node_match=node_match_fn,
         edge_match=node_match_fn,
         upper_bound=upper_bound,
     )
+    if distance is None:
+        distance = -1
+    return distance
 
 
 def ged(first_graph, second_graph, timeout=5, upper_bound=500):
-    """Function to compute the difference based on graph edit distance algorithm"""
-    return nx.graph_edit_distance(
+    distance = nx.graph_edit_distance(
         first_graph,
         second_graph,
         node_match=node_match_fn,
@@ -246,6 +258,9 @@ def ged(first_graph, second_graph, timeout=5, upper_bound=500):
         timeout=timeout,
         upper_bound=upper_bound,
     )
+    if distance is None:
+        distance = -1
+    return distance
 
 
 def write_dot(G, path):
@@ -296,22 +311,23 @@ def summarize(G, as_dict=False, as_dot=False):
     return summary_graph
 
 
-def is_similar(M1, M2, upper_bound=500, timeout=5):
-    """Function to check if two graphs are similar. To simplify the problem, first the raw graph difference is computed to check if the graphs are the same.
-    If not graph edit distance is computed with a fixed timeout to help answer the question
-    """
+def is_similar(M1, M2, edit_distance=10, upper_bound=500, timeout=5):
     if not diff_graph(M1, M2, as_dict=True):
         return True
     distance = ged(M1, M2, upper_bound=upper_bound, timeout=timeout)
-    if distance is None:
+    if distance == -1:
         return False
-    return True
+    return int(distance) < edit_distance
 
 
 def convert_graphml(
     gml_file, force_multigraph=False, as_graph=True, as_adjacency_data=False
 ):
     """Function to convert graphml to networkx"""
+    if not DATABASE_PACK_AVAILABLE:
+        return RuntimeError(
+            "Graph database dependencies missing. Please refer to the documentation to install the database pack or use the official chen container image."
+        )
     try:
         G = read_graphml(gml_file, force_multigraph=force_multigraph)
         if as_graph:

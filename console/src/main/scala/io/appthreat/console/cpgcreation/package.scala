@@ -18,13 +18,10 @@ package object cpgcreation {
   ): Option[CpgGenerator] = {
     lazy val conf = config.withArgs(args)
     language match {
-      case Languages.C | Languages.NEWC           => Some(AtomGenerator(conf, rootPath, language))
-      case Languages.JAVA                         => Some(AtomGenerator(conf, rootPath, language))
-      case Languages.JAVASRC                      => Some(AtomGenerator(conf, rootPath, language))
-      case Languages.JSSRC | Languages.JAVASCRIPT => Some(AtomGenerator(conf, rootPath, language))
-      case Languages.PYTHONSRC                    => Some(AtomGenerator(conf, rootPath, language))
-      case Languages.PYTHON                       => Some(AtomGenerator(conf, rootPath, language))
-      case _                                      => None
+      case Languages.C | Languages.NEWC | Languages.JAVA | Languages.JAVASRC | Languages.JSSRC | Languages.JAVASCRIPT |
+          Languages.PYTHON | Languages.PYTHONSRC =>
+        Some(AtomGenerator(conf, rootPath, language))
+      case _ => None
     }
   }
 
@@ -80,6 +77,12 @@ package object cpgcreation {
   private def isCFile(filename: String): Boolean =
     Seq(".c", ".cc", ".cpp", ".h", ".hpp", ".hh").exists(filename.endsWith)
 
+  private def isYamlFile(filename: String): Boolean =
+    Seq(".yml", ".yaml").exists(filename.endsWith)
+
+  private def isBomFile(filename: String): Boolean =
+    Seq("bom.json", ".cdx.json").exists(filename.endsWith)
+
   private def guessLanguageForRegularFile(file: File): Option[String] = {
     file.name.toLowerCase match {
       case f if isJavaBinary(f)      => Some(Languages.JAVA)
@@ -94,6 +97,9 @@ package object cpgcreation {
       case f if f.endsWith(".rb")    => Some(Languages.RUBYSRC)
       case f if isLlvmFile(f)        => Some(Languages.LLVM)
       case f if isCFile(f)           => Some(Languages.NEWC)
+      case f if isBomFile(f)         => Option("BOM")
+      case f if f.endsWith(".json")  => Option("JSON")
+      case f if isYamlFile(f)        => Option("YAML")
       case _                         => None
     }
   }

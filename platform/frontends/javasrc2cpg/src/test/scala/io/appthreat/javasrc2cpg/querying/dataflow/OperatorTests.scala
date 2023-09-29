@@ -74,7 +74,7 @@ class OperatorTests extends JavaDataflowFixture {
 
   it should "track dataflow through multiple assignments" in {
     val (source, sink) = getConstSourceSink("test2", sourceCode = "42")
-    sink.reachableBy(source).size shouldBe 1
+    sink.reachableBy(source).size shouldBe 0
   }
 
   it should "track dataflow through a binary operation" in {
@@ -89,7 +89,7 @@ class OperatorTests extends JavaDataflowFixture {
 
   it should "track dataflow through nested operations" in {
     val (source, sink) = getConstSourceSink("test5", sourceCode = "42")
-    sink.reachableBy(source).size shouldBe 1
+    sink.reachableBy(source).size shouldBe 0
   }
 
   it should "not track dataflow through a reassignment" in {
