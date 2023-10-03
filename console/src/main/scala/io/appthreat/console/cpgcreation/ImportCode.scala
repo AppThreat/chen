@@ -7,6 +7,10 @@ import io.appthreat.console.{ConsoleException, FrontendConfig, Reporting}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import overflowdb.traversal.help.Table
+import me.shadaj.scalapy.py
+import me.shadaj.scalapy.py.SeqConverters
+import py.PyQuote
+import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 import java.nio.file.Path
 import scala.util.{Failure, Success, Try}
@@ -17,6 +21,7 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
   private val config             = console.config
   private val workspace          = console.workspace
   protected val generatorFactory = new CpgGeneratorFactory(config)
+  val chenPyUtils                = py.module("chenpy.utils")
 
   private def checkInputPath(inputPath: String): Unit = {
     if (!File(inputPath).exists) {
@@ -24,21 +29,29 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
     }
   }
 
+  def importUrl(inputPath: String): String = chenPyUtils.import_url(inputPath).as[String]
+
   /** This is the `importCode(...)` method exposed on the console. It attempts to find a suitable CPG generator first by
     * looking at the `language` parameter and if no generator is found for the language, looking the contents at
     * `inputPath` to determine heuristically which generator to use.
     */
   def apply(inputPath: String, projectName: String = "", language: String = ""): Cpg = {
-    checkInputPath(inputPath)
+    var srcPath =
+      if (
+        inputPath.startsWith("http") || inputPath.startsWith("git://") || inputPath.startsWith("CVE-") || inputPath
+          .startsWith("GHSA-")
+      ) importUrl(inputPath)
+      else inputPath
+    checkInputPath(srcPath)
     if (language != "") {
       generatorFactory.forLanguage(language) match {
-        case None           => throw new ConsoleException(s"No CPG generator exists for language: $language")
-        case Some(frontend) => apply(frontend, inputPath, projectName)
+        case None           => throw new ConsoleException(s"No Atom generator exists for language: $language")
+        case Some(frontend) => apply(frontend, srcPath, projectName)
       }
     } else {
-      generatorFactory.forCodeAt(inputPath) match {
-        case None           => throw new ConsoleException(s"No suitable CPG generator found for: $inputPath")
-        case Some(frontend) => apply(frontend, inputPath, projectName)
+      generatorFactory.forCodeAt(srcPath) match {
+        case None           => throw new ConsoleException(s"No suitable Atom generator found for: $srcPath")
+        case Some(frontend) => apply(frontend, srcPath, projectName)
       }
     }
   }
@@ -81,7 +94,7 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
 
     def apply(inputPath: String, projectName: String = "", args: List[String] = List()): Cpg = {
       val frontend = cpgGeneratorForLanguage(language, config.frontend, config.install.rootPath.path, args)
-        .getOrElse(throw new ConsoleException(s"no cpg generator for language=$language available!"))
+        .getOrElse(throw new ConsoleException(s"no atom generator for language=$language available!"))
       new ImportCode(console)(frontend, inputPath, projectName)
     }
   }
@@ -96,7 +109,7 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
       withCodeInTmpFile(str, "tmp." + extension) { dir =>
         super.apply(dir.path.toString, args = args)
       } match {
-        case Failure(exception) => throw new ConsoleException(s"unable to generate cpg from given String", exception)
+        case Failure(exception) => throw new ConsoleException(s"unable to generate atom from given String", exception)
         case Success(value)     => value
       }
     }
@@ -133,7 +146,8 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
 
     val cpgMaybe = workspace.createProject(inputPath, name).flatMap { pathToProject =>
       val frontendCpgOutFile = pathToProject.resolve(nameOfLegacyCpgInProject)
-      generatorFactory.runGenerator(generator, inputPath, frontendCpgOutFile.toString) match {
+      val frontendAtomPath   = generatorFactory.runGenerator(generator, inputPath, frontendCpgOutFile.toString)
+      frontendAtomPath match {
         case Success(_) =>
           console.open(name).flatMap(_.cpg)
         case Failure(exception) =>

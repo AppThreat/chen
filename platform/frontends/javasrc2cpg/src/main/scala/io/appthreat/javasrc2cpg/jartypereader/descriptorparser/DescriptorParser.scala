@@ -27,11 +27,11 @@ object DescriptorParser extends TypeParser {
       case Success(signature, _) => signature
 
       case Failure(err, _) =>
-        logger.error(s"parseClassSignature failed with $err")
+        logger.debug(s"parseClassSignature failed with $err")
         throw new IllegalArgumentException(s"FAILURE: Parsing invalid signature descriptor $descriptor")
 
       case Error(err, _) =>
-        logger.error(s"parseClassSignature raised error $err")
+        logger.debug(s"parseClassSignature raised error $err")
         throw new IllegalArgumentException(s"ERROR: Parsing invalid signature descriptor $descriptor")
     }
   }

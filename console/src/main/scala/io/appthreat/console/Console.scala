@@ -44,43 +44,15 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
 
   implicit val pyGlobal: me.shadaj.scalapy.py.Dynamic.global.type = py.Dynamic.global
   var richTableLib: me.shadaj.scalapy.py.Dynamic                  = py.module("logging")
-  var richConsoleLib: me.shadaj.scalapy.py.Dynamic                = py.module("logging")
   var richTreeLib: me.shadaj.scalapy.py.Dynamic                   = py.module("logging")
-  var richPrettyLib: me.shadaj.scalapy.py.Dynamic                 = py.module("logging")
   var richProgressLib: me.shadaj.scalapy.py.Dynamic               = py.module("logging")
-  var richSyntaxLib: me.shadaj.scalapy.py.Dynamic                 = py.module("logging")
-  var richHighlighterLib: me.shadaj.scalapy.py.Dynamic            = py.module("logging")
-  var richThemeLib: me.shadaj.scalapy.py.Dynamic                  = py.module("logging")
   var richConsole: me.shadaj.scalapy.py.Dynamic                   = py.module("logging")
   var richAvailable                                               = true
   try {
     richTableLib = py.module("rich.table")
-    richConsoleLib = py.module("rich.console")
     richTreeLib = py.module("rich.tree")
-    richPrettyLib = py.module("rich.pretty")
     richProgressLib = py.module("rich.progress")
-    richSyntaxLib = py.module("rich.syntax")
-    richHighlighterLib = py.module("rich.highlighter")
-    richThemeLib = py.module("rich.theme")
-    CPythonInterpreter.execManyLines("""
-        |from rich.highlighter import RegexHighlighter
-        |from rich.theme import Theme
-        |
-        |class CustomHighlighter(RegexHighlighter):
-        |  base_style = "atom."
-        |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
-        |
-        |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
-        |""".stripMargin)
-    richConsole = richConsoleLib.Console(
-      log_time = false,
-      log_path = false,
-      force_interactive = true,
-      color_system = "256",
-      highlight = true,
-      highlighter = py.Dynamic.global.CustomHighlighter(),
-      theme = py.Dynamic.global.custom_theme
-    )
+    richConsole = py.module("chenpy.logger").console
   } catch {
     case _: Exception => richAvailable = false
   }
@@ -336,8 +308,8 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
                  |
                  |-----------
                  |
-                 |inputPath: location on disk of the code to analyze. e.g., a directory
-                 |containing source code or a Java archive (JAR).
+                 |inputPath: http or git url, CVE or GHSA id, location on disk of the code to analyze. e.g., a directory
+                 |containing source code or a Java archive (JAR) or Android apk file.
                  |
                  |projectName: a unique name used for project management. If this parameter
                  |is omitted, the name will be derived from `inputPath`
@@ -352,7 +324,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
                  |the filename found and possibly by looking into the file/directory.
                  |
                  |""",
-    example = """importCode("example.jar")"""
+    example = """importCode("git url or path")"""
   )
   def importCode = new ImportCode(this)
 

@@ -212,9 +212,14 @@ object AstWithStaticInit {
 
 /** Translate a Java Parser AST into a CPG AST
   */
-class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Global, symbolSolver: JavaSymbolSolver)(
-  implicit withSchemaValidation: ValidationMode
-) extends AstCreatorBase(filename)
+class AstCreator(
+  filename: String,
+  javaParserAst: CompilationUnit,
+  global: Global,
+  symbolSolver: JavaSymbolSolver,
+  packagesJarMappings: mutable.Map[String, mutable.Set[String]]
+)(implicit withSchemaValidation: ValidationMode)
+    extends AstCreatorBase(filename)
     with AstNodeBuilder[Node, AstCreator] {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -265,7 +270,7 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
         .importedAs(name)
         .importedEntity(typeFullName)
 
-      if (importStmt.isStatic()) {
+      if (importStmt.isStatic) {
         scope.addStaticImport(importNode)
       } else {
         scope.addType(name, typeFullName)
@@ -312,8 +317,8 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
         logger.error(s"Unsolved symbol exception caught in $filename")
         Ast()
       case t: Throwable =>
-        logger.error(s"Parsing file $filename failed with $t")
-        logger.error(s"Caused by ${t.getCause}")
+        logger.debug(s"Parsing file $filename failed with $t")
+        logger.debug(s"Caused by ${t.getCause}")
         Ast()
     }
   }
@@ -569,10 +574,8 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     val defaultFullName = s"${Defines.UnresolvedNamespace}.${typ.getNameAsString}"
     val name            = resolvedType.flatMap(typeInfoCalc.name).getOrElse(typ.getNameAsString)
     val typeFullName    = resolvedType.flatMap(typeInfoCalc.fullName).getOrElse(defaultFullName)
-
-    val code = codeForTypeDecl(typ, isInterface)
-
-    NewTypeDecl()
+    val code            = codeForTypeDecl(typ, isInterface)
+    val typeDecl = NewTypeDecl()
       .name(name)
       .fullName(typeFullName)
       .lineNumber(line(typ))
@@ -582,6 +585,9 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
       .code(code)
       .astParentType(astParentType)
       .astParentFullName(astParentFullName)
+    if (packagesJarMappings.contains(typeFullName))
+      typeDecl.aliasTypeFullName(packagesJarMappings.getOrElse(typeFullName, mutable.Set.empty).headOption)
+    typeDecl
   }
 
   private def addTypeDeclTypeParamsToScope(typ: TypeDeclaration[_]): Unit = {
@@ -792,10 +798,12 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
         Defines.ConstructorMethodName,
         signature
       )
-
+    val typeNameLookup = fullName.takeWhile(_ != ':').split("\\.").dropRight(1).mkString(".")
     constructorNode
       .fullName(fullName)
       .signature(signature)
+    if (packagesJarMappings.contains(typeNameLookup))
+      constructorNode.astParentType(packagesJarMappings.getOrElse(typeNameLookup, mutable.Set.empty).head)
 
     parameterAsts.foreach { ast =>
       ast.root match {
@@ -1053,7 +1061,9 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     methodNode
       .fullName(methodFullName)
       .signature(signature)
-
+    val typeNameLookup = methodFullName.takeWhile(_ != ':').split("\\.").dropRight(1).mkString(".")
+    if (packagesJarMappings.contains(typeNameLookup))
+      methodNode.astParentType(packagesJarMappings.getOrElse(typeNameLookup, mutable.Set.empty).head)
     val thisNode = Option.when(!methodDeclaration.isStatic) {
       val typeFullName = scope.enclosingTypeDeclFullName
       thisNodeForMethod(typeFullName, line(methodDeclaration))
@@ -1342,7 +1352,7 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
 
     val iterableAst = astsForExpression(iterableExpression, expectedType = expectedType) match {
       case Nil =>
-        logger.error(s"Could not create AST for iterable expr $iterableExpression: $filename:l$lineNo")
+        logger.debug(s"Could not create AST for iterable expr $iterableExpression: $filename:l$lineNo")
         Ast()
       case iterableAstHead :: Nil => iterableAstHead
       case iterableAsts =>
@@ -1455,7 +1465,7 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     // Create item local
     val maybeVariable = stmt.getVariable.getVariables.asScala.toList match {
       case Nil =>
-        logger.error(s"ForEach statement has empty variable list: $filename$lineNo")
+        logger.debug(s"ForEach statement has empty variable list: $filename$lineNo")
         None
       case variable :: Nil => Some(variable)
       case variable :: _ =>
@@ -2689,7 +2699,7 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     }
 
     if (paramTypesList.sizeIs != lambdaParameters.size) {
-      logger.error(s"Found different number lambda params and param types for $expr. Some parameters will be missing.")
+      logger.debug(s"Found different number lambda params and param types for $expr. Some parameters will be missing.")
     }
 
     val parameterNodes = lambdaParameters
@@ -2959,12 +2969,13 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     val implementedInfo                = getLambdaImplementedInfo(expr, expectedType)
     val lambdaMethodNode =
       createAndPushLambdaMethod(expr, lambdaMethodName, implementedInfo, localsForCaptured, expectedType)
-
+    val typeNameLookup = lambdaMethodNode.fullName.takeWhile(_ != ':').split("\\.").dropRight(1).mkString(".")
     val methodRef =
       NewMethodRef()
         .methodFullName(lambdaMethodNode.fullName)
         .typeFullName(lambdaMethodNode.fullName)
         .code(lambdaMethodNode.fullName)
+        .dynamicTypeHintFullName(packagesJarMappings.getOrElse(typeNameLookup, mutable.Set.empty).toSeq)
 
     addClosureBindingsToDiffGraph(closureBindingsForCapturedVars, methodRef)
 
@@ -3108,7 +3119,6 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
       .toOption
       .flatten
       .orElse(expressionTypeFullName)
-
     val dispatchType = dispatchTypeForCall(maybeResolvedCall, call.getScope.toScala)
 
     val receiverTypeOption = targetTypeForCall(call)
@@ -3131,10 +3141,11 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
     val codePrefix    = codePrefixForMethodCall(call)
     val callCode      = s"$codePrefix${call.getNameAsString}($argumentsCode)"
 
-    val callName       = call.getNameAsString
-    val namespace      = receiverType.getOrElse(Defines.UnresolvedNamespace)
-    val signature      = composeSignature(returnType, argumentTypes, argumentAsts.size)
-    val methodFullName = composeMethodFullName(namespace, callName, signature)
+    val callName        = call.getNameAsString
+    val namespace       = receiverType.getOrElse(Defines.UnresolvedNamespace)
+    val signature       = composeSignature(returnType, argumentTypes, argumentAsts.size)
+    val methodFullName  = composeMethodFullName(namespace, callName, signature)
+    val typeFullNameStr = expressionTypeFullName.getOrElse(TypeConstants.Any)
     val callRoot = NewCall()
       .name(callName)
       .methodFullName(methodFullName)
@@ -3143,8 +3154,12 @@ class AstCreator(filename: String, javaParserAst: CompilationUnit, global: Globa
       .dispatchType(dispatchType)
       .lineNumber(line(call))
       .columnNumber(column(call))
-      .typeFullName(expressionTypeFullName.getOrElse(TypeConstants.Any))
-
+      .typeFullName(typeFullNameStr)
+    callRoot.dynamicTypeHintFullName(
+      packagesJarMappings
+        .getOrElse(methodFullName.takeWhile(_ != ':').split("\\.").dropRight(1).mkString("."), mutable.Set.empty)
+        .toSeq
+    )
     callAst(callRoot, argumentAsts, scopeAsts.headOption)
   }
 

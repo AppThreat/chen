@@ -122,29 +122,9 @@ object Path {
   }
 
   def printFlows(tableRows: ArrayBuffer[Array[String]], caption: String): Unit = {
-    val richTableLib   = py.module("rich.table")
-    val richConsoleLib = py.module("rich.console")
-    CPythonInterpreter.execManyLines("""
-        |from rich.highlighter import RegexHighlighter
-        |from rich.theme import Theme
-        |
-        |class CustomHighlighter(RegexHighlighter):
-        |  base_style = "atom."
-        |  highlights = [r"(?P<method>([\w-]+\.)+[\w-]+[^<>:(),]?)", r"(?P<path>(\w+\/.*\.[\w:]+))", r"(?P<params>[(]([\w,-]+\.)+?[\w-]+[)]$)", r"(?P<opers>(unresolvedNamespace|unresolvedSignature|init|operators|operator|clinit))"]
-        |
-        |custom_theme = Theme({"atom.path" : "#7c8082", "atom.params": "#5a7c90", "atom.opers": "#7c8082", "atom.method": "#FF753D", "info": "#5A7C90", "warning": "#FF753D", "danger": "bold red"})
-        |""".stripMargin)
-    val richConsole =
-      richConsoleLib.Console(
-        log_time = false,
-        log_path = false,
-        force_interactive = true,
-        color_system = "256",
-        highlight = true,
-        highlighter = py.Dynamic.global.CustomHighlighter(),
-        theme = py.Dynamic.global.custom_theme
-      )
-    val table = richTableLib.Table(highlight = true, expand = true, caption = caption)
+    val richTableLib = py.module("rich.table")
+    val richConsole  = py.module("chenpy.logger").console
+    val table        = richTableLib.Table(highlight = true, expand = true, caption = caption)
     Array("Location", "Method", "Parameter", "Tracked").foreach(c => table.add_column(c))
     tableRows.foreach { row =>
       {

@@ -1,11 +1,10 @@
-package io.appthreat.pysrc2cpg
+package io.appthreat.c2cpg.passes
 
 import better.files.File
 import io.appthreat.x2cpg.passes.frontend.XConfigFileCreationPass
 import io.shiftleft.codepropertygraph.Cpg
 
-class ConfigFileCreationPass(cpg: Cpg, requirementsTxt: String = "requirement.txt")
-    extends XConfigFileCreationPass(cpg) {
+class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
 
   override val configFileFilters: List[File => Boolean] = List(
     // TOML files
@@ -15,11 +14,14 @@ class ConfigFileCreationPass(cpg: Cpg, requirementsTxt: String = "requirement.tx
     // YAML files
     extensionFilter(".yaml"),
     extensionFilter(".lock"),
+    pathEndFilter("conanfile.txt"),
+    extensionFilter(".cmake"),
+    extensionFilter(".build"),
+    pathEndFilter("CMakeLists.txt"),
     pathEndFilter("bom.json"),
     pathEndFilter(".chennai.json"),
     pathEndFilter("setup.cfg"),
-    // Requirements.txt
-    pathEndFilter(requirementsTxt)
+    pathEndFilter("setup.py")
   )
 
 }

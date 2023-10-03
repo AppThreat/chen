@@ -19,7 +19,7 @@ class MethodReturnTests extends JavaDataflowFixture {
       | }
       |
       | public void woo() {
-      |   int x = 20;
+      |   String x = "20";
       |   System.out.println(1, x);
       |   sink(x);
       | }
@@ -46,7 +46,7 @@ class MethodReturnTests extends JavaDataflowFixture {
   }
 
   it should "find a flow passed an external method with semantic" in {
-    val src = cpg.literal.code("20")
+    val src = cpg.literal.code("\"20\"")
     val snk = cpg.method("sink").parameter.index(1)
     snk.reachableBy(src).size shouldBe 1
   }

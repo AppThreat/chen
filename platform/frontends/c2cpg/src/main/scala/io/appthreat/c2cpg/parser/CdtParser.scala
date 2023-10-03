@@ -107,7 +107,7 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         )
       } catch {
         case u: UnsupportedClassVersionError =>
-          logger.error("c2cpg requires at least JRE-17 to run. Please check your Java Runtime Environment!", u)
+          logger.debug("c2cpg requires at least JRE-17 to run. Please check your Java Runtime Environment!", u)
           System.exit(1)
           ParseResult(None, failure = Option(u)) // return value to make the compiler happy
         case e: Throwable =>

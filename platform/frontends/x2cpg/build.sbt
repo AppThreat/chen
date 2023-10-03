@@ -3,6 +3,9 @@ name := "x2cpg"
 dependsOn(Projects.semanticcpg)
 
 libraryDependencies ++= Seq(
+  "io.circe" %% "circe-core" % Versions.circe,
+  "io.circe" %% "circe-generic" % Versions.circe,
+  "io.circe" %% "circe-parser" % Versions.circe,
   "org.gradle"     % "gradle-tooling-api" % Versions.gradleTooling % Optional,
   "org.scalatest" %% "scalatest"          % Versions.scalatest     % Test
 )

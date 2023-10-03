@@ -34,7 +34,7 @@ object Environment {
 
   def pathExists(path: String): Boolean = {
     if (!Paths.get(path).toFile.exists()) {
-      logger.error(s"Input path '$path' does not exist!")
+      logger.debug(s"Input path '$path' does not exist!")
       false
     } else {
       true

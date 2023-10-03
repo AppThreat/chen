@@ -5,19 +5,39 @@ import os
 import re
 import shutil
 import sys
+import tarfile
+import tempfile
 import zipfile
 from hashlib import blake2b
 
+import httpx
 import orjson
 import pkg_resources
 import psutil
+from packageurl import PackageURL
+from packageurl.contrib import purl2url
 from psutil._common import bytes2human
 from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
+import rich.progress
+from rich.progress import Progress
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
+
+from chenpy.source import ghsa
+
+GIT_AVAILABLE = False
+try:
+    import git
+
+    GIT_AVAILABLE = True
+except ImportError:
+    pass
+
+MAVEN_CENTRAL_URL = "https://repo1.maven.org/maven2/"
+ANDROID_MAVEN = "https://maven.google.com/"
 
 mimetypes.init()
 
@@ -570,3 +590,183 @@ def unzip_unsafe(zf, to_dir):
         os.remove(zf)
     except Exception:
         pass
+
+
+def check_command(cmd):
+    """
+    Method to check if command is available
+    :return True if command is available in PATH. False otherwise
+    """
+    cpath = shutil.which(cmd, mode=os.F_OK | os.X_OK)
+    return cpath is not None
+
+
+def is_binary_string(content):
+    """
+    Method to check if the given content is a binary string
+    """
+    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
+    return bool(content.translate(None, textchars))
+
+
+def is_exe(src):
+    """Detect if the source is a binary file
+    :param src: Source path
+    :return True if binary file. False otherwise.
+    """
+    if os.path.isfile(src):
+        try:
+            return is_binary_string(open(src, "rb").read(1024))
+        except OSError:
+            return False
+    return False
+
+
+def import_url(src):
+    """Method to import code from url"""
+    if not os.path.exists(src):
+        clone_dir = tempfile.mkdtemp(prefix="chen")
+        if src.startswith("http") or src.startswith("git://"):
+            clone_repo(src, clone_dir)
+        else:
+            download_package_unsafe(src, clone_dir)
+        src = clone_dir
+    return src
+
+
+def clone_repo(repo_url, clone_dir, depth=1):
+    """Method to clone a git repo"""
+    if not GIT_AVAILABLE:
+        return None
+    git.Repo.clone_from(repo_url, clone_dir, depth=depth)
+    return clone_dir
+
+
+def build_maven_download_url(purl):
+    """
+    Return a maven download URL from the `purl` string.
+    """
+    url_prefix = MAVEN_CENTRAL_URL
+
+    purl_data = PackageURL.from_string(purl)
+    group = purl_data.namespace.replace(".", "/")
+    name = purl_data.name
+    version = purl_data.version
+
+    if "android" in group:
+        url_prefix = ANDROID_MAVEN
+
+    if name and version:
+        return f"{url_prefix}{group}/{name}/{version}/{name}-{version}.jar"
+
+
+def build_pypi_download_url(purl):
+    """
+    Return a PyPI download URL from the `purl` string.
+    """
+    url_prefix = "https://pypi.io/packages/source/"
+    purl_data = PackageURL.from_string(purl)
+    name = purl_data.name
+    version = purl_data.version
+    if name and version:
+        return f"{url_prefix}{name[0]}/{name}/{name}-{version}.tar.gz"
+
+
+def build_golang_download_url(purl):
+    """
+    Return a golang download URL from the `purl` string.
+    """
+    purl_data = PackageURL.from_string(purl)
+    namespace = purl_data.namespace
+    name = purl_data.name
+    version = purl_data.version
+    qualifiers = purl_data.qualifiers
+    download_url = qualifiers.get("download_url")
+    if download_url:
+        return download_url
+    if not (namespace and name and version):
+        return
+    version_prefix = qualifiers.get("version_prefix", "v")
+    version = f"{version_prefix}{version}"
+    return f"https://{namespace}/{name}/archive/refs/tags/{version}.zip"
+
+
+def build_ghsa_download_url(cve_or_ghsa):
+    """Method to get download urls for the packages belonging to the CVE"""
+    return ghsa.get_download_urls(cve_or_ghsa=cve_or_ghsa)
+
+
+def get_download_url(purl_str):
+    """Build download urls from a purl or CVE or GHSA id"""
+    if purl_str.startswith("GHSA") or purl_str.startswith("CVE"):
+        return build_ghsa_download_url(purl_str)
+    if purl_str.startswith("pkg:maven"):
+        return build_maven_download_url(purl_str)
+    if purl_str.startswith("pkg:pypi"):
+        return build_pypi_download_url(purl_str)
+    if purl_str.startswith("pkg:golang"):
+        return build_golang_download_url(purl_str)
+    return purl2url.get_download_url(purl_str)
+
+
+def untar_unsafe(tf, to_dir):
+    """Method to untar .tar or .tar.gz files in an unsafe manner"""
+    if tf.endswith("tar.gz") or tf.endswith(".tgz"):
+        tar = tarfile.open(tf, "r:gz")
+        tar.extractall(to_dir)
+        tar.close()
+    elif tf.endswith(".tar"):
+        tar = tarfile.open(tf, "r:")
+        tar.extractall(to_dir)
+        tar.close()
+    shutil.rmtree(tf, ignore_errors=True)
+
+
+def download_package_unsafe(purl_str, download_dir, expand_archive=True):
+    """Method to download the package from the given purl or CVE id"""
+    if not purl_str:
+        return
+    durl = get_download_url(purl_str)
+    if not durl:
+        return
+    if isinstance(durl, str):
+        durl = [durl]
+    for aurl in durl:
+        if isinstance(aurl, dict) and aurl.get("purl"):
+            aurl = get_download_url(aurl.get("purl"))
+        with open(
+            os.path.join(download_dir, os.path.basename(aurl)), mode="wb"
+        ) as download_file:
+            with httpx.stream("GET", aurl, follow_redirects=True) as response:
+                total = int(response.headers["Content-Length"])
+                with Progress(
+                    "[progress.percentage]{task.percentage:>3.0f}%",
+                    rich.progress.BarColumn(bar_width=None),
+                    rich.progress.DownloadColumn(),
+                    rich.progress.TransferSpeedColumn(),
+                ) as progress:
+                    download_task = progress.add_task("Download", total=total)
+                    for chunk in response.iter_bytes():
+                        download_file.write(chunk)
+                        progress.update(
+                            download_task, completed=response.num_bytes_downloaded
+                        )
+            download_file.close()
+            if expand_archive:
+                if download_file.name.endswith(".zip"):
+                    unzip_unsafe(download_file.name, download_dir)
+                elif (
+                    download_file.name.endswith(".tar")
+                    or download_file.name.endswith(".tar.gz")
+                    or download_file.name.endswith(".tgz")
+                ):
+                    untar_unsafe(download_file.name, download_dir)
+    return download_dir
+
+
+def purl_to_friendly_name(purl_str):
+    """Convert package url to a friendly name"""
+    purl_data = PackageURL.from_string(purl_str)
+    name = purl_data.name
+    version = purl_data.version
+    return f"{name}-{version}"

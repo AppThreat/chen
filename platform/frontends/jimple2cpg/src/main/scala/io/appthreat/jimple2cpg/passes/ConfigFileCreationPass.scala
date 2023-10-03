@@ -1,4 +1,4 @@
-package io.appthreat.javasrc2cpg.passes
+package io.appthreat.jimple2cpg.passes
 
 import better.files.File
 import io.appthreat.x2cpg.passes.frontend.XConfigFileCreationPass
@@ -7,10 +7,7 @@ import io.shiftleft.codepropertygraph.Cpg
 class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
 
   override val configFileFilters: List[File => Boolean] = List(
-    // JAVA_INTERNAL
     extensionFilter(".properties"),
-    // JSP
-    extensionFilter(".jsp"),
     // Velocity files, see https://velocity.apache.org
     extensionFilter(".vm"),
     // For Terraform secrets
@@ -27,8 +24,6 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
     pathEndFilter("struts.xml"),
     // DIRECT WEB REMOTING
     pathEndFilter("dwr.xml"),
-    // MYBATIS
-    mybatisFilter,
     // BUILD SYSTEM
     pathEndFilter("build.gradle"),
     pathEndFilter("build.gradle.kts"),
@@ -38,9 +33,5 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
     pathEndFilter("bom.json"),
     pathEndFilter(".chennai.json")
   )
-
-  private def mybatisFilter(file: File): Boolean = {
-    file.canonicalPath.contains("batis") && file.extension.contains(".xml")
-  }
 
 }

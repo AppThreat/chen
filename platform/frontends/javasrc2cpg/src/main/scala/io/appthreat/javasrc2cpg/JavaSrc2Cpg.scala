@@ -11,6 +11,7 @@ import io.appthreat.javasrc2cpg.passes.{
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass, XTypeRecoveryConfig}
 import io.appthreat.x2cpg.X2CpgFrontend
+import io.appthreat.x2cpg.passes.taggers.CdxPass
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.passes.CpgPassBase
@@ -35,6 +36,7 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config] {
         TypeNodePass.withRegisteredTypes(astCreationPass.global.usedTypes.keys().asScala.toList, cpg).createAndApply()
         new TypeInferencePass(cpg).createAndApply()
       }
+      new CdxPass(cpg).createAndApply()
     }
   }
 

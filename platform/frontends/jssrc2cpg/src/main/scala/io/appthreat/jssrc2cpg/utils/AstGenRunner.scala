@@ -287,7 +287,7 @@ class AstGenRunner(config: Config) {
         val skipped = skippedFiles(in, result.toList)
         AstGenRunnerResult(parsed.map((in.toString(), _)), skipped.map((in.toString(), _)))
       case Failure(f) =>
-        logger.error("\t- running astgen failed!", f)
+        logger.debug("\t- running astgen failed!", f)
         AstGenRunnerResult()
     }
   }

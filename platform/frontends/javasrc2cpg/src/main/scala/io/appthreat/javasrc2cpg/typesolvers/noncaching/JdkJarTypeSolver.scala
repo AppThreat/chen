@@ -18,12 +18,15 @@ import scala.util.{Failure, Success, Try, Using}
 
 class JdkJarTypeSolver extends TypeSolver {
 
-  private val logger = LoggerFactory.getLogger(this.getClass())
+  private val logger = LoggerFactory.getLogger(this.getClass)
 
   private var parent: Option[TypeSolver] = None
   private val classPool                  = new NonCachingClassPool()
 
-  private val knownPackagePrefixes: mutable.Set[String] = mutable.Set.empty
+  val knownPackagePrefixes: mutable.Set[String] = mutable.Set.empty
+
+  // Populating this causes memory leaks
+  val packagesJarMappings: mutable.Map[String, mutable.Set[String]] = mutable.Map.empty
 
   private type RefType = ResolvedReferenceTypeDeclaration
 
@@ -62,15 +65,15 @@ class JdkJarTypeSolver extends TypeSolver {
 
   override def solveType(name: String): ResolvedReferenceTypeDeclaration = {
     tryToSolveType(name) match {
-      case symbolReference if symbolReference.isSolved() =>
-        symbolReference.getCorrespondingDeclaration()
+      case symbolReference if symbolReference.isSolved =>
+        symbolReference.getCorrespondingDeclaration
 
       case _ => throw new UnsolvedSymbolException(name)
     }
   }
 
   private def ctClassToRefType(ctClass: CtClass): RefType = {
-    JavassistFactory.toTypeDeclaration(ctClass, getRoot())
+    JavassistFactory.toTypeDeclaration(ctClass, getRoot)
   }
 
   private def refTypeToSymbolReference(refType: RefType): SymbolReference[RefType] = {
@@ -99,7 +102,7 @@ class JdkJarTypeSolver extends TypeSolver {
         case Success(_) => registerPackagesForJar(archivePath)
 
         case Failure(e) =>
-          logger.warn(s"Could not load jar at path $archivePath", e.getMessage())
+          logger.warn(s"Could not load jar at path $archivePath", e.getMessage)
       }
     }
   }
@@ -108,23 +111,28 @@ class JdkJarTypeSolver extends TypeSolver {
     val entryNameConverter = if (archivePath.isJarPath) packagePrefixForJarEntry else packagePrefixForJmodEntry
     try {
       Using(new JarFile(archivePath)) { jarFile =>
-        knownPackagePrefixes ++=
-          jarFile
-            .entries()
-            .asIterator()
-            .asScala
-            .filter(entry => !entry.isDirectory() && entry.getName().endsWith(ClassExtension))
-            .map(entry => entryNameConverter(entry.getName()))
+        def jarPackages = jarFile
+          .entries()
+          .asIterator()
+          .asScala
+          .filter(entry =>
+            !entry.isDirectory && !entry.getName
+              .startsWith("module-info") && (entry.getName.endsWith(ClassExtension) || entry.getName
+              .endsWith(JavaExtension) || entry.getName.endsWith(KtExtension))
+          )
+        knownPackagePrefixes ++= jarPackages.map(entry => entryNameConverter(entry.getName))
       }
     } catch {
       case ioException: IOException =>
-        logger.warn(s"Could register classes for archive at $archivePath", ioException.getMessage())
+        logger.warn(s"Could register classes for archive at $archivePath", ioException.getMessage)
     }
   }
 }
 
 object JdkJarTypeSolver {
   val ClassExtension: String  = ".class"
+  val JavaExtension: String   = ".java"
+  val KtExtension: String     = ".kt"
   val JmodClassPrefix: String = "classes/"
   val JarExtension: String    = ".jar"
   val JmodExtension: String   = ".jmod"

@@ -1,13 +1,14 @@
 package io.appthreat.jimple2cpg
 
 import better.files.File
-import io.appthreat.jimple2cpg.passes.{AstCreationPass, SootAstCreationPass}
+import io.appthreat.jimple2cpg.passes.{AstCreationPass, ConfigFileCreationPass, SootAstCreationPass}
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.ClassFile
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.appthreat.x2cpg.datastructures.Global
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
+import io.appthreat.x2cpg.passes.taggers.CdxPass
 import io.shiftleft.codepropertygraph.Cpg
 import org.slf4j.LoggerFactory
 import soot.options.Options
@@ -109,7 +110,8 @@ class Jimple2Cpg extends X2CpgFrontend[Config] {
           astCreator.global
         }
     }
-
+    new ConfigFileCreationPass(cpg).createAndApply()
+    new CdxPass(cpg).createAndApply()
     logger.debug("Loading classes to soot")
     Scene.v().loadNecessaryClasses()
     logger.debug(s"Loaded ${Scene.v().getApplicationClasses.size()} classes")

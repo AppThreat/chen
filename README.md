@@ -11,6 +11,10 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 - Node.js > 16 (To run [atom](https://github.com/AppThreat/atom))
 - Minimum 16GB RAM
 
+### Additional requirements
+
+- Rust (For rocksdb-py compilation)
+
 ## Installation
 
 ```shell
@@ -25,6 +29,12 @@ To download the chen distribution including the science pack.
 
 ```shell
 chen --download
+```
+
+To generate custom graphs and models with atom for data science, download the scientific pack which installs support for PyTorch ecosystem.
+
+```shell
+chen --download --with-science
 ```
 
 Once the download finishes, the command will display the download location along with the environment variables that need to be set to invoke `chennai` console. Example output below:

@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory
 
 import java.net.URLClassLoader
 import java.nio.file.{Path, Paths}
+import scala.collection.mutable
 import scala.collection.parallel.CollectionConverters.*
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.RichOptional
@@ -42,7 +43,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
 
   private val sourceFilenames = SourceParser.getSourceFilenames(config, sourcesOverride)
 
-  val (sourceParser, symbolSolver) = initParserAndUtils(config, sourceFilenames)
+  val (sourceParser, symbolSolver, packagesJarMappings) = initParserAndUtils(config, sourceFilenames)
 
   override def generateParts(): Array[String] = sourceFilenames
 
@@ -52,18 +53,23 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
       case Some(compilationUnit) =>
         symbolSolver.inject(compilationUnit)
         diffGraph.absorb(
-          new AstCreator(relativeFilename, compilationUnit, global, symbolSolver)(config.schemaValidation).createAst()
+          new AstCreator(relativeFilename, compilationUnit, global, symbolSolver, packagesJarMappings)(
+            config.schemaValidation
+          ).createAst()
         )
 
       case None => logger.warn(s"Skipping AST creation for $filename")
     }
   }
 
-  private def initParserAndUtils(config: Config, sourceFilenames: Array[String]): (SourceParser, JavaSymbolSolver) = {
-    val dependencies = getDependencyList(config.inputPath)
-    val sourceParser = util.SourceParser(config, dependencies.exists(_.contains("lombok")))
-    val symbolSolver = createSymbolSolver(config, dependencies, sourceParser, sourceFilenames)
-    (sourceParser, symbolSolver)
+  private def initParserAndUtils(
+    config: Config,
+    sourceFilenames: Array[String]
+  ): (SourceParser, JavaSymbolSolver, mutable.Map[String, mutable.Set[String]]) = {
+    val dependencies                        = getDependencyList(config.inputPath)
+    val sourceParser                        = util.SourceParser(config, dependencies.exists(_.contains("lombok")))
+    val (symbolSolver, packagesJarMappings) = createSymbolSolver(config, dependencies, sourceParser, sourceFilenames)
+    (sourceParser, symbolSolver, packagesJarMappings)
   }
 
   private def getDependencyList(inputPath: String): List[String] = {
@@ -85,7 +91,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
     dependencies: List[String],
     sourceParser: SourceParser,
     sourceFilenames: Array[String]
-  ): JavaSymbolSolver = {
+  ): (JavaSymbolSolver, mutable.Map[String, mutable.Set[String]]) = {
     val combinedTypeSolver = new SimpleCombinedTypeSolver()
     val symbolSolver       = new JavaSymbolSolver(combinedTypeSolver)
 
@@ -107,7 +113,8 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
         jdkPath
     }
 
-    combinedTypeSolver.addNonCachingTypeSolver(JdkJarTypeSolver.fromJdkPath(jdkPath))
+    val jdkJarTypeSolver = JdkJarTypeSolver.fromJdkPath(jdkPath)
+    combinedTypeSolver.addNonCachingTypeSolver(jdkJarTypeSolver)
 
     val relativeSourceFilenames =
       sourceFilenames.map(filename => Path.of(config.inputPath).relativize(Path.of(filename)).toString)
@@ -125,7 +132,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
       }
       .foreach { combinedTypeSolver.addNonCachingTypeSolver(_) }
 
-    symbolSolver
+    (symbolSolver, jdkJarTypeSolver.packagesJarMappings)
   }
 
   private def recursiveJarsFromPath(path: String): List[String] = {

@@ -138,5 +138,5 @@ object Main extends X2CpgMain(cmdLineParser, new JavaSrc2Cpg()) {
     }
   }
 
-  def getCmdLineParser = cmdLineParser
+  def getCmdLineParser: OParser[Unit, Config] = cmdLineParser
 }

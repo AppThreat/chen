@@ -35,6 +35,13 @@ def build_args():
         "user_data_dir",
     )
     parser.add_argument(
+        "--with-science",
+        action="store_true",
+        default=False,
+        dest="science_pack",
+        help="Download the science pack",
+    )
+    parser.add_argument(
         "--server",
         action="store_true",
         default=False,
@@ -104,7 +111,7 @@ def fix_envs():
         )
 
 
-def download_chen_distribution(overwrite=False):
+def download_chen_distribution(overwrite=False, science_pack=False):
     if os.path.exists(os.path.join(config.chen_home, "platform")):
         if not overwrite:
             fix_envs()
@@ -150,16 +157,18 @@ def download_chen_distribution(overwrite=False):
                         pass
         # Install the science pack
         if req_files:
-            install_science_modules()
+            install_py_modules("database")
+            if science_pack:
+                install_py_modules("science")
         fix_envs()
 
 
-def install_science_modules():
+def install_py_modules(pack="database"):
     """
     Install the required science modules
     """
     LOG.debug("About to install the science pack using cpu-only configuration")
-    req_file = os.path.join(config.chen_home, "chen-science-requirements.txt")
+    req_file = os.path.join(config.chen_home, f"chen-{pack}-requirements.txt")
     if os.path.exists(req_file):
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "-r", req_file],
@@ -174,7 +183,7 @@ def main():
     and generates reports based on the results.
     """
     args = build_args()
-    download_chen_distribution(args.download)
+    download_chen_distribution(args.download, args.science_pack)
 
 
 if __name__ == "__main__":
