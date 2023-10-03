@@ -108,13 +108,16 @@ class CdxPass(cpg: Cpg) extends CpgPass(cpg) {
             val bpkg = pkg.takeWhile(_ != '$')
             cpg.typeDecl.fullNameExact(bpkg).newTagNodePair("purl", compPurl).store()(dstGraph)
             cpg.call.typeFullNameExact(bpkg).newTagNodePair("purl", compPurl).store()(dstGraph)
+            cpg.method.parameter.typeFullNameExact(bpkg).newTagNodePair("purl", compPurl).store()(dstGraph)
             if (compType != "library") {
               cpg.typeDecl.fullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
               cpg.call.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
+              cpg.method.parameter.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
             }
             descTags.foreach { t =>
               cpg.typeDecl.fullNameExact(bpkg).newTagNode(t).store()(dstGraph)
               cpg.call.typeFullNameExact(bpkg).newTagNode(t).store()(dstGraph)
+              cpg.method.parameter.typeFullNameExact(bpkg).newTagNode(t).store()(dstGraph)
             }
           }
         }

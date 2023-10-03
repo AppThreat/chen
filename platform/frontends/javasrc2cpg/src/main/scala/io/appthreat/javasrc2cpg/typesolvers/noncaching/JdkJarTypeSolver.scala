@@ -23,8 +23,11 @@ class JdkJarTypeSolver extends TypeSolver {
   private var parent: Option[TypeSolver] = None
   private val classPool                  = new NonCachingClassPool()
 
-  val knownPackagePrefixes: mutable.Set[String]                     = mutable.Set.empty
+  val knownPackagePrefixes: mutable.Set[String] = mutable.Set.empty
+
+  // Populating this causes memory leaks
   val packagesJarMappings: mutable.Map[String, mutable.Set[String]] = mutable.Map.empty
+
   private type RefType = ResolvedReferenceTypeDeclaration
 
   override def getParent(): TypeSolver = parent.get
@@ -118,20 +121,6 @@ class JdkJarTypeSolver extends TypeSolver {
               .endsWith(JavaExtension) || entry.getName.endsWith(KtExtension))
           )
         knownPackagePrefixes ++= jarPackages.map(entry => entryNameConverter(entry.getName))
-        jarPackages
-          .map(entry =>
-            entry.getName
-              .split("/")
-              .mkString(".")
-              .replace(".class", "")
-              .replace("classesx.", "")
-              .replace("classes.", "")
-          )
-          .foreach(p => {
-            val existingMapping = packagesJarMappings.getOrElse(p, mutable.Set.empty)
-            existingMapping.add(jarFile.getName)
-            packagesJarMappings.put(p, existingMapping)
-          })
       }
     } catch {
       case ioException: IOException =>

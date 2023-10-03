@@ -19,9 +19,14 @@ class ChennaiTagsPass(cpg: Cpg) extends CpgPass(cpg) {
       val tags            = cursor.downField("tags").focus.flatMap(_.asArray).getOrElse(Vector.empty)
       tags.foreach { comp =>
         val tagName    = comp.hcursor.downField("name").as[String].getOrElse("")
+        val tagParams  = comp.hcursor.downField("parameters").downArray.as[String]
         val tagMethods = comp.hcursor.downField("methods").downArray.as[String]
         val tagTypes   = comp.hcursor.downField("types").downArray.as[String]
         val tagFiles   = comp.hcursor.downField("files").downArray.as[String]
+        tagParams.foreach { paramName =>
+          cpg.method.parameter.typeFullNameExact(paramName).newTagNode(tagName).store()(dstGraph)
+          cpg.method.parameter.typeFullName(paramName).newTagNode(tagName).store()(dstGraph)
+        }
         tagMethods.foreach { methodName =>
           cpg.method.fullNameExact(methodName).newTagNode(tagName).store()(dstGraph)
           cpg.method.fullName(methodName).newTagNode(tagName).store()(dstGraph)
