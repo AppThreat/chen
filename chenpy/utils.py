@@ -20,6 +20,8 @@ from psutil._common import bytes2human
 from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
+import rich.progress
+from rich.progress import Progress
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
