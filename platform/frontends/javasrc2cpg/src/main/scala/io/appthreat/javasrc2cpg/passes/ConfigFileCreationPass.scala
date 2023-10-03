@@ -36,7 +36,7 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
     pathEndFilter("AndroidManifest.xml"),
     // Bom
     pathEndFilter("bom.json"),
-    pathEndFilter(".chennai.json")
+    pathEndFilter("chennai.json")
   )
 
   private def mybatisFilter(file: File): Boolean = {

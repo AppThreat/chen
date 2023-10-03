@@ -19,7 +19,7 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
     extensionFilter(".build"),
     pathEndFilter("CMakeLists.txt"),
     pathEndFilter("bom.json"),
-    pathEndFilter(".chennai.json"),
+    pathEndFilter("chennai.json"),
     pathEndFilter("setup.cfg"),
     pathEndFilter("setup.py")
   )

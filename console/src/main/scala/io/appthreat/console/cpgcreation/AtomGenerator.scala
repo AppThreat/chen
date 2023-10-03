@@ -2,7 +2,7 @@ package io.appthreat.console.cpgcreation
 
 import io.appthreat.console.FrontendConfig
 import io.shiftleft.codepropertygraph.Cpg
-
+import io.appthreat.x2cpg.passes.taggers.{CdxPass, ChennaiTagsPass}
 import java.nio.file.Path
 import scala.util.Try
 
@@ -20,6 +20,8 @@ case class AtomGenerator(config: FrontendConfig, rootPath: Path, language: Strin
   override def isAvailable: Boolean = true
 
   override def applyPostProcessingPasses(atom: Cpg): Cpg = {
+    new CdxPass(atom).createAndApply()
+    new ChennaiTagsPass(atom).createAndApply()
     atom
   }
 
