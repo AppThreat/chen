@@ -16,7 +16,7 @@ class ConfigFileCreationPass(cpg: Cpg, requirementsTxt: String = "requirement.tx
     extensionFilter(".yaml"),
     extensionFilter(".lock"),
     pathEndFilter("bom.json"),
-    pathEndFilter(".chennai.json"),
+    pathEndFilter("chennai.json"),
     pathEndFilter("setup.cfg"),
     // Requirements.txt
     pathEndFilter(requirementsTxt)

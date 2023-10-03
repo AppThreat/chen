@@ -412,14 +412,12 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
       workspace.deleteProject(name)
     }
 
-    if (enhance) {
-      cpgOpt
-        .filter(_.metaData.hasNext)
-        .foreach { cpg =>
-          applyDefaultOverlays(cpg)
-          applyPostProcessingPasses(cpg)
-        }
-    }
+    cpgOpt
+      .filter(_.metaData.hasNext)
+      .foreach { cpg =>
+        if (enhance) applyDefaultOverlays(cpg)
+        applyPostProcessingPasses(cpg)
+      }
     cpgOpt
   }
 
