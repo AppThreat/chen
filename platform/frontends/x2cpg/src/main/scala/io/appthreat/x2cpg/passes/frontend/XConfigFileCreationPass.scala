@@ -4,7 +4,7 @@ import better.files.File
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewConfigFile
 import io.shiftleft.passes.ConcurrentWriterCpgPass
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.utils.IOUtils
 import org.slf4j.LoggerFactory
 
@@ -67,6 +67,10 @@ abstract class XConfigFileCreationPass(cpg: Cpg) extends ConcurrentWriterCpgPass
 
   protected def pathEndFilter(pathEnd: String)(file: File): Boolean = {
     file.canonicalPath.endsWith(pathEnd)
+  }
+
+  protected def pathRegexFilter(pathRegex: String)(file: File): Boolean = {
+    file.canonicalPath.matches(pathRegex)
   }
 
   private def isConfigFile(file: File): Boolean = {
