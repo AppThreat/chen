@@ -50,21 +50,15 @@ object ChenConsole {
 
   def banner(): String =
     s"""
-        |
         | _                          _   _   _   _  __
         |/  |_   _  ._  ._   _. o   |_  / \\ / \\ / \\  / |_|_
         |\\_ | | (/_ | | | | (_| |   |_) \\_/ \\_/ \\_/ /    |
         |
-        |
         |Version: $version
-        |$helpMsg
       """.stripMargin
 
   def version: String =
     getClass.getPackage.getImplementationVersion
-
-  private def helpMsg: String =
-    s"""Type `help` to begin""".stripMargin
 
   def defaultConfig: ConsoleConfig = new ConsoleConfig()
 

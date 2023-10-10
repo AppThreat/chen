@@ -9,6 +9,8 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg) {
   override val configFileFilters: List[File => Boolean] = List(
     // JAVA_INTERNAL
     extensionFilter(".properties"),
+    // HTML
+    pathRegexFilter(".*resources/templates.*.html"),
     // JSP
     extensionFilter(".jsp"),
     // Velocity files, see https://velocity.apache.org

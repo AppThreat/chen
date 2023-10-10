@@ -8,6 +8,7 @@ object Predefined {
     Seq(
       "import _root_.io.appthreat.console._",
       "import _root_.io.appthreat.chencli.console.ChenConsole._",
+      "import _root_.io.appthreat.chencli.console.Chen.context",
       "import _root_.io.shiftleft.codepropertygraph.Cpg",
       "import _root_.io.shiftleft.codepropertygraph.Cpg.docSearchPackages",
       "import _root_.io.shiftleft.codepropertygraph.cpgloading._",
@@ -20,7 +21,17 @@ object Predefined {
       "import overflowdb.traversal.{`package` => _, help => _, _}",
       "import scala.jdk.CollectionConverters._",
       """
+        |def reachables(sourceTag: String, sinkTag: String)(implicit atom: Cpg): Unit = {
+        |  try {
+        |    def source=atom.tag.name(sourceTag).parameter
+        |    def sink=atom.ret.where(_.tag.name(sinkTag))
+        |    sink.df(source).t
+        |  } catch {
+        |    case exc: Exception =>
+        |  }
+        |}
         |
+        |def reachables(implicit atom: Cpg): Unit = reachables("framework-input", "framework-output")
         |
         |""".stripMargin
     )
