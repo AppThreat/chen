@@ -18,10 +18,10 @@ class CdxPass(cpg: Cpg) extends CpgPass(cpg) {
 
   private def containsRegex(str: String) = Pattern.quote(str) == str
 
-  private val BOM_JSON_FILE = "bom.json"
+  private val BOM_JSON_FILE = ".*(bom|cdx).json"
 
   override def run(dstGraph: DiffGraphBuilder): Unit = {
-    cpg.configFile(BOM_JSON_FILE).content.foreach { cdxData =>
+    cpg.configFile.name(BOM_JSON_FILE).content.foreach { cdxData =>
       val cdxJson         = parse(cdxData).getOrElse(Json.Null)
       val cursor: HCursor = cdxJson.hcursor
       val components      = cursor.downField("components").focus.flatMap(_.asArray).getOrElse(Vector.empty)
