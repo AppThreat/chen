@@ -57,7 +57,7 @@ object ChenFlow {
   }
 
   private def parseConfig(args: Array[String]): Option[FlowConfig] = {
-    new scopt.OptionParser[FlowConfig]("joern-flow") {
+    new scopt.OptionParser[FlowConfig]("chen-flow") {
       head("Find flows")
       help("help")
 

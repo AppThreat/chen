@@ -35,7 +35,7 @@ object Path {
   lazy val maxTrackedWidth = sys.env.get("CHEN_DATAFLOW_TRACKED_WIDTH").map(_.toInt).getOrElse(DefaultMaxTrackedWidth)
 
   private def tagAsString(tag: Iterator[Tag]) =
-    if (tag.nonEmpty) tag.filterNot(_.name == "purl").name.mkString(", ") else ""
+    if (tag.nonEmpty) tag.name.mkString(", ") else ""
 
   implicit val show: Show[Path] = { path =>
     var caption = ""
@@ -65,6 +65,7 @@ object Path {
       var tags: String = tagAsString(astNode.tag)
       if (fileLocation == "#") fileLocation = "N/A"
       astNode match {
+        case _: MethodReturn =>
         case methodParameterIn: MethodParameterIn =>
           val methodName = methodParameterIn.method.name
           if (tags.isEmpty && methodParameterIn.method.tag.nonEmpty) {
@@ -172,7 +173,7 @@ object Path {
       {
         val end_section         = row.head == "call"
         val trow: Array[String] = row.tail
-        if (trow(3) != "RET" && !trow(4).startsWith("<operator>.fieldAccess")) {
+        if (!trow(4).startsWith("<operator>.fieldAccess")) {
           val tagsStr: String = if (trow(4).nonEmpty) s"Tags: ${trow(4)}" else ""
           val methodStr       = s"${trow(1)}\n${tagsStr}"
           table.add_row(trow(0), methodStr.stripMargin, trow(2), trow(3), end_section = end_section)

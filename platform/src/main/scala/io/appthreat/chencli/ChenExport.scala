@@ -71,7 +71,7 @@ object ChenExport {
   }
 
   private def parseConfig(args: Array[String]): Option[Config] = {
-    new scopt.OptionParser[Config]("joern-export") {
+    new scopt.OptionParser[Config]("chen-export") {
       head("Dump intermediate graph representations (or entire graph) of code in a given export format")
       help("help")
       arg[String]("cpg")

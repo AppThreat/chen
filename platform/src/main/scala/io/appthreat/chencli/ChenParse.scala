@@ -26,7 +26,7 @@ object ChenParse {
     }
   }
 
-  val optionParser = new scopt.OptionParser[ParserConfig]("joern-parse") {
+  val optionParser = new scopt.OptionParser[ParserConfig]("chen-parse") {
     arg[String]("input")
       .optional()
       .text("source file or directory containing source files")

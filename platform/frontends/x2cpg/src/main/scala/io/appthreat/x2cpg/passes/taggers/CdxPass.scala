@@ -36,10 +36,10 @@ class CdxPass(cpg: Cpg) extends CpgPass(cpg) {
           val nsstr = ns.hcursor.downField("value").as[String].getOrElse("")
           nsstr.split("\n").filterNot(_.contains("test")).filterNot(_.contains("mock")).foreach { (pkg: String) =>
             val bpkg = pkg.takeWhile(_ != '$')
-            cpg.call.typeFullNameExact(bpkg).newTagNodePair(PURL_TYPE, compPurl).store()(dstGraph)
-            cpg.method.parameter.typeFullNameExact(bpkg).newTagNodePair(PURL_TYPE, compPurl).store()(dstGraph)
+            cpg.call.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
+            cpg.method.parameter.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
             if (!containsRegex(bpkg))
-              cpg.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNodePair(PURL_TYPE, compPurl).store()(dstGraph)
+              cpg.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(compPurl).store()(dstGraph)
             if (compType != "library") {
               cpg.call.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
               cpg.call.typeFullNameExact(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
