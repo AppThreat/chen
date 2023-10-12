@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "appthreat-chen"
-version = "0.0.14"
+version = "0.0.15"
 description = "Code Hierarchy Exploration Net (chen)"
 authors = ["Team AppThreat <cloud@appthreat.com>"]
 license = "Apache-2.0"
@@ -45,8 +45,8 @@ quart = "^0.18.4"
 
 
 [tool.poetry.extras]
-science = ["uvloop", "networkx", "pydotplus", "pyg-lib", "torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv", "torch-geometric", "torch", "torchtext", "rocksdb-py"]
-database = ["networkx", "rocksdb-py"]
+science = ["uvloop", "networkx", "pydotplus", "pyg-lib", "torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv", "torch-geometric", "torch", "torchtext"]
+database = ["networkx"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.1"
@@ -57,9 +57,6 @@ pyinstaller = "^5.10.1"
 pdoc3 = "^0.10.0"
 
 [tool.poetry.group.science]
-optional = true
-
-[tool.poetry.group.database]
 optional = true
 
 [tool.poetry.group.science.dependencies]
@@ -73,10 +70,6 @@ torch-spline-conv = {version = "^1.2.2+pt20cpu", markers = "sys_platform == 'lin
 torch-geometric = {version = "^2.3.1"}
 torch = {version = "^2.0.1+cpu", source = "torch"}
 torchtext = {version = "^0.15.2+cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "torch"}
-
-[tool.poetry.group.database.dependencies]
-rocksdb-py = "^0.0.4"
-
 
 [[tool.poetry.source]]
 name = "pyg"
