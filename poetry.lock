@@ -2152,6 +2152,11 @@ files = [
     {file = "scikit_learn-1.3.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f66eddfda9d45dd6cadcd706b65669ce1df84b8549875691b1f403730bdef217"},
     {file = "scikit_learn-1.3.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c6448c37741145b241eeac617028ba6ec2119e1339b1385c9720dae31367f2be"},
     {file = "scikit_learn-1.3.1-cp311-cp311-win_amd64.whl", hash = "sha256:c413c2c850241998168bbb3bd1bb59ff03b1195a53864f0b80ab092071af6028"},
+    {file = "scikit_learn-1.3.1-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:ef540e09873e31569bc8b02c8a9f745ee04d8e1263255a15c9969f6f5caa627f"},
+    {file = "scikit_learn-1.3.1-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:9147a3a4df4d401e618713880be023e36109c85d8569b3bf5377e6cd3fecdeac"},
+    {file = "scikit_learn-1.3.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d2cd3634695ad192bf71645702b3df498bd1e246fc2d529effdb45a06ab028b4"},
+    {file = "scikit_learn-1.3.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0c275a06c5190c5ce00af0acbb61c06374087949f643ef32d355ece12c4db043"},
+    {file = "scikit_learn-1.3.1-cp312-cp312-win_amd64.whl", hash = "sha256:0e1aa8f206d0de814b81b41d60c1ce31f7f2c7354597af38fae46d9c47c45122"},
     {file = "scikit_learn-1.3.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:52b77cc08bd555969ec5150788ed50276f5ef83abb72e6f469c5b91a0009bbca"},
     {file = "scikit_learn-1.3.1-cp38-cp38-macosx_12_0_arm64.whl", hash = "sha256:a683394bc3f80b7c312c27f9b14ebea7766b1f0a34faf1a2e9158d80e860ec26"},
     {file = "scikit_learn-1.3.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a15d964d9eb181c79c190d3dbc2fff7338786bf017e9039571418a1d53dab236"},
@@ -2468,16 +2473,16 @@ name = "torch-spline-conv"
 version = "1.2.2+pt20cpu"
 description = "Implementation of the Spline-Based Convolution Operator of SplineCNN in PyTorch"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp310-cp310-linux_x86_64.whl", hash = "sha256:c9a8e1c04a04ae602d1575517ce726ad6fcc6ad3b234f04fa09a492916716bb7"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp310-cp310-win_amd64.whl", hash = "sha256:8be0abe79f15a310ffb91c6c53d0dd7cd5bf80f4d89f38331db8eae3a3cf5bf7"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:78b9ae2dbc882861a9f6c405d0059d2e14f789d03b455e54f9adbcc1158cb8b7"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp311-cp311-win_amd64.whl", hash = "sha256:b2143efff50097a01baf647c0df37e77bdfab186d6841de44112c48dad50d872"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp38-cp38-linux_x86_64.whl", hash = "sha256:5e38e034ab7c8f2432e50fb6a090c5e3bbdca7ca7985c8bf52d0b1d8ebe3aee4"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp38-cp38-win_amd64.whl", hash = "sha256:9b7161d3cbc1f49e5b4676d37f46d4a61fe922e9477c79b853eaf0d33e1c53c8"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp39-cp39-linux_x86_64.whl", hash = "sha256:03814ce3251f2dd177d28c2ae0a3b406e4bafce7cd7957818325cc0e0710a7be"},
-    {file = "torch_spline_conv-1.2.2+pt20cpu-cp39-cp39-win_amd64.whl", hash = "sha256:d78c53e96ed583eae5046d4a79918e095f52161ba67fb43f0ec3d49e100c1fce"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp310-cp310-linux_x86_64.whl", hash = "sha256:67c726abcf028e1878cdcbc87fbc436d810e99f7d7acdb023edb8b8ea2443cee"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp310-cp310-win_amd64.whl", hash = "sha256:48f32797282a38b6556945fb40d1bc31db6abff8c2c432522220fef4815ff650"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:c57d60ea114970bacff4ad5ce9644a5bbf24288711064e224909fb663f215c64"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp311-cp311-win_amd64.whl", hash = "sha256:13f55491b6edc4c0818751237017ad816b0bc484c1994c2eedf3e54bb4d466d5"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp38-cp38-linux_x86_64.whl", hash = "sha256:e36462c5c71a6e737ccabd9d3b6d764ed190a96bb6cab8cba9be0dd9b54f3650"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp38-cp38-win_amd64.whl", hash = "sha256:f9191ed0cce2286b291bedc8f74083eb02483a9c9a0390d12bd8aa26de0ec364"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp39-cp39-linux_x86_64.whl", hash = "sha256:446fe5d02e815cb7f4fcfdd6ed1356e3a430d365c1f1334a6c17d7fce506479b"},
+    {file = "torch_spline_conv-1.2.2+pt20cpu-cp39-cp39-win_amd64.whl", hash = "sha256:a2a24f7f7be3bbc2146f1dbeeec607db7c58a1e520a0c269c48af1ed7431051b"},
 ]
 
 [package.extras]
@@ -2779,4 +2784,4 @@ science = ["uvloop"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8.1,<3.12"
-content-hash = "7db7edaf15242db592eb560c57ab32dced7c1b33bc502db35aacaed54345e3f7"
+content-hash = "206eb980328902359b0db26ebd3868de566db98b717ff27e608f0a2128090895"
