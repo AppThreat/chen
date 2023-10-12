@@ -2,8 +2,6 @@
 
 Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy.
 
-[![chennai demo](https://asciinema.org/a/hwDt9f8ED9WmXeiLS90a9en2Y.svg)](https://asciinema.org/a/hwDt9f8ED9WmXeiLS90a9en2Y)
-
 ## Requirements
 
 - Java 17 - 20
