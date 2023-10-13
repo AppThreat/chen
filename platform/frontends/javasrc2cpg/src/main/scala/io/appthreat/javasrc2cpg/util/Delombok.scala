@@ -42,7 +42,7 @@ object Delombok {
         s"@${file.canonicalPath}"
 
       case Failure(t) =>
-        logger.warn(
+        logger.debug(
           s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems",
           t
         )
@@ -59,13 +59,15 @@ object Delombok {
             tempDir.path.toAbsolutePath.toString
 
           case Failure(t) =>
-            logger.warn(s"Executing delombok failed", t)
-            logger.warn("Creating AST with original source instead. Some methods and type information will be missing.")
+            logger.debug(s"Executing delombok failed", t)
+            logger.debug(
+              "Creating AST with original source instead. Some methods and type information will be missing."
+            )
             projectDir
         }
 
       case Failure(e) =>
-        logger.warn(s"Failed to create temporary directory for delomboked source. Methods and types may be missing", e)
+        logger.debug(s"Failed to create temporary directory for delomboked source. Methods and types may be missing", e)
         projectDir
     }
   }
@@ -78,7 +80,7 @@ object Delombok {
       case Some("types-only")   => TypesOnly
       case Some("run-delombok") => RunDelombok
       case Some(value) =>
-        logger.warn(s"Found unrecognised delombok mode `$value`. Using default instead.")
+        logger.debug(s"Found unrecognised delombok mode `$value`. Using default instead.")
         Default
     }
   }

@@ -109,10 +109,11 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
           objectType(fullyQualified)
         }
       case unionType: ResolvedUnionType =>
-        // The individual elements of the type union cannot be accessed in ResolvedUnionType.
-        // For whatever reason there is no accessor and the field is private.
-        // So for now we settle with the ancestor type. Maybe we use reflection later.
-        Try(unionType.getCommonAncestor.toScala).toOption.flatten
+        Try(unionType.getElements.asScala.find(_.isReferenceType)).toOption.flatten
+          .flatMap(nameOrFullName(_, typeParamValues, fullyQualified))
+          .orElse(objectType(fullyQualified))
+      case intersectionType: ResolvedIntersectionType =>
+        Try(intersectionType.getElements.asScala.find(_.isReferenceType)).toOption.flatten
           .flatMap(nameOrFullName(_, typeParamValues, fullyQualified))
           .orElse(objectType(fullyQualified))
       case _: InferenceVariableType =>

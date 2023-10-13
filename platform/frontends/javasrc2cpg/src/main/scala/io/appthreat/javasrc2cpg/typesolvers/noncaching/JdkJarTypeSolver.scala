@@ -102,7 +102,7 @@ class JdkJarTypeSolver extends TypeSolver {
         case Success(_) => registerPackagesForJar(archivePath)
 
         case Failure(e) =>
-          logger.warn(s"Could not load jar at path $archivePath", e.getMessage)
+          logger.debug(s"Could not load jar at path $archivePath", e.getMessage)
       }
     }
   }
@@ -124,7 +124,7 @@ class JdkJarTypeSolver extends TypeSolver {
       }
     } catch {
       case ioException: IOException =>
-        logger.warn(s"Could register classes for archive at $archivePath", ioException.getMessage)
+        logger.debug(s"Could register classes for archive at $archivePath", ioException.getMessage)
     }
   }
 }

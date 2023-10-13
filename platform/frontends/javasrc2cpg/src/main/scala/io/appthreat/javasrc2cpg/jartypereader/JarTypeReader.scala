@@ -67,7 +67,7 @@ object JarTypeReader {
   private def classTypeSignatureFromString(signature: String): ClassTypeSignature = {
     signature.split('.').toList match {
       case Nil =>
-        logger.warn(s"$signature is not a valid class signature")
+        logger.debug(s"$signature is not a valid class signature")
         ClassTypeSignature(None, NameWithTypeArgs("", Nil), Nil)
 
       case name :: Nil => ClassTypeSignature(None, typedName = NameWithTypeArgs(name, Nil), Nil)
