@@ -402,7 +402,7 @@ class AstCreator(
   def getBindingTable(typeDecl: ResolvedReferenceTypeDeclaration): BindingTable = {
     val fullName = typeInfoCalc.fullName(typeDecl).getOrElse {
       val qualifiedName = typeDecl.getQualifiedName
-      logger.warn(s"Could not get full name for resolved type decl $qualifiedName. THIS SHOULD NOT HAPPEN!")
+      logger.debug(s"Could not get full name for resolved type decl $qualifiedName. THIS SHOULD NOT HAPPEN!")
       qualifiedName
     }
     bindingTableCache.getOrElseUpdate(
@@ -1217,7 +1217,7 @@ class AstCreator(
       case x: WhileStmt        => Seq(astForWhile(x))
       // case x: LocalClassDeclarationStmt => Seq(astForLocalClassDeclarationStmt(x))
       case x =>
-        logger.warn(s"Attempting to generate AST for unknown statement of type ${x.getClass}")
+        logger.debug(s"Attempting to generate AST for unknown statement of type ${x.getClass}")
         Seq(unknownAst(x))
     }
   }
@@ -1356,7 +1356,7 @@ class AstCreator(
         Ast()
       case iterableAstHead :: Nil => iterableAstHead
       case iterableAsts =>
-        logger.warn(
+        logger.debug(
           s"Found multiple ASTS for iterable expr $iterableExpression: $filename:l$lineNo\nDropping all but the first!"
         )
         iterableAsts.head
@@ -1469,7 +1469,7 @@ class AstCreator(
         None
       case variable :: Nil => Some(variable)
       case variable :: _ =>
-        logger.warn(s"ForEach statement defines multiple variables. Dropping all but the first: $filename$lineNo")
+        logger.debug(s"ForEach statement defines multiple variables. Dropping all but the first: $filename$lineNo")
         Some(variable)
     }
 
@@ -1614,13 +1614,13 @@ class AstCreator(
 
     val actualIteratorAst = astsForExpression(iterExpr, expectedType = ExpectedType.empty).toList match {
       case Nil =>
-        logger.warn(s"Could not create receiver ast for iterator $iterExpr")
+        logger.debug(s"Could not create receiver ast for iterator $iterExpr")
         None
 
       case ast :: Nil => Some(ast)
 
       case ast :: _ =>
-        logger.warn(s"Created multiple receiver asts for $iterExpr. Dropping all but the first.")
+        logger.debug(s"Created multiple receiver asts for $iterExpr. Dropping all but the first.")
         Some(ast)
     }
 
@@ -2062,7 +2062,7 @@ class AstCreator(
       Seq(assignAst)
     } else {
       if (partialConstructorQueue.size > 1) {
-        logger.warn("BUG: Received multiple partial constructors from assignment. Dropping all but the first.")
+        logger.debug("BUG: Received multiple partial constructors from assignment. Dropping all but the first.")
       }
       val partialConstructor = partialConstructorQueue.head
       partialConstructorQueue.clear()
@@ -2115,12 +2115,12 @@ class AstCreator(
             callAst(fieldAccess.copy, args)
 
           case _ =>
-            logger.warn(s"Attempting to copy field access without required children: ${fieldAccess.code}")
+            logger.debug(s"Attempting to copy field access without required children: ${fieldAccess.code}")
             Ast()
         }
 
       case Some(root) =>
-        logger.warn(s"Attempting to copy unhandled root type for var decl init: $root")
+        logger.debug(s"Attempting to copy unhandled root type for var decl init: $root")
         Ast()
 
       case None =>
@@ -3192,7 +3192,6 @@ class AstCreator(
     val evalStrat =
       if (parameter.getType.isPrimitiveType) EvaluationStrategies.BY_VALUE else EvaluationStrategies.BY_SHARING
     typeInfoCalc.registerType(typeFullName)
-
     val parameterNode = NewMethodParameterIn()
       .name(parameter.getName.toString)
       .code(parameter.toString)

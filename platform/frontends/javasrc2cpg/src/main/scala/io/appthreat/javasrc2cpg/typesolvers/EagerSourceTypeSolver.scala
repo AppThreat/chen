@@ -55,11 +55,11 @@ class EagerSourceTypeSolver(
 
   override def setParent(parent: TypeSolver): Unit = {
     if (parent == null) {
-      logger.warn(s"Cannot set parent of type solver to null. setParent will be ignored.")
+      logger.debug(s"Cannot set parent of type solver to null. setParent will be ignored.")
     } else if (this.parent != null) {
-      logger.warn(s"Attempting to re-set type solver parent. setParent will be ignored.")
+      logger.debug(s"Attempting to re-set type solver parent. setParent will be ignored.")
     } else if (parent == this) {
-      logger.warn(s"Parent of TypeSolver cannot be itself. setParent will be ignored.")
+      logger.debug(s"Parent of TypeSolver cannot be itself. setParent will be ignored.")
     } else {
       this.parent = parent
     }

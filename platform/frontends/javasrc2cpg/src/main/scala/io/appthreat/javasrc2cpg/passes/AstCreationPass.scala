@@ -1,38 +1,22 @@
 package io.appthreat.javasrc2cpg.passes
 
 import better.files.File
-import com.github.javaparser.{JavaParser, ParserConfiguration}
-import com.github.javaparser.ParserConfiguration.LanguageLevel
 import com.github.javaparser.ast.CompilationUnit
-import com.github.javaparser.ast.Node.Parsedness
 import com.github.javaparser.symbolsolver.JavaSymbolSolver
-import com.github.javaparser.symbolsolver.resolution.typesolvers.{
-  ClassLoaderTypeSolver,
-  JarTypeSolver,
-  ReflectionTypeSolver
-}
-import io.appthreat.javasrc2cpg.{Config, JavaSrc2Cpg, util}
-import io.appthreat.javasrc2cpg.util.{Delombok, SourceParser}
+import com.github.javaparser.symbolsolver.resolution.typesolvers.{JarTypeSolver, ReflectionTypeSolver}
 import io.appthreat.javasrc2cpg.JavaSrc2Cpg.JavaSrcEnvVar
 import io.appthreat.javasrc2cpg.typesolvers.noncaching.JdkJarTypeSolver
 import io.appthreat.javasrc2cpg.typesolvers.{EagerSourceTypeSolver, SimpleCombinedTypeSolver}
-import io.appthreat.javasrc2cpg.passes.AstCreationPass.*
-import io.appthreat.javasrc2cpg.util.Delombok.DelombokMode
-import io.appthreat.javasrc2cpg.util.Delombok.DelombokMode.*
-import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.javasrc2cpg.util.SourceParser
+import io.appthreat.javasrc2cpg.{Config, JavaSrc2Cpg, util}
 import io.appthreat.x2cpg.datastructures.Global
-import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
 import io.appthreat.x2cpg.utils.dependency.DependencyResolver
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import org.slf4j.LoggerFactory
 
-import java.net.URLClassLoader
 import java.nio.file.{Path, Paths}
 import scala.collection.mutable
-import scala.collection.parallel.CollectionConverters.*
-import scala.jdk.CollectionConverters.*
-import scala.jdk.OptionConverters.RichOptional
 import scala.util.{Success, Try}
 
 class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[String]] = None)
@@ -58,7 +42,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
           ).createAst()
         )
 
-      case None => logger.warn(s"Skipping AST creation for $filename")
+      case None => logger.debug(s"Skipping AST creation for $filename")
     }
   }
 
@@ -77,7 +61,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
       DependencyResolver.getDependencies(Paths.get(inputPath)) match {
         case Some(deps) => deps.toList
         case None =>
-          logger.warn(s"Could not fetch dependencies for project at path $inputPath")
+          logger.debug(s"Could not fetch dependencies for project at path $inputPath")
           List()
       }
     } else {
@@ -123,7 +107,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
       EagerSourceTypeSolver(relativeSourceFilenames, sourceParser, combinedTypeSolver, symbolSolver)
 
     combinedTypeSolver.addCachingTypeSolver(sourceTypeSolver)
-
+    combinedTypeSolver.addNonCachingTypeSolver(new ReflectionTypeSolver())
     // Add solvers for inference jars
     val jarsList = config.inferenceJarPaths.flatMap(recursiveJarsFromPath).toList
     (jarsList ++ dependencies)
