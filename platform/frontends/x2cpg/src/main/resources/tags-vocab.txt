@@ -77,3 +77,14 @@ comparators
 transform
 encode
 decode
+ldap
+owasp
+fileupload
+beanshell
+spel
+mail
+apacheds
+jndi
+ldif
+jdbm
+kerberos
