@@ -9,7 +9,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
-      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $(pwd):/app:rw -t ghcr.io/appthreat/chen chennai"
+      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
 ARG JAVA_VERSION=20.0.2-graalce
 ARG MAVEN_VERSION=3.9.3
@@ -29,13 +29,11 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.11 \
     ANDROID_HOME=/opt/android-sdk-linux
-ENV PATH=${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/opt/miniconda3/bin:
+ENV PATH=/opt/miniconda3/envs/chenpy/bin:/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
 WORKDIR /opt
-COPY ./ci/requirements.txt /opt/
 COPY ./ci/kernel.json /opt/
-COPY ./pyproject.toml /opt/
-COPY ./poetry.lock /opt/
+COPY ./ci/conda-install.sh /opt/
 COPY ./chenpy /opt/chenpy
 COPY README.md /opt/
 
@@ -54,26 +52,22 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core wget \
-        python3.11 python3.11-devel python3.11-pip graphviz graphviz-gd graphviz-python3 \
+    && microdnf install -y gcc git-core wget bash \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
-    && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
-    && python3 --version \
-    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && python3.11 -m pip install --no-cache-dir -r /opt/requirements.txt notebook poetry virtualenv \
-    && python3.11 -m poetry config installer.max-workers 10 \
-    && python3.11 -m poetry config virtualenvs.create false \
-    && cd /opt/chenpy && python3.11 -m poetry install --no-interaction --no-ansi -vvv --no-cache --with=science && cd ../ \
-    && python3.11 -m pip install --no-cache-dir numpy GitPython pandas graphviz networkx[default,extra] \
     && mkdir -p /opt/miniconda3 \
-    && wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
+    && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
     && bash /opt/miniconda3/miniconda.sh -b -u -p /opt/miniconda3 \
     && rm -rf /opt/miniconda3/miniconda.sh \
-    && /opt/miniconda3/bin/conda init bash \
-    && /opt/miniconda3/bin/conda update -n base -c defaults conda -y \
-    && /opt/miniconda3/bin/conda config --set restore_free_channel true \
+    && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
+    && echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc \
+    && echo "conda activate chenpy" >> ~/.bashrc \
+    && conda update -n base -c defaults conda -y \
+    && conda config --add channels conda-forge \
+    && conda install -n base conda-libmamba-solver -y \
+    && conda config --set solver libmamba \
+    && conda create --name chenpy python=3.11 -y \
+    && conda init bash \
+    && bash -c /opt/conda-install.sh \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -97,11 +91,12 @@ RUN set -e; \
     && chmod +x coursier \
     && ./coursier launch almond:0.14.0-RC13 --scala 3.3.0 -- --install \
     && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
-    && sudo npm install -g @cyclonedx/cdxgen --omit=optional \
+    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
     && rm -f coursier
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
+ENV JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=/opt/miniconda3/envs/chenpy/lib"
 RUN unzip -q chen.zip \
-    && rm chen.zip kernel.json requirements.txt \
+    && rm chen.zip kernel.json conda-install.sh \
     && microdnf clean all
 CMD ["chennai"]

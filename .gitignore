@@ -55,3 +55,4 @@ chen.zip
 **/__pycache__/
 .vscode/
 project/metals.sbt
+conda-out/

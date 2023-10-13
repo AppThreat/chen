@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "appthreat-chen"
-version = "0.0.17"
+version = "0.0.18"
 description = "Code Hierarchy Exploration Net (chen)"
 authors = ["Team AppThreat <cloud@appthreat.com>"]
 license = "Apache-2.0"
@@ -41,11 +41,10 @@ appdirs = "^1.4.4"
 psutil = "^5.9.5"
 packageurl-python = "^0.11.2"
 gitpython = "^3.1.37"
-quart = "^0.18.4"
 
 
 [tool.poetry.extras]
-science = ["uvloop", "networkx", "pydotplus", "pyg-lib", "torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv", "torch-geometric", "torch", "torchtext"]
+science = ["uvloop", "networkx", "torch-geometric", "torch", "torchtext"]
 database = ["networkx"]
 
 [tool.poetry.group.dev.dependencies]
@@ -64,12 +63,6 @@ optional = true
 
 [tool.poetry.group.science.dependencies]
 networkx = {extras = ["default", "extra"], version = "^3.1"}
-pydotplus = {version = "^2.0.2", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", optional = true}
-pyg-lib = {version = "^0.2.0+pt20cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "pyg"}
-torch-scatter = {version = "^2.1.1+pt20cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "pyg"}
-torch-sparse = {version = "^0.6.17+pt20cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "pyg"}
-torch-cluster = {version = "^1.6.1+pt20cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "pyg"}
-torch-spline-conv = {version = "^1.2.2+pt20cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "pyg"}
 torch-geometric = {version = "^2.3.1"}
 torch = {version = "^2.0.1+cpu", source = "torch"}
 torchtext = {version = "^0.15.2+cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "torch"}

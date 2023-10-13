@@ -16,7 +16,6 @@ except ImportError:
     DATABASE_PACK_AVAILABLE = False
 
 try:
-    import pydotplus
     import torch
     from torch import Tensor
     from torch_geometric.data import Data
@@ -28,24 +27,6 @@ try:
     )
 except ImportError:
     SCIENCE_PACK_AVAILABLE = False
-
-
-def convert_dot(data):
-    """
-    Function to convert dot data into graph
-    """
-    if not data:
-        return None
-    graph_list = []
-    data_list = data
-    if isinstance(data, str):
-        data_list = [data]
-    for d in data_list:
-        with tempfile.NamedTemporaryFile(prefix="graph", suffix=".dot") as fp:
-            pydotplus.parser.parse_dot_data(d).write(fp.name)
-            G = nx.Graph(nx.nx_agraph.read_dot(fp))
-            graph_list.append(G)
-    return graph_list[0] if len(graph_list) == 1 else graph_list
 
 
 def _hash_label(label, digest_size):
