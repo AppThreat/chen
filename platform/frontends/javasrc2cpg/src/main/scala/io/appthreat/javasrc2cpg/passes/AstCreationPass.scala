@@ -58,7 +58,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
           ).createAst()
         )
 
-      case None => logger.warn(s"Skipping AST creation for $filename")
+      case None => logger.debug(s"Skipping AST creation for $filename")
     }
   }
 
@@ -77,7 +77,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
       DependencyResolver.getDependencies(Paths.get(inputPath)) match {
         case Some(deps) => deps.toList
         case None =>
-          logger.warn(s"Could not fetch dependencies for project at path $inputPath")
+          logger.debug(s"Could not fetch dependencies for project at path $inputPath")
           List()
       }
     } else {

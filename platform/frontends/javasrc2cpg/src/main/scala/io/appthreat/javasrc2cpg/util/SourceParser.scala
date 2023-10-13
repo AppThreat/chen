@@ -69,22 +69,24 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
     val javaParserConfig =
       new ParserConfiguration()
         .setLanguageLevel(LanguageLevel.BLEEDING_EDGE)
+        .setAttributeComments(false)
+        .setLexicalPreservationEnabled(true)
         .setStoreTokens(storeTokens)
     val parseResult = new JavaParser(javaParserConfig).parse(file.toJava)
 
     parseResult.getProblems.asScala.toList match {
       case Nil => // Just carry on as usual
       case problems =>
-        logger.warn(s"Encountered problems while parsing file ${file.name}:")
+        logger.debug(s"Encountered problems while parsing file ${file.name}:")
         problems.foreach { problem =>
-          logger.warn(s"- ${problem.getMessage}")
+          logger.debug(s"- ${problem.getMessage}")
         }
     }
 
     parseResult.getResult.toScala match {
       case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)
       case _ =>
-        logger.warn(s"Failed to parse file ${file.name}")
+        logger.debug(s"Failed to parse file ${file.name}")
         None
     }
   }
