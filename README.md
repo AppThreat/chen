@@ -103,7 +103,7 @@ Refer to the documentation site to learn more about the commands.
 
 - C/C++ (Requires Java 17 or above)
 - H (C/C++ Header files alone)
-- Java (Requires compilation)
+- Java (Requires compilation) - 8 to 17
 - Jar
 - Android APK (Requires Android SDK. Set the environment variable `ANDROID_HOME`)
 - JavaScript
