@@ -678,13 +678,14 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     val base = if (comparePattern.nonEmpty) atom.method.fullName(s".*${comparePattern}.*") else atom.method.internal
     base.whereNot(_.fullNameExact(methodFullName)).foreach { method =>
       py.`with`(progress) { mprogress =>
-        val task = mprogress.add_task(s"Analyzing ${method.fullName}", start = false)
+        val task = mprogress.add_task(s"Analyzing ${method.fullName}", start = false, total = 100)
         val edit_distance =
           Torch.edit_distance(first_method, method.iterator.gml, upper_bound = upper_bound, timeout = timeout)
         if (edit_distance != -1) {
           methodDistances += MethodDistance(method.location.filename, method.fullName, edit_distance)
         }
-        mprogress.update(task, advance = 100)
+        mprogress.stop_task(task)
+        mprogress.update(task, completed = 100)
       }
     }
     methodDistances.sortInPlaceBy[Double](x => x.editDistance)

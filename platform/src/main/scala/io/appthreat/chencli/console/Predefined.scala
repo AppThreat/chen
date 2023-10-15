@@ -21,17 +21,18 @@ object Predefined {
       "import overflowdb.traversal.{`package` => _, help => _, _}",
       "import scala.jdk.CollectionConverters._",
       """
-        |def reachables(sourceTag: String, sinkTag: String)(implicit atom: Cpg): Unit = {
+        |def reachables(sinkTag: String, sourceTag: String, sourceTags: Array[String])(implicit atom: Cpg): Unit = {
         |  try {
         |    def source=atom.tag.name(sourceTag).parameter
+        |    def sources=sourceTags.map(t => atom.tag.name(t).parameter)
         |    def sink=atom.ret.where(_.tag.name(sinkTag))
-        |    sink.df(source).t
+        |    sink.df(source, sources).t
         |  } catch {
         |    case exc: Exception =>
         |  }
         |}
         |
-        |def reachables(implicit atom: Cpg): Unit = reachables("framework-input", "framework-output")
+        |def reachables(implicit atom: Cpg): Unit = reachables("framework-output", "framework-input", Array("api"))
         |
         |""".stripMargin
     )

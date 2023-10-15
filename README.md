@@ -13,23 +13,55 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 - Rust (For rocksdb-py compilation)
 
-## Installation
+## Getting started
+
+chen container image has everything needed to get started.
+
+### Interactive console
+
+To start the interactive console, run `chennai` command.
 
 ```shell
-# Install atom
-sudo npm install -g @appthreat/atom
+docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai
+```
+
+### Jupyter notebook server
+
+```shell
+docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen jupyter notebook --ip 0.0.0.0 --port 9000 --no-browser --allow-root
+```
+
+### Chennai server mode
+
+`chennai` could also be run as an HTTP server.
+
+```shell
+docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -p 8080:8080 -it ghcr.io/appthreat/chen chennai --server
+```
+
+**Defaults:**
+
+- Port 8080
+- Username chenadmin
+- Password chenpassword
+
+## Local Installation
+
+```shell
+# Install atom and cdxgen
+sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional
 
 # Install chen from pypi
 pip install appthreat-chen
 ```
 
-To download the chen distribution including the science pack.
+To download the chen distribution.
 
 ```shell
 chen --download
 ```
 
-To generate custom graphs and models with atom for data science, download the scientific pack which installs support for PyTorch ecosystem.
+To generate custom graphs and models with atom for data science, download the scientific pack which installs support for PyTorch ecosystem. [conda](https://docs.conda.io/projects/conda/en/stable/user-guide/install/index.html) is recommended for best experience.
 
 ```shell
 chen --download --with-science
@@ -40,10 +72,13 @@ Once the download finishes, the command will display the download location along
 ```shell
 [21:53:36] INFO     To run chennai console, add the following environment variables to your .zshrc or .bashrc:
 export JAVA_OPTS="-Xmx16G"
+export JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=<lib dir>"
 export SCALAPY_PYTHON_LIBRARY=python3.10
 export CHEN_HOME=/home/user/.local/share/chen
 export PATH=$PATH:/home/user/.local/share/chen/platform:/home/user/.local/share/chen/platform/bin:
 ```
+
+It is important to set these environment variables without which the console commands would fail with errors.
 
 ## Running the console
 
@@ -109,6 +144,34 @@ Refer to the documentation site to learn more about the commands.
 - JavaScript
 - TypeScript
 - Python
+
+## Troubleshooing
+
+### Commands throw errors in chennai console
+
+You might see errors like this in chennai console.
+
+```shell
+chennai> help
+-- [E006] Not Found Error: -----------------------------------------------------
+1 |help
+  |^^^^
+  |Not found: help
+  |-----------------------------------------------------------------------------
+  | Explanation (enabled by `-explain`)
+  |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  | The identifier for `help` is not bound, that is,
+  | no declaration for this identifier can be found.
+  | That can happen, for example, if `help` or its declaration has either been
+  | misspelt or if an import is missing.
+   -----------------------------------------------------------------------------
+1 error found
+```
+
+This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the two environment variables below are set correctly.
+
+- SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python311
+- JAVA_TOOL_OPTIONS - jna.library.path must be set to the python lib directory
 
 ## Origin of chen
 
