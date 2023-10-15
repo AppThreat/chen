@@ -58,13 +58,12 @@ jobs:
         run: |
           poetry publish --build --username $PYPI_USERNAME --password $PYPI_PASSWORD
           $CONDA/bin/conda update -n base -c defaults conda
-          $CONDA/bin/conda token set $ANACONDA_TOKEN
-          $CONDA/bin/conda config --set anaconda_upload yes
           $CONDA/bin/conda build --output-folder ./conda-out/ ./conda/
+          anaconda upload --label main -u appthreat ./conda-out/noarch/*.tar.bz2
         env:
           PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
           PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-          ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
         continue-on-error: true
       - run: sha512sum target/chen.zip > target/chen.zip.sha512
       - name: Create Release
