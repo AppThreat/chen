@@ -3,32 +3,29 @@ package io.appthreat.console
 import better.files.File
 import io.appthreat.console.cpgcreation.{CpgGeneratorFactory, ImportCode}
 import io.appthreat.console.workspacehandling.{Project, WorkspaceLoader, WorkspaceManager}
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.appthreat.x2cpg.X2Cpg.defaultOverlayCreators
+import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
-import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.Overlays
-import io.shiftleft.semanticcpg.language.types.structure.MethodTraversal
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.dotextension.ImageViewer
+import io.shiftleft.semanticcpg.language.types.structure.MethodTraversal
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
 import io.shiftleft.semanticcpg.utils.Torch
-import overflowdb.traversal.help.Doc
 import me.shadaj.scalapy.py
-import me.shadaj.scalapy.py.SeqConverters
-import py.PyQuote
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
+import overflowdb.traversal.help.Doc
 
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 import scala.sys.process.Process
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
-import scala.collection.mutable.ListBuffer
 
 class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.currentWorkingDirectory)
     extends Reporting {
 
-  import Console._
+  import Console.*
 
   private val _config       = new ConsoleConfig()
   def config: ConsoleConfig = _config
@@ -449,24 +446,22 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "summary"
   )
-  def summary: Unit = {
-    try {
-      val table = richTableLib.Table(title = "Atom Summary")
-      table.add_column("Node Type")
-      table.add_column("Count")
-      table.add_row("Files", "" + atom.file.size)
-      table.add_row("Methods", "" + atom.method.size)
-      table.add_row("Annotations", "" + atom.annotation.size)
-      table.add_row("Imports", "" + atom.imports.size)
-      table.add_row("Literals", "" + atom.literal.size)
-      table.add_row("Config Files", "" + atom.configFile.size)
-      val appliedOverlays = Overlays.appliedOverlays(atom)
-      if (appliedOverlays.nonEmpty) table.add_row("Overlays", "" + appliedOverlays.size)
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
-    }
+  def summary(as_text: Boolean): String = {
+    val table = richTableLib.Table(title = "Atom Summary")
+    table.add_column("Node Type")
+    table.add_column("Count")
+    table.add_row("Files", "" + atom.file.size)
+    table.add_row("Methods", "" + atom.method.size)
+    table.add_row("Annotations", "" + atom.annotation.size)
+    table.add_row("Imports", "" + atom.imports.size)
+    table.add_row("Literals", "" + atom.literal.size)
+    table.add_row("Config Files", "" + atom.configFile.size)
+    val appliedOverlays = Overlays.appliedOverlays(atom)
+    if (appliedOverlays.nonEmpty) table.add_row("Overlays", "" + appliedOverlays.size)
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
+  def summary: String = summary(as_text = false)
 
   @Doc(
     info = "List files",
@@ -475,18 +470,15 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "files"
   )
-  def files(title: String = "Files"): Unit = {
-    try {
-      val table = richTableLib.Table(title = title, highlight = true)
-      table.add_column("File Name")
-      table.add_column("Method Count")
-      atom.file.whereNot(_.name("<unknown>")).foreach { f => table.add_row(f.name, "" + f.method.size) }
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
-    }
+  def files(title: String = "Files", as_text: Boolean): String = {
+    val table = richTableLib.Table(title = title, highlight = true)
+    table.add_column("File Name")
+    table.add_column("Method Count")
+    atom.file.whereNot(_.name("<unknown>")).foreach { f => table.add_row(f.name, "" + f.method.size) }
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
-  def files: Unit = files("Files")
+  def files: String = files("Files", as_text = false)
 
   @Doc(
     info = "List methods",
@@ -500,42 +492,45 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "methods('Methods', includeCalls=true, tree=true)"
   )
-  def methods(title: String = "Methods", includeCalls: Boolean = false, tree: Boolean = false): Unit = {
-    try {
-      if (tree) {
-        val rootTree = richTreeLib.Tree(title, highlight = true)
-        atom.file.whereNot(_.name("<unknown>")).foreach { f =>
-          val childTree = richTreeLib.Tree(f.name, highlight = true)
-          f.method.foreach(m => {
-            val mtree = childTree.add(m.fullName)
-            if (includeCalls)
-              m.call
-                .filterNot(_.name.startsWith("<operator"))
-                .toSet
-                .foreach(c =>
-                  mtree
-                    .add(
-                      c.methodFullName + (if (c.callee(NoResolve).head.isExternal) " :right_arrow_curving_up:" else "")
-                    )
-                )
-          })
-          rootTree.add(childTree)
-        }
-        richConsole.print(rootTree)
-      } else {
-        val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
-        table.add_column("File Name")
-        table.add_column("Methods")
-        atom.file.whereNot(_.name("<unknown>")).foreach { f =>
-          table.add_row(f.name, f.method.fullName.l.mkString("\n"))
-        }
-        richConsole.print(table)
+  def methods(
+    title: String = "Methods",
+    includeCalls: Boolean = false,
+    tree: Boolean = false,
+    as_text: Boolean = false
+  ): String = {
+    if (tree) {
+      val rootTree = richTreeLib.Tree(title, highlight = true)
+      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+        val childTree = richTreeLib.Tree(f.name, highlight = true)
+        f.method.foreach(m => {
+          val mtree = childTree.add(m.fullName)
+          if (includeCalls)
+            m.call
+              .filterNot(_.name.startsWith("<operator"))
+              .toSet
+              .foreach(c =>
+                mtree
+                  .add(
+                    c.methodFullName + (if (c.callee(NoResolve).head.isExternal) " :right_arrow_curving_up:" else "")
+                  )
+              )
+        })
+        rootTree.add(childTree)
       }
-    } catch {
-      case exc: Exception => report(exc.getMessage)
+      richConsole.print(rootTree)
+      if (as_text) richConsole.export_text().as[String] else ""
+    } else {
+      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+      table.add_column("File Name")
+      table.add_column("Methods")
+      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+        table.add_row(f.name, f.method.fullName.l.mkString("\n"))
+      }
+      richConsole.print(table)
+      if (as_text) richConsole.export_text().as[String] else ""
     }
   }
-  def methods: Unit = methods("Methods")
+  def methods: String = methods("Methods", as_text = false)
 
   @Doc(
     info = "List annotations",
@@ -544,22 +539,19 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "annotations"
   )
-  def annotations(title: String = "Annotations"): Unit = {
-    try {
-      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
-      table.add_column("File Name")
-      table.add_column("Methods")
-      table.add_column("Annotations")
-      atom.file.whereNot(_.name("<unknown>")).method.filter(_.annotation.nonEmpty).foreach { m =>
-        table.add_row(m.location.filename, m.fullName, m.annotation.fullName.l.mkString("\n"))
-      }
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
+  def annotations(title: String = "Annotations", as_text: Boolean): String = {
+    val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+    table.add_column("File Name")
+    table.add_column("Methods")
+    table.add_column("Annotations")
+    atom.file.whereNot(_.name("<unknown>")).method.filter(_.annotation.nonEmpty).foreach { m =>
+      table.add_row(m.location.filename, m.fullName, m.annotation.fullName.l.mkString("\n"))
     }
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
 
-  def annotations: Unit = annotations("Annotations")
+  def annotations: String = annotations("Annotations", as_text = false)
 
   @Doc(
     info = "List imports",
@@ -568,21 +560,18 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "imports"
   )
-  def imports(title: String = "Imports"): Unit = {
-    try {
-      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
-      table.add_column("File Name")
-      table.add_column("Import")
-      atom.imports.foreach { i =>
-        table.add_row(i.file.name.l.mkString("\n"), i.importedEntity.getOrElse(""))
-      }
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
+  def imports(title: String = "Imports", as_text: Boolean): String = {
+    val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+    table.add_column("File Name")
+    table.add_column("Import")
+    atom.imports.foreach { i =>
+      table.add_row(i.file.name.l.mkString("\n"), i.importedEntity.getOrElse(""))
     }
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
 
-  def imports: Unit = imports("Imports")
+  def imports: String = imports("Imports", as_text = false)
 
   @Doc(
     info = "List declarations",
@@ -591,25 +580,22 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
          |""",
     example = "declarations"
   )
-  def declarations(title: String = "Declarations"): Unit = {
-    try {
-      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
-      table.add_column("File Name")
-      table.add_column("Declarations")
-      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
-        val dec: Set[Declaration] =
-          (f.assignment.argument(1).filterNot(_.code == "this").isIdentifier.refsTo ++ f.method.parameter
-            .filterNot(_.code == "this")
-            .filter(_.typeFullName != "ANY")).toSet
-        table.add_row(f.name, dec.name.toSet.mkString("\n"))
-      }
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
+  def declarations(title: String = "Declarations", as_text: Boolean): String = {
+    val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+    table.add_column("File Name")
+    table.add_column("Declarations")
+    atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+      val dec: Set[Declaration] =
+        (f.assignment.argument(1).filterNot(_.code == "this").isIdentifier.refsTo ++ f.method.parameter
+          .filterNot(_.code == "this")
+          .filter(_.typeFullName != "ANY")).toSet
+      table.add_row(f.name, dec.name.toSet.mkString("\n"))
     }
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
 
-  def declarations: Unit = declarations("Declarations")
+  def declarations: String = declarations("Declarations", as_text = false)
 
   @Doc(
     info = "List sensitive literals",
@@ -620,24 +606,22 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
   )
   def sensitive(
     title: String = "Sensitive Literals",
-    pattern: String = "(secret|password|token|key|admin|root)"
-  ): Unit = {
-    try {
-      val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
-      table.add_column("File Name")
-      table.add_column("Sensitive Literals")
-      atom.file.whereNot(_.name("<unknown>")).foreach { f =>
-        val slits: Set[Literal] =
-          f.assignment.where(_.argument.order(1).code(s"(?i).*${pattern}.*")).argument.order(2).isLiteral.toSet
-        table.add_row(f.name, if (slits.nonEmpty) slits.code.mkString("\n") else "N/A")
-      }
-      richConsole.print(table)
-    } catch {
-      case exc: Exception => report(exc.getMessage)
+    pattern: String = "(secret|password|token|key|admin|root)",
+    as_text: Boolean = false
+  ): String = {
+    val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
+    table.add_column("File Name")
+    table.add_column("Sensitive Literals")
+    atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+      val slits: Set[Literal] =
+        f.assignment.where(_.argument.order(1).code(s"(?i).*${pattern}.*")).argument.order(2).isLiteral.toSet
+      table.add_row(f.name, if (slits.nonEmpty) slits.code.mkString("\n") else "N/A")
     }
+    richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
 
-  def sensitive: Unit = sensitive("Sensitive Literals")
+  def sensitive: String = sensitive("Sensitive Literals", as_text = false)
 
   @Doc(
     info = "Show graph edit distance from the source method to the comparison methods",
@@ -665,8 +649,9 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     methodFullName: String,
     comparePattern: String = "",
     upper_bound: Int = 500,
-    timeout: Int = 5
-  ): Unit = {
+    timeout: Int = 5,
+    as_text: Boolean = false
+  ): String = {
     val table =
       richTableLib.Table(title = s"Similarity analysis for `${methodFullName}`", highlight = true, show_lines = true)
     val progress     = richProgressLib.Progress(transient = true)
@@ -691,6 +676,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     methodDistances.sortInPlaceBy[Double](x => x.editDistance)
     methodDistances.foreach(row => table.add_row(row.filename, row.fullName, "" + row.editDistance))
     richConsole.print(table)
+    if (as_text) richConsole.export_text().as[String] else ""
   }
 
   def printDashes(count: Int) = {
@@ -763,7 +749,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
 
       val projectOpt = workspace.projectByCpg(cpg)
       if (projectOpt.isEmpty) {
-        throw new RuntimeException("No record for CPG. Please use `importCode`/`importCpg/open`")
+        throw new RuntimeException("No record for atom. Please use `importCode`/`importAtom/open`")
       }
 
       if (projectOpt.get.appliedOverlays.contains(creator.overlayName)) {

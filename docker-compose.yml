@@ -1,0 +1,38 @@
+version: "3.9"
+services:
+  chennai:
+#    image: ghcr.io/appthreat/chen
+    build:
+      dockerfile: ci/Dockerfile
+      labels:
+        com.docker.compose.container-number: "1"
+    volumes:
+      - $HOME:$HOME
+      - /tmp:/tmp
+    ports:
+      - "8080:8080"
+    command: chennai --server --server-host 0.0.0.0 --server-port 8080 --server-auth-username chenadmin --server-auth-password chenpassword
+  notebook:
+#    image: ghcr.io/appthreat/chen
+    build:
+      dockerfile: ci/Dockerfile
+      labels:
+        com.docker.compose.container-number: "2"
+    develop:
+      watch:
+        - action: rebuild
+          path: ./console
+        - action: rebuild
+          path: ./platform
+        - action: sync
+          path: ./chenpy
+          target: /opt/chenpy
+        - action: sync
+          path: ./chenpy
+          target: /opt/miniconda3/lib/python3.11/site-packages/chenpy
+    volumes:
+      - ./notebooks:/opt/notebooks
+      - /tmp:/tmp
+    ports:
+      - "9999:9999"
+    command: jupyter notebook --allow-root --no-browser --ip=0.0.0.0 --port=9999

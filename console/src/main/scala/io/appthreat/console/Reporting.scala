@@ -26,6 +26,8 @@ object GlobalReporting {
   def enable(): Unit =
     enabled = true
 
+  def isEnabled(): Boolean = enabled
+
   def disable(): Unit =
     enabled = false
 

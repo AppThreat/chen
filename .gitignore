@@ -56,3 +56,4 @@ chen.zip
 .vscode/
 project/metals.sbt
 conda-out/
+notebooks/.ipynb_checkpoints/

@@ -90,7 +90,7 @@ async def create_cpg(
     skip_sbom=True,
     use_atom=False,
 ):
-    """Function to create Atom using cpggen server"""
+    """Function to create Atom using atomgen server"""
     app_manifests = []
     res = await client.create_cpg(
         connection,
@@ -107,7 +107,7 @@ async def create_cpg(
             if not project_name and first_app.get("app"):
                 project_name = first_app.get("app")
             cpg_path = first_app.get("cpg")
-            res = await import_cpg(connection, cpg_path, project_name)
+            res = await import_atom(connection, cpg_path, project_name)
             if not res:
                 return None
     return (
@@ -115,7 +115,7 @@ async def create_cpg(
     )
 
 
-async def import_cpg(connection, cpg_path, project_name=None):
+async def import_atom(connection, cpg_path, project_name=None):
     """Function to import Atom"""
     if cpg_path:
         res = await dir_exists(connection, cpg_path)
@@ -131,34 +131,23 @@ async def import_cpg(connection, cpg_path, project_name=None):
         res = await client.q(connection, f"""importCpg("{cpg_path}")""")
     if isinstance(res, str):
         return False
-    if "The graph has been modified" in res.get("response", ""):
-        # Execute save command
-        await client.q(connection, "save")
-        return True
-    return False
+    return True
 
 
-async def import_code(connection, directory, project_name=None):
+async def import_code(connection, directory, project_name=None, language=""):
     """Function to import code to chen"""
-    if directory:
-        res = await dir_exists(connection, directory)
-        if not res:
-            raise ValueError(
-                f"Directory {directory} doesn't exist for import into chen. Check if the directory is mounted and accessible from the server."
-            )
     if project_name:
         res = await client.q(
-            connection, f"""importCode("{directory}", "{project_name}")"""
+            connection,
+            f"""importCode("{directory}", projectName="{project_name}", language="{language.upper()}")""",
         )
     else:
-        res = await client.q(connection, f"""importCode("{directory}")""")
+        res = await client.q(
+            connection, f"""importCode("{directory}", language="{language.upper()}")"""
+        )
     if isinstance(res, str):
         return False
     if "io.shiftleft.codepropertygraph.Cpg" in res.get("response", ""):
-        return True
-    if "Code successfully imported" in res.get("response", ""):
-        # Execute save command
-        await client.q(connection, "save")
         return True
     return False
 

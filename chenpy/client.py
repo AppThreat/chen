@@ -45,11 +45,11 @@ class Connection:
     Connection object to hold following connections:
        - Websocket to chen server
        - http connection to chen server
-       - http connection to cpggen server
+       - http connection to atomgen server
     """
 
-    def __init__(self, cpggenclient, httpclient, websocket):
-        self.cpggenclient = cpggenclient
+    def __init__(self, atomgenclient, httpclient, websocket):
+        self.atomgenclient = atomgenclient
         self.httpclient = httpclient
         self.websocket = websocket
 
@@ -62,7 +62,7 @@ class Connection:
 
     async def close(self):
         """Close all connections"""
-        await self.cpggenclient.close()
+        await self.atomgenclient.close()
         await self.httpclient.close()
         await self.websocket.close()
 
@@ -72,37 +72,37 @@ class Connection:
 
 def get_sync(
     base_url="http://localhost:9000",
-    cpggen_url="http://localhost:7072",
+    atomgen_url="http://localhost:7072",
     username=None,
     password=None,
 ):
-    """Function to create a plain synchronous http connection to chen and cpggen server"""
+    """Function to create a plain synchronous http connection to chen and atomgen server"""
     auth = None
     if username and password:
         auth = httpx.BasicAuth(username, password)
     base_url = base_url.rstrip("/")
     client = httpx.Client(base_url=base_url, auth=auth, timeout=CLIENT_TIMEOUT)
-    cpggenclient = None
-    if cpggen_url:
-        cpggenclient = httpx.Client(base_url=cpggen_url, timeout=CLIENT_TIMEOUT)
-    return Connection(cpggenclient, client, None)
+    atomgenclient = None
+    if atomgen_url:
+        atomgenclient = httpx.Client(base_url=atomgen_url, timeout=CLIENT_TIMEOUT)
+    return Connection(atomgenclient, client, None)
 
 
 async def get(
-    base_url="http://localhost:9000",
-    cpggen_url="http://localhost:7072",
+    base_url="http://localhost:8080",
+    atomgen_url="http://localhost:7072",
     username=None,
     password=None,
 ):
-    """Function to create a connection to chen and cpggen server"""
+    """Function to create a connection to chen and atomgen server"""
     auth = None
     if username and password:
         auth = httpx.BasicAuth(username, password)
     base_url = base_url.rstrip("/")
     client = httpx.AsyncClient(base_url=base_url, auth=auth, timeout=CLIENT_TIMEOUT)
-    cpggenclient = None
-    if cpggen_url:
-        cpggenclient = httpx.AsyncClient(base_url=cpggen_url, timeout=CLIENT_TIMEOUT)
+    atomgenclient = None
+    if atomgen_url:
+        atomgenclient = httpx.AsyncClient(base_url=atomgen_url, timeout=CLIENT_TIMEOUT)
     ws_url = f"""{base_url.replace("http://", "ws://").replace("https://", "wss://")}/connect"""
     websocket = await websockets.connect(ws_url, ping_interval=None, ping_timeout=None)
     connected_msg = await websocket.recv()
@@ -112,7 +112,7 @@ async def get(
         )
     # Workaround to fix websockets.exceptions.ConnectionClosedError
     await asyncio.sleep(0)
-    return Connection(cpggenclient, client, websocket)
+    return Connection(atomgenclient, client, websocket)
 
 
 async def send(connection, message):
@@ -348,12 +348,12 @@ async def create_cpg(
     auto_build=True,
     skip_sbom=True,
 ):
-    """Create Atom using cpggen server"""
-    client = connection.cpggenclient
+    """Create Atom using atomgen server"""
+    client = connection.atomgenclient
     if not client:
         return {
             "error": "true",
-            "message": "No active connection to cpggen server. Pass the cpggen url to the client.get method.",
+            "message": "No active connection to atomgen server. Pass the atomgen url to the client.get method.",
         }, 500
     # Suppor for url
     url = ""

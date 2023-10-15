@@ -44,7 +44,7 @@ class CpgGeneratorFactory(config: ConsoleConfig) {
   /** For a language, return the generator
     */
   def forLanguage(language: String): Option[CpgGenerator] = {
-    Option(language)
+    Option(language.toUpperCase())
       .filter(languageIsKnown)
       .flatMap { lang =>
         cpgGeneratorForLanguage(lang, config.frontend, config.install.rootPath.path, args = Nil)

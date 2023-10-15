@@ -17,7 +17,7 @@ package object cpgcreation {
     args: List[String]
   ): Option[CpgGenerator] = {
     lazy val conf = config.withArgs(args)
-    language match {
+    language.toUpperCase() match {
       case Languages.C | Languages.NEWC | Languages.JAVA | Languages.JAVASRC | Languages.JSSRC | Languages.JAVASCRIPT |
           Languages.PYTHON | Languages.PYTHONSRC =>
         Some(AtomGenerator(conf, rootPath, language))

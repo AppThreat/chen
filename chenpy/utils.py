@@ -89,6 +89,9 @@ def t(result, title="", caption="", language="javascript"):
 
 
 def print_table(result, title="", caption="", language="javascript"):
+    if isinstance(result, Table):
+        console.print(result)
+        return
     """Function to print the result as a table"""
     table = Table(
         title=title,
@@ -455,8 +458,17 @@ def fix_json(sout):
                     sout = sout.split(': String = "')[-1]
             else:
                 sout = sout.split(': String = "')[-1][-1]
-        elif "tree: ListBuffer" in sout or " = ListBuffer(" in sout:
+        elif (
+            "tree: ListBuffer" in sout
+            or " = ListBuffer(" in sout
+            or ': String = """' in sout
+        ):
             sout = sout.split(": String = ")[-1]
+            if '"""' in sout:
+                sout = sout.replace('"""', "")
+            return sout
+        elif "me.shadaj.scalapy.py.Dynamic | Unit = " in sout:
+            sout = sout.split("me.shadaj.scalapy.py.Dynamic | Unit = ")[-1]
             if '"""' in sout:
                 sout = sout.replace('"""', "")
             return sout
@@ -496,12 +508,13 @@ def parse_error(serr):
     if "No projects loaded" in serr:
         return """ERROR: Import code using import_code api. Usage: await workspace.import_code(connection, directory_name, app_name)"""
     if "No Atom loaded" in serr:
-        return """ERROR: Import cpg using import_cpg or create_cpg api."""
+        return """ERROR: Import atom using import_atom or import_code api."""
     return serr
 
 
 def read_image(file_path):
-    """Function to read image file safely optionally converting binary formats to base64 string. Useful to render images in notebooks"""
+    """Function to read image file safely optionally converting binary formats to base64 string. Useful to render
+    images in notebooks"""
     if os.path.exists(file_path):
         (mt, encoding) = mimetypes.guess_type(file_path, strict=True)
         if mt.startswith("image/svg"):
