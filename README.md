@@ -17,18 +17,30 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 chen container image has everything needed to get started.
 
+### Jupyter notebook with docker compose
+
+Use the docker compose from this repo to try chennai with Jupyter notebook.
+
+```shell
+git clone https://github.com/AppThreat/chen
+cd chen
+docker compose up
+```
+
+- Navigate to the link "http://127.0.0.1:9999/tree?token=chennai"
+- Click notebooks and then `getting-started.ipynb`
+
+Use the controls in Jupyter to interact with the cells. For a preview via github click [here](./notebooks/getting-started.ipynb)
+
+<img src="./docs/_media/chennai-jupyter1.png" alt="Jupyter console" width="512">
+<img src="./docs/_media/chennai-jupyter2.png" alt="Jupyter console" width="512">
+
 ### Interactive console
 
 To start the interactive console, run `chennai` command.
 
 ```shell
 docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai
-```
-
-### Jupyter notebook server
-
-```shell
-docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen jupyter notebook --ip 0.0.0.0 --port 9000 --no-browser --allow-root
 ```
 
 ### Chennai server mode

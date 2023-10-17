@@ -458,6 +458,7 @@ class Console[T <: Project](loader: WorkspaceLoader[T], baseDir: File = File.cur
     table.add_row("Config Files", "" + atom.configFile.size)
     val appliedOverlays = Overlays.appliedOverlays(atom)
     if (appliedOverlays.nonEmpty) table.add_row("Overlays", "" + appliedOverlays.size)
+    richConsole.clear()
     richConsole.print(table)
     if (as_text) richConsole.export_text().as[String] else ""
   }
