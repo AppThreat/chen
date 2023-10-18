@@ -258,7 +258,7 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
     }
   ): Option[Project] = {
     if (!projectExists(name)) {
-      report(s"Project does not exist in workspace. Try `importCode/importCpg(inputPath)` to create it")
+      report(s"Project does not exist in workspace. Try `importCode/importAtom(inputPath)` to create it")
       None
     } else if (!File(baseCpgFilename(name)).exists) {
       report(s"CPG for project $name does not exist at ${baseCpgFilename(name)}, bailing out")

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "appthreat-chen"
-version = "0.0.18"
+version = "0.0.19"
 description = "Code Hierarchy Exploration Net (chen)"
 authors = ["Team AppThreat <cloud@appthreat.com>"]
 license = "Apache-2.0"
@@ -63,16 +63,20 @@ optional = true
 
 [tool.poetry.group.science.dependencies]
 networkx = {extras = ["default", "extra"], version = "^3.1"}
-torch-geometric = {version = "^2.3.1"}
-torch = {version = "^2.0.1+cpu", source = "torch"}
-torchtext = {version = "^0.15.2+cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "torch"}
+torch-geometric = {version = "^2.4.0"}
+torch = {version = "^2.1.0+cpu", source = "torch"}
+torchtext = {version = "^0.16.0+cpu", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", source = "torch"}
+nbconvert = "^7.9.2"
+jupyter-core = "^5.4.0"
+jupyter-client = "^8.4.0"
+notebook = "^7.0.5"
 
 [tool.poetry.group.database.dependencies]
 networkx = {extras = ["default", "extra"], version = "^3.1"}
 
 [[tool.poetry.source]]
 name = "pyg"
-url = "https://data.pyg.org/whl/torch-2.0.0+cpu.html"
+url = "https://data.pyg.org/whl/torch-2.1.0+cpu.html"
 priority = "explicit"
 
 

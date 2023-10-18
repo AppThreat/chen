@@ -17,18 +17,30 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 chen container image has everything needed to get started.
 
+### Jupyter notebook with docker compose
+
+Use the docker compose from this repo to try chennai with Jupyter notebook.
+
+```shell
+git clone https://github.com/AppThreat/chen
+cd chen
+docker compose up
+```
+
+- Navigate to the link "http://127.0.0.1:9999/tree?token=chennai"
+- Click notebooks and then `getting-started.ipynb`
+
+Use the controls in Jupyter to interact with the cells. For a preview via github click [here](./notebooks/getting-started.ipynb)
+
+<img src="./docs/_media/chennai-jupyter1.png" alt="Jupyter console" width="512">
+<img src="./docs/_media/chennai-jupyter2.png" alt="Jupyter console" width="512">
+
 ### Interactive console
 
 To start the interactive console, run `chennai` command.
 
 ```shell
 docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai
-```
-
-### Jupyter notebook server
-
-```shell
-docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen jupyter notebook --ip 0.0.0.0 --port 9000 --no-browser --allow-root
 ```
 
 ### Chennai server mode
@@ -73,7 +85,7 @@ Once the download finishes, the command will display the download location along
 [21:53:36] INFO     To run chennai console, add the following environment variables to your .zshrc or .bashrc:
 export JAVA_OPTS="-Xmx16G"
 export JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=<lib dir>"
-export SCALAPY_PYTHON_LIBRARY=python3.10
+export SCALAPY_PYTHON_LIBRARY=python3.11
 export CHEN_HOME=/home/user/.local/share/chen
 export PATH=$PATH:/home/user/.local/share/chen/platform:/home/user/.local/share/chen/platform/bin:
 ```
@@ -168,10 +180,11 @@ chennai> help
 1 error found
 ```
 
-This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the two environment variables below are set correctly.
+This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the below environment variables below are set correctly.
 
 - SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python311
 - JAVA_TOOL_OPTIONS - jna.library.path must be set to the python lib directory
+- SCALAPY_PYTHON_PROGRAMNAME - Path to Python executable in case of virtual environments (Usually not required)
 
 ## Origin of chen
 

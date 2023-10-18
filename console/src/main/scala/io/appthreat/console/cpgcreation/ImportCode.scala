@@ -44,7 +44,7 @@ class ImportCode[T <: Project](console: Console[T]) extends Reporting {
       else inputPath
     checkInputPath(srcPath)
     if (language != "") {
-      generatorFactory.forLanguage(language) match {
+      generatorFactory.forLanguage(language.toUpperCase()) match {
         case None           => throw new ConsoleException(s"No Atom generator exists for language: $language")
         case Some(frontend) => apply(frontend, srcPath, projectName)
       }

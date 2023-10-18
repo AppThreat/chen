@@ -432,3 +432,51 @@ async def export(
         if colorize
         else (res[0] if res and len(res) == 1 else res)
     )
+
+
+async def summary(connection):
+    return await client.q(connection, "summary(true)")
+
+
+async def files(connection, title="Files"):
+    return await client.q(connection, f'files(title="{title}", true)')
+
+
+def bool_to_str(b):
+    return "true" if b else "false"
+
+
+async def methods(connection, title="Methods", include_calls=False, tree=False):
+    return await client.q(
+        connection,
+        f'methods(title="{title}", includeCalls={bool_to_str(include_calls)}, tree={bool_to_str(tree)}, as_text=true)',
+    )
+
+
+async def annotations(connection, title="Annotations"):
+    return await client.q(connection, f'annotations(title="{title}", true)')
+
+
+async def imports(connection, title="Imports"):
+    return await client.q(connection, f'imports(title="{title}", true)')
+
+
+async def declarations(connection, title="Declarations"):
+    return await client.q(connection, f'declarations(title="{title}", as_text=true)')
+
+
+async def sensitive(
+    connection, title="Sensitive", pattern="(secret|password|token|key|admin|root)"
+):
+    return await client.q(
+        connection, f'sensitive(title="{title}", pattern="{pattern}", as_text=true)'
+    )
+
+
+async def show_similar(
+    connection, method_fullname, compare_pattern="", upper_bound=500, timeout=5
+):
+    return await client.q(
+        connection,
+        f'showSimilar(methodFullName="{method_fullname}", comparePattern="{compare_pattern}", upper_bound={upper_bound}, timeout={timeout}, as_text=true)',
+    )

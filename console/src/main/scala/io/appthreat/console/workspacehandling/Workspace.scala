@@ -18,7 +18,7 @@ class Workspace[ProjectType <: Project](var projects: ListBuffer[ProjectType]) {
     */
   override def toString: String = {
     if (projects.isEmpty) {
-      System.err.println("The workpace is empty. Use `importCode` or `importCpg` to populate it")
+      System.err.println("The workpace is empty. Use `importCode` or `importAtom` to populate it")
       "empty"
     } else {
       """

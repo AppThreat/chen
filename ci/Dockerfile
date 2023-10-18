@@ -28,13 +28,12 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1" \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.11 \
-    ANDROID_HOME=/opt/android-sdk-linux
-ENV PATH=/opt/miniconda3/envs/chenpy/bin:/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
+    ANDROID_HOME=/opt/android-sdk-linux \
+    CHEN_INSTALL_DIR=/opt/workspace
+ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
 WORKDIR /opt
-COPY ./ci/kernel.json /opt/
 COPY ./ci/conda-install.sh /opt/
-COPY ./chenpy /opt/chenpy
 COPY README.md /opt/
 
 RUN set -e; \
@@ -52,22 +51,23 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core wget bash \
-        pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel \
-    && mkdir -p /opt/miniconda3 \
+    && microdnf install -y gcc git-core wget bash graphviz graphviz-gd \
+        pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel glibc-common glibc-all-langpacks \
+    && mkdir -p /opt/miniconda3 /opt/workspace \
     && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
     && bash /opt/miniconda3/miniconda.sh -b -u -p /opt/miniconda3 \
     && rm -rf /opt/miniconda3/miniconda.sh \
     && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && echo "conda activate chenpy" >> ~/.bashrc \
     && conda update -n base -c defaults conda -y \
     && conda config --add channels conda-forge \
     && conda install -n base conda-libmamba-solver -y \
     && conda config --set solver libmamba \
-    && conda create --name chenpy python=3.11 -y \
     && conda init bash \
     && bash -c /opt/conda-install.sh \
+    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true" >> $HOME/.sdkman/etc/config \
@@ -87,16 +87,17 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
-    && curl -Lo coursier https://git.io/coursier-cli \
-    && chmod +x coursier \
-    && ./coursier launch almond:0.14.0-RC13 --scala 3.3.0 -- --install \
-    && cp /opt/kernel.json /root/.local/share/jupyter/kernels/scala/ \
-    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
-    && rm -f coursier
+    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional
+ENV LC_ALL=en_US.UTF-8 \
+    LANG=en_US.UTF-8 \
+    LANGUAGE=en_US.UTF-8 \
+    JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=/opt/miniconda3/lib"
+COPY ./chenpy /opt/chenpy
+COPY ./pyproject.toml /opt/
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
-ENV JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=/opt/miniconda3/envs/chenpy/lib"
 RUN unzip -q chen.zip \
-    && rm chen.zip kernel.json conda-install.sh \
+    && python -m pip install --no-deps . \
+    && rm chen.zip conda-install.sh pyproject.toml \
     && microdnf clean all
 CMD ["chennai"]
