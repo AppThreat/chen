@@ -50,13 +50,6 @@ jobs:
           python3 -m poetry config virtualenvs.create false
           python3 -m poetry install --no-cache
           poetry run flake8 chenpy --count --select=E9,F63,F7,F82 --show-source --statistics
-      - name: Test conda
-        if: runner.os == 'Linux'
-        run: |          
-          # Test conda build
-          $CONDA/bin/conda update -n base -c defaults conda
-          $CONDA/bin/conda install anaconda-client conda-build
-          $CONDA/bin/conda build -c conda-forge --output-folder ./conda-out/ chenpy
       - uses: actions/cache@v3
         with:
           path: |

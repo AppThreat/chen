@@ -1,11 +1,11 @@
 version: "3.9"
 services:
   chennai:
-#    image: ghcr.io/appthreat/chen
-    build:
-      dockerfile: ci/Dockerfile
-      labels:
-        com.docker.compose.container-number: "1"
+    image: ghcr.io/appthreat/chen
+#    build:
+#      dockerfile: ci/Dockerfile
+#      labels:
+#        com.docker.compose.container-number: "1"
     volumes:
       - $HOME:$HOME
       - /tmp:/tmp
@@ -13,11 +13,11 @@ services:
       - "8080:8080"
     command: chennai --server --server-host 0.0.0.0 --server-port 8080 --server-auth-username chenadmin --server-auth-password chenpassword
   notebook:
-#    image: ghcr.io/appthreat/chen
-    build:
-      dockerfile: ci/Dockerfile
-      labels:
-        com.docker.compose.container-number: "2"
+    image: ghcr.io/appthreat/chen
+#    build:
+#      dockerfile: ci/Dockerfile
+#      labels:
+#        com.docker.compose.container-number: "2"
     develop:
       watch:
         - action: rebuild
