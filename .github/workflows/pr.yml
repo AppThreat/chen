@@ -56,7 +56,7 @@ jobs:
           # Test conda build
           $CONDA/bin/conda update -n base -c defaults conda
           $CONDA/bin/conda install anaconda-client conda-build
-          $CONDA/bin/conda build --output-folder ./conda-out/ ./conda/
+          $CONDA/bin/conda build -c conda-forge --output-folder ./conda-out/ chenpy
       - uses: actions/cache@v3
         with:
           path: |
