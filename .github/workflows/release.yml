@@ -58,6 +58,7 @@ jobs:
         run: |
           poetry publish --build --username $PYPI_USERNAME --password $PYPI_PASSWORD
           $CONDA/bin/conda update -n base -c defaults conda
+          $CONDA/bin/conda install anaconda-client conda-build
           $CONDA/bin/conda build -c conda-forge --output-folder ./conda-out/ chenpy
           anaconda upload --label main -u appthreat ./conda-out/noarch/*.tar.bz2
         env:
