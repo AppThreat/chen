@@ -109,16 +109,17 @@ object Path {
         case call: Call =>
           if (!call.code.startsWith("<operator") || !call.methodFullName.startsWith("<operator")) {
             if (
-              tags.isEmpty && call.callee(NoResolve).head.isExternal && !call.methodFullName.startsWith(
-                "<operator"
-              ) && !call.name
+              tags.isEmpty && call.callee(NoResolve).nonEmpty && call
+                .callee(NoResolve)
+                .head
+                .isExternal && !call.methodFullName.startsWith("<operator") && !call.name
                 .startsWith("<operator") && !call.methodFullName.startsWith("new ")
             ) {
               tags = tagAsString(call.callee(NoResolve).head.tag)
             }
             var callIcon =
               if (
-                call.callee(NoResolve).head.isExternal && !call.name
+                call.callee(NoResolve).nonEmpty && call.callee(NoResolve).head.isExternal && !call.name
                   .startsWith("<operator") && !call.methodFullName.startsWith("new ")
               ) " :right_arrow_curving_up:"
               else ""
@@ -176,7 +177,13 @@ object Path {
         if (!trow(4).startsWith("<operator>.fieldAccess")) {
           val tagsStr: String = if (trow(4).nonEmpty) s"Tags: ${trow(4)}" else ""
           val methodStr       = s"${trow(1)}\n${tagsStr}"
-          table.add_row(trow(0), methodStr.stripMargin, trow(2), trow(3), end_section = end_section)
+          table.add_row(
+            trow(0),
+            methodStr.stripMargin,
+            trow(2),
+            trow(3).takeWhile(_ != '\n'),
+            end_section = end_section
+          )
         }
       }
     }
