@@ -1,6 +1,6 @@
 # chen
 
-Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy.
+Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy. This repo contains the source code for chen library and an advanced REPL console called chennai (chen not AI).
 
 ## Requirements
 
@@ -8,10 +8,6 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 - Python > 3.8.1
 - Node.js > 16 (To run [atom](https://github.com/AppThreat/atom))
 - Minimum 16GB RAM
-
-### Additional requirements
-
-- Rust (For rocksdb-py compilation)
 
 ## Getting started
 
@@ -190,9 +186,9 @@ This error is mostly due to missing python .so (linux), .dll (windows) or .dylib
 
 chen is a fork of the popular [joern](https://github.com/joernio/joern) project. We deviate from the joern project in the following ways:
 
-- Make code analysis accessible by adding first-class integration with Python and frameworks such as NetworkX and PyTorch
+- Make code analysis accessible by adding first-class integration with Python and frameworks such as NetworkX and PyTorch.
 - Enable broader hierarchical analysis (Application + Dependency + Container + OS layer)
-- By creating a more welcoming community more appropriate for beginner users with great support
+- By creating a welcoming community more appropriate for beginner users with great enterprise support. We want to democratize code analysis.
 
 ## License
 
