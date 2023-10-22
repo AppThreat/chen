@@ -48,7 +48,7 @@ jobs:
       - name: Install and test
         run: |
           npm install -g @appthreat/atom
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           pip install poetry
           sudo apt install -y graphviz-dev
           poetry config virtualenvs.create false
