@@ -70,7 +70,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
             .filterNot(_.startsWith("com.sun"))
             .filterNot(_.contains("test"))
             .filterNot(_.contains("mock"))
-            .filterNot(_.contains(".lock"))
+            .filterNot(_.endsWith(".lock"))
+            .filterNot(_.endsWith(".json"))
             .foreach { (pkg: String) =>
               var bpkg = pkg.takeWhile(_ != '$')
               if (language == Languages.JAVA || language == Languages.JAVASRC)

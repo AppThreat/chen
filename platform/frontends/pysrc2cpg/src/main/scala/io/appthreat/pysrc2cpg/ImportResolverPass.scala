@@ -1,16 +1,18 @@
 package io.appthreat.pysrc2cpg
 
-import better.files.{File => BFile}
-import io.appthreat.x2cpg.passes.frontend.ImportsPass._
+import better.files.File as BFile
+import io.appthreat.x2cpg.passes.frontend.ImportsPass.*
 import io.appthreat.x2cpg.passes.frontend.XImportResolverPass
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 
-import java.io.{File => JFile}
+import java.io.File as JFile
 import java.util.regex.{Matcher, Pattern}
 
 class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
+
+  private lazy val root = cpg.metaData.root.headOption.getOrElse("").stripSuffix(JFile.separator)
 
   override protected def optionalResolveImport(
     fileName: String,
@@ -24,7 +26,13 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
       val namespace = importedEntity.stripSuffix(s".${splitName.last}")
       (relativizeNamespace(namespace, fileName), splitName.last)
     } else {
-      ("", importedEntity)
+      val currDir = BFile(root) / fileName match
+        case x if x.isDirectory => x
+        case x                  => x.parent
+
+      val relCurrDir = currDir.pathAsString.stripPrefix(root).stripPrefix(JFile.separator)
+
+      (relCurrDir, importedEntity)
     }
 
     resolveEntities(namespace, entityName, importedAs).foreach(x => resolvedImportToTag(x, importCall, diffGraph))
