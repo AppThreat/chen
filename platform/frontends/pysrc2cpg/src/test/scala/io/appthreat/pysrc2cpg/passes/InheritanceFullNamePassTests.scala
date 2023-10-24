@@ -50,7 +50,7 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
 
     "resolve the type to a type stub from a fully qualified path" in {
       def user = cpg.typeDecl("User")
-      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Model").mkString(File.separator))
+      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Model").mkString("."))
       // TODO: Empty for now, would require a stub
       user.baseType.fullName.l shouldBe Seq()
     }
@@ -58,7 +58,7 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
     "resolve the type to a type stub from a partially qualified path using an alias" in {
       def user = cpg.typeDecl("CoolUser")
 
-      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Cool").mkString(File.separator))
+      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Cool").mkString("."))
       // TODO: Empty for now, would require a stub
       user.baseType.fullName.l shouldBe Seq()
     }

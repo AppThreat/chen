@@ -497,7 +497,7 @@ class RegexDefinedFlowsDataFlowTests
       .moreCode(views, Seq("controller", "views.py").mkString(File.separator))
 
     val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
-    args.size shouldBe 3
+    args.size shouldBe 2
   }
 
   "Import statement with method ref sample five" in {
@@ -521,7 +521,7 @@ class RegexDefinedFlowsDataFlowTests
       .moreCode(views, Seq("student", "views.py").mkString(File.separator))
 
     val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
-    args.size shouldBe 3
+    args.size shouldBe 2
   }
 
   "flows via tuple literal" should {

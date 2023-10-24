@@ -3,7 +3,7 @@ package io.appthreat.x2cpg.passes.frontend
 import io.appthreat.x2cpg.passes.base.TypeDeclStubCreator
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, PropertyNames, Languages}
 import io.shiftleft.passes.ForkJoinParallelCpgPass
 import io.shiftleft.semanticcpg.language._
 
@@ -16,6 +16,7 @@ import java.util.regex.{Matcher, Pattern}
   */
 abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPass[TypeDecl](cpg) {
 
+  val language: String              = cpg.metaData.language.head
   protected val pathSep: Char       = '.'
   protected val fileModuleSep: Char = ':'
   protected val moduleName: String
@@ -31,7 +32,10 @@ abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPas
   override def runOnPart(builder: DiffGraphBuilder, source: TypeDecl): Unit = {
     val resolvedTypeDecls = resolveInheritedTypeFullName(source, builder)
     if (resolvedTypeDecls.nonEmpty) {
-      val fullNames = resolvedTypeDecls.map(_.fullName)
+      var fullNames = resolvedTypeDecls.map(_.fullName)
+      if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
+        fullNames = fullNames.map(_.replaceAll(File.pathSeparator, "."))
+      }
       builder.setNodeProperty(source, PropertyNames.INHERITS_FROM_TYPE_FULL_NAME, fullNames)
       cpg.typ.fullNameExact(fullNames: _*).foreach(tgt => builder.addEdge(source, tgt, EdgeTypes.INHERITS_FROM))
     }
@@ -99,14 +103,20 @@ abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPas
     */
   protected def xTypeFullName(importedType: String, importedPath: String): (String, String) = {
     val combinedPath = ImportStringHandling.combinedPath(importedType, importedPath, pathSep)
+    val pathReplacement =
+      if (language == Languages.PYTHON || language == Languages.PYTHONSRC) "."
+      else Matcher.quoteReplacement(File.separator)
+    var moduleNameToUse =
+      if (language == Languages.PYTHON || language == Languages.PYTHONSRC) "" else s"$fileModuleSep$moduleName"
+    if (moduleNameToUse == ".") moduleNameToUse = ""
     combinedPath.split(pathSep).lastOption match {
       case Some(tName) =>
         (
           tName,
           combinedPath
             .stripSuffix(s"$pathSep$tName")
-            .replaceAll(s"${Pattern.quote(pathSep.toString)}", Matcher.quoteReplacement(File.separator)) +
-            Seq(s"$fileExt$fileModuleSep$moduleName", tName).mkString(pathSep.toString)
+            .replaceAll(s"${Pattern.quote(pathSep.toString)}", pathReplacement) +
+            Seq(s"$fileExt$moduleNameToUse", tName).mkString(pathReplacement.toString)
         )
       case None => (combinedPath, combinedPath)
     }

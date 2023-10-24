@@ -741,8 +741,8 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     val cpg = code("print('Hello, world!')")
       .moreCode(controller, Seq("controller", "urls.py").mkString(File.separator))
       .moreCode(views, Seq("student", "views.py").mkString(File.separator))
-
-    val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
+    println(cpg.call.methodFullName("django.conf.urls.url").argument.isMethodRef.l)
+    val Some(allPageRef) = cpg.call.methodFullName("django.conf.urls.url").argument.isMethodRef.headOption: @unchecked
     allPageRef.methodFullName shouldBe Seq("student", "views.all_page").mkString(".")
     allPageRef.code shouldBe "views.all_page"
   }
