@@ -18,7 +18,7 @@ class DynamicTypeHintFullNamePassTests extends PySrc2CpgFixture(withOssDataflow 
 
     "take into accounts imports" in {
       cpg.method("m").methodReturn.typeFullName.l shouldBe List(
-        Seq("foo", "bar.py:<module>.Woo").mkString(File.separator)
+        Seq("foo", "bar.Woo").mkString(".")
       )
     }
   }

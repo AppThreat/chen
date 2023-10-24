@@ -73,41 +73,41 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         sendGridM: UnknownMethod,
         sendGridT: UnknownTypeDecl
       ) = cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      webClientM.fullName shouldBe "slack_sdk.py:<module>.WebClient.__init__"
-      webClientT.fullName shouldBe "slack_sdk.py:<module>.WebClient"
-      sendGridM.fullName shouldBe "sendgrid.py:<module>.SendGridAPIClient.__init__"
-      sendGridT.fullName shouldBe "sendgrid.py:<module>.SendGridAPIClient"
+      webClientM.fullName shouldBe "slack_sdk.WebClient.__init__"
+      webClientT.fullName shouldBe "slack_sdk.WebClient"
+      sendGridM.fullName shouldBe "sendgrid.SendGridAPIClient.__init__"
+      sendGridT.fullName shouldBe "sendgrid.SendGridAPIClient"
     }
 
     "resolve 'sg' identifier types from import information" in {
       val List(sgAssignment, sgElseWhere) = cpg.identifier("sg").take(2).l
-      sgAssignment.typeFullName shouldBe "sendgrid.py:<module>.SendGridAPIClient"
-      sgElseWhere.typeFullName shouldBe "sendgrid.py:<module>.SendGridAPIClient"
+      sgAssignment.typeFullName shouldBe "sendgrid.SendGridAPIClient"
+      sgElseWhere.typeFullName shouldBe "sendgrid.SendGridAPIClient"
     }
 
     "resolve 'sg' call path from import information" in {
       val List(apiClient) = cpg.call("SendGridAPIClient").l
-      apiClient.methodFullName shouldBe "sendgrid.py:<module>.SendGridAPIClient.__init__"
+      apiClient.methodFullName shouldBe "sendgrid.SendGridAPIClient.__init__"
       val List(sendCall) = cpg.call("send").l
-      sendCall.methodFullName shouldBe "sendgrid.py:<module>.SendGridAPIClient.send"
+      sendCall.methodFullName shouldBe "sendgrid.SendGridAPIClient.send"
     }
 
     "resolve 'client' identifier types from import information" in {
       val List(clientAssignment, clientElseWhere) = cpg.identifier("client").take(2).l
-      clientAssignment.typeFullName shouldBe "slack_sdk.py:<module>.WebClient"
-      clientElseWhere.typeFullName shouldBe "slack_sdk.py:<module>.WebClient"
+      clientAssignment.typeFullName shouldBe "slack_sdk.WebClient"
+      clientElseWhere.typeFullName shouldBe "slack_sdk.WebClient"
     }
 
     "resolve 'client' call path from identifier in child scope" in {
       val List(client) = cpg.call("WebClient").l
-      client.methodFullName shouldBe "slack_sdk.py:<module>.WebClient.__init__"
+      client.methodFullName shouldBe "slack_sdk.WebClient.__init__"
       val List(postMessage) = cpg.call("chat_postMessage").l
-      postMessage.methodFullName shouldBe "slack_sdk.py:<module>.WebClient.chat_postMessage"
+      postMessage.methodFullName shouldBe "slack_sdk.WebClient.chat_postMessage"
     }
 
     "resolve a dummy 'send' return value from sg.send" in {
       val List(postMessage) = cpg.identifier("response").l
-      postMessage.typeFullName shouldBe "sendgrid.py:<module>.SendGridAPIClient.send.<returnValue>"
+      postMessage.typeFullName shouldBe "sendgrid.SendGridAPIClient.send.<returnValue>"
     }
 
   }
@@ -141,27 +141,27 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "resolve 'db' identifier types from import information" in {
       val List(clientAssignment, clientElseWhere) = cpg.identifier("db").take(2).l
-      clientAssignment.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy"
-      clientElseWhere.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy"
+      clientAssignment.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy"
+      clientElseWhere.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy"
     }
 
     "resolve the 'SQLAlchemy' constructor in the module" in {
       val Some(client) = cpg.call("SQLAlchemy").headOption: @unchecked
-      client.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.__init__"
+      client.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.__init__"
     }
 
     "resolve 'User' field types" in {
       val List(id, firstname, age, address) =
         cpg.identifier.nameExact("id", "firstname", "age", "address").l.takeRight(4)
-      id.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.Column"
-      firstname.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.Column"
-      age.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.Column"
-      address.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.Column"
+      id.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy.Column"
+      firstname.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy.Column"
+      age.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy.Column"
+      address.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy.Column"
     }
 
     "resolve the 'Column' constructor for a class member" in {
       val Some(columnConstructor) = cpg.call("Column").headOption: @unchecked
-      columnConstructor.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.Column.__init__"
+      columnConstructor.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.Column.__init__"
     }
 
   }
@@ -185,7 +185,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "conservatively present either option when an imported function uses the same name as a builtin" in {
       val Some(absCall) = cpg.call("abs").headOption: @unchecked
-      absCall.dynamicTypeHintFullName shouldBe Seq("foo.py:<module>.abs", "__builtin.abs")
+      absCall.dynamicTypeHintFullName shouldBe Seq("foo.abs", "__builtin.abs")
     }
 
   }
@@ -219,12 +219,12 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     "resolve correct imports via tag nodes" in {
       val List(foo1: UnknownMethod, foo2: UnknownTypeDecl) =
         cpg.file(".*foo.py").ast.isCall.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      foo1.fullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.__init__"
-      foo2.fullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy"
+      foo1.fullName shouldBe "flask_sqlalchemy.SQLAlchemy.__init__"
+      foo2.fullName shouldBe "flask_sqlalchemy.SQLAlchemy"
       val List(bar1: ResolvedTypeDecl, bar2: ResolvedMethod) =
         cpg.file(".*bar.py").ast.isCall.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      bar1.fullName shouldBe "foo.py:<module>"
-      bar2.fullName shouldBe "foo.py:<module>"
+      bar1.fullName shouldBe "foo"
+      bar2.fullName shouldBe "foo"
     }
 
     "resolve 'x' and 'y' locally under foo.py" in {
@@ -254,7 +254,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         .isIdentifier
         .name("d")
         .headOption: @unchecked
-      d.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy"
+      d.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy"
       d.dynamicTypeHintFullName shouldBe Seq()
     }
 
@@ -265,7 +265,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         .isCall
         .name("createTable")
         .l
-      d.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.createTable"
+      d.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.createTable"
       d.dynamicTypeHintFullName shouldBe Seq()
       d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
     }
@@ -278,7 +278,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         .name("deleteTable")
         .l
 
-      d.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.deleteTable"
+      d.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.deleteTable"
       d.dynamicTypeHintFullName shouldBe Seq()
       d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
     }
@@ -312,24 +312,24 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     "resolve correct imports via tag nodes" in {
       val List(a: ResolvedTypeDecl, b: ResolvedMethod, c: UnknownImport, d: ResolvedMember) =
         cpg.file(".*UserController.py").ast.isCall.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      a.fullName shouldBe "app.py:<module>"
-      b.fullName shouldBe "app.py:<module>"
-      c.path shouldBe "flask.py:<module>.jsonify"
-      d.basePath shouldBe "app.py:<module>"
+      a.fullName shouldBe "app"
+      b.fullName shouldBe "app"
+      c.path shouldBe "flask.jsonify"
+      d.basePath shouldBe "app"
       d.memberName shouldBe "db"
 
       val List(sqlAlchemyM: UnknownMethod, sqlAlchemyT: UnknownTypeDecl) =
         cpg.file(".*app.py").ast.isCall.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      sqlAlchemyM.fullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.__init__"
-      sqlAlchemyT.fullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy"
+      sqlAlchemyM.fullName shouldBe "flask_sqlalchemy.SQLAlchemy.__init__"
+      sqlAlchemyT.fullName shouldBe "flask_sqlalchemy.SQLAlchemy"
     }
 
     "be determined as a variable reference and have its type recovered correctly" in {
-      cpg.identifier("db").map(_.typeFullName).toSet shouldBe Set("flask_sqlalchemy.py:<module>.SQLAlchemy")
+      cpg.identifier("db").map(_.typeFullName).toSet shouldBe Set("flask_sqlalchemy.SQLAlchemy")
 
       cpg
         .call("add")
-        .where(_.parentBlock.ast.isIdentifier.typeFullName("flask_sqlalchemy.py:<module>.SQLAlchemy"))
+        .where(_.parentBlock.ast.isIdentifier.typeFullName("flask_sqlalchemy.SQLAlchemy"))
         .where(_.parentBlock.ast.isFieldIdentifier.canonicalName("session"))
         .headOption
         .map(_.code) shouldBe Some("tmp0.add(user)")
@@ -337,13 +337,13 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "provide a dummy type to a member if the member type is not known" in {
       val Some(sessionTmpVar) = cpg.identifier("tmp0").headOption: @unchecked
-      sessionTmpVar.typeFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.<member>(session)"
+      sessionTmpVar.typeFullName shouldBe "flask_sqlalchemy.SQLAlchemy.<member>(session)"
 
       val Some(addCall) = cpg
         .call("add")
         .headOption: @unchecked
       addCall.typeFullName shouldBe "ANY"
-      addCall.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.<member>(session).add"
+      addCall.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.<member>(session).add"
       addCall.callee(NoResolve).isExternal.headOption shouldBe Some(true)
     }
 
@@ -358,16 +358,16 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "resolve correct imports via tag nodes" in {
       val List(logging: UnknownImport) = cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      logging.path shouldBe "logging.py:<module>"
+      logging.path shouldBe "logging"
     }
 
     "provide a dummy type" in {
       val Some(log) = cpg.identifier("log").headOption: @unchecked
-      log.typeFullName shouldBe "logging.py:<module>.getLogger.<returnValue>"
+      log.typeFullName shouldBe "logging.getLogger.<returnValue>"
       val List(errorCall) = cpg.call("error").l
-      errorCall.methodFullName shouldBe "logging.py:<module>.getLogger.<returnValue>.error"
+      errorCall.methodFullName shouldBe "logging.getLogger.<returnValue>.error"
       val List(getLoggerCall) = cpg.call("getLogger").l
-      getLoggerCall.methodFullName shouldBe "logging.py:<module>.getLogger"
+      getLoggerCall.methodFullName shouldBe "logging.getLogger"
     }
   }
 
@@ -382,15 +382,15 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     "resolve correct imports via tag nodes" in {
       val List(error: UnknownImport, request: UnknownImport) =
         cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      error.path shouldBe "urllib.py:<module>.error"
-      request.path shouldBe "urllib.py:<module>.request"
+      error.path shouldBe "urllib.error"
+      request.path shouldBe "urllib.request"
     }
 
     "reasonably determine the constructor type" in {
       val Some(tmp0) = cpg.identifier("tmp0").headOption: @unchecked
-      tmp0.typeFullName shouldBe "urllib.py:<module>.request"
+      tmp0.typeFullName shouldBe "urllib.request"
       val Some(requestCall) = cpg.call("Request").headOption: @unchecked
-      requestCall.methodFullName shouldBe "urllib.py:<module>.request.Request.__init__"
+      requestCall.methodFullName shouldBe "urllib.request.Request.__init__"
     }
   }
 
@@ -443,18 +443,18 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       val List(a: ResolvedTypeDecl, b: ResolvedMethod, c: UnknownMethod, d: UnknownTypeDecl, e: UnknownImport) =
         cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
 
-      a.fullName shouldBe "MongoConnection.py:<module>.MongoConnection"
-      b.fullName shouldBe "MongoConnection.py:<module>.MongoConnection.__init__"
-      c.fullName shouldBe "pymongo.py:<module>.MongoClient.__init__"
-      d.fullName shouldBe "pymongo.py:<module>.MongoClient"
-      e.path shouldBe Seq("django", "conf.py:<module>.settings").mkString(File.separator)
+      a.fullName shouldBe "MongoConnection.MongoConnection"
+      b.fullName shouldBe "MongoConnection.MongoConnection.__init__"
+      c.fullName shouldBe "pymongo.MongoClient.__init__"
+      d.fullName shouldBe "pymongo.MongoClient"
+      e.path shouldBe Seq("django", "conf.settings").mkString(".")
     }
 
     "recover a potential type for `self.collection` using the assignment at `get_collection` as a type hint" in {
       val Some(selfFindFound) = cpg.typeDecl(".*InstallationsDAO.*").ast.isCall.name("find_one").headOption: @unchecked
       selfFindFound.dynamicTypeHintFullName shouldBe Seq(
         "__builtin.None.find_one",
-        "pymongo.py:<module>.MongoClient.__init__.<indexAccess>.<indexAccess>.find_one"
+        "pymongo.MongoClient.__init__.<indexAccess>.<indexAccess>.find_one"
       )
     }
 
@@ -486,7 +486,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "manage to create a correct chain of dummy field accesses before the call" in {
       val Some(bikeFind) = cpg.call.name("find").headOption: @unchecked
-      bikeFind.methodFullName shouldBe "flask_pymongo.py:<module>.PyMongo.<member>(db).<member>(bikes).find"
+      bikeFind.methodFullName shouldBe "flask_pymongo.PyMongo.<member>(db).<member>(bikes).find"
     }
   }
 
@@ -508,7 +508,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "recover the import as an identifier and not directly as a call" in {
       val Some(initCall) = cpg.call.name("initialize").headOption: @unchecked
-      initCall.methodFullName shouldBe "datadog.py:<module>.initialize"
+      initCall.methodFullName shouldBe "datadog.initialize"
     }
   }
 
@@ -536,12 +536,12 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "recover its full name successfully" in {
       val Some(addFieldConstructor) = cpg.call.name("AddField").headOption: @unchecked
-      addFieldConstructor.methodFullName shouldBe Seq("django", "db.py:<module>.migrations.AddField.__init__").mkString(
-        File.separator
+      addFieldConstructor.methodFullName shouldBe Seq("django", "db.migrations.AddField.__init__").mkString(
+        "."
       )
       val Some(booleanFieldConstructor) = cpg.call.name("BooleanField").headOption: @unchecked
-      booleanFieldConstructor.methodFullName shouldBe Seq("django", "db.py:<module>.models.BooleanField.__init__")
-        .mkString(File.separator)
+      booleanFieldConstructor.methodFullName shouldBe Seq("django", "db.models.BooleanField.__init__")
+        .mkString(".")
     }
   }
 
@@ -561,7 +561,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
           |   global __factory
           |   return __factory()
           |""".stripMargin,
-        Seq("data", "db_session.py").mkString(File.separator)
+        Seq("data", "db_session.py").mkString(".")
       )
 
     "resolve correct imports via tag nodes" in {
@@ -571,20 +571,20 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         sqlSessionM: UnknownMethod,
         sqlSessionT: UnknownTypeDecl
       ) = cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      sessionT.fullName shouldBe Seq("data", "db_session.py:<module>").mkString(File.separator)
-      sessionM.fullName shouldBe Seq("data", "db_session.py:<module>").mkString(File.separator)
-      sqlSessionM.fullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session.__init__").mkString(File.separator)
-      sqlSessionT.fullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session").mkString(File.separator)
+      sessionT.fullName shouldBe Seq("data", "db_session").mkString(".")
+      sessionM.fullName shouldBe Seq("data", "db_session").mkString(".")
+      sqlSessionM.fullName shouldBe Seq("sqlalchemy", "orm.Session.__init__").mkString(".")
+      sqlSessionT.fullName shouldBe Seq("sqlalchemy", "orm.Session").mkString(".")
     }
 
     "recover its full name successfully" in {
       val List(methodFullName) = cpg.call("query").methodFullName.l
-      methodFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session.query").mkString(File.separator)
+      methodFullName shouldBe Seq("sqlalchemy", "orm.Session.query").mkString(".")
     }
 
     "reflect these types as under the type full name" in {
       val Some(ret) = cpg.method("create_session").methodReturn.headOption: @unchecked
-      ret.typeFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session").mkString(File.separator)
+      ret.typeFullName shouldBe Seq("sqlalchemy", "orm.Session").mkString(".")
     }
   }
 
@@ -605,12 +605,12 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |def add_student():
         | pass
         |""".stripMargin,
-      Seq("student", "views.py").mkString(File.separator)
+      Seq("student", "views.py").mkString(".")
     )
 
     "recover the method full name related" in {
       val Some(methodRef) = cpg.methodRef.code("views.add_student").headOption: @unchecked
-      methodRef.methodFullName shouldBe Seq("student", "views.py:<module>.add_student").mkString(File.separator)
+      methodRef.methodFullName shouldBe Seq("student", "views.add_student").mkString(".")
       methodRef.typeFullName shouldBe "<empty>"
     }
   }
@@ -625,7 +625,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "be sufficient to resolve method full names at calls" in {
       val List(call) = cpg.call("query").l
-      call.methodFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session.query").mkString(File.separator)
+      call.methodFullName shouldBe Seq("sqlalchemy", "orm.Session.query").mkString(".")
     }
 
   }
@@ -644,7 +644,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |            print(f"User with username={self.username} already exist")
         |            db.session.rollback()
         |""".stripMargin,
-      Seq("api", "models", "user.py").mkString(File.separator)
+      Seq("api", "models", "user.py").mkString(".")
     ).moreCode(
       """from flask_sqlalchemy import SQLAlchemy
         |
@@ -652,21 +652,21 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |
         |db = SQLAlchemy(app)
         |""".stripMargin,
-      Seq("api", "__init__.py").mkString(File.separator)
+      Seq("api", "__init__.py").mkString(".")
     )
 
     "resolve correct imports via tag nodes" in {
       val List(sqlSessionM: UnknownMethod, sqlSessionT: UnknownTypeDecl, db: ResolvedMember) =
         cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      sqlSessionM.fullName shouldBe Seq("flask_sqlalchemy.py:<module>.SQLAlchemy.__init__").mkString(File.separator)
-      sqlSessionT.fullName shouldBe Seq("flask_sqlalchemy.py:<module>.SQLAlchemy").mkString(File.separator)
-      db.basePath shouldBe Seq("api", "__init__.py:<module>").mkString(File.separator)
+      sqlSessionM.fullName shouldBe Seq("flask_sqlalchemy.SQLAlchemy.__init__").mkString(".")
+      sqlSessionT.fullName shouldBe Seq("flask_sqlalchemy.SQLAlchemy").mkString(".")
+      db.basePath shouldBe Seq("api", "__init__").mkString(".")
       db.memberName shouldBe "db"
     }
 
     "recover a call to `add`" in {
       val Some(addCall) = cpg.call("add").headOption: @unchecked
-      addCall.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.<member>(session).add"
+      addCall.methodFullName shouldBe "flask_sqlalchemy.SQLAlchemy.<member>(session).add"
     }
   }
 
@@ -692,9 +692,9 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "recover the child function `post` path correctly via receiver" in {
       val Some(postCallReceiver) = cpg.identifier("requests").headOption: @unchecked
-      postCallReceiver.typeFullName shouldBe "requests.py:<module>"
+      postCallReceiver.typeFullName shouldBe "requests"
       val Some(postCall) = cpg.call("post").headOption: @unchecked
-      postCall.methodFullName shouldBe "requests.py:<module>.post"
+      postCall.methodFullName shouldBe "requests.post"
     }
   }
 
@@ -709,15 +709,15 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "with the correct identifier and call types" in {
       val Some(postCallReceiver) = cpg.identifier("db").headOption: @unchecked
-      postCallReceiver.typeFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session").mkString(File.separator)
+      postCallReceiver.typeFullName shouldBe Seq("sqlalchemy", "orm.Session").mkString(".")
       val Some(postCall) = cpg.call("query").headOption: @unchecked
-      postCall.methodFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session.query").mkString(File.separator)
+      postCall.methodFullName shouldBe Seq("sqlalchemy", "orm.Session.query").mkString(".")
     }
 
     "reflect these types as under the type full name" in {
       val List(p1, p2) = cpg.method("get_user_by_email").parameter.l
       p1.typeFullName shouldBe "__builtin.str"
-      p2.typeFullName shouldBe Seq("sqlalchemy", "orm.py:<module>.Session").mkString(File.separator)
+      p2.typeFullName shouldBe Seq("sqlalchemy", "orm.Session").mkString(".")
     }
   }
 
@@ -743,7 +743,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, Seq("student", "views.py").mkString(File.separator))
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe Seq("student", "views.py:<module>.all_page").mkString(File.separator)
+    allPageRef.methodFullName shouldBe Seq("student", "views.all_page").mkString(".")
     allPageRef.code shouldBe "views.all_page"
   }
 
@@ -768,7 +768,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, "views.py")
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe "views.py:<module>.all_page"
+    allPageRef.methodFullName shouldBe "views.all_page"
     allPageRef.code shouldBe "views.all_page"
   }
 
@@ -793,7 +793,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, Seq("controller", "views.py").mkString(File.separator))
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe Seq("controller", "views.py:<module>.all_page").mkString(File.separator)
+    allPageRef.methodFullName shouldBe Seq("controller", "views.all_page").mkString(".")
     allPageRef.code shouldBe "views.all_page"
   }
 
@@ -818,7 +818,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, Seq("controller", "views.py").mkString(File.separator))
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe Seq("controller", "views.py:<module>.all_page").mkString(File.separator)
+    allPageRef.methodFullName shouldBe Seq("controller", "views.all_page").mkString(".")
     allPageRef.code shouldBe "all_page"
   }
 
@@ -843,7 +843,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, Seq("student", "views.py").mkString(File.separator))
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe Seq("student", "views.py:<module>.all_page").mkString(File.separator)
+    allPageRef.methodFullName shouldBe Seq("student", "views.all_page").mkString(".")
     allPageRef.code shouldBe "all_page"
   }
 
@@ -869,7 +869,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
       .moreCode(views, Seq("authy", "views.py").mkString(File.separator))
 
     val Some(allPageRef) = cpg.call.methodFullName("django.*[.](path|url)").argument.isMethodRef.headOption: @unchecked
-    allPageRef.methodFullName shouldBe Seq("authy", "views.py:<module>.PasswordChange").mkString(File.separator)
+    allPageRef.methodFullName shouldBe Seq("authy", "views.PasswordChange").mkString(".")
     allPageRef.code shouldBe "PasswordChange"
   }
 
@@ -888,13 +888,13 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "present an appropriate dummy type for direct call returns" in {
       cpg.typeDecl("Foo").inheritsFromTypeFullName.l shouldBe List(
-        Seq("sqlalchemy", "ext", "declarative.py:<module>.declarative_base.<returnValue>").mkString(File.separator)
+        Seq("sqlalchemy", "ext", "declarative.declarative_base.<returnValue>").mkString(".")
       )
     }
 
     "present an appropriate dummy type for call results held by identifiers" in {
       cpg.typeDecl("Bar").inheritsFromTypeFullName.l shouldBe List(
-        Seq("sqlalchemy", "ext", "declarative.py:<module>.declarative_base.<returnValue>").mkString(File.separator)
+        Seq("sqlalchemy", "ext", "declarative.declarative_base.<returnValue>").mkString(".")
       )
     }
   }
@@ -911,7 +911,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "resolve the cls variable" in {
       cpg.method("class_method").parameter.name("cls").typeFullName.headOption shouldBe Some(
-        "Test0.py:<module>.MyClass"
+        "Test0.MyClass"
       )
     }
   }
@@ -939,14 +939,14 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     "resolve correct imports via tag nodes" in {
       val List(djangoModels: UnknownImport, profileT: ResolvedTypeDecl, profileM: ResolvedMethod) =
         cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      djangoModels.path shouldBe Seq("django", "db.py:<module>.models").mkString(File.separator)
-      profileT.fullName shouldBe "models.py:<module>.Profile"
-      profileM.fullName shouldBe "models.py:<module>.Profile.__init__"
+      djangoModels.path shouldBe Seq("django", "db.models").mkString(".")
+      profileT.fullName shouldBe "models.Profile"
+      profileM.fullName shouldBe "models.Profile.__init__"
     }
 
     "resolve the `filter` call" in {
       val Some(call) = cpg.call.nameExact("filter").headOption: @unchecked
-      call.methodFullName shouldBe "models.py:<module>.Profile.<member>(objects).filter"
+      call.methodFullName shouldBe "models.Profile.<member>(objects).filter"
     }
 
   }
@@ -965,7 +965,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |		return self.botoClient
         |
         |""".stripMargin,
-      Seq("lib", "connector.py").mkString(File.separator)
+      Seq("lib", "connector.py").mkString(".")
     ).moreCode(
       """
         |from lib.connector import Connector
@@ -981,16 +981,16 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
     "resolve correct imports via tag nodes" in {
       val List(connectorT: ResolvedTypeDecl, connectorM: ResolvedMethod) =
         cpg.call.where(_.referencedImports).tag.toResolvedImport.toList: @unchecked
-      connectorT.fullName shouldBe Seq("lib", "connector.py:<module>.Connector").mkString(File.separator)
-      connectorM.fullName shouldBe Seq("lib", "connector.py:<module>.Connector.__init__").mkString(File.separator)
+      connectorT.fullName shouldBe Seq("lib", "connector.Connector").mkString(".")
+      connectorM.fullName shouldBe Seq("lib", "connector.Connector.__init__").mkString(".")
     }
 
     "be able to use field accesses as type hints" in {
       val Some(c) = cpg.identifier("c").headOption: @unchecked
-      c.typeFullName shouldBe Seq("lib", "connector.py:<module>.Connector").mkString(File.separator)
+      c.typeFullName shouldBe Seq("lib", "connector.Connector").mkString(".")
       val Some(getBotoClient) = cpg.call.nameExact("getBotoClient").headOption: @unchecked
-      getBotoClient.methodFullName shouldBe Seq("lib", "connector.py:<module>.Connector.getBotoClient").mkString(
-        File.separator
+      getBotoClient.methodFullName shouldBe Seq("lib", "connector.Connector.getBotoClient").mkString(
+        "."
       )
       val Some(getS3Object) = cpg.call.nameExact("getS3Object").headOption: @unchecked
       getS3Object.methodFullName shouldBe "boto.<returnValue>.getS3Object"
@@ -1033,27 +1033,27 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |        redis = await self.get_redis()
         |        await redis.set(key, value, expire=expires)
         |""".stripMargin,
-      Seq("db", "redis.py").mkString(File.separator)
+      Seq("db", "redis.py").mkString(".")
     )
 
     "assert the method properties in RedisDB, especially quoted type hints" in {
       val Some(redisDB) = cpg.typeDecl.nameExact("RedisDB").method.nameExact("<body>").headOption: @unchecked
       val List(instanceM, getRedisM, setM) = redisDB.astOut.isMethod.nameExact("instance", "get_redis", "set").l
 
-      instanceM.methodReturn.typeFullName shouldBe Seq("db", "redis.py:<module>.RedisDB").mkString(File.separator)
-      getRedisM.methodReturn.typeFullName shouldBe "aioredis.py:<module>.Redis"
+      instanceM.methodReturn.typeFullName shouldBe Seq("db", "redis.RedisDB").mkString(".")
+      getRedisM.methodReturn.typeFullName shouldBe "aioredis.Redis"
       setM.methodReturn.typeFullName shouldBe "ANY"
     }
 
     "be able to generate an appropriate dummy value" in {
       val Some(redisSet) = cpg.call.code(".*set.*apiuserscache.*").headOption: @unchecked
-      redisSet.methodFullName shouldBe Seq("db", "redis.py:<module>.RedisDB.set").mkString(File.separator)
+      redisSet.methodFullName shouldBe Seq("db", "redis.RedisDB.set").mkString(".")
     }
 
     "be able to handle a simple call off an alias" in {
       val Some(redisGet) = cpg.call.nameExact("publish_json").headOption: @unchecked
-      redisGet.methodFullName shouldBe Seq("db", "redis.py:<module>.RedisDB.get_redis.publish_json").mkString(
-        File.separator
+      redisGet.methodFullName shouldBe Seq("db", "redis.RedisDB.get_redis.publish_json").mkString(
+        "."
       )
     }
   }
@@ -1068,7 +1068,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |       response = self.fetch_response(request)
         |       token = Token.from_string(response)
         |""".stripMargin,
-      Seq("social_auth", "backends", "contrib", "flickr.py").mkString(File.separator)
+      Seq("social_auth", "backends", "contrib", "flickr.py").mkString(".")
     )
       .moreCode(
         """
@@ -1104,19 +1104,19 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |        token = Token(key, secret)
         |        return token
         |""".stripMargin,
-        Seq("oauth2", "__init__.py").mkString(File.separator)
+        Seq("oauth2", "__init__.py").mkString(".")
       )
 
     "instantiate the return value correctly under `from_string`" in {
       val Some(token) = cpg.method("from_string").ast.isIdentifier.nameExact("token").headOption: @unchecked
-      token.typeFullName shouldBe Seq("oauth2", "__init__.py:<module>.Token").mkString(File.separator)
+      token.typeFullName shouldBe Seq("oauth2", "__init__.Token").mkString(".")
       val Some(fromString) = cpg.method("from_string").methodReturn.headOption: @unchecked
-      fromString.typeFullName shouldBe Seq("oauth2", "__init__.py:<module>.Token").mkString(File.separator)
+      fromString.typeFullName shouldBe Seq("oauth2", "__init__.Token").mkString(".")
     }
 
     "propagate the type in the return value" in {
       val Some(token) = cpg.method("access_token").ast.isIdentifier.nameExact("token").headOption: @unchecked
-      token.typeFullName shouldBe Seq("oauth2", "__init__.py:<module>.Token").mkString(File.separator)
+      token.typeFullName shouldBe Seq("oauth2", "__init__.Token").mkString(".")
     }
 
   }
@@ -1135,7 +1135,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    responses={404: {"description": "Not found"}},
         |)
         |""".stripMargin,
-      Seq("code", "main.py").mkString(File.separator)
+      Seq("code", "main.py").mkString(".")
     ).moreCode(
       """
         |from fastapi import APIRouter
@@ -1147,19 +1147,19 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    return fake_items_db
         |
         |""".stripMargin,
-      Seq("code", "itemsrouter.py").mkString(File.separator)
+      Seq("code", "itemsrouter.py").mkString(".")
     )
 
     "preserve the filename path relative to the root and not themselves" in {
-      val itemsrouter = cpg.identifier.where(_.typeFullName(".*itemsrouter.py:<module>")).l
+      val itemsrouter = cpg.identifier.where(_.typeFullName(".*itemsrouter")).l
       itemsrouter.forall(
-        _.typeFullName == Seq("code", "itemsrouter.py:<module>").mkString(File.separator)
+        _.typeFullName == Seq("code", "itemsrouter").mkString(".")
       ) shouldBe true
     }
 
     "correctly infer the `fastapi` types" in {
-      cpg.identifier("fastapi").forall(_.typeFullName == "fastapi.py:<module>.APIRouter") shouldBe true
-      cpg.identifier("app").forall(_.typeFullName == "fastapi.py:<module>.FastAPI") shouldBe true
+      cpg.identifier("fastapi").forall(_.typeFullName == "fastapi.APIRouter") shouldBe true
+      cpg.identifier("app").forall(_.typeFullName == "fastapi.FastAPI") shouldBe true
     }
 
   }

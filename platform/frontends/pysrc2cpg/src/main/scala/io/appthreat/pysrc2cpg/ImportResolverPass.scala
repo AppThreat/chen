@@ -72,7 +72,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
             case x: TypeDecl => ResolvedTypeDecl(x.fullName)
           }
         if (resolvedEntities.isEmpty) {
-          traversal.filterNot(_.contains("__init__.py")).map(x => UnknownImport(x))
+          traversal.filterNot(_.contains("__init__")).map(x => UnknownImport(x))
         } else {
           resolvedEntities
         }
@@ -80,8 +80,8 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
     }
 
     implicit class CalleeAsInitExt(val name: String) {
-      def asInit: String = if (name.contains("__init__.py")) name
-      else name.replace(".py", s"${JFile.separator}__init__.py")
+      def asInit: String = if (name.contains("__init__")) name
+      else name.replace(".py", s".__init__")
 
       def withInit: Seq[String] = Seq(name, name.asInit)
     }
@@ -105,10 +105,10 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
         // Case 1: Qualified path: import foo.bar => (bar.py or bar/__init__.py)
         val splitFunc = expEntity.split("\\.")
         val name      = splitFunc.tail.mkString(".")
-        s"${splitFunc(0)}.py:<module>$pathSep$name".withInit.toResolvedImport(cpg)
+        s"${splitFunc(0)}.$name".withInit.toResolvedImport(cpg)
       case "" =>
         // Case 2: import of a module: import foo => (foo.py or foo/__init__.py)
-        s"$expEntity.py:<module>".withInit.toResolvedImport(cpg)
+        s"$expEntity.".withInit.toResolvedImport(cpg)
       case _ if membersMatchingImports.nonEmpty =>
         // Case 3: import of a variable: from api import db => (api.py or foo.__init__.py) @ identifier(db)
         membersMatchingImports.map {
@@ -126,22 +126,22 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg) {
         val pyFile    = BFile(codeRoot) / s"$path.py"
         fileOrDir match {
           case f if f.isDirectory && !pyFile.exists =>
-            Seq(s"${path.replaceAll("\\.", sep)}${java.io.File.separator}$expEntity.py:<module>").toResolvedImport(cpg)
+            Seq(s"${path}.$expEntity").toResolvedImport(cpg)
           case f if f.isDirectory && (f / s"$expEntity.py").exists =>
-            Seq(s"${(f / s"$expEntity.py").pathAsString.stripPrefix(codeRoot)}:<module>").toResolvedImport(cpg)
+            Seq(s"${(f / s"$expEntity").pathAsString.stripPrefix(codeRoot).replace(sep, ".")}").toResolvedImport(cpg)
           case _ =>
-            s"${path.replaceAll("\\.", sep)}.py:<module>$pathSep$expEntity".withInit.toResolvedImport(cpg)
+            s"${path}.$expEntity".withInit.toResolvedImport(cpg)
         }
     }).flatMap {
       // If we import the constructor, we also import the type
       case x: ResolvedMethod if isMaybeConstructor =>
-        Seq(ResolvedMethod(Seq(x.fullName, "__init__").mkString(pathSep), alias), ResolvedTypeDecl(x.fullName))
+        Seq(ResolvedMethod(Seq(x.fullName, "__init__").mkString("."), alias), ResolvedTypeDecl(x.fullName))
       // If we import the type, we also import the constructor
       case x: ResolvedTypeDecl if isMaybeConstructor =>
-        Seq(x, ResolvedMethod(Seq(x.fullName, "__init__").mkString(pathSep), alias))
+        Seq(x, ResolvedMethod(Seq(x.fullName, "__init__").mkString("."), alias))
       // If we can determine the import is a constructor, then it is likely not a member
       case x: UnknownImport if isMaybeConstructor =>
-        Seq(UnknownMethod(Seq(x.path, "__init__").mkString(pathSep), alias), UnknownTypeDecl(x.path))
+        Seq(UnknownMethod(Seq(x.path, "__init__").mkString("."), alias), UnknownTypeDecl(x.path))
       case x => Seq(x)
     }.toSet
   }

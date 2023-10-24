@@ -29,7 +29,7 @@ class Semantics private (methodToSemantic: mutable.Map[String, FlowSemantic]) {
 
   /** The map below keeps a mapping between results of a regex and the regex string it matches. e.g.
     *
-    * `path/to/file.py:<module>.Foo.sink` -> `^path.*Foo\\.sink$`
+    * `path/to/file.Foo.sink` -> `^path.*Foo\\.sink$`
     */
   private val regexMatchedFullNames = mutable.HashMap.empty[String, String]
 

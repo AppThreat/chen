@@ -72,7 +72,7 @@ class DynamicTypeHintFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPass[CfgN
     }
 
   private def pythonicTypeNameToImport(fullName: String): String =
-    fullName.replaceFirst("\\.py:<module>", "").replaceAll(Pattern.quote(File.separator), ".")
+    fullName.replaceAll(Pattern.quote(File.separator), ".")
 
   private def setTypeHints(
     diffGraph: BatchedUpdate.DiffGraphBuilder,
@@ -83,10 +83,10 @@ class DynamicTypeHintFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPass[CfgN
   ) = {
     val importFullPath   = ImportStringHandling.combinedPath(importedEntity, typeHint)
     val typeHintFullName = typeHint.replaceFirst(Pattern.quote(alias), importedEntity)
-    val typeFilePath     = typeHintFullName.replaceAll("\\.", Matcher.quoteReplacement(File.separator))
+    val typeFilePath     = typeHintFullName
     val pythonicTypeFullName = importFullPath.split("\\.").lastOption match {
       case Some(typeName) =>
-        typeFilePath.stripSuffix(s"${File.separator}$typeName").concat(s".py:<module>.$typeName")
+        typeFilePath.stripSuffix(s".$typeName").concat(s".$typeName")
       case None => typeHintFullName
     }
     cpg.typeDecl.fullName(s".*${Pattern.quote(pythonicTypeFullName)}").l match {

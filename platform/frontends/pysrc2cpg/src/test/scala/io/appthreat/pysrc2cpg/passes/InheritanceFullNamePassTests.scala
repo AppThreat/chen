@@ -26,8 +26,8 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
 
     "resolve the type being inherited fully" in {
       def bar = cpg.typeDecl("Bar")
-      bar.inheritsFromTypeFullName.l shouldBe Seq("foo.py:<module>.Foo")
-      bar.baseType.fullName.l shouldBe Seq("foo.py:<module>.Foo")
+      bar.inheritsFromTypeFullName.l shouldBe Seq("foo.Foo")
+      bar.baseType.fullName.l shouldBe Seq("foo.Foo")
     }
   }
 
@@ -50,7 +50,7 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
 
     "resolve the type to a type stub from a fully qualified path" in {
       def user = cpg.typeDecl("User")
-      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.py:<module>.Model").mkString(File.separator))
+      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Model").mkString(File.separator))
       // TODO: Empty for now, would require a stub
       user.baseType.fullName.l shouldBe Seq()
     }
@@ -58,7 +58,7 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
     "resolve the type to a type stub from a partially qualified path using an alias" in {
       def user = cpg.typeDecl("CoolUser")
 
-      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.py:<module>.Cool").mkString(File.separator))
+      user.inheritsFromTypeFullName.l shouldBe Seq(Seq("tortoise", "models.Cool").mkString(File.separator))
       // TODO: Empty for now, would require a stub
       user.baseType.fullName.l shouldBe Seq()
     }
@@ -66,7 +66,7 @@ class InheritanceFullNamePassTests extends PySrc2CpgFixture(withOssDataflow = fa
     "resolve the type to a type stub from a shorter qualified path that is extended" in {
       def foo = cpg.typeDecl("Foo")
 
-      foo.inheritsFromTypeFullName.l shouldBe Seq("foo.py:<module>.Bar")
+      foo.inheritsFromTypeFullName.l shouldBe Seq("foo.Bar")
       // TODO: Empty for now, would require a stub
       foo.baseType.fullName.l shouldBe Seq()
     }

@@ -303,9 +303,9 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
       )
 
     val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
-    method.fullName shouldBe "models.py:<module>.Foo.__init__"
+    method.fullName shouldBe "models.Foo.__init__"
     val List(typeDeclFullName) = method.typeDecl.fullName.l
-    typeDeclFullName shouldBe "models.py:<module>.Foo"
+    typeDeclFullName shouldBe "models.Foo"
   }
 
   "lookup of __init__ call even when hidden in base class" in {
@@ -322,9 +322,9 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
       )
 
     val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
-    method.fullName shouldBe "models.py:<module>.Foo.__init__"
+    method.fullName shouldBe "models.Foo.__init__"
     val List(typeDeclFullName) = method.typeDecl.fullName.l
-    typeDeclFullName shouldBe "models.py:<module>.Foo"
+    typeDeclFullName shouldBe "models.Foo"
   }
 
 }
@@ -333,15 +333,15 @@ class RegexDefinedFlowsDataFlowTests
     extends PySrc2CpgFixture(
       withOssDataflow = true,
       extraFlows = List(
-        FlowSemantic.from("^path.*<module>\\.sanitizer$", List((0, 0), (1, 1)), regex = true),
-        FlowSemantic.from("^foo.*<module>\\.sanitizer.*", List((0, 0), (1, 1)), regex = true),
+        FlowSemantic.from("^path.*\\.sanitizer$", List((0, 0), (1, 1)), regex = true),
+        FlowSemantic.from("^foo.*\\.sanitizer.*", List((0, 0), (1, 1)), regex = true),
         FlowSemantic.from("^foo.*\\.create_sanitizer\\.<returnValue>\\.sanitize", List((0, 0), (1, 1)), regex = true),
         FlowSemantic
           .from(
-            "requests.py:<module>.post",
+            "requests.post",
             List((0, 0), (1, "url", -1), (2, "body", -1), (1, "url", 1, "url"), (2, "body", 2, "body"))
           ),
-        FlowSemantic.from("cross_taint.py:<module>.go", List((0, 0), (1, 1), (1, "a", 2, "b")))
+        FlowSemantic.from("cross_taint.go", List((0, 0), (1, 1), (1, "a", 2, "b")))
       )
     ) {
 

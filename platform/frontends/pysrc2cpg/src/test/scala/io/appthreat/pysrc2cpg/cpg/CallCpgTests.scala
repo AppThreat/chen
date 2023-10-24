@@ -168,7 +168,7 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.signature shouldBe ""
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(5)
-      callNode.methodFullName shouldBe "test.py:<module>.func"
+      callNode.methodFullName shouldBe "test.func"
     }
   }
 
@@ -199,14 +199,15 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
           |def bar_func(a, b):
           | return a - b
           |""".stripMargin,
-      Seq("foo", "bar", "__init__.py").mkString(File.separator)
+      Seq("foo", "bar", "__init__.py").mkString(".")
     )
 
     "test that the identifiers are not set to the function pointers but rather the 'ANY' return value" in {
       val List(x, y, z) = cpg.identifier.name("x", "y", "z").l
-      x.typeFullName shouldBe "foo.py:<module>.foo_func.<returnValue>"
-      y.typeFullName shouldBe Seq("foo", "bar", "__init__.py:<module>.bar_func.<returnValue>").mkString(File.separator)
-      z.typeFullName shouldBe "foo.py:<module>.faz.<returnValue>"
+      println(y.typeFullName)
+      x.typeFullName shouldBe "foo.foo_func.<returnValue>"
+      y.typeFullName shouldBe Seq("foo", "bar", "__init__.bar_func.<returnValue>").mkString(".")
+      z.typeFullName shouldBe "foo.faz.<returnValue>"
     }
 
     "test call node properties for normal import from module on root path" in {
@@ -215,7 +216,7 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.signature shouldBe ""
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(6)
-      callNode.methodFullName shouldBe "foo.py:<module>.foo_func"
+      callNode.methodFullName shouldBe "foo.foo_func"
       callNode.callee(NoResolve).isExternal.headOption shouldBe Some(false)
     }
 
@@ -225,7 +226,7 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.signature shouldBe ""
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(7)
-      callNode.methodFullName shouldBe Seq("foo", "bar", "__init__.py:<module>.bar_func").mkString(File.separator)
+      callNode.methodFullName shouldBe Seq("foo", "bar", "__init__.bar_func").mkString(".")
       callNode.callee(NoResolve).isExternal.headOption shouldBe Some(false)
     }
 
@@ -235,7 +236,7 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.signature shouldBe ""
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(8)
-      callNode.methodFullName shouldBe "foo.py:<module>.faz"
+      callNode.methodFullName shouldBe "foo.faz"
       callNode.callee(NoResolve).isExternal.headOption shouldBe Some(false)
     }
   }

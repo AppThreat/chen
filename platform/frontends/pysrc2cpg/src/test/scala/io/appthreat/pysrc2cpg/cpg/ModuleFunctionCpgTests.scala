@@ -9,14 +9,14 @@ class ModuleFunctionCpgTests extends AnyFreeSpec with Matchers {
   lazy val cpg = Py2CpgTestContext.buildCpg("""pass""".stripMargin)
 
   "test module method node properties" in {
-    val methodNode = cpg.method.fullName("test.py:<module>").head
-    methodNode.name shouldBe "<module>"
-    methodNode.fullName shouldBe "test.py:<module>"
+    val methodNode = cpg.method.fullName("test").head
+    methodNode.name shouldBe "test"
+    methodNode.fullName shouldBe "test"
     methodNode.lineNumber shouldBe Some(1)
   }
 
   "test method body" in {
-    val topLevelExprs = cpg.method.fullName("test.py:<module>").topLevelExpressions.l
+    val topLevelExprs = cpg.method.fullName("test").topLevelExpressions.l
     topLevelExprs.size shouldBe 1
     topLevelExprs.isCall.head.code shouldBe "pass"
     topLevelExprs.isCall.head.methodFullName shouldBe "<operator>.pass"

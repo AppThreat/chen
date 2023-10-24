@@ -314,7 +314,7 @@ class ContextStack {
             contextHasVariable = context.variables.contains(name)
 
             val closureBindingId =
-              methodContext.astParent.asInstanceOf[NewMethod].fullName + ":" + name
+              methodContext.astParent.asInstanceOf[NewMethod].fullName + "." + name
 
             if (!contextHasVariable) {
               if (context != moduleMethodContext.get) {

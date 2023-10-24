@@ -79,7 +79,7 @@ class AssignCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test local node" in {
-      cpg.method.name("<module>").local.name("tmp0").headOption should not be empty
+      cpg.method.name("test").local.name("tmp0").headOption should not be empty
     }
 
     "test tmp variable assignment" in {
@@ -127,7 +127,7 @@ class AssignCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test local node" in {
-      cpg.method.name("<module>").local.name("tmp0").headOption should not be empty
+      cpg.method.name("test").local.name("tmp0").headOption should not be empty
     }
 
     "test tmp variable assignment" in {

@@ -9,32 +9,32 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |  pass
         |""".stripMargin)
     "have correct instance class type and typeDecl" in {
-      cpg.typ.name("Foo").fullName.head shouldBe "Test0.py:<module>.Foo"
+      cpg.typ.name("Foo").fullName.head shouldBe "Test0.Foo"
       val typeDecl = cpg.typeDecl.name("Foo").head
-      typeDecl.fullName shouldBe "Test0.py:<module>.Foo"
-      typeDecl.astParent shouldBe cpg.method.name("<module>").head
+      typeDecl.fullName shouldBe "Test0.Foo"
+      typeDecl.astParent shouldBe cpg.method.name("Test0").head
     }
 
     "have correct meta class type and typeDecl" in {
-      cpg.typ.name("Foo<meta>").fullName.head shouldBe "Test0.py:<module>.Foo<meta>"
+      cpg.typ.name("Foo<meta>").fullName.head shouldBe "Test0.Foo<meta>"
       val typeDecl = cpg.typeDecl.name("Foo<meta>").head
-      typeDecl.fullName shouldBe "Test0.py:<module>.Foo<meta>"
-      typeDecl.astParent shouldBe cpg.method.name("<module>").head
+      typeDecl.fullName shouldBe "Test0.Foo<meta>"
+      typeDecl.astParent shouldBe cpg.method.name("Test0").head
     }
 
     "have correct meta class call handler type and typeDecl" in {
       cpg.typ.name("<metaClassCallHandler>").fullName.head shouldBe
-        "Test0.py:<module>.Foo.<metaClassCallHandler>"
+        "Test0.Foo.<metaClassCallHandler>"
       val typeDecl = cpg.typeDecl.name("<metaClassCallHandler>").head
-      typeDecl.fullName shouldBe "Test0.py:<module>.Foo.<metaClassCallHandler>"
+      typeDecl.fullName shouldBe "Test0.Foo.<metaClassCallHandler>"
       typeDecl.astParent shouldBe cpg.typeDecl.name("Foo<meta>").head
     }
 
     "have correct fake new type and typeDecl" in {
       cpg.typ.name("<fakeNew>").fullName.head shouldBe
-        "Test0.py:<module>.Foo.<fakeNew>"
+        "Test0.Foo.<fakeNew>"
       val typeDecl = cpg.typeDecl.name("<fakeNew>").head
-      typeDecl.fullName shouldBe "Test0.py:<module>.Foo.<fakeNew>"
+      typeDecl.fullName shouldBe "Test0.Foo.<fakeNew>"
       typeDecl.astParent shouldBe cpg.typeDecl.name("Foo<meta>").head
     }
   }
@@ -47,7 +47,7 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
           |""".stripMargin)
 
       val handlerMethod = cpg.method.name("<metaClassCallHandler>").head
-      handlerMethod.fullName shouldBe "Test0.py:<module>.Foo.<metaClassCallHandler>"
+      handlerMethod.fullName shouldBe "Test0.Foo.<metaClassCallHandler>"
       handlerMethod.lineNumber shouldBe Some(2)
 
       handlerMethod.parameter.size shouldBe 1
@@ -63,7 +63,7 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
           |""".stripMargin)
 
       val handlerMethod = cpg.method.name("<metaClassCallHandler>").head
-      handlerMethod.fullName shouldBe "Test0.py:<module>.Foo.<metaClassCallHandler>"
+      handlerMethod.fullName shouldBe "Test0.Foo.<metaClassCallHandler>"
       handlerMethod.lineNumber shouldBe Some(2)
 
       handlerMethod.parameter.size shouldBe 1
@@ -79,7 +79,7 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
                        |""".stripMargin)
 
       val func1 = cpg.method.name("func1").head
-      func1.fullName shouldBe "Test0.py:<module>.Foo.func1"
+      func1.fullName shouldBe "Test0.Foo.func1"
     }
 
     "have correct full name for <body> method in class" in {
@@ -88,7 +88,7 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
                        |""".stripMargin)
 
       val func1 = cpg.method.name("<body>").head
-      func1.fullName shouldBe "Test0.py:<module>.Foo.<body>"
+      func1.fullName shouldBe "Test0.Foo.<body>"
     }
 
     "have correct parameter index for method in class" in {

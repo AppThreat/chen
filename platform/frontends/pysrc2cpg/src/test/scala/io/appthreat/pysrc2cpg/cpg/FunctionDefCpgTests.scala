@@ -12,9 +12,9 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
         |""".stripMargin)
 
     "test method node properties" in {
-      val methodNode = cpg.method.fullName("test.py:<module>.func").head
+      val methodNode = cpg.method.fullName("test.func").head
       methodNode.name shouldBe "func"
-      methodNode.fullName shouldBe "test.py:<module>.func"
+      methodNode.fullName shouldBe "test.func"
       methodNode.filename shouldBe "test.py"
       methodNode.isExternal shouldBe false
       methodNode.lineNumber shouldBe Some(1)
@@ -24,28 +24,28 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test method modifier" in {
-      cpg.method.fullName("test.py:<module>.func").isVirtual.nonEmpty shouldBe true
+      cpg.method.fullName("test.func").isVirtual.nonEmpty shouldBe true
     }
 
     "test method parameter nodes" in {
-      val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+      val parameter1 = cpg.method.fullName("test.func").parameter.order(1).head
       parameter1.name shouldBe "a"
       parameter1.index shouldBe 1
       parameter1.typeFullName shouldBe Constants.ANY
 
-      val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+      val parameter2 = cpg.method.fullName("test.func").parameter.order(2).head
       parameter2.name shouldBe "b"
       parameter2.index shouldBe 2
       parameter2.typeFullName shouldBe Constants.ANY
     }
 
     "test method return node" in {
-      cpg.method.fullName("test.py:<module>.func").methodReturn.code.head shouldBe "RET"
-      cpg.method.fullName("test.py:<module>.func").methodReturn.typeFullName.head shouldBe Constants.ANY
+      cpg.method.fullName("test.func").methodReturn.code.head shouldBe "RET"
+      cpg.method.fullName("test.func").methodReturn.typeFullName.head shouldBe Constants.ANY
     }
 
     "test method body" in {
-      val topLevelExprs = cpg.method.fullName("test.py:<module>.func").topLevelExpressions.l
+      val topLevelExprs = cpg.method.fullName("test.func").topLevelExpressions.l
       topLevelExprs.size shouldBe 1
       topLevelExprs.isCall.head.code shouldBe "pass"
       topLevelExprs.isCall.head.methodFullName shouldBe "<operator>.pass"
@@ -53,7 +53,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
 
     "test function method ref" in {
       cpg.methodRef("func").referencedMethod.fullName.head shouldBe
-        "test.py:<module>.func"
+        "test.func"
     }
 
     "test assignment of method ref to local variable" in {
@@ -62,21 +62,21 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test existence of local variable in module function" in {
-      cpg.method.fullName("test.py:<module>").local.name.l should contain("func")
+      cpg.method.fullName("test").local.name.l should contain("func")
     }
 
     "test corresponding type, typeDecl and binding" in {
       val bindingTypeDecl =
-        cpg.method.fullName("test.py:<module>.func").referencingBinding.bindingTypeDecl.head
+        cpg.method.fullName("test.func").referencingBinding.bindingTypeDecl.head
 
       bindingTypeDecl.name shouldBe "func"
-      bindingTypeDecl.fullName shouldBe "test.py:<module>.func"
+      bindingTypeDecl.fullName shouldBe "test.func"
       bindingTypeDecl.filename shouldBe "test.py"
       bindingTypeDecl.lineNumber shouldBe Some(1)
       bindingTypeDecl.columnNumber shouldBe Some(1)
 
       bindingTypeDecl.referencingType.name.head shouldBe "func"
-      bindingTypeDecl.referencingType.fullName.head shouldBe "test.py:<module>.func"
+      bindingTypeDecl.referencingType.fullName.head shouldBe "test.func"
     }
   }
 
@@ -86,12 +86,12 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
         |""".stripMargin)
 
     "test method parameter nodes" in {
-      val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+      val parameter1 = cpg.method.fullName("test.func").parameter.order(1).head
       parameter1.name shouldBe "a"
       parameter1.index shouldBe 1
       parameter1.typeFullName shouldBe Constants.ANY
 
-      val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+      val parameter2 = cpg.method.fullName("test.func").parameter.order(2).head
       parameter2.name shouldBe "b"
       parameter2.index shouldBe 2
       parameter2.typeFullName shouldBe Constants.ANY
@@ -104,17 +104,17 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
         |""".stripMargin)
 
     "test method parameter nodes" in {
-      val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+      val parameter1 = cpg.method.fullName("test.func").parameter.order(1).head
       parameter1.name shouldBe "a"
       parameter1.index shouldBe 1
       parameter1.typeFullName shouldBe Constants.ANY
 
-      val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+      val parameter2 = cpg.method.fullName("test.func").parameter.order(2).head
       parameter2.name shouldBe "b"
       parameter2.index shouldBe 2
       parameter2.typeFullName shouldBe Constants.ANY
 
-      val parameter3 = cpg.method.fullName("test.py:<module>.func").parameter.order(3).head
+      val parameter3 = cpg.method.fullName("test.func").parameter.order(3).head
       parameter3.name shouldBe "c"
       parameter3.index shouldBe 3
       parameter3.typeFullName shouldBe Constants.ANY

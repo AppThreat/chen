@@ -65,7 +65,7 @@ class MemberCpgTests extends AnyFreeSpec with Matchers {
 
     "should have the MEMBER fn attached to the meta class and have col+line no" in {
       val List(memberFn) = cpg.typeDecl("Foo").where(node => node.member.name("replace")).l
-      memberFn.fullName shouldBe "test.py:<module>.Foo"
+      memberFn.fullName shouldBe "test.Foo"
       memberFn.lineNumber shouldBe Some(2)
       memberFn.columnNumber shouldBe Some(1)
     }

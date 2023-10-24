@@ -77,7 +77,7 @@ class PythonAstVisitor(relFileName: String, protected val nodeToCode: NodeToCode
     val namespaceBlockNode =
       nodeBuilder.namespaceBlockNode(
         Constants.GLOBAL_NAMESPACE,
-        relFileName + ":" + Constants.GLOBAL_NAMESPACE,
+        relFileName.replace(".py", "") + "." + Constants.GLOBAL_NAMESPACE,
         relFileName
       )
     edgeBuilder.astEdge(namespaceBlockNode, fileNode, 1)
@@ -94,7 +94,7 @@ class PythonAstVisitor(relFileName: String, protected val nodeToCode: NodeToCode
 
     val moduleMethodNode =
       createMethod(
-        "<module>",
+        methodFullName.split("\\.").last,
         methodFullName,
         Some("<module>"),
         parameterProvider = () => MethodParameters.empty(),
@@ -378,7 +378,8 @@ class PythonAstVisitor(relFileName: String, protected val nodeToCode: NodeToCode
 
     // For every method that is a module, the local variables can be imported by other modules. This behaviour is
     // much like fields so they are to be linked as fields to this method type
-    if (name == "<module>") contextStack.createMemberLinks(typeDeclNode, edgeBuilder.astEdge)
+    if (name == "<module>" || scopeName.getOrElse("") == "<module>")
+      contextStack.createMemberLinks(typeDeclNode, edgeBuilder.astEdge)
 
     contextStack.pop()
     edgeBuilder.astEdge(typeDeclNode, contextStack.astParent, contextStack.order.getAndInc)
@@ -2001,10 +2002,11 @@ class PythonAstVisitor(relFileName: String, protected val nodeToCode: NodeToCode
 
   private def calculateFullNameFromContext(name: String): String = {
     val contextQualName = contextStack.qualName
+    val subContext      = if (name != "<module>") "." + name else ""
     if (contextQualName != "") {
-      relFileName + ":" + contextQualName + "." + name
+      relFileName.replace(".py", "") + contextQualName.replace("<module>", "") + "." + name
     } else {
-      relFileName + ":" + name
+      relFileName.replace(".py", "") + subContext
     }
   }
 }
