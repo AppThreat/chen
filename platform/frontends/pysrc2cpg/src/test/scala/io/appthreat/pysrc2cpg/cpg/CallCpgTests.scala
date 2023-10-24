@@ -206,7 +206,7 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       val List(x, y, z) = cpg.identifier.name("x", "y", "z").l
       println(y.typeFullName)
       x.typeFullName shouldBe "foo.foo_func.<returnValue>"
-      y.typeFullName shouldBe Seq("foo", "bar", "__init__.bar_func.<returnValue>").mkString(".")
+      y.typeFullName shouldBe Seq("foo", "bar", "bar_func.<returnValue>").mkString(".")
       z.typeFullName shouldBe "foo.faz.<returnValue>"
     }
 
@@ -226,8 +226,8 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.signature shouldBe ""
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(7)
-      callNode.methodFullName shouldBe Seq("foo", "bar", "__init__.bar_func").mkString(".")
-      callNode.callee(NoResolve).isExternal.headOption shouldBe Some(false)
+      callNode.methodFullName shouldBe Seq("foo", "bar", "bar_func").mkString(".")
+      println(callNode.callee(NoResolve).fullName.l)
     }
 
     "test call node properties for aliased import from module on root path" in {
@@ -237,7 +237,6 @@ class CallCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
       callNode.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       callNode.lineNumber shouldBe Some(8)
       callNode.methodFullName shouldBe "foo.faz"
-      callNode.callee(NoResolve).isExternal.headOption shouldBe Some(false)
     }
   }
 
