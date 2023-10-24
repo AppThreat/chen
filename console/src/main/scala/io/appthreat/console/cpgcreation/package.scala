@@ -75,7 +75,7 @@ package object cpgcreation {
     * io.appthreat.c2cpg.parser.FileDefaults
     */
   private def isCFile(filename: String): Boolean =
-    Seq(".c", ".cc", ".cpp", ".h", ".hpp", ".hh").exists(filename.endsWith)
+    Seq(".c", ".cc", ".cpp", ".h", ".hpp", ".hh", ".ccm", ".cxxm", ".c++m").exists(filename.endsWith)
 
   private def isYamlFile(filename: String): Boolean =
     Seq(".yml", ".yaml").exists(filename.endsWith)
