@@ -2019,7 +2019,9 @@ object PythonAstVisitor {
   // There is a corresponding list in policies which needs to be updated if this one is updated and vice versa.
   val builtinFunctionsV3: Iterable[String] = Iterable(
     "abs",
+    "aiter",
     "all",
+    "anext",
     "any",
     "ascii",
     "bin",
@@ -2051,6 +2053,7 @@ object PythonAstVisitor {
     "locals",
     "map",
     "max",
+    "memoryview",
     "min",
     "next",
     "oct",

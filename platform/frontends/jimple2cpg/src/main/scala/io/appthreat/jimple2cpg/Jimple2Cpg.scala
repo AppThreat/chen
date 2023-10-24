@@ -8,7 +8,6 @@ import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.appthreat.x2cpg.datastructures.Global
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
-import io.appthreat.x2cpg.passes.taggers.CdxPass
 import io.shiftleft.codepropertygraph.Cpg
 import org.slf4j.LoggerFactory
 import soot.options.Options
@@ -120,7 +119,6 @@ class Jimple2Cpg extends X2CpgFrontend[Config] {
       .createAndApply()
     DeclarationRefPass(cpg).createAndApply()
     new ConfigFileCreationPass(cpg).createAndApply()
-    new CdxPass(cpg).createAndApply()
   }
 
   override def createCpg(config: Config): Try[Cpg] =

@@ -7,6 +7,7 @@ import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
+import java.io.File
 import java.util.regex.Pattern
 import scala.collection.mutable
 import scala.io.Source
@@ -45,6 +46,16 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
 
   private val BOM_JSON_FILE = ".*(bom|cdx).json"
 
+  private def toPyModuleForm(str: String) = {
+    if (str.nonEmpty && str.count(_ == '.') > 0) {
+      s".*${str.split("\\.").take(2).mkString(Pattern.quote(File.separator))}.*"
+    } else if (str.nonEmpty) {
+      s"$str${Pattern.quote(File.separator)}.*"
+    } else {
+      str
+    }
+  }
+
   override def run(dstGraph: DiffGraphBuilder): Unit = {
     atom.configFile.name(BOM_JSON_FILE).content.foreach { cdxData =>
       val cdxJson         = parse(cdxData).getOrElse(Json.Null)
@@ -72,12 +83,19 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
             .filterNot(_.contains("mock"))
             .filterNot(_.endsWith(".lock"))
             .filterNot(_.endsWith(".json"))
+            .filterNot(_.endsWith(".txt"))
             .foreach { (pkg: String) =>
               var bpkg = pkg.takeWhile(_ != '$')
-              if (language == Languages.JAVA || language == Languages.JAVASRC)
+              if (language == Languages.JAVA || language == Languages.JAVASRC) {
                 bpkg = bpkg.split("\\.").take(PKG_NS_SIZE).mkString(".").concat(".*")
-              if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) bpkg = s".*${bpkg}.*"
-              if (!donePkgs.contains(bpkg)) {
+                bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
+              }
+              if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
+                bpkg = s".*${bpkg}.*"
+                bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
+              }
+              if (language == Languages.PYTHON || language == Languages.PYTHONSRC) bpkg = toPyModuleForm(bpkg)
+              if (bpkg.nonEmpty && !donePkgs.contains(bpkg)) {
                 donePkgs.put(bpkg, true)
                 if (!containsRegex(bpkg)) {
                   atom.call.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
