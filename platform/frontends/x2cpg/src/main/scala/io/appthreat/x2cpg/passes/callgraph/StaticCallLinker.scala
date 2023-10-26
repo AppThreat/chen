@@ -39,7 +39,7 @@ class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg) {
         linkStaticCall(call, dstGraph)
       case DispatchTypes.DYNAMIC_DISPATCH =>
       // Do nothing
-      case _ => logger.warn(s"Unknown dispatch type on dynamic CALL ${call.code}")
+      case _ => logger.debug(s"Unknown dispatch type on dynamic CALL ${call.code}")
     }
   }
 

@@ -26,7 +26,7 @@ class CodeToCpg(cpg: Cpg, inputProvider: Iterable[InputProvider], schemaValidati
       diffGraph.absorb(astVisitor.getDiffGraph)
     } catch {
       case exception: Throwable =>
-        logger.warn(s"Failed to convert file ${inputPair.relFileName}", exception)
+        logger.debug(s"Failed to convert file ${inputPair.relFileName}", exception)
         Iterator.empty
     }
   }

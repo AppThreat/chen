@@ -47,8 +47,11 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
   private val BOM_JSON_FILE = ".*(bom|cdx).json"
 
   private def toPyModuleForm(str: String) = {
-    if (str.nonEmpty && str.count(_ == '.') > 0) {
-      s".*${str.split("\\.").take(2).mkString(Pattern.quote(File.separator))}.*"
+    if (str.nonEmpty) {
+      val tmpParts = str.split("\\.")
+      if (str.count(_ == '.') > 1) s"${tmpParts.take(2).mkString(Pattern.quote(File.separator))}.*"
+      else if (str.count(_ == '.') == 1) s"${tmpParts.head}.py:<module>.*"
+      else str
     } else if (str.nonEmpty) {
       s"$str${Pattern.quote(File.separator)}.*"
     } else {
@@ -110,6 +113,9 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
                     atom.identifier.code(bpkg).newTagNode(compPurl).store()(dstGraph)
                     atom.identifier.code(bpkg).inCall.newTagNode(compPurl).store()(dstGraph)
                   }
+                  if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
+                    atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compPurl).store()(dstGraph)
+                  }
                 }
                 if (compType != "library") {
                   if (!containsRegex(bpkg)) {
@@ -126,6 +132,9 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
                       atom.call.code(bpkg).argument.newTagNode(compType).store()(dstGraph)
                       atom.identifier.code(bpkg).newTagNode(compType).store()(dstGraph)
                       atom.identifier.code(bpkg).inCall.newTagNode(compType).store()(dstGraph)
+                    }
+                    if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
+                      atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compType).store()(dstGraph)
                     }
                   }
                 }

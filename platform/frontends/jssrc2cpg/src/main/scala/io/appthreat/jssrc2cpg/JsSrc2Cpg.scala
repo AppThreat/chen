@@ -22,7 +22,6 @@ import io.appthreat.jssrc2cpg.passes.{
 import io.appthreat.jssrc2cpg.passes.*
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
-import io.appthreat.x2cpg.passes.callgraph.NaiveCallLinker
 import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
 import io.appthreat.x2cpg.utils.{HashUtil, Report}
 import io.shiftleft.codepropertygraph.Cpg
@@ -80,8 +79,7 @@ object JsSrc2Cpg {
       new ConstClosurePass(cpg),
       new ImportResolverPass(cpg),
       new JavaScriptTypeRecoveryPass(cpg, typeRecoveryConfig),
-      new JavaScriptTypeHintCallLinker(cpg),
-      new NaiveCallLinker(cpg)
+      new JavaScriptTypeHintCallLinker(cpg)
     )
   }
 

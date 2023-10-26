@@ -34,13 +34,13 @@ class MethodDecoratorPass(cpg: Cpg) extends CpgPass(cpg) {
 
         val method = parameterIn.astIn.headOption
         if (method.isEmpty) {
-          logger.warn("Parameter without method encountered: " + parameterIn.toString)
+          logger.debug("Parameter without method encountered: " + parameterIn.toString)
         } else {
           if (parameterIn.typeFullName == null) {
             val evalType = parameterIn.typ
             dstGraph.addEdge(parameterOut, evalType, EdgeTypes.EVAL_TYPE)
             if (!loggedMissingTypeFullName) {
-              logger.warn("Using deprecated CPG format with missing TYPE_FULL_NAME on METHOD_PARAMETER_IN nodes.")
+              logger.debug("Using deprecated CPG format with missing TYPE_FULL_NAME on METHOD_PARAMETER_IN nodes.")
               loggedMissingTypeFullName = true
             }
           }
@@ -50,7 +50,7 @@ class MethodDecoratorPass(cpg: Cpg) extends CpgPass(cpg) {
           dstGraph.addEdge(parameterIn, parameterOut, EdgeTypes.PARAMETER_LINK)
         }
       } else if (!loggedDeprecatedWarning) {
-        logger.warn("Using deprecated CPG format with PARAMETER_LINK edges")
+        logger.debug("Using deprecated CPG format with PARAMETER_LINK edges")
         loggedDeprecatedWarning = true
       }
     }

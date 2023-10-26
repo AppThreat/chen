@@ -1,20 +1,9 @@
 package io.appthreat.console.cpgcreation
 
 import io.appthreat.console.FrontendConfig
-import io.appthreat.pysrc2cpg.{
-  DynamicTypeHintFullNamePass,
-  ImportResolverPass,
-  ImportsPass,
-  NewMain,
-  Py2CpgOnFileSystemConfig,
-  PythonInheritanceNamePass,
-  PythonTypeHintCallLinker,
-  PythonTypeRecoveryPass
-}
-import io.appthreat.console.FrontendConfig
+import io.appthreat.pysrc2cpg.*
 import io.appthreat.x2cpg.X2Cpg
 import io.appthreat.x2cpg.passes.base.AstLinkerPass
-import io.appthreat.x2cpg.passes.callgraph.NaiveCallLinker
 import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
 import io.shiftleft.codepropertygraph.Cpg
 
@@ -46,7 +35,6 @@ case class PythonSrcCpgGenerator(config: FrontendConfig, rootPath: Path) extends
       case None         => XTypeRecoveryConfig()
     new PythonTypeRecoveryPass(cpg, typeRecoveryConfig).createAndApply()
     new PythonTypeHintCallLinker(cpg).createAndApply()
-    new NaiveCallLinker(cpg).createAndApply()
 
     // Some of passes above create new methods, so, we
     // need to run the ASTLinkerPass one more time
