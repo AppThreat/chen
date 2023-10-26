@@ -17,7 +17,7 @@ object MavenDependencies {
     ) match {
       case Success(lines) => lines
       case Failure(exception) =>
-        logger.warn(
+        logger.debug(
           s"Retrieval of compile class path via maven return with error.\n" +
             "The compile class path may be missing or partial.\n" +
             "Results will suffer from poor type information.\n\n" +

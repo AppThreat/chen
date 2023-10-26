@@ -40,10 +40,10 @@ class CdgPass(cpg: Cpg) extends ForkJoinParallelCpgPass[Method](cpg) {
           val nodeLabel  = postDomFrontierNode.label
           val containsIn = postDomFrontierNode._containsIn
           if (containsIn == null || !containsIn.hasNext) {
-            logger.warn(s"Found CDG edge starting at $nodeLabel node. This is most likely caused by an invalid CFG.")
+            logger.debug(s"Found CDG edge starting at $nodeLabel node. This is most likely caused by an invalid CFG.")
           } else {
             val method = containsIn.next()
-            logger.warn(
+            logger.debug(
               s"Found CDG edge starting at $nodeLabel node. This is most likely caused by an invalid CFG." +
                 s" Method: ${method match {
                     case m: Method => m.fullName;

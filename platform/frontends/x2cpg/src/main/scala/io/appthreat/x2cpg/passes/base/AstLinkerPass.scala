@@ -35,7 +35,7 @@ class AstLinkerPass(cpg: Cpg) extends CpgPass(cpg) with LinkingUtil {
         case NodeTypes.TYPE_DECL       => typeDeclFullNameToNode(cpg, astParentFullName)
         case NodeTypes.NAMESPACE_BLOCK => namespaceBlockFullNameToNode(cpg, astParentFullName)
         case _ =>
-          logger.warn(
+          logger.debug(
             s"Invalid AST_PARENT_TYPE=$astParentFullName;" +
               s" astChild LABEL=${astChild.label};" +
               s" astChild FULL_NAME=$astChildFullName"

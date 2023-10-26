@@ -5,7 +5,6 @@ import io.appthreat.dataflowengineoss.queryengine.EngineContext
 import io.appthreat.dataflowengineoss.semanticsloader.FlowSemantic
 import io.appthreat.x2cpg.X2Cpg
 import io.appthreat.x2cpg.passes.base.AstLinkerPass
-import io.appthreat.x2cpg.passes.callgraph.NaiveCallLinker
 import io.appthreat.x2cpg.testfixtures.{Code2CpgFixture, LanguageFrontend, TestCpg}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.semanticcpg.language.{ICallResolver, NoResolve}
@@ -41,7 +40,6 @@ class PySrcTestCpg extends TestCpg with PythonFrontend {
     new DynamicTypeHintFullNamePass(this).createAndApply()
     new PythonTypeRecoveryPass(this).createAndApply()
     new PythonTypeHintCallLinker(this).createAndApply()
-    new NaiveCallLinker(this).createAndApply()
 
     // Some of passes above create new methods, so, we
     // need to run the ASTLinkerPass one more time

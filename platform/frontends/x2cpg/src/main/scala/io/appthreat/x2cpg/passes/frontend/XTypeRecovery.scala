@@ -194,7 +194,7 @@ object XTypeRecovery {
           } else if (x == 1) {
             logger.debug("Intra-procedural type propagation enabled")
           } else if (x > 5) {
-            logger.warn(s"Large iteration count of $x will take a while to terminate")
+            logger.debug(s"Large iteration count of $x will take a while to terminate")
           }
           success
         }
@@ -695,7 +695,9 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
         val callCode = if (c.code.contains("(")) c.code.substring(c.code.indexOf("(")) else c.code
         XTypeRecovery.dummyMemberType(callCode, f.canonicalName, pathSep)
       case xs =>
-        logger.warn(s"Unhandled field structure ${xs.map(x => (x.label, x.code)).mkString(",")} @ ${debugLocation(fa)}")
+        logger.debug(
+          s"Unhandled field structure ${xs.map(x => (x.label, x.code)).mkString(",")} @ ${debugLocation(fa)}"
+        )
         wrapName("<unknown>")
     }
   }
@@ -724,7 +726,7 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
       val fieldName = getFieldName(fa)
       associateTypes(LocalVar(fieldName), fa, getLiteralType(l))
     } else {
-      logger.warn(s"Unhandled call assigned to literal point ${c.name} @ ${debugLocation(c)}")
+      logger.debug(s"Unhandled call assigned to literal point ${c.name} @ ${debugLocation(c)}")
       Set.empty
     }
   }
@@ -802,7 +804,7 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
           Set(fieldName.stripSuffix(s"${XTypeRecovery.DummyMemberLoad}$pathSep${fi.canonicalName}"))
         )
       case _ =>
-        logger.warn(s"Unable to assign identifier '${i.name}' to field load '$fieldName' @ ${debugLocation(i)}")
+        logger.debug(s"Unable to assign identifier '${i.name}' to field load '$fieldName' @ ${debugLocation(i)}")
         Set.empty
     }
   }

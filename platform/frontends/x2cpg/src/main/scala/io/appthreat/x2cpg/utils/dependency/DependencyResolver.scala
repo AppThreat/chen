@@ -34,7 +34,7 @@ object DependencyResolver {
       else if (isGradleBuildFile(buildFile))
         getCoordinatesForGradleProject(buildFile.getParent, defaultGradleConfigurationName)
       else {
-        logger.warn(s"Found unsupported build file $buildFile")
+        logger.debug(s"Found unsupported build file $buildFile")
         Nil
       }
     }.flatten
@@ -49,7 +49,7 @@ object DependencyResolver {
     val lines = ExternalCommand.run(s"gradle dependencies --configuration $configuration", projectDir.toString) match {
       case Success(lines) => lines
       case Failure(exception) =>
-        logger.warn(
+        logger.debug(
           s"Could not retrieve dependencies for Gradle project at path `$projectDir`\n" +
             exception.getMessage
         )
@@ -71,7 +71,7 @@ object DependencyResolver {
       } else if (isGradleBuildFile(buildFile)) {
         getDepsForGradleProject(params, buildFile.getParent)
       } else {
-        logger.warn(s"Found unsupported build file $buildFile")
+        logger.debug(s"Found unsupported build file $buildFile")
         Nil
       }
     }.flatten
@@ -90,7 +90,7 @@ object DependencyResolver {
     GradleDependencies.get(projectDir, gradleProjectName, gradleConfiguration) match {
       case Some(deps) => Some(deps)
       case None =>
-        logger.warn(s"Could not download Gradle dependencies for project at path `$projectDir`")
+        logger.debug(s"Could not download Gradle dependencies for project at path `$projectDir`")
         None
     }
   }

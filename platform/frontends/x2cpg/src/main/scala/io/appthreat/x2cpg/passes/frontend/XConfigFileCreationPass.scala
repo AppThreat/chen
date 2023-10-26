@@ -25,7 +25,7 @@ abstract class XConfigFileCreationPass(cpg: Cpg) extends ConcurrentWriterCpgPass
 
   override def generateParts(): Array[File] =
     if (rootDir.isBlank) {
-      logger.warn("Unable to recover project directory for configuration file pass.")
+      logger.debug("Unable to recover project directory for configuration file pass.")
       Array.empty
     } else {
       Try(File(rootDir)) match {
@@ -50,7 +50,7 @@ abstract class XConfigFileCreationPass(cpg: Cpg) extends ConcurrentWriterCpgPass
         diffGraph.addNode(configNode)
 
       case Failure(error) =>
-        logger.warn(s"Unable to create config file node for ${file.canonicalPath}: $error")
+        logger.debug(s"Unable to create config file node for ${file.canonicalPath}: $error")
     }
   }
 

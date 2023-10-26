@@ -147,7 +147,7 @@ object GradleDependencies {
               logger.debug(s"Found Gradle projects: ${validProjectNames.mkString(",")}")
               if (!validProjectNames.contains(projectName)) {
                 val validProjectNamesStr = validProjectNames.mkString(",")
-                logger.warn(
+                logger.debug(
                   s"The provided Gradle project name `$projectName` is is not part of the valid project names: `$validProjectNamesStr`"
                 )
                 None
@@ -159,13 +159,13 @@ object GradleDependencies {
             }
           } catch {
             case t: Throwable =>
-              logger.warn(s"Caught exception while trying use Gradle connection: ${t.getMessage}")
+              logger.debug(s"Caught exception while trying use Gradle connection: ${t.getMessage}")
               logger.debug(s"Full exception: ", t)
               None
           }
         }
       case Failure(t) =>
-        logger.warn(s"Caught exception while trying fetch Gradle project information: ${t.getMessage}")
+        logger.debug(s"Caught exception while trying fetch Gradle project information: ${t.getMessage}")
         logger.debug(s"Full exception: ", t)
         None
     }
@@ -182,7 +182,7 @@ object GradleDependencies {
       ) match {
         case Success(_) => Some(out.toString)
         case Failure(ex) =>
-          logger.warn(s"Caught exception while executing Gradle task named `$taskName`:", ex.getMessage)
+          logger.debug(s"Caught exception while executing Gradle task named `$taskName`:", ex.getMessage)
           logger.debug(s"Full exception: ", ex)
           None
       }
@@ -215,7 +215,7 @@ object GradleDependencies {
           logger.debug(s"Resolved `${result.size}` dependency files.")
           Some(result)
         case Failure(ex) =>
-          logger.warn(s"Caught exception while executing Gradle task: ${ex.getMessage}")
+          logger.debug(s"Caught exception while executing Gradle task: ${ex.getMessage}")
           logger.debug(s"Gradle task execution stdout: \n$stdoutStream")
           logger.debug(s"Gradle task execution stderr: \n$stderrStream")
           None
@@ -234,7 +234,7 @@ object GradleDependencies {
         .filter(_.path.getFileName.toString == Constants.jarInsideAarFileName)
         .toList
     if (classesJarEntries.size != 1) {
-      logger.warn(s"Found aar file without `classes.jar` inside at path ${aar.path}")
+      logger.debug(s"Found aar file without `classes.jar` inside at path ${aar.path}")
       outDir.delete()
       None
     } else {
@@ -257,7 +257,7 @@ object GradleDependencies {
     logger.debug(s"Fetching Gradle project information at path `$projectDir` with project name `$projectName`.")
     getGradleProjectInfo(projectDir, projectName) match {
       case Some(projectInfo) if projectInfo.gradleVersionMajorMinor()._1 < 5 =>
-        logger.warn(s"Unsupported Gradle version `${projectInfo.gradleVersion}`")
+        logger.debug(s"Unsupported Gradle version `${projectInfo.gradleVersion}`")
         None
       case Some(projectInfo) =>
         Try(File.newTemporaryDirectory(tempDirPrefix).deleteOnExit()) match {
@@ -288,22 +288,22 @@ object GradleDependencies {
                       }
                     }
                   case Failure(ex) =>
-                    logger.warn(s"Caught exception while trying to establish a Gradle connection: ${ex.getMessage}")
+                    logger.debug(s"Caught exception while trying to establish a Gradle connection: ${ex.getMessage}")
                     logger.debug(s"Full exception: ", ex)
                     None
                 }
               case Failure(ex) =>
-                logger.warn(s"Could not create temporary file for Gradle init script: ${ex.getMessage}")
+                logger.debug(s"Could not create temporary file for Gradle init script: ${ex.getMessage}")
                 logger.debug(s"Full exception: ", ex)
                 None
             }
           case Failure(ex) =>
-            logger.warn(s"Could not create temporary directory for saving dependency files: ${ex.getMessage}")
+            logger.debug(s"Could not create temporary directory for saving dependency files: ${ex.getMessage}")
             logger.debug("Full exception: ", ex)
             None
         }
       case None =>
-        logger.warn("Could not fetch Gradle project information")
+        logger.debug("Could not fetch Gradle project information")
         None
     }
   }
