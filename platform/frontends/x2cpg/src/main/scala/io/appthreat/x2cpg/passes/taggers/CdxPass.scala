@@ -42,6 +42,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
       "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
     )
 
+  private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
+
   private def containsRegex(str: String) = Pattern.quote(str) == str || str.contains("*")
 
   private val BOM_JSON_FILE = ".*(bom|cdx).json"
@@ -68,6 +70,10 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
       if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
         JS_REQUEST_PATTERNS.foreach(p => atom.call.code(p).newTagNode("framework-input").store()(dstGraph))
         JS_RESPONSE_PATTERNS.foreach(p => atom.call.code(p).newTagNode("framework-output").store()(dstGraph))
+      }
+      if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
+        PY_REQUEST_PATTERNS
+          .foreach(p => atom.method.fullName(p).parameter.newTagNode("framework-input").store()(dstGraph))
       }
       components.foreach { comp =>
         val PURL_TYPE               = "purl"
