@@ -121,6 +121,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
                   }
                   if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
                     atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compPurl).store()(dstGraph)
+                    atom.identifier.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
                   }
                 }
                 if (compType != "library") {

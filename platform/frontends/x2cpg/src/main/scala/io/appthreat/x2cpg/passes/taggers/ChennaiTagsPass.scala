@@ -20,11 +20,12 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom) {
   private val FRAMEWORK_OUTPUT = "framework-output"
 
   private val PYTHON_ROUTES_CALL_REGEXES =
-    Array("django/(conf/)?urls.py:<module>.(path|re_path|url).*", ".*(route|web\\.).*")
+    Array("django/(conf/)?urls.py:<module>.(path|re_path|url).*", ".*(route|web\\.|add_resource).*")
   private val PYTHON_ROUTES_DECORATORS_REGEXES = Array(
-    ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*"
+    ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*",
+    ".*def (get|post|put)\\("
   )
-  private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|form).*"
+  private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
   private def tagPythonRoutes(dstGraph: DiffGraphBuilder): Unit = {
     PYTHON_ROUTES_CALL_REGEXES.foreach { r =>
       atom.call
