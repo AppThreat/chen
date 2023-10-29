@@ -23,7 +23,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom) {
     Array("django/(conf/)?urls.py:<module>.(path|re_path|url).*", ".*(route|web\\.|add_resource).*")
   private val PYTHON_ROUTES_DECORATORS_REGEXES = Array(
     ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*",
-    ".*def (get|post|put)\\("
+    ".*def\\s(get|post|put)\\(.*"
   )
   private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
   private def tagPythonRoutes(dstGraph: DiffGraphBuilder): Unit = {
@@ -34,28 +34,23 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom) {
         .isLiteral
         .newTagNode(FRAMEWORK_ROUTE)
         .store()(dstGraph)
-
-      PYTHON_ROUTES_DECORATORS_REGEXES.foreach { r =>
-        def decoratedMethods = atom.methodRef
-          .where(_.inCall.code(r).argument)
-          ._refOut
-          .collectAll[Method]
-        decoratedMethods.call.assignment
-          .code(HTTP_METHODS_REGEX)
-          .argument
-          .isIdentifier
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
-        decoratedMethods
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
-        decoratedMethods.parameter
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
-      }
-      atom.ret
-        .where(_.method.tag.name(FRAMEWORK_INPUT))
-        .newTagNode(FRAMEWORK_OUTPUT)
+    }
+    PYTHON_ROUTES_DECORATORS_REGEXES.foreach { r =>
+      def decoratedMethods = atom.methodRef
+        .where(_.inCall.code(r).argument)
+        ._refOut
+        .collectAll[Method]
+      decoratedMethods.call.assignment
+        .code(HTTP_METHODS_REGEX)
+        .argument
+        .isIdentifier
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(dstGraph)
+      decoratedMethods
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(dstGraph)
+      decoratedMethods.parameter
+        .newTagNode(FRAMEWORK_INPUT)
         .store()(dstGraph)
     }
   }
