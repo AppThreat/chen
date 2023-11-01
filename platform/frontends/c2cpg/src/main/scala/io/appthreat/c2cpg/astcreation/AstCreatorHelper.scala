@@ -144,7 +144,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
       "enum",
       "struct",
       "interface",
-      "class"
+      "class",
+      "naked",
+      "export",
+      "module",
+      "import"
     )
 
   protected def cleanType(rawType: String, stripKeywords: Boolean = true): String = {
