@@ -485,23 +485,33 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
   }
 
   protected def astForNode(node: IASTNode): Ast = {
-    node match {
-      case expr: IASTExpression             => astForExpression(expr)
-      case name: IASTName                   => astForIdentifier(name)
-      case decl: IASTDeclSpecifier          => astForIdentifier(decl)
-      case l: IASTInitializerList           => astForInitializerList(l)
-      case c: ICPPASTConstructorInitializer => astForCPPASTConstructorInitializer(c)
-      case d: ICASTDesignatedInitializer    => astForCASTDesignatedInitializer(d)
-      case d: ICPPASTDesignatedInitializer  => astForCPPASTDesignatedInitializer(d)
-      case d: CASTArrayRangeDesignator      => astForCASTArrayRangeDesignator(d)
-      case d: CPPASTArrayRangeDesignator    => astForCPPASTArrayRangeDesignator(d)
-      case d: ICASTArrayDesignator          => nullSafeAst(d.getSubscriptExpression)
-      case d: ICPPASTArrayDesignator        => nullSafeAst(d.getSubscriptExpression)
-      case d: ICPPASTFieldDesignator        => astForNode(d.getName)
-      case d: ICASTFieldDesignator          => astForNode(d.getName)
-      case decl: ICPPASTDecltypeSpecifier   => astForDecltypeSpecifier(decl)
-      case arrMod: IASTArrayModifier        => astForArrayModifier(arrMod)
-      case _                                => notHandledYet(node)
+    if (config.includeFunctionBodies) {
+      node match {
+        case expr: IASTExpression             => astForExpression(expr)
+        case name: IASTName                   => astForIdentifier(name)
+        case decl: IASTDeclSpecifier          => astForIdentifier(decl)
+        case l: IASTInitializerList           => astForInitializerList(l)
+        case c: ICPPASTConstructorInitializer => astForCPPASTConstructorInitializer(c)
+        case d: ICASTDesignatedInitializer    => astForCASTDesignatedInitializer(d)
+        case d: ICPPASTDesignatedInitializer  => astForCPPASTDesignatedInitializer(d)
+        case d: CASTArrayRangeDesignator      => astForCASTArrayRangeDesignator(d)
+        case d: CPPASTArrayRangeDesignator    => astForCPPASTArrayRangeDesignator(d)
+        case d: ICASTArrayDesignator          => nullSafeAst(d.getSubscriptExpression)
+        case d: ICPPASTArrayDesignator        => nullSafeAst(d.getSubscriptExpression)
+        case d: ICPPASTFieldDesignator        => astForNode(d.getName)
+        case d: ICASTFieldDesignator          => astForNode(d.getName)
+        case decl: ICPPASTDecltypeSpecifier   => astForDecltypeSpecifier(decl)
+        case arrMod: IASTArrayModifier        => astForArrayModifier(arrMod)
+        case _                                => notHandledYet(node)
+      }
+    } else {
+      node match {
+        case expr: IASTExpression           => astForExpression(expr)
+        case name: IASTName                 => astForIdentifier(name)
+        case decl: IASTDeclSpecifier        => astForIdentifier(decl)
+        case decl: ICPPASTDecltypeSpecifier => astForDecltypeSpecifier(decl)
+        case _                              => notHandledYet(node)
+      }
     }
   }
 

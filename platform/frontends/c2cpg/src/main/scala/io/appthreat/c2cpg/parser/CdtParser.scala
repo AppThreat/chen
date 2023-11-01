@@ -45,6 +45,22 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private val includePaths     = parserConfig.userIncludePaths
   private val log              = new DefaultLogService
 
+  private var stayCpp: Boolean = false;
+
+  private val cScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
+    definedSymbols,
+    (includePaths ++ parserConfig.systemIncludePathsC).map(_.toString).toArray,
+    parserConfig.macroFiles.map(_.toString).toArray,
+    parserConfig.includeFiles.map(_.toString).toArray
+  )
+
+  private val cppScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
+    definedSymbols,
+    (includePaths ++ parserConfig.systemIncludePathsCPP).map(_.toString).toArray,
+    parserConfig.macroFiles.map(_.toString).toArray,
+    parserConfig.includeFiles.map(_.toString).toArray
+  )
+
   // Setup indexing
   var index: Option[IIndex] = Option(EmptyCIndex.INSTANCE)
   if (config.useProjectIndex) {
@@ -71,17 +87,11 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
     }
   }
 
-  private def createScannerInfo(file: Path): ExtendedScannerInfo = {
-    val additionalIncludes =
-      if (FileDefaults.isCPPFile(file.toString)) parserConfig.systemIncludePathsCPP
-      else parserConfig.systemIncludePathsC
-    new ExtendedScannerInfo(
-      definedSymbols,
-      (includePaths ++ additionalIncludes).map(_.toString).toArray,
-      parserConfig.macroFiles.map(_.toString).toArray,
-      parserConfig.includeFiles.map(_.toString).toArray
-    )
-  }
+  private def createScannerInfo(file: Path): ExtendedScannerInfo =
+    if (stayCpp || FileDefaults.isCPPFile(file.toString)) {
+      stayCpp = true
+      cppScannerInfo
+    } else cScannerInfo
 
   private def parseInternal(file: Path): ParseResult = {
     val realPath = File(file)
