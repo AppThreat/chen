@@ -144,7 +144,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
       "enum",
       "struct",
       "interface",
-      "class"
+      "class",
+      "naked",
+      "export",
+      "module",
+      "import"
     )
 
   protected def cleanType(rawType: String, stripKeywords: Boolean = true): String = {
@@ -485,6 +489,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
   }
 
   protected def astForNode(node: IASTNode): Ast = {
+    if (config.includeFunctionBodies) astForNodeFull(node) else astForNodePartial(node)
+  }
+
+  protected def astForNodeFull(node: IASTNode): Ast = {
     node match {
       case expr: IASTExpression             => astForExpression(expr)
       case name: IASTName                   => astForIdentifier(name)
@@ -502,6 +510,16 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
       case decl: ICPPASTDecltypeSpecifier   => astForDecltypeSpecifier(decl)
       case arrMod: IASTArrayModifier        => astForArrayModifier(arrMod)
       case _                                => notHandledYet(node)
+    }
+  }
+
+  protected def astForNodePartial(node: IASTNode): Ast = {
+    node match {
+      case expr: IASTExpression           => astForExpression(expr)
+      case name: IASTName                 => astForIdentifier(name)
+      case decl: IASTDeclSpecifier        => astForIdentifier(decl)
+      case decl: ICPPASTDecltypeSpecifier => astForDecltypeSpecifier(decl)
+      case _                              => notHandledYet(node)
     }
   }
 

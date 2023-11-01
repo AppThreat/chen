@@ -271,6 +271,12 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode) { 
     astForExpression(packExpansionExpression.getPattern)
 
   protected def astForExpression(expression: IASTExpression): Ast = {
+    if (config.includeFunctionBodies)
+      astForExpressionFull(expression)
+    else astForExpressionPartial(expression)
+  }
+
+  protected def astForExpressionFull(expression: IASTExpression): Ast = {
     val r = expression match {
       case lit: IASTLiteralExpression                  => astForLiteral(lit)
       case un: IASTUnaryExpression                     => astForUnaryExpression(un)
@@ -290,6 +296,19 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode) { 
       case lambdaExpression: ICPPASTLambdaExpression   => astForMethodRefForLambda(lambdaExpression)
       case cExpr: IGNUASTCompoundStatementExpression   => astForCompoundStatementExpression(cExpr)
       case pExpr: ICPPASTPackExpansionExpression       => astForPackExpansionExpression(pExpr)
+      case _                                           => notHandledYet(expression)
+    }
+    asChildOfMacroCall(expression, r)
+  }
+
+  protected def astForExpressionPartial(expression: IASTExpression): Ast = {
+    val r = expression match {
+      case call: IASTFunctionCallExpression            => astForCallExpression(call)
+      case typeId: IASTTypeIdExpression                => astForTypeIdExpression(typeId)
+      case fieldRef: IASTFieldReference                => astForFieldReference(fieldRef)
+      case newExpression: ICPPASTNewExpression         => astForNewExpression(newExpression)
+      case typeIdInit: IASTTypeIdInitializerExpression => astForTypeIdInitExpression(typeIdInit)
+      case c: ICPPASTSimpleTypeConstructorExpression   => astForConstructorExpression(c)
       case _                                           => notHandledYet(expression)
     }
     asChildOfMacroCall(expression, r)

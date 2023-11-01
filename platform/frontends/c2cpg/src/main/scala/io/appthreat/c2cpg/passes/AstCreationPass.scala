@@ -33,6 +33,7 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
         FileDefaults.SOURCE_FILE_EXTENSIONS ++ FileDefaults.HEADER_FILE_EXTENSIONS,
         config.withDefaultIgnoredFilesRegex(DefaultIgnoredFolders)
       )
+      .sortWith(_.compareToIgnoreCase(_) > 0)
       .toArray
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit = {
