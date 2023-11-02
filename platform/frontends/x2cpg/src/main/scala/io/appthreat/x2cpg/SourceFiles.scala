@@ -26,7 +26,7 @@ object SourceFiles {
 
   private def isIgnoredByDefault(filePath: String, config: X2CpgConfig[_]): Boolean = {
     val relPath = toRelativePath(filePath, config.inputPath)
-    if (config.defaultIgnoredFilesRegex.exists(_.matches(relPath))) {
+    if (config.defaultIgnoredFilesRegex.exists(_.matches(relPath)) || File(filePath).isSymbolicLink) {
       logger.debug(s"'$relPath' ignored by default")
       true
     } else {
@@ -85,7 +85,7 @@ object SourceFiles {
 
     val matchingFiles = files.filter(hasSourceFileExtension).map(_.toString)
     val matchingFilesFromDirs = dirs
-      .flatMap(_.listRecursively(VisitOptions.follow))
+      .flatMap(_.listRecursively(VisitOptions.default))
       .filter(hasSourceFileExtension)
       .map(_.pathAsString)
 
