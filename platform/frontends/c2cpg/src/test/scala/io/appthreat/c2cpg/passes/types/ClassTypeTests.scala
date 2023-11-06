@@ -130,6 +130,34 @@ class ClassTypeTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT) {
     "should allow traversing from type to enclosing file" in {
       cpg.typeDecl.file.filter(_.name.endsWith(FileDefaults.CPP_EXT)).l should not be empty
     }
+    "handling C++ classes (code example 3)" should {
+      "generate correct call fullnames" in {
+        val cpg = code(
+          """
+            |class B {
+            |public:
+            |  void foo2() {}
+            |};
+            |
+            |class A {
+            |private:
+            |  B b;
+            |
+            |public:
+            |  void foo1() {
+            |    b.foo2();
+            |   }
+            |};
+            |
+            |int main() {
+            |  A a;
+            |  a.foo1();
+            |  return 0;
+            |}""".stripMargin)
+        cpg.call("foo1").methodFullName.toSetMutable shouldBe Set("A.foo1")
+        cpg.call("foo2").methodFullName.toSetMutable shouldBe Set("B.foo2")
+      }
+    }
   }
 
 }

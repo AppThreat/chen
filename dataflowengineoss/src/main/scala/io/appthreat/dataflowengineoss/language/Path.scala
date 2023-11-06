@@ -2,15 +2,10 @@ package io.appthreat.dataflowengineoss.language
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.semanticcpg.language.Show
+import me.shadaj.scalapy.py
 import org.apache.commons.lang.StringUtils
 
 import scala.collection.mutable.{ArrayBuffer, Set}
-
-import me.shadaj.scalapy.py
-import me.shadaj.scalapy.py.SeqConverters
-import py.PyQuote
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 case class Path(elements: List[AstNode]) {
   def resultPairs(): List[(String, Option[Integer])] = {
@@ -30,9 +25,10 @@ case class Path(elements: List[AstNode]) {
 
 object Path {
 
-  val DefaultMaxTrackedWidth = 128
+  private val DefaultMaxTrackedWidth = 128
   // TODO replace with dynamic rendering based on the terminal's width, e.g. in scala-repl-pp
-  lazy val maxTrackedWidth = sys.env.get("CHEN_DATAFLOW_TRACKED_WIDTH").map(_.toInt).getOrElse(DefaultMaxTrackedWidth)
+  private lazy val maxTrackedWidth =
+    sys.env.get("CHEN_DATAFLOW_TRACKED_WIDTH").map(_.toInt).getOrElse(DefaultMaxTrackedWidth)
 
   private def tagAsString(tag: Iterator[Tag]) =
     if (tag.nonEmpty) tag.name.mkString(", ") else ""
@@ -50,13 +46,14 @@ object Path {
           val method = cfgNode.method
           sinkCode = method.fullName
       }
-      caption = s"Source: ${srcNode.code}"
+      caption = if (srcNode.code != "this") s"Source: ${srcNode.code}" else ""
       if (srcTags.nonEmpty) caption += s"\nSource Tags: ${srcTags}"
       caption += s"\nSink: ${sinkCode}\n"
       if (sinkTags.nonEmpty) caption += s"Sink Tags: ${sinkTags}\n"
     }
-    val tableRows  = ArrayBuffer[Array[String]]()
-    val addedPaths = Set[String]()
+    var hasCheckLike: Boolean = false;
+    val tableRows             = ArrayBuffer[Array[String]]()
+    val addedPaths            = Set[String]()
     path.elements.foreach { astNode =>
       val nodeType     = astNode.getClass.getSimpleName
       val lineNumber   = astNode.lineNumber.getOrElse("").toString
@@ -155,9 +152,11 @@ object Path {
           val tracked = StringUtils.normalizeSpace(StringUtils.abbreviate(statement, maxTrackedWidth))
           tableRows += Array[String]("cfgNode", fileLocation, methodName, "", tracked, tags)
       }
+      if (isCheckLike(tags)) hasCheckLike = true
       addedPaths += s"${fileName}#${lineNumber}"
     }
     try {
+      if (hasCheckLike) caption = s"This flow is safe with mitigation in place.\n$caption"
       printFlows(tableRows, caption)
     } catch {
       case exc: Exception =>
@@ -165,7 +164,16 @@ object Path {
     caption
   }
 
-  def printFlows(tableRows: ArrayBuffer[Array[String]], caption: String): Unit = {
+  private def addEmphasis(str: String, isCheckLike: Boolean): String = if (isCheckLike) s"[green]$str[/green]" else str
+
+  private def simplifyFilePath(str: String): String = str.replace("src/main/java/", "").replace("src/main/scala/", "")
+
+  private def isCheckLike(tagsStr: String): Boolean =
+    tagsStr.contains("valid") || tagsStr.contains("encrypt") || tagsStr.contains("encode") || tagsStr.contains(
+      "transform"
+    ) || tagsStr.contains("check")
+
+  private def printFlows(tableRows: ArrayBuffer[Array[String]], caption: String): Unit = {
     val richTableLib = py.module("rich.table")
     val richConsole  = py.module("chenpy.logger").console
     val table        = richTableLib.Table(highlight = true, expand = true, caption = caption)
@@ -174,14 +182,14 @@ object Path {
       {
         val end_section         = row.head == "call"
         val trow: Array[String] = row.tail
-        if (!trow(4).startsWith("<operator>.fieldAccess")) {
+        if (!trow(3).startsWith("<operator") && trow(3) != "<empty>" && trow(3) != "RET") {
           val tagsStr: String = if (trow(4).nonEmpty) s"Tags: ${trow(4)}" else ""
           val methodStr       = s"${trow(1)}\n${tagsStr}"
           table.add_row(
-            trow(0),
+            simplifyFilePath(trow(0)),
             methodStr.stripMargin,
-            trow(2),
-            trow(3).takeWhile(_ != '\n'),
+            addEmphasis(trow(2), isCheckLike(tagsStr)),
+            addEmphasis(trow(3).takeWhile(_ != '\n'), isCheckLike(tagsStr)),
             end_section = end_section
           )
         }

@@ -25,9 +25,9 @@ libraryDependencies ++= Seq(
   "io.circe"             %% "circe-parser"      % CirceVersion,
   "org.zeroturnaround"    % "zt-zip"            % ZeroturnaroundVersion,
   "com.lihaoyi"          %% "os-lib"            % "0.9.1",
-  "com.lihaoyi"          %% "pprint"            % "0.7.3",
+  "com.lihaoyi"          %% "pprint"            % "0.8.1",
   "com.lihaoyi"          %% "cask"              % CaskVersion,
-  "me.shadaj"            %% "scalapy-core"      % "0.5.2",
+  "dev.scalapy"          %% "scalapy-core"      % "0.5.3",
   "org.scala-lang.modules" % "scala-asm"        % "9.5.0-scala-1",
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test
 )

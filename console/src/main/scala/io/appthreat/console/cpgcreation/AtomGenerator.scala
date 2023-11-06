@@ -34,8 +34,6 @@ case class AtomGenerator(
   override def isAvailable: Boolean = true
 
   override def applyPostProcessingPasses(atom: Cpg): Cpg = {
-    new CdxPass(atom).createAndApply()
-    new ChennaiTagsPass(atom).createAndApply()
     atom
   }
 
