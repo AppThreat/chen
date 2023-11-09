@@ -7,7 +7,7 @@ import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes, Operators
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.operatorextension.OpNodes
-import OpNodes.{Assignment, FieldAccess}
+import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.{Assignment, FieldAccess}
 import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.BatchedUpdate
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -266,14 +266,26 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
     case x => x.getKnownTypes.nonEmpty
   }
 
-  protected def assignments: Iterator[Assignment] =
-    cu.ast.isCall.nameExact(Operators.assignment).map(new OpNodes.Assignment(_))
+  protected def assignments: Iterator[Assignment] = cu match {
+    case x: File =>
+      x.method.flatMap(_._callViaContainsOut).nameExact(Operators.assignment).map(new OpNodes.Assignment(_))
+    case x: Method => x.flatMap(_._callViaContainsOut).nameExact(Operators.assignment).map(new OpNodes.Assignment(_))
+    case x         => x.ast.isCall.nameExact(Operators.assignment).map(new OpNodes.Assignment(_))
+  }
 
   protected def members: Iterator[Member] = cu.ast.isMember
 
-  protected def returns: Iterator[Return] = cu.ast.isReturn
+  protected def returns: Iterator[Return] = cu match {
+    case x: File   => x.method.flatMap(_._returnViaContainsOut)
+    case x: Method => x._returnViaContainsOut
+    case x         => x.ast.isReturn
+  }
 
-  protected def importNodes: Iterator[Import] = cu.ast.isCall.referencedImports
+  protected def importNodes: Iterator[Import] = cu match {
+    case x: File   => x.method.flatMap(_._callViaContainsOut).referencedImports
+    case x: Method => x.file.method.flatMap(_._callViaContainsOut).referencedImports
+    case x         => x.ast.isCall.referencedImports
+  }
 
   override def compute(): Boolean = try {
     // Set known aliases that point to imports for local and external methods/modules

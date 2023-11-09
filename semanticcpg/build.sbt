@@ -4,7 +4,7 @@ libraryDependencies ++= Seq(
   "io.shiftleft"  %% "codepropertygraph" % Versions.cpg,
   "com.michaelpollmeier" %% "scala-repl-pp" % Versions.scalaReplPP,
   "org.json4s"    %% "json4s-native"     % Versions.json4s,
-  "me.shadaj"     %% "scalapy-core"      % "0.5.2",
+  "dev.scalapy"     %% "scalapy-core"      % "0.5.3",
   "org.scalatest" %% "scalatest"         % Versions.scalatest % Test
 )
 

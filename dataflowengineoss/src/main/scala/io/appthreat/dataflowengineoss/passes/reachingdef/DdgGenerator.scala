@@ -352,13 +352,14 @@ private class UsageAnalyzer(
   private def sameVariable(use: StoredNode, inElement: StoredNode): Boolean = {
     inElement match {
       case param: MethodParameterIn =>
-        nodeToString(use).contains(param.name)
+        nodeToString(use).contains(param.name) || nodeToString(use).contains(param.code)
       case call: Call if indirectionAccessSet.contains(call.name) =>
         call.argumentOption(1).exists(x => nodeToString(use).contains(x.code))
       case call: Call =>
         nodeToString(use).contains(call.code)
-      case identifier: Identifier => nodeToString(use).contains(identifier.code)
-      case _                      => false
+      case identifier: Identifier =>
+        nodeToString(use).contains(identifier.name) || nodeToString(use).contains(identifier.code)
+      case _ => false
     }
   }
 

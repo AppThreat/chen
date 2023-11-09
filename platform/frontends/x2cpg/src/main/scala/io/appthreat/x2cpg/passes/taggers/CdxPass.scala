@@ -83,92 +83,96 @@ class CdxPass(atom: Cpg) extends CpgPass(atom) {
         val descTags   = keywords.filter(k => compDescription.toLowerCase().contains(" " + k)).take(TAGS_COUNT)
         val properties = comp.hcursor.downField("properties").focus.flatMap(_.asArray).getOrElse(Vector.empty)
         properties.foreach { ns =>
-          val nsstr = ns.hcursor.downField("value").as[String].getOrElse("")
-          nsstr
-            .split("(\n|,)")
-            .filterNot(_.startsWith("java."))
-            .filterNot(_.startsWith("com.sun"))
-            .filterNot(_.contains("test"))
-            .filterNot(_.contains("mock"))
-            .filterNot(_.endsWith(".lock"))
-            .filterNot(_.endsWith(".json"))
-            .filterNot(_.endsWith(".txt"))
-            .foreach { (pkg: String) =>
-              var bpkg = pkg.takeWhile(_ != '$')
-              if (language == Languages.JAVA || language == Languages.JAVASRC) {
-                bpkg = bpkg.split("\\.").take(PKG_NS_SIZE).mkString(".").concat(".*")
-                bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
-              }
-              if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
-                bpkg = s".*${bpkg}.*"
-                bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
-              }
-              if (language == Languages.PYTHON || language == Languages.PYTHONSRC) bpkg = toPyModuleForm(bpkg)
-              if (bpkg.nonEmpty && !donePkgs.contains(bpkg)) {
-                donePkgs.put(bpkg, true)
-                if (!containsRegex(bpkg)) {
-                  atom.call.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  atom.method.parameter.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(compPurl).store()(dstGraph)
-                } else {
-                  atom.call.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  atom.method.parameter.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  atom.method.fullName(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
-                    atom.call.code(bpkg).argument.newTagNode(compPurl).store()(dstGraph)
-                    atom.identifier.code(bpkg).newTagNode(compPurl).store()(dstGraph)
-                    atom.identifier.code(bpkg).inCall.newTagNode(compPurl).store()(dstGraph)
-                  }
-                  if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
-                    atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compPurl).store()(dstGraph)
-                    atom.identifier.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
-                  }
+          val nsstr  = ns.hcursor.downField("value").as[String].getOrElse("")
+          val nsname = ns.hcursor.downField("name").as[String].getOrElse("")
+          // Skip the SrcFile property
+          if (nsname != "SrcFile") {
+            nsstr
+              .split("(\n|,)")
+              .filterNot(_.startsWith("java."))
+              .filterNot(_.startsWith("com.sun"))
+              .filterNot(_.contains("test"))
+              .filterNot(_.contains("mock"))
+              .foreach { (pkg: String) =>
+                var bpkg = pkg.takeWhile(_ != '$')
+                if (language == Languages.JAVA || language == Languages.JAVASRC) {
+                  bpkg = bpkg.split("\\.").take(PKG_NS_SIZE).mkString(".").concat(".*")
+                  bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
                 }
-                if (compType != "library") {
+                if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
+                  bpkg = s".*${bpkg}.*"
+                  bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
+                }
+                if (language == Languages.PYTHON || language == Languages.PYTHONSRC) bpkg = toPyModuleForm(bpkg)
+                if (bpkg.nonEmpty && !donePkgs.contains(bpkg)) {
+                  donePkgs.put(bpkg, true)
                   if (!containsRegex(bpkg)) {
-                    atom.call.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
-                    atom.call.typeFullNameExact(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
-                    atom.method.parameter.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
-                    atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(compType).store()(dstGraph)
+                    atom.call.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.identifier.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.method.parameter.typeFullNameExact(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(compPurl).store()(dstGraph)
                   } else {
-                    atom.call.typeFullName(bpkg).newTagNode(compType).store()(dstGraph)
-                    atom.call.typeFullName(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
-                    atom.method.parameter.typeFullName(bpkg).newTagNode(compType).store()(dstGraph)
-                    atom.method.fullName(bpkg).newTagNode(compType).store()(dstGraph)
+                    atom.call.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.identifier.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.method.parameter.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    atom.method.fullName(bpkg).newTagNode(compPurl).store()(dstGraph)
                     if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
-                      atom.call.code(bpkg).argument.newTagNode(compType).store()(dstGraph)
-                      atom.identifier.code(bpkg).newTagNode(compType).store()(dstGraph)
-                      atom.identifier.code(bpkg).inCall.newTagNode(compType).store()(dstGraph)
+                      atom.call.code(bpkg).argument.newTagNode(compPurl).store()(dstGraph)
+                      atom.identifier.code(bpkg).newTagNode(compPurl).store()(dstGraph)
+                      atom.identifier.code(bpkg).inCall.newTagNode(compPurl).store()(dstGraph)
                     }
                     if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
-                      atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compType).store()(dstGraph)
+                      atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compPurl).store()(dstGraph)
+                      atom.identifier.typeFullName(bpkg).newTagNode(compPurl).store()(dstGraph)
+                    }
+                  }
+                  if (compType != "library") {
+                    if (!containsRegex(bpkg)) {
+                      atom.call.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
+                      atom.call.typeFullNameExact(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
+                      atom.method.parameter.typeFullNameExact(bpkg).newTagNode(compType).store()(dstGraph)
+                      atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(compType).store()(dstGraph)
+                    } else {
+                      atom.call.typeFullName(bpkg).newTagNode(compType).store()(dstGraph)
+                      atom.call.typeFullName(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
+                      atom.method.parameter.typeFullName(bpkg).newTagNode(compType).store()(dstGraph)
+                      atom.method.fullName(bpkg).newTagNode(compType).store()(dstGraph)
+                      if (language == Languages.JSSRC || language == Languages.JAVASCRIPT) {
+                        atom.call.code(bpkg).argument.newTagNode(compType).store()(dstGraph)
+                        atom.identifier.code(bpkg).newTagNode(compType).store()(dstGraph)
+                        atom.identifier.code(bpkg).inCall.newTagNode(compType).store()(dstGraph)
+                      }
+                      if (language == Languages.PYTHON || language == Languages.PYTHONSRC) {
+                        atom.call.where(_.methodFullName(bpkg)).argument.newTagNode(compType).store()(dstGraph)
+                      }
+                    }
+                  }
+                  if (compType == "framework") {
+                    def frameworkAnnotatedMethod = atom.annotation
+                      .fullName(bpkg)
+                      .method
+
+                    frameworkAnnotatedMethod.parameter
+                      .newTagNode(s"$compType-input")
+                      .store()(dstGraph)
+                    atom.ret
+                      .where(_.method.annotation.fullName(bpkg))
+                      .newTagNode(s"$compType-output")
+                      .store()(dstGraph)
+                  }
+                  descTags.foreach { t =>
+                    atom.call.typeFullName(bpkg).newTagNode(t).store()(dstGraph)
+                    atom.identifier.typeFullName(bpkg).newTagNode(t).store()(dstGraph)
+                    atom.method.parameter.typeFullName(bpkg).newTagNode(t).store()(dstGraph)
+                    if (!containsRegex(bpkg)) {
+                      atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(t).store()(dstGraph)
+                    } else {
+                      atom.method.fullName(bpkg).newTagNode(t).store()(dstGraph)
                     }
                   }
                 }
-                if (compType == "framework") {
-                  def frameworkAnnotatedMethod = atom.annotation
-                    .fullName(bpkg)
-                    .method
-
-                  frameworkAnnotatedMethod.parameter
-                    .newTagNode(s"$compType-input")
-                    .store()(dstGraph)
-                  atom.ret
-                    .where(_.method.annotation.fullName(bpkg))
-                    .newTagNode(s"$compType-output")
-                    .store()(dstGraph)
-                }
-                descTags.foreach { t =>
-                  atom.call.typeFullName(bpkg).newTagNode(t).store()(dstGraph)
-                  atom.method.parameter.typeFullName(bpkg).newTagNode(t).store()(dstGraph)
-                  if (!containsRegex(bpkg)) {
-                    atom.method.fullName(s"${Pattern.quote(bpkg)}.*").newTagNode(t).store()(dstGraph)
-                  } else {
-                    atom.method.fullName(bpkg).newTagNode(t).store()(dstGraph)
-                  }
-                }
               }
-            }
+          }
         }
       }
     }

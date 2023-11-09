@@ -57,7 +57,9 @@ abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPas
   }
 
   protected def resolveInheritedTypeFullName(td: TypeDecl, builder: DiffGraphBuilder): Seq[TypeDeclBase] = {
-    val qualifiedNamesInScope = td.file.ast
+    val callsOfInterest     = td.file.method.flatMap(_._callViaContainsOut)
+    val typeDeclsOfInterest = td.file.typeDecl
+    val qualifiedNamesInScope = (callsOfInterest ++ typeDeclsOfInterest)
       .flatMap(extractTypeDeclFromNode)
       .filterNot(_.endsWith(moduleName))
       .l
