@@ -1,0 +1,39 @@
+diff --git a/build.sbt b/build.sbt
+index 30f005d..16e9759 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -41,18 +41,18 @@ ThisBuild / libraryDependencies ++= Seq(
+ ThisBuild / compile / javacOptions ++= Seq(
+   "-g", // debug symbols
+   "-Xlint",
+-  "--release=17"
++  "--release=21"
+ ) ++ {
+   // fail early if users with JDK8 try to run this
+   val javaVersion = sys.props("java.specification.version").toFloat
+-  assert(javaVersion.toInt >= 17, s"this build requires JDK17+ - you're using $javaVersion")
++  assert(javaVersion.toInt >= 21, s"this build requires JDK21+ - you're using $javaVersion")
+   Nil
+ }
+ 
+ ThisBuild / scalacOptions ++= Seq(
+   "-deprecation", // Emit warning and location for usages of deprecated APIs.
+   "--release",
+-  "17",
++  "21",
+ )
+ 
+ 
+diff --git a/dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala b/dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
+index 00c4297..97822ab 100644
+--- a/dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
++++ b/dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
+@@ -28,7 +28,7 @@ class Engine(context: EngineContext):
+ 
+     private val logger: Logger = LoggerFactory.getLogger(this.getClass)
+     private val executorService: ExecutorService =
+-        Executors.newWorkStealingPool(2)
++        Executors.newVirtualThreadPerTaskExecutor()
+     private val completionService =
+         new ExecutorCompletionService[TaskSummary](executorService)
+ 

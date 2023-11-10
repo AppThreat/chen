@@ -15,7 +15,7 @@ chen container image has everything needed to get started.
 
 ### Jupyter notebook with docker compose
 
-Use the docker compose from this repo to try chennai with Jupyter notebook.
+Use the docker compose from this repo to try chennai with Jupyter Notebook.
 
 ```shell
 git clone https://github.com/AppThreat/chen
@@ -69,7 +69,7 @@ To download the chen distribution.
 chen --download
 ```
 
-To generate custom graphs and models with atom for data science, download the scientific pack which installs support for PyTorch ecosystem. [conda](https://docs.conda.io/projects/conda/en/stable/user-guide/install/index.html) is recommended for best experience.
+To generate custom graphs and models with atom for data science, download the scientific pack which installs support for the PyTorch ecosystem. [conda](https://docs.conda.io/projects/conda/en/stable/user-guide/install/index.html) is recommended for the best experience.
 
 ```shell
 chen --download --with-science
@@ -176,7 +176,7 @@ chennai> help
 1 error found
 ```
 
-This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the below environment variables below are set correctly.
+This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the environment variables below are set correctly.
 
 - SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python311
 - JAVA_TOOL_OPTIONS - jna.library.path must be set to the python lib directory
