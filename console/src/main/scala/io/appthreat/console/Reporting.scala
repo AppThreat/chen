@@ -3,43 +3,40 @@ package io.appthreat.console
 import java.io.OutputStream
 import scala.collection.mutable
 
-trait Reporting {
+trait Reporting:
 
-  def reportOutStream: OutputStream = System.err
+    def reportOutStream: OutputStream = System.err
 
-  def report(string: String): Unit = {
-    reportOutStream.write((string + "\n").getBytes("UTF-8"))
-    GlobalReporting.appendToGlobalStdOut(string)
-  }
-}
+    def report(string: String): Unit =
+        reportOutStream.write((string + "\n").getBytes("UTF-8"))
+        GlobalReporting.appendToGlobalStdOut(string)
 
-/** A dirty hack to capture the reported output for the server-mode. Context: server mode is a bit tricky, because the
-  * reporting happens inside the repl, but we want to retrieve it from the context _outside_ the repl, and the two have
-  * separate classloaders. There's probably a cleaner way, but for now this serves our needs.
+/** A dirty hack to capture the reported output for the server-mode. Context: server mode is a bit
+  * tricky, because the reporting happens inside the repl, but we want to retrieve it from the
+  * context _outside_ the repl, and the two have separate classloaders. There's probably a cleaner
+  * way, but for now this serves our needs.
   *
-  * Note that this convolutes the output from concurrently-running jobs - so we should not run UserRunnables
-  * concurrently.
+  * Note that this convolutes the output from concurrently-running jobs - so we should not run
+  * UserRunnables concurrently.
   */
-object GlobalReporting {
-  private var enabled = false
+object GlobalReporting:
+    private var enabled = false
 
-  def enable(): Unit =
-    enabled = true
+    def enable(): Unit =
+        enabled = true
 
-  def isEnabled(): Boolean = enabled
+    def isEnabled(): Boolean = enabled
 
-  def disable(): Unit =
-    enabled = false
+    def disable(): Unit =
+        enabled = false
 
-  private val globalStdOut = new mutable.StringBuilder
+    private val globalStdOut = new mutable.StringBuilder
 
-  def appendToGlobalStdOut(s: String): Unit = {
-    if (enabled) globalStdOut.append(s + System.lineSeparator())
-  }
+    def appendToGlobalStdOut(s: String): Unit =
+        if enabled then globalStdOut.append(s + System.lineSeparator())
 
-  def getAndClearGlobalStdOut(): String = {
-    val result = globalStdOut.result()
-    globalStdOut.clear()
-    result
-  }
-}
+    def getAndClearGlobalStdOut(): String =
+        val result = globalStdOut.result()
+        globalStdOut.clear()
+        result
+end GlobalReporting

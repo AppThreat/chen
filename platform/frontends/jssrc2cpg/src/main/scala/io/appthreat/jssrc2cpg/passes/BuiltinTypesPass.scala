@@ -5,36 +5,35 @@ import io.shiftleft.codepropertygraph.generated.nodes.{NewNamespaceBlock, NewTyp
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes}
 import io.shiftleft.passes.CpgPass
 
-class BuiltinTypesPass(cpg: Cpg) extends CpgPass(cpg) {
+class BuiltinTypesPass(cpg: Cpg) extends CpgPass(cpg):
 
-  override def run(diffGraph: DiffGraphBuilder): Unit = {
-    val namespaceBlock = NewNamespaceBlock()
-      .name(Defines.GlobalNamespace)
-      .fullName(Defines.GlobalNamespace)
-      .order(0)
-      .filename("builtintypes")
+    override def run(diffGraph: DiffGraphBuilder): Unit =
+        val namespaceBlock = NewNamespaceBlock()
+            .name(Defines.GlobalNamespace)
+            .fullName(Defines.GlobalNamespace)
+            .order(0)
+            .filename("builtintypes")
 
-    diffGraph.addNode(namespaceBlock)
+        diffGraph.addNode(namespaceBlock)
 
-    Defines.JsTypes.zipWithIndex.map { case (typeName: String, index) =>
-      val tpe = NewType()
-        .name(typeName)
-        .fullName(typeName)
-        .typeDeclFullName(typeName)
-      diffGraph.addNode(tpe)
+        Defines.JsTypes.zipWithIndex.map { case (typeName: String, index) =>
+            val tpe = NewType()
+                .name(typeName)
+                .fullName(typeName)
+                .typeDeclFullName(typeName)
+            diffGraph.addNode(tpe)
 
-      val typeDecl = NewTypeDecl()
-        .name(typeName)
-        .fullName(typeName)
-        .isExternal(true)
-        .astParentType(NodeTypes.NAMESPACE_BLOCK)
-        .astParentFullName(Defines.GlobalNamespace)
-        .order(index + 1)
-        .filename("builtintypes")
+            val typeDecl = NewTypeDecl()
+                .name(typeName)
+                .fullName(typeName)
+                .isExternal(true)
+                .astParentType(NodeTypes.NAMESPACE_BLOCK)
+                .astParentFullName(Defines.GlobalNamespace)
+                .order(index + 1)
+                .filename("builtintypes")
 
-      diffGraph.addNode(typeDecl)
-      diffGraph.addEdge(namespaceBlock, typeDecl, EdgeTypes.AST)
-    }
-  }
-
-}
+            diffGraph.addNode(typeDecl)
+            diffGraph.addEdge(namespaceBlock, typeDecl, EdgeTypes.AST)
+        }
+    end run
+end BuiltinTypesPass

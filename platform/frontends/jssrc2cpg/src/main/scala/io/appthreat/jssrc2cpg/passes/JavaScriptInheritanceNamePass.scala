@@ -3,13 +3,11 @@ package io.appthreat.jssrc2cpg.passes
 import io.appthreat.x2cpg.passes.frontend.XInheritanceFullNamePass
 import io.shiftleft.codepropertygraph.Cpg
 
-/** Using some basic heuristics, will try to resolve type full names from types found within the CPG. Requires
-  * ImportPass as a pre-requisite.
+/** Using some basic heuristics, will try to resolve type full names from types found within the
+  * CPG. Requires ImportPass as a pre-requisite.
   */
-class JavaScriptInheritanceNamePass(cpg: Cpg) extends XInheritanceFullNamePass(cpg) {
+class JavaScriptInheritanceNamePass(cpg: Cpg) extends XInheritanceFullNamePass(cpg):
 
-  override val pathSep: Char      = ':'
-  override val moduleName: String = ":program"
-  override val fileExt: String    = ".js"
-
-}
+    override val pathSep: Char      = ':'
+    override val moduleName: String = ":program"
+    override val fileExt: String    = ".js"

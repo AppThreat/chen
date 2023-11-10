@@ -5,12 +5,9 @@ import io.shiftleft.semanticcpg.language.toTraversalSugarExt
 
 /** An identifier, e.g., an instance of a local variable, or a temporary variable
   */
-class IdentifierTraversal(val traversal: Iterator[Identifier]) extends AnyVal {
+class IdentifierTraversal(val traversal: Iterator[Identifier]) extends AnyVal:
 
-  /** Traverse to all declarations of this identifier
-    */
-  def refsTo: Iterator[Declaration] = {
-    traversal.flatMap(_.refOut).cast[Declaration]
-  }
-
-}
+    /** Traverse to all declarations of this identifier
+      */
+    def refsTo: Iterator[Declaration] =
+        traversal.flatMap(_.refOut).cast[Declaration]

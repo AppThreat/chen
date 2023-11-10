@@ -12,30 +12,29 @@ case class AtomGenerator(
   language: String,
   sliceMode: String = "usages",
   slicesFile: String = "usages.json"
-) extends CpgGenerator {
-  private lazy val command: String = "atom"
+) extends CpgGenerator:
+    private lazy val command: String = "atom"
 
-  /** Generate an atom for the given input path. Returns the output path, or None, if no CPG was generated.
-    */
-  override def generate(inputPath: String, outputPath: String = "app.atom"): Try[String] = {
-    val arguments = Seq(
-      sliceMode,
-      "-s",
-      slicesFile,
-      "--output",
-      outputPath,
-      "--language",
-      language,
-      inputPath
-    ) ++ config.cmdLineParams
-    runShellCommand(command, arguments).map(_ => outputPath)
-  }
+    /** Generate an atom for the given input path. Returns the output path, or None, if no CPG was
+      * generated.
+      */
+    override def generate(inputPath: String, outputPath: String = "app.atom"): Try[String] =
+        val arguments = Seq(
+          sliceMode,
+          "-s",
+          slicesFile,
+          "--output",
+          outputPath,
+          "--language",
+          language,
+          inputPath
+        ) ++ config.cmdLineParams
+        runShellCommand(command, arguments).map(_ => outputPath)
 
-  override def isAvailable: Boolean = true
+    override def isAvailable: Boolean = true
 
-  override def applyPostProcessingPasses(atom: Cpg): Cpg = {
-    atom
-  }
+    override def applyPostProcessingPasses(atom: Cpg): Cpg =
+        atom
 
-  override def isJvmBased = false
-}
+    override def isJvmBased = false
+end AtomGenerator

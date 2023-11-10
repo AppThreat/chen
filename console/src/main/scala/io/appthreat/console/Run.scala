@@ -6,58 +6,58 @@ import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
 import org.reflections8.Reflections
 import org.reflections8.util.{ClasspathHelper, ConfigurationBuilder}
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
-object Run {
+object Run:
 
-  def runCustomQuery(console: Console[_], query: HasStoreMethod): Unit = {
-    console._runAnalyzer(new LayerCreator {
-      override val overlayName: String = "custom"
-      override val description: String = "A custom pass"
+    def runCustomQuery(console: Console[?], query: HasStoreMethod): Unit =
+        console._runAnalyzer(new LayerCreator:
+            override val overlayName: String = "custom"
+            override val description: String = "A custom pass"
 
-      override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit = {
-        val pass: CpgPass = new CpgPass(console.cpg) {
-          override val name = "custom"
-          override def run(builder: DiffGraphBuilder): Unit = {
-            query.store()(builder)
-          }
-        }
-        runPass(pass, context, storeUndoInfo)
-      }
-    })
-  }
+            override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
+                val pass: CpgPass = new CpgPass(console.cpg):
+                    override val name = "custom"
+                    override def run(builder: DiffGraphBuilder): Unit =
+                        query.store()(builder)
+                runPass(pass, context, storeUndoInfo)
+        )
 
-  /** Generate code for the run command
-    * @param exclude
-    *   list of analyzers to exclude (by full class name)
-    */
-  def codeForRunCommand(exclude: List[String] = List()): String = {
-    val ioSlLayerCreators    = creatorsFor("io.shiftleft", exclude)
-    val ioJoernLayerCreators = creatorsFor("io.appthreat", exclude)
-    codeForLayerCreators((ioSlLayerCreators ++ ioJoernLayerCreators).distinct)
-  }
+    /** Generate code for the run command
+      * @param exclude
+      *   list of analyzers to exclude (by full class name)
+      */
+    def codeForRunCommand(exclude: List[String] = List()): String =
+        val ioSlLayerCreators    = creatorsFor("io.shiftleft", exclude)
+        val ioJoernLayerCreators = creatorsFor("io.appthreat", exclude)
+        codeForLayerCreators((ioSlLayerCreators ++ ioJoernLayerCreators).distinct)
 
-  private def creatorsFor(namespace: String, exclude: List[String]) = {
-    new Reflections(
-      new ConfigurationBuilder().setUrls(
-        ClasspathHelper.forPackage(namespace, ClasspathHelper.contextClassLoader(), ClasspathHelper.staticClassLoader())
-      )
-    ).getSubTypesOf(classOf[LayerCreator])
-      .asScala
-      .filterNot(t => t.isAnonymousClass || t.isLocalClass || t.isMemberClass || t.isSynthetic)
-      .filterNot(t => t.getName.startsWith("io.appthreat.console.Run"))
-      .toList
-      .map(t => (t.getSimpleName.toLowerCase, s"_root_.${t.getName}"))
-      .filter(t => !exclude.contains(t._2))
-  }
+    private def creatorsFor(namespace: String, exclude: List[String]) =
+        new Reflections(
+          new ConfigurationBuilder().setUrls(
+            ClasspathHelper.forPackage(
+              namespace,
+              ClasspathHelper.contextClassLoader(),
+              ClasspathHelper.staticClassLoader()
+            )
+          )
+        ).getSubTypesOf(classOf[LayerCreator])
+            .asScala
+            .filterNot(t =>
+                t.isAnonymousClass || t.isLocalClass || t.isMemberClass || t.isSynthetic
+            )
+            .filterNot(t => t.getName.startsWith("io.appthreat.console.Run"))
+            .toList
+            .map(t => (t.getSimpleName.toLowerCase, s"_root_.${t.getName}"))
+            .filter(t => !exclude.contains(t._2))
 
-  private def codeForLayerCreators(layerCreatorTypeNames: List[(String, String)]): String = {
-    val optsMembersCode = layerCreatorTypeNames
-      .map { case (varName, typeName) => s"val $varName = $typeName.defaultOpts" }
-      .mkString("\n")
+    private def codeForLayerCreators(layerCreatorTypeNames: List[(String, String)]): String =
+        val optsMembersCode = layerCreatorTypeNames
+            .map { case (varName, typeName) => s"val $varName = $typeName.defaultOpts" }
+            .mkString("\n")
 
-    val optsCode =
-      s"""
+        val optsCode =
+            s"""
          |class OptsDynamic {
          |$optsMembersCode
          |}
@@ -69,25 +69,27 @@ object Run {
          | def diffGraph = _diffGraph
          |""".stripMargin
 
-    val membersCode = layerCreatorTypeNames
-      .map { case (varName, typeName) => s"  def $varName: Cpg = _runAnalyzer(new $typeName(opts.$varName))" }
-      .mkString("\n")
+        val membersCode = layerCreatorTypeNames
+            .map { case (varName, typeName) =>
+                s"  def $varName: Cpg = _runAnalyzer(new $typeName(opts.$varName))"
+            }
+            .mkString("\n")
 
-    val toStringCode =
-      s"""
+        val toStringCode =
+            s"""
          |  import overflowdb.traversal.help.Table
          |  override def toString() : String = {
          |    val columnNames = List("name", "description")
          |    val rows =
          |      ${layerCreatorTypeNames.map { case (varName, typeName) =>
-          s"""List("$varName",$typeName.description.trim)"""
-        }}
+                  s"""List("$varName",$typeName.description.trim)"""
+              }}
          |    "\\n" + Table(columnNames, rows).render
          |  }
          |""".stripMargin
 
-    optsCode +
-      s"""
+        optsCode +
+            s"""
          |class OverlaysDynamic {
          |
          |  def apply(query: _root_.io.shiftleft.semanticcpg.language.HasStoreMethod) =
@@ -99,6 +101,5 @@ object Run {
          |}
          |val run = new OverlaysDynamic()
          |""".stripMargin
-  }
-
-}
+    end codeForLayerCreators
+end Run

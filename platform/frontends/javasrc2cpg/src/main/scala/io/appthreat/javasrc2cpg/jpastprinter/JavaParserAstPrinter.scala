@@ -8,18 +8,16 @@ import io.shiftleft.semanticcpg.language.dotextension.Shared
 
 import java.nio.file.Path
 
-object JavaParserAstPrinter {
-  def printJpAsts(config: Config): Unit = {
+object JavaParserAstPrinter:
+    def printJpAsts(config: Config): Unit =
 
-    val sourceParser = util.SourceParser(config, false)
-    val printer      = new YamlPrinter(true)
+        val sourceParser = util.SourceParser(config, false)
+        val printer      = new YamlPrinter(true)
 
-    SourceParser.getSourceFilenames(config).foreach { filename =>
-      val relativeFilename = Path.of(config.inputPath).relativize(Path.of(filename)).toString
-      sourceParser.parseAnalysisFile(relativeFilename).foreach { compilationUnit =>
-        println(relativeFilename)
-        println(printer.output(compilationUnit))
-      }
-    }
-  }
-}
+        SourceParser.getSourceFilenames(config).foreach { filename =>
+            val relativeFilename = Path.of(config.inputPath).relativize(Path.of(filename)).toString
+            sourceParser.parseAnalysisFile(relativeFilename).foreach { compilationUnit =>
+                println(relativeFilename)
+                println(printer.output(compilationUnit))
+            }
+        }

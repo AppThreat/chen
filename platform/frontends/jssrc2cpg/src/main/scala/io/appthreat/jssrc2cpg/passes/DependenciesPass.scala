@@ -11,25 +11,26 @@ import java.nio.file.Paths
 
 /** Creation of DEPENDENCY nodes from "package.json" files.
   */
-class DependenciesPass(cpg: Cpg, config: Config) extends CpgPass(cpg) {
+class DependenciesPass(cpg: Cpg, config: Config) extends CpgPass(cpg):
 
-  override def run(diffGraph: DiffGraphBuilder): Unit = {
-    val packagesJsons = SourceFiles
-      .determine(config.inputPath, Set(".json"))
-      .filterNot(_.contains(Defines.NodeModulesFolder))
-      .filter(f =>
-        f.endsWith(PackageJsonParser.PackageJsonFilename) || f.endsWith(PackageJsonParser.PackageJsonLockFilename)
-      )
+    override def run(diffGraph: DiffGraphBuilder): Unit =
+        val packagesJsons = SourceFiles
+            .determine(config.inputPath, Set(".json"))
+            .filterNot(_.contains(Defines.NodeModulesFolder))
+            .filter(f =>
+                f.endsWith(PackageJsonParser.PackageJsonFilename) || f.endsWith(
+                  PackageJsonParser.PackageJsonLockFilename
+                )
+            )
 
-    val dependencies: Map[String, String] =
-      packagesJsons.flatMap(p => PackageJsonParser.dependencies(Paths.get(p))).toMap
+        val dependencies: Map[String, String] =
+            packagesJsons.flatMap(p => PackageJsonParser.dependencies(Paths.get(p))).toMap
 
-    dependencies.foreach { case (name, version) =>
-      val dep = NewDependency()
-        .name(name)
-        .version(version)
-      diffGraph.addNode(dep)
-    }
-  }
-
-}
+        dependencies.foreach { case (name, version) =>
+            val dep = NewDependency()
+                .name(name)
+                .version(version)
+            diffGraph.addNode(dep)
+        }
+    end run
+end DependenciesPass

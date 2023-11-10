@@ -3,12 +3,10 @@ package io.appthreat.pysrc2cpg
 import io.appthreat.x2cpg.passes.frontend.XInheritanceFullNamePass
 import io.shiftleft.codepropertygraph.Cpg
 
-/** Using some basic heuristics, will try to resolve type full names from types found within the CPG. Requires
-  * ImportPass as a pre-requisite.
+/** Using some basic heuristics, will try to resolve type full names from types found within the
+  * CPG. Requires ImportPass as a pre-requisite.
   */
-class PythonInheritanceNamePass(cpg: Cpg) extends XInheritanceFullNamePass(cpg) {
+class PythonInheritanceNamePass(cpg: Cpg) extends XInheritanceFullNamePass(cpg):
 
-  override val moduleName: String = "<module>"
-  override val fileExt: String    = ".py"
-
-}
+    override val moduleName: String = "<module>"
+    override val fileExt: String    = ".py"

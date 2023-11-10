@@ -2,14 +2,16 @@ package io.shiftleft
 
 /** Domain specific language for querying code property graphs
   *
-  * This is the API reference for the CPG query language, a language to mine code for defects and vulnerabilities both
-  * interactively on a code analysis shell (REPL), or using non-interactive scripts.
+  * This is the API reference for the CPG query language, a language to mine code for defects and
+  * vulnerabilities both interactively on a code analysis shell (REPL), or using non-interactive
+  * scripts.
   *
   * Queries written in the CPG query language express graph traversals (see
-  * [[https://en.wikipedia.org/wiki/Graph_traversal]]). Similar to the standard graph traversal language "Gremlin" (see
-  * [[https://en.wikipedia.org/wiki/Gremlin_(programming_language)]])) these traversals are formulated as sequences of
-  * primitive language elements referred to as "steps". You can think of a step as a small program, similar to a unix
-  * shell utility, however, instead of processing lines one by one, the step processes nodes of the graph.
+  * [[https://en.wikipedia.org/wiki/Graph_traversal]]). Similar to the standard graph traversal
+  * language "Gremlin" (see [[https://en.wikipedia.org/wiki/Gremlin_(programming_language)]])) these
+  * traversals are formulated as sequences of primitive language elements referred to as "steps".
+  * You can think of a step as a small program, similar to a unix shell utility, however, instead of
+  * processing lines one by one, the step processes nodes of the graph.
   *
   * ==Starting a traversal==
   * All traversals begin by selecting a set of start nodes, e.g.,
@@ -24,8 +26,8 @@ package io.shiftleft
   * {{{io.shiftleft.codepropertygraph.Cpg}}}
   *
   * ==Lazy evaluation==
-  * Queries are lazily evaluated, e.g., `cpg.method` creates a traversal which you can add more steps to. You can, for
-  * example, evaluate the traversal by converting it to a list:
+  * Queries are lazily evaluated, e.g., `cpg.method` creates a traversal which you can add more
+  * steps to. You can, for example, evaluate the traversal by converting it to a list:
   *
   * {{{cpg.method.toList}}}
   *
@@ -36,8 +38,9 @@ package io.shiftleft
   * provides the same result as the former query.
   *
   * ==Properties==
-  * Nodes have "properties", key-value pairs where keys are strings and values are primitive data types such as strings,
-  * integers, or Booleans. Properties of nodes can be selected based on their key, e.g.,
+  * Nodes have "properties", key-value pairs where keys are strings and values are primitive data
+  * types such as strings, integers, or Booleans. Properties of nodes can be selected based on their
+  * key, e.g.,
   *
   * {{{cpg.method.name}}}
   *
@@ -45,22 +48,24 @@ package io.shiftleft
   *
   * {{{cpg.method.name(".*exec.*")}}}
   *
-  * traverse to all methods where `name` matches the regular expression ".*exec.*". You can see a complete list of
-  * properties by browsing to the API documentation of the corresponding step. For example, you can find the properties
-  * of method nodes at [[io.shiftleft.semanticcpg.language.types.structure.MethodTraversal]].
+  * traverse to all methods where `name` matches the regular expression ".*exec.*". You can see a
+  * complete list of properties by browsing to the API documentation of the corresponding step. For
+  * example, you can find the properties of method nodes at
+  * [[io.shiftleft.semanticcpg.language.types.structure.MethodTraversal]].
   *
   * ==Side effects==
-  * Useful if you want to mutate something outside the traversal, or simply debug it: This prints all typeDecl names as
-  * it traverses the graph and increments `i` for each one.
+  * Useful if you want to mutate something outside the traversal, or simply debug it: This prints
+  * all typeDecl names as it traverses the graph and increments `i` for each one.
   * {{{
   *   var i = 0
   *   cpg.typeDecl.sideEffect{typeTemplate => println(typeTemplate.name); i = i + 1}.exec
   * }}}
   *
   * ==[advanced] Selecting multiple things from your traversal==
-  * If you are interested in multiple things along the way of your traversal, you label anything using the `as`
-  * modulator, and use `select` at the end. Note that the compiler automatically derived the correct return type as a
-  * tuple of the labelled steps, in this case with two elements.
+  * If you are interested in multiple things along the way of your traversal, you label anything
+  * using the `as` modulator, and use `select` at the end. Note that the compiler automatically
+  * derived the correct return type as a tuple of the labelled steps, in this case with two
+  * elements.
   *
   * {{{
   *   cpg.method.as("method").definingTypeDecl.as("classDef").select.toList
@@ -74,8 +79,9 @@ package io.shiftleft
   *   someMethod.start.parameter.toList
   * }}}
   *
-  * You can use this e.g. in a for comprehension, which is (in this context) essentially an alternative way to select
-  * multiple intermediate things. It is more expressive, but more computationally expensive.
+  * You can use this e.g. in a for comprehension, which is (in this context) essentially an
+  * alternative way to select multiple intermediate things. It is more expressive, but more
+  * computationally expensive.
   * {{{
   *   val query = for {
   *     method <- cpg.method

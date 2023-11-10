@@ -7,9 +7,9 @@ import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 import scala.util.{Failure, Success, Try}
 
-object Fingerprinting {
+object Fingerprinting:
 
-  CPythonInterpreter.execManyLines("""
+    CPythonInterpreter.execManyLines("""
       |from hashlib import blake2b
       |
       |def calculate_hash(content, digest_size = 16):
@@ -21,6 +21,5 @@ object Fingerprinting {
       |  return None
       |""".stripMargin)
 
-  def calculate_hash(content: String, digest_size: Int = 16): Option[String] =
-    Option(py.Dynamic.global.calculate_hash(content, digest_size).as[String])
-}
+    def calculate_hash(content: String, digest_size: Int = 16): Option[String] =
+        Option(py.Dynamic.global.calculate_hash(content, digest_size).as[String])

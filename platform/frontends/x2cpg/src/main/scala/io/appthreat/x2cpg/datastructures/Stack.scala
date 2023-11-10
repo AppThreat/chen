@@ -2,18 +2,13 @@ package io.appthreat.x2cpg.datastructures
 
 import scala.collection.mutable
 
-object Stack {
+object Stack:
 
-  type Stack[StackElement] = mutable.ListBuffer[StackElement]
+    type Stack[StackElement] = mutable.ListBuffer[StackElement]
 
-  implicit class StackWrapper[StackElement](val parentStack: Stack[StackElement]) extends AnyVal {
-    def push(parent: StackElement): Unit = {
-      parentStack.prepend(parent)
-    }
+    implicit class StackWrapper[StackElement](val parentStack: Stack[StackElement]) extends AnyVal:
+        def push(parent: StackElement): Unit =
+            parentStack.prepend(parent)
 
-    def pop(): Unit = {
-      parentStack.remove(0)
-    }
-  }
-
-}
+        def pop(): Unit =
+            parentStack.remove(0)
