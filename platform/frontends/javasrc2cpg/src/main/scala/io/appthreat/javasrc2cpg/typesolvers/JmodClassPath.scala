@@ -1,51 +1,45 @@
 package io.appthreat.javasrc2cpg.typesolvers
 
 import better.files.File
-import JmodClassPath._
+import JmodClassPath.*
 import javassist.ClassPath
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 import java.io.InputStream
 import java.net.URL
 import java.util.jar.{JarEntry, JarFile}
 
-class JmodClassPath(jmodPath: String) extends ClassPath {
-  private val jarfile    = new JarFile(jmodPath)
-  private val jarfileURL = File(jmodPath).url.toString
-  private val entries    = getEntriesMap(jarfile)
+class JmodClassPath(jmodPath: String) extends ClassPath:
+    private val jarfile    = new JarFile(jmodPath)
+    private val jarfileURL = File(jmodPath).url.toString
+    private val entries    = getEntriesMap(jarfile)
 
-  private def entryToClassName(entry: JarEntry): String = {
-    entry.getName.stripPrefix(JmodClassesPrefix).stripSuffix(".class").replace('/', '.')
-  }
+    private def entryToClassName(entry: JarEntry): String =
+        entry.getName.stripPrefix(JmodClassesPrefix).stripSuffix(".class").replace('/', '.')
 
-  private def getEntriesMap(jarfile: JarFile): Map[String, JarEntry] = {
-    jarfile
-      .entries()
-      .asScala
-      .filter(_.getName.startsWith(JmodClassesPrefix))
-      .filter(_.getName.endsWith(".class"))
-      .map { entry => entryToClassName(entry) -> entry }
-      .toMap
-  }
+    private def getEntriesMap(jarfile: JarFile): Map[String, JarEntry] =
+        jarfile
+            .entries()
+            .asScala
+            .filter(_.getName.startsWith(JmodClassesPrefix))
+            .filter(_.getName.endsWith(".class"))
+            .map { entry => entryToClassName(entry) -> entry }
+            .toMap
 
-  override def find(classname: String): URL = {
-    val jarname = classname.replace('.', '/') + ".class"
+    override def find(classname: String): URL =
+        val jarname = classname.replace('.', '/') + ".class"
 
-    if (entries.contains(classname)) {
-      Try(new URL(s"jmod:${jarfileURL}!/${jarname}")).getOrElse(null)
-    } else { null }
-  }
+        if entries.contains(classname) then
+            Try(new URL(s"jmod:${jarfileURL}!/${jarname}")).getOrElse(null)
+        else null
 
-  override def openClassfile(classname: String): InputStream = {
-    entries.get(classname) match {
-      case None => null
+    override def openClassfile(classname: String): InputStream =
+        entries.get(classname) match
+            case None => null
 
-      case Some(entry) => jarfile.getInputStream(entry)
-    }
-  }
-}
+            case Some(entry) => jarfile.getInputStream(entry)
+end JmodClassPath
 
-object JmodClassPath {
-  val JmodClassesPrefix: String = "classes/"
-}
+object JmodClassPath:
+    val JmodClassesPrefix: String = "classes/"

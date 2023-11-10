@@ -8,25 +8,21 @@ import io.appthreat.x2cpg.utils.LinkingUtil
 
 /** Create INHERITS_FROM edges from `TYPE_DECL` nodes to `TYPE` nodes.
   */
-class TypeHierarchyPass(cpg: Cpg) extends CpgPass(cpg) with LinkingUtil {
+class TypeHierarchyPass(cpg: Cpg) extends CpgPass(cpg) with LinkingUtil:
 
-  override def run(dstGraph: DiffGraphBuilder): Unit = {
-    linkToMultiple(
-      cpg,
-      srcLabels = List(NodeTypes.TYPE_DECL),
-      dstNodeLabel = NodeTypes.TYPE,
-      edgeType = EdgeTypes.INHERITS_FROM,
-      dstNodeMap = typeFullNameToNode(cpg, _),
-      getDstFullNames = (srcNode: TypeDecl) => {
-        if (srcNode.inheritsFromTypeFullName != null) {
-          srcNode.inheritsFromTypeFullName
-        } else {
-          Seq()
-        }
-      },
-      dstFullNameKey = PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
-      dstGraph
-    )
-  }
-
-}
+    override def run(dstGraph: DiffGraphBuilder): Unit =
+        linkToMultiple(
+          cpg,
+          srcLabels = List(NodeTypes.TYPE_DECL),
+          dstNodeLabel = NodeTypes.TYPE,
+          edgeType = EdgeTypes.INHERITS_FROM,
+          dstNodeMap = typeFullNameToNode(cpg, _),
+          getDstFullNames = (srcNode: TypeDecl) =>
+              if srcNode.inheritsFromTypeFullName != null then
+                  srcNode.inheritsFromTypeFullName
+              else
+                  Seq()
+          ,
+          dstFullNameKey = PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
+          dstGraph
+        )

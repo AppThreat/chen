@@ -18,65 +18,62 @@ class EagerSourceTypeSolver(
   sourceParser: SourceParser,
   combinedTypeSolver: SimpleCombinedTypeSolver,
   symbolSolver: JavaSymbolSolver
-) extends TypeSolver {
+) extends TypeSolver:
 
-  private val logger             = LoggerFactory.getLogger(this.getClass)
-  private var parent: TypeSolver = _
+    private val logger             = LoggerFactory.getLogger(this.getClass)
+    private var parent: TypeSolver = _
 
-  private val foundTypes: Map[String, SymbolReference[ResolvedReferenceTypeDeclaration]] = {
-    filenames
-      .flatMap(sourceParser.parseTypesFile)
-      .flatMap { cu =>
-        symbolSolver.inject(cu)
-        cu.findAll(classOf[TypeDeclaration[_]])
-          .asScala
-          .map { typeDeclaration =>
-            val name = typeDeclaration.getFullyQualifiedName.toScala match {
-              case Some(fullyQualifiedName) => fullyQualifiedName
-              case None =>
-                val name = typeDeclaration.getNameAsString
-                logger.debug(s"Could not find fully qualified name for typeDecl $name")
-                name
+    private val foundTypes: Map[String, SymbolReference[ResolvedReferenceTypeDeclaration]] =
+        filenames
+            .flatMap(sourceParser.parseTypesFile)
+            .flatMap { cu =>
+                symbolSolver.inject(cu)
+                cu.findAll(classOf[TypeDeclaration[_]])
+                    .asScala
+                    .map { typeDeclaration =>
+                        val name = typeDeclaration.getFullyQualifiedName.toScala match
+                            case Some(fullyQualifiedName) => fullyQualifiedName
+                            case None =>
+                                val name = typeDeclaration.getNameAsString
+                                logger.debug(
+                                  s"Could not find fully qualified name for typeDecl $name"
+                                )
+                                name
+                        TypeSizeReducer.simplifyType(typeDeclaration)
+                        val resolvedSymbol = Try(
+                          SymbolReference.solved(
+                            JavaParserFacade.get(combinedTypeSolver).getTypeDeclaration(
+                              typeDeclaration
+                            )
+                          ): SymbolReference[ResolvedReferenceTypeDeclaration]
+                        ).getOrElse(SymbolReference.unsolved())
+                        name -> resolvedSymbol
+                    }
+                    .toList
             }
-            TypeSizeReducer.simplifyType(typeDeclaration)
-            val resolvedSymbol = Try(
-              SymbolReference.solved(
-                JavaParserFacade.get(combinedTypeSolver).getTypeDeclaration(typeDeclaration)
-              ): SymbolReference[ResolvedReferenceTypeDeclaration]
-            ).getOrElse(SymbolReference.unsolved())
-            name -> resolvedSymbol
-          }
-          .toList
-      }
-      .toMap
-  }
+            .toMap
 
-  override def getParent: TypeSolver = parent
+    override def getParent: TypeSolver = parent
 
-  override def setParent(parent: TypeSolver): Unit = {
-    if (parent == null) {
-      logger.debug(s"Cannot set parent of type solver to null. setParent will be ignored.")
-    } else if (this.parent != null) {
-      logger.debug(s"Attempting to re-set type solver parent. setParent will be ignored.")
-    } else if (parent == this) {
-      logger.debug(s"Parent of TypeSolver cannot be itself. setParent will be ignored.")
-    } else {
-      this.parent = parent
-    }
-  }
+    override def setParent(parent: TypeSolver): Unit =
+        if parent == null then
+            logger.debug(s"Cannot set parent of type solver to null. setParent will be ignored.")
+        else if this.parent != null then
+            logger.debug(s"Attempting to re-set type solver parent. setParent will be ignored.")
+        else if parent == this then
+            logger.debug(s"Parent of TypeSolver cannot be itself. setParent will be ignored.")
+        else
+            this.parent = parent
 
-  override def tryToSolveType(name: String): SymbolReference[ResolvedReferenceTypeDeclaration] = {
-    foundTypes.getOrElse(name, SymbolReference.unsolved())
-  }
-}
+    override def tryToSolveType(name: String): SymbolReference[ResolvedReferenceTypeDeclaration] =
+        foundTypes.getOrElse(name, SymbolReference.unsolved())
+end EagerSourceTypeSolver
 
-object EagerSourceTypeSolver {
-  def apply(
-    filenames: Array[String],
-    sourceParser: SourceParser,
-    combinedTypeSolver: SimpleCombinedTypeSolver,
-    symbolSolver: JavaSymbolSolver
-  ): EagerSourceTypeSolver = {
-    new EagerSourceTypeSolver(filenames, sourceParser, combinedTypeSolver, symbolSolver)
-  }
-}
+object EagerSourceTypeSolver:
+    def apply(
+      filenames: Array[String],
+      sourceParser: SourceParser,
+      combinedTypeSolver: SimpleCombinedTypeSolver,
+      symbolSolver: JavaSymbolSolver
+    ): EagerSourceTypeSolver =
+        new EagerSourceTypeSolver(filenames, sourceParser, combinedTypeSolver, symbolSolver)

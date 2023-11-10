@@ -6,13 +6,16 @@ import scala.collection.mutable
 
 /** A single element of a scope stack.
   */
-abstract class ScopeElement(val name: String, val scopeNode: NewNode, val surroundingScope: Option[ScopeElement]) {
-  var subScopeCounter: Int                             = 0
-  val nameToVariableNode: mutable.Map[String, NewNode] = mutable.HashMap.empty
+abstract class ScopeElement(
+  val name: String,
+  val scopeNode: NewNode,
+  val surroundingScope: Option[ScopeElement]
+):
+    var subScopeCounter: Int                             = 0
+    val nameToVariableNode: mutable.Map[String, NewNode] = mutable.HashMap.empty
 
-  def addVariable(variableName: String, variableNode: NewNode): Unit =
-    nameToVariableNode(variableName) = variableNode
-}
+    def addVariable(variableName: String, variableNode: NewNode): Unit =
+        nameToVariableNode(variableName) = variableNode
 
 class MethodScopeElement(
   val methodFullName: String,

@@ -3,18 +3,15 @@ package io.shiftleft.semanticcpg.language
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
-trait HasStoreMethod {
-  def store()(implicit diffBuilder: DiffGraphBuilder): Unit
-}
+trait HasStoreMethod:
+    def store()(implicit diffBuilder: DiffGraphBuilder): Unit
 
-class NewNodeSteps[A <: NewNode](val traversal: Iterator[A]) extends HasStoreMethod {
+class NewNodeSteps[A <: NewNode](val traversal: Iterator[A]) extends HasStoreMethod:
 
-  override def store()(implicit diffBuilder: DiffGraphBuilder): Unit =
-    traversal.sideEffect(storeRecursively).iterate()
+    override def store()(implicit diffBuilder: DiffGraphBuilder): Unit =
+        traversal.sideEffect(storeRecursively).iterate()
 
-  private def storeRecursively(newNode: NewNode)(implicit diffBuilder: DiffGraphBuilder): Unit = {
-    diffBuilder.addNode(newNode)
-  }
+    private def storeRecursively(newNode: NewNode)(implicit diffBuilder: DiffGraphBuilder): Unit =
+        diffBuilder.addNode(newNode)
 
-  def label: Iterator[String] = traversal.map(_.label)
-}
+    def label: Iterator[String] = traversal.map(_.label)

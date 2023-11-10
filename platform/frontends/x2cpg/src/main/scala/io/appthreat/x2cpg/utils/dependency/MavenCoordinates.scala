@@ -6,9 +6,9 @@ import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import scala.util.{Failure, Success}
 
-object MavenCoordinates {
-  private[dependency] def fromGradleOutput(lines: Seq[String]): Seq[String] = {
-    /*
+object MavenCoordinates:
+    private[dependency] def fromGradleOutput(lines: Seq[String]): Seq[String] =
+        /*
     on the following regex, for the following input:
     ```
     |    |    +--- org.springframework.boot:spring-boot-starter-logging:3.0.5
@@ -39,20 +39,19 @@ object MavenCoordinates {
     org.slf4j:jul-to-slf4j:2.0.7
     ^g1 ------------------^^g2 ^
     ```
-     */
-    val pattern = """^[| ]*[+\\]\s*[-]*\s*([^:]+:[^:]+:)([^\s]+)(\s+->\s+)?([^\s]+)?""".r
-    lines
-      .flatMap { l =>
-        pattern.findFirstMatchIn(l) match {
-          case Some(m) =>
-            if (Option(m.group(4)).isEmpty)
-              Some(m.group(1) + m.group(2))
-            else
-              Some(m.group(1) + m.group(4))
-          case _ => None
-        }
-      }
-      .distinct
-      .sorted
-  }
-}
+         */
+        val pattern = """^[| ]*[+\\]\s*[-]*\s*([^:]+:[^:]+:)([^\s]+)(\s+->\s+)?([^\s]+)?""".r
+        lines
+            .flatMap { l =>
+                pattern.findFirstMatchIn(l) match
+                    case Some(m) =>
+                        if Option(m.group(4)).isEmpty then
+                            Some(m.group(1) + m.group(2))
+                        else
+                            Some(m.group(1) + m.group(4))
+                    case _ => None
+            }
+            .distinct
+            .sorted
+    end fromGradleOutput
+end MavenCoordinates
