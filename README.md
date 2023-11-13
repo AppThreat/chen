@@ -197,3 +197,10 @@ Apache-2.0
 ## Enterprise support
 
 Enterprise support including custom language development and integration services is available via AppThreat Ltd. Free community support is also available via [Discord](https://discord.gg/UD4sHgbXYr).
+
+## Sponsors
+
+YourKit supports open source projects with innovative and intelligent tools for monitoring and profiling Java and .NET applications.
+YourKit is the creator of <a href="https://www.yourkit.com/java/profiler/">YourKit Java Profiler</a>, <a href="https://www.yourkit.com/dotnet-profiler/">YourKit .NET Profiler</a>, and <a href="https://www.yourkit.com/youmonitor/">YourKit YouMonitor</a>.
+
+![YourKit logo](./docs/yklogo.png)
