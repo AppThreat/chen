@@ -56,6 +56,9 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
                 .newTagNode(FRAMEWORK_INPUT)
                 .store()(dstGraph)
         }
+        atom.file.name(".*views.py.*").method.parameter.name("request").method.newTagNode(
+          FRAMEWORK_INPUT
+        ).store()(dstGraph)
     end tagPythonRoutes
 
     override def run(dstGraph: DiffGraphBuilder): Unit =

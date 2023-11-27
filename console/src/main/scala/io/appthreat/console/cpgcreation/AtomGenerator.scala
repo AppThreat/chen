@@ -2,7 +2,7 @@ package io.appthreat.console.cpgcreation
 
 import io.appthreat.console.FrontendConfig
 import io.shiftleft.codepropertygraph.Cpg
-import io.appthreat.x2cpg.passes.taggers.{CdxPass, ChennaiTagsPass}
+
 import java.nio.file.Path
 import scala.util.Try
 
