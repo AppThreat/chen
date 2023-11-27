@@ -527,7 +527,13 @@ class Console[T <: Project](
             atom.file.whereNot(_.name("<unknown>")).foreach { f =>
                 table.add_row(
                   f.name,
-                  f.method.map(m =>
+                  f.method.filterNot(m =>
+                      m.fullName.endsWith("<metaClassCallHandler>") || m.fullName.endsWith(
+                        "<fakeNew>"
+                      ) || m.fullName.endsWith(
+                        "<metaClassAdapter>"
+                      )
+                  ).map(m =>
                       var methodDisplayStr = if m.tag.nonEmpty then
                           s"""${m.fullName}\n[info]Tags: ${m.tag.name.mkString(", ")}[/info]"""
                       else m.fullName
