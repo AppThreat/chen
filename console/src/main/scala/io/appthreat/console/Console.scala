@@ -525,7 +525,21 @@ class Console[T <: Project](
             table.add_column("File Name")
             table.add_column("Methods")
             atom.file.whereNot(_.name("<unknown>")).foreach { f =>
-                table.add_row(f.name, f.method.fullName.l.mkString("\n"))
+                table.add_row(
+                  f.name,
+                  f.method.map(m =>
+                      var methodDisplayStr = if m.tag.nonEmpty then
+                          s"""${m.fullName}\n[info]Tags: ${m.tag.name.mkString(", ")}[/info]"""
+                      else m.fullName
+                      if m.tag.nonEmpty && (m.tag.name.contains(
+                            "validation"
+                          ) || m.tag.name.contains("sanitization") || m.tag.name.contains(
+                            "authentication"
+                          ) || m.tag.name.contains("authorization"))
+                      then methodDisplayStr = s"[green]$methodDisplayStr[/green]"
+                      methodDisplayStr
+                  ).l.mkString("\n")
+                )
             }
             richConsole.print(table)
             if as_text then richConsole.export_text().as[String] else ""
