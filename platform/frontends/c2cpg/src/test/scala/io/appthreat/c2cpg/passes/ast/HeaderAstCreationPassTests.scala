@@ -42,15 +42,16 @@ class HeaderAstCreationPassTests extends CCodeToCpgSuite {
           // in main.h and included in main.c and we do scan both
           bar.fullName shouldBe "bar"
           bar.filename shouldBe "main.h"
-          foo.fullName shouldBe "foo"
-          foo.filename shouldBe "other.h"
+
+          foo.fullName shouldBe "main"
+          foo.filename shouldBe "main.c"
           // main is include twice. First time for the header file,
           // second time for the actual implementation in the source file
           // We do not de-duplicate this as line/column numbers differ
-          m1.fullName shouldBe "main"
+          m1.fullName shouldBe "main.h:2:2:main"
           m1.filename shouldBe "main.h"
-          m2.fullName shouldBe "main"
-          m2.filename shouldBe "main.c"
+          m2.fullName shouldBe "other.h:2:2:foo"
+          m2.filename shouldBe "other.h"
           printf.fullName shouldBe "printf"
       }
     }
