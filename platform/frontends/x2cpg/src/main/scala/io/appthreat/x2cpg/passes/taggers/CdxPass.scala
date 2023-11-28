@@ -130,12 +130,20 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                         ).newTagNode(
                                           compPurl
                                         ).store()(dstGraph)
+                                        atom.method.fullNameExact(bpkg).callIn(
+                                          NoResolve
+                                        ).newTagNode(
+                                          "library-call"
+                                        ).store()(dstGraph)
                                         atom.method.fullNameExact(bpkg).newTagNode(
                                           compPurl
                                         ).store()(dstGraph)
                                         if !containsRegex(bpkg) then
                                             atom.parameter.typeFullName(s"$bpkg.*").newTagNode(
                                               compPurl
+                                            ).store()(dstGraph)
+                                            atom.parameter.typeFullName(s"$bpkg.*").newTagNode(
+                                              "framework-input"
                                             ).store()(dstGraph)
                                             atom.parameter.typeFullName(s"$bpkg.*").method.callIn(
                                               NoResolve
@@ -147,6 +155,11 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                               s"${Pattern.quote(bpkg)}.*"
                                             ).newTagNode(
                                               compPurl
+                                            ).store()(dstGraph)
+                                            atom.parameter.typeFullName(
+                                              s"${Pattern.quote(bpkg)}.*"
+                                            ).newTagNode(
+                                              "framework-input"
                                             ).store()(dstGraph)
                                             atom.parameter.typeFullName(
                                               s"${Pattern.quote(bpkg)}.*"
