@@ -44,7 +44,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
 
     private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
 
-    private def containsRegex(str: String) = Pattern.quote(str) == str || str.contains("*")
+    private def containsRegex(str: String) =
+        Pattern.quote(str) == str || str.contains("*") || str.contains("(") || str.contains(")")
 
     private val BOM_JSON_FILE = ".*(bom|cdx).json"
 
@@ -121,7 +122,41 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                 then bpkg = toPyModuleForm(bpkg)
                                 if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
                                     donePkgs.put(bpkg, true)
-                                    if !containsRegex(bpkg) then
+                                    // C/C++
+                                    if language == Languages.NEWC || language == Languages.C
+                                    then
+                                        atom.method.fullNameExact(bpkg).callIn(
+                                          NoResolve
+                                        ).newTagNode(
+                                          compPurl
+                                        ).store()(dstGraph)
+                                        atom.method.fullNameExact(bpkg).newTagNode(
+                                          compPurl
+                                        ).store()(dstGraph)
+                                        if !containsRegex(bpkg) then
+                                            atom.parameter.typeFullName(s"$bpkg.*").newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                            atom.parameter.typeFullName(s"$bpkg.*").method.callIn(
+                                              NoResolve
+                                            ).newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                        else
+                                            atom.parameter.typeFullName(
+                                              s"${Pattern.quote(bpkg)}.*"
+                                            ).newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                            atom.parameter.typeFullName(
+                                              s"${Pattern.quote(bpkg)}.*"
+                                            ).method.callIn(
+                                              NoResolve
+                                            ).newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                        end if
+                                    else if !containsRegex(bpkg) then
                                         atom.call.typeFullNameExact(bpkg).newTagNode(
                                           compPurl
                                         ).store()(dstGraph)
@@ -246,4 +281,5 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                 }
             }
         }
+    end run
 end CdxPass
