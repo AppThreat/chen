@@ -158,7 +158,7 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
         val filename           = fileName(macroDef)
         val lineNo: Integer    = line(macroDef).getOrElse(-1)
         val lineNoEnd: Integer = lineEnd(macroDef).getOrElse(-1)
-        s"$filename:$lineNo:$lineNoEnd:$name:${argAsts.size}"
+        if name != "NULL" then s"$filename:$lineNo:$lineNoEnd:$name:${argAsts.size}" else name
 
     /** The CDT utility method is unfortunately in a class that is marked as deprecated, however,
       * this is because the CDT team would like to discourage its use but at the same time does not

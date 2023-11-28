@@ -1,6 +1,7 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.c2cpg.datastructures.CGlobal
+import io.appthreat.c2cpg.parser.FileDefaults
 import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewNode}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
@@ -280,6 +281,9 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         cleanedName.split(Defines.qualifiedNameSeparator).lastOption.getOrElse(cleanedName)
 
     protected def fullName(node: IASTNode): String =
+        val filename           = fileName(node)
+        val lineNo: Integer    = line(node).getOrElse(-1)
+        val lineNoEnd: Integer = lineEnd(node).getOrElse(-1)
         val qualifiedName: String = node match
             case d: CPPASTIdExpression if d.getEvaluation.isInstanceOf[EvalBinding] =>
                 val evaluation = d.getEvaluation.asInstanceOf[EvalBinding]
@@ -324,9 +328,21 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 if ASTStringUtil.getSimpleName(
                   f.getName
                 ).isEmpty && f.getNestedDeclarator != null =>
-                s"${fullName(f.getParent)}.${shortName(f.getNestedDeclarator)}"
+                val parentFullName = fullName(f.getParent)
+                val sn             = shortName(f.getNestedDeclarator)
+                val fnWithParent =
+                    if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
+                if FileDefaults.isHeaderFile(filename) then
+                    s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
+                else fnWithParent
             case f: IASTFunctionDeclarator =>
-                s"${fullName(f.getParent)}.${ASTStringUtil.getSimpleName(f.getName)}"
+                val parentFullName = fullName(f.getParent)
+                val sn             = ASTStringUtil.getSimpleName(f.getName)
+                val fnWithParent =
+                    if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
+                if FileDefaults.isHeaderFile(filename) then
+                    s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
+                else fnWithParent
             case f: IASTFunctionDefinition if f.getDeclarator != null =>
                 s"${fullName(f.getParent)}.${ASTStringUtil.getQualifiedName(f.getDeclarator.getName)}"
             case f: IASTFunctionDefinition =>

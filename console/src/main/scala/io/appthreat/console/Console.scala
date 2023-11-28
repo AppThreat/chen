@@ -502,18 +502,22 @@ class Console[T <: Project](
             atom.file.whereNot(_.name("<unknown>")).foreach { f =>
                 val childTree = richTreeLib.Tree(f.name, highlight = true)
                 f.method.foreach(m =>
-                    val mtree = childTree.add(m.fullName)
+                    val addedMethods = mutable.Map.empty[String, Boolean]
+                    val mtree        = childTree.add(m.fullName)
                     if includeCalls then
                         m.call
                             .filterNot(_.name.startsWith("<operator"))
+                            .filterNot(_.methodFullName == "NULL")
                             .toSet
                             .foreach(c =>
-                                mtree
-                                    .add(
-                                      c.methodFullName + (if c.callee(NoResolve).head.isExternal
-                                                          then " :right_arrow_curving_up:"
-                                                          else "")
-                                    )
+                                if !addedMethods.contains(c.methodFullName) then
+                                    mtree
+                                        .add(
+                                          c.methodFullName + (if c.callee(NoResolve).head.isExternal
+                                                              then " :right_arrow_curving_up:"
+                                                              else "")
+                                        )
+                                    addedMethods += c.methodFullName -> true
                             )
                 )
                 rootTree.add(childTree)
