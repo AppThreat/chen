@@ -1,14 +1,9 @@
 package io.appthreat.x2cpg.passes.taggers
 
-import io.circe.*
-import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
-import io.shiftleft.codepropertygraph.generated.nodes.Method
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-
-import java.util.regex.Pattern
 
 /** Creates tags on any node
   */
@@ -28,3 +23,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           dstGraph
         )
         atom.method.internal.name(".*(authori).*").newTagNode("authorization").store()(dstGraph)
+        if language == Languages.NEWC || language == Languages.C
+        then
+            atom.method.internal.name("main").parameter.newTagNode("cli-source").store()(dstGraph)
+end EasyTagsPass
