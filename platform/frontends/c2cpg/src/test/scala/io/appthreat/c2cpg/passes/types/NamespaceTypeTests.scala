@@ -80,9 +80,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       inside(cpg.method.nameNot("<global>").fullName.l) { case List(m1, f1, f2, h, m2) =>
         // TODO: this looks strange too it first glance. But as Eclipse CDT does not provide any
         //  mapping from definitions outside of namespace into them we cant reconstruct proper full-names.
-        m1 shouldBe "Q.V.C.m"
-        f1 shouldBe "Q.V.f"
-        h shouldBe "V.f.h"
+        m1 shouldBe "Test0.cpp:3:3:Q.V.C.m"
+        f1 shouldBe "Test0.cpp:5:5:Q.V.f"
+        h shouldBe "Test0.cpp:11:11:V.f.h"
         f2 shouldBe "V.f"
         m2 shouldBe "V.C.m"
       }
@@ -165,8 +165,8 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
-        f shouldBe "f"
-        g shouldBe "A.g"
+        f shouldBe "Test0.cpp:2:2:f"
+        g shouldBe "Test0.cpp:5:5:A.g"
         h shouldBe "h"
       }
 
@@ -204,9 +204,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.method.internal.nameNot("<global>").l) { case List(f1, f2, foo, bar) =>
-        f1.fullName shouldBe "A.f"
+        f1.fullName shouldBe "Test0.cpp:3:3:A.f"
         f1.signature shouldBe "void A.f (int)"
-        f2.fullName shouldBe "A.f"
+        f2.fullName shouldBe "Test0.cpp:8:8:A.f"
         f2.signature shouldBe "void A.f (char)"
         foo.fullName shouldBe "foo"
         bar.fullName shouldBe "bar"

@@ -109,8 +109,9 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                     case null           => Defines.anyTypeName
             case null => Defines.anyTypeName
         val (name, fullname) = uniqueName("lambda", "", fullName(lambdaExpression))
-        val signature        = s"$returnType $fullname ${parameterListSignature(lambdaExpression)}"
-        val code             = nodeSignature(lambdaExpression)
+        val signature =
+            s"$returnType ${fullNameWithoutLocation(fullname)} ${parameterListSignature(lambdaExpression)}"
+        val code = nodeSignature(lambdaExpression)
         val methodNode_ =
             methodNode(lambdaExpression, name, code, fullname, Some(signature), filename)
 
@@ -139,13 +140,13 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         val returnType = typeForDeclSpecifier(
           funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
         )
+        val name           = shortName(funcDecl)
         val fullname       = fullName(funcDecl)
         val templateParams = templateParameters(funcDecl).getOrElse("")
         val signature =
-            s"$returnType $fullname$templateParams ${parameterListSignature(funcDecl)}"
+            s"$returnType ${fullNameWithoutLocation(fullname)}$templateParams ${parameterListSignature(funcDecl)}"
 
         if seenFunctionSignatures.add(signature) then
-            val name        = shortName(funcDecl)
             val code        = nodeSignature(funcDecl.getParent)
             val filename    = fileName(funcDecl)
             val methodNode_ = methodNode(funcDecl, name, code, fullname, Some(signature), filename)
@@ -172,6 +173,8 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         end if
     end astForFunctionDeclarator
 
+    private def fullNameWithoutLocation(fullName: String) = fullName.split(":").last
+
     protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
         val filename       = fileName(funcDef)
         val returnType     = typeForDeclSpecifier(funcDef.getDeclSpecifier)
@@ -180,7 +183,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         val templateParams = templateParameters(funcDef).getOrElse("")
 
         val signature =
-            s"$returnType $fullname$templateParams ${parameterListSignature(funcDef)}"
+            s"$returnType ${fullNameWithoutLocation(fullname)}$templateParams ${parameterListSignature(funcDef)}"
         seenFunctionSignatures.add(signature)
 
         val code        = nodeSignature(funcDef)

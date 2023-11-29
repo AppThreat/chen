@@ -75,7 +75,7 @@ class TemplateTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
         x.fullName shouldBe "x"
         x.signature shouldBe "void x<T,U> (T,U)"
         y.name shouldBe "y"
-        y.fullName shouldBe "y"
+        y.fullName shouldBe "Test0.cpp:6:6:y"
         y.signature shouldBe "void y<T,U> (T,U)"
       }
     }

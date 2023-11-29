@@ -332,17 +332,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 val sn             = shortName(f.getNestedDeclarator)
                 val fnWithParent =
                     if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
-                if FileDefaults.isHeaderFile(filename) then
-                    s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
-                else fnWithParent
+                s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
             case f: IASTFunctionDeclarator =>
                 val parentFullName = fullName(f.getParent)
                 val sn             = ASTStringUtil.getSimpleName(f.getName)
                 val fnWithParent =
                     if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
-                if FileDefaults.isHeaderFile(filename) then
-                    s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
-                else fnWithParent
+                s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
             case f: IASTFunctionDefinition if f.getDeclarator != null =>
                 s"${fullName(f.getParent)}.${ASTStringUtil.getQualifiedName(f.getDeclarator.getName)}"
             case f: IASTFunctionDefinition =>

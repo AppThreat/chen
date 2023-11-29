@@ -260,12 +260,13 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
 
     "Exclusions behind over-taint" should {
       "not kill flows" in {
+        cpg.method.name("sink").fullName.l shouldBe Seq("Test0.c:3:3:sink", "sink")
         val source = cpg.method.name("source").methodReturn
         val sink   = cpg.method.name("sink").parameter
         val flows  = sink.reachableByFlows(source)
 
         flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 2), ("source()", 6), ("sink(c[1])", 8), ("sink(int* cont)", 3))
+          List(("RET", -1), ("source()", 6), ("sink(c[1])", 8), ("sink(p1)", -1))
         )
       }
     }
@@ -290,7 +291,7 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
         val flows  = sink.reachableByFlows(source)
 
         flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 3), ("source()", 7), ("sink((*arg).field)", 8), ("sink(int i)", 4))
+          List(("RET", -1), ("source()", 7), ("sink((*arg).field)", 8), ("sink(p1)", -1))
         )
       }
     }
@@ -314,7 +315,7 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
         val flows  = sink.reachableByFlows(source)
 
         flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 2), ("source()", 6), ("sink(*arg)", 7), ("sink(int i)", 3))
+          List(("RET", -1), ("source()", 6), ("sink(*arg)", 7), ("sink(p1)", -1))
         )
       }
     }

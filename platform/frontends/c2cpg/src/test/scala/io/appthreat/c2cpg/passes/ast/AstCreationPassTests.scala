@@ -1955,7 +1955,7 @@ class AstCreationPassTests extends AbstractPassTest {
     "be correct for function edge case" in AstFixture("class Foo { char (*(*x())[5])() }", "test.cpp") { cpg =>
       val List(method) = cpg.method.nameNot("<global>").l
       method.name shouldBe "x"
-      method.fullName shouldBe "Foo.x"
+      method.fullName shouldBe "test.cpp:1:1:Foo.x"
       method.code shouldBe "char (*(*x())[5])()"
       method.signature shouldBe "char Foo.x ()"
     }
