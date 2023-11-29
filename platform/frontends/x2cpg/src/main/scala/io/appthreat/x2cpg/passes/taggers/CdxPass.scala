@@ -150,6 +150,18 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                             ).newTagNode(
                                               compPurl
                                             ).store()(dstGraph)
+                                            atom.call.code(s".*\\.$bpkg.*").newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                            atom.call.code(s".*\\.$bpkg.*").newTagNode(
+                                              "library-call"
+                                            ).store()(dstGraph)
+                                            atom.call.code(s"$bpkg->.*").newTagNode(
+                                              compPurl
+                                            ).store()(dstGraph)
+                                            atom.call.code(s"$bpkg->.*").newTagNode(
+                                              "library-call"
+                                            ).store()(dstGraph)
                                         else
                                             atom.parameter.typeFullName(
                                               s"${Pattern.quote(bpkg)}.*"

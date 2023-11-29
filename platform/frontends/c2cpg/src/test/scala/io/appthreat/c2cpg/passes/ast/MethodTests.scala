@@ -77,7 +77,7 @@ class MethodTests extends CCodeToCpgSuite {
     "should not generate a type decl for method declarations" in {
       inside(cpg.method.name("doFoo").l) { case List(x) =>
         x.name shouldBe "doFoo"
-        x.fullName shouldBe "doFoo"
+        x.fullName shouldBe "Test0.c:1:1:doFoo"
         x.astParentType shouldBe NodeTypes.TYPE_DECL
         x.astParentFullName should endWith(NamespaceTraversal.globalNamespaceName)
       }

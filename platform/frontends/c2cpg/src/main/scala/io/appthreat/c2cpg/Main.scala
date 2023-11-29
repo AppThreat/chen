@@ -1,6 +1,7 @@
 package io.appthreat.c2cpg
 
-import Frontend.*
+import better.files.File
+import io.appthreat.c2cpg.Frontend.*
 import io.appthreat.x2cpg.{X2CpgConfig, X2CpgMain}
 import org.slf4j.LoggerFactory
 import scopt.OParser
