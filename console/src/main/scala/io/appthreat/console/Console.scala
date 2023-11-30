@@ -371,7 +371,10 @@ class Console[T <: Project](
               inputPath,
               workspace
             ))
-        val cpgFile = File(inputPath)
+
+        val cpgFile = if inputPath.endsWith(".atom") || inputPath.endsWith(".⚛") then
+            File(inputPath)
+        else File(inputPath) / "app.atom"
 
         if !cpgFile.exists then
             report(s"CPG at $inputPath does not exist. Bailing out.")

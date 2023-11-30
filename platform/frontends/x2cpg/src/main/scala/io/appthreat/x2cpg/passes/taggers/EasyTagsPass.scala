@@ -58,8 +58,13 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
               dstGraph
             )
             atom.method.external.fullName(
-              "(Pistache|Http|Rest|oatpp|HttpClient|HttpRequest|WebSocketClient|HttpResponse|drogon|chrono|httplib)(::|\\.).*"
+              "(Pistache|Http|Rest|oatpp|HttpClient|HttpRequest|WebSocketClient|HttpResponse|drogon|chrono|httplib|web)(::|\\.).*"
             ).parameter.newTagNode(
+              "http"
+            ).store()(
+              dstGraph
+            )
+            atom.method.external.name("(kore_|onion_|coro_).*").parameter.newTagNode(
               "http"
             ).store()(
               dstGraph
