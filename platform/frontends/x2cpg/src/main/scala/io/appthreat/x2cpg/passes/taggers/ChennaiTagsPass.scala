@@ -24,11 +24,40 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
           "django/(conf/)?urls.py:<module>.(path|re_path|url).*",
           ".*(route|web\\.|add_resource).*"
         )
+
+    private def C_ROUTES_CALL_REGEXES = Array(
+      "Routes::(Post|Get|Delete|Head|Options|Put).*",
+      "API_CALL",
+      "API_CALL_ASYNC",
+      "ENDPOINT",
+      "ENDPOINT_ASYNC",
+      "ENDPOINT_INTERCEPTOR",
+      "ENDPOINT_INTERCEPTOR_ASYNC",
+      "registerHandler",
+      "PATH_ADD",
+      "ADD_METHOD_TO",
+      "ADD_METHOD_VIA_REGEX",
+      "WS_PATH_ADD",
+      "svr\\.(Post|Get|Delete|Head|Options|Put)"
+    )
     private val PYTHON_ROUTES_DECORATORS_REGEXES = Array(
       ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*",
       ".*def\\s(get|post|put)\\(.*"
     )
     private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
+
+    private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
+        C_ROUTES_CALL_REGEXES.foreach { r =>
+            atom.method.fullName(r).parameter.newTagNode(FRAMEWORK_INPUT).store()(
+              dstGraph
+            )
+            atom.call
+                .where(_.methodFullName(r))
+                .argument
+                .isLiteral
+                .newTagNode(FRAMEWORK_ROUTE)
+                .store()(dstGraph)
+        }
     private def tagPythonRoutes(dstGraph: DiffGraphBuilder): Unit =
         PYTHON_ROUTES_CALL_REGEXES.foreach { r =>
             atom.call
@@ -64,6 +93,8 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     override def run(dstGraph: DiffGraphBuilder): Unit =
         if language == Languages.PYTHON || language == Languages.PYTHONSRC then
             tagPythonRoutes(dstGraph)
+        if language == Languages.NEWC || language == Languages.C then
+            tagCRoutes(dstGraph)
         atom.configFile("chennai.json").content.foreach { cdxData =>
             val ctagsJson       = parse(cdxData).getOrElse(Json.Null)
             val cursor: HCursor = ctagsJson.hcursor

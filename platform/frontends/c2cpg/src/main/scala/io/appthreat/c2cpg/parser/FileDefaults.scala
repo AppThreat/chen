@@ -13,7 +13,7 @@ object FileDefaults:
     val SOURCE_FILE_EXTENSIONS: Set[String] = Set(C_EXT, CC_EXT, CPP_EXT)
 
     val HEADER_FILE_EXTENSIONS: Set[String] =
-        Set(C_HEADER_EXT, CPP_HEADER_EXT, OTHER_HEADER_EXT, ".h.in")
+        Set(C_HEADER_EXT, CPP_HEADER_EXT, OTHER_HEADER_EXT, ".h.in", ".tmh")
 
     private val CPP_FILE_EXTENSIONS = Set(CC_EXT, CPP_EXT, CPP_HEADER_EXT, ".ccm", ".cxxm", ".c++m")
 

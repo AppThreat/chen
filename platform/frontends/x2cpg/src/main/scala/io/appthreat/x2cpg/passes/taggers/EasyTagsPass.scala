@@ -26,4 +26,44 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         if language == Languages.NEWC || language == Languages.C
         then
             atom.method.internal.name("main").parameter.newTagNode("cli-source").store()(dstGraph)
+            atom.method.internal.name("wmain").parameter.newTagNode("cli-source").store()(dstGraph)
+            atom.method.external.name("(cuda|curl_|BIO_).*").parameter.newTagNode(
+              "library-call"
+            ).store()(
+              dstGraph
+            )
+            atom.method.external.name("DriverEntry").parameter.newTagNode("driver-source").store()(
+              dstGraph
+            )
+            atom.method.external.name("WdfDriverCreate").parameter.newTagNode(
+              "driver-source"
+            ).store()(dstGraph)
+            atom.method.external.name("OnDeviceAdd").parameter.newTagNode(
+              "driver-source"
+            ).store()(dstGraph)
+            atom.method.external.fullName(
+              "(Aws|Azure|google|cloud)(::|\\.).*"
+            ).parameter.newTagNode(
+              "cloud"
+            ).store()(dstGraph)
+            atom.method.external.fullName("(CDevice|CDriver)(::|\\.).*").parameter.newTagNode(
+              "device-driver"
+            ).store()(dstGraph)
+            atom.method.external.fullName(
+              "(Windows|WEX|WDMAudio|winrt|wilEx)(::|\\.).*"
+            ).parameter.newTagNode("windows").store()(dstGraph)
+            atom.method.external.fullName("(RpcServer)(::|\\.).*").parameter.newTagNode(
+              "rpc"
+            ).store()(
+              dstGraph
+            )
+            atom.method.external.fullName(
+              "(Pistache|Http|Rest|oatpp|HttpClient|HttpRequest|WebSocketClient|HttpResponse|drogon|chrono|httplib)(::|\\.).*"
+            ).parameter.newTagNode(
+              "http"
+            ).store()(
+              dstGraph
+            )
+        end if
+    end run
 end EasyTagsPass

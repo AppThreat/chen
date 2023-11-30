@@ -499,7 +499,7 @@ class Console[T <: Project](
     ): String =
         if tree then
             val rootTree = richTreeLib.Tree(title, highlight = true)
-            atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+            atom.file.whereNot(_.name("<(unknown|includes)>")).foreach { f =>
                 val childTree = richTreeLib.Tree(f.name, highlight = true)
                 f.method.foreach(m =>
                     val addedMethods = mutable.Map.empty[String, Boolean]
@@ -528,7 +528,7 @@ class Console[T <: Project](
             val table = richTableLib.Table(title = title, highlight = true, show_lines = true)
             table.add_column("File Name")
             table.add_column("Methods")
-            atom.file.whereNot(_.name("<unknown>")).foreach { f =>
+            atom.file.whereNot(_.name("<(unknown|includes)>")).foreach { f =>
                 table.add_row(
                   f.name,
                   f.method.filterNot(m =>
