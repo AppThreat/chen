@@ -372,14 +372,18 @@ class Console[T <: Project](
               workspace
             ))
 
-        val cpgFile = if inputPath.endsWith(".atom") || inputPath.endsWith(".⚛") then
-            File(inputPath)
-        else File(inputPath) / "app.atom"
-
+        var cpgFile = File(inputPath)
+        if !cpgFile.exists then
+            cpgFile =
+                if inputPath.endsWith(".atom") || inputPath.endsWith(".⚛") || inputPath.endsWith(
+                      ".zip"
+                    ) || inputPath.endsWith(".cpg") || inputPath.endsWith(".bin")
+                then
+                    File(inputPath)
+                else File(inputPath) / "app.atom"
         if !cpgFile.exists then
             report(s"CPG at $inputPath does not exist. Bailing out.")
             return None
-
         val pathToProject         = workspace.createProject(inputPath, name)
         val cpgDestinationPathOpt = pathToProject.map(_.resolve(nameOfCpgInProject))
 
