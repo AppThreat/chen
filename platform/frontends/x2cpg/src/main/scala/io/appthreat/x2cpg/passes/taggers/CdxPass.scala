@@ -43,21 +43,6 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
         )
 
     private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
-    private def C_REQUEST_PATTERNS = Array(
-      "Routes::(Post|Get|Delete|Head|Options|Put).*",
-      "API_CALL",
-      "API_CALL_ASYNC",
-      "ENDPOINT",
-      "ENDPOINT_ASYNC",
-      "ENDPOINT_INTERCEPTOR",
-      "ENDPOINT_INTERCEPTOR_ASYNC",
-      "registerHandler",
-      "PATH_ADD",
-      "ADD_METHOD_TO",
-      "ADD_METHOD_VIA_REGEX",
-      "WS_PATH_ADD",
-      "svr\\.(Post|Get|Delete|Head|Options|Put)"
-    )
 
     private def containsRegex(str: String) =
         Pattern.quote(str) != str || str.contains("*") || str.contains("(") || str.contains(")")
@@ -92,14 +77,6 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                 )
             if language == Languages.PYTHON || language == Languages.PYTHONSRC then
                 PY_REQUEST_PATTERNS
-                    .foreach(p =>
-                        atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
-                          dstGraph
-                        )
-                    )
-            if language == Languages.NEWC || language == Languages.C
-            then
-                C_REQUEST_PATTERNS
                     .foreach(p =>
                         atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
                           dstGraph
