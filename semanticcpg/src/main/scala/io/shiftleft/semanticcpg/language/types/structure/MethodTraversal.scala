@@ -5,13 +5,13 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.utils.Fingerprinting
 import overflowdb.*
-import overflowdb.traversal.help
-import overflowdb.traversal.help.Doc
 import overflowdb.formats.ExportResult
 import overflowdb.formats.graphml.GraphMLExporter
+import overflowdb.traversal.help
+import overflowdb.traversal.help.Doc
 
+import java.nio.file.{Files, Paths}
 import scala.jdk.CollectionConverters.*
-import java.nio.file.{Files, Path, Paths}
 
 case class MethodSubGraph(methodName: String, methodFullName: String, nodes: Set[Node]):
     def edges: Set[Edge] =
@@ -214,7 +214,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
                 GraphMLExporter.runExport(
                   nodes,
                   subGraph.edges,
-                  Paths.get(pathToUse, s"${methodName}-${methodHash.getOrElse("")}.graphml")
+                  Paths.get(pathToUse, s"${methodName}-${methodHash}.graphml")
                 )
             }
             .reduce(plus)
