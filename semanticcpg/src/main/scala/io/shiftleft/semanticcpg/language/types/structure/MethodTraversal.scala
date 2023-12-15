@@ -6,6 +6,7 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.utils.Fingerprinting
 import overflowdb.*
 import overflowdb.formats.ExportResult
+import overflowdb.formats.dot.DotExporter
 import overflowdb.formats.graphml.GraphMLExporter
 import overflowdb.traversal.help
 import overflowdb.traversal.help.Doc
@@ -13,7 +14,12 @@ import overflowdb.traversal.help.Doc
 import java.nio.file.{Files, Paths}
 import scala.jdk.CollectionConverters.*
 
-case class MethodSubGraph(methodName: String, methodFullName: String, nodes: Set[Node]):
+case class MethodSubGraph(
+  methodName: String,
+  methodFullName: String,
+  filename: String,
+  nodes: Set[Node]
+):
     def edges: Set[Edge] =
         for
             node <- nodes
@@ -191,34 +197,71 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
 
     def numberOfLines: Iterator[Int] = traversal.map(_.numberOfLines)
 
+    def sanitizeFilename(filename: String) =
+        Paths.get(filename).getFileName.toString.replaceAll("[^a-zA-Z0-9-_\\.]", "_")
+
+    def getOrCreateExportPath(pathToUse: String): String =
+        try
+            if pathToUse == null then
+                Files.createTempDirectory("graph-export").toAbsolutePath.toString
+            else
+                Paths.get(pathToUse).toFile.mkdirs()
+                pathToUse
+        catch
+            case exc: Exception => pathToUse
+
     @Doc(info = "Export the methods to graphml")
     def gml(gmlDir: String = null): ExportResult =
-        var pathToUse = gmlDir
+        var pathToUse = getOrCreateExportPath(gmlDir)
         traversal
             .map { method =>
                 MethodSubGraph(
                   methodName = method.name,
                   methodFullName = method.fullName,
+                  filename = method.location.filename,
                   nodes = method.ast.toSet
                 )
             }
-            .map { case subGraph @ MethodSubGraph(methodName, methodFullName, nodes) =>
+            .map { case subGraph @ MethodSubGraph(methodName, methodFullName, filename, nodes) =>
                 val methodHash = Fingerprinting.calculate_hash(methodFullName)
-                try
-                    if pathToUse == null then
-                        pathToUse = Files.createTempDirectory("gml-export").toAbsolutePath.toString
-                    else
-                        Paths.get(pathToUse).toFile.mkdirs()
-                catch
-                    case exc: Exception =>
                 GraphMLExporter.runExport(
                   nodes,
                   subGraph.edges,
-                  Paths.get(pathToUse, s"${methodName}-${methodHash}.graphml")
+                  Paths.get(
+                    pathToUse,
+                    s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.graphml"
+                  )
                 )
             }
             .reduce(plus)
     end gml
 
     def gml: ExportResult = gml(null)
+
+    def dot(dotDir: String = null): ExportResult =
+        var pathToUse = getOrCreateExportPath(dotDir)
+        traversal
+            .map { method =>
+                MethodSubGraph(
+                  methodName = method.name,
+                  methodFullName = method.fullName,
+                  filename = method.location.filename,
+                  nodes = method.ast.toSet
+                )
+            }
+            .map { case subGraph @ MethodSubGraph(methodName, methodFullName, filename, nodes) =>
+                val methodHash = Fingerprinting.calculate_hash(methodFullName)
+                DotExporter.runExport(
+                  nodes,
+                  subGraph.edges,
+                  Paths.get(
+                    pathToUse,
+                    s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.dot"
+                  )
+                )
+            }
+            .reduce(plus)
+    end dot
+
+    def dot: ExportResult = dot(null)
 end MethodTraversal
