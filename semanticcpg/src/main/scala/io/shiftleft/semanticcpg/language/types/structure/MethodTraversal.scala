@@ -200,10 +200,10 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
     def sanitizeFilename(filename: String) =
         Paths.get(filename).getFileName.toString.replaceAll("[^a-zA-Z0-9-_\\.]", "_")
 
-    def getOrCreatePath(pathToUse: String): String =
+    def getOrCreateExportPath(pathToUse: String): String =
         try
             if pathToUse == null then
-                Files.createTempDirectory("gml-export").toAbsolutePath.toString
+                Files.createTempDirectory("graph-export").toAbsolutePath.toString
             else
                 Paths.get(pathToUse).toFile.mkdirs()
                 pathToUse
@@ -212,7 +212,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
 
     @Doc(info = "Export the methods to graphml")
     def gml(gmlDir: String = null): ExportResult =
-        var pathToUse = getOrCreatePath(gmlDir)
+        var pathToUse = getOrCreateExportPath(gmlDir)
         traversal
             .map { method =>
                 MethodSubGraph(
@@ -239,7 +239,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
     def gml: ExportResult = gml(null)
 
     def dot(dotDir: String = null): ExportResult =
-        var pathToUse = getOrCreatePath(dotDir)
+        var pathToUse = getOrCreateExportPath(dotDir)
         traversal
             .map { method =>
                 MethodSubGraph(
