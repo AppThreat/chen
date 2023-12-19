@@ -777,7 +777,7 @@ class AstCreator(
         val typeFullNameWithoutGenericSplit = typeInfoCalc
             .fullName(v.getType)
             .orElse(scope.lookupType(v.getTypeAsString))
-            .getOrElse(s"${Defines.UnresolvedNamespace}.${v.getTypeAsString}")
+            .getOrElse(guessTypeFullName(v.getTypeAsString))
         val typeFullName =
             // Check if the typeFullName is unresolved and if it has generic information to resolve the typeFullName
             if
@@ -979,8 +979,8 @@ class AstCreator(
             case Success(resolvedType) => typeInfoCalc.fullName(resolvedType)
         resolvedTypeOption.orElse(exprNameFromStack(expr))
 
-    private def astForAnnotationExpr(annotationExpr: AnnotationExpr): Ast =
-        val fallbackType = annotationExpr.getNameAsString match
+    private def guessTypeFullName(initString: String): String =
+        initString match
             case x
                 if Seq(
                   "Override",
@@ -991,11 +991,14 @@ class AstCreator(
                   "Native"
                 ).contains(x) => s"java.lang.$x"
             case y if y.startsWith("java.") => y
-            case _ => s"${Defines.UnresolvedNamespace}.${annotationExpr.getNameAsString}"
-        val fullName = expressionReturnTypeFullName(annotationExpr).getOrElse(fallbackType)
-        val code     = annotationExpr.toString
-        val name     = annotationExpr.getName.getIdentifier
-        val node     = annotationNode(annotationExpr, code, name, fullName)
+            case _                          => s"${Defines.UnresolvedNamespace}.${initString}"
+
+    private def astForAnnotationExpr(annotationExpr: AnnotationExpr): Ast =
+        val fallbackType = guessTypeFullName(annotationExpr.getNameAsString)
+        val fullName     = expressionReturnTypeFullName(annotationExpr).getOrElse(fallbackType)
+        val code         = annotationExpr.toString
+        val name         = annotationExpr.getName.getIdentifier
+        val node         = annotationNode(annotationExpr, code, name, fullName)
         annotationExpr match
             case _: MarkerAnnotationExpr =>
                 annotationAst(node, List.empty)
@@ -2261,7 +2264,7 @@ class AstCreator(
 
             val typeName = typeFullName
                 .map(TypeNodePass.fullToShortName)
-                .getOrElse(s"${Defines.UnresolvedNamespace}.${variable.getTypeAsString}")
+                .getOrElse(guessTypeFullName(variable.getTypeAsString))
             val code = s"$typeName $name = ${initializerAsts.rootCodeOrEmpty}"
 
             val callNode = newOperatorCallNode(
@@ -2493,7 +2496,7 @@ class AstCreator(
                     // A static field represented by a NameExpr must belong to the class in which it's used. Static fields
                     // from other classes are represented by a FieldAccessExpr instead.
                     scope.enclosingTypeDecl.map(_.name).getOrElse(
-                      s"${Defines.UnresolvedNamespace}.$name"
+                      guessTypeFullName(name)
                     )
                 else
                     NameConstants.This
@@ -3395,7 +3398,7 @@ class AstCreator(
                 .fullName(parameter.getType)
                 .orElse(scope.lookupType(parameter.getTypeAsString))
                 .map(_ ++ maybeArraySuffix)
-                .getOrElse(s"${Defines.UnresolvedNamespace}.${parameter.getTypeAsString}")
+                .getOrElse(guessTypeFullName(parameter.getTypeAsString))
         val evalStrat =
             if parameter.getType.isPrimitiveType then EvaluationStrategies.BY_VALUE
             else EvaluationStrategies.BY_SHARING
