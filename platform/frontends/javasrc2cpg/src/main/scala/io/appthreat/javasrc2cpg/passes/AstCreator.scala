@@ -980,11 +980,22 @@ class AstCreator(
         resolvedTypeOption.orElse(exprNameFromStack(expr))
 
     private def astForAnnotationExpr(annotationExpr: AnnotationExpr): Ast =
-        val fallbackType = s"${Defines.UnresolvedNamespace}.${annotationExpr.getNameAsString}"
-        val fullName     = expressionReturnTypeFullName(annotationExpr).getOrElse(fallbackType)
-        val code         = annotationExpr.toString
-        val name         = annotationExpr.getName.getIdentifier
-        val node         = annotationNode(annotationExpr, code, name, fullName)
+        val fallbackType = annotationExpr.getNameAsString match
+            case x
+                if Seq(
+                  "Override",
+                  "Deprecated",
+                  "SuppressWarnings",
+                  "SafeVarargs",
+                  "FunctionalInterface",
+                  "Native"
+                ).contains(x) => s"java.lang.$x"
+            case y if y.startsWith("java.") => y
+            case _ => s"${Defines.UnresolvedNamespace}.${annotationExpr.getNameAsString}"
+        val fullName = expressionReturnTypeFullName(annotationExpr).getOrElse(fallbackType)
+        val code     = annotationExpr.toString
+        val name     = annotationExpr.getName.getIdentifier
+        val node     = annotationNode(annotationExpr, code, name, fullName)
         annotationExpr match
             case _: MarkerAnnotationExpr =>
                 annotationAst(node, List.empty)
