@@ -316,4 +316,34 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       }
     }
   }
+
+    "lombok annotations" should {
+        lazy val cpg = code(
+            """
+              |import lombok.Data;
+              |
+              |@Data
+              |public class UserLombokModel {
+              |	private long id;
+              |	private String firstName;
+              |	private String lastName;
+              |	private int age;
+              |	private LocalDate createdDate;
+              |	private LocalDate updatedDate;
+              |	private String gender;
+              |}
+              |
+              |""".stripMargin)
+
+        "test annotation node properties" in {
+            cpg.typeDecl.name("UserLombokModel").annotation.l match {
+                case List(data) =>
+                    data.name shouldBe "Data"
+                    data.fullName shouldBe "lombok.Data"
+                    data.code shouldBe "@Data"
+                    data.lineNumber shouldBe Some(4)
+                case result => fail(s"Expected 1 annotations for UserLombokModel but got $result")
+            }
+        }
+    }
 }
