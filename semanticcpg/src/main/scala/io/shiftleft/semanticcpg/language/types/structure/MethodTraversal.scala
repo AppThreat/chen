@@ -1,5 +1,6 @@
 package io.shiftleft.semanticcpg.language.types.structure
 
+import better.files.File
 import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
@@ -264,4 +265,30 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
     end dot
 
     def dot: ExportResult = dot(null)
+
+    def exportAllRepr(dotCfgDir: String = null): Unit =
+        var pathToUse = getOrCreateExportPath(dotCfgDir)
+        traversal
+            .foreach { method =>
+                val methodName     = method.name
+                val methodFullName = method.fullName
+                val filename       = method.location.filename
+                val methodHash     = Fingerprinting.calculate_hash(methodFullName)
+                File(
+                  pathToUse,
+                  s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-ast.dot"
+                ).write(method.dotAst.head)
+                File(
+                  pathToUse,
+                  s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cdg.dot"
+                ).write(method.dotCdg.head)
+                File(
+                  pathToUse,
+                  s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cfg.dot"
+                ).write(method.dotCfg.head)
+            }
+    end exportAllRepr
+
+    def exportAllRepr: Unit = exportAllRepr(null)
+
 end MethodTraversal
