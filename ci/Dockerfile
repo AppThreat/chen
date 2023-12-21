@@ -1,19 +1,19 @@
-FROM almalinux:9.2-minimal
+FROM almalinux:9.3-minimal
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/appthreat/chen" \
       org.opencontainers.image.url="https://github.com/appthreat/chen" \
-      org.opencontainers.image.version="1.0.x" \
+      org.opencontainers.image.version="1.1.x" \
       org.opencontainers.image.vendor="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=20.0.2-graalce
-ARG MAVEN_VERSION=3.9.3
-ARG GRADLE_VERSION=8.2.1
+ARG JAVA_VERSION=21.0.1-graalce
+ARG MAVEN_VERSION=3.9.6
+ARG GRADLE_VERSION=8.5
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \

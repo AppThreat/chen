@@ -1,6 +1,6 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "1.0.10"
+ThisBuild / version      := "1.1.0"
 ThisBuild / scalaVersion := "3.3.1"
 
 val cpgVersion = "1.4.22"
@@ -32,9 +32,9 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 )
 
 ThisBuild / libraryDependencies ++= Seq(
-  "org.slf4j"                % "slf4j-api"         % "2.0.7",
-  "org.apache.logging.log4j" % "log4j-slf4j2-impl" % "2.20.0" % Optional,
-  "org.apache.logging.log4j" % "log4j-core"        % "2.20.0" % Optional
+  "org.slf4j"                % "slf4j-api"         % "2.0.9",
+  "org.apache.logging.log4j" % "log4j-slf4j2-impl" % "2.22.0" % Optional,
+  "org.apache.logging.log4j" % "log4j-core"        % "2.22.0" % Optional
   // `Optional` means "not transitive", but still included in "stage/lib"
 )
 

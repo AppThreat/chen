@@ -23,6 +23,7 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.{CPPASTIdExpression, CPPFunc
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTArrayRangeDesignator
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.EvalMemberAccess
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTFieldReference
+import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPMethod
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
 import java.nio.file.{Path, Paths}
@@ -30,10 +31,6 @@ import scala.annotation.nowarn
 import scala.collection.mutable
 
 object AstCreatorHelper:
-
-    // maximum length of code fields in number of characters
-    private val MaxCodeLength: Int = 1000
-    private val MinCodeLength: Int = 50
 
     implicit class OptionSafeAst(val ast: Ast) extends AnyVal:
         def withArgEdge(src: NewNode, dst: Option[NewNode]): Ast = dst match
@@ -80,6 +77,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         Option(cdtAst.flattenLocationsToFile(node.getNodeLocations.lastOption.toArray)).map(
           _.asFileLocation()
         )
+
+    protected def code(node: IASTNode): String = shortenCode(nodeSignature(node))
 
     protected def fileName(node: IASTNode): String =
         val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
@@ -208,6 +207,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 s.getEvaluation match
                     case evaluation: EvalMemberAccess =>
                         cleanType(evaluation.getOwnerType.toString, stripKeywords)
+                    case evalBinding: EvalBinding =>
+                        evalBinding.getBinding match
+                            case m: CPPMethod => cleanType(fullName(m.getDefinition))
+                            case _ => cleanType(ASTTypeUtil.getNodeType(s), stripKeywords)
                     case _ => cleanType(ASTTypeUtil.getNodeType(s), stripKeywords)
             case _: IASTIdExpression | _: IASTName | _: IASTDeclarator =>
                 cleanType(ASTTypeUtil.getNodeType(node), stripKeywords)
@@ -227,9 +230,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 cleanType(getNodeSignature(node), stripKeywords)
         end match
     end typeFor
-
-    protected def shortenCode(code: String, length: Int = MaxCodeLength): String =
-        StringUtils.abbreviate(code, math.max(MinCodeLength, length))
 
     private def notHandledText(node: IASTNode): String =
         s"""Node '${node.getClass.getSimpleName}' not handled yet!
