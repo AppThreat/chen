@@ -268,6 +268,7 @@ class AstCreator(
         node.getEnd.map(x => Integer.valueOf(x.line)).toScala
     protected def columnEnd(node: Node): Option[Integer] =
         node.getEnd.map(x => Integer.valueOf(x.line)).toScala
+    protected def code(node: Node): String = ""
 
     // TODO: Handle static imports correctly.
     private def addImportsToScope(compilationUnit: CompilationUnit): Seq[NewImport] =
@@ -355,6 +356,7 @@ class AstCreator(
         catch
             // This is really, really ugly, but there's a bug in the JavaParser symbol solver that can lead to
             // unterminated recursion in some cases where types cannot be resolved.
+            // Update: This must be fixed with https://github.com/javaparser/javaparser/pull/4236
             case e: StackOverflowError =>
                 logger.debug(s"Caught StackOverflowError in $filename")
                 Failure(e)

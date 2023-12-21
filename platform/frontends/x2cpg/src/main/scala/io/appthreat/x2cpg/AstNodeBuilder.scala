@@ -31,6 +31,19 @@ trait AstNodeBuilder[Node, NodeProcessor]:
     protected def lineEnd(node: Node): Option[Integer]
     protected def columnEnd(element: Node): Option[Integer]
 
+    private val MinCodeLength: Int        = 50
+    private val DefaultMaxCodeLength: Int = 1000
+    // maximum length of code fields in number of characters
+    private lazy val MaxCodeLength: Int =
+        sys.env.get("CHEN_MAX_CODE_LENGTH").flatMap(_.toIntOption).getOrElse(DefaultMaxCodeLength)
+
+    protected def code(node: Node): String
+
+    protected def shortenCode(code: String): String =
+        StringUtils.abbreviate(code, math.max(MinCodeLength, MaxCodeLength))
+
+    protected def offset(node: Node): Option[(Int, Int)] = None
+
     protected def unknownNode(node: Node, code: String): NewUnknown =
         NewUnknown()
             .parserTypeName(node.getClass.getSimpleName)

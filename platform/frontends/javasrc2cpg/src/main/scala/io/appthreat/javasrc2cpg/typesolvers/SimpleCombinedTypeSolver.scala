@@ -2,7 +2,7 @@ package io.appthreat.javasrc2cpg.typesolvers
 
 import com.github.javaparser.resolution.UnsolvedSymbolException
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration
-import com.github.javaparser.symbolsolver.cache.GuavaCache
+import com.github.javaparser.resolution.cache.GuavaCache
 import com.github.javaparser.resolution.TypeSolver
 import com.github.javaparser.resolution.model.SymbolReference
 import com.google.common.cache.CacheBuilder

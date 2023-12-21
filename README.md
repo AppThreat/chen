@@ -190,6 +190,8 @@ chen is a fork of the popular [joern](https://github.com/joernio/joern) project.
 - Enable broader hierarchical analysis (Application + Dependency + Container + OS layer)
 - By creating a welcoming community more appropriate for beginner users with great enterprise support. We want to democratize code analysis.
 
+We don't intend for bug-to-bug compatibility and often rewrite patches to suit our needs. We also do not bring features and passes that do not add value for hierarchical analysis.
+
 ## License
 
 Apache-2.0

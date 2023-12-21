@@ -150,7 +150,7 @@ class CallTests extends CCodeToCpgSuite {
     )
     "have correct names for static methods / calls from classes" in {
       cpg.method.name("square").fullName.head shouldBe "A.square"
-      cpg.method.name("call_square").call.methodFullName.head shouldBe "A.square"
+      cpg.method.name("call_square").call.methodFullName.head shouldBe "test.cpp:4:4:A.square.square.A.square"
     }
   }
 

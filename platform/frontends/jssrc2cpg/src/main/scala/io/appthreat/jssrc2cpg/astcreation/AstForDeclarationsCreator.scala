@@ -42,9 +42,15 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                 createBabelNodeInfo(obj.json("id")).node match
                     case ArrayPattern =>
                         obj.json("id")("elements").arr.toSeq.map(createBabelNodeInfo).map(_.code)
-                    case _ => Seq(obj.json("id")("name").str)
+                    case ObjectPattern =>
+                        obj.json("id")("properties").arr.toSeq.flatMap(p =>
+                            codeForBabelNodeInfo(createBabelNodeInfo(p))
+                        )
+                    case _ =>
+                        Seq(obj.json("id")("name").str)
             case VariableDeclarator => Seq(code(obj.json("id")))
             case MemberExpression   => Seq(code(obj.json("property")))
+            case ObjectProperty     => Seq(code(obj.json("key")))
             case ObjectExpression =>
                 obj.json("properties").arr.toSeq.flatMap(d =>
                     codeForBabelNodeInfo(createBabelNodeInfo(d))

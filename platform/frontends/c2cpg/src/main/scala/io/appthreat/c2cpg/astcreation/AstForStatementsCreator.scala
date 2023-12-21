@@ -204,7 +204,13 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
         val code       = s"while (${nullSafeCode(whileStmt.getCondition)})"
         val compareAst = astForConditionExpression(whileStmt.getCondition)
         val bodyAst    = nullSafeAst(whileStmt.getBody)
-        whileAst(Some(compareAst), bodyAst, Some(code))
+        whileAst(
+          Some(compareAst),
+          bodyAst,
+          Some(code),
+          lineNumber = line(whileStmt),
+          columnNumber = column(whileStmt)
+        )
 
     private def astForIf(ifStmt: IASTIfStatement): Ast =
         val (code, conditionAst) = ifStmt match

@@ -240,9 +240,12 @@ trait InteractiveShell:
           replpp.Config(
             predefFiles = predefFile +: config.additionalImports,
             nocolors = config.nocolors,
-            dependencies = config.dependencies,
-            resolvers = config.resolvers,
-            verbose = config.verbose,
+            classpathConfig = replpp.Config
+                .ForClasspath(
+                  inheritClasspath = true,
+                  dependencies = config.dependencies,
+                  resolvers = config.resolvers
+                ),
             greeting = Option(greeting),
             prompt = Option(promptStr),
             onExitCode = Option(onExitCode),
@@ -268,14 +271,19 @@ trait ScriptExecution:
                 scriptFile = Option(scriptFile),
                 command = config.command,
                 params = config.params,
-                dependencies = config.dependencies,
-                resolvers = config.resolvers,
-                verbose = config.verbose
+                verbose = config.verbose,
+                classpathConfig = replpp.Config
+                    .ForClasspath(
+                      inheritClasspath = true,
+                      dependencies = config.dependencies,
+                      resolvers = config.resolvers
+                    )
               )
             )
             if config.verbose && scriptReturn.isFailure then
                 println(scriptReturn.failed.get.getMessage)
             scriptReturn
+        end if
     end runScript
 
     /** For the given config, generate a list of commands to import the CPG
@@ -392,9 +400,13 @@ trait ServerHandling:
 
         val baseConfig = replpp.Config(
           predefFiles = predefFile +: config.additionalImports,
-          dependencies = config.dependencies,
-          resolvers = config.resolvers,
-          verbose = false
+          verbose = true, // always print what's happening - helps debugging
+          classpathConfig = replpp.Config
+              .ForClasspath(
+                inheritClasspath = true,
+                dependencies = config.dependencies,
+                resolvers = config.resolvers
+              )
         )
 
         replpp.server.ReplServer.startHttpServer(
