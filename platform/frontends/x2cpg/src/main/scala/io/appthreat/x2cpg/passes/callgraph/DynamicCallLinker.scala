@@ -135,10 +135,13 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
             case None => None
 
     private def resolveCallInSuperClasses(call: Call): Boolean =
-        if !call.methodFullName.contains(":") then return false
+        if !call.methodFullName.contains(":") && !call.methodFullName.contains(".") then
+            return false
         def split(str: String, n: Int) = (str.take(n), str.drop(n + 1))
-        val (fullName, signature) = split(call.methodFullName, call.methodFullName.lastIndexOf(":"))
-        val typeDeclFullName      = fullName.replace(s".${call.name}", "")
+        val (fullName, signature) = if call.methodFullName.contains(":") then
+            split(call.methodFullName, call.methodFullName.lastIndexOf(":"))
+        else split(call.methodFullName, call.methodFullName.lastIndexOf("."))
+        val typeDeclFullName = fullName.replace(s".${call.name}", "")
         val candidateInheritedMethods =
             cpg.typeDecl
                 .fullNameExact(allSuperClasses(typeDeclFullName).toIndexedSeq*)
@@ -159,8 +162,30 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
               )
             )
             true
+        else if call.methodFullName == "<operator>.indirectFieldAccess" then
+            val calledMethodName = call.argument.last.code
+            val fieldTypes       = call.argument.head.typ.l
+            fieldTypes.foreach { ft =>
+                val ftSubClasses = allSubclasses(ft.fullName).filterNot(cn => cn == ft.fullName)
+                if ftSubClasses.nonEmpty then
+                    val candidateSubTypeMethods = cpg.typeDecl.fullNameExact(
+                      ftSubClasses.toIndexedSeq*
+                    ).astChildren.isMethod.name(calledMethodName).fullName.l
+                    if candidateSubTypeMethods.nonEmpty then
+                        validM.put(
+                          calledMethodName,
+                          validM.getOrElse(
+                            calledMethodName,
+                            mutable.LinkedHashSet.empty
+                          ) ++ mutable.LinkedHashSet.from(
+                            candidateSubTypeMethods
+                          )
+                        )
+            }
+            true
         else
             false
+        end if
     end resolveCallInSuperClasses
 
     private def linkDynamicCall(call: Call, dstGraph: DiffGraphBuilder): Unit =
@@ -170,9 +195,11 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
             )
         then return
         // Support for overriding
-        resolveCallInSuperClasses(call)
-
-        validM.get(call.methodFullName) match
+        val resolved        = resolveCallInSuperClasses(call)
+        var methodNameToUse = call.methodFullName
+        if call.methodFullName.startsWith("<operator>") && resolved then
+            methodNameToUse = call.argument.last.code
+        validM.get(methodNameToUse) match
             case Some(tgts) =>
                 val callsOut = call.callOut.fullName.toSetImmutable
                 val tgtMs = tgts

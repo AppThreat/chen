@@ -120,16 +120,21 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         init match
             case i: IASTEqualsInitializer =>
                 val operatorName = Operators.assignment
+                val left         = astForNode(declarator.getName)
+                val right        = astForNode(i.getInitializerClause)
+                val code         = i.getInitializerClause.getRawSignature;
+                val dispatchType =
+                    if code.nonEmpty && (code.startsWith("&") || code.contains("->")) then
+                        DispatchTypes.DYNAMIC_DISPATCH
+                    else DispatchTypes.STATIC_DISPATCH
                 val callNode_ =
                     callNode(
                       declarator,
                       nodeSignature(declarator),
                       operatorName,
                       operatorName,
-                      DispatchTypes.STATIC_DISPATCH
+                      dispatchType
                     )
-                val left  = astForNode(declarator.getName)
-                val right = astForNode(i.getInitializerClause)
                 callAst(callNode_, List(left, right))
             case i: ICPPASTConstructorInitializer =>
                 val name = ASTStringUtil.getSimpleName(declarator.getName)

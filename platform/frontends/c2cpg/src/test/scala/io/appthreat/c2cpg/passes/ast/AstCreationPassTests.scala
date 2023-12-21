@@ -310,7 +310,7 @@ class AstCreationPassTests extends AbstractPassTest {
       inside(cpg.call(lambda2Name).l) { case List(lambda2call) =>
         lambda2call.name shouldBe lambda2Name
         lambda2call.methodFullName shouldBe lambda2Name
-        // TODO: lambda2call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+        lambda2call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
         inside(lambda2call.astChildren.l) { case List(ref: MethodRef, lit: Literal) =>
           ref.methodFullName shouldBe lambda2Name
           ref.code should startWith("[](int n) -> int")
