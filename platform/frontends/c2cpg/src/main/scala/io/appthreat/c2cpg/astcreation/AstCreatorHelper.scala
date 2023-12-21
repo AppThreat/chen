@@ -1,12 +1,10 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.c2cpg.datastructures.CGlobal
-import io.appthreat.c2cpg.parser.FileDefaults
-import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewNode}
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
-import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
 import io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode
-import io.shiftleft.codepropertygraph.generated.EdgeTypes
+import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
+import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewNode}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 import io.shiftleft.utils.IOUtils
 import org.apache.commons.lang.StringUtils
 import org.eclipse.cdt.core.dom.ast.*
@@ -18,12 +16,8 @@ import org.eclipse.cdt.core.dom.ast.c.{
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.CASTArrayRangeDesignator
-import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.EvalBinding
-import org.eclipse.cdt.internal.core.dom.parser.cpp.{CPPASTIdExpression, CPPFunction}
-import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTArrayRangeDesignator
-import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.EvalMemberAccess
-import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTFieldReference
-import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPMethod
+import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.{EvalBinding, EvalMemberAccess}
+import org.eclipse.cdt.internal.core.dom.parser.cpp.*
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
 import java.nio.file.{Path, Paths}

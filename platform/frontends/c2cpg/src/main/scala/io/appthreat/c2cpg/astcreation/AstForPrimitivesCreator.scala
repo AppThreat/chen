@@ -92,7 +92,14 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     protected def astForFieldReference(fieldRef: IASTFieldReference): Ast =
         val op = if fieldRef.isPointerDereference then Operators.indirectFieldAccess
         else Operators.fieldAccess
-        val ma = callNode(fieldRef, nodeSignature(fieldRef), op, op, DispatchTypes.STATIC_DISPATCH)
+        val ma = callNode(
+          fieldRef,
+          nodeSignature(fieldRef),
+          op,
+          op,
+          if fieldRef.isPointerDereference then DispatchTypes.DYNAMIC_DISPATCH
+          else DispatchTypes.STATIC_DISPATCH
+        )
         val owner = astForExpression(fieldRef.getFieldOwner)
         val member = fieldIdentifierNode(
           fieldRef,

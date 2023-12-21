@@ -47,4 +47,46 @@ class CallGraphQueryTests extends CCodeToCpgSuite {
     cpg.method.name("printf").callIn.argument.inCall.name.toSetMutable shouldBe Set("printf")
   }
 
+    "CallTest 6" should {
+        val cpg = code(
+            """
+              |class Animal {
+              |	public:
+              |    virtual void eat() {
+              |		std::cout<<"eat nothing";
+              |	}
+              |};
+              |class Cat:public Animal {
+              |    public:
+              |	void eat() {
+              |        std::cout<<"eat fish";
+              |    }
+              |};
+              |class People {
+              |  Cat d;
+              |  Animal *pet = &d;
+              |  void eat() {
+              |    std::cout<<"people eat";
+              |  }
+              |  void feedPets() {
+              |    pet->eat();
+              |  }
+              |}
+              |int main( )
+              |{
+              |   Cat c;
+              |   Animal *a = &c;
+              |   a->eat();
+              |   return 0;
+              |}
+              |""".stripMargin,
+            "test.cpp"
+        )
+        "have correct type full names for calls" in {
+            cpg.method.name("eat").fullName.toSet shouldBe Set("Animal.eat", "Cat.eat", "People.eat")
+            cpg.method.fullName("main").callee.fullName.toSet shouldBe Set("Animal.eat", "Cat.eat")
+            cpg.method.fullName("Cat.eat").caller.fullName.toSet shouldBe Set("main")
+            cpg.method.fullName("Animal.eat").caller.fullName.toSet shouldBe Set("People.feedPets", "main")
+        }
+    }
 }

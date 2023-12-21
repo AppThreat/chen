@@ -50,9 +50,16 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             case IASTBinaryExpression.op_ellipses        => "<operator>.op_ellipses"
             case _                                       => "<operator>.unknown"
 
-        val callNode_ = callNode(bin, nodeSignature(bin), op, op, DispatchTypes.STATIC_DISPATCH)
-        val left      = nullSafeAst(bin.getOperand1)
-        val right     = nullSafeAst(bin.getOperand2)
+        val callNode_ = callNode(
+          bin,
+          nodeSignature(bin),
+          op,
+          op,
+          if op == Operators.indirectFieldAccess then DispatchTypes.DYNAMIC_DISPATCH
+          else DispatchTypes.STATIC_DISPATCH
+        )
+        val left  = nullSafeAst(bin.getOperand1)
+        val right = nullSafeAst(bin.getOperand2)
         callAst(callNode_, List(left, right))
     end astForBinaryExpression
 
@@ -91,7 +98,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
         val (dd, name) = call.getFunctionNameExpression match
             case _: ICPPASTLambdaExpression =>
                 (
-                  DispatchTypes.STATIC_DISPATCH,
+                  DispatchTypes.DYNAMIC_DISPATCH,
                   rec.root.get.asInstanceOf[NewMethodRef].methodFullName
                 )
             case _ if rec.root.exists(_.isInstanceOf[NewIdentifier]) =>
@@ -164,7 +171,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   nodeSignature(unary),
                   operatorMethod,
                   operatorMethod,
-                  DispatchTypes.STATIC_DISPATCH
+                  if operatorMethod == Operators.addressOf || operatorMethod == Operators.indirectFieldAccess
+                  then DispatchTypes.DYNAMIC_DISPATCH
+                  else DispatchTypes.STATIC_DISPATCH
                 )
             val operand = nullSafeAst(unary.getOperand)
             callAst(cpgUnary, List(operand))
