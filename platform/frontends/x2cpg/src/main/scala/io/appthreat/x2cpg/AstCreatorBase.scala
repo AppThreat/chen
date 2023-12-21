@@ -4,12 +4,13 @@ import io.appthreat.x2cpg.passes.frontend.MetaDataPass
 import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, ModifierTypes}
+import io.shiftleft.passes.IntervalKeyPool
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 abstract class AstCreatorBase(filename: String)(implicit withSchemaValidation: ValidationMode):
     val diffGraph: DiffGraphBuilder = new DiffGraphBuilder
-
+    private val closureKeyPool      = new IntervalKeyPool(first = 0, last = Long.MaxValue)
     def createAst(): DiffGraphBuilder
 
     /** Create a global namespace block for the given `filename`
@@ -326,4 +327,6 @@ abstract class AstCreatorBase(filename: String)(implicit withSchemaValidation: V
       */
     def absolutePath(filename: String): String =
         better.files.File(filename).path.toAbsolutePath.normalize().toString
+
+    def nextClosureName(): String = s"${Defines.ClosurePrefix}${closureKeyPool.next}"
 end AstCreatorBase
