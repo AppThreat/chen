@@ -39,7 +39,9 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
       // Bom
       pathEndFilter("bom.json"),
       pathEndFilter(".cdx.json"),
-      pathEndFilter("chennai.json")
+      pathEndFilter("chennai.json"),
+      extensionFilter(".yml"),
+      extensionFilter(".yaml")
     )
 
     private def mybatisFilter(file: File): Boolean =

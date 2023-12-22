@@ -20,6 +20,12 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          coverage: "none"
+          php-version: "8.3"
+          tools: composer:v2
       - name: Set up Python
         uses: actions/setup-python@v4
         with:

@@ -28,4 +28,5 @@ object Defines:
 
     val LeftAngularBracket = "<"
     val Unknown            = "<unknown>"
+    val ClosurePrefix      = "<lambda>"
 end Defines

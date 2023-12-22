@@ -29,12 +29,16 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.11 \
     ANDROID_HOME=/opt/android-sdk-linux \
-    CHEN_INSTALL_DIR=/opt/workspace
+    CHEN_INSTALL_DIR=/opt/workspace \
+    PHP_PARSER_BIN=/opt/vendor/bin/php-parse \
+    COMPOSER_ALLOW_SUPERUSER=1
 ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
 WORKDIR /opt
 COPY ./ci/conda-install.sh /opt/
 COPY README.md /opt/
+COPY ./platform/frontends/php2atom/composer.json /opt/composer.json
+COPY ./platform/frontends/php2atom/composer.json /opt/composer.lock
 
 RUN set -e; \
     ARCH_NAME="$(rpm --eval '%{_arch}')"; \
@@ -51,7 +55,7 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core wget bash graphviz graphviz-gd \
+    && microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel glibc-common glibc-all-langpacks \
     && mkdir -p /opt/miniconda3 /opt/workspace \
     && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
@@ -87,7 +91,9 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
-    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional
+    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
+    && php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && php composer-setup.php \
+    && mv composer.phar /usr/local/bin/composer
 ENV LC_ALL=en_US.UTF-8 \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US.UTF-8 \
@@ -97,6 +103,7 @@ COPY ./pyproject.toml /opt/
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
 RUN unzip -q chen.zip \
+    && composer update --no-progress --prefer-dist --ignore-platform-reqs \
     && python -m pip install --no-deps . \
     && rm chen.zip conda-install.sh pyproject.toml \
     && microdnf clean all

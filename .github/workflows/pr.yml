@@ -16,6 +16,12 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: ${{ matrix.jvm }}
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          coverage: "none"
+          php-version: "8.3"
+          tools: composer:v2
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -44,6 +50,7 @@ jobs:
         if: runner.os == 'macOS'
       - name: Install and test
         run: |
+          bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom
           python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install poetry

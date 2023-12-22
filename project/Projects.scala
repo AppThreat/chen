@@ -15,4 +15,5 @@ object Projects {
   lazy val jssrc2cpg   = project.in(frontendsRoot / "jssrc2cpg")
   lazy val javasrc2cpg = project.in(frontendsRoot / "javasrc2cpg")
   lazy val jimple2cpg  = project.in(frontendsRoot / "jimple2cpg")
+  lazy val php2atom  = project.in(frontendsRoot / "php2atom")
 }
