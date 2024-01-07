@@ -615,7 +615,7 @@ object Domain:
                 val children = arr.value.map(readStmt).toList
                 PhpFile(children)
             case unhandled =>
-                logger.error(
+                logger.debug(
                   s"Found unhandled type in readFile: ${unhandled.getClass} with value $unhandled"
                 )
                 ???
@@ -661,7 +661,7 @@ object Domain:
             case "Stmt_Foreach"      => readForeach(json)
             case "Stmt_TraitUse"     => readTraitUse(json)
             case unhandled =>
-                logger.error(s"Found unhandled stmt type: $unhandled")
+                logger.debug(s"Found unhandled stmt type: $unhandled")
                 ???
 
     private def readString(json: Value): PhpString =
@@ -1059,7 +1059,7 @@ object Domain:
             case typ if isCastType(typ)     => readCast(json)
 
             case unhandled =>
-                logger.error(s"Found unhandled expr type: $unhandled")
+                logger.debug(s"Found unhandled expr type: $unhandled")
                 ???
 
     private def readClone(json: Value): PhpCloneExpr =
@@ -1080,7 +1080,7 @@ object Domain:
 
     private def readVariable(json: Value): PhpVariable =
         if !json.obj.contains("name") then
-            logger.error(s"Variable did not contain name: $json")
+            logger.debug(s"Variable did not contain name: $json")
         val varAttrs = PhpAttributes(json)
         val name = json("name") match
             case Str(value) => readName(value).copy(attributes = varAttrs)
@@ -1363,7 +1363,7 @@ object Domain:
                 PhpNameExpr(name, PhpAttributes(json))
 
             case unhandled =>
-                logger.error(s"Found unhandled name type $unhandled: $json")
+                logger.debug(s"Found unhandled name type $unhandled: $json")
                 ??? // TODO: other matches are possible?
 
     /** One of Identifier, Name, or Complex Type (Nullable, Intersection, or Union)

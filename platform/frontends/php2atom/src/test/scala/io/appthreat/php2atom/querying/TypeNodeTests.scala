@@ -28,11 +28,11 @@ class TypeNodeTests extends PhpCode2CpgFixture {
 
     "have corresponding type nodes created" in {
       println(cpg.literal.toList)
-      cpg.typ.fullName.toSet shouldEqual Set("ANY", "int")
+      cpg.typ.fullName.toSet shouldEqual Set("ANY", "string")
     }
 
     "have corresponding type decls created" in {
-      cpg.typeDecl.external.fullName.toSet shouldEqual Set("ANY", "int")
+      cpg.typeDecl.external.fullName.toSet shouldEqual Set("ANY", "string")
     }
   }
 }

@@ -26,7 +26,7 @@ class ClosureRefPass(cpg: Cpg) extends ConcurrentWriterCpgPass[ClosureBinding](c
     override def runOnPart(diffGraph: DiffGraphBuilder, closureBinding: ClosureBinding): Unit =
         closureBinding.captureIn.collectAll[MethodRef].toList match
             case Nil =>
-                logger.error(
+                logger.debug(
                   s"No MethodRef corresponding to closureBinding ${closureBinding.closureBindingId}"
                 )
 
@@ -34,7 +34,7 @@ class ClosureRefPass(cpg: Cpg) extends ConcurrentWriterCpgPass[ClosureBinding](c
                 addRefToCapturedNode(diffGraph, closureBinding, getMethod(methodRef))
 
             case methodRefs =>
-                logger.error(
+                logger.debug(
                   s"Mutliple MethodRefs corresponding to closureBinding ${closureBinding.closureBindingId}"
                 )
                 logger.debug(s"${closureBinding.closureBindingId} MethodRefs = ${methodRefs}")

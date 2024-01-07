@@ -7,7 +7,6 @@ import io.appthreat.x2cpg.utils.ExternalCommand
 import org.slf4j.LoggerFactory
 
 import java.nio.file.Paths
-import scala.io.Source
 import scala.util.{Failure, Success, Try}
 
 class PhpParser private (phpParserPath: String, phpIniPath: String):
@@ -16,7 +15,11 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
 
     private def phpParseCommand(filename: String): String =
         val phpParserCommands = "--with-recovery --resolve-names --json-dump"
-        s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
+        phpParserPath match
+            case "phpastgen" =>
+                s"$phpParserPath $phpParserCommands $filename"
+            case _ =>
+                s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
 
     def parseFile(inputPath: String, phpIniOverride: Option[String]): Option[PhpFile] =
         val inputFile      = File(inputPath)
@@ -30,7 +33,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
                 processParserOutput(output, inputFilePath)
 
             case Failure(exception) =>
-                logger.error(s"Failure running php-parser with $command", exception.getMessage())
+                logger.debug(s"Failure running php-parser with $command", exception.getMessage)
                 None
 
     private def processParserOutput(output: String, filename: String): Option[PhpFile] =
@@ -46,11 +49,11 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
                 case Success(Some(value)) => Some(value)
 
                 case Success(None) =>
-                    logger.error(s"Parsing json string for $filename resulted in null return value")
+                    logger.debug(s"Parsing json string for $filename resulted in null return value")
                     None
 
                 case Failure(exception) =>
-                    logger.error(
+                    logger.debug(
                       s"Parsing json string for $filename failed with exception",
                       exception
                     )
@@ -64,7 +67,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
             case Success(phpFile) => Some(phpFile)
 
             case Failure(e) =>
-                logger.error(s"Failed to generate intermediate AST for $filename", e)
+                logger.debug(s"Failed to generate intermediate AST for $filename", e)
                 None
 end PhpParser
 
@@ -74,10 +77,8 @@ object PhpParser:
     val PhpParserBinEnvVar = "PHP_PARSER_BIN"
 
     private def defaultPhpIni: String =
-        val iniContents = Source.fromResource("php.ini").getLines().mkString(System.lineSeparator())
-
         val tmpIni = File.newTemporaryFile(suffix = "-php.ini").deleteOnExit()
-        tmpIni.writeText(iniContents)
+        tmpIni.writeText("memory_limit = -1")
         tmpIni.canonicalPath
 
     private def isPhpAstgenSupported: Boolean =
@@ -114,20 +115,14 @@ object PhpParser:
     ): Option[String] =
         val pathString = maybeOverride match
             case Some(overridePath) if overridePath.nonEmpty =>
-                logger.debug(s"Using override path for $identifier: $overridePath")
                 overridePath
-
             case _ =>
-                logger.debug(s"$identifier path not overridden. Using default: $defaultValue")
                 defaultValue
 
         File(pathString) match
-            case file if file.exists() && file.isRegularFile() => Some(file.canonicalPath)
-
-            case _ =>
-                logger.error(s"Invalid path for $identifier: $pathString")
-                None
-    end configOverrideOrDefaultPath
+            case file if file.exists() && file.isRegularFile(File.LinkOptions.follow) =>
+                Some(file.canonicalPath)
+            case _ => Some(defaultValue)
 
     private def maybePhpParserPath(config: Config): Option[String] =
         val phpParserPathOverride =
