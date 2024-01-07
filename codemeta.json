@@ -31,8 +31,8 @@
     "MacOS"
   ],
   "softwareRequirements": [
-    "Python >= 3.8",
-    "Java >= 17"
+    "Python >= 3.10",
+    "Java >= 21"
   ],
   "author": [
     {

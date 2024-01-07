@@ -44,6 +44,7 @@ class Php2Atom extends X2CpgFrontend[Config]:
                 new AstCreationPass(config, cpg, parser.get)(
                   config.schemaValidation
                 ).createAndApply()
+                new ConfigFileCreationPass(cpg).createAndApply()
                 new AstParentInfoPass(cpg).createAndApply()
                 new AnyTypePass(cpg).createAndApply()
                 TypeNodePass.withTypesFromCpg(cpg).createAndApply()
@@ -56,7 +57,7 @@ class Php2Atom extends X2CpgFrontend[Config]:
                   errorMessages.toList
             ).mkString("\n- ")
 
-            logger.error(errorOutput)
+            logger.debug(errorOutput)
 
             Failure(new RuntimeException("php not found or version not supported"))
         end if

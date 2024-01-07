@@ -188,7 +188,7 @@ object Path:
             addedPaths += s"${fileName}#${lineNumber}"
         }
         try
-            if hasCheckLike then caption = s"This flow is safe with mitigation in place.\n$caption"
+            if hasCheckLike then caption = s"This flow has mitigations in place.\n$caption"
             printFlows(tableRows, caption)
         catch
             case exc: Exception =>

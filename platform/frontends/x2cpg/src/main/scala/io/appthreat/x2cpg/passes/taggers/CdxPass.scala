@@ -75,6 +75,13 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                 JS_RESPONSE_PATTERNS.foreach(p =>
                     atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
                 )
+            if language == Languages.PHP then
+                atom.parameter.name("request.*").newTagNode("framework-input").store()(dstGraph)
+                atom.parameter.name("response.*").newTagNode("framework-output").store()(dstGraph)
+                atom.ret
+                    .where(_.method.parameter.name("request.*"))
+                    .newTagNode("framework-output")
+                    .store()(dstGraph)
             if language == Languages.PYTHON || language == Languages.PYTHONSRC then
                 PY_REQUEST_PATTERNS
                     .foreach(p =>
@@ -120,6 +127,10 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                         bpkg.replace(File.separator, Pattern.quote(File.separator))
                                 if language == Languages.PYTHON || language == Languages.PYTHONSRC
                                 then bpkg = toPyModuleForm(bpkg)
+                                if language == Languages.PHP
+                                then
+                                    bpkg = bpkg.replaceAll("""\\""", """\\\\""")
+                                    bpkg = s"""$bpkg.*"""
                                 if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
                                     donePkgs.put(bpkg, true)
                                     // C/C++
