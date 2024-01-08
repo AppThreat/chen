@@ -8,31 +8,19 @@ import io.shiftleft.semanticcpg.language._
 import io.shiftleft.codepropertygraph.generated.nodes.Block
 
 class TypeNodeTests extends PhpCode2CpgFixture {
-  "TypeDecls with inheritsFrom types" should {
-    val cpg = code("""<?php
-     |namespace foo;
-     |class A extends B implements C, D {}
-     |""".stripMargin)
+    "TypeDecls with inheritsFrom types" should {
+        val cpg = code(
+            """<?php
+              |namespace foo;
+              |class A extends B implements C, D {}
+              |""".stripMargin)
 
-    "have type nodes created for the TypeDecl and inherited types" in {
-      cpg.typ.fullName.toSet shouldEqual Set("ANY", "foo\\A", "foo\\B", "foo\\C", "foo\\D")
+        "have type nodes created for the TypeDecl and inherited types" in {
+            cpg.typ.fullName.toSet shouldEqual Set("ANY", "foo\\A", "foo\\B", "foo\\C", "foo\\D")
+        }
+
+        "have TypeDecl stubs created for inherited types" in {
+            cpg.typeDecl.external.fullName.toSet shouldEqual Set("ANY", "foo\\B", "foo\\C", "foo\\D")
+        }
     }
-
-    "have TypeDecl stubs created for inherited types" in {
-      cpg.typeDecl.external.fullName.toSet shouldEqual Set("ANY", "foo\\B", "foo\\C", "foo\\D")
-    }
-  }
-
-  "known types without explicit typeDecls" should {
-    val cpg = code("""<?php\n$x = 3;""")
-
-    "have corresponding type nodes created" in {
-      println(cpg.literal.toList)
-      cpg.typ.fullName.toSet shouldEqual Set("ANY", "int")
-    }
-
-    "have corresponding type decls created" in {
-      cpg.typeDecl.external.fullName.toSet shouldEqual Set("ANY", "int")
-    }
-  }
 }

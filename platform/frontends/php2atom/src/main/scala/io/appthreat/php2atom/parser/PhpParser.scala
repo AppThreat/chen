@@ -14,7 +14,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     private val logger = LoggerFactory.getLogger(this.getClass)
 
     private def phpParseCommand(filename: String): String =
-        val phpParserCommands = "--with-recovery --resolve-names --json-dump"
+        val phpParserCommands = "--with-recovery --resolve-names -c --json-dump"
         phpParserPath match
             case "phpastgen" =>
                 s"$phpParserPath $phpParserCommands $filename"
@@ -39,7 +39,6 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     private def processParserOutput(output: String, filename: String): Option[PhpFile] =
         val maybeJson =
             linesToJsonValue(output.split(System.lineSeparator()).toIndexedSeq, filename)
-
         maybeJson.flatMap(jsonValueToPhpFile(_, filename))
 
     private def linesToJsonValue(lines: Seq[String], filename: String): Option[ujson.Value] =
@@ -59,7 +58,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
                     )
                     None
         else
-            logger.warn(s"No JSON output for $filename")
+            logger.debug(s"No JSON output for $filename")
             None
 
     private def jsonValueToPhpFile(json: ujson.Value, filename: String): Option[PhpFile] =

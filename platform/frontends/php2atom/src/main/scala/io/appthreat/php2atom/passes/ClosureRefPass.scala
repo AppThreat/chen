@@ -51,7 +51,7 @@ class ClosureRefPass(cpg: Cpg) extends ConcurrentWriterCpgPass[ClosureBinding](c
     ): Unit =
         method match
             case None =>
-                logger.warn(
+                logger.debug(
                   s"No parent method for methodRef for ${closureBinding.closureBindingId}. REF edge will be missing"
                 )
 

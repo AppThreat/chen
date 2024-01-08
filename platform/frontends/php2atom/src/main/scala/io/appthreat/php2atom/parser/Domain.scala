@@ -87,7 +87,7 @@ object Domain:
                     PhpAttributes.Empty
 
                 case unhandled =>
-                    logger.warn(s"Could not find attributes object in type $unhandled")
+                    logger.debug(s"Could not find attributes object in type $unhandled")
                     PhpAttributes.Empty
 
     object PhpModifiers:
@@ -660,9 +660,8 @@ object Domain:
             case "Stmt_GroupUse"     => readGroupUse(json)
             case "Stmt_Foreach"      => readForeach(json)
             case "Stmt_TraitUse"     => readTraitUse(json)
-            case unhandled =>
-                logger.debug(s"Found unhandled stmt type: $unhandled")
-                ???
+            case "Stmt_Block"        => NopStmt(PhpAttributes(json))
+            case unhandled           => NopStmt(PhpAttributes(json))
 
     private def readString(json: Value): PhpString =
         PhpString.withQuotes(json("value").str, PhpAttributes(json))
@@ -750,7 +749,7 @@ object Domain:
             case 3 => PhpIncludeType.Require
             case 4 => PhpIncludeType.RequireOnce
             case other =>
-                logger.warn(s"Unhandled include type: $other. Defaulting to regular include.")
+                logger.debug(s"Unhandled include type: $other. Defaulting to regular include.")
                 PhpIncludeType.Include
 
         PhpIncludeExpr(expr, includeType, PhpAttributes(json))
@@ -1009,7 +1008,9 @@ object Domain:
         json("nodeType").str match
             case "Scalar_String"   => readString(json)
             case "Scalar_DNumber"  => PhpFloat(json("value").toString, PhpAttributes(json))
+            case "Scalar_Float"    => PhpFloat(json("value").toString, PhpAttributes(json))
             case "Scalar_LNumber"  => PhpInt(json("value").toString, PhpAttributes(json))
+            case "Scalar_Int"      => PhpInt(json("value").toString, PhpAttributes(json))
             case "Scalar_Encapsed" => readEncapsed(json)
             case "Scalar_InterpolatedString" => readEncapsed(json)
             case "Scalar_EncapsedStringPart" => readString(json)
@@ -1223,7 +1224,7 @@ object Domain:
             case ujson.Null => Nil
             case stmts: Arr => stmts.arr.map(readStmt).toList
             case unhandled =>
-                logger.warn(s"Unhandled namespace stmts type $unhandled")
+                logger.debug(s"Unhandled namespace stmts type $unhandled")
                 ???
 
         PhpNamespaceStmt(name, stmts, PhpAttributes(json))
@@ -1325,8 +1326,9 @@ object Domain:
         val name  = readName(json("name"))
         val value = readExpr(json("value"))
         val namespacedName =
-            Option.unless(json("namespacedName").isNull)(readName(json("namespacedName")))
-
+            Option.unless(json.obj.get("namespacedName").isNull)(readName(
+              json.obj.get("namespacedName")
+            ))
         PhpConstDeclaration(name, value, namespacedName, PhpAttributes(json))
 
     private def readParam(json: Value): PhpParam =
@@ -1346,21 +1348,28 @@ object Domain:
             case Str(name) => PhpNameExpr(name, PhpAttributes.Empty)
 
             case Obj(value) if value.get("nodeType").map(_.str).contains("Name_FullyQualified") =>
-                val name = value("parts").arr.map(_.str).mkString(NamespaceDelimiter)
+                val name = if value.get("parts").nonEmpty then
+                    value("parts").arr.map(_.str).mkString(NamespaceDelimiter)
+                else Try(value("name").str).getOrElse("")
                 PhpNameExpr(name, PhpAttributes(json))
 
             case Obj(value) if value.get("nodeType").map(_.str).contains("Name") =>
-                // TODO Can this case just be merged with Name_FullyQualified?
-                val name = value("parts").arr.map(_.str).mkString(NamespaceDelimiter)
+                val name = if value.get("parts").nonEmpty then
+                    value("parts").arr.map(_.str).mkString(NamespaceDelimiter)
+                else Try(value("name").str).getOrElse("")
                 PhpNameExpr(name, PhpAttributes(json))
 
             case Obj(value) if value.get("nodeType").map(_.str).contains("Identifier") =>
-                val name = value("name").str
-                PhpNameExpr(name, PhpAttributes(json))
+                val name = Try(value("name").str).getOrElse("")
+                if name.nonEmpty then PhpNameExpr(name, PhpAttributes(json))
+                else PhpNameExpr("anonymous", PhpAttributes.Empty)
 
             case Obj(value) if value.get("nodeType").map(_.str).contains("VarLikeIdentifier") =>
-                val name = value("name").str
-                PhpNameExpr(name, PhpAttributes(json))
+                val name = Try(value("name").str).getOrElse("")
+                if name.nonEmpty then PhpNameExpr(name, PhpAttributes(json))
+                else PhpNameExpr("anonymous", PhpAttributes.Empty)
+
+            case arr: Arr => PhpNameExpr(json.toString, PhpAttributes.Empty)
 
             case unhandled =>
                 logger.debug(s"Found unhandled name type $unhandled: $json")

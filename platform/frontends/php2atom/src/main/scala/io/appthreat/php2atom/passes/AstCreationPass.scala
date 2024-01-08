@@ -32,12 +32,19 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
             File(filename).name
         else
             File(config.inputPath).relativize(File(filename)).toString
-        parser.parseFile(filename, config.phpIni) match
-            case Some(parseResult) =>
-                diffGraph.absorb(
-                  new AstCreator(relativeFilename, parseResult)(config.schemaValidation).createAst()
-                )
+        if !config.ignoredFilesRegex.matches(
+              relativeFilename
+            ) && !config.defaultIgnoredFilesRegex.exists(_.matches(relativeFilename))
+        then
+            parser.parseFile(filename, config.phpIni) match
+                case Some(parseResult) =>
+                    diffGraph.absorb(
+                      new AstCreator(relativeFilename, parseResult)(
+                        config.schemaValidation
+                      ).createAst()
+                    )
 
-            case None =>
-                logger.warn(s"Could not parse file $filename. Results will be missing!")
+                case None =>
+                    logger.debug(s"Could not parse file $filename. Results will be missing!")
+    end runOnPart
 end AstCreationPass
