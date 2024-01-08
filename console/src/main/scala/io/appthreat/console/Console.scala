@@ -543,7 +543,7 @@ class Console[T <: Project](
                         "<fakeNew>"
                       ) || m.fullName.endsWith(
                         "<metaClassAdapter>"
-                      )
+                      ) || m.name.isEmpty
                   ).map(m =>
                       var methodDisplayStr = if m.tag.nonEmpty then
                           s"""${m.fullName}\n[info]Tags: ${m.tag.name.mkString(", ")}[/info]"""

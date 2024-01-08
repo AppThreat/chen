@@ -44,6 +44,9 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
       ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*",
       ".*def\\s(get|post|put)\\(.*"
     )
+    private val PHP_ROUTES_METHODS_REGEXES = Array(
+      ".*(router|routes)->(add|before|mount|get|post|put|delete|head|option).*"
+    )
     private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
 
     private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
@@ -89,12 +92,22 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
           FRAMEWORK_INPUT
         ).store()(dstGraph)
     end tagPythonRoutes
-
+    private def tagPhpRoutes(dstGraph: DiffGraphBuilder): Unit =
+        PHP_ROUTES_METHODS_REGEXES.foreach { r =>
+            atom.method.fullName(r).parameter.newTagNode(FRAMEWORK_INPUT).store()(
+              dstGraph
+            )
+            atom.call.where(_.methodFullName(r)).argument.isLiteral.newTagNode(
+              FRAMEWORK_ROUTE
+            ).store()(dstGraph)
+        }
+    end tagPhpRoutes
     override def run(dstGraph: DiffGraphBuilder): Unit =
         if language == Languages.PYTHON || language == Languages.PYTHONSRC then
             tagPythonRoutes(dstGraph)
         if language == Languages.NEWC || language == Languages.C then
             tagCRoutes(dstGraph)
+        if language == Languages.PHP then tagPhpRoutes(dstGraph)
         atom.configFile("chennai.json").content.foreach { cdxData =>
             val ctagsJson       = parse(cdxData).getOrElse(Json.Null)
             val cursor: HCursor = ctagsJson.hcursor

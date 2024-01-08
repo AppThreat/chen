@@ -38,7 +38,7 @@ class Scope(implicit nextClosureName: () => String)
                 super.pushNewScope(PhpScopeElement(namespace))
 
             case invalid =>
-                logger.warn(s"pushNewScope called with invalid node $invalid. Ignoring!")
+                logger.debug(s"pushNewScope called with invalid node $invalid. Ignoring!")
 
     override def popScope(): Option[PhpScopeElement] =
         val scopeNode = super.popScope()
@@ -88,7 +88,7 @@ class Scope(implicit nextClosureName: () => String)
                 scopeElement.scopeNode.getClosureMethodName
 
             case None =>
-                logger.warn(
+                logger.debug(
                   "BUG: Attempting to get scopedClosureName, but no scope has been push. Defaulting to unscoped"
                 )
                 NameConstants.Closure
