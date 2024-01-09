@@ -129,9 +129,10 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                 ???
 
     private def astForEchoStmt(echoStmt: PhpEchoStmt): Ast =
-        val args     = echoStmt.exprs.map(astForExpr)
-        val code     = s"echo ${args.map(_.rootCodeOrEmpty).mkString(",")}"
-        val callNode = newOperatorCallNode("echo", code, line = line(echoStmt))
+        val args = echoStmt.exprs.map(astForExpr)
+        val code = s"echo ${args.map(_.rootCodeOrEmpty).mkString(",")}"
+        val callNode =
+            newOperatorCallNode("echo", code, line = line(echoStmt), column = column(echoStmt))
         callAst(callNode, args)
 
     private def thisParamAstForMethod(originNode: PhpNode): Ast =
@@ -221,7 +222,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val returnType = decl.returnType.map(_.name).getOrElse(TypeConstants.Any)
 
         val methodBodyStmts = bodyPrefixAsts ++ decl.stmts.flatMap(astsForStmt)
-        val methodReturn    = newMethodReturnNode(returnType, line = line(decl), column = None)
+        val methodReturn = newMethodReturnNode(returnType, line = line(decl), column = column(decl))
 
         val methodBody = blockAst(blockNode(decl), methodBodyStmts)
 
@@ -329,7 +330,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val code       = s"while (${condition.rootCodeOrEmpty})"
         val body       = stmtBodyBlockAst(whileStmt)
 
-        whileAst(Option(condition), List(body), Option(code), lineNumber)
+        whileAst(
+          Option(condition),
+          List(body),
+          Option(code),
+          lineNumber,
+          columnNumber = column(whileStmt)
+        )
 
     private def astForDoStmt(doStmt: PhpDoStmt): Ast =
         val condition  = astForExpr(doStmt.cond)
@@ -337,7 +344,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val code       = s"do {...} while (${condition.rootCodeOrEmpty})"
         val body       = stmtBodyBlockAst(doStmt)
 
-        doWhileAst(Option(condition), List(body), Option(code), lineNumber)
+        doWhileAst(
+          Option(condition),
+          List(body),
+          Option(code),
+          lineNumber,
+          columnNumber = column(doStmt)
+        )
 
     private def astForForStmt(stmt: PhpForStmt): Ast =
         val lineNumber = line(stmt)
@@ -425,6 +438,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             .name(label)
             .code(label)
             .lineNumber(line(stmt))
+            .columnNumber(column(stmt))
 
         controlStructureAst(gotoNode, condition = None, children = Ast(jumpLabel) :: Nil)
 
@@ -435,6 +449,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             .name(label)
             .code(label)
             .lineNumber(line(stmt))
+            .columnNumber(column(stmt))
 
         Ast(jumpTarget)
 
@@ -445,6 +460,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val namespaceBlock = NewNamespaceBlock()
             .name(name)
             .fullName(fullName)
+            .lineNumber(line(stmt))
+            .columnNumber(column(stmt))
 
         scope.pushNewScope(namespaceBlock)
         val bodyStmts = astsForClassLikeBody(stmt, stmt.stmts, createDefaultConstructor = false)
@@ -457,7 +474,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val declareCode =
             s"${PhpOperators.declareFunc}(${declareAssignAsts.map(_.rootCodeOrEmpty).mkString(",")})"
         val declareNode =
-            newOperatorCallNode(PhpOperators.declareFunc, declareCode, line = line(stmt))
+            newOperatorCallNode(
+              PhpOperators.declareFunc,
+              declareCode,
+              line = line(stmt),
+              column = column(stmt)
+            )
         val declareAst = callAst(declareNode, declareAssignAsts)
 
         stmt.stmts match
@@ -468,13 +490,19 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                     .withChildren(stmtAsts)
 
             case None => declareAst
+    end astForDeclareStmt
 
     private def astForDeclareItem(item: PhpDeclareItem): Ast =
         val key   = identifierNode(item, item.key.name, item.key.name, "ANY")
         val value = astForExpr(item.value)
         val code  = s"${key.name}=${value.rootCodeOrEmpty}"
 
-        val declareAssignment = newOperatorCallNode(Operators.assignment, code, line = line(item))
+        val declareAssignment = newOperatorCallNode(
+          Operators.assignment,
+          code,
+          line = line(item),
+          column = column(item)
+        )
         callAst(declareAssignment, Ast(key) :: value :: Nil)
 
     private def astForHaltCompilerStmt(stmt: PhpHaltCompilerStmt): Ast =
@@ -496,7 +524,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
           name,
           code,
           typeFullName = Some(TypeConstants.Void),
-          line = line(stmt)
+          line = line(stmt),
+          column = column(stmt)
         )
             .methodFullName(PhpOperators.unset)
         callAst(callNode, args)
@@ -509,27 +538,39 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val code     = s"${PhpOperators.global} ${varsAsts.map(_.rootCodeOrEmpty).mkString(", ")}"
 
         val globalCallNode =
-            newOperatorCallNode(PhpOperators.global, code, Some(TypeConstants.Void), line(stmt))
+            newOperatorCallNode(
+              PhpOperators.global,
+              code,
+              Some(TypeConstants.Void),
+              line(stmt),
+              column(stmt)
+            )
 
         callAst(globalCallNode, varsAsts)
 
     private def astForUseStmt(stmt: PhpUseStmt): Ast =
         // TODO Use useType + scope to get better name info
         val imports = stmt.uses.map(astForUseUse(_))
-        wrapMultipleInBlock(imports, line(stmt))
+        wrapMultipleInBlock(imports, line(stmt), column(stmt))
 
     private def astForGroupUseStmt(stmt: PhpGroupUseStmt): Ast =
         // TODO Use useType + scope to get better name info
         val groupPrefix = s"${stmt.prefix.name}\\"
         val imports     = stmt.uses.map(astForUseUse(_, groupPrefix))
-        wrapMultipleInBlock(imports, line(stmt))
+        wrapMultipleInBlock(imports, line(stmt), column(stmt))
 
-    private def astForKeyValPair(key: PhpExpr, value: PhpExpr, lineNo: Option[Integer]): Ast =
+    private def astForKeyValPair(
+      key: PhpExpr,
+      value: PhpExpr,
+      lineNo: Option[Integer],
+      colNo: Option[Integer]
+    ): Ast =
         val keyAst   = astForExpr(key)
         val valueAst = astForExpr(value)
 
-        val code     = s"${keyAst.rootCodeOrEmpty} => ${valueAst.rootCodeOrEmpty}"
-        val callNode = newOperatorCallNode(PhpOperators.doubleArrow, code, line = lineNo)
+        val code = s"${keyAst.rootCodeOrEmpty} => ${valueAst.rootCodeOrEmpty}"
+        val callNode =
+            newOperatorCallNode(PhpOperators.doubleArrow, code, line = lineNo, column = colNo)
         callAst(callNode, keyAst :: valueAst :: Nil)
 
     private def astForForeachStmt(stmt: PhpForeachStmt): Ast =
@@ -537,13 +578,14 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val iterIdentifier = getTmpIdentifier(stmt, maybeTypeFullName = None, prefix = "iter_")
 
         val assignItemTargetAst = stmt.keyVar match
-            case Some(key) => astForKeyValPair(key, stmt.valueVar, line(stmt))
+            case Some(key) => astForKeyValPair(key, stmt.valueVar, line(stmt), column(stmt))
             case None      => astForExpr(stmt.valueVar)
 
         // Initializer asts
         // - Iterator assign
-        val iterValue         = astForExpr(stmt.iterExpr)
-        val iteratorAssignAst = simpleAssignAst(Ast(iterIdentifier), iterValue, line(stmt))
+        val iterValue = astForExpr(stmt.iterExpr)
+        val iteratorAssignAst =
+            simpleAssignAst(Ast(iterIdentifier), iterValue, line(stmt), column(stmt))
 
         // - Assigned item assign
         val itemInitAst = getItemAssignAstForForeach(stmt, assignItemTargetAst, iterIdentifier.copy)
@@ -553,10 +595,21 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val valueAst   = astForExpr(stmt.valueVar)
         val isNullCode = s"$isNullName(${valueAst.rootCodeOrEmpty})"
         val isNullCall =
-            newOperatorCallNode(isNullName, isNullCode, Some(TypeConstants.Bool), line(stmt))
+            newOperatorCallNode(
+              isNullName,
+              isNullCode,
+              Some(TypeConstants.Bool),
+              line(stmt),
+              column(stmt)
+            )
                 .methodFullName(PhpOperators.isNull)
         val notIsNull =
-            newOperatorCallNode(Operators.logicalNot, s"!$isNullCode", line = line(stmt))
+            newOperatorCallNode(
+              Operators.logicalNot,
+              s"!$isNullCode",
+              line = line(stmt),
+              column = column(stmt)
+            )
         val isNullAst    = callAst(isNullCall, valueAst :: Nil)
         val conditionAst = callAst(notIsNull, isNullAst :: Nil)
 
@@ -587,9 +640,17 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             s"foreach (${iteratorAst.rootCodeOrEmpty} as $ampPrefix${assignItemTargetAst.rootCodeOrEmpty})"
         val foreachNode = controlStructureNode(stmt, ControlStructureTypes.FOR, foreachCode)
         Ast(foreachNode)
-            .withChild(wrapMultipleInBlock(iteratorAssignAst :: itemInitAst :: Nil, line(stmt)))
+            .withChild(wrapMultipleInBlock(
+              iteratorAssignAst :: itemInitAst :: Nil,
+              line(stmt),
+              column(stmt)
+            ))
             .withChild(conditionAst)
-            .withChild(wrapMultipleInBlock(nextCallAst :: itemUpdateAst :: Nil, line(stmt)))
+            .withChild(wrapMultipleInBlock(
+              nextCallAst :: itemUpdateAst :: Nil,
+              line(stmt),
+              column(stmt)
+            ))
             .withChild(bodyAst)
             .withConditionEdges(foreachNode, conditionAst.root.toList)
     end astForForeachStmt
@@ -616,17 +677,28 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val valueAst = if stmt.assignByRef then
             val addressOfCode = s"&${currentCallAst.rootCodeOrEmpty}"
             val addressOfCall =
-                newOperatorCallNode(Operators.addressOf, addressOfCode, line = line(stmt))
+                newOperatorCallNode(
+                  Operators.addressOf,
+                  addressOfCode,
+                  line = line(stmt),
+                  column = column(stmt)
+                )
             callAst(addressOfCall, currentCallAst :: Nil)
         else
             currentCallAst
 
-        simpleAssignAst(assignItemTargetAst, valueAst, line(stmt))
+        simpleAssignAst(assignItemTargetAst, valueAst, line(stmt), column(stmt))
     end getItemAssignAstForForeach
 
-    private def simpleAssignAst(target: Ast, source: Ast, lineNo: Option[Integer]): Ast =
-        val code     = s"${target.rootCodeOrEmpty} = ${source.rootCodeOrEmpty}"
-        val callNode = newOperatorCallNode(Operators.assignment, code, line = lineNo)
+    private def simpleAssignAst(
+      target: Ast,
+      source: Ast,
+      lineNo: Option[Integer],
+      colNo: Option[Integer]
+    ): Ast =
+        val code = s"${target.rootCodeOrEmpty} = ${source.rootCodeOrEmpty}"
+        val callNode =
+            newOperatorCallNode(Operators.assignment, code, line = lineNo, column = colNo)
         callAst(callNode, target :: source :: Nil)
 
     private def astforTraitUseStmt(stmt: PhpTraitUseStmt): Ast =
@@ -641,12 +713,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             case PhpUseType.Constant => s"const "
             case _                   => ""
         val code = s"use $typeCode$originalName$aliasCode"
-
         val importNode = NewImport()
             .importedEntity(originalName)
             .importedAs(stmt.alias.map(_.name))
             .isExplicit(true)
             .code(code)
+            .lineNumber(line(stmt))
+            .columnNumber(column(stmt))
 
         Ast(importNode)
 
@@ -675,7 +748,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             val defaultAssignAst = maybeValueAst.map { valueAst =>
                 val valueCode = s"static $code = ${valueAst.rootCodeOrEmpty}"
                 val assignNode =
-                    newOperatorCallNode(Operators.assignment, valueCode, line = line(stmt))
+                    newOperatorCallNode(
+                      Operators.assignment,
+                      valueCode,
+                      line = line(stmt),
+                      column = column(stmt)
+                    )
                 callAst(assignNode, variableAst :: valueAst :: Nil)
             }
 
@@ -937,7 +1015,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             case Some(conditionAst) =>
                 NewJumpTarget().name("case").code(s"case ${conditionAst.rootCodeOrEmpty}")
             case None => NewJumpTarget().name("default").code("default")
-        jumpTarget.lineNumber(line(caseStmt))
+        jumpTarget.lineNumber(line(caseStmt)).columnNumber(column(caseStmt))
 
         val stmtAsts = caseStmt.stmts.flatMap(astsForStmt)
 
@@ -1030,7 +1108,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val receiverAst = (targetAst, nameAst) match
             case (Some(target), Some(n)) =>
                 val fieldAccess =
-                    newOperatorCallNode(Operators.fieldAccess, codePrefix, line = line(call))
+                    newOperatorCallNode(
+                      Operators.fieldAccess,
+                      codePrefix,
+                      line = line(call),
+                      column = column(call)
+                    )
                 Option(callAst(fieldAccess, target :: n :: Nil))
             case (Some(target), None) => Option(target)
             case (None, Some(n))      => Option(n)
@@ -1059,6 +1142,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
         valueAst.root.collect { case root: NewIdentifier =>
             root.lineNumber = line(variable)
+            root.columnNumber = column(variable)
         }
 
         valueAst
@@ -1133,7 +1217,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                 val code =
                     s"${targetAst.rootCodeOrEmpty} $symbol $refSymbol${sourceAst.rootCodeOrEmpty}"
 
-                val callNode = newOperatorCallNode(operatorName, code, line = line(assignment))
+                val callNode = newOperatorCallNode(
+                  operatorName,
+                  code,
+                  line = line(assignment),
+                  column = column(assignment)
+                )
                 callAst(callNode, List(targetAst, sourceAst))
 
     private def astForEncapsed(encapsed: PhpEncapsed): Ast =
@@ -1147,7 +1236,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                   PhpOperators.encaps,
                   code,
                   Some(TypeConstants.String),
-                  line(encapsed)
+                  line(encapsed),
+                  column = column(encapsed)
                 )
                 callAst(callNode, args)
 
@@ -1167,7 +1257,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val symbol = operatorSymbols.getOrElse(binOp.operator, binOp.operator)
         val code   = s"${leftAst.rootCodeOrEmpty} $symbol ${rightAst.rootCodeOrEmpty}"
 
-        val callNode = newOperatorCallNode(binOp.operator, code, line = line(binOp))
+        val callNode =
+            newOperatorCallNode(binOp.operator, code, line = line(binOp), column = column(binOp))
 
         callAst(callNode, List(leftAst, rightAst))
 
@@ -1184,7 +1275,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             else
                 s"$symbol${exprAst.rootCodeOrEmpty}"
 
-        val callNode = newOperatorCallNode(unaryOp.operator, code, line = line(unaryOp))
+        val callNode = newOperatorCallNode(
+          unaryOp.operator,
+          code,
+          line = line(unaryOp),
+          column = column(unaryOp)
+        )
 
         callAst(callNode, exprAst :: Nil)
 
@@ -1196,7 +1292,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val codeStr = s"($typeFullName) ${expr.rootCodeOrEmpty}"
 
         val callNode =
-            newOperatorCallNode(name = Operators.cast, codeStr, Some(typeFullName), line(castExpr))
+            newOperatorCallNode(
+              name = Operators.cast,
+              codeStr,
+              Some(typeFullName),
+              line(castExpr),
+              column = column(castExpr)
+            )
 
         callAst(callNode, Ast(typ) :: expr :: Nil)
 
@@ -1210,7 +1312,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
               name,
               code,
               typeFullName = Some(TypeConstants.Bool),
-              line = line(isSetExpr)
+              line = line(isSetExpr),
+              column = column(isSetExpr)
             )
                 .methodFullName(PhpOperators.issetFunc)
 
@@ -1225,7 +1328,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
               name,
               code,
               typeFullName = Some(TypeConstants.Int),
-              line = line(printExpr)
+              line = line(printExpr),
+              column = column(printExpr)
             )
                 .methodFullName(PhpOperators.printFunc)
 
@@ -1243,10 +1347,16 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                 s"${conditionAst.rootCodeOrEmpty} ? ${thenAst.rootCodeOrEmpty} : ${elseAst.rootCodeOrEmpty}"
             case None => s"${conditionAst.rootCodeOrEmpty} ?: ${elseAst.rootCodeOrEmpty}"
 
-        val callNode = newOperatorCallNode(operatorName, code, line = line(ternaryOp))
+        val callNode = newOperatorCallNode(
+          operatorName,
+          code,
+          line = line(ternaryOp),
+          column = column(ternaryOp)
+        )
 
         val args = List(Option(conditionAst), maybeThenAst, Option(elseAst)).flatten
         callAst(callNode, args)
+    end astForTernaryOp
 
     private def astForThrow(expr: PhpThrowExpr): Ast =
         val thrownExpr = astForExpr(expr.expr)
@@ -1262,7 +1372,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val argType = argAst.rootType.orElse(Some(TypeConstants.Any))
         val code    = s"$name ${argAst.rootCodeOrEmpty}"
 
-        val callNode = newOperatorCallNode(name, code, argType, line(expr))
+        val callNode = newOperatorCallNode(name, code, argType, line(expr), column = column(expr))
             .methodFullName(PhpOperators.cloneFunc)
 
         callAst(callNode, argAst :: Nil)
@@ -1277,7 +1387,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
               name,
               code,
               typeFullName = Some(TypeConstants.Bool),
-              line = line(expr)
+              line = line(expr),
+              column = column(expr)
             )
                 .methodFullName(PhpOperators.emptyFunc)
 
@@ -1293,7 +1404,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
               name,
               code,
               typeFullName = Some(TypeConstants.Bool),
-              line = line(expr)
+              line = line(expr),
+              column = column(expr)
             )
                 .methodFullName(PhpOperators.evalFunc)
 
@@ -1304,7 +1416,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val args = expr.expr.map(astForExpr)
         val code = s"$name(${args.map(_.rootCodeOrEmpty).getOrElse("")})"
 
-        val callNode = newOperatorCallNode(name, code, Some(TypeConstants.Void), line(expr))
+        val callNode = newOperatorCallNode(
+          name,
+          code,
+          Some(TypeConstants.Void),
+          line(expr),
+          column = column(expr)
+        )
             .methodFullName(PhpOperators.exitFunc)
 
         callAst(callNode, args.toList)
@@ -1362,7 +1480,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val name     = PhpOperators.listFunc
         val args     = expr.items.flatten.map { item => astForExpr(item.value) }
         val listCode = s"$name(${args.map(_.rootCodeOrEmpty).mkString(",")})"
-        val listNode = newOperatorCallNode(name, listCode, line = line(expr))
+        val listNode = newOperatorCallNode(name, listCode, line = line(expr), column = column(expr))
             .methodFullName(PhpOperators.listFunc)
 
         callAst(listNode, args)
@@ -1403,12 +1521,14 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             // In PHP cases aren't labeled with `case`, but this is used by the CFG creator to differentiate between
             // case/default labels and other labels.
             val code = s"case ${conditionAst.rootCode.getOrElse(NameConstants.Unknown)}"
-            NewJumpTarget().name(code).code(code).lineNumber(line(condition))
+            NewJumpTarget().name(code).code(code).lineNumber(line(condition)).columnNumber(column(
+              condition
+            ))
         }
         val defaultLabel = Option.when(matchArm.isDefault)(
           NewJumpTarget().name(NameConstants.Default).code(NameConstants.Default).lineNumber(line(
             matchArm
-          ))
+          )).columnNumber(column(matchArm))
         )
         val targetAsts = (targets ++ defaultLabel.toList).map(Ast(_))
 
@@ -1552,14 +1672,21 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         // Alloc assign
         val allocCode = s"$className.<alloc>()"
         val allocNode =
-            newOperatorCallNode(Operators.alloc, allocCode, Option(className), line(expr))
+            newOperatorCallNode(
+              Operators.alloc,
+              allocCode,
+              Option(className),
+              line(expr),
+              column = column(expr)
+            )
         val allocAst        = callAst(allocNode, base = maybeNameAst)
         val allocAssignCode = s"${tmpIdentifier.code} = ${allocAst.rootCodeOrEmpty}"
         val allocAssignNode = newOperatorCallNode(
           Operators.assignment,
           allocAssignCode,
           Option(className),
-          line(expr)
+          line(expr),
+          column = column(expr)
         )
         val allocAssignAst = callAst(allocAssignNode, Ast(tmpIdentifier) :: allocAst :: Nil)
 
@@ -1630,7 +1757,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
         val assignCode = s"${dimFetchAst.rootCodeOrEmpty} = ${valueAst.rootCodeOrEmpty}"
 
-        val assignNode = newOperatorCallNode(Operators.assignment, assignCode, line = line(item))
+        val assignNode = newOperatorCallNode(
+          Operators.assignment,
+          assignCode,
+          line = line(item),
+          column = column(item)
+        )
 
         callAst(assignNode, dimFetchAst :: valueAst :: Nil)
     end assignForArrayItem
@@ -1641,14 +1773,26 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
         if item.byRef then
             val parentCall =
-                newOperatorCallNode(Operators.addressOf, s"&$valueCode", line = line(item))
+                newOperatorCallNode(
+                  Operators.addressOf,
+                  s"&$valueCode",
+                  line = line(item),
+                  column = column(item)
+                )
             callAst(parentCall, exprAst :: Nil)
         else if item.unpack then
             val parentCall =
-                newOperatorCallNode(PhpOperators.unpack, s"...$valueCode", line = line(item))
+                newOperatorCallNode(
+                  PhpOperators.unpack,
+                  s"...$valueCode",
+                  line = line(item),
+                  column = column(item)
+                )
             callAst(parentCall, exprAst :: Nil)
         else
             exprAst
+        end if
+    end astForArrayItemValue
 
     private def astForArrayDimFetchExpr(expr: PhpArrayDimFetchExpr): Ast =
         val variableAst  = astForExpr(expr.variable)
@@ -1658,7 +1802,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             case Some(dimension) =>
                 val dimensionAst = astForExpr(dimension)
                 val code         = s"$variableCode[${dimensionAst.rootCodeOrEmpty}]"
-                val accessNode = newOperatorCallNode(Operators.indexAccess, code, line = line(expr))
+                val accessNode = newOperatorCallNode(
+                  Operators.indexAccess,
+                  code,
+                  line = line(expr),
+                  column = column(expr)
+                )
                 callAst(accessNode, variableAst :: dimensionAst :: Nil)
 
             case None =>
@@ -1667,12 +1816,18 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                   s"ArrayDimFetchExpr without dimensions should be handled in assignment: ${errorPosition}"
                 )
                 Ast()
+    end astForArrayDimFetchExpr
 
     private def astForErrorSuppressExpr(expr: PhpErrorSuppressExpr): Ast =
         val childAst = astForExpr(expr.expr)
 
-        val code         = s"@${childAst.rootCodeOrEmpty}"
-        val suppressNode = newOperatorCallNode(PhpOperators.errorSuppress, code, line = line(expr))
+        val code = s"@${childAst.rootCodeOrEmpty}"
+        val suppressNode = newOperatorCallNode(
+          PhpOperators.errorSuppress,
+          code,
+          line = line(expr),
+          column = column(expr)
+        )
         childAst.rootType.foreach(typ => suppressNode.typeFullName(typ))
 
         callAst(suppressNode, childAst :: Nil)
@@ -1683,7 +1838,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
         val code = s"${exprAst.rootCodeOrEmpty} instanceof ${classAst.rootCodeOrEmpty}"
         val instanceOfNode =
-            newOperatorCallNode(Operators.instanceOf, code, Some(TypeConstants.Bool), line(expr))
+            newOperatorCallNode(
+              Operators.instanceOf,
+              code,
+              Some(TypeConstants.Bool),
+              line(expr),
+              column = column(expr)
+            )
 
         callAst(instanceOfNode, exprAst :: classAst :: Nil)
 
@@ -1691,8 +1852,9 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val objExprAst = astForExpr(expr.expr)
 
         val fieldAst = expr.name match
-            case name: PhpNameExpr => Ast(newFieldIdentifierNode(name.name, line(expr)))
-            case other             => astForExpr(other)
+            case name: PhpNameExpr =>
+                Ast(newFieldIdentifierNode(name.name, line(expr), column = column(expr)))
+            case other => astForExpr(other)
 
         val accessSymbol =
             if expr.isStatic then
@@ -1703,15 +1865,21 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                 "->"
 
         val code = s"${objExprAst.rootCodeOrEmpty}$accessSymbol${fieldAst.rootCodeOrEmpty}"
-        val fieldAccessNode = newOperatorCallNode(Operators.fieldAccess, code, line = line(expr))
+        val fieldAccessNode = newOperatorCallNode(
+          Operators.fieldAccess,
+          code,
+          line = line(expr),
+          column = column(expr)
+        )
 
         callAst(fieldAccessNode, objExprAst :: fieldAst :: Nil)
     end astForPropertyFetchExpr
 
     private def astForIncludeExpr(expr: PhpIncludeExpr): Ast =
-        val exprAst  = astForExpr(expr.expr)
-        val code     = s"${expr.includeType} ${exprAst.rootCodeOrEmpty}"
-        val callNode = newOperatorCallNode(expr.includeType, code, line = line(expr))
+        val exprAst = astForExpr(expr.expr)
+        val code    = s"${expr.includeType} ${exprAst.rootCodeOrEmpty}"
+        val callNode =
+            newOperatorCallNode(expr.includeType, code, line = line(expr), column = column(expr))
 
         callAst(callNode, exprAst :: Nil)
 
@@ -1719,7 +1887,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val args = astForEncapsed(expr.parts)
         val code = "`" + args.rootCodeOrEmpty + "`"
 
-        val callNode = newOperatorCallNode(PhpOperators.shellExec, code, line = line(expr))
+        val callNode = newOperatorCallNode(
+          PhpOperators.shellExec,
+          code,
+          line = line(expr),
+          column = column(expr)
+        )
 
         callAst(callNode, args :: Nil)
 
@@ -1747,10 +1920,16 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                 val targetAst = astForExpr(expr.className)
                 val fieldIdentifierName =
                     expr.constantName.map(_.name).getOrElse(NameConstants.Unknown)
-                val fieldIdentifier = newFieldIdentifierNode(fieldIdentifierName, line(expr))
+                val fieldIdentifier =
+                    newFieldIdentifierNode(fieldIdentifierName, line(expr), column = column(expr))
                 val fieldAccessCode = s"${targetAst.rootCodeOrEmpty}::${fieldIdentifier.code}"
                 val fieldAccessCall =
-                    newOperatorCallNode(Operators.fieldAccess, fieldAccessCode, line = line(expr))
+                    newOperatorCallNode(
+                      Operators.fieldAccess,
+                      fieldAccessCode,
+                      line = line(expr),
+                      column = column(expr)
+                    )
                 callAst(fieldAccessCall, List(targetAst, Ast(fieldIdentifier)))
 
     private def astForConstFetchExpr(expr: PhpConstFetchExpr): Ast =
@@ -1761,18 +1940,26 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         else if NameConstants.isNull(constName) then
             Ast(literalNode(expr, constName, TypeConstants.NullType))
         else
-            val namespaceName   = NamespaceTraversal.globalNamespaceName
-            val identifier      = identifierNode(expr, namespaceName, namespaceName, "ANY")
-            val fieldIdentifier = newFieldIdentifierNode(constName, line = line(expr))
+            val namespaceName = NamespaceTraversal.globalNamespaceName
+            val identifier    = identifierNode(expr, namespaceName, namespaceName, "ANY")
+            val fieldIdentifier =
+                newFieldIdentifierNode(constName, line = line(expr), column = column(expr))
 
             val fieldAccessNode =
-                newOperatorCallNode(Operators.fieldAccess, code = constName, line = line(expr))
+                newOperatorCallNode(
+                  Operators.fieldAccess,
+                  code = constName,
+                  line = line(expr),
+                  column = column(expr)
+                )
             val args = List(identifier, fieldIdentifier).map(Ast(_))
 
             callAst(fieldAccessNode, args)
+        end if
+    end astForConstFetchExpr
 
     protected def line(phpNode: PhpNode): Option[Integer]      = phpNode.attributes.lineNumber
-    protected def column(phpNode: PhpNode): Option[Integer]    = None
+    protected def column(phpNode: PhpNode): Option[Integer]    = phpNode.attributes.columnNumber
     protected def lineEnd(phpNode: PhpNode): Option[Integer]   = None
     protected def columnEnd(phpNode: PhpNode): Option[Integer] = None
     protected def code(phpNode: PhpNode): String =

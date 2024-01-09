@@ -7,7 +7,7 @@
   "downloadUrl": "https://github.com/AppThreat/chen",
   "issueTracker": "https://github.com/AppThreat/chen/issues",
   "name": "chen",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy.",
   "applicationCategory": "code-analysis",
   "keywords": [
