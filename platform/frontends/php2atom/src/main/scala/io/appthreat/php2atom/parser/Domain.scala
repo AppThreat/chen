@@ -70,17 +70,23 @@ object Domain:
     // Used for creating the default constructor.
     val ConstructorMethodName = "__construct"
 
-    final case class PhpAttributes(lineNumber: Option[Integer], kind: Option[Int])
+    final case class PhpAttributes(
+      lineNumber: Option[Integer],
+      columnNumber: Option[Integer],
+      kind: Option[Int]
+    )
     object PhpAttributes:
-        val Empty: PhpAttributes = PhpAttributes(None, None)
+        val Empty: PhpAttributes = PhpAttributes(None, None, None)
 
         def apply(json: Value): PhpAttributes =
             Try(json("attributes")) match
                 case Success(Obj(attributes)) =>
                     val startLine =
                         attributes.get("startLine").map(num => Integer.valueOf(num.num.toInt))
+                    val startColumn =
+                        attributes.get("startFilePos").map(num => Integer.valueOf(num.num.toInt))
                     val kind = attributes.get("kind").map(_.num.toInt)
-                    PhpAttributes(startLine, kind)
+                    PhpAttributes(startLine, startColumn, kind)
 
                 case Success(Arr(_)) =>
                     logger.debug(s"Found array attributes in $json")
@@ -89,6 +95,7 @@ object Domain:
                 case unhandled =>
                     logger.debug(s"Could not find attributes object in type $unhandled")
                     PhpAttributes.Empty
+    end PhpAttributes
 
     object PhpModifiers:
         private val ModifierMasks = List(

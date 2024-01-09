@@ -151,11 +151,16 @@ abstract class AstCreatorBase(filename: String)(implicit withSchemaValidation: V
                 Ast(controlStructureNode)
                     .withChildren(children)
 
-    def wrapMultipleInBlock(asts: Seq[Ast], lineNumber: Option[Integer]): Ast =
+    def wrapMultipleInBlock(
+      asts: Seq[Ast],
+      lineNumber: Option[Integer],
+      columnNumber: Option[Integer]
+    ): Ast =
         asts.toList match
-            case Nil        => blockAst(NewBlock().lineNumber(lineNumber))
+            case Nil => blockAst(NewBlock().lineNumber(lineNumber).columnNumber(columnNumber))
             case ast :: Nil => ast
-            case astList    => blockAst(NewBlock().lineNumber(lineNumber), astList)
+            case astList =>
+                blockAst(NewBlock().lineNumber(lineNumber).columnNumber(columnNumber), astList)
 
     def whileAst(
       condition: Option[Ast],
@@ -208,9 +213,9 @@ abstract class AstCreatorBase(filename: String)(implicit withSchemaValidation: V
         val lineNumber = forNode.lineNumber
         Ast(forNode)
             .withChildren(locals)
-            .withChild(wrapMultipleInBlock(initAsts, lineNumber))
-            .withChild(wrapMultipleInBlock(conditionAsts, lineNumber))
-            .withChild(wrapMultipleInBlock(updateAsts, lineNumber))
+            .withChild(wrapMultipleInBlock(initAsts, lineNumber, forNode.columnNumber))
+            .withChild(wrapMultipleInBlock(conditionAsts, lineNumber, forNode.columnNumber))
+            .withChild(wrapMultipleInBlock(updateAsts, lineNumber, forNode.columnNumber))
             .withChildren(bodyAsts)
             .withConditionEdges(forNode, conditionAsts.flatMap(_.root).toList)
 
