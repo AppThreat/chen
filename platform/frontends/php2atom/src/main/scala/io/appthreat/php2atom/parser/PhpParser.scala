@@ -14,7 +14,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     private val logger = LoggerFactory.getLogger(this.getClass)
 
     private def phpParseCommand(filename: String): String =
-        val phpParserCommands = "--with-recovery --resolve-names -c --json-dump"
+        val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
         phpParserPath match
             case "phpastgen" =>
                 s"$phpParserPath $phpParserCommands $filename"
@@ -28,7 +28,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
 
         val command = phpParseCommand(inputFilePath)
 
-        ExternalCommand.runMultiple(command, inputDirectory) match
+        ExternalCommand.run(command, inputDirectory, true) match
             case Success(output) =>
                 processParserOutput(output, inputFilePath)
 
@@ -36,9 +36,9 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
                 logger.debug(s"Failure running php-parser with $command", exception.getMessage)
                 None
 
-    private def processParserOutput(output: String, filename: String): Option[PhpFile] =
+    private def processParserOutput(output: Seq[String], filename: String): Option[PhpFile] =
         val maybeJson =
-            linesToJsonValue(output.split(System.lineSeparator()).toIndexedSeq, filename)
+            linesToJsonValue(output, filename)
         maybeJson.flatMap(jsonValueToPhpFile(_, filename))
 
     private def linesToJsonValue(lines: Seq[String], filename: String): Option[ujson.Value] =
@@ -89,23 +89,22 @@ object PhpParser:
                 false
 
     private def defaultPhpParserBin: String =
-        if isPhpAstgenSupported then
-            "phpastgen"
-        else
-            val dir =
-                Paths.get(
-                  this.getClass.getProtectionDomain.getCodeSource.getLocation.toURI
-                ).toAbsolutePath.toString
-
-            val fixedDir = new java.io.File(dir.substring(0, dir.indexOf("php2atom"))).toString
-
+        val dir =
             Paths.get(
-              fixedDir,
-              "php2atom",
-              "vendor",
-              "bin",
-              "php-parse"
+              this.getClass.getProtectionDomain.getCodeSource.getLocation.toURI
             ).toAbsolutePath.toString
+
+        val fixedDir = new java.io.File(dir.substring(0, dir.indexOf("php2atom"))).toString
+
+        val builtInGen = Paths.get(
+          fixedDir,
+          "php2atom",
+          "vendor",
+          "bin",
+          "php-parse"
+        ).toAbsolutePath.toString
+        if File(builtInGen).exists() then builtInGen
+        else "phpastgen"
 
     private def configOverrideOrDefaultPath(
       identifier: String,

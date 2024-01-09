@@ -45,7 +45,8 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
       ".*def\\s(get|post|put)\\(.*"
     )
     private val PHP_ROUTES_METHODS_REGEXES = Array(
-      ".*(router|routes)->(add|before|mount|get|post|put|delete|head|option).*"
+      ".*(router|routes|r|app|map)->(addRoute|add|before|mount|get|post|put|delete|head|option).*",
+      ".*(Router)::(scope|connect|get|post|put|delete|head|option).*"
     )
     private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
 

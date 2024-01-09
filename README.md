@@ -152,6 +152,7 @@ Refer to the documentation site to learn more about the commands.
 - JavaScript
 - TypeScript
 - Python
+- PHP (Requires PHP >= 7.0. Supports PHP 5.2 to 8.3)
 
 ## Troubleshooing
 
