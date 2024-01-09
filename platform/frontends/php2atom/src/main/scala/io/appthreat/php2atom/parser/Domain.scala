@@ -1,19 +1,17 @@
 package io.appthreat.php2atom.parser
 
-import io.appthreat.php2atom.astcreation.PhpBuiltins
+import io.appthreat.php2atom.astcreation.AstCreator
 import io.appthreat.php2atom.astcreation.AstCreator.TypeConstants
 import io.appthreat.php2atom.parser.Domain.PhpAssignment.{AssignTypeMap, isAssignType}
 import io.appthreat.php2atom.parser.Domain.PhpBinaryOp.{BinaryOpTypeMap, isBinaryOpType}
 import io.appthreat.php2atom.parser.Domain.PhpCast.{CastTypeMap, isCastType}
 import io.appthreat.php2atom.parser.Domain.PhpUnaryOp.{UnaryOpTypeMap, isUnaryOpType}
 import io.appthreat.php2atom.parser.Domain.PhpUseType.{PhpUseType, getUseType}
-import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.{ModifierTypes, Operators}
 import org.slf4j.LoggerFactory
 import ujson.{Arr, Obj, Str, Value}
 
 import scala.util.{Success, Try}
-import io.appthreat.php2atom.astcreation.AstCreator
 
 object Domain:
 

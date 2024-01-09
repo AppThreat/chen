@@ -713,7 +713,6 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             case PhpUseType.Constant => s"const "
             case _                   => ""
         val code = s"use $typeCode$originalName$aliasCode"
-
         val importNode = NewImport()
             .importedEntity(originalName)
             .importedAs(stmt.alias.map(_.name))
