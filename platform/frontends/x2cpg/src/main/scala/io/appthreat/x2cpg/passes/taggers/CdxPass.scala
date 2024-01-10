@@ -45,7 +45,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
     private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
 
     private def containsRegex(str: String) =
-        Pattern.quote(str) != str || str.contains("*") || str.contains("(") || str.contains(")")
+        val reChars = "[](){}*+&|?.,\\$"
+        str.exists(reChars.contains(_))
 
     private val BOM_JSON_FILE = ".*(bom|cdx).json"
 
