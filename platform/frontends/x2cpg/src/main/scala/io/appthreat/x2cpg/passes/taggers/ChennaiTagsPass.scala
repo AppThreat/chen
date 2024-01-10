@@ -50,6 +50,10 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     )
     private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
 
+    private def containsRegex(str: String) =
+        val reChars = "[](){}*+&|?.,\\$"
+        str.exists(reChars.contains(_))
+
     private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
         C_ROUTES_CALL_REGEXES.foreach { r =>
             atom.method.fullName(r).parameter.newTagNode(FRAMEWORK_INPUT).store()(
@@ -131,7 +135,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
                         atom.method.parameter.typeFullNameExact(pn).newTagNode(tagName).store()(
                           dstGraph
                         )
-                        if !pn.contains("[") && !pn.contains("*") then
+                        if !containsRegex(pn) then
                             atom.method.parameter.typeFullName(
                               s".*${Pattern.quote(pn)}.*"
                             ).newTagNode(tagName).store()(dstGraph)
@@ -140,7 +144,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
                     val mn = methodName.asString.getOrElse("")
                     if mn.nonEmpty then
                         atom.method.fullNameExact(mn).newTagNode(tagName).store()(dstGraph)
-                        if !mn.contains("[") && !mn.contains("*") then
+                        if !containsRegex(mn) then
                             atom.method.fullName(s".*${Pattern.quote(mn)}.*").newTagNode(
                               tagName
                             ).store()(dstGraph)
@@ -151,7 +155,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
                         atom.method.parameter.typeFullNameExact(tn).newTagNode(tagName).store()(
                           dstGraph
                         )
-                        if !tn.contains("[") && !tn.contains("*") then
+                        if !containsRegex(tn) then
                             atom.method.parameter.typeFullName(
                               s".*${Pattern.quote(tn)}.*"
                             ).newTagNode(tagName).store()(dstGraph)
@@ -165,7 +169,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
                     val fn = fileName.asString.getOrElse("")
                     if fn.nonEmpty then
                         atom.file.nameExact(fn).newTagNode(tagName).store()(dstGraph)
-                        if !fn.contains("[") && !fn.contains("*") then
+                        if !containsRegex(fn) then
                             atom.file.name(s".*${Pattern.quote(fn)}.*").newTagNode(tagName).store()(
                               dstGraph
                             )

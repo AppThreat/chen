@@ -520,7 +520,11 @@ class Console[T <: Project](
                                 if !addedMethods.contains(c.methodFullName) then
                                     mtree
                                         .add(
-                                          c.methodFullName + (if c.callee(NoResolve).head.isExternal
+                                          c.methodFullName + (if c.callee(
+                                                                    NoResolve
+                                                                  ).head.nonEmpty && c.callee(
+                                                                    NoResolve
+                                                                  ).head.isExternal
                                                               then " :right_arrow_curving_up:"
                                                               else "")
                                         )
