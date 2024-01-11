@@ -4,13 +4,13 @@ dependsOn(Projects.semanticcpg, Projects.dataflowengineoss % Test, Projects.x2cp
 
 libraryDependencies ++= Seq(
   "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4",
-  "org.eclipse.platform"    % "org.eclipse.equinox.common"       % "3.18.100",
-  "org.eclipse.platform"    % "org.eclipse.core.resources"       % "3.19.100" excludeAll(
+  "org.eclipse.platform"    % "org.eclipse.equinox.common"       % "3.18.200",
+  "org.eclipse.platform"    % "org.eclipse.core.resources"       % "3.20.0" excludeAll(
     ExclusionRule(organization = "com.ibm.icu", name = "icu4j"),
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface"),
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface.text")
   ),
-  "org.jline"               % "jline"                      % "3.24.1",
+  "org.jline"               % "jline"                      % "3.25.0",
   "org.scalatest"          %% "scalatest"                  % Versions.scalatest % Test
 )
 
