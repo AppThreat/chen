@@ -1,6 +1,6 @@
 package io.appthreat.javasrc2cpg.passes
 
-import com.github.javaparser.resolution.cache.GuavaCache
+import com.github.javaparser.symbolsolver.cache.GuavaCache
 import com.google.common.cache.CacheBuilder
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
