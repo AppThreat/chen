@@ -70,5 +70,12 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
               dstGraph
             )
         end if
+        if language == Languages.PHP
+        then
+            atom.call.code("\\$_(GET|POST|FILES|REQUEST|COOKIE|SESSION|ENV).*").argument.newTagNode(
+              "framework-input"
+            ).store()(dstGraph)
+            atom.method.name("__serialize").newTagNode("serialization").store()(dstGraph)
+            atom.method.name("__unserialize").newTagNode("deserialization").store()(dstGraph)
     end run
 end EasyTagsPass
