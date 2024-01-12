@@ -75,7 +75,26 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             atom.call.code("\\$_(GET|POST|FILES|REQUEST|COOKIE|SESSION|ENV).*").argument.newTagNode(
               "framework-input"
             ).store()(dstGraph)
-            atom.method.name("__serialize").newTagNode("serialization").store()(dstGraph)
-            atom.method.name("__unserialize").newTagNode("deserialization").store()(dstGraph)
+            // Wordpress plugins.
+            atom.method.name("add_action").parameter.newTagNode("framework-input").store()(dstGraph)
+            atom.method.name("add_filter").parameter.newTagNode("framework-input").store()(dstGraph)
+            // TODO: Needs testing with more plugins
+            /*
+            atom.call.methodFullName(".*add_action.*").argument.isLiteral.foreach { a =>
+                atom.method.nameExact(a.code).parameter.newTagNode("framework-input").store()(
+                  dstGraph
+                )
+            }
+            atom.call.methodFullName(".*add_filter.*").argument.isLiteral.foreach { a =>
+                atom.method.nameExact(a.code).parameter.newTagNode("framework-input").store()(
+                  dstGraph
+                )
+            }
+             */
+            atom.method.name("wp_cron").newTagNode("cron").store()(dstGraph)
+            atom.method.name("wp_mail").newTagNode("mail").store()(dstGraph)
+            atom.method.name("wp_signon").newTagNode("authentication").store()(dstGraph)
+            atom.method.name("wp_remote_.*").newTagNode("http").store()(dstGraph)
+        end if
     end run
 end EasyTagsPass
