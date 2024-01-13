@@ -144,7 +144,7 @@ Refer to the documentation site to learn more about the commands.
 
 ## Languages supported
 
-- C/C++ (Requires Java 17 or above)
+- C/C++ (Requires Java 21 or above)
 - H (C/C++ Header files alone)
 - Java (Requires compilation) - 8 to 17
 - Jar

@@ -28,7 +28,7 @@ class Engine(context: EngineContext):
 
     private val logger: Logger = LoggerFactory.getLogger(this.getClass)
     private val executorService: ExecutorService =
-        Executors.newWorkStealingPool(2)
+        Executors.newVirtualThreadPerTaskExecutor()
     private val completionService =
         new ExecutorCompletionService[TaskSummary](executorService)
 
