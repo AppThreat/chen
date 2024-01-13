@@ -93,7 +93,7 @@ def fix_envs():
         )
         if not os.getenv("JAVA_HOME"):
             LOG.info(
-                "Ensure Java >= 17 up to 20 is installed. Set the environment variable JAVA_HOME to point the correct "
+                "Ensure Java >= 21 is installed. Set the environment variable JAVA_HOME to point the correct "
                 "java directory."
             )
         LOG.info(
