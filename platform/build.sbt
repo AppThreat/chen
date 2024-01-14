@@ -3,7 +3,7 @@ name := "platform"
 dependsOn(Projects.console, Projects.console % "test->test", Projects.dataflowengineoss, Projects.x2cpg)
 
 libraryDependencies ++= Seq(
-  "io.shiftleft"     %% "codepropertygraph" % Versions.cpg,
+  "io.appthreat"     %% "codepropertygraph" % Versions.cpg,
   "com.lihaoyi"      %% "requests"          % Versions.requests,
   "com.github.scopt" %% "scopt"             % "4.1.0",
   "org.reflections"   % "reflections"       % "0.10.2",

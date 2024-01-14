@@ -3,8 +3,8 @@ package io.appthreat.console
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.HasStoreMethod
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
-import org.reflections8.Reflections
-import org.reflections8.util.{ClasspathHelper, ConfigurationBuilder}
+import org.reflections.Reflections
+import org.reflections.util.{ClasspathHelper, ConfigurationBuilder}
 
 import scala.jdk.CollectionConverters.*
 

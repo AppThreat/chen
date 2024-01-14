@@ -1,9 +1,9 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.0.0"
+ThisBuild / version      := "2.0.1"
 ThisBuild / scalaVersion := "3.3.1"
 
-val cpgVersion = "1.4.22"
+val cpgVersion = "0.0.1"
 
 lazy val platform          = Projects.platform
 lazy val console           = Projects.console
@@ -35,9 +35,7 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 
 ThisBuild / libraryDependencies ++= Seq(
   "org.slf4j"                % "slf4j-api"         % "2.0.11",
-  "org.apache.logging.log4j" % "log4j-slf4j2-impl" % "2.22.1" % Optional,
-  "org.apache.logging.log4j" % "log4j-core"        % "2.22.1" % Optional
-  // `Optional` means "not transitive", but still included in "stage/lib"
+  "org.slf4j"                % "slf4j-simple"         % "2.0.11" % Optional,
 )
 
 ThisBuild / compile / javacOptions ++= Seq(
@@ -54,7 +52,7 @@ ThisBuild / compile / javacOptions ++= Seq(
 ThisBuild / scalacOptions ++= Seq(
   "-deprecation", // Emit warning and location for usages of deprecated APIs.
   "--release",
-  "21",
+  "21"
 )
 
 
