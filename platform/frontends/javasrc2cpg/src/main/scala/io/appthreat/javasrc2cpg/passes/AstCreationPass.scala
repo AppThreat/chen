@@ -88,11 +88,8 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
         val jdkPath = (config.jdkPath, jdkPathFromEnvVar) match
             case (None, None) =>
                 val javaHome = System.getProperty("java.home")
-                logger.debug(
-                  s"No explicit jdk-path set in , so using system java.home for JDK type information: $javaHome"
-                )
-                javaHome
-
+                if javaHome != null && javaHome.nonEmpty then javaHome
+                else System.getenv("JAVA_HOME")
             case (None, Some(jdkPath)) =>
                 logger.debug(
                   s"Using JDK path from environment variable ${JavaSrcEnvVar.JdkPath.name} for JDK type information: $jdkPath"
@@ -104,10 +101,11 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
                   s"Using JDK path set with jdk-path option for JDK type information: $jdkPath"
                 )
                 jdkPath
-
-        val jdkJarTypeSolver = JdkJarTypeSolver.fromJdkPath(jdkPath)
-        combinedTypeSolver.addNonCachingTypeSolver(jdkJarTypeSolver)
-
+        var jdkJarTypeSolver: JdkJarTypeSolver = null
+        // native-image could have empty JAVA_HOME
+        if jdkPath != null && jdkPath.nonEmpty then
+            jdkJarTypeSolver = JdkJarTypeSolver.fromJdkPath(jdkPath)
+            combinedTypeSolver.addNonCachingTypeSolver(jdkJarTypeSolver)
         val relativeSourceFilenames =
             sourceFilenames.map(filename =>
                 Path.of(config.inputPath).relativize(Path.of(filename)).toString
@@ -120,7 +118,6 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
               combinedTypeSolver,
               symbolSolver
             )
-
         combinedTypeSolver.addCachingTypeSolver(sourceTypeSolver)
         combinedTypeSolver.addNonCachingTypeSolver(new ReflectionTypeSolver())
         // Add solvers for inference jars
@@ -130,8 +127,8 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
                 Try(new JarTypeSolver(path)).toOption
             }
             .foreach { combinedTypeSolver.addNonCachingTypeSolver(_) }
-
-        (symbolSolver, jdkJarTypeSolver.packagesJarMappings)
+        if jdkJarTypeSolver != null then (symbolSolver, jdkJarTypeSolver.packagesJarMappings)
+        else (symbolSolver, null)
     end createSymbolSolver
 
     private def recursiveJarsFromPath(path: String): List[String] =

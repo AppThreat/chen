@@ -98,7 +98,6 @@ object SourceParser:
               config.delombokMode,
               hasLombokDependency
             )
-
         new SourceParser(Path.of(canonicalInputPath), Path.of(analysisDir), Path.of(typesDir))
 
     def getSourceFilenames(
@@ -126,18 +125,19 @@ object SourceParser:
       hasLombokDependency: Boolean
     ): (String, String) =
         lazy val delombokDir = Delombok.run(originalDir, delombokJavaHome)
+        if delombokDir.nonEmpty then
+            Delombok.parseDelombokModeOption(delombokMode) match
+                case Default if hasLombokDependency =>
+                    logger.debug(s"Analysing delomboked code as lombok dependency was found.")
+                    (delombokDir, delombokDir)
 
-        Delombok.parseDelombokModeOption(delombokMode) match
-            case Default if hasLombokDependency =>
-                logger.debug(s"Analysing delomboked code as lombok dependency was found.")
-                (delombokDir, delombokDir)
+                case Default => (originalDir, originalDir)
 
-            case Default => (originalDir, originalDir)
+                case NoDelombok => (originalDir, originalDir)
 
-            case NoDelombok => (originalDir, originalDir)
+                case TypesOnly => (originalDir, delombokDir)
 
-            case TypesOnly => (originalDir, delombokDir)
-
-            case RunDelombok => (delombokDir, delombokDir)
+                case RunDelombok => (delombokDir, delombokDir)
+        else (delombokDir, delombokDir)
     end getAnalysisAndTypesDirs
 end SourceParser

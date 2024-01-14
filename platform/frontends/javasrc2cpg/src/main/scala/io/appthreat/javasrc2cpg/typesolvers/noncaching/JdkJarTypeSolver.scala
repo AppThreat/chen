@@ -89,9 +89,7 @@ class JdkJarTypeSolver extends TypeSolver:
         archivePaths.foreach { archivePath =>
             addPathToClassPool(archivePath) match
                 case Success(_) => registerPackagesForJar(archivePath)
-
                 case Failure(e) =>
-                    logger.debug(s"Could not load jar at path $archivePath", e.getMessage)
         }
 
     private def registerPackagesForJar(archivePath: String): Unit =
@@ -114,11 +112,6 @@ class JdkJarTypeSolver extends TypeSolver:
             }
         catch
             case ioException: IOException =>
-                logger.debug(
-                  s"Could register classes for archive at $archivePath",
-                  ioException.getMessage
-                )
-        end try
     end registerPackagesForJar
 end JdkJarTypeSolver
 
@@ -136,11 +129,8 @@ object JdkJarTypeSolver:
 
     def fromJdkPath(jdkPath: String): JdkJarTypeSolver =
         val jarPaths = SourceFiles.determine(jdkPath, Set(JarExtension, JmodExtension))
-        if jarPaths.isEmpty then
-            throw new IllegalArgumentException(
-              s"No .jar or .jmod files found at JDK path ${jdkPath}"
-            )
-        new JdkJarTypeSolver().withJars(jarPaths)
+        if jarPaths.nonEmpty then new JdkJarTypeSolver().withJars(jarPaths)
+        else new JdkJarTypeSolver()
 
     /** Convert JavaParser class name foo.bar.qux.Baz to package prefix foo.bar Only use first 2
       * parts since this is sufficient to deterimine whether a class has been registered in most

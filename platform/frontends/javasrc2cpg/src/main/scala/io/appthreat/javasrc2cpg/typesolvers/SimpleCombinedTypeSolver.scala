@@ -66,7 +66,6 @@ class SimpleCombinedTypeSolver extends TypeSolver:
                         // RecordDeclarations aren't handled by JavaParser yet
                         None
                     case unhandled: Throwable =>
-                        logger.debug("Caught unhandled exception", unhandled)
                         None
             }
             .collectFirst { case Some(symbolReference) =>
