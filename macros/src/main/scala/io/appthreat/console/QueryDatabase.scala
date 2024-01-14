@@ -1,7 +1,7 @@
 package io.appthreat.console
 
-import org.reflections8.Reflections
-import org.reflections8.util.{ClasspathHelper, ConfigurationBuilder}
+import org.reflections.Reflections
+import org.reflections.util.{ClasspathHelper, ConfigurationBuilder}
 
 import java.lang.reflect.{Method, Parameter}
 import scala.annotation.unused

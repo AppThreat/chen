@@ -3,7 +3,7 @@ name := "jimple2cpg"
 dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
-  "io.shiftleft"  %% "codepropertygraph" % Versions.cpg,
+  "io.appthreat"  %% "cpg2" % Versions.cpg,
   "org.soot-oss"   % "soot"              % "4.4.1",
   "org.scala-lang.modules" % "scala-asm" % "9.6.0-scala-1",
   "org.ow2.asm"            % "asm"       % "9.6",
