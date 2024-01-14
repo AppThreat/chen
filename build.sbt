@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "2.0.1"
 ThisBuild / scalaVersion := "3.3.1"
 
-val cpgVersion = "0.0.2"
+val cpgVersion = "1.0.0"
 
 lazy val platform          = Projects.platform
 lazy val console           = Projects.console
