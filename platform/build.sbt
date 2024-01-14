@@ -3,7 +3,7 @@ name := "platform"
 dependsOn(Projects.console, Projects.console % "test->test", Projects.dataflowengineoss, Projects.x2cpg)
 
 libraryDependencies ++= Seq(
-  "io.appthreat"     %% "codepropertygraph" % Versions.cpg,
+  "io.appthreat"     %% "cpg2" % Versions.cpg,
   "com.lihaoyi"      %% "requests"          % Versions.requests,
   "com.github.scopt" %% "scopt"             % "4.1.0",
   "org.reflections"   % "reflections"       % "0.10.2",
@@ -78,7 +78,7 @@ generateScaladocs := {
   inputFiles.createDirectory()
 
   /* extract sources-jar dependencies */
-  List("codepropertygraph", "semanticcpg").foreach { projectName =>
+  List("cpg2", "semanticcpg").foreach { projectName =>
     val jar = SbtHelper.findJar(s"${projectName}_3", updateReport, SbtHelper.JarClassifier.Sources)
     new ZipFile(jar).extractAll(inputFiles.pathAsString)
   }
