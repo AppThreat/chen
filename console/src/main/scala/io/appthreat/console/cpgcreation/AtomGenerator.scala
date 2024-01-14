@@ -1,5 +1,6 @@
 package io.appthreat.console.cpgcreation
 
+import better.files.File
 import io.appthreat.console.FrontendConfig
 import io.shiftleft.codepropertygraph.Cpg
 
@@ -10,8 +11,8 @@ case class AtomGenerator(
   config: FrontendConfig,
   rootPath: Path,
   language: String,
-  sliceMode: String = "usages",
-  slicesFile: String = "usages.json"
+  sliceMode: String = "reachables",
+  slicesFile: String = "reachables.slices.json"
 ) extends CpgGenerator:
     private lazy val command: String = "atom"
 
@@ -24,12 +25,12 @@ case class AtomGenerator(
           "-s",
           slicesFile,
           "--output",
-          outputPath,
+          (File(inputPath) / outputPath).pathAsString,
           "--language",
           language,
           inputPath
         ) ++ config.cmdLineParams
-        runShellCommand(command, arguments).map(_ => outputPath)
+        runShellCommand(command, arguments).map(_ => (File(inputPath) / outputPath).pathAsString)
 
     override def isAvailable: Boolean = true
 

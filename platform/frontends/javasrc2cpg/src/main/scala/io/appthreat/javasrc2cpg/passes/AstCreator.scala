@@ -1109,7 +1109,7 @@ class AstCreator(
             .signature(signature)
         val typeNameLookup =
             methodFullName.takeWhile(_ != ':').split("\\.").dropRight(1).mkString(".")
-        if packagesJarMappings.contains(typeNameLookup) then
+        if packagesJarMappings != null && packagesJarMappings.contains(typeNameLookup) then
             methodNode.astParentType(packagesJarMappings.getOrElse(
               typeNameLookup,
               mutable.Set.empty

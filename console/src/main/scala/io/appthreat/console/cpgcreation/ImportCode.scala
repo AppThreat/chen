@@ -1,16 +1,12 @@
 package io.appthreat.console.cpgcreation
 
 import better.files.File
-import io.appthreat.console.{Console, FrontendConfig, Reporting}
 import io.appthreat.console.workspacehandling.Project
-import io.appthreat.console.{ConsoleException, FrontendConfig, Reporting}
+import io.appthreat.console.{Console, ConsoleException, FrontendConfig, Reporting}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
-import overflowdb.traversal.help.Table
 import me.shadaj.scalapy.py
-import me.shadaj.scalapy.py.SeqConverters
-import py.PyQuote
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
+import overflowdb.traversal.help.Table
 
 import java.nio.file.Path
 import scala.util.{Failure, Success, Try}
