@@ -26,8 +26,8 @@ replaceDomainClassesInJoern := {
 }
 
 ThisBuild / libraryDependencies ++= Seq(
-  "io.appthreat" %% "codepropertygraph-schema"         % cpgVersion,
-  "io.appthreat" %% "codepropertygraph-domain-classes" % cpgVersion
+  "io.appthreat" %% "cpg2-schema"         % cpgVersion,
+  "io.appthreat" %% "cpg2-domain-classes" % cpgVersion
 )
 
 lazy val schema = project
