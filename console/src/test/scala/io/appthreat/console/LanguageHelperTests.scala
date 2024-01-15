@@ -26,7 +26,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `JavaSrc` for a directory containing `.java`" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "ServiceIdentifierComposerVisitorBasedStrategy.java")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.JAVASRC)
@@ -34,7 +34,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `Go` for a directory containing `Gopkg.lock`" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "Gopkg.lock")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.GOLANG)
@@ -42,7 +42,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `Go` for a directory containing `Gopkg.toml`" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "Gopkg.toml")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.GOLANG)
@@ -50,7 +50,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `Javascript` for a directory containing `package.json`" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "package.json")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.JSSRC)
@@ -58,7 +58,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `C` for a directory containing .ll (LLVM) file" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "foobar.ll")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.LLVM)
@@ -66,7 +66,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess the language with the largest number of files" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "source.c")
         touch(subdir / "source.java")
@@ -79,7 +79,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "not find anything for an empty directory" in {
-      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+      File.usingTemporaryDirectory("chentests") { tmpDir =>
         guessLanguage(tmpDir.pathAsString) shouldBe None
       }
     }
