@@ -58,3 +58,5 @@ chen.zip
 project/metals.sbt
 conda-out/
 notebooks/.ipynb_checkpoints/
+*.slices.json
+
