@@ -42,8 +42,13 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       baseNode: NewNode,
       callName: String
     ): Ast =
-        val args      = astForNodes(callExpr.json("arguments").arr.toList)
-        val callNode_ = callNode(callExpr, callExpr.code, callName, DispatchTypes.DYNAMIC_DISPATCH)
+        val args = astForNodes(callExpr.json("arguments").arr.toList)
+        val callNode_ = callNode(
+          callExpr,
+          callExpr.code,
+          callName,
+          DispatchTypes.DYNAMIC_DISPATCH
+        )
         // If the callee is a function itself, e.g. closure, then resolve this locally, if possible
         callExpr.json.obj
             .get("callee")
