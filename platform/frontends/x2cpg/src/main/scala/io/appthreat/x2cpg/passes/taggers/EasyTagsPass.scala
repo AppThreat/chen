@@ -1,7 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.Languages
+import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -14,7 +14,20 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     override def run(dstGraph: DiffGraphBuilder): Unit =
         atom.method.internal.name(".*(valid|check).*").newTagNode("validation").store()(dstGraph)
         atom.method.internal.name("is[A-Z].*").newTagNode("validation").store()(dstGraph)
-        if language == Languages.PYTHON || language == Languages.PYTHONSRC then
+        if language == Languages.JSSRC || language == Languages.JAVASCRIPT then
+            // Tag cli source
+            atom.method.internal.fullName("(index|app).(js|jsx|ts|tsx)::program").newTagNode(
+              "cli-source"
+            ).store()(
+              dstGraph
+            )
+            // Tag exported methods
+            atom.call.where(_.methodFullName(Operators.assignment)).code(
+              "(module\\.)?exports.*"
+            ).argument.isCall.methodFullName.filterNot(_.startsWith("<")).foreach { m =>
+                atom.method.nameExact(m).newTagNode("exported").store()(dstGraph)
+            }
+        else if language == Languages.PYTHON || language == Languages.PYTHONSRC then
             atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
         atom.method.internal.name(".*(encode|escape|sanit).*").newTagNode("sanitization").store()(
           dstGraph
