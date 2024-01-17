@@ -120,16 +120,6 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                              .fullName
                              .map(x => ResolvedTypeDecl(x))
                              .toSet ++ Set(ResolvedMethod(b.methodFullName, callName, receiver))
-                     case ::(x: Call, ::(b: Call, _)) =>
-                         if !b.methodFullName.startsWith("<") then
-                             cpg.method.fullNameExact(b.methodFullName).newTagNode(
-                               "exported"
-                             ).store()(diffGraph)
-                             Set(
-                               ResolvedMethod(b.methodFullName, alias, Option("this")),
-                               ResolvedTypeDecl(b.methodFullName)
-                             )
-                         else Set.empty[ResolvedImport]
                      case ::(_, ::(y: Call, _)) =>
                          // Exported closure with a method ref within the AST of the RHS
                          y.ast.isMethodRef.map(mRef =>

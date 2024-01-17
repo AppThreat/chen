@@ -126,11 +126,8 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
 
     def callNode(node: BabelNodeInfo, code: String, name: String, dispatchType: String): NewCall =
         val fullName =
-            if dispatchType == DispatchTypes.DYNAMIC_DISPATCH && name != code && !code.contains(
-                  "{"
-                ) && !code.contains("require")
-            then code.takeWhile(_ != '(')
-            else name
+            if dispatchType == DispatchTypes.STATIC_DISPATCH then name
+            else x2cpg.Defines.DynamicCallUnknownFullName
         callNode(node, code, name, fullName, dispatchType, None, Some(Defines.Any))
 
     private def createCallNode(
@@ -139,24 +136,17 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
       dispatchType: String,
       line: Option[Integer],
       column: Option[Integer]
-    ): NewCall =
-        val methodFullName =
-            if dispatchType == DispatchTypes.DYNAMIC_DISPATCH && callName != code && !code.contains(
-                  "{"
-                ) && !code.contains("require")
-            then code.takeWhile(_ != '(')
-            else callName
-        NewCall()
-            .code(code)
-            .name(callName)
-            .methodFullName(
-              methodFullName
-            )
-            .dispatchType(dispatchType)
-            .lineNumber(line)
-            .columnNumber(column)
-            .typeFullName(Defines.Any)
-    end createCallNode
+    ): NewCall = NewCall()
+        .code(code)
+        .name(callName)
+        .methodFullName(
+          if dispatchType == DispatchTypes.STATIC_DISPATCH then callName
+          else x2cpg.Defines.DynamicCallUnknownFullName
+        )
+        .dispatchType(dispatchType)
+        .lineNumber(line)
+        .columnNumber(column)
+        .typeFullName(Defines.Any)
 
     protected def createVoidCallNode(line: Option[Integer], column: Option[Integer]): NewCall =
         createCallNode("void 0", "<operator>.void", DispatchTypes.STATIC_DISPATCH, line, column)
