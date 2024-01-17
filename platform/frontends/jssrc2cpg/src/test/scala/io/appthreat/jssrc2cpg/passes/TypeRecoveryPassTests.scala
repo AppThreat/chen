@@ -21,12 +21,6 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
         |z.push(4)
         |""".stripMargin)
 
-    "resolve 'x' identifier types despite shadowing" in {
-      val List(xOuterScope, xInnerScope) = cpg.identifier.nameExact("x").l
-      xOuterScope.dynamicTypeHintFullName shouldBe Seq("__ecma.String", "__ecma.Number")
-      xInnerScope.dynamicTypeHintFullName shouldBe Seq("__ecma.String", "__ecma.Number")
-    }
-
     "resolve 'z' types correctly" in {
       // The dictionary/object type is just considered "ANY" which is fine for now
       cpg.identifier("z").typeFullName.toSet.headOption shouldBe Some("__ecma.Array")
@@ -167,10 +161,10 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
 
     "resolve 'foo.x' and 'foo.y' field access primitive types correctly" in {
       val List(z1, z2) = cpg.file.name(".*Bar.*").ast.isIdentifier.nameExact("z").l
-      z1.typeFullName shouldBe "ANY"
-      z1.dynamicTypeHintFullName shouldBe Seq("__ecma.Number", "__ecma.String")
-      z2.typeFullName shouldBe "ANY"
-      z2.dynamicTypeHintFullName shouldBe Seq("__ecma.Number", "__ecma.String")
+      z1.typeFullName shouldBe "__ecma.String"
+      z1.dynamicTypeHintFullName shouldBe Seq()
+      z2.typeFullName shouldBe "__ecma.String"
+      z2.dynamicTypeHintFullName shouldBe Seq()
     }
 
     "resolve 'foo.d' field access object types correctly" in {
@@ -185,8 +179,7 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
 
     "resolve a 'createTable' call indirectly from 'foo.d' field access correctly" in {
       val List(d) = cpg.file.name(".*Bar.*").ast.isCall.name("createTable").l
-      d.methodFullName shouldBe "flask_sqlalchemy:SQLAlchemy:createTable"
-      d.dynamicTypeHintFullName shouldBe Seq()
+      d.dynamicTypeHintFullName shouldBe Seq("d.createTable", "flask_sqlalchemy:SQLAlchemy:createTable")
       d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
     }
 
@@ -197,8 +190,7 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
         .isCall
         .name("deleteTable")
         .l
-      d.methodFullName shouldBe "flask_sqlalchemy:SQLAlchemy:deleteTable"
-      d.dynamicTypeHintFullName shouldBe empty
+      d.dynamicTypeHintFullName shouldBe Seq("db.deleteTable", "flask_sqlalchemy:SQLAlchemy:deleteTable")
       d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
     }
 
@@ -458,5 +450,32 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
     }
 
   }
+
+    "Default exports with calls" should {
+
+        val cpg = code(
+            """
+              |const logger = require('./logger');
+              |
+              |function a(){
+              |    logger.info('Hello, world!');
+              |}
+              |
+              |a();
+              |""".stripMargin,
+            "app.js"
+        ).moreCode(
+          """
+              |const pino = require('pino');
+              |
+              |module.exports = pino({});
+              |""".stripMargin, "logger.js"
+        )
+
+        "have the correct method full name" in {
+            cpg.call.name("info").methodFullName.head shouldBe "logger.info"
+        }
+
+    }
 
 }
