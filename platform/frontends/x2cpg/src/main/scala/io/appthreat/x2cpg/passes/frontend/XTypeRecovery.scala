@@ -1241,7 +1241,7 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
             builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, Seq.empty)
         else if types.size == 2 then
             builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.last)
-            builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, Seq.empty)
+            builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, Seq(types.head))
         else builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, types)
 
     /** Allows one to modify the types assigned to locals.

@@ -162,9 +162,9 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite {
     "resolve 'foo.x' and 'foo.y' field access primitive types correctly" in {
       val List(z1, z2) = cpg.file.name(".*Bar.*").ast.isIdentifier.nameExact("z").l
       z1.typeFullName shouldBe "__ecma.String"
-      z1.dynamicTypeHintFullName shouldBe Seq()
+      z1.dynamicTypeHintFullName shouldBe Seq("__ecma.Number")
       z2.typeFullName shouldBe "__ecma.String"
-      z2.dynamicTypeHintFullName shouldBe Seq()
+      z2.dynamicTypeHintFullName shouldBe Seq("__ecma.Number")
     }
 
     "resolve 'foo.d' field access object types correctly" in {
