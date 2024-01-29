@@ -955,16 +955,22 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
                 case x: MethodReturn      => setTypeFromTypeHints(x)
                 case x: Identifier if symbolTable.contains(x) =>
                     setTypeInformationForRecCall(x, x.inCall.headOption, x.inCall.argument.l)
-                case x: Call if symbolTable.contains(x) =>
-                    val typs =
-                        if state.config.enabledDummyTypes then symbolTable.get(x).toSeq
-                        else symbolTable.get(x).filterNot(XTypeRecovery.isDummyType).toSeq
-                    storeCallTypeInfo(x, typs)
+                case x: Call =>
+                    if symbolTable.contains(x) then
+                        val typs =
+                            if state.config.enabledDummyTypes then symbolTable.get(x).toSeq
+                            else symbolTable.get(x).filterNot(XTypeRecovery.isDummyType).toSeq
+                        storeCallTypeInfo(x, typs)
+                    else if x.argument.headOption.exists(symbolTable.contains) then
+                        setTypeInformationForRecCall(x, Option(x), x.argument.l)
+                    else if !x.name.startsWith("<") && !x.code.contains(
+                          "require"
+                        ) && !x.code.contains("this")
+                    then
+                        storeCallTypeInfo(x, Seq(x.code.takeWhile(_ != '(')))
                 case x: Identifier
                     if symbolTable.contains(CallAlias(x.name)) && x.inCall.nonEmpty =>
                     setTypeInformationForRecCall(x, x.inCall.headOption, x.inCall.argument.l)
-                case x: Call if x.argument.headOption.exists(symbolTable.contains) =>
-                    setTypeInformationForRecCall(x, Option(x), x.argument.l)
                 case _ =>
             }
         // Set types in an atomic way
@@ -1230,7 +1236,12 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
       * types.
       */
     protected def setTypes(n: StoredNode, types: Seq[String]): Unit =
-        if types.size == 1 then builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.head)
+        if types.size == 1 then
+            builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.head)
+            builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, Seq.empty)
+        else if types.size == 2 && types.last.nonEmpty && types.last != "null" then
+            builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.last)
+            builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, Seq(types.head))
         else builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, types)
 
     /** Allows one to modify the types assigned to locals.

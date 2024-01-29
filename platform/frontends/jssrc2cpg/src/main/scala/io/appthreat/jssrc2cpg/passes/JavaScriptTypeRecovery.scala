@@ -184,6 +184,7 @@ private class RecoverForJavaScriptFile(
             )
 
     override protected def visitIdentifierAssignedToCall(i: Identifier, c: Call): Set[String] =
+        // Instead of returning empty, this must visit and identify the default export
         if c.name == "require" then Set.empty
         else super.visitIdentifierAssignedToCall(i, c)
 

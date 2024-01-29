@@ -1,9 +1,9 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "1.1.6"
+ThisBuild / version      := "2.0.6"
 ThisBuild / scalaVersion := "3.3.1"
 
-val cpgVersion = "1.4.22"
+val cpgVersion = "1.0.0"
 
 lazy val platform          = Projects.platform
 lazy val console           = Projects.console
@@ -35,26 +35,24 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 
 ThisBuild / libraryDependencies ++= Seq(
   "org.slf4j"                % "slf4j-api"         % "2.0.11",
-  "org.apache.logging.log4j" % "log4j-slf4j2-impl" % "2.22.1" % Optional,
-  "org.apache.logging.log4j" % "log4j-core"        % "2.22.1" % Optional
-  // `Optional` means "not transitive", but still included in "stage/lib"
+  "org.slf4j"                % "slf4j-nop"         % "2.0.11" % Optional,
 )
 
 ThisBuild / compile / javacOptions ++= Seq(
   "-g", // debug symbols
   "-Xlint",
-  "--release=17"
+  "--release=21"
 ) ++ {
   // fail early if users with JDK8 try to run this
   val javaVersion = sys.props("java.specification.version").toFloat
-  assert(javaVersion.toInt >= 17, s"this build requires JDK17+ - you're using $javaVersion")
+  assert(javaVersion.toInt >= 21, s"this build requires JDK21+ - you're using $javaVersion")
   Nil
 }
 
 ThisBuild / scalacOptions ++= Seq(
   "-deprecation", // Emit warning and location for usages of deprecated APIs.
   "--release",
-  "17",
+  "21"
 )
 
 

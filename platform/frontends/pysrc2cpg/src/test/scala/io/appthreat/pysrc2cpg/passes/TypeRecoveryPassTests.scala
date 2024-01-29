@@ -27,8 +27,8 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "resolve 'x' identifier types despite shadowing" in {
       val List(xOuterScope, xInnerScope) = cpg.identifier("x").take(2).l
-      xOuterScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int", "__builtin.str")
-      xInnerScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int", "__builtin.str")
+      xOuterScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
+      xInnerScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
     }
 
     "resolve 'y' and 'z' identifier collection types" in {
@@ -241,10 +241,10 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
         .isIdentifier
         .name("z")
         .l
-      z1.typeFullName shouldBe "ANY"
-      z1.dynamicTypeHintFullName shouldBe Seq("__builtin.int", "__builtin.str")
-      z2.typeFullName shouldBe "ANY"
-      z2.dynamicTypeHintFullName shouldBe Seq("__builtin.int", "__builtin.str")
+      z1.typeFullName shouldBe "__builtin.str"
+      z1.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
+      z2.typeFullName shouldBe "__builtin.str"
+      z2.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
     }
 
     "resolve 'foo.d' field access object types correctly" in {
@@ -460,7 +460,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false) {
 
     "correctly determine that, despite being unable to resolve the correct method full name, that it is an internal method" in {
       val Some(selfFindFound) = cpg.typeDecl(".*InstallationsDAO.*").ast.isCall.name("find_one").headOption: @unchecked
-      selfFindFound.callee.isExternal.toSeq shouldBe Seq(true, true)
+      selfFindFound.callee.isExternal.toSeq shouldBe Seq(true, true, true)
     }
   }
 

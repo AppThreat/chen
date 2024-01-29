@@ -95,6 +95,9 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                              else constructorMatches.fullName.toSet
                          if methodPaths.nonEmpty then
                              methodPaths.flatMap(x =>
+                                 cpg.method.fullNameExact(x).newTagNode(
+                                   "exported"
+                                 ).store()(diffGraph)
                                  Set(ResolvedMethod(x, alias, Option("this")), ResolvedTypeDecl(x))
                              )
                          else if moduleExportsThisVariable then
@@ -107,7 +110,11 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                              x.argumentOption(2).map(_.code).getOrElse(b.referencedMethod.name)
                          val (callName, receiver) =
                              if methodName == "exports" then (alias, Option("this"))
-                             else (methodName, Option(alias))
+                             else
+                                 cpg.method.fullNameExact(methodName).newTagNode(
+                                   "exported"
+                                 ).store()(diffGraph)
+                                 (methodName, Option(alias))
                          b.referencedMethod.astParent.iterator
                              .collectAll[Method]
                              .fullName
@@ -116,10 +123,14 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                      case ::(_, ::(y: Call, _)) =>
                          // Exported closure with a method ref within the AST of the RHS
                          y.ast.isMethodRef.map(mRef =>
+                             cpg.method.fullNameExact(mRef.methodFullName).newTagNode(
+                               "exported"
+                             ).store()(diffGraph)
                              ResolvedMethod(mRef.methodFullName, alias, Option("this"))
                          ).toSet
                      case _ =>
                          Set.empty[ResolvedImport]
+                 end match
              }.toSet
          else
              Set(UnknownMethod(entity, alias, Option("this")), UnknownTypeDecl(entity))

@@ -363,8 +363,8 @@ class JavaTypeRecoveryPassTests extends JavaSrcCode2CpgFixture(enableTypeRecover
 
     "hint that `transaction` may be of the null type" in {
       val Some(transaction) = cpg.identifier("transaction").headOption: @unchecked
+        transaction.dynamicTypeHintFullName.contains("null")
       transaction.typeFullName shouldBe "org.hibernate.Transaction"
-      transaction.dynamicTypeHintFullName.contains("null")
     }
   }
 

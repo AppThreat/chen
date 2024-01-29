@@ -35,34 +35,39 @@ object Delombok:
         val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
         val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match
             case Success(file) =>
-                // Write classpath to a file to work around Windows length limits.
-                file.write(System.getProperty("java.class.path"))
-                s"@${file.canonicalPath}"
-
+                if System.getProperty("java.class.path").nonEmpty then
+                    // Write classpath to a file to work around Windows length limits.
+                    file.write(System.getProperty("java.class.path"))
+                    s"@${file.canonicalPath}"
+                else System.getProperty("java.class.path")
             case Failure(t) =>
                 logger.debug(
-                  s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems",
-                  t
+                  s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
                 )
                 System.getProperty("java.class.path")
-        s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
+        if classPathArg.nonEmpty then
+            s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
+        else ""
 
     def run(projectDir: String, analysisJavaHome: Option[String]): String =
         Try(File.newTemporaryDirectory(prefix = "delombok").deleteOnExit()) match
             case Success(tempDir) =>
-                ExternalCommand.run(
-                  delombokToTempDirCommand(tempDir, analysisJavaHome),
-                  cwd = projectDir
-                ) match
-                    case Success(_) =>
-                        tempDir.path.toAbsolutePath.toString
+                val externalCommand = delombokToTempDirCommand(tempDir, analysisJavaHome)
+                if externalCommand.nonEmpty then
+                    ExternalCommand.run(
+                      externalCommand,
+                      cwd = projectDir
+                    ) match
+                        case Success(_) =>
+                            tempDir.path.toAbsolutePath.toString
 
-                    case Failure(t) =>
-                        logger.debug(s"Executing delombok failed", t)
-                        logger.debug(
-                          "Creating AST with original source instead. Some methods and type information will be missing."
-                        )
-                        projectDir
+                        case Failure(t) =>
+                            logger.debug(s"Executing delombok failed", t)
+                            logger.debug(
+                              "Creating AST with original source instead. Some methods and type information will be missing."
+                            )
+                            projectDir
+                else ""
 
             case Failure(e) =>
                 logger.debug(

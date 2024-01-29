@@ -33,7 +33,7 @@ class ChenConsole extends Console[ChenProject](new ChenWorkspaceLoader):
             .getOrElse(EngineContext())
 
     def loadCpg(inputPath: String): Option[Cpg] =
-        report("Deprecated. Please use `importCpg` instead")
+        report("Deprecated. Please use `importAtom` instead")
         importCpg(inputPath)
 
     override def applyDefaultOverlays(cpg: Cpg): Cpg =

@@ -12,12 +12,12 @@ import scala.collection.mutable
   */
 class InstallConfig(environment: Map[String, String] = sys.env):
 
-    /** determining the root path of the joern/ocular installation is rather complex unfortunately,
-      * because we support a variety of use cases:
+    /** determining the root path of the installation is rather complex unfortunately, because we
+      * support a variety of use cases:
       *   - running the installed distribution from the install dir
       *   - running the installed distribution anywhere else on the system
-      *   - running a locally staged ocular/joern build (via `sbt stage` and then either `./joern`
-      *     or `cd platform/target/universal/stage; ./joern`)
+      *   - running a locally staged build (via `sbt stage` and then either `./chennai` or `cd
+      *     platform/target/universal/stage; ./chennai`)
       *   - running a unit/integration test (note: the jars would be in the local cache, e.g. in
       *     ~/.coursier/cache)
       */

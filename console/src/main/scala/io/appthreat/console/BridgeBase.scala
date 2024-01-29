@@ -290,7 +290,7 @@ trait ScriptExecution:
       */
     private def importCpgCode(config: Config): List[String] =
         config.cpgToLoad.map { cpgFile =>
-            "importCpg(\"" + cpgFile + "\")"
+            "importAtom(\"" + cpgFile + "\")"
         }.toList ++ config.forInputPath.map { name =>
             s"""
          |openForInputPath(\"$name\")
@@ -340,9 +340,8 @@ trait PluginHandling:
 
         val storeCode = if config.store then "save"
         else ""
-        val runDataflow = if productName == "ocular" then "run.dataflow"
-        else "run.ossdataflow"
-        val argsString = argsStringFromConfig(config)
+        val runDataflow = "run.ossdataflow"
+        val argsString  = argsStringFromConfig(config)
 
         s"""
        | if (${config.overwrite} || !workspace.projectExists("$src")) {

@@ -1,7 +1,7 @@
 package io.appthreat.console
 
-import org.reflections8.Reflections
-import org.reflections8.util.{ClasspathHelper, ConfigurationBuilder}
+import org.reflections.Reflections
+import org.reflections.util.{ClasspathHelper, ConfigurationBuilder}
 
 import java.lang.reflect.{Method, Parameter}
 import scala.annotation.unused
@@ -44,7 +44,7 @@ class QueryDatabase(
             // the namespace currently looks like `io.appthreat.scanners.c.CopyLoops`
             val namespaceParts = bundleNamespace.split('.')
             val language =
-                if bundleNamespace.startsWith("io.appthreat.ocular.scanners") then
+                if bundleNamespace.startsWith("io.appthreat.chen.scanners") then
                     namespaceParts(4)
                 else if namespaceParts.length > 3 then
                     namespaceParts(3)

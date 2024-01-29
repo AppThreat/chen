@@ -23,16 +23,24 @@ object Predefined:
           """
         |def reachables(sinkTag: String, sourceTag: String, sourceTags: Array[String])(implicit atom: Cpg): Unit = {
         |  try {
-        |    def source=atom.tag.name(sourceTag).parameter
+        |    val language = atom.metaData.language.l.head
         |    def sources=sourceTags.map(t => atom.tag.name(t).parameter)
-        |    def sink=atom.ret.where(_.tag.name(sinkTag))
-        |    sink.df(source, sources).t
+        |    if language == Languages.JSSRC || language == Languages.JAVASCRIPT || language == Languages.PYTHON || language == Languages.PYTHONSRC
+        |    then
+        |      def source = atom.tag.name(sourceTag).call.argument
+        |      def sink = atom.tag.name(sinkTag).call.argument
+        |      sink.df(source, sources).t
+        |    else
+        |       def source=atom.tag.name(sourceTag).parameter
+        |       def sink=atom.ret.where(_.tag.name(sinkTag))
+        |       sink.df(source, sources).t
+        |    end if
         |  } catch {
         |    case exc: Exception =>
         |  }
         |}
         |
-        |def reachables(implicit atom: Cpg): Unit = reachables("framework-output", "framework-input", Array("api"))
+        |def reachables(implicit atom: Cpg): Unit = reachables("framework-output", "framework-input", Array("api", "framework", "http", "cli-source", "library-call"))
         |
         |""".stripMargin
         )

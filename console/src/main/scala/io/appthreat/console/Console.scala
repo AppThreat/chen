@@ -522,6 +522,8 @@ class Console[T <: Project](
                                         .add(
                                           c.methodFullName + (if c.callee(
                                                                     NoResolve
+                                                                  ).nonEmpty && c.callee(
+                                                                    NoResolve
                                                                   ).head.nonEmpty && c.callee(
                                                                     NoResolve
                                                                   ).head.isExternal
@@ -530,6 +532,7 @@ class Console[T <: Project](
                                         )
                                     addedMethods += c.methodFullName -> true
                             )
+                    end if
                 )
                 rootTree.add(childTree)
             }
