@@ -125,7 +125,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             atom.call.methodFullName("java.security.*doFinal.*").newTagNode(
               "crypto-generate"
             ).store()(dstGraph)
-            atom.call.methodFullName("org.bouncycastle.*(doFinal|generate).*").newTagNode(
+            atom.call.methodFullName("org.bouncycastle.*(doFinal|generate|build).*").newTagNode(
               "crypto-generate"
             ).store()(dstGraph)
             atom.call.methodFullName("javax.(security|crypto).*doFinal.*").newTagNode(

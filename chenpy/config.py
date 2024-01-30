@@ -7,4 +7,4 @@ if not os.path.exists(chen_home):
     os.makedirs(chen_home)
 
 # chen oras distribution url
-chen_distribution_url = "ghcr.io/appthreat/chen-platform:v1"
+chen_distribution_url = "ghcr.io/appthreat/chen-platform:v2"

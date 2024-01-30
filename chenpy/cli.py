@@ -184,7 +184,7 @@ conda install -n chenpy-local -c conda-forge networkx --solver=libmamba -y
 conda install -n chenpy-local -c pytorch pytorch torchtext cpuonly --solver=libmamba -y
 pip install pyg_lib -f https://data.pyg.org/whl/torch-2.1.0+cpu.html
 conda install -n chenpy-local -c conda-forge scipy numpy packageurl-python nbconvert jupyter_core jupyter_client notebook --solver=libmamba -y
-conda install -n chenpy-local -c conda-forge oras-py httpx websockets orjson rich appdirs psutil gitpython --solver=libmamba -y"""
+conda install -n chenpy-local -c conda-forge oras-py==0.1.26 httpx websockets orjson rich appdirs psutil gitpython --solver=libmamba -y"""
             for line in conda_install_script.split("\n"):
                 if line.strip():
                     task = progress.add_task(line, start=False, total=100)
@@ -227,6 +227,7 @@ def detect_python_lib_path():
         return lib_dir, py_version
     cp = subprocess.run(
         ["python3-config", "--ldflags", "--embed"],
+        check=True,
         capture_output=True,
         encoding="utf-8",
         shell=USE_SHELL,

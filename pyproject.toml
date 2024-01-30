@@ -36,7 +36,7 @@ websockets = "^11.0.2"
 uvloop = {version = "^0.17.0", markers = "sys_platform == 'linux' or sys_platform == 'darwin'", optional = true}
 orjson = "^3.9.0"
 rich = "^13.4.1"
-oras = "^0.1.24"
+oras = "0.1.26"
 appdirs = "^1.4.4"
 psutil = "^5.9.5"
 packageurl-python = "^0.11.2"

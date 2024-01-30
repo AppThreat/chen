@@ -24,7 +24,7 @@ requirements:
     - conda-forge::websockets>=11.0.2,<12.0.0
     - conda-forge::orjson>=3.9.0,<4.0.0
     - conda-forge::rich>=13.4.1,<14.0.0
-    - conda-forge::oras-py>=0.1.25
+    - conda-forge::oras-py==0.1.26
     - conda-forge::appdirs>=1.4.4,<2.0.0
     - conda-forge::psutil>=5.9.5,<6.0.0
     - conda-forge::packageurl-python>=0.11.2,<0.12.0

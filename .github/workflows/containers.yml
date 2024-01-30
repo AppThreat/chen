@@ -20,11 +20,11 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Set up JDK
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '21'
@@ -35,11 +35,11 @@ jobs:
           php-version: "8.3"
           tools: composer:v2
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '21.x'
       - name: Delete `.rustup` directory
@@ -48,7 +48,7 @@ jobs:
       - name: Delete `.cargo` directory # to save disk space
         run: rm -rf /home/runner/.cargo
         if: runner.os == 'Linux'
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.sbt
@@ -69,7 +69,7 @@ jobs:
         run: |
           cd target
           echo $GITHUB_TOKEN | oras login ghcr.io -u $GITHUB_USERNAME --password-stdin
-          oras push ghcr.io/$IMAGE_NAME:v1 \
+          oras push ghcr.io/$IMAGE_NAME:v2 \
             --annotation-file ../ci/annotations.json \
             ./chen.zip:application/vnd.appthreat.chen.layer.v1+tar \
             ./chen-science-requirements.txt:application/vnd.appthreat.chen.layer.v1+tar \
