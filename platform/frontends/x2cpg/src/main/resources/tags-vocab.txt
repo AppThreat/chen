@@ -88,3 +88,5 @@ jndi
 ldif
 jdbm
 kerberos
+oidc
+oauth2

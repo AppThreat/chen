@@ -460,6 +460,30 @@ class Console[T <: Project](
         table.add_row("Imports", "" + atom.imports.size)
         table.add_row("Literals", "" + atom.literal.size)
         table.add_row("Config Files", "" + atom.configFile.size)
+        table.add_row(
+          "Validation tags",
+          "[#5A7C90]" + atom.tag.name("(validation|sanitization).*").name.size + "[/#5A7C90]"
+        )
+        table.add_row(
+          "Unique packages",
+          "[#5A7C90]" + atom.tag.name("pkg.*").name.dedup.size + "[/#5A7C90]"
+        )
+        table.add_row(
+          "Framework tags",
+          "[#5A7C90]" + atom.tag.name("framework.*").name.size + "[/#5A7C90]"
+        )
+        table.add_row(
+          "Framework input",
+          "[#5A7C90]" + atom.tag.name("framework-(input|route)").name.size + "[/#5A7C90]"
+        )
+        table.add_row(
+          "Framework output",
+          "[#5A7C90]" + atom.tag.name("framework-output").name.size + "[/#5A7C90]"
+        )
+        table.add_row(
+          "Crypto tags",
+          "[#5A7C90]" + atom.tag.name("crypto.*").name.size + "[/#5A7C90]"
+        )
         val appliedOverlays = Overlays.appliedOverlays(atom)
         if appliedOverlays.nonEmpty then table.add_row("Overlays", "" + appliedOverlays.size)
         richConsole.clear()
@@ -517,7 +541,12 @@ class Console[T <: Project](
                             .filterNot(_.methodFullName == "NULL")
                             .toSet
                             .foreach(c =>
-                                if !addedMethods.contains(c.methodFullName) then
+                                if !addedMethods.contains(
+                                      c.methodFullName
+                                    ) && c.methodFullName != "<unknownFullName>" && !c.methodFullName.startsWith(
+                                      "{ "
+                                    )
+                                then
                                     mtree
                                         .add(
                                           c.methodFullName + (if c.callee(
