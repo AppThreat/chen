@@ -105,8 +105,11 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                 properties.foreach { ns =>
                     val nsstr  = ns.hcursor.downField("value").as[String].getOrElse("")
                     val nsname = ns.hcursor.downField("name").as[String].getOrElse("")
-                    // Skip the SrcFile property
-                    if nsname != "SrcFile" then
+                    // Skip the SrcFile, ResolvedUrl, GradleProfileName, cdx: properties
+                    if nsname != "SrcFile" && nsname != "ResolvedUrl" && nsname != "GradleProfileName" && !nsname.startsWith(
+                          "cdx:"
+                        )
+                    then
                         nsstr
                             .split("(\n|,)")
                             .filterNot(_.startsWith("java."))
