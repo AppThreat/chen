@@ -124,8 +124,9 @@ top-level commands. To get more detailed help on a specific command, just type
 Try `help.importCode` to begin with.
 _______________________________________________________________________________________________________________________________________________________________
 command          | description                                                               | example                                                       |
-==============================================================================================================================================================|
+=============================================================================================================================================================|
 annotations      | List annotations                                                          | annotations                                                   |
+callTree         | Show call tree for the given method                                       | callTree(method full name)                                    |
 close            | Close project by name                                                     | close(projectName)                                            |
 declarations     | List declarations                                                         | declarations                                                  |
 distance         | Show graph edit distance from the source method to the comparison methods | distance(source method iterator, comparison method iterators) |
@@ -138,6 +139,8 @@ methods          | List methods                                                 
 sensitive        | List sensitive literals                                                   | sensitive                                                     |
 showSimilar      | Show methods similar to the given method                                  | showSimilar(method full name)                                 |
 summary          | Display summary information                                               | summary                                                       |
+reachables       | Show reachable flows from a source to sink. Default source: framework-input and sink: framework-output | reachables                       |
+cryptos          | Show reachable flows from a source to sink. Default source: crypto-algorithm and sink: crypto-generate | cryptos                          |
 ```
 
 Refer to the documentation site to learn more about the commands.

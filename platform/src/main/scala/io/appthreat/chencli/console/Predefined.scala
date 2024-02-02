@@ -19,8 +19,10 @@ object Predefined:
           "import _root_.io.shiftleft.semanticcpg.language._",
           "import overflowdb._",
           "import overflowdb.traversal.{`package` => _, help => _, _}",
+          "import overflowdb.traversal.help.Doc",
           "import scala.jdk.CollectionConverters._",
           """
+        |@Doc(info = "Show reachable flows from a source to sink. Default source: framework-input and sink: framework-output", example = "reachables")
         |def reachables(sinkTag: String, sourceTag: String, sourceTags: Array[String])(implicit atom: Cpg): Unit = {
         |  try {
         |    val language = atom.metaData.language.l.head
@@ -40,8 +42,31 @@ object Predefined:
         |  }
         |}
         |
+        |@Doc(info = "Show reachable flows from a source to sink. Default source: framework-input and sink: framework-output", example = "reachables")
         |def reachables(implicit atom: Cpg): Unit = reachables("framework-output", "framework-input", Array("api", "framework", "http", "cli-source", "library-call"))
         |
+        |@Doc(info = "Show reachable flows from a source to sink. Default source: crypto-algorithm and sink: crypto-generate", example = "cryptos")
+        |def cryptos(sinkTag: String, sourceTag: String, sourceTags: Array[String])(implicit atom: Cpg): Unit = {
+        |  try {
+        |    val language = atom.metaData.language.l.head
+        |    def sources=sourceTags.map(t => atom.tag.name(t).parameter)
+        |    if language == Languages.JSSRC || language == Languages.JAVASCRIPT || language == Languages.PYTHON || language == Languages.PYTHONSRC
+        |    then
+        |      def source = atom.tag.name(sourceTag).call.argument
+        |      def sink = atom.tag.name(sinkTag).call.argument
+        |      sink.df(source, sources).t
+        |    else
+        |       def source=atom.tag.name(sourceTag).literal
+        |       def sink=atom.tag.name(sinkTag).call
+        |       sink.df(source, sources).t
+        |    end if
+        |  } catch {
+        |    case exc: Exception =>
+        |  }
+        |}
+        |
+        |@Doc(info = "Show reachable flows from a source to sink. Default source: crypto-algorithm and sink: crypto-generate", example = "cryptos")
+        |def cryptos(implicit atom: Cpg): Unit = cryptos("crypto-generate", "crypto-algorithm", Array("api", "framework", "http", "cli-source", "library-call"))
         |""".stripMargin
         )
 
