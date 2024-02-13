@@ -34,8 +34,8 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 )
 
 ThisBuild / libraryDependencies ++= Seq(
-  "org.slf4j"                % "slf4j-api"         % "2.0.11",
-  "org.slf4j"                % "slf4j-nop"         % "2.0.11" % Optional,
+  "org.slf4j"                % "slf4j-api"         % "2.0.12",
+  "org.slf4j"                % "slf4j-nop"         % "2.0.12" % Optional,
 )
 
 ThisBuild / compile / javacOptions ++= Seq(
