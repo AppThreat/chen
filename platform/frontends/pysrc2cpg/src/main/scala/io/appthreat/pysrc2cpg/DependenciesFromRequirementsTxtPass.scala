@@ -35,4 +35,3 @@ class DependenciesFromRequirementsTxtPass(cpg: Cpg) extends CpgPass(cpg):
                     dstGraph.addNode(node)
             }
         }
-end DependenciesFromRequirementsTxtPass

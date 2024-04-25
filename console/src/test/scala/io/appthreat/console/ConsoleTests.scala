@@ -289,7 +289,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
       )
       val numOverlayFilesBefore = console.project.path.resolve("overlays").toFile.list().length
       numOverlayFilesBefore shouldBe 0
-      console._runAnalyzer(defaultOverlayCreators(): _*)
+      console._runAnalyzer(defaultOverlayCreators()*)
       console.project.appliedOverlays shouldBe List(
         Base.overlayName,
         ControlFlow.overlayName,

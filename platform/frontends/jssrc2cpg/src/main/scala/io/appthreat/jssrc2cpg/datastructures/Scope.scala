@@ -53,7 +53,7 @@ class Scope:
         addVariable(stack, variableName, variableNode, scopeType)
 
     def addVariableReference(variableName: String, referenceNode: NewNode): Unit =
-        pendingReferences prepend PendingReference(variableName, referenceNode, stack)
+        pendingReferences.prepend(PendingReference(variableName, referenceNode, stack))
 
     def resolve(unresolvedHandler: (NewNode, String) => (NewNode, ScopeType))
       : Iterator[ResolvedReference] =

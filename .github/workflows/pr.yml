@@ -6,7 +6,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        jvm: ['21']
+        jvm: ['21', '22']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,8 +14,9 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: ${{ matrix.jvm }}
+          cache: "sbt"
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
         with:
@@ -41,12 +42,10 @@ jobs:
         if: runner.os == 'Linux'
       - name: Install graphviz-dev
         run: |
-          brew install graphviz
-          python -m pip install \
-              --global-option=build_ext \
-              --global-option="-I$(brew --prefix graphviz)/include/" \
-              --global-option="-L$(brew --prefix graphviz)/lib/" \
-              pygraphviz
+          brew install graphviz sbt
+          export C_INCLUDE_PATH="$(brew --prefix graphviz)/include/"
+          export LIBRARY_PATH="$(brew --prefix graphviz)/lib/"
+          pip install --use-pep517 --config-setting="--global-option=build_ext" pygraphviz
         if: runner.os == 'macOS'
       - name: Install and test
         run: |

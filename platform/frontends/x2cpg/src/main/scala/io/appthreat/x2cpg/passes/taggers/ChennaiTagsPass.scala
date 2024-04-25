@@ -41,7 +41,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
       "svr\\.(Post|Get|Delete|Head|Options|Put)"
     )
     private val PYTHON_ROUTES_DECORATORS_REGEXES = Array(
-      ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required)\\(.*",
+      ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required|api\\.doc|api\\.response|api\\.errorhandler)\\(.*",
       ".*def\\s(get|post|put)\\(.*"
     )
     private val PHP_ROUTES_METHODS_REGEXES = Array(
@@ -95,6 +95,16 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
         }
         atom.file.name(".*views.py.*").method.parameter.name("request").method.newTagNode(
           FRAMEWORK_INPUT
+        ).store()(dstGraph)
+        atom.file.name(".*controllers.*.py.*").method.name(
+          "get|post|put|delete|head|option"
+        ).parameter.filterNot(_.name == "self").newTagNode(
+          FRAMEWORK_INPUT
+        ).store()(dstGraph)
+        atom.file.name(".*controllers.*.py.*").method.name(
+          "get|post|put|delete|head|option"
+        ).methodReturn.newTagNode(
+          FRAMEWORK_OUTPUT
         ).store()(dstGraph)
     end tagPythonRoutes
     private def tagPhpRoutes(dstGraph: DiffGraphBuilder): Unit =

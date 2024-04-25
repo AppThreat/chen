@@ -108,7 +108,7 @@ object GradleDependencies:
       gradleProjectName: String,
       gradleConfigurationName: String
     ): GradleDepsInitScript =
-        val taskName = taskNamePrefix + "_" + (Random.alphanumeric take 8).toList.mkString
+        val taskName = taskNamePrefix + "_" + (Random.alphanumeric.take(8)).toList.mkString
         val content =
             if forAndroid then
                 gradle5OrLaterAndroidInitScript(

@@ -56,9 +56,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
             if str.count(_ == '.') > 1 then
                 s"${tmpParts.take(2).mkString(Pattern.quote(File.separator))}.*"
             else if str.count(_ == '.') == 1 then s"${tmpParts.head}.py:<module>.*"
-            else str
-        else if str.nonEmpty then
-            s"$str${Pattern.quote(File.separator)}.*"
+            else s"$str.py:<module>.*"
         else
             str
 
@@ -99,6 +97,30 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                 val descTags = keywords.filter(k =>
                     compDescription.toLowerCase().contains(" " + k)
                 ).take(TAGS_COUNT)
+                if (language == Languages.PYTHON || language == Languages.PYTHONSRC) && compPurl.startsWith(
+                      "pkg:pypi"
+                    )
+                then
+                    val pkgName = compPurl.split("@").head.replace("pkg:pypi/", "")
+                        .replace("python-", "")
+                        .replace("-", "_");
+                    Set(
+                      pkgName,
+                      pkgName.replace("flask_", ""),
+                      pkgName.replace("django_", ""),
+                      pkgName.replace("py", "")
+                    ).foreach { ns =>
+                        val bpkg = toPyModuleForm(ns)
+                        if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
+                            donePkgs.put(bpkg, true)
+                        atom.call.where(
+                          _.methodFullName(bpkg)
+                        ).argument.newTagNode(compPurl).store()(dstGraph)
+                        atom.identifier.typeFullName(bpkg).newTagNode(
+                          compPurl
+                        ).store()(dstGraph)
+                    }
+                end if
                 val properties = comp.hcursor.downField("properties").focus.flatMap(
                   _.asArray
                 ).getOrElse(Vector.empty)
