@@ -110,15 +110,17 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                       pkgName.replace("django_", ""),
                       pkgName.replace("py", "")
                     ).foreach { ns =>
-                        val bpkg = toPyModuleForm(ns)
-                        if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
-                            donePkgs.put(bpkg, true)
-                        atom.call.where(
-                          _.methodFullName(bpkg)
-                        ).argument.newTagNode(compPurl).store()(dstGraph)
-                        atom.identifier.typeFullName(bpkg).newTagNode(
-                          compPurl
-                        ).store()(dstGraph)
+                        Set(toPyModuleForm(ns), s"$ns${Pattern.quote(File.separator)}.*").foreach {
+                            bpkg =>
+                                if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
+                                    donePkgs.put(bpkg, true)
+                                atom.call.where(
+                                  _.methodFullName(bpkg)
+                                ).newTagNode(compPurl).store()(dstGraph)
+                                atom.identifier.typeFullName(bpkg).newTagNode(
+                                  compPurl
+                                ).store()(dstGraph)
+                        }
                     }
                 end if
                 val properties = comp.hcursor.downField("properties").focus.flatMap(
