@@ -50,7 +50,7 @@ class PhpSetKnownTypesPass(cpg: Cpg, knownTypesFile: Option[JFile] = None)
         val builtinMethod = cpg.method.fullNameExact(part.name).l
         builtinMethod.foreach(mNode =>
             setTypes(builder, mNode.methodReturn, part.rTypes)
-            (mNode.parameter.l zip part.pTypes).map((p, pTypes) => setTypes(builder, p, pTypes))
+            (mNode.parameter.l.zip(part.pTypes)).map((p, pTypes) => setTypes(builder, p, pTypes))
         )
 
     def createKnownFunctionFromLine(line: String): Option[KnownFunction] =

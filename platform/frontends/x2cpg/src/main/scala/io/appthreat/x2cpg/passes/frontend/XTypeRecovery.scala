@@ -49,7 +49,6 @@ case class XTypeRecoveryState(
     lazy val isFirstIteration: Boolean = currentIteration == 0
 
     def clear(): Unit = isFieldCache.clear()
-end XTypeRecoveryState
 
 /** In order to propagate types across compilation units, but avoid the poor scalability of a
   * fixed-point algorithm, the number of iterations can be configured using the iterations
@@ -177,7 +176,7 @@ object XTypeRecovery:
 
     /** Parser options for languages implementing this pass.
       */
-    def parserOptions[R <: X2CpgConfig[R] with TypeRecoveryParserConfig[R]]: OParser[?, R] =
+    def parserOptions[R <: X2CpgConfig[R] & TypeRecoveryParserConfig[R]]: OParser[?, R] =
         val builder = OParser.builder[R]
         import builder.*
         OParser.sequence(

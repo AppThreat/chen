@@ -33,7 +33,7 @@ class Console[T <: Project](
     def config: ConsoleConfig = _config
     def console: Console[T]   = this
 
-    protected var workspaceManager: WorkspaceManager[T] = _
+    protected var workspaceManager: WorkspaceManager[T] = scala.compiletime.uninitialized
     switchWorkspace(baseDir.path.resolve("workspace").toString)
     protected def workspacePathName: String = workspaceManager.getPath
 
@@ -797,7 +797,7 @@ class Console[T <: Project](
                 lastCallerMethod = methodName
                 dashCount += 1
             if dashCount < depth then
-                calleeList foreach { c =>
+                calleeList.foreach { c =>
                     tree += s"${printDashes(dashCount)}${c.fullName}~~${c.location.filename}#${c.lineNumber.getOrElse(0)}"
                     findCallee(c.fullName, tree)
                 }

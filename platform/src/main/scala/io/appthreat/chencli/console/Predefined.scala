@@ -50,11 +50,16 @@ object Predefined:
         |  try {
         |    val language = atom.metaData.language.l.head
         |    def sources=sourceTags.map(t => atom.tag.name(t).parameter)
-        |    if language == Languages.JSSRC || language == Languages.JAVASCRIPT || language == Languages.PYTHON || language == Languages.PYTHONSRC
+        |    if language == Languages.JSSRC || language == Languages.JAVASCRIPT
         |    then
         |      def source = atom.tag.name(sourceTag).call.argument
         |      def sink = atom.tag.name(sinkTag).call.argument
         |      sink.df(source, sources).t
+        |    else if  language == Languages.PYTHON || language == Languages.PYTHONSRC
+        |    then
+        |      def source = atom.tag.name(sourceTag).call
+        |      def sink = atom.tag.name(sinkTag).call
+        |      sink.df(source).t
         |    else
         |       def source=atom.tag.name(sourceTag).literal
         |       def sink=atom.tag.name(sinkTag).call

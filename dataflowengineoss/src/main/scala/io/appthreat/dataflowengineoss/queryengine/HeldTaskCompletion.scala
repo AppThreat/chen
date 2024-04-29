@@ -113,7 +113,6 @@ class HeldTaskCompletion(
                 (parentTask, TableEntry(newPath))
             }
             .filter { case (_, tableEntry) => containsCycle(tableEntry) }
-    end createResultsForHeldTaskAndTableResult
 
     private def containsCycle(tableEntry: TableEntry): Boolean =
         val pathSeq =

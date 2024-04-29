@@ -42,7 +42,7 @@ class PythonAstVisitor(
 
     protected val contextStack = new ContextStack()
 
-    private var memOpMap: AstNodeToMemoryOperationMap = _
+    private var memOpMap: AstNodeToMemoryOperationMap = scala.compiletime.uninitialized
 
     private val members = mutable.Map.empty[NewTypeDecl, List[String]]
 
@@ -173,7 +173,7 @@ class PythonAstVisitor(
         result
     end createBuiltinIdentifiers
 
-    private def unhandled(node: ast.iast with ast.iattributes): NewNode =
+    private def unhandled(node: ast.iast & ast.iattributes): NewNode =
         val unhandledAsUnknown = true
         if unhandledAsUnknown then
             nodeBuilder.unknownNode(node.toString, node.getClass.getName, lineAndColOf(node))
@@ -1869,18 +1869,18 @@ class PythonAstVisitor(
     private def andOpCodeAndFullName(): () => (String, String) = () =>
         ("and", Operators.logicalAnd)
 
-        /** TODO For now this function compromises on the correctness of the lowering in order to
-          * get some data flow tracking going.
-          *   1. For constructs like x.func() we assume x to be the instance which is passed into
-          *      func. This is not true since the instance method object gets the instance already
-          *      bound/captured during function access. This becomes relevant for constructs like:
-          *      x.func = y.func <- y.func is class method object x.func() In this case the instance
-          *      passed into func is y and not x. We cannot represent this in th CPG and thus stick
-          *      to the assumption that the part before the "." and the bound/captured instance will
-          *      be the same. For reference see:
-          *      https://docs.python.org/3/reference/datamodel.html#the-standard-type-hierarchy
-          *      search for "Instance methods"
-          */
+    /** TODO For now this function compromises on the correctness of the lowering in order to get
+      * some data flow tracking going.
+      *   1. For constructs like x.func() we assume x to be the instance which is passed into func.
+      *      This is not true since the instance method object gets the instance already
+      *      bound/captured during function access. This becomes relevant for constructs like:
+      *      x.func = y.func <- y.func is class method object x.func() In this case the instance
+      *      passed into func is y and not x. We cannot represent this in th CPG and thus stick to
+      *      the assumption that the part before the "." and the bound/captured instance will be the
+      *      same. For reference see:
+      *      https://docs.python.org/3/reference/datamodel.html#the-standard-type-hierarchy search
+      *      for "Instance methods"
+      */
     def convert(call: ast.Call): nodes.NewNode =
         val argumentNodes = call.args.map(convert).toSeq
         val keywordArgNodes = call.keywords.flatMap { keyword =>

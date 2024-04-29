@@ -35,7 +35,7 @@ abstract class TestCpg extends Cpg() with LanguageFrontend {
     this
   }
 
-  def withConfig(config: X2CpgConfig[_]): this.type = {
+  def withConfig(config: X2CpgConfig[?]): this.type = {
     setConfig(config)
     this
   }

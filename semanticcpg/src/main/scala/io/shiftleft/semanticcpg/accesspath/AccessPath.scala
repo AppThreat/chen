@@ -258,7 +258,6 @@ case class FullMatchResult(
   extensionDiff: Elements
 ):
     def hasMatch: Boolean = stepIntoPath.nonEmpty
-end FullMatchResult
 
 /** For handling of invertible elements, cf AccessPathAlgebra.md. The general rule is that elements
   * concatenate normally, except for:

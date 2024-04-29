@@ -290,7 +290,6 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
               edges = diffGraphs,
               fringe = leftCfg.fringe ++ rightCfg.fringe
             ) ++ cfgForSingleNode(call)
-    end cfgForAndExpression
 
     /** Same construction recipe as for the AND expression, just that the fringe edge type of the
       * left CFG is `FalseEdge`.
@@ -363,7 +362,6 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
               fringe = cfgForMacroCall.fringe ++ cfgForExpansion.fringe
             )
         cfg
-    end cfgForInlinedCall
 
     /** A for statement is of the form `for(initExpr; condition; loopExpr) body` and all four
       * components may be empty. The sequence (condition - body - loopExpr) form the inner part of
@@ -551,7 +549,7 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
             maybeFinallyBodyCfg.headOption.getOrElse(Cfg.empty)
         else
             Cfg
-                .from(Seq(tryBodyCfg) ++ catchBodyCfgs ++ maybeFinallyBodyCfg: _*)
+                .from(Seq(tryBodyCfg) ++ catchBodyCfgs ++ maybeFinallyBodyCfg*)
                 .copy(
                   entryNode = tryBodyCfg.entryNode,
                   edges =
@@ -602,7 +600,7 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
         val breakFringe = takeCurrentLevel(bodyCfgs.flatMap(_.breaks)).map((_, AlwaysEdge))
 
         Cfg
-            .from(conditionCfg :: bodyCfgs: _*)
+            .from(conditionCfg :: bodyCfgs*)
             .copy(
               entryNode = conditionCfg.entryNode,
               edges = caseEdges ++ conditionCfg.edges ++ bodyCfgs.flatMap(_.edges),

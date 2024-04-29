@@ -77,7 +77,7 @@ end X2CpgConfig
   * @param frontend
   *   the frontend to use for CPG creation
   */
-abstract class X2CpgMain[T <: X2CpgConfig[T], X <: X2CpgFrontend[_]](
+abstract class X2CpgMain[T <: X2CpgConfig[T], X <: X2CpgFrontend[?]](
   val cmdLineParser: OParser[Unit, T],
   frontend: X
 )(
@@ -105,7 +105,7 @@ end X2CpgMain
 
 /** Trait that represents a CPG generator, where T is the frontend configuration class.
   */
-trait X2CpgFrontend[T <: X2CpgConfig[_]]:
+trait X2CpgFrontend[T <: X2CpgConfig[?]]:
 
     /** Create a CPG according to given configuration. Returns CPG wrapped in a `Try`, making it
       * possible to detect and inspect exceptions in CPG generation. To be provided by the frontend.
@@ -244,7 +244,7 @@ object X2Cpg:
     /** Apply function `applyPasses` to a newly created CPG. The CPG is wrapped in a `Try` and
       * returned. On failure, the CPG is ensured to be closed.
       */
-    def withNewEmptyCpg[T <: X2CpgConfig[_]](
+    def withNewEmptyCpg[T <: X2CpgConfig[?]](
       outPath: String,
       config: T
     )(applyPasses: (Cpg, T) => Unit): Try[Cpg] =
@@ -263,7 +263,7 @@ object X2Cpg:
     /** Given a function that receives a configuration and returns an arbitrary result type wrapped
       * in a `Try`, evaluate the function, printing errors to the console.
       */
-    def withErrorsToConsole[T <: X2CpgConfig[_]](config: T)(f: T => Try[?]): Try[?] =
+    def withErrorsToConsole[T <: X2CpgConfig[?]](config: T)(f: T => Try[?]): Try[?] =
         f(config) match
             case Failure(exception) =>
                 exception.printStackTrace()

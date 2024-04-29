@@ -16,8 +16,8 @@ import scala.util.{Failure, Success, Try}
 
 class JarUnpackingTests extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
-  var validCpgs: Map[String, Cpg] = _
-  var slippyCpg: Cpg              = _
+  var validCpgs: Map[String, Cpg] = scala.compiletime.uninitialized
+  var slippyCpg: Cpg              = scala.compiletime.uninitialized
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

@@ -24,4 +24,3 @@ class HeaderFileFinder(root: String):
         val matches = nameToPathMap.getOrElse(name, List())
         matches.map(_.toString).sortBy(x => Levenshtein.distance(x, path)).headOption
     }
-end HeaderFileFinder
