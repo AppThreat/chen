@@ -338,6 +338,14 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                                             atom.method.fullName(bpkg).newTagNode(t).store()(
                                               dstGraph
                                             )
+                                            if language == Languages.PYTHON || language == Languages.PYTHONSRC
+                                            then
+                                                atom.call.where(
+                                                  _.methodFullName(bpkg)
+                                                ).newTagNode(t).store()(dstGraph)
+                                                atom.identifier.typeFullName(bpkg).newTagNode(
+                                                  t
+                                                ).store()(dstGraph)
                                     }
                                 end if
                             }

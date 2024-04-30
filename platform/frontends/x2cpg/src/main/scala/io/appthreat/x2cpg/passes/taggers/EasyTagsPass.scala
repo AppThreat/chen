@@ -155,15 +155,20 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             ).newTagNode("crypto-algorithm").store()(dstGraph)
         end if
         if language == Languages.PYTHON || language == Languages.PYTHONSRC then
-            atom.identifier.typeFullName("cryptography.*").newTagNode("crypto").store()(dstGraph)
-            atom.call.methodFullName("cryptography.*").newTagNode("crypto").store()(dstGraph)
+            val known_crypto_libs = "(cryptography|Crypto|ecdsa|nacl).*"
+            atom.identifier.typeFullName(known_crypto_libs).newTagNode(
+              "crypto"
+            ).store()(dstGraph)
+            atom.call.methodFullName(known_crypto_libs).newTagNode(
+              "crypto"
+            ).store()(dstGraph)
             atom.call.methodFullName(
-              "cryptography.*(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange).*"
+              s"${known_crypto_libs}(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem).*"
             ).newTagNode(
               "crypto-generate"
             ).store()(dstGraph)
             atom.call.name("[A-Z0-9]+").methodFullName(
-              "cryptography.*(primitives|serialization).*"
+              s"${known_crypto_libs}(primitives|serialization).*"
             ).argument.inCall.newTagNode(
               "crypto-algorithm"
             ).store()(dstGraph)
