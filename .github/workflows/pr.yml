@@ -1,7 +1,7 @@
 name: pr
 on: pull_request
 jobs:
-  test:
+  pr-tests:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -78,5 +78,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python311"
+          SCALAPY_PYTHON_LIBRARY: "python312"
         if: runner.os == 'Windows'
