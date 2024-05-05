@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -50,11 +50,11 @@ jobs:
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom
-          python3.11 -m pip install --upgrade pip
-          python3.11 -m pip install poetry
-          python3.11 -m poetry config virtualenvs.create false
-          python3.11 -m poetry install --no-cache
-          python3.11 -m poetry run flake8 chenpy --count --select=E9,F63,F7,F82 --show-source --statistics
+          python3.12 -m pip install --upgrade pip
+          python3.12 -m pip install poetry
+          python3.12 -m poetry config virtualenvs.create false
+          python3.12 -m poetry install --no-cache
+          python3.12 -m poetry run flake8 chenpy --count --select=E9,F63,F7,F82 --show-source --statistics
       - uses: actions/cache@v4
         with:
           path: |
@@ -65,7 +65,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python3.11"
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
         if: runner.os != 'Windows'
       - name: Compile and run tests
         run: sbt scalafmtCheck +test

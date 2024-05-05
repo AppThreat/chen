@@ -1,7 +1,7 @@
 name: pr
 on: pull_request
 jobs:
-  test:
+  pr-tests:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -26,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -69,7 +69,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python3.11"
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
         if: runner.os != 'Windows'
       - name: Compile and run tests
         run: |
@@ -78,5 +78,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python311"
+          SCALAPY_PYTHON_LIBRARY: "python312"
         if: runner.os == 'Windows'

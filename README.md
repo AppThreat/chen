@@ -81,7 +81,7 @@ Once the download finishes, the command will display the download location along
 [21:53:36] INFO     To run chennai console, add the following environment variables to your .zshrc or .bashrc:
 export JAVA_OPTS="-Xmx16G"
 export JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=<lib dir>"
-export SCALAPY_PYTHON_LIBRARY=python3.11
+export SCALAPY_PYTHON_LIBRARY=python3.12
 export CHEN_HOME=/home/user/.local/share/chen
 export PATH=$PATH:/home/user/.local/share/chen/platform:/home/user/.local/share/chen/platform/bin:
 ```
@@ -182,7 +182,7 @@ chennai> help
 
 This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the environment variables below are set correctly.
 
-- SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python311
+- SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python312
 - JAVA_TOOL_OPTIONS - jna.library.path must be set to the python lib directory
 - SCALAPY_PYTHON_PROGRAMNAME - Path to Python executable in case of virtual environments (Usually not required)
 

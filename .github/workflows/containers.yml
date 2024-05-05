@@ -37,7 +37,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -58,13 +58,13 @@ jobs:
           sbt stage createDistribution
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCALAPY_PYTHON_LIBRARY: "python3.11"
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
       - name: Export python requirements
         run: |
-          python3.11 -m pip install --upgrade pip
-          python3.11 -m pip install poetry
-          python3.11 -m poetry export -f requirements.txt --with=science --without-hashes --output target/chen-science-requirements.txt
-          python3.11 -m poetry export -f requirements.txt --with=database --without-hashes --output target/chen-database-requirements.txt
+          python3.12 -m pip install --upgrade pip
+          python3.12 -m pip install poetry
+          python3.12 -m poetry export -f requirements.txt --with=science --without-hashes --output target/chen-science-requirements.txt
+          python3.12 -m poetry export -f requirements.txt --with=database --without-hashes --output target/chen-database-requirements.txt
       - name: Upload chen to ghcr
         run: |
           cd target

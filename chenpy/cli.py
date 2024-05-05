@@ -178,11 +178,11 @@ def install_py_modules(pack="database"):
             "About to install the science pack using conda. A new environment called 'chenpy-local' will be created."
         )
         with Progress(transient=True) as progress:
-            conda_install_script = """conda create --name chenpy-local python=3.11 -y
+            conda_install_script = """conda create --name chenpy-local python=3.12 -y
 conda install -n chenpy-local conda-libmamba-solver -y
 conda install -n chenpy-local -c conda-forge networkx --solver=libmamba -y
 conda install -n chenpy-local -c pytorch pytorch torchtext cpuonly --solver=libmamba -y
-pip install pyg_lib -f https://data.pyg.org/whl/torch-2.1.0+cpu.html
+pip install pyg_lib -f https://data.pyg.org/whl/torch-2.3.0+cpu.html
 conda install -n chenpy-local -c conda-forge scipy numpy packageurl-python nbconvert jupyter_core jupyter_client notebook --solver=libmamba -y
 conda install -n chenpy-local -c conda-forge oras-py==0.1.26 httpx websockets orjson rich appdirs psutil gitpython --solver=libmamba -y"""
             for line in conda_install_script.split("\n"):
