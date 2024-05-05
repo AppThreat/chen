@@ -11,15 +11,14 @@ about:
   dev_url: https://github.com/appthreat/chen
 requirements:
   build:
-    - python
     - pip
+    - poetry
   host:
-    - pip
     - python
-    - setuptools
+    - pip
     - poetry
   run:
-    - python>=3.10,<3.12
+    - python>=3.10,<3.13
     - conda-forge::httpx>=0.27.0
     - conda-forge::websockets>=12.0
     - conda-forge::orjson>=3.10.1,<4.0.0
@@ -30,26 +29,33 @@ requirements:
     - conda-forge::packageurl-python>=0.11.2,<0.12.0
     - conda-forge::gitpython>=3.1.43,<4.0.0
     - conda-forge::networkx>=3.3
-    - conda-forge::numpy>=1.26
-    - conda-forge::scipy>=1.11.3
 build:
+  include_recipe: False
   pin_depends: record
   noarch: python
   script: |
     cp ${RECIPE_DIR}/pyproject.toml ${SRC_DIR}/
+    cp ${RECIPE_DIR}/poetry.lock ${SRC_DIR}/
     cp ${RECIPE_DIR}/LICENSE ${SRC_DIR}/
     cp ${RECIPE_DIR}/README.md ${SRC_DIR}/
     cp ${RECIPE_DIR}/docker-compose.yml ${SRC_DIR}/
     cp -rf ${RECIPE_DIR}/docs ${SRC_DIR}/
     cp -rf ${RECIPE_DIR}/notebooks ${SRC_DIR}/
-    rm -rf ${SRC_DIR}/{ci,console,dataflowengineoss,macros,platform,project,scripts,semanticcpg,target,tests,workspace}
+    cp ${RECIPE_DIR}/codemeta.json ${SRC_DIR}/
+    rm -rf ${SRC_DIR}/{ci,console,dataflowengineoss,macros,platform,project,scripts,semanticcpg,target,tests,workspace,chennai}
+    {{ PYTHON }} -m poetry config virtualenvs.create false
+    {{ PYTHON }} -m poetry install
     {{ PYTHON }} -m pip install --no-build-isolation --no-deps --ignore-installed .
   entry_points:
     - chen = chenpy.cli:main
 
 source:
   path: ./chenpy
-  folder: chenpy
+  folder: ./chenpy
+
+test:
+  imports:
+    - chenpy
 
 extra:
   maintainers:

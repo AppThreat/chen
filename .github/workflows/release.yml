@@ -1,5 +1,6 @@
 name: release
 on:
+  pull_request:
   push:
     tags:
       - 'v*'
@@ -46,8 +47,16 @@ jobs:
             ~/.sbt
             ~/.coursier
           key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
-      - run: |
-          sbt createDistribution publish
+      - name: sbt createDistribution
+        run: |
+          sbt createDistribution
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
+      - name: sbt publish
+        run: |
+          sbt publish
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCALAPY_PYTHON_LIBRARY: "python3.12"
@@ -63,13 +72,22 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           poetry publish --build --username $PYPI_USERNAME --password $PYPI_PASSWORD
-          $CONDA/bin/conda update -n base -c defaults conda
-          $CONDA/bin/conda install anaconda-client conda-build
-          $CONDA/bin/conda build -c conda-forge --output-folder ./conda-out/ .
-          anaconda upload --label main -u appthreat ./conda-out/noarch/*.tar.bz2
         env:
           PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
           PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+      - name: Build Anaconda
+        run: |
+          mkdir /tmp/conda-out
+          $CONDA/bin/conda update -n base -c defaults conda
+          $CONDA/bin/conda install anaconda-client conda-build conda-verify
+          $CONDA/bin/conda build -c conda-forge --no-anaconda-upload --output-folder /tmp/conda-out/ .
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+      - name: Release Anaconda
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          anaconda upload --label main -u appthreat /tmp/conda-out/noarch/*.tar.bz2
+        env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
         continue-on-error: true
       - run: sha512sum target/chen.zip > target/chen.zip.sha512
