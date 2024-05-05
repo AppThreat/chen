@@ -4,7 +4,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/appthreat/chen" \
       org.opencontainers.image.url="https://github.com/appthreat/chen" \
-      org.opencontainers.image.version="2.0.x" \
+      org.opencontainers.image.version="2.1.x" \
       org.opencontainers.image.vendor="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
@@ -27,7 +27,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     PYTHONIOENCODING="utf-8" \
     JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1" \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
-    SCALAPY_PYTHON_LIBRARY=python3.11 \
+    SCALAPY_PYTHON_LIBRARY=python3.12 \
     ANDROID_HOME=/opt/android-sdk-linux \
     CHEN_INSTALL_DIR=/opt/workspace \
     PHP_PARSER_BIN=/opt/vendor/bin/php-parse \

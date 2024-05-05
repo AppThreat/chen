@@ -29,7 +29,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -50,7 +50,7 @@ jobs:
           sbt createDistribution publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCALAPY_PYTHON_LIBRARY: "python3.11"
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
       - name: Install and test
         run: |
           npm install -g @appthreat/atom

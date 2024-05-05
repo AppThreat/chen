@@ -81,7 +81,7 @@ Once the download finishes, the command will display the download location along
 [21:53:36] INFO     To run chennai console, add the following environment variables to your .zshrc or .bashrc:
 export JAVA_OPTS="-Xmx16G"
 export JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Djna.library.path=<lib dir>"
-export SCALAPY_PYTHON_LIBRARY=python3.11
+export SCALAPY_PYTHON_LIBRARY=python3.12
 export CHEN_HOME=/home/user/.local/share/chen
 export PATH=$PATH:/home/user/.local/share/chen/platform:/home/user/.local/share/chen/platform/bin:
 ```

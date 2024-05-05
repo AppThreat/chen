@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   chennai:
     image: ghcr.io/appthreat/chen
@@ -29,7 +28,7 @@ services:
           target: /opt/chenpy
         - action: sync
           path: ./chenpy
-          target: /opt/miniconda3/lib/python3.11/site-packages/chenpy
+          target: /opt/miniconda3/lib/python3.12/site-packages/chenpy
     volumes:
       - ./notebooks:/opt/notebooks
       - /tmp:/tmp

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "appthreat-chen"
-version = "2.0.11"
+version = "2.1.0"
 description = "Code Hierarchy Exploration Net (chen)"
 authors = ["Team AppThreat <cloud@appthreat.com>"]
 license = "Apache-2.0"
@@ -75,7 +75,7 @@ networkx = {extras = ["default", "extra"], version = "^3.1"}
 
 [[tool.poetry.source]]
 name = "pyg"
-url = "https://data.pyg.org/whl/torch-2.1.0+cpu.html"
+url = "https://data.pyg.org/whl/torch-2.3.0+cpu.html"
 priority = "explicit"
 
 
