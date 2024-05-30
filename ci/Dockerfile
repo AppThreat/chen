@@ -1,4 +1,4 @@
-FROM almalinux:9.3-minimal
+FROM almalinux:9.4-minimal
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
@@ -54,11 +54,10 @@ RUN set -e; \
             ;; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
-    echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
+    microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel glibc-common glibc-all-langpacks \
     && mkdir -p /opt/miniconda3 /opt/workspace \
-    && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /opt/miniconda3/miniconda.sh \
+    && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${ARCH_NAME}.sh -O /opt/miniconda3/miniconda.sh \
     && bash /opt/miniconda3/miniconda.sh -b -u -p /opt/miniconda3 \
     && rm -rf /opt/miniconda3/miniconda.sh \
     && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
@@ -69,9 +68,9 @@ RUN set -e; \
     && conda config --set solver libmamba \
     && conda init bash \
     && bash -c /opt/conda-install.sh \
-    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rpm -ivh graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
-    && rm graphviz-devel-2.44.0-25.el9.${ARCH_NAME}.rpm \
+    && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
+    && rpm -ivh graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
+    && rm graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
     && curl -s "https://get.sdkman.io" | bash \
     && source "$HOME/.sdkman/bin/sdkman-init.sh" \
     && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true\nsdkman_curl_connect_timeout=20\nsdkman_curl_max_time=0" >> $HOME/.sdkman/etc/config \
@@ -83,14 +82,14 @@ RUN set -e; \
     && rm -rf /root/.sdkman \
     && microdnf install -y epel-release \
     && mkdir -p ${ANDROID_HOME}/cmdline-tools \
-    && curl -L https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
+    && curl -L https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
     && unzip ${ANDROID_HOME}/cmdline-tools/android_tools.zip -d ${ANDROID_HOME}/cmdline-tools/ \
     && rm ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
     && mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
     && yes | /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
-    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-33' --sdk_root=/opt/android-sdk-linux \
-    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;33.0.0' --sdk_root=/opt/android-sdk-linux \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' --sdk_root=/opt/android-sdk-linux \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;34.0.0' --sdk_root=/opt/android-sdk-linux \
     && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
     && php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && php composer-setup.php \
     && mv composer.phar /usr/local/bin/composer
