@@ -54,7 +54,8 @@ RUN set -e; \
             ;; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
-    microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
+    echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
+    && microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
         pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel glibc-common glibc-all-langpacks \
     && mkdir -p /opt/miniconda3 /opt/workspace \
     && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${ARCH_NAME}.sh -O /opt/miniconda3/miniconda.sh \
