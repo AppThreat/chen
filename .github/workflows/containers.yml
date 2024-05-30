@@ -7,6 +7,7 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:    # allow to manually trigger this workflow
+  pull_request:
 
 env:
   REGISTRY: ghcr.io
@@ -42,6 +43,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '21.x'
+      - name: Trim CI agent
+        run: |
+          chmod +x ci/free_disk_space.sh
+          ./ci/free_disk_space.sh
       - name: Delete `.rustup` directory
         run: rm -rf /home/runner/.rustup # to save disk space
         if: runner.os == 'Linux'
@@ -105,7 +110,7 @@ jobs:
         with:
           file: ci/Dockerfile
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
