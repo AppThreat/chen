@@ -31,6 +31,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     ANDROID_HOME=/opt/android-sdk-linux \
     CHEN_INSTALL_DIR=/opt/workspace \
     PHP_PARSER_BIN=/opt/vendor/bin/php-parse \
+    CDXGEN_NO_BANNER=true \
     COMPOSER_ALLOW_SUPERUSER=1
 ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
