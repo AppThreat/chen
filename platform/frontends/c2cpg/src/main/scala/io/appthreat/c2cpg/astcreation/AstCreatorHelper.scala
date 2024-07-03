@@ -85,15 +85,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             offsetToColumn(node, x.getNodeOffset)
         }
 
-    protected def columnEnd(node: IASTNode): Option[Integer] =
-        val loc = nullSafeFileLocation(node)
-        loc.map { x =>
-            offsetToColumn(node, x.getNodeOffset + x.getNodeLength - 1)
-        }
-
-    private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
-        Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
-
     private def offsetToColumn(node: IASTNode, offset: Int): Int =
         val table      = fileOffsetTable(node)
         val index      = java.util.Arrays.binarySearch(table, offset)
@@ -121,6 +112,15 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     protected def fileName(node: IASTNode): String =
         val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
         SourceFiles.toRelativePath(path, config.inputPath)
+
+    private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
+        Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
+
+    protected def columnEnd(node: IASTNode): Option[Integer] =
+        val loc = nullSafeFileLocation(node)
+        loc.map { x =>
+            offsetToColumn(node, x.getNodeOffset + x.getNodeLength - 1)
+        }
 
     protected def registerType(typeName: String): String =
         val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
@@ -160,9 +160,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 val anonType =
                     s"${uniqueName("type", "", "")._1}${t.substring(0, t.indexOf("{"))}${t.substring(t.indexOf("}") + 1)}"
                 anonType.replace(" ", "")
-            case t if t.startsWith("[") && t.endsWith("]") => Defines.anyTypeName
-            case t if t.contains(Defines.qualifiedNameSeparator) =>
-                fixQualifiedName(t).split(".").lastOption.getOrElse(Defines.anyTypeName)
+            case t if t.startsWith("[") && t.endsWith("]")       => Defines.anyTypeName
+            case t if t.contains(Defines.qualifiedNameSeparator) => fixQualifiedName(t)
             case t if t.startsWith("unsigned ") => "unsigned " + t.substring(9).replace(" ", "")
             case t if t.contains("[") && t.contains("]") => t.replace(" ", "")
             case t if t.contains("*")                    => t.replace(" ", "")
@@ -218,6 +217,14 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 cleanType(ASTTypeUtil.getType(l.getExpressionType))
             case e: IASTExpression =>
                 cleanType(ASTTypeUtil.getNodeType(e), stripKeywords)
+            case c: ICPPASTConstructorInitializer
+                if c.getParent.isInstanceOf[ICPPASTConstructorChainInitializer] =>
+                cleanType(
+                  fullName(c.getParent.asInstanceOf[
+                    ICPPASTConstructorChainInitializer
+                  ].getMemberInitializerId),
+                  stripKeywords
+                )
             case _ =>
                 cleanType(getNodeSignature(node), stripKeywords)
         end match
@@ -327,6 +334,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             case d: IASTIdExpression              => ASTStringUtil.getSimpleName(d.getName)
             case _: IASTTranslationUnit           => ""
             case u: IASTUnaryExpression           => nodeSignature(u.getOperand)
+            case x: ICPPASTQualifiedName          => ASTStringUtil.getQualifiedName(x)
             case other if other.getParent != null => fullName(other.getParent)
             case other if other != null           => notHandledYet(other); ""
             case null                             => ""
