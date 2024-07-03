@@ -4,7 +4,7 @@ enablePlugins(JavaAppPackaging)
 
 val ScoptVersion          = "4.1.0"
 val CaskVersion           = "0.9.2"
-val CirceVersion          = "0.14.6"
+val CirceVersion          = "0.14.9"
 val ZeroturnaroundVersion = "1.17"
 
 dependsOn(
@@ -24,7 +24,7 @@ libraryDependencies ++= Seq(
   "io.circe"             %% "circe-generic"     % CirceVersion,
   "io.circe"             %% "circe-parser"      % CirceVersion,
   "org.zeroturnaround"    % "zt-zip"            % ZeroturnaroundVersion,
-  "com.lihaoyi"          %% "os-lib"            % "0.10.0",
+  "com.lihaoyi"          %% "os-lib"            % "0.10.2",
   "com.lihaoyi"          %% "pprint"            % "0.9.0",
   "com.lihaoyi"          %% "cask"              % CaskVersion,
   "dev.scalapy"          %% "scalapy-core"      % "0.5.3",

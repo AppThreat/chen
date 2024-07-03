@@ -36,6 +36,15 @@ private class RecoverForJavaScriptFile(
   state: XTypeRecoveryState
 ) extends RecoverForXCompilationUnit[File](cpg, cu, builder, state):
 
+    private lazy val exportedIdentifiers = cu.method
+        .nameExact(":program")
+        .flatMap(_._callViaContainsOut)
+        .nameExact(Operators.assignment)
+        .filter(_.code.startsWith("exports.*"))
+        .argument
+        .isIdentifier
+        .name
+        .toSet
     override protected val pathSep = ':'
 
     /** A heuristic method to determine if a call is a constructor or not.
@@ -103,16 +112,6 @@ private class RecoverForJavaScriptFile(
         }
     end prepopulateSymbolTable
 
-    private lazy val exportedIdentifiers = cu.method
-        .nameExact(":program")
-        .flatMap(_._callViaContainsOut)
-        .nameExact(Operators.assignment)
-        .filter(_.code.startsWith("exports.*"))
-        .argument
-        .isIdentifier
-        .name
-        .toSet
-
     override protected def isField(i: Identifier): Boolean =
         state.isFieldCache.getOrElseUpdate(
           i.id(),
@@ -124,12 +123,15 @@ private class RecoverForJavaScriptFile(
       c: Call
     ): Set[String] =
         val constructorPaths = if c.methodFullName.endsWith(".alloc") then
-            def newChildren =
-                c.inAssignment.astSiblings.isCall.nameExact("<operator>.new").astChildren
+            val newOp = c.inAssignment.astSiblings.isCall.nameExact("<operator>.new").headOption
+            val newChildren = newOp.astChildren.l
             val possibleImportIdentifier = newChildren.isIdentifier.headOption match
                 case Some(i) if GlobalBuiltins.builtins.contains(i.name) => Set(s"__ecma.${i.name}")
-                case Some(i)                                             => symbolTable.get(i)
-                case None                                                => Set.empty[String]
+                case Some(i) =>
+                    val typs = symbolTable.get(CallAlias(i.name, Option("this")))
+                    if typs.nonEmpty then newOp.foreach(symbolTable.put(_, typs))
+                    symbolTable.get(i)
+                case None => Set.empty[String]
             lazy val possibleConstructorPointer =
                 newChildren.astChildren.isFieldIdentifier.map(f =>
                     CallAlias(f.canonicalName, Some("this"))

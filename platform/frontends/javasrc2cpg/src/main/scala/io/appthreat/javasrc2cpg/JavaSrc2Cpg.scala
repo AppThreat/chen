@@ -14,7 +14,6 @@ import io.appthreat.x2cpg.X2CpgFrontend
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.passes.CpgPassBase
-import org.slf4j.LoggerFactory
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
@@ -23,13 +22,12 @@ import scala.util.matching.Regex
 class JavaSrc2Cpg extends X2CpgFrontend[Config]:
     import JavaSrc2Cpg.*
 
-    private val logger = LoggerFactory.getLogger(this.getClass)
-
     override def createCpg(config: Config): Try[Cpg] =
         withNewEmptyCpg(config.outputPath, config: Config) { (cpg, config) =>
             new MetaDataPass(cpg, language, config.inputPath).createAndApply()
             val astCreationPass = new AstCreationPass(config, cpg)
             astCreationPass.createAndApply()
+            astCreationPass.clearJavaParserCaches()
             new ConfigFileCreationPass(cpg).createAndApply()
             if !config.skipTypeInfPass then
                 TypeNodePass.withRegisteredTypes(
@@ -41,7 +39,6 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config]:
 
 object JavaSrc2Cpg:
     val language: String = Languages.JAVASRC
-    private val logger   = LoggerFactory.getLogger(this.getClass)
 
     val sourceFileExtensions: Set[String] = Set(".java")
 

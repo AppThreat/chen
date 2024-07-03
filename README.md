@@ -6,7 +6,7 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 - Java >= 21
 - Python >= 3.10
-- Node.js >= 18 (To run [atom](https://github.com/AppThreat/atom))
+- Node.js >= 20 (To run [atom](https://github.com/AppThreat/atom))
 - Minimum 16GB RAM
 
 ## Getting started
@@ -147,9 +147,9 @@ Refer to the documentation site to learn more about the commands.
 
 ## Languages supported
 
-- C/C++ (Requires Java 21 or above)
+- C/C++
 - H (C/C++ Header files alone)
-- Java (Requires compilation) - 8 to 17
+- Java (Requires compilation) - 8 to 21
 - Jar
 - Android APK (Requires Android SDK. Set the environment variable `ANDROID_HOME`)
 - JavaScript

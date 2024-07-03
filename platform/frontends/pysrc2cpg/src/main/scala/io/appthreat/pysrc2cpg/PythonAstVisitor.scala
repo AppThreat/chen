@@ -12,7 +12,7 @@ import io.appthreat.pythonparser.ast
 import io.appthreat.pysrc2cpg.memop.*
 import io.appthreat.x2cpg.ValidationMode
 import io.shiftleft.codepropertygraph.generated.*
-import io.shiftleft.codepropertygraph.generated.nodes.{NewNode, NewTypeDecl}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewIdentifier, NewNode, NewTypeDecl}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.mutable
@@ -243,7 +243,7 @@ class PythonAstVisitor(
      * The lowering is:
      * func = f1(arg)(f2(func))
      *
-     * This function takes a method ref, wrappes it in the decorator calls and returns the resulting expression.
+     * This function takes a method ref, wraps it in the decorator calls and returns the resulting expression.
      * In the example case this is:
      * f1(arg)(f2(func))
      */
@@ -253,9 +253,13 @@ class PythonAstVisitor(
     ): nodes.NewNode =
         decoratorList.foldRight(methodRefNode)(
           (decorator: ast.iexpr, wrappedMethodRef: nodes.NewNode) =>
+              val (decoratorNode, decoratorName) = convert(decorator) match
+                  case decoratorNode: NewIdentifier => decoratorNode -> decoratorNode.name
+                  case decoratorNode =>
+                      decoratorNode -> "" // other decorators are dynamic so we leave this blank
               createCall(
-                convert(decorator),
-                "",
+                decoratorNode,
+                decoratorName,
                 lineAndColOf(decorator),
                 wrappedMethodRef :: Nil,
                 Nil
