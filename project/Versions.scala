@@ -2,13 +2,13 @@
 object Versions {
   val cpg = parseVersion("cpgVersion")
   val antlr         = "4.13.1"
-  val scalatest     = "3.2.18"
+  val scalatest     = "3.2.19"
   val cats          = "3.5.4"
   val json4s        = "4.0.7"
-  val gradleTooling = "8.7"
-  val circe         = "0.14.6"
-  val requests      = "0.8.2"
-  val upickle       = "3.3.0"
+  val gradleTooling = "8.8"
+  val circe         = "0.14.9"
+  val requests      = "0.8.3"
+  val upickle       = "3.3.1"
   val scalaReplPP   = "0.1.85"
 
   private def parseVersion(key: String): String = {
