@@ -6,6 +6,8 @@ import io.appthreat.dataflowengineoss.language.nodemethods.{
     ExtendedCfgNodeMethods
 }
 import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
+import scala.language.implicitConversions
 
 package object language:
 
@@ -26,4 +28,17 @@ package object language:
 
     implicit def toDdgNodeDotSingle(method: Method): DdgNodeDot =
         new DdgNodeDot(Iterator.single(method))
+
+    implicit def toExtendedPathsTrav[NodeType <: Path](traversal: IterableOnce[NodeType])
+      : PassesExt =
+        new PassesExt(traversal.iterator)
+
+    class PassesExt(traversal: Iterator[Path]):
+
+        def passes(trav: Iterator[AstNode] => Iterator[?]): Iterator[Path] =
+            traversal.filter(_.elements.exists(_.start.where(trav).nonEmpty))
+
+        def passesNot(trav: Iterator[AstNode] => Iterator[?]): Iterator[Path] =
+            traversal.filter(_.elements.forall(_.start.where(trav).isEmpty))
+
 end language
