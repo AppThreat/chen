@@ -1,122 +1,347 @@
 package io.appthreat.pysrc2cpg.dataflow
 
-import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
-import io.appthreat.dataflowengineoss.semanticsloader.FlowSemantic
+import io.appthreat.dataflowengineoss.semanticsloader.{FlowMapping, FlowSemantic, PassThroughMapping}
+import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Literal, Member, Method}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.Ignore
 
 import java.io.File
 
-class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
+class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true):
 
-  "intra-procedural" in {
-    val cpg: Cpg = code("""
+    "intra-procedural" in {
+        val cpg: Cpg = code("""
       |a = 42
       |c = foo(a, b)
       |print(c)
       |""".stripMargin)
-    val source = cpg.literal("42")
-    val sink   = cpg.call.code("print.*").argument
-    sink.reachableByFlows(source).size shouldBe 1
-  }
+        val source = cpg.literal("42")
+        val sink   = cpg.call.code("print.*").argument
+        sink.reachableByFlows(source).size shouldBe 1
+    }
 
-  "chained call" in {
-    val cpg: Cpg = code("""
+    "intra-procedural 2" in {
+        val cpg = code(
+          """
+              |x = foo(20)
+              |print(x)
+              |""".stripMargin
+        )
+
+        def source = cpg.literal("20")
+        def sink = cpg.call("print").argument
+        val flows  = sink.reachableByFlows(source).l
+        flows.map(flowToResultPairs) shouldBe List(List(("foo(20)", 2), ("print(x)", 3)), List(("foo(20)", 2), ("print(x)", 3)))
+    }
+
+    "flow from aliased literal to imported external method call return value" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows.map(flowToResultPairs) shouldBe List(List(("a = 20", 3), ("foo(a)", 4)))
+    }
+
+    "flow from literal directly used in imported external method call return value" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |print(foo(20))
+              |""".stripMargin
+        )
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows.map(flowToResultPairs) shouldBe List(List(("foo(20)", 3)))
+    }
+
+    "no flow from aliased literal to imported external method call return value given empty semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List())))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from aliased literal to imported external method call return value given receiver-only semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List(FlowMapping(0, 0)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from aliased literal to imported external method call return value given argument1-only semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List(FlowMapping(1, 1)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to imported external method return value given empty semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List())))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to imported external method return value given receiver-only semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List(FlowMapping(0, 0)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to imported external method return value given argument1-only semantics" in {
+        val cpg = code(
+          """
+              |from helpers import foo
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("helpers.py:<module>.foo", List(FlowMapping(1, 1)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from aliased literal to method call return value given empty semantics" in {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List())))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from aliased literal to method call return value given receiver-only semantics" in {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List(FlowMapping(0, 0)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from aliased literal to method call return value given argument1-only semantics" ignore {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |a = 20
+              |print(foo(a))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List(FlowMapping(1, 1)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to method call return value given empty semantics" ignore {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List())))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to method call return value given receiver-only semantics" ignore {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List(FlowMapping(0, 0)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "no flow from literal to method call return value given argument1-only semantics" ignore {
+        val cpg = code(
+          """
+              |def foo(x):
+              |  return x
+              |
+              |print(foo(20))
+              |""".stripMargin
+        )
+            .withExtraFlows(List(FlowSemantic("Test0.py:<module>.foo", List(FlowMapping(1, 1)))))
+        val source = cpg.literal("20").l
+        val sink   = cpg.call("print").argument(1).l
+        val flows  = sink.reachableByFlows(source).l
+        flows shouldBe empty
+    }
+
+    "chained call" in {
+        val cpg: Cpg = code("""
       |a = 42
       |c = foo(a).bar()
       |sink(c)
       |""".stripMargin)
-    def source = cpg.literal("42")
-    def sink   = cpg.call("sink").argument
-    sink.reachableByFlows(source).size shouldBe 1
-  }
+        def source = cpg.literal("42")
+        def sink   = cpg.call("sink").argument
+        sink.reachableByFlows(source).size shouldBe 1
+    }
 
-  "inter procedural call 1" in {
-    val cpg: Cpg = code("""
+    "inter procedural call 1" in {
+        val cpg: Cpg = code("""
       |def foo():
       |    return 42
       |bar = foo()
       |print(bar)
       |""".stripMargin)
-    def source = cpg.literal("42")
-    def sink   = cpg.call("print")
-    sink.reachableByFlows(source).size shouldBe 1
-  }
+        def source = cpg.literal("42")
+        def sink   = cpg.call("print")
+        sink.reachableByFlows(source).size shouldBe 1
+    }
 
-  "inter procedural call 2" in {
-    val cpg: Cpg = code("""
+    "inter procedural call 2" in {
+        val cpg: Cpg = code("""
       |def foo(input):
       |    sink(input)
       |def main():
       |    source = 42
       |    foo(source)
       |""".stripMargin)
-    def source = cpg.literal("42")
-    def sink   = cpg.call("sink")
-    sink.reachableByFlows(source).size shouldBe 1
-  }
+        def source = cpg.literal("42")
+        def sink   = cpg.call("sink")
+        sink.reachableByFlows(source).size shouldBe 1
+    }
 
-  "flow from class variable to sink" in {
-    val cpg: Cpg = code("""
+    "flow from class variable to sink" in {
+        val cpg: Cpg = code("""
                           |class Foo():
                           |    x = 'sensitive'
                           |    def foo(self):
                           |        sink(self.x)
                           |""".stripMargin)
-    val source = cpg.member(".*x.*").l
-    val sink   = cpg.call(".*sink").argument(1).l
-    source.size shouldBe 1
-    sink.size shouldBe 1
-    sink.reachableByFlows(source).size shouldBe 1
-  }
+        val source = cpg.member(".*x.*").l
+        val sink   = cpg.call(".*sink").argument(1).l
+        source.size shouldBe 1
+        sink.size shouldBe 1
+        sink.reachableByFlows(source).size shouldBe 1
+    }
 
-  "flow from class variable to sink in assignment" in {
-    val cpg: Cpg = code("""
+    "flow from class variable to sink in assignment" in {
+        val cpg: Cpg = code("""
         |class Foo():
         |    x = 'sensitive'
         |    def foo(self):
         |        a = sink(self.x)
         |""".stripMargin)
 
-    val source = cpg.member(".*x.*").l
-    val sink   = cpg.call(".*sink").argument(1).l
-    source.size shouldBe 1
-    sink.size shouldBe 1
-    val flows = sink.reachableByFlows(source).l
-    flows.size shouldBe 1
-    flows.head.elements.head match {
-      case member: Member =>
-        member.name shouldBe "x"
-      case _ => fail()
+        val source = cpg.member(".*x.*").l
+        val sink   = cpg.call(".*sink").argument(1).l
+        source.size shouldBe 1
+        sink.size shouldBe 1
+        val flows = sink.reachableByFlows(source).l
+        flows.size shouldBe 1
+        flows.head.elements.head match
+            case member: Member =>
+                member.name shouldBe "x"
+            case _ => fail()
     }
-  }
 
-  "flow from literal to class variable to sink in assignment" in {
-    val cpg: Cpg = code("""
+    "flow from literal to class variable to sink in assignment" in {
+        val cpg: Cpg = code("""
                           |class Foo():
                           |    x = 'sensitive'
                           |    def foo(self):
                           |        a = sink(self.x)
                           |""".stripMargin)
 
-    val source = cpg.literal.code(".*sensitive.*").l
-    val sink   = cpg.call(".*sink").argument(1).l
-    source.size shouldBe 1
-    sink.size shouldBe 1
-    val flows = sink.reachableByFlows(source).l
-    flows.size shouldBe 1
-    flows.head.elements.head match {
-      case literal: Literal =>
-        literal.code shouldBe "'sensitive'"
-      case _ => fail()
+        val source = cpg.literal.code(".*sensitive.*").l
+        val sink   = cpg.call(".*sink").argument(1).l
+        source.size shouldBe 1
+        sink.size shouldBe 1
+        val flows = sink.reachableByFlows(source).l
+        flows.size shouldBe 1
+        flows.head.elements.head match
+            case literal: Literal =>
+                literal.code shouldBe "'sensitive'"
+            case _ => fail()
     }
-  }
 
-  "flow from instance variable in constructor (MEMBER) to sink" in {
-    val cpg: Cpg = code("""
+    "flow from instance variable in constructor (MEMBER) to sink" in {
+        val cpg: Cpg = code("""
         |class Foo:
         |    def __init__(self):
         |        self.x = 'sensitive'
@@ -126,21 +351,20 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
         |
         |""".stripMargin)
 
-    val source = cpg.member(".*x.*").l
-    val sink   = cpg.call(".*sink").argument(1).l
-    source.size shouldBe 1
-    sink.size shouldBe 1
-    val flows = sink.reachableByFlows(source).l
-    flows.size shouldBe 1
-    flows.head.elements.head match {
-      case member: Member =>
-        member.name shouldBe "x"
-      case _ => fail()
+        val source = cpg.member(".*x.*").l
+        val sink   = cpg.call(".*sink").argument(1).l
+        source.size shouldBe 1
+        sink.size shouldBe 1
+        val flows = sink.reachableByFlows(source).l
+        flows.size shouldBe 1
+        flows.head.elements.head match
+            case member: Member =>
+                member.name shouldBe "x"
+            case _ => fail()
     }
-  }
 
-  "flow from literal to instance variable in constructor (MEMBER) to sink" in {
-    val cpg: Cpg = code("""
+    "flow from literal to instance variable in constructor (MEMBER) to sink" in {
+        val cpg: Cpg = code("""
                           |class Foo:
                           |    def __init__(self):
                           |        self.x = 'sensitive'
@@ -150,22 +374,21 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
                           |
                           |""".stripMargin)
 
-    val source = cpg.literal.code(".*sensitive.*").l
-    val sink   = cpg.call(".*sink").argument(1).l
-    source.size shouldBe 1
-    sink.size shouldBe 1
-    val flows = sink.reachableByFlows(source).l
-    flows.size shouldBe 1
+        val source = cpg.literal.code(".*sensitive.*").l
+        val sink   = cpg.call(".*sink").argument(1).l
+        source.size shouldBe 1
+        sink.size shouldBe 1
+        val flows = sink.reachableByFlows(source).l
+        flows.size shouldBe 1
 
-    flows.head.elements.head match {
-      case literal: Literal =>
-        literal.code shouldBe "'sensitive'"
-      case _ => fail()
+        flows.head.elements.head match
+            case literal: Literal =>
+                literal.code shouldBe "'sensitive'"
+            case _ => fail()
     }
-  }
 
-  "flow from global variable to sink" in {
-    val cpg: Cpg = code("""
+    "flow from global variable to sink" in {
+        val cpg: Cpg = code("""
         |import requests
         |url = "https://app.commissionly.io/api/public/opportunity"
         |
@@ -182,19 +405,19 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
         |accountId="sometext"
         |response = client.post_data(data, accountId)
         |""".stripMargin)
-    val sourceUrlIdentifier = cpg.identifier(".*url.*").l
-    val sink                = cpg.call("post").l
-    sourceUrlIdentifier.size shouldBe 2
-    sink.size shouldBe 1
-    sink.reachableByFlows(sourceUrlIdentifier).size shouldBe 2
+        val sourceUrlIdentifier = cpg.identifier(".*url.*").l
+        val sink                = cpg.call("post").l
+        sourceUrlIdentifier.size shouldBe 2
+        sink.size shouldBe 1
+        sink.reachableByFlows(sourceUrlIdentifier).size shouldBe 2
 
-    val sourceUrlLiteral = cpg.literal(".*app.commissionly.io.*").l
-    sourceUrlLiteral.size shouldBe 1
-    sink.reachableByFlows(sourceUrlLiteral).size shouldBe 1
-  }
+        val sourceUrlLiteral = cpg.literal(".*app.commissionly.io.*").l
+        sourceUrlLiteral.size shouldBe 1
+        sink.reachableByFlows(sourceUrlLiteral).size shouldBe 1
+    }
 
-  "Flow correctly from parent scope to child function scope" in {
-    val cpg: Cpg = code("""
+    "Flow correctly from parent scope to child function scope" in {
+        val cpg: Cpg = code("""
         |def foo(u):
         |
         |  x = 1
@@ -207,26 +430,26 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
         |
         |""".stripMargin)
 
-    val sink1 = cpg.call("print").l
-    val sink2 = cpg.call("debug").l
-    sink1.size shouldBe 1
-    sink2.size shouldBe 1
+        val sink1 = cpg.call("print").l
+        val sink2 = cpg.call("debug").l
+        sink1.size shouldBe 1
+        sink2.size shouldBe 1
 
-    val iSrc = cpg.method("foo").ast.isIdentifier.name("x").lineNumber(4).l
-    iSrc.size shouldBe 1
-    sink1.reachableBy(iSrc).dedup.size shouldBe 1
+        val iSrc = cpg.method("foo").ast.isIdentifier.name("x").lineNumber(4).l
+        iSrc.size shouldBe 1
+        sink1.reachableBy(iSrc).dedup.size shouldBe 1
 
-    val lSrc = cpg.method("foo").ast.isLiteral.code("1").lineNumber(4).l
-    lSrc.size shouldBe 1
-    sink1.reachableBy(lSrc).size shouldBe 1
+        val lSrc = cpg.method("foo").ast.isLiteral.code("1").lineNumber(4).l
+        lSrc.size shouldBe 1
+        sink1.reachableBy(lSrc).size shouldBe 1
 
-    val pSrc = cpg.method("foo").parameter.nameExact("u").l
-    pSrc.size shouldBe 1
-    sink2.reachableBy(pSrc).size shouldBe 1
-  }
+        val pSrc = cpg.method("foo").parameter.nameExact("u").l
+        pSrc.size shouldBe 1
+        sink2.reachableBy(pSrc).size shouldBe 1
+    }
 
-  "flow from function param to sink" in {
-    val cpg: Cpg = code("""
+    "flow from function param to sink" in {
+        val cpg: Cpg = code("""
       |import requests
       |
       |class TestClient:
@@ -242,20 +465,20 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
       |                        auth=(self.user, self.password)
       |        )
       |""".stripMargin)
-    val sourceMember = cpg.member(".*password.*").l
-    val sinkPost     = cpg.call.methodFullName(".*requests.*post.*").l
-    val flowsPost    = sinkPost.reachableByFlows(sourceMember).l
-    flowsPost.size shouldBe 1
+        val sourceMember = cpg.member(".*password.*").l
+        val sinkPost     = cpg.call.methodFullName(".*requests.*post.*").l
+        val flowsPost    = sinkPost.reachableByFlows(sourceMember).l
+        flowsPost.size shouldBe 1
 
-    val sourceParam = cpg.identifier("accountId").l
-    val sinkGet     = cpg.call.methodFullName(".*requests.*get.*").l
+        val sourceParam = cpg.identifier("accountId").l
+        val sinkGet     = cpg.call.methodFullName(".*requests.*get.*").l
 
-    val flowsGet = sinkGet.reachableByFlows(sourceParam).l
-    flowsGet.size shouldBe 2
-  }
+        val flowsGet = sinkGet.reachableByFlows(sourceParam).l
+        flowsGet.size shouldBe 2
+    }
 
-  "flow from index access to index access" in {
-    val cpg: Cpg = code("""
+    "flow from index access to index access" in {
+        val cpg: Cpg = code("""
         |
         |def foo():
         |    y = dict()
@@ -263,14 +486,14 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
         |    sink(y)
         |""".stripMargin)
 
-    val sources = cpg.identifier("x").l
-    val sinks   = cpg.call("sink").argument.l
-    val flows   = sinks.reachableByFlows(sources)
-    flows.size shouldBe 1
-  }
+        val sources = cpg.identifier("x").l
+        val sinks   = cpg.call("sink").argument.l
+        val flows   = sinks.reachableByFlows(sources)
+        flows.size shouldBe 1
+    }
 
-  "flow from expression that taints global variable to sink" in {
-    val cpg: Cpg = code("""
+    "flow from expression that taints global variable to sink" in {
+        val cpg: Cpg = code("""
         |d = {
         |   'x': F.sum('x'),
         |   'y': F.sum('y'),
@@ -282,52 +505,51 @@ class DataFlowTests extends PySrc2CpgFixture(withOssDataflow = true) {
         |       return sink(d)
         |""".stripMargin)
 
-    val sources = cpg.call("<operator>.indexAccess").argument.isIdentifier.l
-    val sinks   = cpg.call("sink").l
-    sinks.reachableByFlows(sources).size should not be 0
-  }
+        val sources = cpg.call("<operator>.indexAccess").argument.isIdentifier.l
+        val sinks   = cpg.call("sink").l
+        sinks.reachableByFlows(sources).size should not be 0
+    }
 
-  "lookup of __init__ call" in {
-    val cpg = code("""
+    "lookup of __init__ call" in {
+        val cpg = code("""
         |from models import Foo
         |foo = Foo(x,y,z)
         |""".stripMargin)
-      .moreCode(
-        """
+            .moreCode(
+              """
           |class Foo:
           |   def __init__(self, a, b, c):
           |      println("foo")
           |      pass
           |""".stripMargin,
-        "models.py"
-      )
+              "models.py"
+            )
 
-    val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
-    method.fullName shouldBe "models.py:<module>.Foo.__init__"
-    val List(typeDeclFullName) = method.typeDecl.fullName.l
-    typeDeclFullName shouldBe "models.py:<module>.Foo"
-  }
+        val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
+        method.fullName shouldBe "models.py:<module>.Foo.__init__"
+        val List(typeDeclFullName) = method.typeDecl.fullName.l
+        typeDeclFullName shouldBe "models.py:<module>.Foo"
+    }
 
-  "lookup of __init__ call even when hidden in base class" in {
-    val cpg = code("""
+    "lookup of __init__ call even when hidden in base class" in {
+        val cpg = code("""
         |from models import Foo
         |foo = Foo(x,y,z)
         |""".stripMargin)
-      .moreCode(
-        """
+            .moreCode(
+              """
           |class Foo(SomeType):
           |   pass
           |""".stripMargin,
-        "models.py"
-      )
+              "models.py"
+            )
 
-    val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
-    method.fullName shouldBe "models.py:<module>.Foo.__init__"
-    val List(typeDeclFullName) = method.typeDecl.fullName.l
-    typeDeclFullName shouldBe "models.py:<module>.Foo"
-  }
-
-}
+        val List(method: Method) = cpg.identifier.name("foo").inAssignment.source.isCall.callee.l
+        method.fullName shouldBe "models.py:<module>.Foo.__init__"
+        val List(typeDeclFullName) = method.typeDecl.fullName.l
+        typeDeclFullName shouldBe "models.py:<module>.Foo"
+    }
+end DataFlowTests
 
 class RegexDefinedFlowsDataFlowTests
     extends PySrc2CpgFixture(
@@ -335,40 +557,50 @@ class RegexDefinedFlowsDataFlowTests
       extraFlows = List(
         FlowSemantic.from("^path.*<module>\\.sanitizer$", List((0, 0), (1, 1)), regex = true),
         FlowSemantic.from("^foo.*<module>\\.sanitizer.*", List((0, 0), (1, 1)), regex = true),
-        FlowSemantic.from("^foo.*\\.create_sanitizer\\.<returnValue>\\.sanitize", List((0, 0), (1, 1)), regex = true),
+        FlowSemantic.from(
+          "^foo.*\\.create_sanitizer\\.<returnValue>\\.sanitize",
+          List((0, 0), (1, 1)),
+          regex = true
+        ),
         FlowSemantic
-          .from(
-            "requests.py:<module>.post",
-            List((0, 0), (1, "url", -1), (2, "body", -1), (1, "url", 1, "url"), (2, "body", 2, "body"))
-          ),
+            .from(
+              "requests.py:<module>.post",
+              List(
+                (0, 0),
+                (1, "url", -1),
+                (2, "body", -1),
+                (1, "url", 1, "url"),
+                (2, "body", 2, "body")
+              )
+            ),
         FlowSemantic.from("cross_taint.py:<module>.go", List((0, 0), (1, 1), (1, "a", 2, "b")))
       )
-    ) {
+    ):
 
-  "regex matched semantic for imported method" should {
-    lazy val cpg = code(
-      """
+    "regex matched semantic for imported method" should {
+        lazy val cpg = code(
+          """
       |from path import sanitizer
       |
       |source = 1
       |x = sanitizer(source)
       |sink(x)
       |""".stripMargin,
-      Seq("foo.py").mkString(java.io.File.separator)
-    )
+          Seq("foo.py").mkString(java.io.File.separator)
+        )
 
-    "register that sanitizer kills the flow on the parameter" in {
-      def source = cpg.literal("1")
-      def sink   = cpg.call("sink")
+        "register that sanitizer kills the flow on the parameter" in {
+            def source = cpg.literal("1")
+            def sink   = cpg.call("sink")
 
-      sink.reachableBy(source).size shouldBe 0
+            sink.reachableBy(source).size shouldBe 0
+        }
+
     }
 
-  }
-
-  "regex matched semantic for more than one imported method" should {
-    lazy val cpg = code(
-      """
+    "regex matched semantic for more than one imported method" should {
+        lazy val cpg = code(
+          """
         |from foo import sanitizerFoo, sanitizerBar
         |
         |source = 1
@@ -376,21 +608,21 @@ class RegexDefinedFlowsDataFlowTests
         |y = sanitizerBar(source)
         |sink(x, y)
         |""".stripMargin,
-      Seq("foo.py").mkString(java.io.File.separator)
-    )
+          Seq("foo.py").mkString(java.io.File.separator)
+        )
 
-    "register that all sanitizers kill the flow on the parameter" in {
-      def source = cpg.literal("1")
-      def sink   = cpg.call("sink")
+        "register that all sanitizers kill the flow on the parameter" in {
+            def source = cpg.literal("1")
+            def sink   = cpg.call("sink")
 
-      sink.reachableBy(source).size shouldBe 0
+            sink.reachableBy(source).size shouldBe 0
+        }
+
     }
 
-  }
-
-  "regex matched semantic for a dummy type resulting from type recovery" should {
-    val cpg = code(
-      """
+    "regex matched semantic for a dummy type resulting from type recovery" should {
+        val cpg = code(
+          """
         |from foo import create_sanitizer
         |
         |source = 1
@@ -398,20 +630,20 @@ class RegexDefinedFlowsDataFlowTests
         |y = x.sanitize(source)
         |sink(y)
         |""".stripMargin,
-      Seq("foo.py").mkString(java.io.File.separator)
-    )
+          Seq("foo.py").mkString(java.io.File.separator)
+        )
 
-    "register that the call off of a return value has no flow" in {
-      def source = cpg.literal("1")
-      def sink   = cpg.call("sink")
+        "register that the call off of a return value has no flow" in {
+            def source = cpg.literal("1")
+            def sink   = cpg.call("sink")
 
-      sink.reachableBy(source).size shouldBe 0
+            sink.reachableBy(source).size shouldBe 0
+        }
+
     }
 
-  }
-
-  "flows to parameterized arguments" should {
-    val cpg = code("""
+    "flows to parameterized arguments" should {
+        val cpg = code("""
         |import requests
         |def foo():
         |    orderId = "Mysource"
@@ -422,16 +654,16 @@ class RegexDefinedFlowsDataFlowTests
         |        )
         |""".stripMargin)
 
-    "have summarized flows accurately pass parameterized argument behaviour" in {
-      val source = cpg.identifier("orderId")
-      val sink   = cpg.call("post")
+        "have summarized flows accurately pass parameterized argument behaviour" in {
+            val source = cpg.identifier("orderId")
+            val sink   = cpg.call("post")
 
-      sink.reachableBy(source).size shouldBe 2
+            sink.reachableBy(source).size shouldBe 2
+        }
     }
-  }
 
-  "flows across named parameterized arguments" should {
-    val cpg = code("""
+    "flows across named parameterized arguments" should {
+        val cpg = code("""
         |import cross_taint
         |
         |def foo():
@@ -441,44 +673,44 @@ class RegexDefinedFlowsDataFlowTests
         |    sink(transport)
         |""".stripMargin)
 
-    "have passed taint from one parameter to the next" in {
-      val source = cpg.literal("\"Mysource\"")
-      val sink   = cpg.call("sink")
+        "have passed taint from one parameter to the next" in {
+            val source = cpg.literal("\"Mysource\"")
+            val sink   = cpg.call("sink")
 
-      sink.reachableBy(source).size shouldBe 1
+            sink.reachableBy(source).size shouldBe 1
+        }
     }
-  }
 
-  "flows from receivers" should {
-    val cpg = code("""
+    "flows from receivers" should {
+        val cpg = code("""
         |class Foo:
         |   def func():
         |      return "x"
         |print(Foo.func())
         |""".stripMargin)
-    "be found" in {
-      val src = cpg.call.code("Foo.func").l
-      val snk = cpg.call("print").l
-      snk.argument.reachableByFlows(src).size shouldBe 1
+        "be found" in {
+            val src = cpg.call.code("Foo.func").l
+            val snk = cpg.call("print").l
+            snk.argument.reachableByFlows(src).size shouldBe 1
+        }
     }
-  }
 
-  "flows from receivers directly" should {
-    val cpg = code("""
+    "flows from receivers directly" should {
+        val cpg = code("""
         |class Foo:
         |   def func():
         |      return "x"
         |print(Foo.func())
         |""".stripMargin)
-    "be found" in {
-      val src = cpg.identifier("Foo").l
-      val snk = cpg.call("print").l
-      snk.reachableByFlows(src).size shouldBe 2
+        "be found" in {
+            val src = cpg.identifier("Foo").l
+            val snk = cpg.call("print").l
+            snk.reachableByFlows(src).size shouldBe 2
+        }
     }
-  }
-  "Import statement with method ref sample four" in {
-    val controller =
-      """
+    "Import statement with method ref sample four" in {
+        val controller =
+            """
         |from django.contrib import admin
         |from django.urls import path
         |from django.conf.urls import url
@@ -488,21 +720,21 @@ class RegexDefinedFlowsDataFlowTests
         |    url(r'allPage', all_page)
         |]
         |""".stripMargin
-    val views =
-      """
+        val views =
+            """
         |def all_page(request):
         |	print("All pages")
         |""".stripMargin
-    val cpg = code(controller, Seq("controller", "urls.py").mkString(File.separator))
-      .moreCode(views, Seq("controller", "views.py").mkString(File.separator))
+        val cpg = code(controller, Seq("controller", "urls.py").mkString(File.separator))
+            .moreCode(views, Seq("controller", "views.py").mkString(File.separator))
 
-    val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
-    args.size shouldBe 3
-  }
+        val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
+        args.size shouldBe 3
+    }
 
-  "Import statement with method ref sample five" in {
-    val controller =
-      """
+    "Import statement with method ref sample five" in {
+        val controller =
+            """
         |from django.contrib import admin
         |from django.urls import path
         |from django.conf.urls import url
@@ -512,20 +744,20 @@ class RegexDefinedFlowsDataFlowTests
         |    url(r'allPage', all_page)
         |]
         |""".stripMargin
-    val views =
-      """
+        val views =
+            """
         |def all_page(request):
         |	print("All pages")
         |""".stripMargin
-    val cpg = code(controller, Seq("controller", "urls.py").mkString(File.separator))
-      .moreCode(views, Seq("student", "views.py").mkString(File.separator))
+        val cpg = code(controller, Seq("controller", "urls.py").mkString(File.separator))
+            .moreCode(views, Seq("student", "views.py").mkString(File.separator))
 
-    val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
-    args.size shouldBe 3
-  }
+        val args = cpg.call.methodFullName("django.*[.](path|url)").l.head.argument.l
+        args.size shouldBe 3
+    }
 
-  "flows via tuple literal" should {
-    val cpg = code("""
+    "flows via tuple literal" should {
+        val cpg = code("""
         |a = 1
         |b = 2
         |c = 3
@@ -535,21 +767,21 @@ class RegexDefinedFlowsDataFlowTests
         |sink1(b)
         |sink2(x)
         |""".stripMargin)
-    "not cross-taint due to 'pass through' semantics" in {
-      val src = cpg.literal("1").l
-      val snk = cpg.call("sink1").l
-      snk.reachableByFlows(src).size shouldBe 0
+        "not cross-taint due to 'pass through' semantics" in {
+            val src = cpg.literal("1").l
+            val snk = cpg.call("sink1").l
+            snk.reachableByFlows(src).size shouldBe 0
+        }
+
+        "taint the return value due to 'pass through' semantics" in {
+            val src = cpg.call.nameExact("<operator>.tupleLiteral").l
+            val snk = cpg.call("sink2").l
+            snk.reachableByFlows(src).size shouldBe 1
+        }
     }
 
-    "taint the return value due to 'pass through' semantics" in {
-      val src = cpg.call.nameExact("<operator>.tupleLiteral").l
-      val snk = cpg.call("sink2").l
-      snk.reachableByFlows(src).size shouldBe 1
-    }
-  }
-
-  "Exception block flow sample one" in {
-    val cpg: Cpg = code("""
+    "Exception block flow sample one" in {
+        val cpg: Cpg = code("""
         |import logging
         |tmp = logging.getLogger(__name__)
         |
@@ -562,15 +794,15 @@ class RegexDefinedFlowsDataFlowTests
         |            tmp.error(f"Failure: {accountId}")
         |            return None
         |""".stripMargin)
-    val sources = cpg.identifier(".*account.*").lineNumber(6).l
-    val sinks   = cpg.call.methodFullName(".*log.*(debug|info|error).*").l
-    val flows   = sinks.reachableByFlows(sources).l
-    flows.size shouldBe 2
-  }
+        val sources = cpg.identifier(".*account.*").lineNumber(6).l
+        val sinks   = cpg.call.methodFullName(".*log.*(debug|info|error).*").l
+        val flows   = sinks.reachableByFlows(sources).l
+        flows.size shouldBe 2
+    }
 
-  // TODO: Need to fix this scenario. This use case is not working across the frontend. Had tested it for Java as well.
-  "Exception block flow sample two" ignore {
-    val cpg: Cpg = code("""
+    // TODO: Need to fix this scenario. This use case is not working across the frontend. Had tested it for Java as well.
+    "Exception block flow sample two" ignore {
+        val cpg: Cpg = code("""
         |import logging
         |tmp = logging.getLogger(__name__)
         |
@@ -583,10 +815,9 @@ class RegexDefinedFlowsDataFlowTests
         |            tmp.error(f"Failure: {accountId}")
         |            return None
         |""".stripMargin)
-    val sources = cpg.identifier(".*account.*").lineNumber(6).l
-    val sinks   = cpg.call.methodFullName(".*log.*(debug|info|error).*").l
-    val flows   = sinks.reachableByFlows(sources).l
-    flows.size shouldBe 2
-  }
-
-}
+        val sources = cpg.identifier(".*account.*").lineNumber(6).l
+        val sinks   = cpg.call.methodFullName(".*log.*(debug|info|error).*").l
+        val flows   = sinks.reachableByFlows(sources).l
+        flows.size shouldBe 2
+    }
+end RegexDefinedFlowsDataFlowTests

@@ -6,7 +6,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{Operators, PropertyNames}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.operatorextension.OpNodes
-import OpNodes.FieldAccess
+import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.FieldAccess
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 class PythonTypeRecoveryPass(cpg: Cpg, config: XTypeRecoveryConfig = XTypeRecoveryConfig())
@@ -37,14 +37,6 @@ private class RecoverForPythonFile(
   builder: DiffGraphBuilder,
   state: XTypeRecoveryState
 ) extends RecoverForXCompilationUnit[File](cpg, cu, builder, state):
-
-    /** Replaces the `this` prefix with the Pythonic `self` prefix for instance methods of functions
-      * local to this compilation unit.
-      */
-    private def fromNodeToLocalPythonKey(node: AstNode): Option[LocalKey] =
-        node match
-            case n: Method => Option(CallAlias(n.name, Option("self")))
-            case _         => SBKey.fromNodeToLocalKey(node)
 
     override val symbolTable: SymbolTable[LocalKey] =
         new SymbolTable[LocalKey](fromNodeToLocalPythonKey)
@@ -92,9 +84,6 @@ private class RecoverForPythonFile(
     override def isConstructor(c: Call): Boolean =
         isConstructor(c.name) && c.code.endsWith(")")
 
-    override protected def isConstructor(name: String): Boolean =
-        name.nonEmpty && name.charAt(0).isUpper
-
     /** If the parent method is module then it can be used as a field.
       */
     override def isField(i: Identifier): Boolean =
@@ -119,6 +108,9 @@ private class RecoverForPythonFile(
                 associateTypes(i, Set(s"${PythonAstVisitor.builtinPrefix}set"))
             case Operators.conditional =>
                 associateTypes(i, Set(s"${PythonAstVisitor.builtinPrefix}bool"))
+            case Operators.indexAccess =>
+                c.argument.argumentIndex(1).isCall.foreach(setCallMethodFullNameFromBase)
+                visitIdentifierAssignedToIndexAccess(i, c)
             case _ => super.visitIdentifierAssignedToOperator(i, c, operation)
 
     override def visitIdentifierAssignedToConstructor(i: Identifier, c: Call): Set[String] =
@@ -147,13 +139,6 @@ private class RecoverForPythonFile(
                 associateTypes(i, globalTypes)
             case _ => super.visitIdentifierAssignedToFieldLoad(i, fa)
 
-    override def getTypesFromCall(c: Call): Set[String] = c.name match
-        case "<operator>.listLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}list")
-        case "<operator>.tupleLiteral" => Set(s"${PythonAstVisitor.builtinPrefix}tuple")
-        case "<operator>.dictLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}dict")
-        case "<operator>.setLiteral"   => Set(s"${PythonAstVisitor.builtinPrefix}set")
-        case _                         => super.getTypesFromCall(c)
-
     override def getFieldParents(fa: FieldAccess): Set[String] =
         if fa.method.name == "<module>" then
             Set(fa.method.fullName)
@@ -164,9 +149,6 @@ private class RecoverForPythonFile(
             (parentTypes ++ baseTypeFullNames).filterNot(_.matches("(?i)(any|object)"))
         else
             super.getFieldParents(fa)
-
-    private def isPyString(s: String): Boolean =
-        (s.startsWith("\"") || s.startsWith("'")) && (s.endsWith("\"") || s.endsWith("'"))
 
     override def getLiteralType(l: Literal): Set[String] =
         (l.code match
@@ -179,6 +161,9 @@ private class RecoverForPythonFile(
             case code if isPyString(code)    => Some(s"${PythonAstVisitor.builtinPrefix}str")
             case _                           => None
         ).toSet
+
+    private def isPyString(s: String): Boolean =
+        (s.startsWith("\"") || s.startsWith("'")) && (s.endsWith("\"") || s.endsWith("'"))
 
     override def createCallFromIdentifierTypeFullName(
       typeFullName: String,
@@ -194,24 +179,8 @@ private class RecoverForPythonFile(
                 Seq(t, callName).mkString(pathSep.toString)
             case _ => super.createCallFromIdentifierTypeFullName(typeFullName, callName)
 
-    override protected def postSetTypeInformation(): Unit =
-        cu.typeDecl
-            .map(t =>
-                t -> t.inheritsFromTypeFullName.partition(itf =>
-                    symbolTable.contains(LocalVar(itf))
-                )
-            )
-            .foreach { case (t, (identifierTypes, otherTypes)) =>
-                val existingTypes = (identifierTypes ++ otherTypes).distinct
-                val resolvedTypes = identifierTypes.map(LocalVar.apply).flatMap(symbolTable.get)
-                if existingTypes != resolvedTypes && resolvedTypes.nonEmpty then
-                    state.changesWereMade.compareAndExchange(false, true)
-                    builder.setNodeProperty(
-                      t,
-                      PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
-                      resolvedTypes
-                    )
-            }
+    override protected def isConstructor(name: String): Boolean =
+        name.nonEmpty && name.charAt(0).isUpper
 
     override def prepopulateSymbolTable(): Unit =
         cu.ast.isMethodRef.where(
@@ -234,6 +203,25 @@ private class RecoverForPythonFile(
         super.prepopulateSymbolTable()
     end prepopulateSymbolTable
 
+    override protected def postSetTypeInformation(): Unit =
+        cu.typeDecl
+            .map(t =>
+                t -> t.inheritsFromTypeFullName.partition(itf =>
+                    symbolTable.contains(LocalVar(itf))
+                )
+            )
+            .foreach { case (t, (identifierTypes, otherTypes)) =>
+                val existingTypes = (identifierTypes ++ otherTypes).distinct
+                val resolvedTypes = identifierTypes.map(LocalVar.apply).flatMap(symbolTable.get)
+                if existingTypes != resolvedTypes && resolvedTypes.nonEmpty then
+                    state.changesWereMade.compareAndExchange(false, true)
+                    builder.setNodeProperty(
+                      t,
+                      PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
+                      resolvedTypes
+                    )
+            }
+
     override protected def visitIdentifierAssignedToTypeRef(
       i: Identifier,
       t: TypeRef,
@@ -244,4 +232,25 @@ private class RecoverForPythonFile(
             .map(td => symbolTable.append(CallAlias(i.name, rec), Set(td)))
             .headOption
             .getOrElse(super.visitIdentifierAssignedToTypeRef(i, t, rec))
+
+    override protected def getIndexAccessTypes(ia: Call): Set[String] =
+        ia.argument.argumentIndex(1).isCall.headOption match
+            case Some(c) =>
+                getTypesFromCall(c).map(x => s"$x$pathSep${XTypeRecovery.DummyIndexAccess}")
+            case _ => super.getIndexAccessTypes(ia)
+
+    override def getTypesFromCall(c: Call): Set[String] = c.name match
+        case "<operator>.listLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}list")
+        case "<operator>.tupleLiteral" => Set(s"${PythonAstVisitor.builtinPrefix}tuple")
+        case "<operator>.dictLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}dict")
+        case "<operator>.setLiteral"   => Set(s"${PythonAstVisitor.builtinPrefix}set")
+        case _                         => super.getTypesFromCall(c)
+
+    /** Replaces the `this` prefix with the Pythonic `self` prefix for instance methods of functions
+      * local to this compilation unit.
+      */
+    private def fromNodeToLocalPythonKey(node: AstNode): Option[LocalKey] =
+        node match
+            case n: Method => Option(CallAlias(n.name, Option("self")))
+            case _         => SBKey.fromNodeToLocalKey(node)
 end RecoverForPythonFile
