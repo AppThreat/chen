@@ -3,6 +3,7 @@ package io.appthreat.javasrc2cpg.passes
 import better.files.File
 import com.github.javaparser.ast.CompilationUnit
 import com.github.javaparser.symbolsolver.JavaSymbolSolver
+import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade
 import com.github.javaparser.symbolsolver.resolution.typesolvers.{
     JarTypeSolver,
     ReflectionTypeSolver
@@ -26,7 +27,6 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
     extends ConcurrentWriterCpgPass[String](cpg):
 
     val global: Global = new Global()
-    private val logger = LoggerFactory.getLogger(classOf[AstCreationPass])
 
     private val sourceFilenames = SourceParser.getSourceFilenames(config, sourcesOverride)
 
@@ -52,7 +52,13 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
                   ).createAst()
                 )
 
-            case None => logger.debug(s"Skipping AST creation for $filename")
+            case None =>
+
+    /** Clear JavaParser caches. Should only be invoked after we no longer need JavaParser, e.g. as
+      * soon as we've built the AST layer for all files.
+      */
+    def clearJavaParserCaches(): Unit =
+        JavaParserFacade.clearInstances()
 
     private def initParserAndUtils(
       config: Config,
@@ -69,10 +75,8 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
             DependencyResolver.getDependencies(Paths.get(inputPath)) match
                 case Some(deps) => deps.toList
                 case None =>
-                    logger.debug(s"Could not fetch dependencies for project at path $inputPath")
                     List()
         else
-            logger.debug("dependency resolving disabled")
             List()
 
     private def createSymbolSolver(
@@ -91,15 +95,9 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
                 if javaHome != null && javaHome.nonEmpty then javaHome
                 else System.getenv("JAVA_HOME")
             case (None, Some(jdkPath)) =>
-                logger.debug(
-                  s"Using JDK path from environment variable ${JavaSrcEnvVar.JdkPath.name} for JDK type information: $jdkPath"
-                )
                 jdkPath
 
             case (Some(jdkPath), _) =>
-                logger.debug(
-                  s"Using JDK path set with jdk-path option for JDK type information: $jdkPath"
-                )
                 jdkPath
         var jdkJarTypeSolver: JdkJarTypeSolver = null
         // native-image could have empty JAVA_HOME

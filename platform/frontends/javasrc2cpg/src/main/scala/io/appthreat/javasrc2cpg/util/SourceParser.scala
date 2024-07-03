@@ -9,7 +9,6 @@ import com.github.javaparser.ParserConfiguration.LanguageLevel
 import com.github.javaparser.ast.CompilationUnit
 import com.github.javaparser.ast.Node.Parsedness
 import io.appthreat.javasrc2cpg.{Config, JavaSrc2Cpg}
-import org.slf4j.LoggerFactory
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -24,8 +23,6 @@ import scala.util.Try
 import scala.util.Success
 
 class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRoot: Path):
-
-    private val logger = LoggerFactory.getLogger(this.getClass)
 
     /** Parse the given file into a JavaParser CompliationUnit that will be used for creating the
       * CPG AST.
@@ -70,24 +67,13 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
                 .setStoreTokens(storeTokens)
         val parseResult = new JavaParser(javaParserConfig).parse(file.toJava)
 
-        parseResult.getProblems.asScala.toList match
-            case Nil => // Just carry on as usual
-            case problems =>
-                logger.debug(s"Encountered problems while parsing file ${file.name}:")
-                problems.foreach { problem =>
-                    logger.debug(s"- ${problem.getMessage}")
-                }
-
         parseResult.getResult.toScala match
             case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)
             case _ =>
-                logger.debug(s"Failed to parse file ${file.name}")
                 None
-    end parse
 end SourceParser
 
 object SourceParser:
-    private val logger = LoggerFactory.getLogger(this.getClass)
 
     def apply(config: Config, hasLombokDependency: Boolean): SourceParser =
         val canonicalInputPath = File(config.inputPath).canonicalPath
@@ -128,7 +114,6 @@ object SourceParser:
         if delombokDir.nonEmpty then
             Delombok.parseDelombokModeOption(delombokMode) match
                 case Default if hasLombokDependency =>
-                    logger.debug(s"Analysing delomboked code as lombok dependency was found.")
                     (delombokDir, delombokDir)
 
                 case Default => (originalDir, originalDir)
