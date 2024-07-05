@@ -18,10 +18,11 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     private val FRAMEWORK_ROUTE  = "framework-route"
     private val FRAMEWORK_INPUT  = "framework-input"
     private val FRAMEWORK_OUTPUT = "framework-output"
+    private val FileSeparator    = java.io.File.separator
 
     private val PYTHON_ROUTES_CALL_REGEXES =
         Array(
-          "django/(conf/)?urls.py:<module>.(path|re_path|url).*",
+          s"django$FileSeparator(conf$FileSeparator)?urls.py:<module>.(path|re_path|url).*",
           ".*(route|web\\.|add_resource).*"
         )
 

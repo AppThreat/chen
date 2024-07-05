@@ -190,9 +190,9 @@ This error is mostly due to missing python .so (linux), .dll (windows) or .dylib
 
 chen is a fork of the popular [joern](https://github.com/joernio/joern) project. We deviate from the joern project in the following ways:
 
+- Keep the CPG implementation at 1.0 based on the original paper.
 - Make code analysis accessible by adding first-class integration with Python and frameworks such as NetworkX and PyTorch.
-- Enable broader hierarchical analysis (Application + Dependency + Container + OS layer)
-- By creating a welcoming community more appropriate for beginner users with great enterprise support. We want to democratize code analysis.
+- Enable broader hierarchical analysis (Application + Dependency + Container + OS layer + Cloud + beyond)
 
 We don't intend for bug-to-bug compatibility and often rewrite patches to suit our needs. We also do not bring features and passes that do not add value for hierarchical analysis.
 
@@ -202,7 +202,7 @@ Apache-2.0
 
 ## Enterprise support
 
-Enterprise support including custom language development and integration services is available via AppThreat Ltd. Free community support is also available via [Discord](https://discord.gg/UD4sHgbXYr).
+Enterprise support including custom language development and integration services is available via AppThreat Ltd.
 
 ## Sponsors
 
