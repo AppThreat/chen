@@ -14,16 +14,16 @@ import java.util.regex.Pattern
   */
 class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
 
-    val language: String         = atom.metaData.language.head
-    private val FRAMEWORK_ROUTE  = "framework-route"
-    private val FRAMEWORK_INPUT  = "framework-input"
-    private val FRAMEWORK_OUTPUT = "framework-output"
-    private val FileSeparator    = java.io.File.separator
+    val language: String             = atom.metaData.language.head
+    private val FRAMEWORK_ROUTE      = "framework-route"
+    private val FRAMEWORK_INPUT      = "framework-input"
+    private val FRAMEWORK_OUTPUT     = "framework-output"
+    private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
 
     private val PYTHON_ROUTES_CALL_REGEXES =
         Array(
-          s"django$FileSeparator(conf$FileSeparator)?urls.py:<module>.(path|re_path|url).*",
-          ".*(route|web\\.|add_resource).*"
+          s"django$EscapedFileSeparator(conf$EscapedFileSeparator)?urls.py:<module>.(path|re_path|url).*".r,
+          ".*(route|web\\.|add_resource).*".r
         )
 
     private def C_ROUTES_CALL_REGEXES = Array(
@@ -70,7 +70,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     private def tagPythonRoutes(dstGraph: DiffGraphBuilder): Unit =
         PYTHON_ROUTES_CALL_REGEXES.foreach { r =>
             atom.call
-                .where(_.methodFullName(r))
+                .where(_.methodFullName(r.toString()))
                 .argument
                 .isLiteral
                 .newTagNode(FRAMEWORK_ROUTE)
