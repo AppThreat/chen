@@ -528,7 +528,7 @@ class Console[T <: Project](
       tree: Boolean = false,
       as_text: Boolean = false
     ): String =
-        if tree then
+        if tree || includeCalls then
             val rootTree = richTreeLib.Tree(title, highlight = true)
             atom.file.whereNot(_.name("<(unknown|includes)>")).foreach { f =>
                 val childTree = richTreeLib.Tree(f.name, highlight = true)
@@ -652,7 +652,7 @@ class Console[T <: Project](
             val dec: Set[Declaration] =
                 (f.assignment.argument(1).filterNot(
                   _.code == "this"
-                ).isIdentifier.refsTo ++ f.method.parameter
+                ).isIdentifier.nameNot("tmp[0-9]+$").refsTo ++ f.method.parameter
                     .filterNot(_.code == "this")
                     .filter(_.typeFullName != "ANY")).toSet
             table.add_row(f.name, dec.name.toSet.mkString("\n"))

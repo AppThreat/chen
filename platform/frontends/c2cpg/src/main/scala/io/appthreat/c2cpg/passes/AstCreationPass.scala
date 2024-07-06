@@ -3,10 +3,10 @@ package io.appthreat.c2cpg.passes
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.astcreation.AstCreator
 import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults}
-import io.appthreat.c2cpg.utils.{Report, TimeUtils}
+import io.appthreat.c2cpg.utils.Report
+import io.appthreat.x2cpg.SourceFiles
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
-import io.appthreat.x2cpg.SourceFiles
 
 import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
