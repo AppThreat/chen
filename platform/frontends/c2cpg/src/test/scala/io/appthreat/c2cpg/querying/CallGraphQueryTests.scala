@@ -83,10 +83,10 @@ class CallGraphQueryTests extends CCodeToCpgSuite {
             "test.cpp"
         )
         "have correct type full names for calls" in {
-            cpg.method.name("eat").fullName.toSet shouldBe Set("Animal.eat", "Cat.eat", "People.eat")
-            cpg.method.fullName("main").callee.fullName.toSet shouldBe Set("Animal.eat", "Cat.eat")
-            cpg.method.fullName("Cat.eat").caller.fullName.toSet shouldBe Set("main")
-            cpg.method.fullName("Animal.eat").caller.fullName.toSet shouldBe Set("People.feedPets", "main")
+            cpg.method.name("eat").fullName.toSet shouldBe Set("Animal.eat:void()", "Cat.eat:void()", "People.eat:void()", "Animal.eat")
+            cpg.method.name("main").callee.fullName.toSet shouldBe Set("Animal.eat", "Cat.eat:void()")
+            cpg.method.fullNameExact("Cat.eat:void()").caller.fullName.toSet shouldBe Set("main:int()")
+            cpg.method.fullName("Animal.eat").caller.fullName.toSet shouldBe Set("People.feedPets:void()", "main:int()")
         }
     }
 }

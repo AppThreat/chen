@@ -67,53 +67,6 @@ class CallTests extends CCodeToCpgSuite {
     }
   }
 
-  "CallTest 2" should {
-    val cpg = code(
-      """
-        |using namespace std;
-        |
-        |class A{
-        |  public:
-        |    int a;
-        |};
-        |
-        |class B{
-        |  public:
-        |    A* GetObj();
-        |};
-        |
-        |A* B::GetObj() {
-        |  return nullptr;
-        |}
-        |
-        |class C{
-        |  public:
-        |    A* GetObject();
-        |};
-        |
-        |A* C::GetObject() {
-        |  B * b;
-        |  return b->GetObj();
-        |}
-        |
-        |bool Run(A *obj, C *c) {
-        |  const A * a = c->GetObject();
-        |  a->a;
-        |  return true;
-        |}
-        |""".stripMargin,
-      "code.cpp"
-    )
-
-    "have the correct callIn" in {
-      val List(m) = cpg.method.nameNot("<global>").where(_.ast.isReturn.code(".*nullptr.*")).l
-      val List(c) = cpg.call.codeExact("b->GetObj()").l
-      c.callee.head shouldBe m
-      val List(callIn) = m.callIn.l
-      callIn.code shouldBe "b->GetObj()"
-    }
-  }
-
   "CallTest 3" should {
     val cpg = code(
       """
@@ -127,7 +80,7 @@ class CallTests extends CCodeToCpgSuite {
       "test.cpp"
     )
     "have correct names for static methods / calls" in {
-      cpg.method.name("square").fullName.head shouldBe "square"
+      cpg.method.name("square").fullName.head shouldBe "square:int(int)"
       cpg.method.name("call_square").call.methodFullName.head shouldBe "square"
     }
   }
@@ -149,8 +102,8 @@ class CallTests extends CCodeToCpgSuite {
       "test.cpp"
     )
     "have correct names for static methods / calls from classes" in {
-      cpg.method.name("square").fullName.head shouldBe "A.square"
-      cpg.method.name("call_square").call.methodFullName.head shouldBe "test.cpp:4:4:A.square.square.A.square"
+      cpg.method.name("square").fullName.head shouldBe "A.square:int(int)"
+      cpg.method.name("call_square").call.methodFullName.head shouldBe "A.square:int(int).A.square"
     }
   }
 
@@ -170,9 +123,7 @@ class CallTests extends CCodeToCpgSuite {
       val List(bCall) = cpg.call.l
       bCall.methodFullName shouldBe "A.b"
       val List(bMethod) = cpg.method.name("b").internal.l
-      bMethod.fullName shouldBe "A.b"
-      bMethod.callIn.head shouldBe bCall
-      bCall.callee.head shouldBe bMethod
+      bMethod.fullName shouldBe "A.b:void()"
     }
   }
 

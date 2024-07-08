@@ -19,7 +19,7 @@ class MethodTests extends CCodeToCpgSuite {
         x.name shouldBe "main"
         x.fullName shouldBe "main"
         x.code should startWith("int main(int argc, char **argv) {")
-        x.signature shouldBe "int main (int,char**)"
+        x.signature shouldBe "int (int,char**)"
         x.isExternal shouldBe false
         x.order shouldBe 1
         x.filename shouldBe "Test0.c"
@@ -77,7 +77,7 @@ class MethodTests extends CCodeToCpgSuite {
     "should not generate a type decl for method declarations" in {
       inside(cpg.method.name("doFoo").l) { case List(x) =>
         x.name shouldBe "doFoo"
-        x.fullName shouldBe "Test0.c:1:1:doFoo"
+        x.fullName shouldBe "doFoo"
         x.astParentType shouldBe NodeTypes.TYPE_DECL
         x.astParentFullName should endWith(NamespaceTraversal.globalNamespaceName)
       }
@@ -112,8 +112,8 @@ class MethodTests extends CCodeToCpgSuite {
     "should be correct for methods with line breaks / whitespace" in {
       inside(cpg.method("foo").l) { case List(foo) =>
         foo.name shouldBe "foo"
-        foo.fullName shouldBe "foo<A,B,C>"
-        foo.signature shouldBe "void foo<A,B,C> ()"
+        foo.fullName shouldBe "foo<A, B, C>:void()"
+        foo.signature shouldBe "void ()"
       }
     }
   }
@@ -129,7 +129,7 @@ class MethodTests extends CCodeToCpgSuite {
       val List(method) = cpg.method.nameExact("foo").l
       method.isExternal shouldBe false
       method.fullName shouldBe "foo"
-      method.signature shouldBe "int foo (int,int)"
+      method.signature shouldBe "int (int,int)"
       method.lineNumber shouldBe Option(2)
       method.columnNumber shouldBe Option(1)
       method.lineNumberEnd shouldBe Option(4)

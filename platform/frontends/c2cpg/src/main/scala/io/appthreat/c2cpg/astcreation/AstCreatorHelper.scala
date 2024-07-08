@@ -15,7 +15,7 @@ import org.eclipse.cdt.core.dom.ast.c.{
 }
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
-import org.eclipse.cdt.internal.core.dom.parser.c.CASTArrayRangeDesignator
+import org.eclipse.cdt.internal.core.dom.parser.c.{CASTArrayRangeDesignator, CASTFunctionDeclarator}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.{EvalBinding, EvalMemberAccess}
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
@@ -79,10 +79,21 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   protected def lineEnd(node: IASTNode): Option[Integer] =
       nullSafeFileLocationLast(node).map(_.getEndingLineNumber)
 
+  private def nullSafeFileLocationLast(node: IASTNode): Option[IASTFileLocation] =
+      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations.lastOption.toArray)).map(
+        _.asFileLocation()
+      )
+
   protected def column(node: IASTNode): Option[Integer] =
     val loc = nullSafeFileLocation(node)
     loc.map { x =>
         offsetToColumn(node, x.getNodeOffset)
+    }
+
+  protected def columnEnd(node: IASTNode): Option[Integer] =
+    val loc = nullSafeFileLocation(node)
+    loc.map { x =>
+        offsetToColumn(node, x.getNodeOffset + x.getNodeLength - 1)
     }
 
   private def offsetToColumn(node: IASTNode, offset: Int): Int =
@@ -108,19 +119,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       if asCharArray(i) == '\n' then
         offsets.append(i + 1)
     offsets.toArray
-
-  protected def fileName(node: IASTNode): String =
-    val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
-    SourceFiles.toRelativePath(path, config.inputPath)
-
-  private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
-      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
-
-  protected def columnEnd(node: IASTNode): Option[Integer] =
-    val loc = nullSafeFileLocation(node)
-    loc.map { x =>
-        offsetToColumn(node, x.getNodeOffset + x.getNodeLength - 1)
-    }
 
   protected def registerType(typeName: String): String =
     val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
@@ -267,27 +265,47 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       name
     cleanedName.split(Defines.qualifiedNameSeparator).lastOption.getOrElse(cleanedName)
 
+  protected def functionTypeToSignature(typ: IFunctionType): String =
+    val returnType     = ASTTypeUtil.getType(typ.getReturnType)
+    val parameterTypes = typ.getParameterTypes.map(ASTTypeUtil.getType)
+    s"$returnType(${parameterTypes.mkString(",")})"
+
   protected def fullName(node: IASTNode): String =
-    val filename           = fileName(node)
-    val lineNo: Integer    = line(node).getOrElse(-1)
-    val lineNoEnd: Integer = lineEnd(node).getOrElse(-1)
+    node match
+      case declarator: CPPASTFunctionDeclarator =>
+          declarator.getName.resolveBinding() match
+            case function: ICPPFunction =>
+                val fullNameNoSig = function.getQualifiedName.mkString(".")
+                val fn =
+                    if function.isExternC then
+                      function.getName
+                    else
+                      s"$fullNameNoSig:${functionTypeToSignature(function.getType)}"
+                return fn
+            case field: ICPPField =>
+            case _: IProblemBinding =>
+                return ""
+      case declarator: CASTFunctionDeclarator =>
+          val fn = declarator.getName.toString
+          return fn
+      case definition: ICPPASTFunctionDefinition =>
+          return fullName(definition.getDeclarator)
+      case x =>
+    end match
+
     val qualifiedName: String = node match
-      case d: CPPASTIdExpression if d.getEvaluation.isInstanceOf[EvalBinding] =>
-          val evaluation = d.getEvaluation.asInstanceOf[EvalBinding]
-          evaluation.getBinding match
-            case f: CPPFunction if f.getDeclarations != null =>
-                usingDeclarationMappings.getOrElse(
-                  fixQualifiedName(ASTStringUtil.getSimpleName(d.getName)),
-                  f.getDeclarations.headOption.map(n =>
-                      ASTStringUtil.getSimpleName(n.getName)
-                  ).getOrElse(f.getName)
-                )
-            case f: CPPFunction if f.getDefinition != null =>
-                usingDeclarationMappings.getOrElse(
-                  fixQualifiedName(ASTStringUtil.getSimpleName(d.getName)),
-                  ASTStringUtil.getSimpleName(f.getDefinition.getName)
-                )
-            case other => other.getName
+      case d: CPPASTIdExpression =>
+          safeGetEvaluation(d) match
+            case Some(evalBinding: EvalBinding) =>
+                evalBinding.getBinding match
+                  case f: CPPFunction if f.getDeclarations != null =>
+                      f.getDeclarations.headOption.map(n => s"${fullName(n)}").getOrElse(f.getName)
+                  case f: CPPFunction if f.getDefinition != null =>
+                      s"${fullName(f.getDefinition)}"
+                  case other =>
+                      other.getName
+            case _ => ASTStringUtil.getSimpleName(d.getName)
+
       case alias: ICPPASTNamespaceAlias => alias.getMappingName.toString
       case namespace: ICPPASTNamespaceDefinition
           if ASTStringUtil.getSimpleName(namespace.getName).nonEmpty =>
@@ -311,34 +329,19 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           s"${fullName(enumSpecifier.getParent)}.${ASTStringUtil.getSimpleName(enumSpecifier.getName)}"
       case f: ICPPASTLambdaExpression =>
           s"${fullName(f.getParent)}."
-      case f: IASTFunctionDeclarator
-          if ASTStringUtil.getSimpleName(
-            f.getName
-          ).isEmpty && f.getNestedDeclarator != null =>
-          val parentFullName = fullName(f.getParent)
-          val sn             = shortName(f.getNestedDeclarator)
-          val fnWithParent =
-              if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
-          s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
-      case f: IASTFunctionDeclarator =>
-          val parentFullName = fullName(f.getParent)
-          val sn             = ASTStringUtil.getSimpleName(f.getName)
-          val fnWithParent =
-              if parentFullName.nonEmpty then s"${parentFullName}.${sn}" else sn
-          s"$filename:$lineNo:$lineNoEnd:${fnWithParent}"
       case f: IASTFunctionDefinition if f.getDeclarator != null =>
           s"${fullName(f.getParent)}.${ASTStringUtil.getQualifiedName(f.getDeclarator.getName)}"
       case f: IASTFunctionDefinition =>
           s"${fullName(f.getParent)}.${shortName(f)}"
       case e: IASTElaboratedTypeSpecifier =>
           s"${fullName(e.getParent)}.${ASTStringUtil.getSimpleName(e.getName)}"
-      case d: IASTIdExpression              => ASTStringUtil.getSimpleName(d.getName)
-      case _: IASTTranslationUnit           => ""
-      case u: IASTUnaryExpression           => nodeSignature(u.getOperand)
-      case x: ICPPASTQualifiedName          => ASTStringUtil.getQualifiedName(x)
-      case other if other.getParent != null => fullName(other.getParent)
-      case other if other != null           => notHandledYet(other); ""
-      case null                             => ""
+      case d: IASTIdExpression     => ASTStringUtil.getSimpleName(d.getName)
+      case _: IASTTranslationUnit  => ""
+      case u: IASTUnaryExpression  => code(u.getOperand)
+      case x: ICPPASTQualifiedName => ASTStringUtil.getQualifiedName(x)
+      case other if other != null && other.getParent != null => fullName(other.getParent)
+      case other if other != null                            => notHandledYet(other); ""
+      case null                                              => ""
     fixQualifiedName(qualifiedName).stripPrefix(".")
   end fullName
 
@@ -399,6 +402,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     }
 
   protected def isIncludedNode(node: IASTNode): Boolean = fileName(node) != filename
+
+  protected def fileName(node: IASTNode): String =
+    val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
+    SourceFiles.toRelativePath(path, config.inputPath)
+
+  private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
+      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
 
   protected def astsForComments(iASTTranslationUnit: IASTTranslationUnit): Seq[Ast] =
       if config.includeComments then
@@ -491,11 +501,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       case _ => Defines.anyTypeName
     if tpe.isEmpty then Defines.anyTypeName else tpe
   end typeForDeclSpecifier
-
-  private def nullSafeFileLocationLast(node: IASTNode): Option[IASTFileLocation] =
-      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations.lastOption.toArray)).map(
-        _.asFileLocation()
-      )
 
   private def safeGetEvaluation(expr: ICPPASTExpression): Option[ICPPEvaluation] =
       // In case of unresolved includes etc. this may fail throwing an unrecoverable exception

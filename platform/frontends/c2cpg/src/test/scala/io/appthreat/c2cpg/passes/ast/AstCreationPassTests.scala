@@ -22,10 +22,10 @@ class AstCreationPassTests extends AbstractPassTest {
        |char *hello();
        |""".stripMargin) { cpg =>
       inside(cpg.method("foo").l) { case List(foo) =>
-        foo.signature shouldBe "char* foo ()"
+        foo.signature shouldBe "char* ()"
       }
       inside(cpg.method("hello").l) { case List(hello) =>
-        hello.signature shouldBe "char* hello ()"
+        hello.signature shouldBe "char*()"
 
       }
     }
@@ -37,7 +37,7 @@ class AstCreationPassTests extends AbstractPassTest {
       "test.cpp"
     ) { cpg =>
       inside(cpg.method("foo").l) { case List(m) =>
-        m.signature shouldBe "void foo (int,int*)"
+        m.signature shouldBe "void (int,int*)"
         inside(m.parameter.l) { case List(x, args) =>
           x.name shouldBe "x"
           x.code shouldBe "int x"
@@ -124,32 +124,32 @@ class AstCreationPassTests extends AbstractPassTest {
       inside(cpg.method.fullNameExact(lambda1FullName).l) { case List(l1) =>
         l1.name shouldBe lambda1FullName
         l1.code should startWith("[] (int a, int b) -> int")
-        l1.signature shouldBe "int anonymous_lambda_0 (int,int)"
+        l1.signature shouldBe "int (int,int)"
         l1.body.code shouldBe "{ return a + b; }"
       }
 
       inside(cpg.method.fullNameExact(lambda2FullName).l) { case List(l2) =>
         l2.name shouldBe lambda2FullName
         l2.code should startWith("[] (string a, string b) -> string")
-        l2.signature shouldBe "string anonymous_lambda_1 (string,string)"
+        l2.signature shouldBe "string (string,string)"
         l2.body.code shouldBe "{ return a + b; }"
       }
 
       inside(cpg.typeDecl(NamespaceTraversal.globalNamespaceName).head.bindsOut.l) {
         case List(bX: Binding, bY: Binding) =>
           bX.name shouldBe lambda1FullName
-          bX.signature shouldBe "int anonymous_lambda_0 (int,int)"
+          bX.signature shouldBe "int (int,int)"
           inside(bX.refOut.l) { case List(method: Method) =>
             method.name shouldBe lambda1FullName
             method.fullName shouldBe lambda1FullName
-            method.signature shouldBe "int anonymous_lambda_0 (int,int)"
+            method.signature shouldBe "int (int,int)"
           }
           bY.name shouldBe lambda2FullName
-          bY.signature shouldBe "string anonymous_lambda_1 (string,string)"
+          bY.signature shouldBe "string (string,string)"
           inside(bY.refOut.l) { case List(method: Method) =>
             method.name shouldBe lambda2FullName
             method.fullName shouldBe lambda2FullName
-            method.signature shouldBe "string anonymous_lambda_1 (string,string)"
+            method.signature shouldBe "string (string,string)"
           }
       }
     }
@@ -168,7 +168,7 @@ class AstCreationPassTests extends AbstractPassTest {
     ) { cpg =>
       val lambdaName     = "anonymous_lambda_0"
       val lambdaFullName = "Foo.anonymous_lambda_0"
-      val signature      = "int Foo.anonymous_lambda_0 (int,int)"
+      val signature      = "int (int,int)"
 
       cpg.member.name("x").order.l shouldBe List(1)
 
@@ -210,7 +210,7 @@ class AstCreationPassTests extends AbstractPassTest {
     ) { cpg =>
       val lambdaName     = "anonymous_lambda_0"
       val lambdaFullName = "A.B.Foo.anonymous_lambda_0"
-      val signature      = "int A.B.Foo.anonymous_lambda_0 (int,int)"
+      val signature      = "int (int,int)"
 
       cpg.member.name("x").order.l shouldBe List(1)
 
@@ -253,9 +253,9 @@ class AstCreationPassTests extends AbstractPassTest {
       "test.cpp"
     ) { cpg =>
       val lambda1Name = "anonymous_lambda_0"
-      val signature1  = "int anonymous_lambda_0 (int)"
+      val signature1  = "int (int)"
       val lambda2Name = "anonymous_lambda_1"
-      val signature2  = "int anonymous_lambda_1 (int)"
+      val signature2  = "int (int)"
 
       cpg.local.name("x").order.l shouldBe List(1)
       cpg.local.name("foo1").order.l shouldBe List(3)
@@ -1528,7 +1528,7 @@ class AstCreationPassTests extends AbstractPassTest {
               argsAIdent.name shouldBe "a"
               argsAIdent.code shouldBe "a"
               argARef.order shouldBe 2
-              argARef.methodFullName shouldBe "file.c:2:2:methodA.methodA"
+              argARef.methodFullName shouldBe "methodA"
               argARef.typeFullName shouldBe methodA.methodReturn.typeFullName
               val argsBIdent = callB.argument(1).asInstanceOf[Identifier]
               val argBRef = callB.argument(2).asInstanceOf[MethodRef]
@@ -1536,7 +1536,7 @@ class AstCreationPassTests extends AbstractPassTest {
               argsBIdent.code shouldBe "b"
               argsBIdent.name shouldBe "b"
               argBRef.order shouldBe 2
-              argBRef.methodFullName shouldBe "file.c:3:3:methodB.methodB"
+              argBRef.methodFullName shouldBe "methodB"
               argBRef.typeFullName shouldBe methodB.methodReturn.typeFullName
           }
       }
@@ -1986,9 +1986,9 @@ class AstCreationPassTests extends AbstractPassTest {
     "be correct for function edge case" in AstFixture("class Foo { char (*(*x())[5])() }", "test.cpp") { cpg =>
       val List(method) = cpg.method.nameNot("<global>").l
       method.name shouldBe "x"
-      method.fullName shouldBe "test.cpp:1:1:Foo.x"
+      method.fullName shouldBe "Foo.x:char (* (*)[5])()()"
       method.code shouldBe "char (*(*x())[5])()"
-      method.signature shouldBe "char Foo.x ()"
+      method.signature shouldBe "char()"
     }
 
     "be consistent with pointer types" in AstFixture("""
