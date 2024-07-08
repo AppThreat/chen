@@ -10,27 +10,27 @@ import io.appthreat.x2cpg.passes.controlflow.codepencegraph.CdgPass
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext, LayerCreatorOptions}
 
 object ControlFlow:
-    val overlayName: String = "controlflow"
-    val description: String = "Control flow layer (including dominators and CDG edges)"
-    def defaultOpts         = new LayerCreatorOptions()
+  val overlayName: String = "controlflow"
+  val description: String = "Control flow layer (including dominators and CDG edges)"
+  def defaultOpts         = new LayerCreatorOptions()
 
-    def passes(cpg: Cpg): Iterator[CpgPassBase] =
-        val cfgCreationPass = cpg.metaData.language.lastOption match
-            case Some(Languages.GHIDRA) => Iterator[CpgPassBase]()
-            case Some(Languages.LLVM)   => Iterator[CpgPassBase]()
-            case _                      => Iterator[CpgPassBase](new CfgCreationPass(cpg))
-        cfgCreationPass ++ Iterator(new CfgDominatorPass(cpg), new CdgPass(cpg))
+  def passes(cpg: Cpg): Iterator[CpgPassBase] =
+    val cfgCreationPass = cpg.metaData.language.lastOption match
+      case Some(Languages.GHIDRA) => Iterator[CpgPassBase]()
+      case Some(Languages.LLVM)   => Iterator[CpgPassBase]()
+      case _                      => Iterator[CpgPassBase](new CfgCreationPass(cpg))
+    cfgCreationPass ++ Iterator(new CfgDominatorPass(cpg), new CdgPass(cpg))
 
 class ControlFlow extends LayerCreator:
-    override val overlayName: String     = ControlFlow.overlayName
-    override val description: String     = ControlFlow.description
-    override val dependsOn: List[String] = List(Base.overlayName)
+  override val overlayName: String     = ControlFlow.overlayName
+  override val description: String     = ControlFlow.description
+  override val dependsOn: List[String] = List(Base.overlayName)
 
-    override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
-        val cpg = context.cpg
-        ControlFlow.passes(cpg).zipWithIndex.foreach { case (pass, index) =>
-            runPass(pass, context, storeUndoInfo, index)
-        }
+  override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
+    val cpg = context.cpg
+    ControlFlow.passes(cpg).zipWithIndex.foreach { case (pass, index) =>
+        runPass(pass, context, storeUndoInfo, index)
+    }
 
-    // LayerCreators need one-arg constructor, because they're called by reflection from io.appthreat.console.Run
-    def this(optionsUnused: LayerCreatorOptions) = this()
+  // LayerCreators need one-arg constructor, because they're called by reflection from io.appthreat.console.Run
+  def this(optionsUnused: LayerCreatorOptions) = this()

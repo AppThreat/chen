@@ -18,21 +18,21 @@ import soot.Scene
 class AstCreationPass(classFiles: List[ClassFile], cpg: Cpg, config: Config)
     extends ConcurrentWriterCpgPass[ClassFile](cpg):
 
-    val global: Global = new Global()
-    private val logger = LoggerFactory.getLogger(classOf[AstCreationPass])
+  val global: Global = new Global()
+  private val logger = LoggerFactory.getLogger(classOf[AstCreationPass])
 
-    override def generateParts(): Array[? <: AnyRef] = classFiles.toArray
+  override def generateParts(): Array[? <: AnyRef] = classFiles.toArray
 
-    override def runOnPart(builder: DiffGraphBuilder, classFile: ClassFile): Unit =
-        try
-            val sootClass = Scene.v().loadClassAndSupport(classFile.fullyQualifiedClassName.get)
-            sootClass.setApplicationClass()
-            val localDiff = AstCreator(classFile.file.canonicalPath, sootClass, global)(
-              config.schemaValidation
-            ).createAst()
-            builder.absorb(localDiff)
-        catch
-            case e: Exception =>
-                logger.warn(s"Exception on AST creation for ${classFile.file.canonicalPath}", e)
-                Iterator()
+  override def runOnPart(builder: DiffGraphBuilder, classFile: ClassFile): Unit =
+      try
+        val sootClass = Scene.v().loadClassAndSupport(classFile.fullyQualifiedClassName.get)
+        sootClass.setApplicationClass()
+        val localDiff = AstCreator(classFile.file.canonicalPath, sootClass, global)(
+          config.schemaValidation
+        ).createAst()
+        builder.absorb(localDiff)
+      catch
+        case e: Exception =>
+            logger.warn(s"Exception on AST creation for ${classFile.file.canonicalPath}", e)
+            Iterator()
 end AstCreationPass

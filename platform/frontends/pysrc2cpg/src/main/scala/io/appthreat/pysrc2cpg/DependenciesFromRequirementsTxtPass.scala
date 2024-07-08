@@ -21,17 +21,17 @@ Werkzeug==1.0.1
 ```
  */
 class DependenciesFromRequirementsTxtPass(cpg: Cpg) extends CpgPass(cpg):
-    private val logger: Logger =
-        LoggerFactory.getLogger(classOf[DependenciesFromRequirementsTxtPass])
-    override def run(dstGraph: DiffGraphBuilder): Unit =
-        cpg.configFile.filter(_.name.endsWith("requirements.txt")).foreach { node =>
-            val lines = node.content.split("\n")
-            lines.filter(_.matches("^[^=]+==[^=]+$")).foreach { line =>
-                val keyValPattern: Regex = "^([^=]+)==([^=]+)$".r
-                for patternMatch <- keyValPattern.findAllMatchIn(line) do
-                    val name    = patternMatch.group(1)
-                    val version = patternMatch.group(2)
-                    val node = NewDependency().name(name).version(version).dependencyGroupId(name)
-                    dstGraph.addNode(node)
-            }
+  private val logger: Logger =
+      LoggerFactory.getLogger(classOf[DependenciesFromRequirementsTxtPass])
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+      cpg.configFile.filter(_.name.endsWith("requirements.txt")).foreach { node =>
+        val lines = node.content.split("\n")
+        lines.filter(_.matches("^[^=]+==[^=]+$")).foreach { line =>
+          val keyValPattern: Regex = "^([^=]+)==([^=]+)$".r
+          for patternMatch <- keyValPattern.findAllMatchIn(line) do
+            val name    = patternMatch.group(1)
+            val version = patternMatch.group(2)
+            val node    = NewDependency().name(name).version(version).dependencyGroupId(name)
+            dstGraph.addNode(node)
         }
+      }

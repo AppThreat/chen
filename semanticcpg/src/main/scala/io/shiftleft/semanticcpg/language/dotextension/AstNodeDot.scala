@@ -6,7 +6,7 @@ import overflowdb.traversal.*
 
 class AstNodeDot[NodeType <: AstNode](val traversal: Iterator[NodeType]) extends AnyVal:
 
-    def dotAst: Iterator[String] = DotAstGenerator.dotAst(traversal)
+  def dotAst: Iterator[String] = DotAstGenerator.dotAst(traversal)
 
-    def plotDotAst(implicit viewer: ImageViewer): Unit =
-        Shared.plotAndDisplay(dotAst.l, viewer)
+  def plotDotAst(implicit viewer: ImageViewer): Unit =
+      Shared.plotAndDisplay(dotAst.l, viewer)

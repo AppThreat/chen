@@ -7,8 +7,8 @@ import overflowdb.BatchedUpdate
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 object Py2Cpg:
-    case class InputPair(content: String, relFileName: String)
-    type InputProvider = () => InputPair
+  case class InputPair(content: String, relFileName: String)
+  type InputProvider = () => InputPair
 
 /** Entry point for general cpg generation from python code.
   *
@@ -31,32 +31,32 @@ class Py2Cpg(
   requirementsTxt: String = "requirements.txt",
   schemaValidationMode: ValidationMode
 ):
-    private val diffGraph   = new DiffGraphBuilder()
-    private val nodeBuilder = new NodeBuilder(diffGraph)
-    private val edgeBuilder = new EdgeBuilder(diffGraph)
+  private val diffGraph   = new DiffGraphBuilder()
+  private val nodeBuilder = new NodeBuilder(diffGraph)
+  private val edgeBuilder = new EdgeBuilder(diffGraph)
 
-    def buildCpg(): Unit =
-        nodeBuilder.metaNode(Languages.PYTHONSRC, version = "").root(
-          inputPath + java.io.File.separator
+  def buildCpg(): Unit =
+    nodeBuilder.metaNode(Languages.PYTHONSRC, version = "").root(
+      inputPath + java.io.File.separator
+    )
+    val globalNamespaceBlock =
+        nodeBuilder.namespaceBlockNode(
+          Constants.GLOBAL_NAMESPACE,
+          Constants.GLOBAL_NAMESPACE,
+          "N/A"
         )
-        val globalNamespaceBlock =
-            nodeBuilder.namespaceBlockNode(
-              Constants.GLOBAL_NAMESPACE,
-              Constants.GLOBAL_NAMESPACE,
-              "N/A"
-            )
-        nodeBuilder.typeNode(Constants.ANY, Constants.ANY)
-        val anyTypeDecl = nodeBuilder.typeDeclNode(
-          Constants.ANY,
-          Constants.ANY,
-          "N/A",
-          Nil,
-          LineAndColumn(1, 1, 1, 1)
-        )
-        edgeBuilder.astEdge(anyTypeDecl, globalNamespaceBlock, 0)
-        BatchedUpdate.applyDiff(outputCpg.graph, diffGraph)
-        new CodeToCpg(outputCpg, inputProviders, schemaValidationMode).createAndApply()
-        new ConfigFileCreationPass(outputCpg, requirementsTxt).createAndApply()
-        new DependenciesFromRequirementsTxtPass(outputCpg).createAndApply()
-    end buildCpg
+    nodeBuilder.typeNode(Constants.ANY, Constants.ANY)
+    val anyTypeDecl = nodeBuilder.typeDeclNode(
+      Constants.ANY,
+      Constants.ANY,
+      "N/A",
+      Nil,
+      LineAndColumn(1, 1, 1, 1)
+    )
+    edgeBuilder.astEdge(anyTypeDecl, globalNamespaceBlock, 0)
+    BatchedUpdate.applyDiff(outputCpg.graph, diffGraph)
+    new CodeToCpg(outputCpg, inputProviders, schemaValidationMode).createAndApply()
+    new ConfigFileCreationPass(outputCpg, requirementsTxt).createAndApply()
+    new DependenciesFromRequirementsTxtPass(outputCpg).createAndApply()
+  end buildCpg
 end Py2Cpg

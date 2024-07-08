@@ -14,47 +14,47 @@ import org.slf4j.{Logger, LoggerFactory}
   * method stubs.
   */
 class MethodDecoratorPass(cpg: Cpg) extends CpgPass(cpg):
-    import MethodDecoratorPass.logger
+  import MethodDecoratorPass.logger
 
-    private var loggedDeprecatedWarning   = false
-    private var loggedMissingTypeFullName = false
+  private var loggedDeprecatedWarning   = false
+  private var loggedMissingTypeFullName = false
 
-    override def run(dstGraph: DiffGraphBuilder): Unit =
-        cpg.parameter.foreach { parameterIn =>
-            if !parameterIn._parameterLinkOut.hasNext then
-                val parameterOut = nodes
-                    .NewMethodParameterOut()
-                    .code(parameterIn.code)
-                    .order(parameterIn.order)
-                    .index(parameterIn.index)
-                    .name(parameterIn.name)
-                    .evaluationStrategy(parameterIn.evaluationStrategy)
-                    .typeFullName(parameterIn.typeFullName)
-                    .isVariadic(parameterIn.isVariadic)
-                    .lineNumber(parameterIn.lineNumber)
-                    .columnNumber(parameterIn.columnNumber)
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+      cpg.parameter.foreach { parameterIn =>
+          if !parameterIn._parameterLinkOut.hasNext then
+            val parameterOut = nodes
+                .NewMethodParameterOut()
+                .code(parameterIn.code)
+                .order(parameterIn.order)
+                .index(parameterIn.index)
+                .name(parameterIn.name)
+                .evaluationStrategy(parameterIn.evaluationStrategy)
+                .typeFullName(parameterIn.typeFullName)
+                .isVariadic(parameterIn.isVariadic)
+                .lineNumber(parameterIn.lineNumber)
+                .columnNumber(parameterIn.columnNumber)
 
-                val method = parameterIn.astIn.headOption
-                if method.isEmpty then
-                    logger.debug("Parameter without method encountered: " + parameterIn.toString)
-                else
-                    if parameterIn.typeFullName == null then
-                        val evalType = parameterIn.typ
-                        dstGraph.addEdge(parameterOut, evalType, EdgeTypes.EVAL_TYPE)
-                        if !loggedMissingTypeFullName then
-                            logger.debug(
-                              "Using deprecated CPG format with missing TYPE_FULL_NAME on METHOD_PARAMETER_IN nodes."
-                            )
-                            loggedMissingTypeFullName = true
+            val method = parameterIn.astIn.headOption
+            if method.isEmpty then
+              logger.debug("Parameter without method encountered: " + parameterIn.toString)
+            else
+              if parameterIn.typeFullName == null then
+                val evalType = parameterIn.typ
+                dstGraph.addEdge(parameterOut, evalType, EdgeTypes.EVAL_TYPE)
+                if !loggedMissingTypeFullName then
+                  logger.debug(
+                    "Using deprecated CPG format with missing TYPE_FULL_NAME on METHOD_PARAMETER_IN nodes."
+                  )
+                  loggedMissingTypeFullName = true
 
-                    dstGraph.addNode(parameterOut)
-                    dstGraph.addEdge(method.get, parameterOut, EdgeTypes.AST)
-                    dstGraph.addEdge(parameterIn, parameterOut, EdgeTypes.PARAMETER_LINK)
-            else if !loggedDeprecatedWarning then
-                logger.debug("Using deprecated CPG format with PARAMETER_LINK edges")
-                loggedDeprecatedWarning = true
-        }
+              dstGraph.addNode(parameterOut)
+              dstGraph.addEdge(method.get, parameterOut, EdgeTypes.AST)
+              dstGraph.addEdge(parameterIn, parameterOut, EdgeTypes.PARAMETER_LINK)
+          else if !loggedDeprecatedWarning then
+            logger.debug("Using deprecated CPG format with PARAMETER_LINK edges")
+            loggedDeprecatedWarning = true
+      }
 end MethodDecoratorPass
 
 object MethodDecoratorPass:
-    private val logger: Logger = LoggerFactory.getLogger(classOf[MethodDecoratorPass])
+  private val logger: Logger = LoggerFactory.getLogger(classOf[MethodDecoratorPass])

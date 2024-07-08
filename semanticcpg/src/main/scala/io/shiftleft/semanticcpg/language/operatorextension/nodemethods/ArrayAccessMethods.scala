@@ -6,22 +6,22 @@ import io.shiftleft.semanticcpg.language.operatorextension.OpNodes
 
 class ArrayAccessMethods(val arrayAccess: OpNodes.ArrayAccess) extends AnyVal:
 
-    def array: Expression =
-        arrayAccess.argument(1)
+  def array: Expression =
+      arrayAccess.argument(1)
 
-    def offset: Expression = arrayAccess.argument(2)
+  def offset: Expression = arrayAccess.argument(2)
 
-    def subscript: Iterator[Identifier] =
-        offset.ast.isIdentifier
+  def subscript: Iterator[Identifier] =
+      offset.ast.isIdentifier
 
-    def usesConstantOffset: Boolean =
-        offset.ast.isIdentifier.nonEmpty || {
-            val literalIndices = offset.ast.isLiteral.l
-            literalIndices.size == 1
-        }
+  def usesConstantOffset: Boolean =
+      offset.ast.isIdentifier.nonEmpty || {
+          val literalIndices = offset.ast.isLiteral.l
+          literalIndices.size == 1
+      }
 
-    def simpleName: Iterator[String] =
-        arrayAccess.array match
-            case id: Identifier => Iterator.single(id.name)
-            case _              => Iterator.empty
+  def simpleName: Iterator[String] =
+      arrayAccess.array match
+        case id: Identifier => Iterator.single(id.name)
+        case _              => Iterator.empty
 end ArrayAccessMethods

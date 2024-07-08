@@ -15,23 +15,23 @@ import scala.collection.parallel.immutable.ParIterable
 
 class PreprocessorPass(config: Config):
 
-    private val parser = new CdtParser(config)
+  private val parser = new CdtParser(config)
 
-    def run(): ParIterable[String] =
-        SourceFiles.determine(config.inputPath, FileDefaults.SOURCE_FILE_EXTENSIONS).par.flatMap(
-          runOnPart
-        )
+  def run(): ParIterable[String] =
+      SourceFiles.determine(config.inputPath, FileDefaults.SOURCE_FILE_EXTENSIONS).par.flatMap(
+        runOnPart
+      )
 
-    private def preprocessorStatement2String(stmt: IASTPreprocessorStatement): Option[String] =
-        stmt match
-            case s: IASTPreprocessorIfStatement =>
-                Option(s"${s.getCondition.mkString}${if s.taken() then "=true" else ""}")
-            case s: IASTPreprocessorIfdefStatement =>
-                Option(s"${s.getCondition.mkString}${if s.taken() then "=true" else ""}")
-            case _ => None
+  private def preprocessorStatement2String(stmt: IASTPreprocessorStatement): Option[String] =
+      stmt match
+        case s: IASTPreprocessorIfStatement =>
+            Option(s"${s.getCondition.mkString}${if s.taken() then "=true" else ""}")
+        case s: IASTPreprocessorIfdefStatement =>
+            Option(s"${s.getCondition.mkString}${if s.taken() then "=true" else ""}")
+        case _ => None
 
-    private def runOnPart(filename: String): Iterable[String] =
-        parser.preprocessorStatements(Paths.get(filename)).flatMap(
-          preprocessorStatement2String
-        ).toSet
+  private def runOnPart(filename: String): Iterable[String] =
+      parser.preprocessorStatements(Paths.get(filename)).flatMap(
+        preprocessorStatement2String
+      ).toSet
 end PreprocessorPass

@@ -20,17 +20,17 @@ class DataFlowProblem[Node, V](
   * discrepancies.
   */
 trait FlowGraph[Node]:
-    val allNodesReversePostOrder: List[Node]
-    val allNodesPostOrder: List[Node]
-    def succ(node: Node): IterableOnce[Node]
-    def pred(node: Node): IterableOnce[Node]
+  val allNodesReversePostOrder: List[Node]
+  val allNodesPostOrder: List[Node]
+  def succ(node: Node): IterableOnce[Node]
+  def pred(node: Node): IterableOnce[Node]
 
 /** This is actually a function family consisting of one transfer function for each node of the flow
   * graph. Each function maps from the analysis domain to the analysis domain, e.g., for reaching
   * definitions, sets of definitions are mapped to sets of definitions.
   */
 trait TransferFunction[Node, V]:
-    def apply(n: Node, x: V): V
+  def apply(n: Node, x: V): V
 
 /** As a practical optimization, OUT[N] is often initialized to GEN[N]. Moreover, we need a way of
   * specifying boundary conditions such as OUT[ENTRY] = {}. We achieve both by allowing the data
@@ -38,9 +38,9 @@ trait TransferFunction[Node, V]:
   */
 trait InOutInit[Node, V]:
 
-    def initIn: Map[Node, V]
+  def initIn: Map[Node, V]
 
-    def initOut: Map[Node, V]
+  def initOut: Map[Node, V]
 
 /** The solution consists of `in` and `out` for each node of the flow graph. We also attach the
   * problem.

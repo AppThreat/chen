@@ -8,14 +8,14 @@ case class PendingReference(
   stack: Option[ScopeElement]
 ):
 
-    def tryResolve(): Option[ResolvedReference] =
-        var foundVariableOption = Option.empty[NewNode]
-        val stackIterator       = new ScopeElementIterator(stack)
+  def tryResolve(): Option[ResolvedReference] =
+    var foundVariableOption = Option.empty[NewNode]
+    val stackIterator       = new ScopeElementIterator(stack)
 
-        while stackIterator.hasNext && foundVariableOption.isEmpty do
-            val scopeElement = stackIterator.next()
-            foundVariableOption = scopeElement.nameToVariableNode.get(variableName)
+    while stackIterator.hasNext && foundVariableOption.isEmpty do
+      val scopeElement = stackIterator.next()
+      foundVariableOption = scopeElement.nameToVariableNode.get(variableName)
 
-        foundVariableOption.map { variableNodeId =>
-            ResolvedReference(variableNodeId, this)
-        }
+    foundVariableOption.map { variableNodeId =>
+        ResolvedReference(variableNodeId, this)
+    }

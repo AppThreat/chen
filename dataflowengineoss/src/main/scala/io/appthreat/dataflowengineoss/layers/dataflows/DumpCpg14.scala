@@ -11,21 +11,21 @@ case class Cpg14DumpOptions(var outDir: String) extends LayerCreatorOptions {}
 
 object DumpCpg14:
 
-    val overlayName = "dumpCpg14"
+  val overlayName = "dumpCpg14"
 
-    val description = "Dump Code Property Graph (2014) to out/"
+  val description = "Dump Code Property Graph (2014) to out/"
 
-    def defaultOpts: Cpg14DumpOptions = Cpg14DumpOptions("out")
+  def defaultOpts: Cpg14DumpOptions = Cpg14DumpOptions("out")
 
 class DumpCpg14(options: Cpg14DumpOptions)(implicit semantics: Semantics = DefaultSemantics())
     extends LayerCreator:
-    override val overlayName: String       = DumpDdg.overlayName
-    override val description: String       = DumpDdg.description
-    override val storeOverlayName: Boolean = false
+  override val overlayName: String       = DumpDdg.overlayName
+  override val description: String       = DumpDdg.description
+  override val storeOverlayName: Boolean = false
 
-    override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
-        val cpg = context.cpg
-        cpg.method.zipWithIndex.foreach { case (method, i) =>
-            val str = method.dotCpg14.head
-            (File(options.outDir) / s"$i-cpg.dot").write(str)
-        }
+  override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
+    val cpg = context.cpg
+    cpg.method.zipWithIndex.foreach { case (method, i) =>
+        val str = method.dotCpg14.head
+        (File(options.outDir) / s"$i-cpg.dot").write(str)
+    }

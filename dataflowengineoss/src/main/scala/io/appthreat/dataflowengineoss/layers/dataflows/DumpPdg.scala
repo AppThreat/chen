@@ -11,21 +11,21 @@ case class PdgDumpOptions(var outDir: String) extends LayerCreatorOptions {}
 
 object DumpPdg:
 
-    val overlayName = "dumpPdg"
+  val overlayName = "dumpPdg"
 
-    val description = "Dump program dependence graph to out/"
+  val description = "Dump program dependence graph to out/"
 
-    def defaultOpts: PdgDumpOptions = PdgDumpOptions("out")
+  def defaultOpts: PdgDumpOptions = PdgDumpOptions("out")
 
 class DumpPdg(options: PdgDumpOptions)(implicit semantics: Semantics = DefaultSemantics())
     extends LayerCreator:
-    override val overlayName: String       = DumpPdg.overlayName
-    override val description: String       = DumpPdg.description
-    override val storeOverlayName: Boolean = false
+  override val overlayName: String       = DumpPdg.overlayName
+  override val description: String       = DumpPdg.description
+  override val storeOverlayName: Boolean = false
 
-    override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
-        val cpg = context.cpg
-        cpg.method.zipWithIndex.foreach { case (method, i) =>
-            val str = method.dotPdg.head
-            (File(options.outDir) / s"$i-pdg.dot").write(str)
-        }
+  override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
+    val cpg = context.cpg
+    cpg.method.zipWithIndex.foreach { case (method, i) =>
+        val str = method.dotPdg.head
+        (File(options.outDir) / s"$i-pdg.dot").write(str)
+    }

@@ -13,8 +13,8 @@ import io.shiftleft.semanticcpg.language.*
   */
 class ParameterIndexCompatPass(cpg: Cpg) extends CpgPass(cpg):
 
-    override def run(diffGraph: BatchedUpdate.DiffGraphBuilder): Unit =
-        cpg.parameter.foreach { param =>
-            if param.index == PropertyDefaults.Index then
-                diffGraph.setNodeProperty(param, PropertyNames.INDEX, param.order)
-        }
+  override def run(diffGraph: BatchedUpdate.DiffGraphBuilder): Unit =
+      cpg.parameter.foreach { param =>
+          if param.index == PropertyDefaults.Index then
+            diffGraph.setNodeProperty(param, PropertyNames.INDEX, param.order)
+      }

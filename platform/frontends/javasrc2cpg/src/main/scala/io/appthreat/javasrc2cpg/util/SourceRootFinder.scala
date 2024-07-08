@@ -14,75 +14,75 @@ import better.files.File
   */
 object SourceRootFinder:
 
-    private val excludes: Set[String] = Set("test", ".mvn", ".git")
+  private val excludes: Set[String] = Set("test", ".mvn", ".git")
 
-    private def statePreSrc(currentDir: File): List[File] =
-        currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
-            child.name match
-                case name if excludes.contains(name) => Nil
-                case "src"                           => stateSrc(child)
-                case "main"                          => statePostSrc(child)
-                case "java"                          => child :: Nil
-                case _                               => statePreSrc(child)
-        }
-
-    private def stateSrc(currentDir: File): List[File] =
-        val mainChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
-            child.name match
-                case name if excludes.contains(name) => Nil
-                case "main"                          => statePostSrc(child)
-                case _                               => Nil
-        }
-
-        val nonMainChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
-            child.name match
-                case name if excludes.contains(name) => Nil
-                case "main"                          => Nil
-                case _                               => statePostSrc(child)
-        }
-
-        val hasExcludedDir = currentDir.children.filter(_.isDirectory).toList.exists(file =>
-            excludes.contains(file.name)
-        )
-
-        (mainChildren, nonMainChildren) match
-            case (Nil, Nil) =>
-                // probably a src/test directory in a tests-only module
-                if hasExcludedDir then Nil else List(currentDir)
-            case (mainC, Nil) =>
-                // probably follows the common src/main/<packages> structure
-                mainC
-            case (Nil, _) =>
-                // the non-main children are probably package roots
-                List(currentDir)
-            case (mainC, nonMC) =>
-                // main a package root here?
-                mainC ++ nonMC
-    end stateSrc
-
-    private def statePostSrc(currentDir: File): List[File] =
-        val javaChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
-            child.name match
-                case name if excludes.contains(name) => Nil
-                case _                               => child :: Nil
-        }
-
-        javaChildren match
-            case Nil => currentDir :: Nil
-            case _   => javaChildren
-
-    private def listBottomLevelSubdirectories(currentDir: File): List[File] =
-        val srcDirs = currentDir.name match
+  private def statePreSrc(currentDir: File): List[File] =
+      currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
+          child.name match
             case name if excludes.contains(name) => Nil
-            case "src"                           => stateSrc(currentDir)
-            case "main"                          => statePostSrc(currentDir)
-            case "java"                          => List(currentDir)
-            case _                               => statePreSrc(currentDir)
+            case "src"                           => stateSrc(child)
+            case "main"                          => statePostSrc(child)
+            case "java"                          => child :: Nil
+            case _                               => statePreSrc(child)
+      }
 
-        srcDirs match
-            case Nil => List(currentDir)
-            case _   => srcDirs
+  private def stateSrc(currentDir: File): List[File] =
+    val mainChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
+        child.name match
+          case name if excludes.contains(name) => Nil
+          case "main"                          => statePostSrc(child)
+          case _                               => Nil
+    }
 
-    def getSourceRoots(codeDir: String): List[String] =
-        listBottomLevelSubdirectories(File(codeDir)).map(_.pathAsString)
+    val nonMainChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
+        child.name match
+          case name if excludes.contains(name) => Nil
+          case "main"                          => Nil
+          case _                               => statePostSrc(child)
+    }
+
+    val hasExcludedDir = currentDir.children.filter(_.isDirectory).toList.exists(file =>
+        excludes.contains(file.name)
+    )
+
+    (mainChildren, nonMainChildren) match
+      case (Nil, Nil) =>
+          // probably a src/test directory in a tests-only module
+          if hasExcludedDir then Nil else List(currentDir)
+      case (mainC, Nil) =>
+          // probably follows the common src/main/<packages> structure
+          mainC
+      case (Nil, _) =>
+          // the non-main children are probably package roots
+          List(currentDir)
+      case (mainC, nonMC) =>
+          // main a package root here?
+          mainC ++ nonMC
+  end stateSrc
+
+  private def statePostSrc(currentDir: File): List[File] =
+    val javaChildren = currentDir.children.filter(_.isDirectory).toList.flatMap { child =>
+        child.name match
+          case name if excludes.contains(name) => Nil
+          case _                               => child :: Nil
+    }
+
+    javaChildren match
+      case Nil => currentDir :: Nil
+      case _   => javaChildren
+
+  private def listBottomLevelSubdirectories(currentDir: File): List[File] =
+    val srcDirs = currentDir.name match
+      case name if excludes.contains(name) => Nil
+      case "src"                           => stateSrc(currentDir)
+      case "main"                          => statePostSrc(currentDir)
+      case "java"                          => List(currentDir)
+      case _                               => statePreSrc(currentDir)
+
+    srcDirs match
+      case Nil => List(currentDir)
+      case _   => srcDirs
+
+  def getSourceRoots(codeDir: String): List[String] =
+      listBottomLevelSubdirectories(File(codeDir)).map(_.pathAsString)
 end SourceRootFinder

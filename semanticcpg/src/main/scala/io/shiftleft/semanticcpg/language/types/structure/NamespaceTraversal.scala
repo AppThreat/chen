@@ -7,26 +7,26 @@ import io.shiftleft.semanticcpg.language.*
   */
 class NamespaceTraversal(val traversal: Iterator[Namespace]) extends AnyVal:
 
-    /** The type declarations defined in this namespace
-      */
-    def typeDecl: Iterator[TypeDecl] =
-        traversal.flatMap(_.refIn).flatMap(_._typeDeclViaAstOut)
+  /** The type declarations defined in this namespace
+    */
+  def typeDecl: Iterator[TypeDecl] =
+      traversal.flatMap(_.refIn).flatMap(_._typeDeclViaAstOut)
 
-    /** Methods defined in this namespace
-      */
-    def method: Iterator[Method] =
-        traversal.flatMap(_.refIn).flatMap(_._methodViaAstOut)
+  /** Methods defined in this namespace
+    */
+  def method: Iterator[Method] =
+      traversal.flatMap(_.refIn).flatMap(_._methodViaAstOut)
 
-    /** External namespaces - any namespaces which contain one or more external type.
-      */
-    def external: Iterator[Namespace] =
-        traversal.where(_.typeDecl.external)
+  /** External namespaces - any namespaces which contain one or more external type.
+    */
+  def external: Iterator[Namespace] =
+      traversal.where(_.typeDecl.external)
 
-    /** Internal namespaces - any namespaces which contain one or more internal type
-      */
-    def internal: Iterator[Namespace] =
-        traversal.where(_.typeDecl.internal)
+  /** Internal namespaces - any namespaces which contain one or more internal type
+    */
+  def internal: Iterator[Namespace] =
+      traversal.where(_.typeDecl.internal)
 end NamespaceTraversal
 
 object NamespaceTraversal:
-    val globalNamespaceName = "<global>"
+  val globalNamespaceName = "<global>"

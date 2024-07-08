@@ -5,6 +5,6 @@ import io.shiftleft.semanticcpg.dotgenerator.{DotCallGraphGenerator, DotTypeHier
 
 class InterproceduralNodeDot(val cpg: Cpg) extends AnyVal:
 
-    def dotCallGraph: Iterator[String] = DotCallGraphGenerator.dotCallGraph(cpg)
+  def dotCallGraph: Iterator[String] = DotCallGraphGenerator.dotCallGraph(cpg)
 
-    def dotTypeHierarchy: Iterator[String] = DotTypeHierarchyGenerator.dotTypeHierarchy(cpg)
+  def dotTypeHierarchy: Iterator[String] = DotTypeHierarchyGenerator.dotTypeHierarchy(cpg)

@@ -11,59 +11,59 @@ import io.shiftleft.semanticcpg.language.*
   */
 class ConstClosurePass(cpg: Cpg) extends CpgPass(cpg):
 
-    // Keeps track of how many times an identifier has been on the LHS of an assignment, by name
-    private lazy val identifiersAssignedCount: Map[String, Int] =
-        cpg.assignment.target.collectAll[Identifier].name.groupCount
+  // Keeps track of how many times an identifier has been on the LHS of an assignment, by name
+  private lazy val identifiersAssignedCount: Map[String, Int] =
+      cpg.assignment.target.collectAll[Identifier].name.groupCount
 
-    override def run(diffGraph: DiffGraphBuilder): Unit =
-        handleConstClosures(diffGraph)
-        handleClosuresDefinedAtExport(diffGraph)
-        handleClosuresAssignedToMutableVar(diffGraph)
+  override def run(diffGraph: DiffGraphBuilder): Unit =
+    handleConstClosures(diffGraph)
+    handleClosuresDefinedAtExport(diffGraph)
+    handleClosuresAssignedToMutableVar(diffGraph)
 
-    private def handleConstClosures(diffGraph: DiffGraphBuilder): Unit =
-        for
-            assignment <- cpg.assignment
-            name       <- assignment.filter(_.code.startsWith("const ")).target.isIdentifier.name
-            methodRef  <- assignment.start.source.isMethodRef
-            method     <- methodRef.referencedMethod
-            enclosingMethod <- assignment.start.method.fullName
-        do
-            updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
+  private def handleConstClosures(diffGraph: DiffGraphBuilder): Unit =
+      for
+        assignment      <- cpg.assignment
+        name            <- assignment.filter(_.code.startsWith("const ")).target.isIdentifier.name
+        methodRef       <- assignment.start.source.isMethodRef
+        method          <- methodRef.referencedMethod
+        enclosingMethod <- assignment.start.method.fullName
+      do
+        updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
 
-    private def handleClosuresDefinedAtExport(diffGraph: DiffGraphBuilder): Unit =
-        for
-            assignment <- cpg.assignment
-            name <- assignment.filter(
-              _.code.startsWith("export")
-            ).target.isCall.argument.isFieldIdentifier.canonicalName.l
-            methodRef       <- assignment.start.source.ast.isMethodRef
-            method          <- methodRef.referencedMethod
-            enclosingMethod <- assignment.start.method.fullName
-        do
-            updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
+  private def handleClosuresDefinedAtExport(diffGraph: DiffGraphBuilder): Unit =
+      for
+        assignment <- cpg.assignment
+        name <- assignment.filter(
+          _.code.startsWith("export")
+        ).target.isCall.argument.isFieldIdentifier.canonicalName.l
+        methodRef       <- assignment.start.source.ast.isMethodRef
+        method          <- methodRef.referencedMethod
+        enclosingMethod <- assignment.start.method.fullName
+      do
+        updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
 
-    private def handleClosuresAssignedToMutableVar(diffGraph: DiffGraphBuilder): Unit =
-        // Handle closures assigned to mutable variables
-        for
-            assignment      <- cpg.assignment
-            name            <- assignment.start.code("^(var|let) .*").target.isIdentifier.name
-            methodRef       <- assignment.start.source.ast.isMethodRef
-            method          <- methodRef.referencedMethod
-            enclosingMethod <- assignment.start.method.fullName
-        do
-            // Conservatively update closures, i.e, if we only find 1 assignment where this variable is on the LHS
-            if identifiersAssignedCount.getOrElse(name, -1) == 1 then
-                updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
+  private def handleClosuresAssignedToMutableVar(diffGraph: DiffGraphBuilder): Unit =
+      // Handle closures assigned to mutable variables
+      for
+        assignment      <- cpg.assignment
+        name            <- assignment.start.code("^(var|let) .*").target.isIdentifier.name
+        methodRef       <- assignment.start.source.ast.isMethodRef
+        method          <- methodRef.referencedMethod
+        enclosingMethod <- assignment.start.method.fullName
+      do
+        // Conservatively update closures, i.e, if we only find 1 assignment where this variable is on the LHS
+        if identifiersAssignedCount.getOrElse(name, -1) == 1 then
+          updateClosures(diffGraph, method, methodRef, enclosingMethod, name)
 
-    private def updateClosures(
-      diffGraph: DiffGraphBuilder,
-      method: Method,
-      methodRef: MethodRef,
-      enclosingMethod: String,
-      name: String
-    ): Unit =
-        val fullName = s"$enclosingMethod:$name"
-        diffGraph.setNodeProperty(methodRef, PropertyNames.METHOD_FULL_NAME, fullName)
-        diffGraph.setNodeProperty(method, PropertyNames.NAME, name)
-        diffGraph.setNodeProperty(method, PropertyNames.FULL_NAME, fullName)
+  private def updateClosures(
+    diffGraph: DiffGraphBuilder,
+    method: Method,
+    methodRef: MethodRef,
+    enclosingMethod: String,
+    name: String
+  ): Unit =
+    val fullName = s"$enclosingMethod:$name"
+    diffGraph.setNodeProperty(methodRef, PropertyNames.METHOD_FULL_NAME, fullName)
+    diffGraph.setNodeProperty(method, PropertyNames.NAME, name)
+    diffGraph.setNodeProperty(method, PropertyNames.FULL_NAME, fullName)
 end ConstClosurePass

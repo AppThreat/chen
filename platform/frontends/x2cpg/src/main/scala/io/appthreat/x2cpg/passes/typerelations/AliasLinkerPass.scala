@@ -8,16 +8,16 @@ import io.appthreat.x2cpg.utils.LinkingUtil
 
 class AliasLinkerPass(cpg: Cpg) extends CpgPass(cpg) with LinkingUtil:
 
-    override def run(dstGraph: DiffGraphBuilder): Unit =
-        // Create ALIAS_OF edges from TYPE_DECL nodes to TYPE
-        linkToMultiple(
-          cpg,
-          srcLabels = List(NodeTypes.TYPE_DECL),
-          dstNodeLabel = NodeTypes.TYPE,
-          edgeType = EdgeTypes.ALIAS_OF,
-          dstNodeMap = typeFullNameToNode(cpg, _),
-          getDstFullNames = (srcNode: TypeDecl) =>
-              srcNode.aliasTypeFullName,
-          dstFullNameKey = PropertyNames.ALIAS_TYPE_FULL_NAME,
-          dstGraph
-        )
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+      // Create ALIAS_OF edges from TYPE_DECL nodes to TYPE
+      linkToMultiple(
+        cpg,
+        srcLabels = List(NodeTypes.TYPE_DECL),
+        dstNodeLabel = NodeTypes.TYPE,
+        edgeType = EdgeTypes.ALIAS_OF,
+        dstNodeMap = typeFullNameToNode(cpg, _),
+        getDstFullNames = (srcNode: TypeDecl) =>
+            srcNode.aliasTypeFullName,
+        dstFullNameKey = PropertyNames.ALIAS_TYPE_FULL_NAME,
+        dstGraph
+      )

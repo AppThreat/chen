@@ -14,59 +14,59 @@ class QueryDatabase(
   namespace: String = "io.appthreat.scanners"
 ):
 
-    /** Determine all bundles on the class path
-      */
-    def allBundles: List[Class[? <: QueryBundle]] =
-        new Reflections(
-          new ConfigurationBuilder().setUrls(
-            ClasspathHelper.forPackage(
-              namespace,
-              ClasspathHelper.contextClassLoader(),
-              ClasspathHelper.staticClassLoader()
-            )
+  /** Determine all bundles on the class path
+    */
+  def allBundles: List[Class[? <: QueryBundle]] =
+      new Reflections(
+        new ConfigurationBuilder().setUrls(
+          ClasspathHelper.forPackage(
+            namespace,
+            ClasspathHelper.contextClassLoader(),
+            ClasspathHelper.staticClassLoader()
           )
-        ).getSubTypesOf(classOf[QueryBundle]).asScala.toList
+        )
+      ).getSubTypesOf(classOf[QueryBundle]).asScala.toList
 
-    /** Determine queries across all bundles
-      */
-    def allQueries: List[Query] =
-        allBundles.flatMap { bundle =>
-            queriesInBundle(bundle)
-        }
+  /** Determine queries across all bundles
+    */
+  def allQueries: List[Query] =
+      allBundles.flatMap { bundle =>
+          queriesInBundle(bundle)
+      }
 
-    /** Return all queries inside `bundle`.
-      */
-    def queriesInBundle[T <: QueryBundle](bundle: Class[T]): List[Query] =
-        val instance = bundle.getField("MODULE$").get(null)
-        queryCreatorsInBundle(bundle).map { case (method, args) =>
-            val query           = method.invoke(instance, args*).asInstanceOf[Query]
-            val bundleNamespace = bundle.getPackageName
-            // the namespace currently looks like `io.appthreat.scanners.c.CopyLoops`
-            val namespaceParts = bundleNamespace.split('.')
-            val language =
-                if bundleNamespace.startsWith("io.appthreat.chen.scanners") then
-                    namespaceParts(4)
-                else if namespaceParts.length > 3 then
-                    namespaceParts(3)
-                else
-                    ""
-            query.copy(language = language)
-        }
+  /** Return all queries inside `bundle`.
+    */
+  def queriesInBundle[T <: QueryBundle](bundle: Class[T]): List[Query] =
+    val instance = bundle.getField("MODULE$").get(null)
+    queryCreatorsInBundle(bundle).map { case (method, args) =>
+        val query           = method.invoke(instance, args*).asInstanceOf[Query]
+        val bundleNamespace = bundle.getPackageName
+        // the namespace currently looks like `io.appthreat.scanners.c.CopyLoops`
+        val namespaceParts = bundleNamespace.split('.')
+        val language =
+            if bundleNamespace.startsWith("io.appthreat.chen.scanners") then
+              namespaceParts(4)
+            else if namespaceParts.length > 3 then
+              namespaceParts(3)
+            else
+              ""
+        query.copy(language = language)
+    }
 
-    /** Obtain all (method, args) pairs from bundle, making it possible to override default args
-      * before creating the query.
-      */
-    def queryCreatorsInBundle[T <: QueryBundle](bundle: Class[T]): List[(Method, List[Any])] =
-        val methods = bundle.getMethods.filter(_.getAnnotations.exists(_.isInstanceOf[q])).toList
-        methods.map { method =>
-            val args = defaultArgs(method, bundle)
-            (method, args)
-        }
+  /** Obtain all (method, args) pairs from bundle, making it possible to override default args
+    * before creating the query.
+    */
+  def queryCreatorsInBundle[T <: QueryBundle](bundle: Class[T]): List[(Method, List[Any])] =
+    val methods = bundle.getMethods.filter(_.getAnnotations.exists(_.isInstanceOf[q])).toList
+    methods.map { method =>
+      val args = defaultArgs(method, bundle)
+      (method, args)
+    }
 
-    private def defaultArgs[T <: QueryBundle](method: Method, bundle: Class[T]): List[Any] =
-        method.getParameters.zipWithIndex.map { case (parameter, index) =>
-            defaultArgumentProvider.defaultArgument(method, bundle, parameter, index)
-        }.toList
+  private def defaultArgs[T <: QueryBundle](method: Method, bundle: Class[T]): List[Any] =
+      method.getParameters.zipWithIndex.map { case (parameter, index) =>
+          defaultArgumentProvider.defaultArgument(method, bundle, parameter, index)
+      }.toList
 end QueryDatabase
 
 /** Joern and Ocular require different implicits to be present, and when we encounter these
@@ -77,22 +77,22 @@ end QueryDatabase
   */
 class DefaultArgumentProvider:
 
-    def typeSpecificDefaultArg(@unused argTypeFullName: String): Option[Any] =
-        None
+  def typeSpecificDefaultArg(@unused argTypeFullName: String): Option[Any] =
+      None
 
-    final def defaultArgument(method: Method, bundle: Class[?], parameter: Parameter, i: Int): Any =
-        val instance         = bundle.getField("MODULE$").get(null)
-        val defaultArgOption = typeSpecificDefaultArg(parameter.getType.getTypeName)
-        defaultArgOption.getOrElse {
-            val defaultMethodName = s"${method.getName}$$default$$${i + 1}"
-            try
-                val defaultMethod = bundle.getDeclaredMethod(defaultMethodName)
-                val defaultValue  = defaultMethod.invoke(instance)
-                defaultValue
-            catch
-                case e: NoSuchMethodException =>
-                    throw new RuntimeException(
-                      s"No default value found for parameter `${parameter.toString}` of query creator method `$method` "
-                    )
-        }
+  final def defaultArgument(method: Method, bundle: Class[?], parameter: Parameter, i: Int): Any =
+    val instance         = bundle.getField("MODULE$").get(null)
+    val defaultArgOption = typeSpecificDefaultArg(parameter.getType.getTypeName)
+    defaultArgOption.getOrElse {
+        val defaultMethodName = s"${method.getName}$$default$$${i + 1}"
+        try
+          val defaultMethod = bundle.getDeclaredMethod(defaultMethodName)
+          val defaultValue  = defaultMethod.invoke(instance)
+          defaultValue
+        catch
+          case e: NoSuchMethodException =>
+              throw new RuntimeException(
+                s"No default value found for parameter `${parameter.toString}` of query creator method `$method` "
+              )
+    }
 end DefaultArgumentProvider

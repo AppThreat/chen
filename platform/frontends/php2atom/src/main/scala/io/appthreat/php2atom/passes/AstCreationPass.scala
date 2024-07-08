@@ -16,35 +16,35 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
   withSchemaValidation: ValidationMode
 ) extends ConcurrentWriterCpgPass[String](cpg):
 
-    private val logger = LoggerFactory.getLogger(this.getClass)
+  private val logger = LoggerFactory.getLogger(this.getClass)
 
-    val PhpSourceFileExtensions: Set[String] = Set(".php")
+  val PhpSourceFileExtensions: Set[String] = Set(".php")
 
-    override def generateParts(): Array[String] = SourceFiles
-        .determine(
-          config.inputPath,
-          PhpSourceFileExtensions
-        )
-        .toArray
+  override def generateParts(): Array[String] = SourceFiles
+      .determine(
+        config.inputPath,
+        PhpSourceFileExtensions
+      )
+      .toArray
 
-    override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
-        val relativeFilename = if filename == config.inputPath then
-            File(filename).name
-        else
-            File(config.inputPath).relativize(File(filename)).toString
-        if !config.ignoredFilesRegex.matches(
-              relativeFilename
-            ) && !config.defaultIgnoredFilesRegex.exists(_.matches(relativeFilename))
-        then
-            parser.parseFile(filename, config.phpIni) match
-                case Some(parseResult) =>
-                    diffGraph.absorb(
-                      new AstCreator(relativeFilename, parseResult)(
-                        config.schemaValidation
-                      ).createAst()
-                    )
+  override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
+    val relativeFilename = if filename == config.inputPath then
+      File(filename).name
+    else
+      File(config.inputPath).relativize(File(filename)).toString
+    if !config.ignoredFilesRegex.matches(
+        relativeFilename
+      ) && !config.defaultIgnoredFilesRegex.exists(_.matches(relativeFilename))
+    then
+      parser.parseFile(filename, config.phpIni) match
+        case Some(parseResult) =>
+            diffGraph.absorb(
+              new AstCreator(relativeFilename, parseResult)(
+                config.schemaValidation
+              ).createAst()
+            )
 
-                case None =>
-                    logger.debug(s"Could not parse file $filename. Results will be missing!")
-    end runOnPart
+        case None =>
+            logger.debug(s"Could not parse file $filename. Results will be missing!")
+  end runOnPart
 end AstCreationPass

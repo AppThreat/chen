@@ -4,4 +4,4 @@ import java.util.concurrent.ConcurrentHashMap
 
 class Global:
 
-    val usedTypes: ConcurrentHashMap[String, Boolean] = new ConcurrentHashMap()
+  val usedTypes: ConcurrentHashMap[String, Boolean] = new ConcurrentHashMap()

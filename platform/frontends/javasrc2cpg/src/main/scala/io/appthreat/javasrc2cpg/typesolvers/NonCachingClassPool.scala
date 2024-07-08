@@ -10,5 +10,5 @@ import scala.annotation.nowarn
   * the search list.
   */
 class NonCachingClassPool extends ClassPool(false):
-    @nowarn override def cacheCtClass(className: String, ctClass: CtClass, dynamic: Boolean): Unit =
-        ()
+  @nowarn override def cacheCtClass(className: String, ctClass: CtClass, dynamic: Boolean): Unit =
+      ()

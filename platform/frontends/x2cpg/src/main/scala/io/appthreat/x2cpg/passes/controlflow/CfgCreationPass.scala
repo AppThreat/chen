@@ -17,9 +17,9 @@ import io.appthreat.x2cpg.passes.controlflow.cfgcreation.CfgCreator
   */
 class CfgCreationPass(cpg: Cpg) extends ConcurrentWriterCpgPass[Method](cpg):
 
-    override def generateParts(): Array[Method] = cpg.method.toArray
+  override def generateParts(): Array[Method] = cpg.method.toArray
 
-    override def runOnPart(diffGraph: DiffGraphBuilder, method: Method): Unit =
-        val localDiff = new DiffGraphBuilder
-        new CfgCreator(method, localDiff).run()
-        diffGraph.absorb(localDiff)
+  override def runOnPart(diffGraph: DiffGraphBuilder, method: Method): Unit =
+    val localDiff = new DiffGraphBuilder
+    new CfgCreator(method, localDiff).run()
+    diffGraph.absorb(localDiff)

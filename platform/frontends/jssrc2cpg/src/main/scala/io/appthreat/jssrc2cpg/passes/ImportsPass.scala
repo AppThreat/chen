@@ -18,10 +18,10 @@ import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.Assignment
   */
 class ImportsPass(cpg: Cpg) extends XImportsPass(cpg):
 
-    override protected val importCallName: String = "require"
+  override protected val importCallName: String = "require"
 
-    override protected def importCallToPart(x: Call): Iterator[(Call, Assignment)] =
-        x.inAssignment.codeNot("var .*").map(y => (x, y))
+  override protected def importCallToPart(x: Call): Iterator[(Call, Assignment)] =
+      x.inAssignment.codeNot("var .*").map(y => (x, y))
 
-    override protected def importedEntityFromCall(call: Call): String =
-        X2Cpg.stripQuotes(call.argument(1).code)
+  override protected def importedEntityFromCall(call: Call): String =
+      X2Cpg.stripQuotes(call.argument(1).code)
