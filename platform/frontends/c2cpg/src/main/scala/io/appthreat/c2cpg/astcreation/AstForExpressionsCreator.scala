@@ -132,10 +132,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 val fullName =
                     if function.isExternC then
                       name
-                    else {
-                        val fullNameNoSig = function.getQualifiedName.mkString(".")
-                        s"$fullNameNoSig:$signature"
-                    }
+                    else
+                      val fullNameNoSig = function.getQualifiedName.mkString(".")
+                      s"$fullNameNoSig:$signature"
 
                 val dispatchType = DispatchTypes.STATIC_DISPATCH
 
@@ -168,8 +167,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                     if method.isVirtual || method.isPureVirtual then
                       (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
                     else
-                      (DispatchTypes.STATIC_DISPATCH, None
-                    )
+                      (DispatchTypes.STATIC_DISPATCH, None)
                 val callCpgNode = callNode(
                   call,
                   code(call),
@@ -415,18 +413,17 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       !unary.getOperand.isInstanceOf[IASTExpressionList]
     then
       nullSafeAst(unary.getOperand)
-    else {
-        val cpgUnary =
-            callNode(
-              unary,
-              code(unary),
-              operatorMethod,
-              operatorMethod,
-              DispatchTypes.STATIC_DISPATCH
-            )
-        val operand = nullSafeAst(unary.getOperand)
-        callAst(cpgUnary, List(operand))
-    }
+    else
+      val cpgUnary =
+          callNode(
+            unary,
+            code(unary),
+            operatorMethod,
+            operatorMethod,
+            DispatchTypes.STATIC_DISPATCH
+          )
+      val operand = nullSafeAst(unary.getOperand)
+      callAst(cpgUnary, List(operand))
   end astForUnaryExpression
 
   private def astForTypeIdExpression(typeId: IASTTypeIdExpression): Ast =
@@ -510,12 +507,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     if newExpression.isArrayAllocation then
       val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
       Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
-    else {
-        val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
-        val args = astsForConstructorInitializer(newExpression.getInitializer) ++
-            astsForInitializerPlacements(newExpression.getPlacementArguments)
-        callAst(cpgNewExpression, List(cpgTypeId) ++ args)
-    }
+    else
+      val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
+      val args = astsForConstructorInitializer(newExpression.getInitializer) ++
+          astsForInitializerPlacements(newExpression.getPlacementArguments)
+      callAst(cpgNewExpression, List(cpgTypeId) ++ args)
 
   private def astForDeleteExpression(delExpression: ICPPASTDeleteExpression): Ast =
     val name = Operators.delete
