@@ -1,10 +1,12 @@
 package io.appthreat.c2cpg.passes.ast
 
+import io.appthreat.c2cpg.astcreation.Defines
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.appthreat.x2cpg.Defines as X2CpgDefines
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.Call
 import io.shiftleft.codepropertygraph.generated.nodes.Literal
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
 class CallTests extends CCodeToCpgSuite {
@@ -81,7 +83,7 @@ class CallTests extends CCodeToCpgSuite {
     )
     "have correct names for static methods / calls" in {
       cpg.method.name("square").fullName.head shouldBe "square:int(int)"
-      cpg.method.name("call_square").call.methodFullName.head shouldBe "square"
+      cpg.method.name("call_square").call.methodFullName.head shouldBe "square:int(int)"
     }
   }
 
@@ -103,7 +105,7 @@ class CallTests extends CCodeToCpgSuite {
     )
     "have correct names for static methods / calls from classes" in {
       cpg.method.name("square").fullName.head shouldBe "A.square:int(int)"
-      cpg.method.name("call_square").call.methodFullName.head shouldBe "A.square:int(int).A.square"
+      cpg.method.name("call_square").call.methodFullName.head shouldBe "A.square:int(int)"
     }
   }
 
@@ -121,10 +123,452 @@ class CallTests extends CCodeToCpgSuite {
     )
     "have correct type full names for calls" in {
       val List(bCall) = cpg.call.l
-      bCall.methodFullName shouldBe "A.b"
+      bCall.methodFullName shouldBe "A.b:void()"
       val List(bMethod) = cpg.method.name("b").internal.l
       bMethod.fullName shouldBe "A.b:void()"
     }
   }
 
+  "CallTest 6" should {
+    val cpg = code(
+      """
+        |class A {
+        |  public:
+        |    void foo1(){
+        |      foo2();
+        |    }
+        |	static void foo2() {}
+        |};
+        |
+        |int main() {
+        |  A a;
+        |  a.foo1();
+        |}
+        |""".stripMargin,
+      "test.cpp"
+    )
+    "have correct type full names for calls" in {
+      val List(foo2Call) = cpg.call("foo2").l
+      foo2Call.methodFullName shouldBe "A.foo2:void()"
+    }
+  }
+  "Successfully typed calls" should {
+    "have correct call for call on non virtual class method" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  class A {
+          |    public:
+          |      void foo(int a){}
+          |  };
+          |}
+          |
+          |void outer() {
+          |  NNN::A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe "void(int)"
+      call.methodFullName shouldBe "NNN.A.foo:void(int)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(instArg, arg1) = call.argument.l
+      instArg.code shouldBe "a"
+      instArg.argumentIndex shouldBe 0
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      call.receiver.isEmpty shouldBe true
+    }
+
+    "have correct call for call on virtual class method" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  class A {
+          |    public:
+          |      virtual void foo(int a){}
+          |  };
+          |}
+          |
+          |void outer() {
+          |  NNN::A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe "void(int)"
+      call.methodFullName shouldBe "NNN.A.foo:void(int)"
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(instArg, arg1) = call.argument.l
+      instArg.code shouldBe "a"
+      instArg.argumentIndex shouldBe 0
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver shouldBe instArg
+    }
+
+    "have correct call for call on stand alone method (CPP)" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  void foo(int a){}
+          |}
+          |
+          |void outer() {
+          |  NNN::foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe "void(int)"
+      call.methodFullName shouldBe "NNN.foo:void(int)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+
+      call.receiver.isEmpty shouldBe true
+    }
+
+    "have correct call for call on lambda function" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  [](int a) {}(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("<operator>()").l
+      call.signature shouldBe "void(int)"
+      call.methodFullName shouldBe "<operator>():void(int)"
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver.isMethodRef shouldBe true
+      receiver.argumentIndex shouldBe -1
+    }
+
+    "have correct call for call on function pointer (CPP)" in {
+      val cpg = code(
+        """
+          |class A {
+          |  public:
+          |    void (*foo)(int);
+          |};
+          |
+          |void outer() {
+          |  A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact(Defines.operatorPointerCall).l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe Defines.operatorPointerCall
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver.code shouldBe "a.foo"
+      receiver.argumentIndex shouldBe -1
+    }
+
+    "have correct call for call on callable object" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  class Callable {
+          |    public:
+          |      void operator()(int a){}
+          |  };
+          |}
+          |class A {
+          |  public:
+          |    NNN::Callable foo;
+          |};
+          |
+          |void outer() {
+          |  A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("<operator>()").l
+      call.signature shouldBe "void(int)"
+      call.methodFullName shouldBe "NNN.Callable.<operator>():void(int)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(instArg, arg1) = call.argument.l
+      instArg.code shouldBe "a.foo"
+      instArg.argumentIndex shouldBe 0
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver shouldBe instArg
+    }
+
+    "have correct call for call on function pointer (C)" in {
+      val cpg = code(
+        """
+          |struct A {
+          |  void (*foo)(int);
+          |}
+          |void outer() {
+          |  struct A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.c"
+      )
+
+      val List(call) = cpg.call.nameExact(Defines.operatorPointerCall).l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe Defines.operatorPointerCall
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver.code shouldBe "a.foo"
+      receiver.argumentIndex shouldBe -1
+    }
+
+    "have correct call for call on stand alone method (C)" in {
+      val cpg = code(
+        """
+          |void foo(int) {}
+          |void outer() {
+          |  foo(1);
+          |}
+          |""".stripMargin,
+        "test.c"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe "foo"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+
+      call.receiver.isEmpty shouldBe true
+    }
+
+    "have correct call for call on extern C function" in {
+      val cpg = code(
+        """
+          |extern "C" {
+          |  void foo(int);
+          |}
+          |
+          |void outer() {
+          |  foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe "foo"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe "void"
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      call.receiver.isEmpty shouldBe true
+    }
+  }
+
+  "Not successfully typed calls" should {
+    "have correct call for field reference style call (CPP)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  Unknown a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe X2CpgDefines.UnresolvedSignature
+      call.methodFullName shouldBe s"${X2CpgDefines.UnresolvedNamespace}.foo:${X2CpgDefines.UnresolvedSignature}(1)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(instArg, arg1) = call.argument.l
+      instArg.code shouldBe "a"
+      instArg.argumentIndex shouldBe 0
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver shouldBe instArg
+    }
+
+    "have correct call for plain call (CPP)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  foo(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe X2CpgDefines.UnresolvedSignature
+      call.methodFullName shouldBe s"${X2CpgDefines.UnresolvedNamespace}.foo:${X2CpgDefines.UnresolvedSignature}(1)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      call.receiver.isEmpty shouldBe true
+    }
+
+    "have correct call for call on arbitrary expression (CPP)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  getX()(1);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+
+      val List(call) = cpg.call.nameExact("<operator>()").l
+      call.signature shouldBe X2CpgDefines.UnresolvedSignature
+      call.methodFullName shouldBe s"${X2CpgDefines.UnresolvedNamespace}.<operator>():${X2CpgDefines.UnresolvedSignature}(1)"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(instArg, arg1) = call.argument.l
+      instArg.code shouldBe "getX()"
+      instArg.argumentIndex shouldBe 0
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver shouldBe instArg
+    }
+
+    "have correct call for field reference style call (C)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  struct A a;
+          |  a.foo(1);
+          |}
+          |""".stripMargin,
+        "test.c"
+      )
+
+      val List(call) = cpg.call.nameExact(Defines.operatorPointerCall).l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe Defines.operatorPointerCall
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver.code shouldBe "a.foo"
+      receiver.argumentIndex shouldBe -1
+    }
+
+    "have correct call for plain call (C)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  foo(1);
+          |}
+          |""".stripMargin,
+        "test.c"
+      )
+
+      val List(call) = cpg.call.nameExact("foo").l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe s"foo"
+      call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      call.receiver.isEmpty shouldBe true
+    }
+
+    "have correct call for call on arbitrary expression (C)" in {
+      val cpg = code(
+        """
+          |void outer() {
+          |  getX()(1);
+          |}
+          |""".stripMargin,
+        "test.c"
+      )
+
+      val List(call) = cpg.call.nameExact(Defines.operatorPointerCall).l
+      call.signature shouldBe ""
+      call.methodFullName shouldBe Defines.operatorPointerCall
+      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      call.typeFullName shouldBe X2CpgDefines.Any
+
+      val List(arg1) = call.argument.l
+      arg1.code shouldBe "1"
+      arg1.argumentIndex shouldBe 1
+
+      val List(receiver) = call.receiver.l
+      receiver.code shouldBe "getX()"
+      receiver.argumentIndex shouldBe -1
+    }
+  }
 }

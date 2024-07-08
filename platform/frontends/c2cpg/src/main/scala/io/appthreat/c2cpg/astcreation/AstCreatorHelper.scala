@@ -3,7 +3,7 @@ package io.appthreat.c2cpg.astcreation
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode
 import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewCall, NewNode}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 import io.shiftleft.utils.IOUtils
 import org.apache.commons.lang.StringUtils
@@ -62,6 +62,41 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       )
   private var usedVariablePostfix: Int = 0
 
+  def createCallAst(
+    callNode: NewCall,
+    arguments: Seq[Ast] = List(),
+    base: Option[Ast] = None,
+    receiver: Option[Ast] = None
+  ): Ast =
+
+    setArgumentIndices(arguments)
+
+    val baseRoot = base.flatMap(_.root).toList
+    val bse      = base.getOrElse(Ast())
+    baseRoot match
+      case List(x: ExpressionNew) =>
+          x.argumentIndex = 0
+      case _ =>
+
+    var ast =
+        Ast(callNode)
+            .withChild(bse)
+
+    if receiver.isDefined && receiver != base then
+      receiver.get.root.get.asInstanceOf[ExpressionNew].argumentIndex = -1
+      ast = ast.withChild(receiver.get)
+
+    ast = ast
+        .withChildren(arguments)
+        .withArgEdges(callNode, baseRoot)
+        .withArgEdges(callNode, arguments.flatMap(_.root))
+
+    if receiver.isDefined then
+      ast = ast.withReceiverEdge(callNode, receiver.get.root.get)
+
+    ast
+  end createCallAst
+
   protected def uniqueName(target: String, name: String, fullName: String): (String, String) =
       if name.isEmpty && (fullName.isEmpty || fullName.endsWith(".")) then
         val name              = s"anonymous_${target}_$usedVariablePostfix"
@@ -119,6 +154,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       if asCharArray(i) == '\n' then
         offsets.append(i + 1)
     offsets.toArray
+
+  protected def fileName(node: IASTNode): String =
+    val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
+    SourceFiles.toRelativePath(path, config.inputPath)
+
+  private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
+      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
 
   protected def registerType(typeName: String): String =
     val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
@@ -402,13 +444,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     }
 
   protected def isIncludedNode(node: IASTNode): Boolean = fileName(node) != filename
-
-  protected def fileName(node: IASTNode): String =
-    val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
-    SourceFiles.toRelativePath(path, config.inputPath)
-
-  private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
-      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
 
   protected def astsForComments(iASTTranslationUnit: IASTTranslationUnit): Seq[Ast] =
       if config.includeComments then

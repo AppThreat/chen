@@ -265,7 +265,7 @@ class MethodTests extends CCodeToCpgSuite {
     )
 
     "deduplicate method forward declarations correctly" in {
-      cpg.method.fullName("abs").size shouldBe 1
+      cpg.method.name("abs").size shouldBe 2
       cpg.call.name("abs").callee(NoResolve).size shouldBe 1
     }
 

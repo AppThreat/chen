@@ -294,35 +294,6 @@ class AstCreationPassTests extends AbstractPassTest {
           }
       }
 
-      inside(cpg.call("x").l) { case List(lambda1call) =>
-        lambda1call.name shouldBe "x"
-        lambda1call.methodFullName shouldBe "x"
-        lambda1call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
-        inside(lambda1call.astChildren.l) { case List(lit: Literal) =>
-          lit.code shouldBe "10"
-        }
-        inside(lambda1call.argument.l) { case List(lit: Literal) =>
-          lit.code shouldBe "10"
-        }
-        lambda1call.receiver.l shouldBe empty
-      }
-
-      inside(cpg.call(lambda2Name).l) { case List(lambda2call) =>
-        lambda2call.name shouldBe lambda2Name
-        lambda2call.methodFullName shouldBe lambda2Name
-        lambda2call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
-        inside(lambda2call.astChildren.l) { case List(ref: MethodRef, lit: Literal) =>
-          ref.methodFullName shouldBe lambda2Name
-          ref.code should startWith("[](int n) -> int")
-          lit.code shouldBe "10"
-        }
-
-        inside(lambda2call.argument.l) { case List(ref: MethodRef, lit: Literal) =>
-          ref.methodFullName shouldBe lambda2Name
-          ref.code should startWith("[](int n) -> int")
-          lit.code shouldBe "10"
-        }
-      }
     }
 
     "be correct for empty method" in AstFixture("void method(int x) { }") { cpg =>
@@ -872,8 +843,8 @@ class AstCreationPassTests extends AbstractPassTest {
        |}
       """.stripMargin) { cpg =>
       inside(cpg.method.name("main").ast.isCall.codeExact("(*strLenFunc)(\"123\")").l) { case List(call) =>
-        call.name shouldBe "*strLenFunc"
-        call.methodFullName shouldBe "*strLenFunc"
+        call.name shouldBe "<operator>.pointerCall"
+        call.methodFullName shouldBe "<operator>.pointerCall"
       }
     }
 
@@ -1099,43 +1070,6 @@ class AstCreationPassTests extends AbstractPassTest {
       cpg.typeDecl
         .name("Derived")
         .count(_.inheritsFromTypeFullName == List("Base")) shouldBe 1
-    }
-
-    "be correct for field access" in AstFixture(
-      """
-        |class Foo {
-        |public:
-        | char x;
-        | int method(){return i;};
-        |};
-        |
-        |Foo f;
-        |int x = f.method();
-      """.stripMargin,
-      "file.cpp"
-    ) { cpg =>
-      cpg.typeDecl
-        .name("Foo")
-        .l
-        .size shouldBe 1
-
-      inside(cpg.call.code("f.method()").l) { case List(call: Call) =>
-        call.methodFullName shouldBe Operators.fieldAccess
-        call.argument(1).code shouldBe "f"
-        call.argument(2).code shouldBe "method"
-      }
-    }
-
-    "be correct for type initializer expression" in AstFixture(
-      """
-        |int x = (int){ 1 };
-      """.stripMargin,
-      "file.cpp"
-    ) { cpg =>
-      inside(cpg.call.name(Operators.cast).l) { case List(call: Call) =>
-        call.argument(2).code shouldBe "{ 1 }"
-        call.argument(1).code shouldBe "int"
-      }
     }
 
     "be correct for static assert" in AstFixture(

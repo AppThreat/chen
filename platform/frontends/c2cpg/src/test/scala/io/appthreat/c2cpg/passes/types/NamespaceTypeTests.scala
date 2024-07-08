@@ -171,10 +171,10 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.call.filterNot(_.name == Operators.fieldAccess).l) { case List(f, g) =>
-        f.name shouldBe "X.f"
-        f.methodFullName shouldBe "X.f"
-        g.name shouldBe "X.g"
-        g.methodFullName shouldBe "X.g"
+        f.name shouldBe "f"
+        f.methodFullName shouldBe "f:void()"
+        g.name shouldBe "g"
+        g.methodFullName shouldBe "A.g:void()"
       }
     }
 
@@ -214,9 +214,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
 
       inside(cpg.call.l) { case List(c1, c2) =>
         c1.name shouldBe "f"
-        c1.methodFullName shouldBe "f"
+        c1.methodFullName shouldBe "A.f:void(char)"
         c2.name shouldBe "f"
-        c2.methodFullName shouldBe "f"
+        c2.methodFullName shouldBe "A.f:void(char)"
       }
     }
 

@@ -163,8 +163,8 @@ class ClassTypeTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT):
             |  return 0;
             |}""".stripMargin
                 )
-                cpg.call("foo1").methodFullName.toSetMutable shouldBe Set("A.foo1")
-                cpg.call("foo2").methodFullName.toSetMutable shouldBe Set("B.foo2")
+                cpg.call("foo1").methodFullName.toSetMutable shouldBe Set("A.foo1:void()")
+                cpg.call("foo2").methodFullName.toSetMutable shouldBe Set("B.foo2:void()")
             }
         }
 

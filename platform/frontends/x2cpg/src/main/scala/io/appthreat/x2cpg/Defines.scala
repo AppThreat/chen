@@ -13,6 +13,7 @@ object Defines:
   // is the number of call arguments.
   // Note that this schema and thus the defines only makes sense for statically
   // typed languages with a package/namespace structure like Java, CSharp, etc..
+  val Any                 = "ANY"
   val UnresolvedNamespace = "<unresolvedNamespace>"
   val UnresolvedSignature = "<unresolvedSignature>"
 
@@ -28,5 +29,6 @@ object Defines:
 
   val LeftAngularBracket = "<"
   val Unknown            = "<unknown>"
-  val ClosurePrefix      = "<lambda>"
+  // Anonymous functions, lambdas, and closures, follow the naming scheme of $LambdaPrefix$int
+  val ClosurePrefix = "<lambda>"
 end Defines
