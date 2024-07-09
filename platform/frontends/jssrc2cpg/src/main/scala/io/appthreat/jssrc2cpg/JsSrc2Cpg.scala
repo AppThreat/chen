@@ -32,52 +32,52 @@ import scala.util.Try
 
 class JsSrc2Cpg extends X2CpgFrontend[Config]:
 
-    private val report: Report = new Report()
+  private val report: Report = new Report()
 
-    def createCpg(config: Config): Try[Cpg] =
-        withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
-            File.usingTemporaryDirectory("jssrc2cpgOut") { tmpDir =>
-                val astGenResult = new AstGenRunner(config).execute(tmpDir)
-                val hash = HashUtil.sha256(astGenResult.parsedFiles.map { case (_, file) =>
-                    File(file).path
-                })
+  def createCpg(config: Config): Try[Cpg] =
+      withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
+          File.usingTemporaryDirectory("jssrc2cpgOut") { tmpDir =>
+            val astGenResult = new AstGenRunner(config).execute(tmpDir)
+            val hash = HashUtil.sha256(astGenResult.parsedFiles.map { case (_, file) =>
+                File(file).path
+            })
 
-                val astCreationPass =
-                    new AstCreationPass(cpg, astGenResult, config, report)(config.schemaValidation)
-                astCreationPass.createAndApply()
+            val astCreationPass =
+                new AstCreationPass(cpg, astGenResult, config, report)(config.schemaValidation)
+            astCreationPass.createAndApply()
 
-                new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
-                new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
-                new BuiltinTypesPass(cpg).createAndApply()
-                new DependenciesPass(cpg, config).createAndApply()
-                new ConfigPass(cpg, config, report).createAndApply()
-                new PrivateKeyFilePass(cpg, config, report).createAndApply()
-                new ImportsPass(cpg).createAndApply()
+            new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
+            new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
+            new BuiltinTypesPass(cpg).createAndApply()
+            new DependenciesPass(cpg, config).createAndApply()
+            new ConfigPass(cpg, config, report).createAndApply()
+            new PrivateKeyFilePass(cpg, config, report).createAndApply()
+            new ImportsPass(cpg).createAndApply()
 
-                report.print()
-            }
-        }
+            report.print()
+          }
+      }
 
-    // This method is intended for internal use only and may be removed at any time.
-    def createCpgWithAllOverlays(config: Config): Try[Cpg] =
-        val maybeCpg = createCpgWithOverlays(config)
-        maybeCpg.map { cpg =>
-            new OssDataFlow(new OssDataFlowOptions()).run(new LayerCreatorContext(cpg))
-            postProcessingPasses(cpg, Option(config)).foreach(_.createAndApply())
-            cpg
-        }
+  // This method is intended for internal use only and may be removed at any time.
+  def createCpgWithAllOverlays(config: Config): Try[Cpg] =
+    val maybeCpg = createCpgWithOverlays(config)
+    maybeCpg.map { cpg =>
+      new OssDataFlow(new OssDataFlowOptions()).run(new LayerCreatorContext(cpg))
+      postProcessingPasses(cpg, Option(config)).foreach(_.createAndApply())
+      cpg
+    }
 end JsSrc2Cpg
 
 object JsSrc2Cpg:
 
-    def postProcessingPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
-        val typeRecoveryConfig = config
-            .map(c => XTypeRecoveryConfig(c.typePropagationIterations, !c.disableDummyTypes))
-            .getOrElse(XTypeRecoveryConfig())
-        List(
-          new JavaScriptInheritanceNamePass(cpg),
-          new ConstClosurePass(cpg),
-          new ImportResolverPass(cpg),
-          new JavaScriptTypeRecoveryPass(cpg, typeRecoveryConfig),
-          new JavaScriptTypeHintCallLinker(cpg)
-        )
+  def postProcessingPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
+    val typeRecoveryConfig = config
+        .map(c => XTypeRecoveryConfig(c.typePropagationIterations, !c.disableDummyTypes))
+        .getOrElse(XTypeRecoveryConfig())
+    List(
+      new JavaScriptInheritanceNamePass(cpg),
+      new ConstClosurePass(cpg),
+      new ImportResolverPass(cpg),
+      new JavaScriptTypeRecoveryPass(cpg, typeRecoveryConfig),
+      new JavaScriptTypeHintCallLinker(cpg)
+    )

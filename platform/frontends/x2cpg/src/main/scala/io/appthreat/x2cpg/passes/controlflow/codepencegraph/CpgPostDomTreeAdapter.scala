@@ -5,5 +5,5 @@ import io.appthreat.x2cpg.passes.controlflow.cfgdominator.DomTreeAdapter
 
 class CpgPostDomTreeAdapter extends DomTreeAdapter[StoredNode]:
 
-    override def immediateDominator(cfgNode: StoredNode): Option[StoredNode] =
-        cfgNode._postDominateIn.nextOption()
+  override def immediateDominator(cfgNode: StoredNode): Option[StoredNode] =
+      cfgNode._postDominateIn.nextOption()

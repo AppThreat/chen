@@ -12,10 +12,10 @@ import io.shiftleft.semanticcpg.language.*
 //  or do it elsewhere.
 class AnyTypePass(cpg: Cpg) extends ConcurrentWriterCpgPass[AstNode](cpg):
 
-    override def generateParts(): Array[AstNode] =
-        cpg.has(PropertyNames.TYPE_FULL_NAME, PropertyDefaults.TypeFullName).collectAll[
-          AstNode
-        ].toArray
+  override def generateParts(): Array[AstNode] =
+      cpg.has(PropertyNames.TYPE_FULL_NAME, PropertyDefaults.TypeFullName).collectAll[
+        AstNode
+      ].toArray
 
-    override def runOnPart(diffGraph: DiffGraphBuilder, node: AstNode): Unit =
-        diffGraph.setNodeProperty(node, PropertyNames.TYPE_FULL_NAME, AstCreator.TypeConstants.Any)
+  override def runOnPart(diffGraph: DiffGraphBuilder, node: AstNode): Unit =
+      diffGraph.setNodeProperty(node, PropertyNames.TYPE_FULL_NAME, AstCreator.TypeConstants.Any)

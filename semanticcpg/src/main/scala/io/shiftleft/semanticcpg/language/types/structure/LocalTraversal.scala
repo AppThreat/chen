@@ -8,10 +8,10 @@ import io.shiftleft.semanticcpg.language.*
   */
 class LocalTraversal(val traversal: Iterator[Local]) extends AnyVal:
 
-    /** The method hosting this local variable
-      */
-    def method: Iterator[Method] =
-        // TODO The following line of code is here for backwards compatibility.
-        // Use the lower commented out line once not required anymore.
-        traversal.repeat(_.in(EdgeTypes.AST))(_.until(_.hasLabel(NodeTypes.METHOD))).cast[Method]
-        // definingBlock.method
+  /** The method hosting this local variable
+    */
+  def method: Iterator[Method] =
+      // TODO The following line of code is here for backwards compatibility.
+      // Use the lower commented out line once not required anymore.
+      traversal.repeat(_.in(EdgeTypes.AST))(_.until(_.hasLabel(NodeTypes.METHOD))).cast[Method]
+      // definingBlock.method

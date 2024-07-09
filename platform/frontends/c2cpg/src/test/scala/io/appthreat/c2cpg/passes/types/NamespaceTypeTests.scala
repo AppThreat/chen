@@ -35,8 +35,8 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |}
         |""".stripMargin)
       inside(cpg.method.isNotStub.fullName.l) { case List(f, m) =>
-        f shouldBe "Q.V.f"
-        m shouldBe "Q.V.C.m"
+        f shouldBe "Q.V.f:int()"
+        m shouldBe "Q.V.C.m:int()"
       }
 
       inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>
@@ -50,9 +50,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
 
         inside(q.method.l) { case List(f, m) =>
           f.name shouldBe "f"
-          f.fullName shouldBe "Q.V.f"
+          f.fullName shouldBe "Q.V.f:int()"
           m.name shouldBe "m"
-          m.fullName shouldBe "Q.V.C.m"
+          m.fullName shouldBe "Q.V.C.m:int()"
         }
       }
 
@@ -80,9 +80,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       inside(cpg.method.nameNot("<global>").fullName.l) { case List(m1, f1, f2, h, m2) =>
         // TODO: this looks strange too it first glance. But as Eclipse CDT does not provide any
         //  mapping from definitions outside of namespace into them we cant reconstruct proper full-names.
-        m1 shouldBe "Test0.cpp:3:3:Q.V.C.m"
-        f1 shouldBe "Test0.cpp:5:5:Q.V.f"
-        h shouldBe "Test0.cpp:11:11:V.f.h"
+        m1 shouldBe "Q.V.C.m:int()"
+        f1 shouldBe "Q.V.f:int()"
+        h shouldBe "h:void()"
         f2 shouldBe "V.f"
         m2 shouldBe "V.C.m"
       }
@@ -129,9 +129,9 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
-        f shouldBe "f"
-        g shouldBe "A.g"
-        h shouldBe "h"
+        f shouldBe "f:void()"
+        g shouldBe "A.g:void()"
+        h shouldBe "h:void()"
       }
 
       inside(cpg.method.nameExact("h").ast.isCall.code.l) { case List(c1, c2, c3, c4) =>
@@ -165,16 +165,16 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
-        f shouldBe "Test0.cpp:2:2:f"
-        g shouldBe "Test0.cpp:5:5:A.g"
-        h shouldBe "h"
+        f shouldBe "f:void()"
+        g shouldBe "A.g:void()"
+        h shouldBe "h:void()"
       }
 
       inside(cpg.call.filterNot(_.name == Operators.fieldAccess).l) { case List(f, g) =>
-        f.name shouldBe "X.f"
-        f.methodFullName shouldBe "X.f"
-        g.name shouldBe "X.g"
-        g.methodFullName shouldBe "X.g"
+        f.name shouldBe "f"
+        f.methodFullName shouldBe "f:void()"
+        g.name shouldBe "g"
+        g.methodFullName shouldBe "A.g:void()"
       }
     }
 
@@ -204,19 +204,19 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
       }
 
       inside(cpg.method.internal.nameNot("<global>").l) { case List(f1, f2, foo, bar) =>
-        f1.fullName shouldBe "Test0.cpp:3:3:A.f"
-        f1.signature shouldBe "void A.f (int)"
-        f2.fullName shouldBe "Test0.cpp:8:8:A.f"
-        f2.signature shouldBe "void A.f (char)"
-        foo.fullName shouldBe "foo"
-        bar.fullName shouldBe "bar"
+        f1.fullName shouldBe "A.f:void(int)"
+        f1.signature shouldBe "void(int)"
+        f2.fullName shouldBe "A.f:void(char)"
+        f2.signature shouldBe "void(char)"
+        foo.fullName shouldBe "foo:void()"
+        bar.fullName shouldBe "bar:void()"
       }
 
       inside(cpg.call.l) { case List(c1, c2) =>
         c1.name shouldBe "f"
-        c1.methodFullName shouldBe "f"
+        c1.methodFullName shouldBe "A.f:void(char)"
         c2.name shouldBe "f"
-        c2.methodFullName shouldBe "f"
+        c2.methodFullName shouldBe "A.f:void(char)"
       }
     }
 

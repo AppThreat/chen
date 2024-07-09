@@ -15,17 +15,17 @@ import overflowdb.traversal.help
 class DeclarationTraversal[NodeType <: Declaration](val traversal: Iterator[NodeType])
     extends AnyVal:
 
-    /** The closure binding node referenced by this declaration
-      */
-    def closureBinding: Iterator[ClosureBinding] =
-        traversal.flatMap(_._refIn).collectAll[ClosureBinding]
+  /** The closure binding node referenced by this declaration
+    */
+  def closureBinding: Iterator[ClosureBinding] =
+      traversal.flatMap(_._refIn).collectAll[ClosureBinding]
 
-    /** Methods that capture this declaration
-      */
-    def capturedByMethodRef: Iterator[MethodRef] =
-        closureBinding.flatMap(_._captureIn).collectAll[MethodRef]
+  /** Methods that capture this declaration
+    */
+  def capturedByMethodRef: Iterator[MethodRef] =
+      closureBinding.flatMap(_._captureIn).collectAll[MethodRef]
 
-    /** Types that capture this declaration
-      */
-    def capturedByTypeRef: Iterator[TypeRef] =
-        closureBinding.flatMap(_._captureIn).collectAll[TypeRef]
+  /** Types that capture this declaration
+    */
+  def capturedByTypeRef: Iterator[TypeRef] =
+      closureBinding.flatMap(_._captureIn).collectAll[TypeRef]

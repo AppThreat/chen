@@ -8,15 +8,15 @@ import io.shiftleft.semanticcpg.language.*
 class AnnotationParameterAssignTraversal(val traversal: Iterator[AnnotationParameterAssign])
     extends AnyVal:
 
-    /** Traverse to all annotation parameters
-      */
-    def parameter: Iterator[AnnotationParameter] =
-        traversal.flatMap(_._annotationParameterViaAstOut)
+  /** Traverse to all annotation parameters
+    */
+  def parameter: Iterator[AnnotationParameter] =
+      traversal.flatMap(_._annotationParameterViaAstOut)
 
-    /** Traverse to all values of annotation parameters
-      */
-    def value: Iterator[Expression] =
-        traversal
-            .flatMap(_.astOut)
-            .filterNot(_.isInstanceOf[AnnotationParameter])
-            .cast[Expression]
+  /** Traverse to all values of annotation parameters
+    */
+  def value: Iterator[Expression] =
+      traversal
+          .flatMap(_.astOut)
+          .filterNot(_.isInstanceOf[AnnotationParameter])
+          .cast[Expression]

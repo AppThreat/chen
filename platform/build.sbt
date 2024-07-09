@@ -53,7 +53,7 @@ Universal / mappings += cpgVersionFile.value -> "schema-extender/cpg-version"
 
 lazy val generateScaladocs = taskKey[File]("generate scaladocs from combined project sources")
 generateScaladocs := {
-  import better.files._
+  import better.files.*
   import java.io.{File => JFile, PrintWriter}
   import sbt.internal.inc.AnalyzingCompiler
   import sbt.internal.util.Attributed.data

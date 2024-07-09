@@ -6,15 +6,15 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 object Imports:
 
-    def createImportNodeAndLink(
-      importedEntity: String,
-      importedAs: String,
-      call: Option[CallBase],
-      diffGraph: DiffGraphBuilder
-    ): NewImport =
-        val importNode = NewImport()
-            .importedAs(importedAs)
-            .importedEntity(importedEntity)
-        diffGraph.addNode(importNode)
-        call.foreach { c => diffGraph.addEdge(c, importNode, EdgeTypes.IS_CALL_FOR_IMPORT) }
-        importNode
+  def createImportNodeAndLink(
+    importedEntity: String,
+    importedAs: String,
+    call: Option[CallBase],
+    diffGraph: DiffGraphBuilder
+  ): NewImport =
+    val importNode = NewImport()
+        .importedAs(importedAs)
+        .importedEntity(importedEntity)
+    diffGraph.addNode(importNode)
+    call.foreach { c => diffGraph.addEdge(c, importNode, EdgeTypes.IS_CALL_FOR_IMPORT) }
+    importNode

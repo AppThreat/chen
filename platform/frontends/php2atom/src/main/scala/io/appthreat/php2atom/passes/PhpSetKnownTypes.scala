@@ -30,50 +30,50 @@ case class KnownFunction(
 class PhpSetKnownTypesPass(cpg: Cpg, knownTypesFile: Option[JFile] = None)
     extends ForkJoinParallelCpgPass[KnownFunction](cpg):
 
-    private val logger = LoggerFactory.getLogger(getClass)
+  private val logger = LoggerFactory.getLogger(getClass)
 
-    override def generateParts(): Array[KnownFunction] =
-        /* parse file and return each row as a KnownFunction object */
-        val source = knownTypesFile match
-            case Some(file) => Source.fromFile(file)
-            case _          => Source.fromResource("known_function_signatures.txt")
-        val contents = source.getLines().filterNot(_.startsWith("//"))
-        val arr      = contents.flatMap(line => createKnownFunctionFromLine(line)).toArray
-        source.close
-        arr
+  override def generateParts(): Array[KnownFunction] =
+    /* parse file and return each row as a KnownFunction object */
+    val source = knownTypesFile match
+      case Some(file) => Source.fromFile(file)
+      case _          => Source.fromResource("known_function_signatures.txt")
+    val contents = source.getLines().filterNot(_.startsWith("//"))
+    val arr      = contents.flatMap(line => createKnownFunctionFromLine(line)).toArray
+    source.close
+    arr
 
-    override def runOnPart(
-      builder: overflowdb.BatchedUpdate.DiffGraphBuilder,
-      part: KnownFunction
-    ): Unit =
-        /* calculate the result of this part - this is done as a concurrent task */
-        val builtinMethod = cpg.method.fullNameExact(part.name).l
-        builtinMethod.foreach(mNode =>
-            setTypes(builder, mNode.methodReturn, part.rTypes)
-            (mNode.parameter.l.zip(part.pTypes)).map((p, pTypes) => setTypes(builder, p, pTypes))
-        )
+  override def runOnPart(
+    builder: overflowdb.BatchedUpdate.DiffGraphBuilder,
+    part: KnownFunction
+  ): Unit =
+    /* calculate the result of this part - this is done as a concurrent task */
+    val builtinMethod = cpg.method.fullNameExact(part.name).l
+    builtinMethod.foreach(mNode =>
+      setTypes(builder, mNode.methodReturn, part.rTypes)
+      (mNode.parameter.l.zip(part.pTypes)).map((p, pTypes) => setTypes(builder, p, pTypes))
+    )
 
-    def createKnownFunctionFromLine(line: String): Option[KnownFunction] =
-        line.split(";").map(_.strip).toList match
-            case Nil                   => None
-            case name :: Nil           => Some(KnownFunction(name))
-            case name :: rTypes :: Nil => Some(KnownFunction(name, scanReturnTypes(rTypes)))
-            case name :: rTypes :: pTypes =>
-                Some(KnownFunction(name, scanReturnTypes(rTypes), scanParamTypes(pTypes)))
+  def createKnownFunctionFromLine(line: String): Option[KnownFunction] =
+      line.split(";").map(_.strip).toList match
+        case Nil                   => None
+        case name :: Nil           => Some(KnownFunction(name))
+        case name :: rTypes :: Nil => Some(KnownFunction(name, scanReturnTypes(rTypes)))
+        case name :: rTypes :: pTypes =>
+            Some(KnownFunction(name, scanReturnTypes(rTypes), scanParamTypes(pTypes)))
 
-    /* From comma separated list of types, create list of types. */
-    def scanReturnTypes(rTypesRaw: String): Seq[String] = rTypesRaw.split(",").map(_.strip).toSeq
+  /* From comma separated list of types, create list of types. */
+  def scanReturnTypes(rTypesRaw: String): Seq[String] = rTypesRaw.split(",").map(_.strip).toSeq
 
-    /* From a semicolon separated list of parameters, each with a comma separated list of types,
-     * create a list of lists of types. */
-    def scanParamTypes(pTypesRawArr: List[String]): Seq[Seq[String]] =
-        pTypesRawArr.map(paramTypeRaw => paramTypeRaw.split(",").map(_.strip).toSeq).toSeq
+  /* From a semicolon separated list of parameters, each with a comma separated list of types,
+   * create a list of lists of types. */
+  def scanParamTypes(pTypesRawArr: List[String]): Seq[Seq[String]] =
+      pTypesRawArr.map(paramTypeRaw => paramTypeRaw.split(",").map(_.strip).toSeq).toSeq
 
-    protected def setTypes(
-      builder: overflowdb.BatchedUpdate.DiffGraphBuilder,
-      n: StoredNode,
-      types: Seq[String]
-    ): Unit =
-        if types.size == 1 then builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.head)
-        else builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, types)
+  protected def setTypes(
+    builder: overflowdb.BatchedUpdate.DiffGraphBuilder,
+    n: StoredNode,
+    types: Seq[String]
+  ): Unit =
+      if types.size == 1 then builder.setNodeProperty(n, PropertyNames.TYPE_FULL_NAME, types.head)
+      else builder.setNodeProperty(n, PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME, types)
 end PhpSetKnownTypesPass

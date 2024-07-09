@@ -1,7 +1,7 @@
 package io.appthreat.console
 
-import better.files.Dsl._
-import better.files._
+import better.files.Dsl.*
+import better.files.*
 import io.appthreat.console.workspacehandling.Project
 
 import scala.util.Try

@@ -6,11 +6,11 @@ import io.shiftleft.semanticcpg.language.{HasLocation, LocationCreator, *}
 
 class IdentifierMethods(val identifier: Identifier) extends AnyVal with NodeExtension
     with HasLocation:
-    override def location: NewLocation =
-        LocationCreator(
-          identifier,
-          identifier.name,
-          identifier.label,
-          identifier.lineNumber,
-          identifier.method
-        )
+  override def location: NewLocation =
+      LocationCreator(
+        identifier,
+        identifier.name,
+        identifier.label,
+        identifier.lineNumber,
+        identifier.method
+      )

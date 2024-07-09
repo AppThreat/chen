@@ -163,8 +163,8 @@ class ClassTypeTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT):
             |  return 0;
             |}""".stripMargin
                 )
-                cpg.call("foo1").methodFullName.toSetMutable shouldBe Set("A.foo1")
-                cpg.call("foo2").methodFullName.toSetMutable shouldBe Set("B.foo2")
+                cpg.call("foo1").methodFullName.toSetMutable shouldBe Set("A.foo1:void()")
+                cpg.call("foo2").methodFullName.toSetMutable shouldBe Set("B.foo2:void()")
             }
         }
 
@@ -181,7 +181,7 @@ class ClassTypeTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT):
                 |}""".stripMargin
                 )
                 val List(constructor) = cpg.typeDecl.nameExact("FooT").method.isConstructor.l
-                constructor.signature shouldBe "Bar.Foo FooT.FooT (std.string,Bar.SomeClass)"
+                constructor.signature shouldBe "Bar.Foo (std.string,Bar.SomeClass)"
                 val List(p1, p2) = constructor.parameter.l
                 p1.typ.fullName shouldBe "std.string"
                 p2.typ.fullName shouldBe "Bar.SomeClass"

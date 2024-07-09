@@ -10,11 +10,11 @@ import java.util.regex.Pattern
 
 class JavaTypeHintCallLinker(cpg: Cpg) extends XTypeHintCallLinker(cpg):
 
-    override protected def calls: Iterator[Call] =
-        cpg.call
-            .nameNot("<operator>.*", "<operators>.*")
-            .filter(c =>
-                calleeNames(c).nonEmpty && c.callee.fullNameNot(
-                  Pattern.quote(Defines.UnresolvedNamespace) + ".*"
-                ).isEmpty
-            )
+  override protected def calls: Iterator[Call] =
+      cpg.call
+          .nameNot("<operator>.*", "<operators>.*")
+          .filter(c =>
+              calleeNames(c).nonEmpty && c.callee.fullNameNot(
+                Pattern.quote(Defines.UnresolvedNamespace) + ".*"
+              ).isEmpty
+          )

@@ -11,12 +11,12 @@ import io.shiftleft.semanticcpg.language.*
   */
 class DeclarationRefPass(atom: Cpg) extends ConcurrentWriterCpgPass[Method](atom):
 
-    override def generateParts(): Array[Method] = atom.method.toArray
+  override def generateParts(): Array[Method] = atom.method.toArray
 
-    override def runOnPart(builder: DiffGraphBuilder, part: Method): Unit =
-        val identifiers = part.ast.isIdentifier.toList
-        val declarations =
-            (part.parameter ++ part.block.astChildren.isLocal).collectAll[Declaration].l
-        declarations.foreach(d =>
-            identifiers.nameExact(d.name).foreach(builder.addEdge(_, d, EdgeTypes.REF))
-        )
+  override def runOnPart(builder: DiffGraphBuilder, part: Method): Unit =
+    val identifiers = part.ast.isIdentifier.toList
+    val declarations =
+        (part.parameter ++ part.block.astChildren.isLocal).collectAll[Declaration].l
+    declarations.foreach(d =>
+        identifiers.nameExact(d.name).foreach(builder.addEdge(_, d, EdgeTypes.REF))
+    )

@@ -24,71 +24,71 @@ class TypeNodePass private (
   getTypesFromCpg: Boolean
 ) extends CpgPass(cpg, "types", keyPool):
 
-    private def getTypeDeclTypes(): mutable.Set[String] =
-        val typeDeclTypes = mutable.Set[String]()
-        cpg.typeDecl.foreach { typeDecl =>
-            typeDeclTypes += typeDecl.fullName
-            typeDeclTypes ++= typeDecl.inheritsFromTypeFullName
-        }
-        typeDeclTypes
+  private def getTypeDeclTypes(): mutable.Set[String] =
+    val typeDeclTypes = mutable.Set[String]()
+    cpg.typeDecl.foreach { typeDecl =>
+      typeDeclTypes += typeDecl.fullName
+      typeDeclTypes ++= typeDecl.inheritsFromTypeFullName
+    }
+    typeDeclTypes
 
-    def getTypeFullNamesFromCpg(): Set[String] =
-        cpg.all
-            .map(_.property(PropertyNames.TYPE_FULL_NAME))
-            .filter(_ != null)
-            .map(_.toString)
-            .toSet
+  def getTypeFullNamesFromCpg(): Set[String] =
+      cpg.all
+          .map(_.property(PropertyNames.TYPE_FULL_NAME))
+          .filter(_ != null)
+          .map(_.toString)
+          .toSet
 
-    override def run(diffGraph: DiffGraphBuilder): Unit =
-        val typeFullNameValues =
-            if getTypesFromCpg then
-                getTypeFullNamesFromCpg()
-            else
-                registeredTypes.toSet
+  override def run(diffGraph: DiffGraphBuilder): Unit =
+    val typeFullNameValues =
+        if getTypesFromCpg then
+          getTypeFullNamesFromCpg()
+        else
+          registeredTypes.toSet
 
-        val usedTypesSet = getTypeDeclTypes() ++ typeFullNameValues
-        usedTypesSet.remove("<empty>")
-        val usedTypes = usedTypesSet.filterInPlace(
-          !_.endsWith(NamespaceTraversal.globalNamespaceName)
-        ).toArray.sorted
+    val usedTypesSet = getTypeDeclTypes() ++ typeFullNameValues
+    usedTypesSet.remove("<empty>")
+    val usedTypes = usedTypesSet.filterInPlace(
+      !_.endsWith(NamespaceTraversal.globalNamespaceName)
+    ).toArray.sorted
 
-        diffGraph.addNode(
-          NewType()
-              .name("ANY")
-              .fullName("ANY")
-              .typeDeclFullName("ANY")
-        )
+    diffGraph.addNode(
+      NewType()
+          .name("ANY")
+          .fullName("ANY")
+          .typeDeclFullName("ANY")
+    )
 
-        usedTypes.foreach { typeName =>
-            val shortName = fullToShortName(typeName)
-            val node = NewType()
-                .name(shortName)
-                .fullName(typeName)
-                .typeDeclFullName(typeName)
-            diffGraph.addNode(node)
-        }
-    end run
+    usedTypes.foreach { typeName =>
+      val shortName = fullToShortName(typeName)
+      val node = NewType()
+          .name(shortName)
+          .fullName(typeName)
+          .typeDeclFullName(typeName)
+      diffGraph.addNode(node)
+    }
+  end run
 end TypeNodePass
 
 object TypeNodePass:
-    // Lambda typeDecl type names fit the structure
-    // `a.b.c.d.ClassName.lambda$method$name:returnType(paramTypes)`
-    // so this regex works by greedily matching the package and class names
-    // at the start and cutting off the matched group before the signature.
-    private val lambdaTypeRegex = raw".*\.(.*):.*\(.*\)".r
+  // Lambda typeDecl type names fit the structure
+  // `a.b.c.d.ClassName.lambda$method$name:returnType(paramTypes)`
+  // so this regex works by greedily matching the package and class names
+  // at the start and cutting off the matched group before the signature.
+  private val lambdaTypeRegex = raw".*\.(.*):.*\(.*\)".r
 
-    def withTypesFromCpg(cpg: Cpg, keyPool: Option[KeyPool] = None): TypeNodePass =
-        new TypeNodePass(Nil, cpg, keyPool, getTypesFromCpg = true)
+  def withTypesFromCpg(cpg: Cpg, keyPool: Option[KeyPool] = None): TypeNodePass =
+      new TypeNodePass(Nil, cpg, keyPool, getTypesFromCpg = true)
 
-    def withRegisteredTypes(
-      registeredTypes: List[String],
-      cpg: Cpg,
-      keyPool: Option[KeyPool] = None
-    ): TypeNodePass =
-        new TypeNodePass(registeredTypes, cpg, keyPool, getTypesFromCpg = false)
+  def withRegisteredTypes(
+    registeredTypes: List[String],
+    cpg: Cpg,
+    keyPool: Option[KeyPool] = None
+  ): TypeNodePass =
+      new TypeNodePass(registeredTypes, cpg, keyPool, getTypesFromCpg = false)
 
-    def fullToShortName(typeName: String): String =
-        typeName match
-            case lambdaTypeRegex(methodName) => methodName
-            case _                           => typeName.split('.').lastOption.getOrElse(typeName)
+  def fullToShortName(typeName: String): String =
+      typeName match
+        case lambdaTypeRegex(methodName) => methodName
+        case _                           => typeName.split('.').lastOption.getOrElse(typeName)
 end TypeNodePass

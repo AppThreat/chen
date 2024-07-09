@@ -12,31 +12,31 @@ import scala.jdk.CollectionConverters.*
   * which do not provide method stubs and type decl stubs.
   */
 class ContainsEdgePass(cpg: Cpg) extends ConcurrentWriterCpgPass[AstNode](cpg):
-    import ContainsEdgePass.*
+  import ContainsEdgePass.*
 
-    override def generateParts(): Array[AstNode] =
-        cpg.graph.nodes(sourceTypes*).asScala.map(_.asInstanceOf[AstNode]).toArray
+  override def generateParts(): Array[AstNode] =
+      cpg.graph.nodes(sourceTypes*).asScala.map(_.asInstanceOf[AstNode]).toArray
 
-    override def runOnPart(dstGraph: DiffGraphBuilder, source: AstNode): Unit =
-        // AST is assumed to be a tree. If it contains cycles, then this will give a nice endless loop with OOM
-        val queue = mutable.ArrayDeque[StoredNode](source)
-        while queue.nonEmpty do
-            val parent = queue.removeHead()
-            for nextNode <- parent._astOut do
-                if isDestinationType(nextNode) then
-                    dstGraph.addEdge(source, nextNode, EdgeTypes.CONTAINS)
-                if !isSourceType(nextNode) then queue.append(nextNode)
+  override def runOnPart(dstGraph: DiffGraphBuilder, source: AstNode): Unit =
+    // AST is assumed to be a tree. If it contains cycles, then this will give a nice endless loop with OOM
+    val queue = mutable.ArrayDeque[StoredNode](source)
+    while queue.nonEmpty do
+      val parent = queue.removeHead()
+      for nextNode <- parent._astOut do
+        if isDestinationType(nextNode) then
+          dstGraph.addEdge(source, nextNode, EdgeTypes.CONTAINS)
+        if !isSourceType(nextNode) then queue.append(nextNode)
 
 object ContainsEdgePass:
 
-    private def isSourceType(node: StoredNode): Boolean = node match
-        case _: Method | _: TypeDecl | _: File => true
-        case _                                 => false
+  private def isSourceType(node: StoredNode): Boolean = node match
+    case _: Method | _: TypeDecl | _: File => true
+    case _                                 => false
 
-    private def isDestinationType(node: StoredNode): Boolean = node match
-        case _: Block | _: Identifier | _: FieldIdentifier | _: Return | _: Method | _: TypeDecl | _: Call | _: Literal |
-            _: MethodRef | _: TypeRef | _: ControlStructure | _: JumpTarget | _: Unknown | _: TemplateDom =>
-            true
-        case _ => false
+  private def isDestinationType(node: StoredNode): Boolean = node match
+    case _: Block | _: Identifier | _: FieldIdentifier | _: Return | _: Method | _: TypeDecl | _: Call | _: Literal |
+        _: MethodRef | _: TypeRef | _: ControlStructure | _: JumpTarget | _: Unknown | _: TemplateDom =>
+        true
+    case _ => false
 
-    private val sourceTypes = List(NodeTypes.METHOD, NodeTypes.TYPE_DECL, NodeTypes.FILE)
+  private val sourceTypes = List(NodeTypes.METHOD, NodeTypes.TYPE_DECL, NodeTypes.FILE)

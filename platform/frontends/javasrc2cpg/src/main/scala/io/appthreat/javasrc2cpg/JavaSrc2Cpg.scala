@@ -20,59 +20,59 @@ import scala.util.Try
 import scala.util.matching.Regex
 
 class JavaSrc2Cpg extends X2CpgFrontend[Config]:
-    import JavaSrc2Cpg.*
+  import JavaSrc2Cpg.*
 
-    override def createCpg(config: Config): Try[Cpg] =
-        withNewEmptyCpg(config.outputPath, config: Config) { (cpg, config) =>
-            new MetaDataPass(cpg, language, config.inputPath).createAndApply()
-            val astCreationPass = new AstCreationPass(config, cpg)
-            astCreationPass.createAndApply()
-            astCreationPass.clearJavaParserCaches()
-            new ConfigFileCreationPass(cpg).createAndApply()
-            if !config.skipTypeInfPass then
-                TypeNodePass.withRegisteredTypes(
-                  astCreationPass.global.usedTypes.keys().asScala.toList,
-                  cpg
-                ).createAndApply()
-                new TypeInferencePass(cpg).createAndApply()
-        }
+  override def createCpg(config: Config): Try[Cpg] =
+      withNewEmptyCpg(config.outputPath, config: Config) { (cpg, config) =>
+        new MetaDataPass(cpg, language, config.inputPath).createAndApply()
+        val astCreationPass = new AstCreationPass(config, cpg)
+        astCreationPass.createAndApply()
+        astCreationPass.clearJavaParserCaches()
+        new ConfigFileCreationPass(cpg).createAndApply()
+        if !config.skipTypeInfPass then
+          TypeNodePass.withRegisteredTypes(
+            astCreationPass.global.usedTypes.keys().asScala.toList,
+            cpg
+          ).createAndApply()
+          new TypeInferencePass(cpg).createAndApply()
+      }
 
 object JavaSrc2Cpg:
-    val language: String = Languages.JAVASRC
+  val language: String = Languages.JAVASRC
 
-    val sourceFileExtensions: Set[String] = Set(".java")
+  val sourceFileExtensions: Set[String] = Set(".java")
 
-    val DefaultIgnoredFilesRegex: List[Regex] = List(".git", ".mvn", "test").flatMap { directory =>
-        List(s"(^|\\\\)$directory($$|\\\\)".r.unanchored, s"(^|/)$directory($$|/)".r.unanchored)
-    }
+  val DefaultIgnoredFilesRegex: List[Regex] = List(".git", ".mvn", "test").flatMap { directory =>
+      List(s"(^|\\\\)$directory($$|\\\\)".r.unanchored, s"(^|/)$directory($$|/)".r.unanchored)
+  }
 
-    val DefaultConfig: Config =
-        Config().withDefaultIgnoredFilesRegex(DefaultIgnoredFilesRegex)
+  val DefaultConfig: Config =
+      Config().withDefaultIgnoredFilesRegex(DefaultIgnoredFilesRegex)
 
-    def apply(): JavaSrc2Cpg = new JavaSrc2Cpg()
+  def apply(): JavaSrc2Cpg = new JavaSrc2Cpg()
 
-    def typeRecoveryPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
-        List(
-          new JavaTypeRecoveryPass(
-            cpg,
-            XTypeRecoveryConfig(enabledDummyTypes = !config.exists(_.disableDummyTypes))
-          ),
-          new JavaTypeHintCallLinker(cpg)
+  def typeRecoveryPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
+      List(
+        new JavaTypeRecoveryPass(
+          cpg,
+          XTypeRecoveryConfig(enabledDummyTypes = !config.exists(_.disableDummyTypes))
+        ),
+        new JavaTypeHintCallLinker(cpg)
+      )
+
+  def showEnv(): Unit =
+    val value =
+        JavaSrcEnvVar.values.foreach { envVar =>
+          val currentValue = Option(System.getenv(envVar.name)).getOrElse("<unset>")
+          println(s"${envVar.name}:")
+          println(s"  Description  : ${envVar.description}")
+          println(s"  Current value: $currentValue")
+        }
+
+  enum JavaSrcEnvVar(val name: String, val description: String):
+    case JdkPath
+        extends JavaSrcEnvVar(
+          "JAVASRC_JDK_PATH",
+          "Path to the JDK home used for retrieving type information about builtin Java types."
         )
-
-    def showEnv(): Unit =
-        val value =
-            JavaSrcEnvVar.values.foreach { envVar =>
-                val currentValue = Option(System.getenv(envVar.name)).getOrElse("<unset>")
-                println(s"${envVar.name}:")
-                println(s"  Description  : ${envVar.description}")
-                println(s"  Current value: $currentValue")
-            }
-
-    enum JavaSrcEnvVar(val name: String, val description: String):
-        case JdkPath
-            extends JavaSrcEnvVar(
-              "JAVASRC_JDK_PATH",
-              "Path to the JDK home used for retrieving type information about builtin Java types."
-            )
 end JavaSrc2Cpg

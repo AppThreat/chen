@@ -5,5 +5,5 @@ import io.shiftleft.semanticcpg.NodeExtension
 import io.shiftleft.semanticcpg.language.{HasLocation, LocationCreator, *}
 
 class LiteralMethods(val literal: Literal) extends AnyVal with NodeExtension with HasLocation:
-    override def location: NewLocation =
-        LocationCreator(literal, literal.code, literal.label, literal.lineNumber, literal.method)
+  override def location: NewLocation =
+      LocationCreator(literal, literal.code, literal.label, literal.lineNumber, literal.method)

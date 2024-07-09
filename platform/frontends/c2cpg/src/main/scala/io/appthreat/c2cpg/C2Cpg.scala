@@ -18,18 +18,18 @@ import scala.util.Try
 
 class C2Cpg extends X2CpgFrontend[Config]:
 
-    private val report: Report = new Report()
+  private val report: Report = new Report()
 
-    def createCpg(config: Config): Try[Cpg] =
-        withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
-            new MetaDataPass(cpg, Languages.NEWC, config.inputPath).createAndApply()
-            new AstCreationPass(cpg, config, report).createAndApply()
-            new ConfigFileCreationPass(cpg).createAndApply()
-            TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
-            new TypeDeclNodePass(cpg)(config.schemaValidation).createAndApply()
-            report.print()
-        }
+  def createCpg(config: Config): Try[Cpg] =
+      withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
+        new MetaDataPass(cpg, Languages.NEWC, config.inputPath).createAndApply()
+        new AstCreationPass(cpg, config, report).createAndApply()
+        new ConfigFileCreationPass(cpg).createAndApply()
+        TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
+        new TypeDeclNodePass(cpg)(config.schemaValidation).createAndApply()
+        report.print()
+      }
 
-    def printIfDefsOnly(config: Config): Unit =
-        val stmts = new PreprocessorPass(config).run().mkString(",")
-        println(stmts)
+  def printIfDefsOnly(config: Config): Unit =
+    val stmts = new PreprocessorPass(config).run().mkString(",")
+    println(stmts)

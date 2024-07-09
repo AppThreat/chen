@@ -1,4 +1,4 @@
-import sbt._
+import sbt.*
 
 object Projects {
   val frontendsRoot = file("platform/frontends")

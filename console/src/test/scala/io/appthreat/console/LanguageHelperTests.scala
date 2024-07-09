@@ -1,7 +1,7 @@
 package io.appthreat.console
 
-import better.files.Dsl._
-import better.files._
+import better.files.Dsl.*
+import better.files.*
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.appthreat.console.cpgcreation.guessLanguage
 import org.scalatest.matchers.should.Matchers

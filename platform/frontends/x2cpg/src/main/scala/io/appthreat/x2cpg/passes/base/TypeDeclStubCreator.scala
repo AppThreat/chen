@@ -13,41 +13,41 @@ import io.shiftleft.semanticcpg.language.types.structure.{FileTraversal, Namespa
   */
 class TypeDeclStubCreator(cpg: Cpg) extends CpgPass(cpg):
 
-    private var typeDeclFullNameToNode = Map[String, TypeDeclBase]()
+  private var typeDeclFullNameToNode = Map[String, TypeDeclBase]()
 
-    private def privateInit(): Unit =
-        cpg.typeDecl
-            .foreach { typeDecl =>
-                typeDeclFullNameToNode += typeDecl.fullName -> typeDecl
-            }
+  private def privateInit(): Unit =
+      cpg.typeDecl
+          .foreach { typeDecl =>
+              typeDeclFullNameToNode += typeDecl.fullName -> typeDecl
+          }
 
-    override def run(dstGraph: DiffGraphBuilder): Unit =
-        privateInit()
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+    privateInit()
 
-        cpg.typ
-            .filterNot(typ => typeDeclFullNameToNode.isDefinedAt(typ.fullName))
-            .foreach { typ =>
-                val newTypeDecl = TypeDeclStubCreator.createTypeDeclStub(typ.name, typ.fullName)
-                typeDeclFullNameToNode += typ.fullName -> newTypeDecl
-                dstGraph.addNode(newTypeDecl)
-            }
+    cpg.typ
+        .filterNot(typ => typeDeclFullNameToNode.isDefinedAt(typ.fullName))
+        .foreach { typ =>
+          val newTypeDecl = TypeDeclStubCreator.createTypeDeclStub(typ.name, typ.fullName)
+          typeDeclFullNameToNode += typ.fullName -> newTypeDecl
+          dstGraph.addNode(newTypeDecl)
+        }
 end TypeDeclStubCreator
 
 object TypeDeclStubCreator:
 
-    def createTypeDeclStub(
-      name: String,
-      fullName: String,
-      isExternal: Boolean = true,
-      astParentType: String = NodeTypes.NAMESPACE_BLOCK,
-      astParentFullName: String = NamespaceTraversal.globalNamespaceName,
-      fileName: String = FileTraversal.UNKNOWN
-    ): NewTypeDecl =
-        NewTypeDecl()
-            .name(name)
-            .fullName(fullName)
-            .isExternal(isExternal)
-            .inheritsFromTypeFullName(IndexedSeq.empty)
-            .astParentType(astParentType)
-            .astParentFullName(astParentFullName)
-            .filename(fileName)
+  def createTypeDeclStub(
+    name: String,
+    fullName: String,
+    isExternal: Boolean = true,
+    astParentType: String = NodeTypes.NAMESPACE_BLOCK,
+    astParentFullName: String = NamespaceTraversal.globalNamespaceName,
+    fileName: String = FileTraversal.UNKNOWN
+  ): NewTypeDecl =
+      NewTypeDecl()
+          .name(name)
+          .fullName(fullName)
+          .isExternal(isExternal)
+          .inheritsFromTypeFullName(IndexedSeq.empty)
+          .astParentType(astParentType)
+          .astParentFullName(astParentFullName)
+          .filename(fileName)

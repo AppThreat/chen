@@ -8,12 +8,12 @@ import io.shiftleft.semanticcpg.language.*
   */
 class MemberTraversal(val traversal: Iterator[Member]) extends AnyVal:
 
-    /** Traverse to annotations of member
-      */
-    def annotation: Iterator[nodes.Annotation] =
-        traversal.flatMap(_._annotationViaAstOut)
+  /** Traverse to annotations of member
+    */
+  def annotation: Iterator[nodes.Annotation] =
+      traversal.flatMap(_._annotationViaAstOut)
 
-    /** Places where
-      */
-    def ref: Iterator[Call] =
-        traversal.flatMap(_._callViaRefIn)
+  /** Places where
+    */
+  def ref: Iterator[Call] =
+      traversal.flatMap(_._callViaRefIn)

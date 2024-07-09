@@ -6,16 +6,16 @@ import io.shiftleft.codepropertygraph.Cpg
 
 class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
 
-    override val configFileFilters: List[File => Boolean] = List(
-      // TOML files
-      extensionFilter(".toml"),
-      // INI files
-      extensionFilter(".ini"),
-      // YAML files
-      extensionFilter(".yaml"),
-      extensionFilter(".lock"),
-      pathEndFilter("composer.json"),
-      pathEndFilter("bom.json"),
-      pathEndFilter(".cdx.json"),
-      pathEndFilter("chennai.json")
-    )
+  override val configFileFilters: List[File => Boolean] = List(
+    // TOML files
+    extensionFilter(".toml"),
+    // INI files
+    extensionFilter(".ini"),
+    // YAML files
+    extensionFilter(".yaml"),
+    extensionFilter(".lock"),
+    pathEndFilter("composer.json"),
+    pathEndFilter("bom.json"),
+    pathEndFilter(".cdx.json"),
+    pathEndFilter("chennai.json")
+  )

@@ -24,105 +24,105 @@ import scala.util.Success
 
 class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRoot: Path):
 
-    /** Parse the given file into a JavaParser CompliationUnit that will be used for creating the
-      * CPG AST.
-      *
-      * @param relativeFilename
-      *   path to the input file relative to the project root.
-      */
-    def parseAnalysisFile(relativeFilename: String): Option[CompilationUnit] =
-        val analysisFilename = analysisRoot.resolve(relativeFilename).toString
-        // Need to store tokens for position information.
-        fileIfExists(analysisFilename).flatMap(parse(_, storeTokens = true))
+  /** Parse the given file into a JavaParser CompliationUnit that will be used for creating the CPG
+    * AST.
+    *
+    * @param relativeFilename
+    *   path to the input file relative to the project root.
+    */
+  def parseAnalysisFile(relativeFilename: String): Option[CompilationUnit] =
+    val analysisFilename = analysisRoot.resolve(relativeFilename).toString
+    // Need to store tokens for position information.
+    fileIfExists(analysisFilename).flatMap(parse(_, storeTokens = true))
 
-    /** Parse the given file into a JavaParser CompliationUnit that will be used for reading type
-      * information. These should not be used for determining the structure of the AST.
-      *
-      * @param relativeFilename
-      *   path to the input file relative to the project root.
-      */
-    def parseTypesFile(relativeFilename: String): Option[CompilationUnit] =
-        val typesFilename = typesRoot.resolve(relativeFilename).toString
-        fileIfExists(typesFilename).flatMap(parse(_, storeTokens = false))
+  /** Parse the given file into a JavaParser CompliationUnit that will be used for reading type
+    * information. These should not be used for determining the structure of the AST.
+    *
+    * @param relativeFilename
+    *   path to the input file relative to the project root.
+    */
+  def parseTypesFile(relativeFilename: String): Option[CompilationUnit] =
+    val typesFilename = typesRoot.resolve(relativeFilename).toString
+    fileIfExists(typesFilename).flatMap(parse(_, storeTokens = false))
 
-    def fileIfExists(filename: String): Option[File] =
-        val file = File(filename)
+  def fileIfExists(filename: String): Option[File] =
+    val file = File(filename)
 
-        Option.when(file.exists)(file)
+    Option.when(file.exists)(file)
 
-    def getTypesFileLines(relativeFilename: String): Try[Iterable[String]] =
-        val typesFilename = typesRoot.resolve(relativeFilename).toString
-        Try(File(typesFilename).lines(Charset.defaultCharset()))
-            .orElse(Try(File(typesFilename).lines(StandardCharsets.ISO_8859_1)))
+  def getTypesFileLines(relativeFilename: String): Try[Iterable[String]] =
+    val typesFilename = typesRoot.resolve(relativeFilename).toString
+    Try(File(typesFilename).lines(Charset.defaultCharset()))
+        .orElse(Try(File(typesFilename).lines(StandardCharsets.ISO_8859_1)))
 
-    def doesTypesFileExist(relativeFilename: String): Boolean =
-        File(typesRoot.resolve(relativeFilename)).isRegularFile
+  def doesTypesFileExist(relativeFilename: String): Boolean =
+      File(typesRoot.resolve(relativeFilename)).isRegularFile
 
-    private def parse(file: File, storeTokens: Boolean): Option[CompilationUnit] =
-        val javaParserConfig =
-            new ParserConfiguration()
-                .setLanguageLevel(LanguageLevel.BLEEDING_EDGE)
-                .setAttributeComments(false)
-                .setLexicalPreservationEnabled(true)
-                .setStoreTokens(storeTokens)
-        val parseResult = new JavaParser(javaParserConfig).parse(file.toJava)
+  private def parse(file: File, storeTokens: Boolean): Option[CompilationUnit] =
+    val javaParserConfig =
+        new ParserConfiguration()
+            .setLanguageLevel(LanguageLevel.BLEEDING_EDGE)
+            .setAttributeComments(false)
+            .setLexicalPreservationEnabled(true)
+            .setStoreTokens(storeTokens)
+    val parseResult = new JavaParser(javaParserConfig).parse(file.toJava)
 
-        parseResult.getResult.toScala match
-            case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)
-            case _ =>
-                None
+    parseResult.getResult.toScala match
+      case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)
+      case _ =>
+          None
 end SourceParser
 
 object SourceParser:
 
-    def apply(config: Config, hasLombokDependency: Boolean): SourceParser =
-        val canonicalInputPath = File(config.inputPath).canonicalPath
-        val (analysisDir, typesDir) =
-            getAnalysisAndTypesDirs(
-              canonicalInputPath,
-              config.delombokJavaHome,
-              config.delombokMode,
-              hasLombokDependency
-            )
-        new SourceParser(Path.of(canonicalInputPath), Path.of(analysisDir), Path.of(typesDir))
+  def apply(config: Config, hasLombokDependency: Boolean): SourceParser =
+    val canonicalInputPath = File(config.inputPath).canonicalPath
+    val (analysisDir, typesDir) =
+        getAnalysisAndTypesDirs(
+          canonicalInputPath,
+          config.delombokJavaHome,
+          config.delombokMode,
+          hasLombokDependency
+        )
+    new SourceParser(Path.of(canonicalInputPath), Path.of(analysisDir), Path.of(typesDir))
 
-    def getSourceFilenames(
-      config: Config,
-      sourcesOverride: Option[List[String]] = None
-    ): Array[String] =
-        val inputPaths = sourcesOverride.getOrElse(config.inputPath :: Nil).toSet
-        SourceFiles.determine(inputPaths, JavaSrc2Cpg.sourceFileExtensions, config).toArray
+  def getSourceFilenames(
+    config: Config,
+    sourcesOverride: Option[List[String]] = None
+  ): Array[String] =
+    val inputPaths = sourcesOverride.getOrElse(config.inputPath :: Nil).toSet
+    SourceFiles.determine(inputPaths, JavaSrc2Cpg.sourceFileExtensions, config).toArray
 
-    /** Implements the logic described in the option description for the "delombok-mode" option:
-      *   - no-delombok: do not run delombok.
-      *   - default: run delombok if a lombok dependency is found and analyse delomboked code.
-      *   - types-only: run delombok, but use it for type information only
-      *   - run-delombok: run delombok and analyse delomboked code
-      *
-      * @return
-      *   the tuple (analysisRoot, typesRoot) where analysisRoot is used to locate source files for
-      *   creating the AST and typesRoot is used for locating source files from which to extract
-      *   type information.
-      */
-    private def getAnalysisAndTypesDirs(
-      originalDir: String,
-      delombokJavaHome: Option[String],
-      delombokMode: Option[String],
-      hasLombokDependency: Boolean
-    ): (String, String) =
-        lazy val delombokDir = Delombok.run(originalDir, delombokJavaHome)
-        if delombokDir.nonEmpty then
-            Delombok.parseDelombokModeOption(delombokMode) match
-                case Default if hasLombokDependency =>
-                    (delombokDir, delombokDir)
+  /** Implements the logic described in the option description for the "delombok-mode" option:
+    *   - no-delombok: do not run delombok.
+    *   - default: run delombok if a lombok dependency is found and analyse delomboked code.
+    *   - types-only: run delombok, but use it for type information only
+    *   - run-delombok: run delombok and analyse delomboked code
+    *
+    * @return
+    *   the tuple (analysisRoot, typesRoot) where analysisRoot is used to locate source files for
+    *   creating the AST and typesRoot is used for locating source files from which to extract type
+    *   information.
+    */
+  private def getAnalysisAndTypesDirs(
+    originalDir: String,
+    delombokJavaHome: Option[String],
+    delombokMode: Option[String],
+    hasLombokDependency: Boolean
+  ): (String, String) =
+    lazy val delombokDir = Delombok.run(originalDir, delombokJavaHome)
+    if delombokDir.nonEmpty then
+      Delombok.parseDelombokModeOption(delombokMode) match
+        case Default if hasLombokDependency =>
+            (delombokDir, delombokDir)
 
-                case Default => (originalDir, originalDir)
+        case Default => (originalDir, originalDir)
 
-                case NoDelombok => (originalDir, originalDir)
+        case NoDelombok => (originalDir, originalDir)
 
-                case TypesOnly => (originalDir, delombokDir)
+        case TypesOnly => (originalDir, delombokDir)
 
-                case RunDelombok => (delombokDir, delombokDir)
-        else (delombokDir, delombokDir)
-    end getAnalysisAndTypesDirs
+        case RunDelombok => (delombokDir, delombokDir)
+    else (delombokDir, delombokDir)
+  end getAnalysisAndTypesDirs
 end SourceParser

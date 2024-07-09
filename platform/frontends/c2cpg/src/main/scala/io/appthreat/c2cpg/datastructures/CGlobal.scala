@@ -7,7 +7,7 @@ import scala.jdk.CollectionConverters.*
 
 object CGlobal extends Global:
 
-    def typesSeen(): List[String] =
-        val types = usedTypes.keys().asScala.filterNot(_ == Defines.anyTypeName).toList
-        usedTypes.clear()
-        types
+  def typesSeen(): List[String] =
+    val types = usedTypes.keys().asScala.filterNot(_ == Defines.anyTypeName).toList
+    usedTypes.clear()
+    types

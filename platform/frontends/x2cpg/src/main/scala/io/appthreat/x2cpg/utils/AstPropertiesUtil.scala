@@ -5,26 +5,26 @@ import io.shiftleft.codepropertygraph.generated.PropertyNames
 
 object AstPropertiesUtil:
 
-    implicit class RootProperties(val ast: Ast) extends AnyVal:
+  implicit class RootProperties(val ast: Ast) extends AnyVal:
 
-        private def rootProperty(propertyName: String): Option[String] =
-            ast.root.flatMap(_.properties.get(propertyName).map(_.toString))
+    private def rootProperty(propertyName: String): Option[String] =
+        ast.root.flatMap(_.properties.get(propertyName).map(_.toString))
 
-        def rootType: Option[String] = rootProperty(PropertyNames.TYPE_FULL_NAME)
+    def rootType: Option[String] = rootProperty(PropertyNames.TYPE_FULL_NAME)
 
-        def rootCode: Option[String] = rootProperty(PropertyNames.CODE)
+    def rootCode: Option[String] = rootProperty(PropertyNames.CODE)
 
-        def rootName: Option[String] = rootProperty(PropertyNames.NAME)
+    def rootName: Option[String] = rootProperty(PropertyNames.NAME)
 
-        def rootCodeOrEmpty: String = rootCode.getOrElse("")
+    def rootCodeOrEmpty: String = rootCode.getOrElse("")
 
-    implicit class RootPropertiesOnSeq(val asts: Seq[Ast]) extends AnyVal:
+  implicit class RootPropertiesOnSeq(val asts: Seq[Ast]) extends AnyVal:
 
-        def rootType: Option[String] = asts.headOption.flatMap(_.rootType)
+    def rootType: Option[String] = asts.headOption.flatMap(_.rootType)
 
-        def rootCode: Option[String] = asts.headOption.flatMap(_.rootCode)
+    def rootCode: Option[String] = asts.headOption.flatMap(_.rootCode)
 
-        def rootName: Option[String] = asts.headOption.flatMap(_.rootName)
+    def rootName: Option[String] = asts.headOption.flatMap(_.rootName)
 
-        def rootCodeOrEmpty: String = asts.rootCode.getOrElse("")
+    def rootCodeOrEmpty: String = asts.rootCode.getOrElse("")
 end AstPropertiesUtil
