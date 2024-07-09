@@ -1978,8 +1978,14 @@ class AstCreator(
     callAst(callNode, args)
 
   private def astForArrayCreationExpr(expr: ArrayCreationExpr, expectedType: ExpectedType): Ast =
+    val elementType = tryWithSafeStackOverflow(expr.getElementType.resolve()).map(elementType =>
+        ExpectedType(typeInfoCalc.fullName(elementType).map(_ ++ "[]"), Option(elementType))
+    )
     val maybeInitializerAst =
-        expr.getInitializer.toScala.map(astForArrayInitializerExpr(_, expectedType))
+        expr.getInitializer.toScala.map(astForArrayInitializerExpr(
+          _,
+          elementType.getOrElse(expectedType)
+        ))
 
     maybeInitializerAst.flatMap(_.root) match
       case Some(initializerRoot: NewCall) => initializerRoot.code(expr.toString)
@@ -2007,10 +2013,9 @@ class AstCreator(
     expr: ArrayInitializerExpr,
     expectedType: ExpectedType
   ): Ast =
-    val typeFullName =
-        expressionReturnTypeFullName(expr)
-            .orElse(expectedType.fullName)
-            .getOrElse(TypeConstants.Any)
+    val typeFullName = expectedType.fullName
+        .map(typeInfoCalc.registerType)
+        .getOrElse(TypeConstants.Any)
     val callNode = newOperatorCallNode(
       Operators.arrayInitializer,
       code = expr.toString,

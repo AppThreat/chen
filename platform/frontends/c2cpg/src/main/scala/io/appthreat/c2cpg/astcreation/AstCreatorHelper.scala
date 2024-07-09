@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewCall, NewNode}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
@@ -326,7 +327,12 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 return fn
             case field: ICPPField =>
             case _: IProblemBinding =>
-                return ""
+                val fullNameNoSig = ASTStringUtil.getQualifiedName(declarator.getName)
+                val fixedFullName = fixQualifiedName(fullNameNoSig).stripPrefix(".")
+                if fixedFullName.isEmpty then
+                  return ""
+                else
+                  return s"$fixedFullName"
       case declarator: CASTFunctionDeclarator =>
           val fn = declarator.getName.toString
           return fn
@@ -371,6 +377,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           s"${fullName(enumSpecifier.getParent)}.${ASTStringUtil.getSimpleName(enumSpecifier.getName)}"
       case f: ICPPASTLambdaExpression =>
           s"${fullName(f.getParent)}."
+      case f: IASTFunctionDeclarator
+          if ASTStringUtil.getSimpleName(f.getName).isEmpty && f.getNestedDeclarator != null =>
+          s"${fullName(f.getParent)}.${shortName(f.getNestedDeclarator)}"
+      case f: IASTFunctionDeclarator if f.getParent.isInstanceOf[IASTFunctionDefinition] =>
+          s"${fullName(f.getParent)}"
+      case f: IASTFunctionDeclarator =>
+          s"${fullName(f.getParent)}.${ASTStringUtil.getSimpleName(f.getName)}"
       case f: IASTFunctionDefinition if f.getDeclarator != null =>
           s"${fullName(f.getParent)}.${ASTStringUtil.getQualifiedName(f.getDeclarator.getName)}"
       case f: IASTFunctionDefinition =>
@@ -540,6 +553,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   private def safeGetEvaluation(expr: ICPPASTExpression): Option[ICPPEvaluation] =
       // In case of unresolved includes etc. this may fail throwing an unrecoverable exception
       Try(expr.getEvaluation).toOption
+
+  protected def safeGetType(tpe: IType): String =
+      // In case of unresolved includes etc. this may fail throwing an unrecoverable exception
+      Try(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
 
   private def notHandledText(node: IASTNode): String =
       s"""Node '${node.getClass.getSimpleName}' not handled yet!

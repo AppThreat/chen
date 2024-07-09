@@ -45,7 +45,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             for
               fullName     <- mayBeFullName
               typeFullName <- mayBeTypeFullName
-            yield methodRefNode(ident, code(ident), fullName, typeFullName)
+            yield methodRefNode(ident, code(ident), fullName, registerType(cleanType(typeFullName)))
         case _ => None
 
   protected def astForIdentifier(ident: IASTNode): Ast =

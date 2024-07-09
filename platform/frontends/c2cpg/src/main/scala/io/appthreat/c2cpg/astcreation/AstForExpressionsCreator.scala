@@ -145,7 +145,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   fullName,
                   dispatchType,
                   Some(signature),
-                  Some(cleanType(ASTTypeUtil.getType(call.getExpressionType)))
+                  Some(registerType(cleanType(safeGetType(call.getExpressionType))))
                 )
                 val args = call.getArguments.toList.map(a => astForNode(a))
 

@@ -83,8 +83,8 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         m1 shouldBe "Q.V.C.m:int()"
         f1 shouldBe "Q.V.f:int()"
         h shouldBe "h:void()"
-        f2 shouldBe ""
-        m2 shouldBe ""
+        f2 shouldBe "V.f"
+        m2 shouldBe "V.C.m"
       }
 
       inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>

@@ -343,7 +343,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     else
       val init = staticInitMethodAst(
         calls,
-        s"$fullname:${io.appthreat.x2cpg.Defines.StaticInitMethodName}",
+        s"$fullname.${io.appthreat.x2cpg.Defines.StaticInitMethodName}",
         None,
         Defines.anyTypeName,
         Some(filename),

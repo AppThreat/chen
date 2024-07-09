@@ -1,5 +1,6 @@
 package io.appthreat.c2cpg.astcreation
 
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.newModifierNode
 import io.appthreat.x2cpg.{Ast, ValidationMode}
@@ -68,7 +69,14 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
             val returnType = typeForDeclSpecifier(
               funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
             )
-            val fullname       = fullName(funcDecl)
+            val name     = shortName(funcDecl)
+            val fullname = fullName(funcDecl)
+            val fixedName = if name.isEmpty then
+              nextClosureName()
+            else name
+            val fixedFullName = if fullname.isEmpty then
+              s"${X2CpgDefines.UnresolvedNamespace}.$name"
+            else fullname
             val templateParams = templateParameters(funcDecl).getOrElse("")
             val signature =
                 s"$returnType${parameterListSignature(funcDecl)}"
@@ -77,8 +85,14 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
               val name       = shortName(funcDecl)
               val codeString = code(funcDecl.getParent)
               val filename   = fileName(funcDecl)
-              val methodNode_ =
-                  methodNode(funcDecl, name, codeString, fullname, Some(signature), filename)
+              val methodNode_ = methodNode(
+                funcDecl,
+                fixedName,
+                codeString,
+                fixedFullName,
+                Some(signature),
+                filename
+              )
 
               scope.pushNewScope(methodNode_)
 
@@ -95,8 +109,13 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                     parameterNodes,
                     newMethodReturnNode(funcDecl, registerType(returnType))
                   )
-              val typeDeclAst =
-                  createFunctionTypeAndTypeDecl(funcDecl, methodNode_, name, fullname, signature)
+              val typeDeclAst = createFunctionTypeAndTypeDecl(
+                funcDecl,
+                methodNode_,
+                fixedName,
+                fixedFullName,
+                signature
+              )
               stubAst.merge(typeDeclAst)
             else
               Ast()
