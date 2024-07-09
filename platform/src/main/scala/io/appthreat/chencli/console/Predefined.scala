@@ -6,21 +6,21 @@ object Predefined:
 
   val shared: Seq[String] =
       Seq(
-        "import _root_.io.appthreat.console._",
-        "import _root_.io.appthreat.chencli.console.ChenConsole._",
+        "import _root_.io.appthreat.console.*",
+        "import _root_.io.appthreat.chencli.console.ChenConsole.*",
         "import _root_.io.appthreat.chencli.console.Chen.context",
         "import _root_.io.shiftleft.codepropertygraph.Cpg",
         "import _root_.io.shiftleft.codepropertygraph.Cpg.docSearchPackages",
-        "import _root_.io.shiftleft.codepropertygraph.cpgloading._",
-        "import _root_.io.shiftleft.codepropertygraph.generated._",
-        "import _root_.io.shiftleft.codepropertygraph.generated.nodes._",
-        "import _root_.io.shiftleft.codepropertygraph.generated.edges._",
-        "import _root_.io.appthreat.dataflowengineoss.language._",
-        "import _root_.io.shiftleft.semanticcpg.language._",
-        "import overflowdb._",
+        "import _root_.io.shiftleft.codepropertygraph.cpgloading.*",
+        "import _root_.io.shiftleft.codepropertygraph.generated.*",
+        "import _root_.io.shiftleft.codepropertygraph.generated.nodes.*",
+        "import _root_.io.shiftleft.codepropertygraph.generated.edges.*",
+        "import _root_.io.appthreat.dataflowengineoss.language.*",
+        "import _root_.io.shiftleft.semanticcpg.language.*",
+        "import overflowdb.*",
         "import overflowdb.traversal.{`package` => _, help => _, _}",
         "import overflowdb.traversal.help.Doc",
-        "import scala.jdk.CollectionConverters._",
+        "import scala.jdk.CollectionConverters.*",
         """
         |@Doc(info = "Show reachable flows from a source to sink. Default source: framework-input and sink: framework-output", example = "reachables")
         |def reachables(sinkTag: String, sourceTag: String, sourceTags: Array[String])(implicit atom: Cpg): Unit = {

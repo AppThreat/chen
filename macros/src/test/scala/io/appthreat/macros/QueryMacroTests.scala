@@ -4,8 +4,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import QueryMacros.withStrRep
-import io.appthreat.console._
-import io.shiftleft.semanticcpg.language._
+import io.appthreat.console.*
+import io.shiftleft.semanticcpg.language.*
 
 class QueryMacroTests extends AnyWordSpec with Matchers {
   "Query macros" should {
