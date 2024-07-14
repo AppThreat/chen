@@ -17,6 +17,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ matrix.jvm }}
           cache: "sbt"
+      - uses: sbt/setup-sbt@v1
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
         with:
