@@ -71,8 +71,11 @@ abstract class XTypeRecoveryPass[CompilationUnitType <: AstNode](
         val state     = XTypeRecoveryState(config, stopEarly = stopEarly)
         try
           Iterator.from(0).takeWhile(_ < config.iterations).foreach { i =>
-            val newState = state.copy(currentIteration = i)
-            generateRecoveryPass(newState).createAndApply()
+              try
+                val newState = state.copy(currentIteration = i)
+                generateRecoveryPass(newState).createAndApply()
+              catch
+                case _: Exception =>
           }
           // If dummy values are enabled and we are stopping early, we need one more round to propagate these dummy values
           if stopEarly.get() && config.enabledDummyTypes then
