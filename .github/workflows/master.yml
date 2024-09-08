@@ -30,7 +30,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '21.x'
+          node-version: '22.x'
       - name: Delete `.rustup` directory
         run: rm -rf /home/runner/.rustup # to save disk space
         if: runner.os == 'Linux'
@@ -75,3 +75,7 @@ jobs:
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
           SCALAPY_PYTHON_LIBRARY: "python3"
         if: runner.os == 'Windows'
+      - name: Generate SBOM with cdxgen
+        run: |
+          npm install -g @cyclonedx/cdxgen
+          cdxgen -t sbt -o bom.json . -p --no-recurse
