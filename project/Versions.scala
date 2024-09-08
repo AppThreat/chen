@@ -1,13 +1,13 @@
 /* reads version declarations from /build.sbt so that we can declare them in one place */
 object Versions {
   val cpg = parseVersion("cpgVersion")
-  val antlr         = "4.13.1"
+  val antlr         = "4.13.2"
   val scalatest     = "3.2.19"
   val cats          = "3.5.4"
   val json4s        = "4.0.7"
-  val gradleTooling = "8.9"
-  val circe         = "0.14.9"
-  val requests      = "0.8.3"
+  val gradleTooling = "8.10"
+  val circe         = "0.14.10"
+  val requests      = "0.9.0"
   val upickle       = "3.3.1"
   val scalaReplPP   = "0.1.85"
 
