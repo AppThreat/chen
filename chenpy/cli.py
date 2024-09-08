@@ -182,7 +182,6 @@ def install_py_modules(pack="database"):
 conda install -n chenpy-local conda-libmamba-solver -y
 conda install -n chenpy-local -c conda-forge networkx --solver=libmamba -y
 conda install -n chenpy-local -c pytorch pytorch torchtext cpuonly --solver=libmamba -y
-pip install pyg_lib -f https://data.pyg.org/whl/torch-2.3.0+cpu.html
 conda install -n chenpy-local -c conda-forge numpy packageurl-python nbconvert jupyter_core jupyter_client notebook --solver=libmamba -y
 conda install -n chenpy-local -c conda-forge oras-py==0.1.26 httpx websockets orjson rich appdirs psutil gitpython --solver=libmamba -y"""
             for line in conda_install_script.split("\n"):
