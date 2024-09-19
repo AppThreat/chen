@@ -5,7 +5,7 @@ object Versions {
   val scalatest     = "3.2.19"
   val cats          = "3.5.4"
   val json4s        = "4.0.7"
-  val gradleTooling = "8.10"
+  val gradleTooling = "8.10.1"
   val circe         = "0.14.10"
   val requests      = "0.9.0"
   val upickle       = "3.3.1"
