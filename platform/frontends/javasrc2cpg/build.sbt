@@ -5,7 +5,6 @@ dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->t
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"             % Versions.cpg,
   "com.github.javaparser"   % "javaparser-symbol-solver-core" % "3.26.2",
-  "org.gradle"              % "gradle-tooling-api"            % Versions.gradleTooling,
   "org.scalatest"          %% "scalatest"                     % Versions.scalatest % Test,
   "org.projectlombok"       % "lombok"                        % "1.18.34",
   "org.scala-lang.modules" %% "scala-parallel-collections"    % "1.0.4",
