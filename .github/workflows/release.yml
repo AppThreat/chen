@@ -97,6 +97,9 @@ jobs:
         run: |
           npm install -g @cyclonedx/cdxgen
           cdxgen -t sbt -o bom.json . --no-recurse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
