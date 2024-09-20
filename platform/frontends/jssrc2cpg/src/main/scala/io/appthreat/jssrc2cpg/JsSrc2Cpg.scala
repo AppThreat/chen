@@ -9,7 +9,6 @@ import io.appthreat.jssrc2cpg.passes.{
     BuiltinTypesPass,
     ConfigPass,
     ConstClosurePass,
-    DependenciesPass,
     ImportResolverPass,
     ImportsPass,
     JavaScriptInheritanceNamePass,
@@ -49,7 +48,6 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
             new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
             new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
             new BuiltinTypesPass(cpg).createAndApply()
-            new DependenciesPass(cpg, config).createAndApply()
             new ConfigPass(cpg, config, report).createAndApply()
             new PrivateKeyFilePass(cpg, config, report).createAndApply()
             new ImportsPass(cpg).createAndApply()
