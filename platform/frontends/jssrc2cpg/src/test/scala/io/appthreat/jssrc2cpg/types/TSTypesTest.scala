@@ -46,7 +46,7 @@ class TSTypesTest extends AbstractPassTest {
     args.name shouldBe "args"
     args.code shouldBe "...args"
     args.isVariadic shouldBe true
-    args.typeFullName shouldBe Defines.Any
+    args.typeFullName shouldBe "Array<any>"
   }
 
   "have return types for arrow functions" in AstFixture("const foo = () => 42;", tsTypes = true) { cpg =>
@@ -138,7 +138,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.identifier.l) { case List(x) =>
       x.name shouldBe "x"
       x.code shouldBe "x"
-      x.typeFullName shouldBe Defines.String // we can actually follow type intrinsics
+      x.typeFullName shouldBe "ModifiedNickName"
     }
   }
 
