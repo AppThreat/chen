@@ -20,7 +20,6 @@ astGenVersion := appProperties.value.getString("jssrc2cpg.astgen_version")
 libraryDependencies ++= Seq(
   "io.appthreat"              %% "cpg2" % Versions.cpg,
   "com.lihaoyi"               %% "upickle"           % Versions.upickle,
-  "com.fasterxml.jackson.core" % "jackson-databind"  % "2.17.2",
   "com.typesafe"               % "config"            % "1.4.3",
   "com.michaelpollmeier"       % "versionsort"       % "1.0.13",
   "org.scalatest"             %% "scalatest"         % Versions.scalatest % Test
