@@ -7,13 +7,6 @@ name := "jssrc2cpg"
 
 dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
-lazy val appProperties = settingKey[Config]("App Properties")
-appProperties := {
-  val path            = (Compile / resourceDirectory).value / "application.conf"
-  val applicationConf = ConfigFactory.parseFile(path).resolve()
-  applicationConf
-}
-
 libraryDependencies ++= Seq(
   "io.appthreat"              %% "cpg2" % Versions.cpg,
   "com.lihaoyi"               %% "upickle"           % Versions.upickle,
