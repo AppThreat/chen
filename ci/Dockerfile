@@ -4,16 +4,16 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/appthreat/chen" \
       org.opencontainers.image.url="https://github.com/appthreat/chen" \
-      org.opencontainers.image.version="2.1.x" \
+      org.opencontainers.image.version="2.2.x" \
       org.opencontainers.image.vendor="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=23-graalce
+ARG JAVA_VERSION=23.0.1-tem
 ARG MAVEN_VERSION=3.9.9
-ARG GRADLE_VERSION=8.10.1
+ARG GRADLE_VERSION=8.11
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
@@ -64,10 +64,10 @@ RUN set -e; \
     && rm -rf /opt/miniconda3/miniconda.sh \
     && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc \
+    && conda install python=3.12 -y \
+    && conda config --set solver classic \
     && conda update -n base -c defaults conda -y \
     && conda config --add channels conda-forge \
-    && conda install -n base conda-libmamba-solver -y \
-    && conda config --set solver libmamba \
     && conda init bash \
     && bash -c /opt/conda-install.sh \
     && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \

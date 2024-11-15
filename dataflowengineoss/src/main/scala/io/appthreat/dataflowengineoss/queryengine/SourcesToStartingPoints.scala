@@ -119,7 +119,10 @@ class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode
 
           val usagesInOtherClasses = cpg.method.flatMap { m =>
               m.fieldAccess
-                  .where(_.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName))
+                  .or(
+                    _.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName),
+                    _.argument(1).isTypeRef.typeFullNameExact(typeDecl.fullName)
+                  )
                   .where { x =>
                       astNode match
                         case identifier: Identifier =>

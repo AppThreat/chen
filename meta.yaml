@@ -1,4 +1,4 @@
-{% set version = "2.1.9" %}
+{% set version = "2.2.0" %}
 
 package:
   name: chen
@@ -18,17 +18,17 @@ requirements:
     - pip
     - poetry
   run:
-    - python>=3.10,<3.13
-    - conda-forge::httpx>=0.27.0
-    - conda-forge::websockets>=12.0
-    - conda-forge::orjson>=3.10.1,<4.0.0
-    - conda-forge::rich>=13.7.1,<14.0.0
+    - python>=3.10,<3.14
+    - conda-forge::httpx>=0.27.2
+    - conda-forge::websockets>=14.1
+    - conda-forge::orjson>=3.10.11,<4.0.0
+    - conda-forge::rich>=13.9.4,<14.0.0
     - conda-forge::oras-py==0.1.26
     - conda-forge::appdirs>=1.4.4,<2.0.0
-    - conda-forge::psutil>=5.9.8,<6.0.0
+    - conda-forge::psutil>=6.1.0,<7.0.0
     - conda-forge::packageurl-python>=0.11.2,<0.12.0
     - conda-forge::gitpython>=3.1.43,<4.0.0
-    - conda-forge::networkx>=3.3
+    - conda-forge::networkx>=3.4.2
 build:
   include_recipe: False
   pin_depends: record
