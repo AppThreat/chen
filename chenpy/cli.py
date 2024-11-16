@@ -179,11 +179,10 @@ def install_py_modules(pack="database"):
         )
         with Progress(transient=True) as progress:
             conda_install_script = """conda create --name chenpy-local python=3.12 -y
-conda install -n chenpy-local conda-libmamba-solver -y
-conda install -n chenpy-local -c conda-forge networkx --solver=libmamba -y
-conda install -n chenpy-local -c pytorch pytorch torchtext cpuonly --solver=libmamba -y
-conda install -n chenpy-local -c conda-forge numpy packageurl-python nbconvert jupyter_core jupyter_client notebook --solver=libmamba -y
-conda install -n chenpy-local -c conda-forge oras-py==0.1.26 httpx websockets orjson rich appdirs psutil gitpython --solver=libmamba -y"""
+conda install -n chenpy-local -c conda-forge networkx -y
+conda install -n chenpy-local -c pytorch pytorch torchtext cpuonly -y
+conda install -n chenpy-local -c conda-forge numpy packageurl-python nbconvert jupyter_core jupyter_client notebook -y
+conda install -n chenpy-local -c conda-forge oras-py==0.1.26 httpx websockets orjson rich appdirs psutil gitpython -y"""
             for line in conda_install_script.split("\n"):
                 if line.strip():
                     task = progress.add_task(line, start=False, total=100)

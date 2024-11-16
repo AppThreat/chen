@@ -49,17 +49,17 @@ object Path:
             val method = cfgNode.method
             sinkCode = method.fullName
       caption = if srcNode.code != "this" then s"Source: ${srcNode.code}" else ""
-      if srcTags.nonEmpty then caption += s"\nSource Tags: ${srcTags}"
-      caption += s"\nSink: ${sinkCode}\n"
-      if sinkTags.nonEmpty then caption += s"Sink Tags: ${sinkTags}\n"
-    var hasCheckLike: Boolean = false;
+      if srcTags.nonEmpty then caption += s"\nSource Tags: $srcTags"
+      caption += s"\nSink: $sinkCode\n"
+      if sinkTags.nonEmpty then caption += s"Sink Tags: $sinkTags\n"
+    var hasCheckLike: Boolean = false
     val tableRows             = ArrayBuffer[Array[String]]()
     val addedPaths            = Set[String]()
     path.elements.foreach { astNode =>
       val nodeType     = astNode.getClass.getSimpleName
       val lineNumber   = astNode.lineNumber.getOrElse("").toString
       val fileName     = astNode.file.name.headOption.getOrElse("").replace("<unknown>", "")
-      var fileLocation = s"${fileName}#${lineNumber}"
+      var fileLocation = s"$fileName#$lineNumber"
       var tags: String = tagAsString(astNode.tag)
       if fileLocation == "#" then fileLocation = "N/A"
       astNode match
@@ -96,7 +96,7 @@ object Path:
             then
               tags = tagAsString(identifier.inCall.head.tag)
             if !addedPaths.contains(
-                s"${fileName}#${lineNumber}"
+                s"$fileName#$lineNumber"
               ) && identifier.inCall.nonEmpty
             then
               tableRows += Array[String](
@@ -185,13 +185,13 @@ object Path:
             )
       end match
       if isCheckLike(tags) then hasCheckLike = true
-      addedPaths += s"${fileName}#${lineNumber}"
+      addedPaths += s"$fileName#$lineNumber"
     }
     try
       if hasCheckLike then caption = s"This flow has mitigations in place.\n$caption"
       printFlows(tableRows, caption)
     catch
-      case exc: Exception =>
+      case _: Exception =>
     caption
 
   private def addEmphasis(str: String, isCheckLike: Boolean): String =
@@ -217,7 +217,7 @@ object Path:
       val trow: Array[String] = row.tail
       if !trow(3).startsWith("<operator") && trow(3) != "<empty>" && trow(3) != "RET" then
         val tagsStr: String = if trow(4).nonEmpty then s"Tags: ${trow(4)}" else ""
-        val methodStr       = s"${trow(1)}\n${tagsStr}"
+        val methodStr       = s"${trow(1)}\n$tagsStr"
         table.add_row(
           simplifyFilePath(trow(0)),
           methodStr.stripMargin,
