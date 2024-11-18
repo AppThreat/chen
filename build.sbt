@@ -1,6 +1,6 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.2.2"
+ThisBuild / version      := "2.2.3"
 ThisBuild / scalaVersion := "3.5.2"
 
 val cpgVersion = "1.0.1"
@@ -36,6 +36,12 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 ThisBuild / libraryDependencies ++= Seq(
   "org.slf4j"                % "slf4j-api"         % "2.0.16",
   "org.slf4j"                % "slf4j-nop"         % "2.0.16" % Optional,
+)
+
+ThisBuild / excludeDependencies ++= Seq(
+  ExclusionRule("com.google.protobuf", "protobuf-java-util"),
+  ExclusionRule("com.github.tototoshi", "scala-csv_3"),
+  ExclusionRule("au.com.bytecode", "opencsv")
 )
 
 ThisBuild / compile / javacOptions ++= Seq(

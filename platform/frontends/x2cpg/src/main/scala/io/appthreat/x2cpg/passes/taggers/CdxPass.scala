@@ -19,7 +19,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
   val language: String = atom.metaData.language.head
 
   // Number of tags needed
-  private val TAGS_COUNT: Int = 2
+  private val TAGS_COUNT: Int = 3
 
   // Number of dots to use in the package namespace
   // Example: org.apache.logging.* would be used for tagging purposes
@@ -94,9 +94,14 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
           val compType  = comp.hcursor.downField("type").as[String].getOrElse("")
           val compDescription: String =
               comp.hcursor.downField("description").as[String].getOrElse("")
-          val descTags = keywords.filter(k =>
-              compDescription.toLowerCase().contains(" " + k)
-          ).take(TAGS_COUNT)
+          // Reuse existing tags from the xBOM
+          val compTags: List[String] =
+              comp.hcursor.downField("tags").as[List[String]].getOrElse(List.empty)
+          val descTags = if compTags.nonEmpty then compTags.take(TAGS_COUNT)
+          else
+            keywords.filter(k =>
+                compDescription.toLowerCase().contains(" " + k)
+            ).take(TAGS_COUNT)
           if (language == Languages.PYTHON || language == Languages.PYTHONSRC) && compPurl.startsWith(
               "pkg:pypi"
             )
