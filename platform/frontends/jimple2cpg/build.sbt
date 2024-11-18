@@ -4,6 +4,7 @@ dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->t
 
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"              % Versions.cpg,
+  "commons-io"             % "commons-io"         % "2.17.0",
   "org.soot-oss"           % "soot"               % "4.6.0",
   "org.scala-lang.modules" % "scala-asm"          % "9.7.0-scala-2",
   "org.ow2.asm"            % "asm"                % "9.7.1",
@@ -11,10 +12,6 @@ libraryDependencies ++= Seq(
   "org.ow2.asm"            % "asm-util"           % "9.7.1",
   "org.ow2.asm"            % "asm-tree"           % "9.7.1",
   "org.scalatest" %% "scalatest"                  % Versions.scalatest % Test
-)
-
-excludeDependencies ++= Seq(
-  ExclusionRule("commons-io", "commons-io")
 )
 
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)
