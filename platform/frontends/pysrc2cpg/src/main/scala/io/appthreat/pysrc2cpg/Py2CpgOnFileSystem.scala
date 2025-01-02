@@ -4,7 +4,6 @@ import io.appthreat.x2cpg.passes.frontend.TypeRecoveryParserConfig
 import io.appthreat.x2cpg.{SourceFiles, X2Cpg, X2CpgConfig, X2CpgFrontend}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.utils.IOUtils
-import org.slf4j.LoggerFactory
 
 import java.nio.file.*
 import scala.util.Try
@@ -35,48 +34,50 @@ case class Py2CpgOnFileSystemConfig(
 end Py2CpgOnFileSystemConfig
 
 class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
-  private val logger = LoggerFactory.getLogger(getClass)
 
   /** Entry point for files system based cpg generation from python code.
     * @param config
     *   Configuration for cpg generation.
     */
   override def createCpg(config: Py2CpgOnFileSystemConfig): Try[Cpg] =
-    logConfiguration(config)
+      X2Cpg.withNewEmptyCpg(config.outputPath, config) { (cpg, _) =>
+        val venvIgnorePath =
+            if config.ignoreVenvDir then
+              config.venvDir :: Nil
+            else
+              Nil
+        val inputPath         = Path.of(config.inputPath)
+        val ignoreDirNamesSet = config.ignoreDirNames.toSet
+        val absoluteIgnorePaths = (config.ignorePaths ++ venvIgnorePath).map { path =>
+            inputPath.resolve(path)
+        }
 
-    X2Cpg.withNewEmptyCpg(config.outputPath, config) { (cpg, _) =>
-      val venvIgnorePath =
-          if config.ignoreVenvDir then
-            config.venvDir :: Nil
-          else
-            Nil
-      val inputPath         = Path.of(config.inputPath)
-      val ignoreDirNamesSet = config.ignoreDirNames.toSet
-      val absoluteIgnorePaths = (config.ignorePaths ++ venvIgnorePath).map { path =>
-          inputPath.resolve(path)
+        val inputFiles = SourceFiles
+            .determine(
+              config.inputPath,
+              Set(".py"),
+              ignoredFilesRegex = Option(config.ignoredFilesRegex),
+              ignoredFilesPath = Option(config.ignoredFiles)
+            )
+            .map(x => Path.of(x))
+            .filter { file => filterIgnoreDirNames(file, inputPath, ignoreDirNamesSet) }
+            .filter { file =>
+                !absoluteIgnorePaths.exists(ignorePath => file.startsWith(ignorePath))
+            }
+
+        val inputProviders = inputFiles.map { inputFile => () =>
+          val content = IOUtils.readLinesInFile(inputFile).mkString("\n")
+          Py2Cpg.InputPair(content, inputPath.relativize(inputFile).toString)
+        }
+        val py2Cpg = new Py2Cpg(
+          inputProviders,
+          cpg,
+          config.inputPath,
+          config.requirementsTxt,
+          config.schemaValidation
+        )
+        py2Cpg.buildCpg()
       }
-
-      val inputFiles = SourceFiles
-          .determine(config.inputPath, Set(".py"), config)
-          .map(x => Path.of(x))
-          .filter { file => filterIgnoreDirNames(file, inputPath, ignoreDirNamesSet) }
-          .filter { file =>
-              !absoluteIgnorePaths.exists(ignorePath => file.startsWith(ignorePath))
-          }
-
-      val inputProviders = inputFiles.map { inputFile => () =>
-        val content = IOUtils.readLinesInFile(inputFile).mkString("\n")
-        Py2Cpg.InputPair(content, inputPath.relativize(inputFile).toString)
-      }
-      val py2Cpg = new Py2Cpg(
-        inputProviders,
-        cpg,
-        config.inputPath,
-        config.requirementsTxt,
-        config.schemaValidation
-      )
-      py2Cpg.buildCpg()
-    }
   end createCpg
 
   private def filterIgnoreDirNames(
@@ -93,12 +94,4 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
     val aPartIsInIgnoreSet = parts.exists(part => ignoreDirNamesSet.contains(part.toString))
     !aPartIsInIgnoreSet
 
-  private def logConfiguration(config: Py2CpgOnFileSystemConfig): Unit =
-    logger.debug(s"Output file: ${config.outputPath}")
-    logger.debug(s"Input directory: ${config.inputPath}")
-    logger.debug(s"Venv directory: ${config.venvDir}")
-    logger.debug(s"IgnoreVenvDir: ${config.ignoreVenvDir}")
-    logger.debug(s"IgnorePaths: ${config.ignorePaths.mkString(", ")}")
-    logger.debug(s"IgnoreDirNames: ${config.ignoreDirNames.mkString(", ")}")
-    logger.debug(s"No dummy types: ${config.disableDummyTypes}")
 end Py2CpgOnFileSystem

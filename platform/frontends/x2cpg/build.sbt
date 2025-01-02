@@ -3,7 +3,9 @@ name := "x2cpg"
 dependsOn(Projects.semanticcpg)
 
 libraryDependencies ++= Seq(
-  "io.circe" %% "circe-core" % Versions.circe,
+  "com.lihaoyi"         %% "upickle"      % Versions.upickle,
+  "com.typesafe"         % "config"       % Versions.typeSafeConfig,
+  "com.michaelpollmeier" % "versionsort"  % Versions.versionSort,
   "io.circe" %% "circe-generic" % Versions.circe,
   "io.circe" %% "circe-parser" % Versions.circe,
   "org.scalatest" %% "scalatest"          % Versions.scalatest     % Test

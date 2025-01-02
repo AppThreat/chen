@@ -31,7 +31,9 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
           .determine(
             config.inputPath,
             FileDefaults.SOURCE_FILE_EXTENSIONS ++ FileDefaults.HEADER_FILE_EXTENSIONS,
-            config.withDefaultIgnoredFilesRegex(DefaultIgnoredFolders)
+            ignoredDefaultRegex = Option(DefaultIgnoredFolders),
+            ignoredFilesRegex = Option(config.ignoredFilesRegex),
+            ignoredFilesPath = Option(config.ignoredFiles)
           )
           .sortWith(_.compareToIgnoreCase(_) > 0)
           .toArray

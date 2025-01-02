@@ -3,7 +3,6 @@ package io.appthreat.x2cpg
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.nodes.AstNode.PropertyDefaults
-import org.slf4j.LoggerFactory
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.SchemaViolationException
 
@@ -13,8 +12,6 @@ enum ValidationMode:
   case Enabled, Disabled
 
 object Ast:
-
-  private val logger = LoggerFactory.getLogger(getClass)
 
   def apply(node: NewNode)(implicit withSchemaValidation: ValidationMode): Ast =
       Ast(Vector.empty :+ node)
@@ -48,6 +45,9 @@ object Ast:
 
     ast.bindsEdges.foreach { edge =>
         diffGraph.addEdge(edge.src, edge.dst, EdgeTypes.BINDS)
+    }
+    ast.captureEdges.foreach { edge =>
+        diffGraph.addEdge(edge.src, edge.dst, EdgeTypes.CAPTURE)
     }
   end storeInDiffGraph
 
@@ -90,7 +90,8 @@ case class Ast(
   refEdges: collection.Seq[AstEdge] = Vector.empty,
   bindsEdges: collection.Seq[AstEdge] = Vector.empty,
   receiverEdges: collection.Seq[AstEdge] = Vector.empty,
-  argEdges: collection.Seq[AstEdge] = Vector.empty
+  argEdges: collection.Seq[AstEdge] = Vector.empty,
+  captureEdges: collection.Seq[AstEdge] = Vector.empty
 )(implicit withSchemaValidation: ValidationMode = ValidationMode.Disabled):
 
   def root: Option[NewNode] = nodes.headOption
@@ -199,6 +200,14 @@ case class Ast(
   def withReceiverEdges(src: NewNode, dsts: List[NewNode]): Ast =
     dsts.foreach(dst => Ast.neighbourValidation(src, dst, EdgeTypes.RECEIVER))
     this.copy(receiverEdges = receiverEdges ++ dsts.map(AstEdge(src, _)))
+
+  def withCaptureEdge(src: NewNode, dst: NewNode): Ast =
+    Ast.neighbourValidation(src, dst, EdgeTypes.CAPTURE)
+    this.copy(captureEdges = captureEdges ++ List(AstEdge(src, dst)))
+
+  def withCaptureEdges(src: NewNode, dsts: Seq[NewNode]): Ast =
+    dsts.foreach(dst => Ast.neighbourValidation(src, dst, EdgeTypes.CAPTURE))
+    this.copy(captureEdges = captureEdges ++ dsts.map(AstEdge(src, _)))
 
   /** Returns a deep copy of the sub tree rooted in `node`. If `order` is set, then the `order` and
     * `argumentIndex` fields of the new root node are set to `order`. If `replacementNode` is set,
