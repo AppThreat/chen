@@ -1,7 +1,7 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.2.3"
-ThisBuild / scalaVersion := "3.5.2"
+ThisBuild / version      := "2.3.0"
+ThisBuild / scalaVersion := "3.6.2"
 
 val cpgVersion = "1.0.1"
 
@@ -17,6 +17,7 @@ lazy val jssrc2cpg         = Projects.jssrc2cpg
 lazy val javasrc2cpg       = Projects.javasrc2cpg
 lazy val jimple2cpg        = Projects.jimple2cpg
 lazy val php2atom          = Projects.php2atom
+lazy val ruby2atom         = Projects.ruby2atom
 
 lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   platform,
@@ -30,7 +31,8 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   jssrc2cpg,
   javasrc2cpg,
   jimple2cpg,
-  php2atom
+  php2atom,
+  ruby2atom,
 )
 
 ThisBuild / libraryDependencies ++= Seq(

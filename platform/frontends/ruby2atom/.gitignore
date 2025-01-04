@@ -1,0 +1,5 @@
+# Created by IntelliJ's ANTLR plugin
+gen/
+*.tokens
+type_stubs
+src/main/resources/ruby_ast_gen

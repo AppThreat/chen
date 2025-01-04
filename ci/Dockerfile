@@ -1,10 +1,10 @@
-FROM almalinux:9.4-minimal
+FROM ghcr.io/appthreat/base:main
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/appthreat/chen" \
       org.opencontainers.image.url="https://github.com/appthreat/chen" \
-      org.opencontainers.image.version="2.2.x" \
+      org.opencontainers.image.version="2.3.x" \
       org.opencontainers.image.vendor="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
@@ -14,10 +14,12 @@ LABEL maintainer="appthreat" \
 ARG JAVA_VERSION=23.0.1-tem
 ARG MAVEN_VERSION=3.9.9
 ARG GRADLE_VERSION=8.11
+ARG RUBY_VERSION=3.4.0
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
     GRADLE_VERSION=$GRADLE_VERSION \
+    RUBY_VERSION=$RUBY_VERSION \
     GRADLE_OPTS="-Dorg.gradle.daemon=false" \
     JAVA_HOME="/opt/java/${JAVA_VERSION}" \
     MAVEN_HOME="/opt/maven/${MAVEN_VERSION}" \
@@ -25,15 +27,20 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     PYTHON_CMD=python3 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8" \
-    JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1" \
+    JAVA_OPTS="-XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:+UnlockDiagnosticVMOptions -XX:G1SummarizeRSetStatsPeriod=1 -Dorg.jline.terminal.disableDeprecatedProviderWarning=true" \
     CHEN_DATAFLOW_TRACKED_WIDTH=128 \
     SCALAPY_PYTHON_LIBRARY=python3.12 \
     ANDROID_HOME=/opt/android-sdk-linux \
     CHEN_INSTALL_DIR=/opt/workspace \
     PHP_PARSER_BIN=/opt/vendor/bin/php-parse \
     CDXGEN_NO_BANNER=true \
-    COMPOSER_ALLOW_SUPERUSER=1
-ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
+    COMPOSER_ALLOW_SUPERUSER=1 \
+    MALLOC_CONF="dirty_decay_ms:2000,narenas:2,background_thread:true" \
+    RUBY_CONFIGURE_OPTS="--with-jemalloc --enable-yjit" \
+    RUBYOPT="--yjit" \
+    RUBY_BUILD_BUILD_PATH="/tmp/rbenv" \
+    RUBY_BUILD_HTTP_CLIENT=curl
+ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/root/.rbenv/bin:
 
 WORKDIR /opt
 COPY ./ci/conda-install.sh /opt/
@@ -57,7 +64,21 @@ RUN set -e; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
     && microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
-        pcre2 findutils which tar gzip zip unzip sudo nodejs ncurses sqlite-devel glibc-common glibc-all-langpacks \
+        openssl-devel libffi-devel readline-devel libyaml zlib-devel ncurses ncurses-devel rust \
+        pcre2 findutils which tar gzip zip unzip sudo nodejs sqlite-devel glibc-common glibc-all-langpacks \
+    && microdnf install -y epel-release \
+    && microdnf install --enablerepo=crb -y libyaml-devel jemalloc-devel \
+    && git clone https://github.com/rbenv/rbenv.git --depth=1 ~/.rbenv \
+    && echo 'export PATH="/root/.rbenv/bin:$PATH"' >> ~/.bashrc \
+    && echo 'eval "$(/root/.rbenv/bin/rbenv init - bash)"' >> ~/.bashrc \
+    && source ~/.bashrc \
+    && mkdir -p "$(rbenv root)/plugins" \
+    && git clone https://github.com/rbenv/ruby-build.git --depth=1 "$(rbenv root)/plugins/ruby-build" \
+    && MAKE_OPTS=-j2 rbenv install ${RUBY_VERSION} \
+    && rbenv global ${RUBY_VERSION} \
+    && ruby --version \
+    && which ruby \
+    && rm -rf /root/.rbenv/cache $RUBY_BUILD_BUILD_PATH \
     && mkdir -p /opt/miniconda3 /opt/workspace \
     && wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${ARCH_NAME}.sh -O /opt/miniconda3/miniconda.sh \
     && bash /opt/miniconda3/miniconda.sh -b -u -p /opt/miniconda3 \
@@ -74,15 +95,14 @@ RUN set -e; \
     && rpm -ivh graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
     && rm graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
     && curl -s "https://get.sdkman.io" | bash \
-    && source "$HOME/.sdkman/bin/sdkman-init.sh" \
-    && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true\nsdkman_curl_connect_timeout=20\nsdkman_curl_max_time=0" >> $HOME/.sdkman/etc/config \
+    && source "/root/.sdkman/bin/sdkman-init.sh" \
+    && echo -e "sdkman_auto_answer=true\nsdkman_selfupdate_feature=false\nsdkman_auto_env=true\nsdkman_curl_connect_timeout=20\nsdkman_curl_max_time=0" >> /root/.sdkman/etc/config \
     && sdk install java $JAVA_VERSION \
     && sdk install maven $MAVEN_VERSION \
     && sdk install gradle $GRADLE_VERSION \
     && sdk offline enable \
     && mv /root/.sdkman/candidates/* /opt/ \
     && rm -rf /root/.sdkman \
-    && microdnf install -y epel-release \
     && mkdir -p ${ANDROID_HOME}/cmdline-tools \
     && curl -L https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
     && unzip ${ANDROID_HOME}/cmdline-tools/android_tools.zip -d ${ANDROID_HOME}/cmdline-tools/ \
@@ -92,7 +112,7 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;34.0.0' --sdk_root=/opt/android-sdk-linux \
-    && sudo npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
+    && npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
     && php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && php composer-setup.php \
     && mv composer.phar /usr/local/bin/composer
 ENV LC_ALL=en_US.UTF-8 \

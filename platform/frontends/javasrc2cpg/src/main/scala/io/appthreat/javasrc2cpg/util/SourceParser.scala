@@ -90,8 +90,13 @@ object SourceParser:
     config: Config,
     sourcesOverride: Option[List[String]] = None
   ): Array[String] =
-    val inputPaths = sourcesOverride.getOrElse(config.inputPath :: Nil).toSet
-    SourceFiles.determine(inputPaths, JavaSrc2Cpg.sourceFileExtensions, config).toArray
+      SourceFiles.determine(
+        config.inputPath,
+        JavaSrc2Cpg.sourceFileExtensions,
+        ignoredDefaultRegex = Option(JavaSrc2Cpg.DefaultIgnoredFilesRegex),
+        ignoredFilesRegex = Option(config.ignoredFilesRegex),
+        ignoredFilesPath = Option(config.ignoredFiles)
+      ).toArray
 
   /** Implements the logic described in the option description for the "delombok-mode" option:
     *   - no-delombok: do not run delombok.

@@ -4,14 +4,11 @@ import better.files.File
 import io.appthreat.php2atom.Config
 import io.appthreat.php2atom.parser.Domain.PhpFile
 import io.appthreat.x2cpg.utils.ExternalCommand
-import org.slf4j.LoggerFactory
 
 import java.nio.file.Paths
 import scala.util.{Failure, Success, Try}
 
 class PhpParser private (phpParserPath: String, phpIniPath: String):
-
-  private val logger = LoggerFactory.getLogger(this.getClass)
 
   private def phpParseCommand(filename: String): String =
     val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
@@ -33,7 +30,6 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
           processParserOutput(output, inputFilePath)
 
       case Failure(exception) =>
-          logger.debug(s"Failure running php-parser with $command", exception.getMessage)
           None
 
   private def processParserOutput(output: Seq[String], filename: String): Option[PhpFile] =
@@ -48,17 +44,11 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
           case Success(Some(value)) => Some(value)
 
           case Success(None) =>
-              logger.debug(s"Parsing json string for $filename resulted in null return value")
               None
 
           case Failure(exception) =>
-              logger.debug(
-                s"Parsing json string for $filename failed with exception",
-                exception
-              )
               None
       else
-        logger.debug(s"No JSON output for $filename")
         None
 
   private def jsonValueToPhpFile(json: ujson.Value, filename: String): Option[PhpFile] =
@@ -66,12 +56,10 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
         case Success(phpFile) => Some(phpFile)
 
         case Failure(e) =>
-            logger.debug(s"Failed to generate intermediate AST for $filename", e)
             None
 end PhpParser
 
 object PhpParser:
-  private val logger = LoggerFactory.getLogger(this.getClass())
 
   val PhpParserBinEnvVar = "PHP_PARSER_BIN"
 

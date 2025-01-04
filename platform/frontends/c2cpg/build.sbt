@@ -3,14 +3,14 @@ name := "c2cpg"
 dependsOn(Projects.semanticcpg, Projects.dataflowengineoss % Test, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
-  "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4",
-  "org.eclipse.platform"    % "org.eclipse.equinox.common"       % "3.19.100",
-  "org.eclipse.platform"    % "org.eclipse.core.resources"       % "3.21.0" excludeAll(
+  "org.scala-lang.modules" %% "scala-parallel-collections" % "1.1.0",
+  "org.eclipse.platform"    % "org.eclipse.equinox.common"       % "3.19.200",
+  "org.eclipse.platform"    % "org.eclipse.core.resources"       % "3.22.0" excludeAll(
     ExclusionRule(organization = "com.ibm.icu", name = "icu4j"),
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface"),
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface.text")
   ),
-  "org.jline"               % "jline"                      % "3.27.1",
+  "org.jline"               % "jline"                      % "3.28.0",
   "org.scalatest"          %% "scalatest"                  % Versions.scalatest % Test
 )
 

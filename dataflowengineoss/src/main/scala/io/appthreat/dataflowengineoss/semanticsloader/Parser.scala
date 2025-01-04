@@ -22,7 +22,7 @@ object Semantics:
 
   def empty: Semantics = fromList(List())
 
-class Semantics private (methodToSemantic: mutable.Map[String, FlowSemantic]):
+class Semantics(methodToSemantic: mutable.Map[String, FlowSemantic]):
 
   /** The map below keeps a mapping between results of a regex and the regex string it matches. e.g.
     *

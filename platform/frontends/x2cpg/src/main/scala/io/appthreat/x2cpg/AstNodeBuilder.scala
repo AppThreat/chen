@@ -42,7 +42,7 @@ trait AstNodeBuilder[Node, NodeProcessor]:
   protected def shortenCode(code: String): String =
       StringUtils.abbreviate(code, math.max(MinCodeLength, MaxCodeLength))
 
-  protected def offset(node: Node): Option[(Int, Int)] = None
+  protected def offset(node: Node): Option[(Integer, Integer)] = None
 
   protected def unknownNode(node: Node, code: String): NewUnknown =
       NewUnknown()

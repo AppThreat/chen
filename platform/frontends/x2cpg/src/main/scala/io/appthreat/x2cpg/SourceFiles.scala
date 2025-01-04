@@ -1,20 +1,102 @@
 package io.appthreat.x2cpg
 
-import better.files.File.VisitOptions
 import better.files.*
+import better.files.File.VisitOptions
 import org.slf4j.LoggerFactory
 
 import java.io.FileNotFoundException
+import java.nio.file.FileVisitor
+import java.nio.file.FileVisitResult
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.Files
+import scala.jdk.CollectionConverters.SetHasAsJava
+import scala.util.matching.Regex
 
 object SourceFiles:
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  private def isIgnoredByFileList(filePath: String, config: X2CpgConfig[?]): Boolean =
-    val isInIgnoredFiles = config.ignoredFiles.exists {
-        case ignorePath if File(ignorePath).isDirectory => filePath.startsWith(ignorePath)
-        case ignorePath                                 => filePath == ignorePath
+  /** A failsafe implementation of a [[FileVisitor]] that continues iterating through files even if
+    * an [[IOException]] occurs during traversal.
+    *
+    * This visitor determines during traversal whether a given file should be excluded based on
+    * several criteria, such as matching default ignore patterns, specific file name patterns, or
+    * explicit file paths to ignore. It does not descent into folders matching such ignore patterns.
+    *
+    * This class is useful in scenarios where file traversal must be resilient to errors, such as
+    * accessing files with restricted permissions or encountering corrupted file entries.
+    *
+    * @param inputPath
+    *   The root path from which the file traversal starts.
+    * @param ignoredDefaultRegex
+    *   Optional sequence of regular expressions to filter out default ignored file patterns.
+    * @param ignoredFilesRegex
+    *   Optional regular expression to filter out specific files based on their names.
+    * @param ignoredFilesPath
+    *   Optional sequence of file paths to exclude from traversal explicitly.
+    */
+  private final class FailsafeFileVisitor(
+    inputPath: String,
+    sourceFileExtensions: Set[String],
+    ignoredDefaultRegex: Option[Seq[Regex]] = None,
+    ignoredFilesRegex: Option[Regex] = None,
+    ignoredFilesPath: Option[Seq[String]] = None
+  ) extends FileVisitor[Path]:
+
+    private val seenFiles = scala.collection.mutable.ArrayBuffer.empty[Path]
+
+    def files(): Array[File] = seenFiles.map(File(_)).toArray
+
+    override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
+        if filterFile(
+            dir.toString,
+            inputPath,
+            ignoredDefaultRegex,
+            ignoredFilesRegex,
+            ignoredFilesPath
+          )
+        then
+          FileVisitResult.CONTINUE
+        else
+          FileVisitResult.SKIP_SUBTREE
+
+    override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult =
+      if
+        hasSourceFileExtension(file, sourceFileExtensions) &&
+        filterFile(
+          file.toString,
+          inputPath,
+          ignoredDefaultRegex,
+          ignoredFilesRegex,
+          ignoredFilesPath
+        )
+      then seenFiles.addOne(file)
+      FileVisitResult.CONTINUE
+
+    override def visitFileFailed(file: Path, exc: java.io.IOException): FileVisitResult =
+      exc match
+        case _: java.nio.file.FileSystemLoopException =>
+            logger.warn(s"Ignoring '$file' (cyclic symlink)")
+        case other => logger.warn(s"Ignoring '$file'", other)
+      FileVisitResult.CONTINUE
+
+    override def postVisitDirectory(dir: Path, exc: java.io.IOException): FileVisitResult =
+        FileVisitResult.CONTINUE
+  end FailsafeFileVisitor
+
+  private def isIgnoredByFileList(filePath: String, ignoredFiles: Seq[String]): Boolean =
+    val filePathFile = File(filePath)
+    if !filePathFile.exists || !filePathFile.isReadable then
+      logger.debug(s"'$filePath' ignored (not readable or broken symlink)")
+      return true
+    val isInIgnoredFiles = ignoredFiles.exists { ignorePath =>
+      val ignorePathFile = File(ignorePath)
+      ignorePathFile.exists &&
+      (ignorePathFile.contains(filePathFile, strict = false) || ignorePathFile.isSameFileAs(
+        filePathFile
+      ))
     }
     if isInIgnoredFiles then
       logger.debug(s"'$filePath' ignored (--exclude)")
@@ -22,106 +104,190 @@ object SourceFiles:
     else
       false
 
-  private def isIgnoredByDefault(filePath: String, config: X2CpgConfig[?]): Boolean =
-    val relPath = toRelativePath(filePath, config.inputPath)
-    if config.defaultIgnoredFilesRegex.exists(_.matches(relPath)) || File(
-        filePath
-      ).isSymbolicLink
-    then
+  private def isIgnoredByDefaultRegex(
+    filePath: String,
+    inputPath: String,
+    ignoredDefaultRegex: Seq[Regex]
+  ): Boolean =
+    val relPath = toRelativePath(filePath, inputPath)
+    if ignoredDefaultRegex.exists(_.matches(relPath)) then
       logger.debug(s"'$relPath' ignored by default")
       true
     else
       false
 
-  private def isIgnoredByRegex(filePath: String, config: X2CpgConfig[?]): Boolean =
-    val relPath               = toRelativePath(filePath, config.inputPath)
-    val isInIgnoredFilesRegex = config.ignoredFilesRegex.matches(relPath)
+  private def isIgnoredByRegex(
+    filePath: String,
+    inputPath: String,
+    ignoredFilesRegex: Regex
+  ): Boolean =
+    val relPath               = toRelativePath(filePath, inputPath)
+    val isInIgnoredFilesRegex = ignoredFilesRegex.matches(relPath)
     if isInIgnoredFilesRegex then
       logger.debug(s"'$relPath' ignored (--exclude-regex)")
       true
     else
       false
 
-  private def filterFiles(files: List[String], config: X2CpgConfig[?]): List[String] =
-      files.filter {
-          case filePath if isIgnoredByDefault(filePath, config)  => false
-          case filePath if isIgnoredByFileList(filePath, config) => false
-          case filePath if isIgnoredByRegex(filePath, config)    => false
-          case _                                                 => true
-      }
-
-  /** For a given input path, determine all source files by inspecting filename extensions.
+  /** Filters a file based on the provided ignore rules.
+    *
+    * This method determines whether a given file should be excluded from processing based on
+    * several criteria, such as matching default ignore patterns, specific file name patterns, or
+    * explicit file paths to ignore.
+    *
+    * @param file
+    *   The file name or path to evaluate.
+    * @param inputPath
+    *   The root input path for the file traversal.
+    * @param ignoredDefaultRegex
+    *   Optional sequence of regular expressions defining default file patterns to ignore.
+    * @param ignoredFilesRegex
+    *   Optional regular expression defining specific file name patterns to ignore.
+    * @param ignoredFilesPath
+    *   Optional sequence of file paths to explicitly exclude.
+    * @return
+    *   `true` if the file is accepted, i.e., does not match any of the ignore criteria, `false`
+    *   otherwise.
     */
-  def determine(inputPath: String, sourceFileExtensions: Set[String]): List[String] =
-      determine(Set(inputPath), sourceFileExtensions)
+  def filterFile(
+    file: String,
+    inputPath: String,
+    ignoredDefaultRegex: Option[Seq[Regex]] = None,
+    ignoredFilesRegex: Option[Regex] = None,
+    ignoredFilesPath: Option[Seq[String]] = None
+  ): Boolean =
+      !ignoredDefaultRegex.exists(isIgnoredByDefaultRegex(file, inputPath, _))
+          && !ignoredFilesRegex.exists(isIgnoredByRegex(file, inputPath, _))
+          && !ignoredFilesPath.exists(isIgnoredByFileList(file, _))
 
-  /** For a given input path, determine all source files by inspecting filename extensions and
-    * filter the result according to the given config (by its ignoredFilesRegex and ignoredFiles).
+  /** Filters a list of files based on the provided ignore rules.
+    *
+    * This method applies [[filterFile]] to each file in the input list, returning only those files
+    * that do not match any of the ignore criteria.
+    *
+    * @param files
+    *   The list of file names or paths to evaluate.
+    * @param inputPath
+    *   The root input path for the file traversal.
+    * @param ignoredDefaultRegex
+    *   Optional sequence of regular expressions defining default file patterns to ignore.
+    * @param ignoredFilesRegex
+    *   Optional regular expression defining specific file name patterns to ignore.
+    * @param ignoredFilesPath
+    *   Optional sequence of file paths to explicitly exclude.
+    * @return
+    *   A filtered list of files that do not match the ignore criteria.
+    */
+  def filterFiles(
+    files: List[String],
+    inputPath: String,
+    ignoredDefaultRegex: Option[Seq[Regex]] = None,
+    ignoredFilesRegex: Option[Regex] = None,
+    ignoredFilesPath: Option[Seq[String]] = None
+  ): List[String] = files.filter(filterFile(
+    _,
+    inputPath,
+    ignoredDefaultRegex,
+    ignoredFilesRegex,
+    ignoredFilesPath
+  ))
+
+  private def hasSourceFileExtension(file: File, sourceFileExtensions: Set[String]): Boolean =
+      sourceFileExtensions.exists(ext => file.pathAsString.endsWith(ext))
+
+  /** Determines a sorted list of file paths in a directory that match the specified criteria.
+    *
+    * @param inputPath
+    *   The root directory to search for files.
+    * @param sourceFileExtensions
+    *   A set of file extensions to include in the search.
+    * @param ignoredDefaultRegex
+    *   An optional sequence of regular expressions for default files to ignore.
+    * @param ignoredFilesRegex
+    *   An optional regular expression for additional files to ignore.
+    * @param ignoredFilesPath
+    *   An optional sequence of specific file paths to ignore.
+    * @param visitOptions
+    *   Implicit parameter defining the options for visiting the file tree. Defaults to
+    *   `VisitOptions.follow`, which follows symbolic links.
+    * @return
+    *   A sorted `List[String]` of file paths matching the criteria.
+    *
+    * This function traverses the file tree starting at the given `inputPath` and collects file
+    * paths that:
+    *   - Have extensions specified in `sourceFileExtensions`.
+    *   - Are not ignored based on `ignoredDefaultRegex`, `ignoredFilesRegex`, or
+    *     `ignoredFilesPath`.
+    *
+    * It uses a custom `FailsafeFileVisitor` to handle the filtering logic and `Files.walkFileTree`
+    * to perform the traversal.
+    *
+    * Example usage:
+    * {{{
+    * val files = determine(
+    *   inputPath = "/path/to/dir",
+    *   sourceFileExtensions = Set(".scala", ".java"),
+    *   ignoredDefaultRegex = Some(Seq(".*\\.tmp".r)),
+    *   ignoredFilesRegex = Some(".*_backup\\.scala".r),
+    *   ignoredFilesPath = Some(Seq("/path/to/dir/ignore_me.scala"))
+    * )
+    * println(files)
+    * }}}
+    * @throws java.io.FileNotFoundException
+    *   if the `inputPath` does not exist or is not readable.
+    * @see
+    *   [[FailsafeFileVisitor]] for details on the visitor used to process files.
     */
   def determine(
     inputPath: String,
     sourceFileExtensions: Set[String],
-    config: X2CpgConfig[?]
-  ): List[String] =
-      determine(Set(inputPath), sourceFileExtensions, config)
+    ignoredDefaultRegex: Option[Seq[Regex]] = None,
+    ignoredFilesRegex: Option[Regex] = None,
+    ignoredFilesPath: Option[Seq[String]] = None
+  )(implicit visitOptions: VisitOptions = VisitOptions.follow): List[String] =
+    val dir = File(inputPath)
+    assertExists(dir)
+    val visitor = new FailsafeFileVisitor(
+      dir.pathAsString,
+      sourceFileExtensions,
+      ignoredDefaultRegex,
+      ignoredFilesRegex,
+      ignoredFilesPath
+    )
+    Files.walkFileTree(dir.path, visitOptions.toSet.asJava, Int.MaxValue, visitor)
+    val matchingFiles = visitor.files().map(_.pathAsString)
+    matchingFiles.toList.sorted
 
-  /** For given input paths, determine all source files by inspecting filename extensions and filter
-    * the result according to the given config (by its ignoredFilesRegex and ignoredFiles).
-    */
-  def determine(
-    inputPaths: Set[String],
+  def determineWithConfig(
+    inputPath: String,
     sourceFileExtensions: Set[String],
     config: X2CpgConfig[?]
-  ): List[String] =
-      filterFiles(determine(inputPaths, sourceFileExtensions), config)
-
-  /** For a given array of input paths, determine all source files by inspecting filename
-    * extensions.
-    */
-  def determine(inputPaths: Set[String], sourceFileExtensions: Set[String]): List[String] =
-    def hasSourceFileExtension(file: File): Boolean =
-        file.extension.exists(sourceFileExtensions.contains)
-
-    val inputFiles = inputPaths.map(File(_))
-    assertAllExist(inputFiles)
-
-    val (dirs, files) = inputFiles.partition(_.isDirectory)
-
-    val matchingFiles = files.filter(hasSourceFileExtension).map(_.toString)
-    val matchingFilesFromDirs = dirs
-        .flatMap(_.listRecursively(VisitOptions.default))
-        .filter(hasSourceFileExtension)
-        .map(_.pathAsString)
-
-    (matchingFiles ++ matchingFilesFromDirs).toList.sorted
-
-  /** Attempting to analyse source paths that do not exist is a hard error. Terminate execution
-    * early to avoid unexpected and hard-to-debug issues in the results.
-    */
-  private def assertAllExist(files: Set[File]): Unit =
-    val (existant, nonExistant) = files.partition(_.isReadable)
-    val nonReadable             = existant.filterNot(_.isReadable)
-
-    if nonExistant.nonEmpty || nonReadable.nonEmpty then
-      logErrorWithPaths("Source input paths do not exist", nonExistant.map(_.canonicalPath))
-
-      logErrorWithPaths(
-        "Source input paths exist, but are not readable",
-        nonReadable.map(_.canonicalPath)
+  )(implicit visitOptions: VisitOptions = VisitOptions.follow): List[String] =
+      determine(
+        inputPath,
+        sourceFileExtensions,
+        ignoredDefaultRegex = Option(config.defaultIgnoredFilesRegex),
+        ignoredFilesRegex = Option(config.ignoredFilesRegex),
+        ignoredFilesPath = Option(config.ignoredFiles)
       )
 
-      throw FileNotFoundException("Invalid source paths provided")
-
-  private def logErrorWithPaths(message: String, paths: Iterable[String]): Unit =
-    val pathsArray = paths.toArray.sorted
-
-    pathsArray.lengthCompare(1) match
-      case cmp if cmp < 0  => // pathsArray is empty, so don't log anything
-      case cmp if cmp == 0 => logger.debug(s"$message: ${paths.head}")
-
-      case cmp =>
-          val errorMessage = (message +: pathsArray.map(path => s"- $path")).mkString("\n")
-          logger.debug(errorMessage)
+  /** Asserts that a given file exists and is readable.
+    *
+    * This method validates the existence and readability of the specified file. If the file does
+    * not exist or is not readable, it logs an error and throws a [[FileNotFoundException]].
+    *
+    * @param file
+    *   The file to validate.
+    * @throws FileNotFoundException
+    *   if the file does not exist or is not readable.
+    */
+  private def assertExists(file: File): Unit =
+    if !file.exists then
+      logger.error(s"Source input path does not exist: ${file.pathAsString}")
+      throw FileNotFoundException("Invalid source path provided!")
+    if !file.isReadable then
+      logger.error(s"Source input path exists, but is not readable: ${file.pathAsString}")
+      throw FileNotFoundException("Invalid source path provided!")
 
   /** Constructs an absolute path against rootPath. If the given path is already absolute this path
     * is returned unaltered. Otherwise, "rootPath / path" is returned.
