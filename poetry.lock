@@ -4515,4 +4515,4 @@ science = ["uvloop"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.14"
-content-hash = "ee92ef67ac46586fe3bc4e768d00805d3e441a9e826b0dbe79b6a67c44316261"
+content-hash = "b33274b499df0a247188ba0e901cc49b3d54b95036e3f29a7756d46c96e49ca3"
