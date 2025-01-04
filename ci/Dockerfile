@@ -14,10 +14,12 @@ LABEL maintainer="appthreat" \
 ARG JAVA_VERSION=23.0.1-tem
 ARG MAVEN_VERSION=3.9.9
 ARG GRADLE_VERSION=8.11
+ARG RUBY_VERSION=3.4.0
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
     GRADLE_VERSION=$GRADLE_VERSION \
+    RUBY_VERSION=$RUBY_VERSION \
     GRADLE_OPTS="-Dorg.gradle.daemon=false" \
     JAVA_HOME="/opt/java/${JAVA_VERSION}" \
     MAVEN_HOME="/opt/maven/${MAVEN_VERSION}" \
@@ -61,19 +63,19 @@ RUN set -e; \
         *) echo >&2 "error: unsupported architecture: '$ARCH_NAME'"; exit 1 ;; \
     esac; \
     echo -e "[nodejs]\nname=nodejs\nstream=20\nprofiles=\nstate=enabled\n" > /etc/dnf/modules.d/nodejs.module \
-    && microdnf install --nodocs -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
+    && microdnf install -y gcc git-core php php-cli php-curl php-zip php-bcmath php-json php-pear php-mbstring php-devel make wget bash graphviz graphviz-gd \
         openssl-devel libffi-devel readline-devel libyaml zlib-devel ncurses ncurses-devel rust \
         pcre2 findutils which tar gzip zip unzip sudo nodejs sqlite-devel glibc-common glibc-all-langpacks \
-    && microdnf install --nodocs -y epel-release \
-    && microdnf install --nodocs --enablerepo=crb -y libyaml-devel jemalloc-devel \
+    && microdnf install -y epel-release \
+    && microdnf install --enablerepo=crb -y libyaml-devel jemalloc-devel \
     && git clone https://github.com/rbenv/rbenv.git --depth=1 ~/.rbenv \
     && echo 'export PATH="/root/.rbenv/bin:$PATH"' >> ~/.bashrc \
     && echo 'eval "$(/root/.rbenv/bin/rbenv init - bash)"' >> ~/.bashrc \
     && source ~/.bashrc \
     && mkdir -p "$(rbenv root)/plugins" \
     && git clone https://github.com/rbenv/ruby-build.git --depth=1 "$(rbenv root)/plugins/ruby-build" \
-    && MAKE_OPTS=-j2 rbenv install 3.4.0 \
-    && rbenv global 3.4.0 \
+    && MAKE_OPTS=-j2 rbenv install ${RUBY_VERSION} \
+    && rbenv global ${RUBY_VERSION} \
     && ruby --version \
     && which ruby \
     && rm -rf /root/.rbenv/cache $RUBY_BUILD_BUILD_PATH \
