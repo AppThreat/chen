@@ -156,6 +156,7 @@ Refer to the documentation site to learn more about the commands.
 - TypeScript
 - Python
 - PHP (Requires PHP >= 7.0. Supports PHP 5.2 to 8.3)
+- Ruby (Requires Ruby 3.4.0. Supports Ruby 1.8 - 3.4.0 syntax)
 
 ## Troubleshooing
 
@@ -182,7 +183,7 @@ chennai> help
 
 This error is mostly due to missing python .so (linux), .dll (windows) or .dylib (mac) file. Ensure the environment variables below are set correctly.
 
-- SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. python313
+- SCALAPY_PYTHON_LIBRARY - Use values such as python3.10, python3.11 based on the version installed. On Windows, there are no dots. Eg: python312
 - JAVA_TOOL_OPTIONS - jna.library.path must be set to the python lib directory
 - SCALAPY_PYTHON_PROGRAMNAME - Path to Python executable in case of virtual environments (Usually not required)
 
