@@ -119,12 +119,24 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
         ).store()(dstGraph)
       }
   end tagPhpRoutes
+  private def tagRubyRoutes(dstGraph: DiffGraphBuilder): Unit =
+    atom.method.where(
+      _.filename("config/routes.rb").code(
+        ".*(get|post|put|delete|head|option|resources|namespace).*"
+      )
+    ).newTagNode(
+      FRAMEWORK_ROUTE
+    ).store()(dstGraph)
+    atom.method.filename(".*controller.rb.*").parameter.newTagNode(FRAMEWORK_INPUT).store()(
+      dstGraph
+    )
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if language == Languages.PYTHON || language == Languages.PYTHONSRC then
       tagPythonRoutes(dstGraph)
     if language == Languages.NEWC || language == Languages.C then
       tagCRoutes(dstGraph)
     if language == Languages.PHP then tagPhpRoutes(dstGraph)
+    if language == Languages.RUBYSRC then tagRubyRoutes(dstGraph)
     atom.configFile("chennai.json").content.foreach { cdxData =>
       val ctagsJson       = parse(cdxData).getOrElse(Json.Null)
       val cursor: HCursor = ctagsJson.hcursor
