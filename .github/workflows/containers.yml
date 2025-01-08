@@ -74,6 +74,7 @@ jobs:
         run: |
           python3.12 -m pip install --upgrade pip
           python3.12 -m pip install poetry
+          python3.12 -m poetry self add poetry-plugin-export
           python3.12 -m poetry export -f requirements.txt --with=science --without-hashes --output target/chen-science-requirements.txt
           python3.12 -m poetry export -f requirements.txt --with=database --without-hashes --output target/chen-database-requirements.txt
       - name: Upload chen to ghcr
