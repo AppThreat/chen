@@ -120,16 +120,42 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
       }
   end tagPhpRoutes
   private def tagRubyRoutes(dstGraph: DiffGraphBuilder): Unit =
+    // rails
+    val railsRoutePrefix = ".*(get|post|put|delete|head|option|resources|namespace)\\s('|\").*"
     atom.method.where(
       _.filename("config/routes.rb").code(
-        ".*(get|post|put|delete|head|option|resources|namespace).*"
+        railsRoutePrefix
       )
     ).newTagNode(
       FRAMEWORK_ROUTE
     ).store()(dstGraph)
+    atom.method.where(
+      _.filename("config/routes.rb").code(
+        railsRoutePrefix
+      )
+    ).parameter.newTagNode(FRAMEWORK_INPUT).store()(
+      dstGraph
+    )
     atom.method.filename(".*controller.rb.*").parameter.newTagNode(FRAMEWORK_INPUT).store()(
       dstGraph
     )
+    atom.method.filename(".*controller.rb.*").methodReturn.newTagNode(
+      FRAMEWORK_OUTPUT
+    ).store()(dstGraph)
+    // sinatra
+    val sinatraRoutePrefix =
+        "(app\\.namespace|app\\.)?(get|post|delete|head|options|put)\\s('|\").*"
+    atom.method.code(sinatraRoutePrefix).newTagNode(
+      FRAMEWORK_ROUTE
+    ).store()(dstGraph)
+    atom.method.code(sinatraRoutePrefix).parameter
+        .newTagNode(FRAMEWORK_INPUT).store()(
+          dstGraph
+        )
+    atom.method.code(sinatraRoutePrefix).methodReturn.newTagNode(
+      FRAMEWORK_OUTPUT
+    ).store()(dstGraph)
+  end tagRubyRoutes
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if language == Languages.PYTHON || language == Languages.PYTHONSRC then
       tagPythonRoutes(dstGraph)
