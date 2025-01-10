@@ -156,7 +156,7 @@ Refer to the documentation site to learn more about the commands.
 - TypeScript
 - Python
 - PHP (Requires PHP >= 7.0. Supports PHP 5.2 to 8.3)
-- Ruby (Requires Ruby 3.4.0. Supports Ruby 1.8 - 3.4.0 syntax)
+- Ruby (Supports Ruby 1.8 - 3.3 syntax)
 
 ## Troubleshooing
 
