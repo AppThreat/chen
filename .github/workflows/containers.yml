@@ -20,7 +20,7 @@ env:
 jobs:
   deploy:
     if: github.repository_owner == 'appthreat'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: write
@@ -47,7 +47,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: '23.x'
       - uses: oras-project/setup-oras@v1
       - name: Trim CI agent
         run: |
