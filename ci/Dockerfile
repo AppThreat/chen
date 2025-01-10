@@ -14,7 +14,7 @@ LABEL maintainer="appthreat" \
 ARG JAVA_VERSION=23.0.1-tem
 ARG MAVEN_VERSION=3.9.9
 ARG GRADLE_VERSION=8.11
-ARG RUBY_VERSION=3.4.0
+ARG RUBY_VERSION=3.4.1
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
@@ -40,7 +40,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     RUBYOPT="--yjit" \
     RUBY_BUILD_BUILD_PATH="/tmp/rbenv" \
     RUBY_BUILD_HTTP_CLIENT=curl
-ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/root/.rbenv/bin:
+ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/root/.rbenv/bin:/root/.rbenv/versions/${RUBY_VERSION}/bin:
 
 WORKDIR /opt
 COPY ./ci/conda-install.sh /opt/
