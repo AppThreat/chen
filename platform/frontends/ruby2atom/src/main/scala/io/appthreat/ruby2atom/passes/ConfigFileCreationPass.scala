@@ -27,5 +27,9 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     // XML files
     extensionFilter(".xml"),
     // ERB files
-    extensionFilter(".erb")
+    extensionFilter(".erb"),
+    pathEndFilter("bom.json"),
+    pathEndFilter(".cdx.json"),
+    pathEndFilter("chennai.json")
   )
+end ConfigFileCreationPass

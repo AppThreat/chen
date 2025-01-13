@@ -60,6 +60,12 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
       else
         str
 
+  private def toRubyModuleForm(str: String) =
+      if str.nonEmpty then
+        s".*(::)?${str.split("::").head}(::).*"
+      else
+        str
+
   override def run(dstGraph: DiffGraphBuilder): Unit =
       atom.configFile.name(BOM_JSON_FILE).content.foreach { cdxData =>
         val cdxJson         = parse(cdxData).getOrElse(Json.Null)
@@ -161,14 +167,28 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                           bpkg.replace(File.separator, Pattern.quote(File.separator))
                     if language == Languages.PYTHON || language == Languages.PYTHONSRC
                     then bpkg = toPyModuleForm(bpkg)
+                    if language == Languages.RUBYSRC
+                    then bpkg = toRubyModuleForm(bpkg)
                     if language == Languages.PHP
                     then
                       bpkg = bpkg.replaceAll("""\\""", """\\\\""")
                       bpkg = s"""$bpkg.*"""
                     if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
                       donePkgs.put(bpkg, true)
+                      // Ruby
+                      if language == Languages.RUBYSRC
+                      then
+                        atom.call.code(bpkg).argument.newTagNode(
+                          compPurl
+                        ).store()(dstGraph)
+                        atom.call.code(bpkg).receiver.newTagNode(
+                          s"$compType-value"
+                        ).store()(dstGraph)
+                        atom.call.code(bpkg).callee(NoResolve).isMethod.parameter.newTagNode(
+                          s"$compType-input"
+                        ).store()(dstGraph)
                       // C/C++
-                      if language == Languages.NEWC || language == Languages.C
+                      else if language == Languages.NEWC || language == Languages.C
                       then
                         atom.method.fullNameExact(bpkg).callIn(
                           NoResolve
