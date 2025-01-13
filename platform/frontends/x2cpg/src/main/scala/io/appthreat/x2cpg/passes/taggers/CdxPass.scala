@@ -182,7 +182,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                           compPurl
                         ).store()(dstGraph)
                         atom.call.code(bpkg).receiver.isMethod.where(_.fullName(
-                          "(routes|controller|application).*\\.rb.*"
+                          s"((app|config)${Pattern.quote(File.separator)})?(routes|controller(s)?|model(s)?|application).*\\.rb.*"
                         )).parameter.newTagNode("framework-input").store()(dstGraph)
                         atom.call.code(bpkg).receiver.newTagNode(
                           s"$compType-value"

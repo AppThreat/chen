@@ -89,6 +89,7 @@ jobs:
           $CONDA/bin/conda build -c conda-forge --no-anaconda-upload --output-folder /tmp/conda-out/ .
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+        continue-on-error: true
       - name: Release Anaconda
         if: startsWith(github.ref, 'refs/tags/')
         run: |
