@@ -20,16 +20,7 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
   override protected val configFileFilters: List[File => Boolean] = List(
     // Gemfiles
     validGemfilePaths.contains,
-    extensionFilter(".ini"),
-    // YAML files
-    extensionFilter(".yaml"),
-    extensionFilter(".yml"),
-    // XML files
-    extensionFilter(".xml"),
-    // ERB files
-    extensionFilter(".erb"),
     pathEndFilter("bom.json"),
     pathEndFilter(".cdx.json"),
     pathEndFilter("chennai.json")
   )
-end ConfigFileCreationPass
