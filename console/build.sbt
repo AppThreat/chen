@@ -30,7 +30,7 @@ libraryDependencies ++= Seq(
   "dev.scalapy"          %% "scalapy-core"      % "0.5.3",
   "org.scala-lang.modules" % "scala-asm"        % "9.7.1-scala-1",
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test,
-  "org.scala-lang"       %% "scala3-compiler"   % "3.6.3"
+  "org.scala-lang"       %% "scala3-compiler"   % "3.6.2"
 )
 
 
