@@ -1,6 +1,6 @@
 name := "schema-extender"
 
-ThisBuild / scalaVersion := "3.6.2"
+ThisBuild / scalaVersion := "3.6.3"
 
 val cpgVersion = IO.read(file("cpg-version"))
 
