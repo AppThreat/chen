@@ -8,7 +8,7 @@ libraryDependencies ++= Seq(
   "io.circe"               %% "circe-generic"              % Versions.circe,
   "io.circe"               %% "circe-parser"               % Versions.circe,
   "org.scalatest"          %% "scalatest"                  % Versions.scalatest % Test,
-  "org.scala-lang.modules" %% "scala-parallel-collections" % "1.1.0"
+  "org.scala-lang.modules" %% "scala-parallel-collections" % Versions.scalaParallel
 )
 
 enablePlugins(Antlr4Plugin)

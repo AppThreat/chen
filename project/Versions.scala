@@ -8,12 +8,13 @@ object Versions {
   val gradleTooling = "8.10.1"
   val circe         = "0.14.10"
   val requests      = "0.9.0"
-  val upickle       = "4.0.2"
+  val upickle       = "4.1.0"
   val scalaReplPP   = "0.1.85"
   val commonsCompress = "1.27.1"
   val jRuby           = "9.4.9.0"
   val typeSafeConfig  = "1.4.3"
-  val versionSort     = "1.0.11"
+  val versionSort     = "1.0.13"
+  val scalaParallel   = "1.2.0"
 
   private def parseVersion(key: String): String = {
     val versionRegexp = s""".*val $key[ ]+=[ ]?"(.*?)"""".r
