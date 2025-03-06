@@ -3,9 +3,10 @@ package io.appthreat.jimple2cpg.passes
 import io.appthreat.jimple2cpg.Config
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.ClassFile
 import io.appthreat.x2cpg.datastructures.Global
+import io.appthreat.x2cpg.utils.FileUtil.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
-import org.slf4j.LoggerFactory
+import better.files.{DefaultCharset, File}
 import soot.Scene
 
 /** Creates the AST layer from the given class file and stores all types in the given global
@@ -19,7 +20,6 @@ class AstCreationPass(classFiles: List[ClassFile], cpg: Cpg, config: Config)
     extends ConcurrentWriterCpgPass[ClassFile](cpg):
 
   val global: Global = new Global()
-  private val logger = LoggerFactory.getLogger(classOf[AstCreationPass])
 
   override def generateParts(): Array[? <: AnyRef] = classFiles.toArray
 
@@ -27,12 +27,10 @@ class AstCreationPass(classFiles: List[ClassFile], cpg: Cpg, config: Config)
       try
         val sootClass = Scene.v().loadClassAndSupport(classFile.fullyQualifiedClassName.get)
         sootClass.setApplicationClass()
-        val localDiff = AstCreator(classFile.file.canonicalPath, sootClass, global)(
+        val localDiff = AstCreator(classFile.file.absolutePathAsString, sootClass, global)(
           config.schemaValidation
         ).createAst()
         builder.absorb(localDiff)
       catch
         case e: Exception =>
-            logger.warn(s"Exception on AST creation for ${classFile.file.canonicalPath}", e)
             Iterator()
-end AstCreationPass

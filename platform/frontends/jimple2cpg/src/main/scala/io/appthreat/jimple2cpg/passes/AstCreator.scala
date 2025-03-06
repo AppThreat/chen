@@ -3,7 +3,7 @@ package io.appthreat.jimple2cpg.passes
 import io.appthreat.x2cpg.Ast.storeInDiffGraph
 import io.appthreat.x2cpg.datastructures.Global
 import io.appthreat.x2cpg.utils.NodeBuilders
-import io.appthreat.x2cpg.{Ast, AstCreatorBase, ValidationMode}
+import io.appthreat.x2cpg.{Ast, AstCreatorBase, Defines, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import org.objectweb.asm.Type
@@ -1179,4 +1179,5 @@ implicit class JvmStringOpts(s: String):
     * converts symbols such as <code>I</code> to <code>int</code>.
     * @return
     */
-  def parseAsJavaType: String = Type.getType(s).getClassName.replaceAll("/", ".")
+  def parseAsJavaType: String =
+      Try { Type.getType(s).getClassName.replaceAll("/", ".") }.getOrElse(Defines.Any)

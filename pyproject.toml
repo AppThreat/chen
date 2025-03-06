@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "appthreat-chen"
-version = "2.3.3"
+version = "2.3.4"
 description = "Code Hierarchy Exploration Net (chen)"
 authors = ["Team AppThreat <cloud@appthreat.com>"]
 license = "Apache-2.0"
