@@ -11,8 +11,8 @@ final case class Config(
   scalaSdk: Option[String] = None,
   dynamicDirs: Seq[String] = Seq.empty,
   dynamicPkgs: Seq[String] = Seq.empty,
-  fullResolver: Boolean = true,
-  recurse: Boolean = true,
+  fullResolver: Boolean = false,
+  recurse: Boolean = false,
   depth: Int = 1,
   onlyClasses: Boolean = false
 ) extends X2CpgConfig[Config]:
@@ -57,6 +57,14 @@ private object Frontend:
       opt[Unit]("onlyClasses")
           .text("only include .class files")
           .action((_, config) => config.withOnlyClasses(true)),
+      opt[Unit]("full-resolver")
+          .text(
+            "enables full transitive resolution of all references found in all classes that are resolved"
+          )
+          .action((_, config) => config.withFullResolver(true)),
+      opt[Unit]("recurse")
+          .text("recursively unpack jars")
+          .action((_, config) => config.withRecurse(true)),
       opt[Seq[String]]("dynamic-dirs")
           .valueName("<dir1>,<dir2>,...")
           .text(
