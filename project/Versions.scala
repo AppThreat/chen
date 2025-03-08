@@ -2,6 +2,7 @@
 object Versions {
   val cpg = parseVersion("cpgVersion")
   val antlr         = "4.13.2"
+  val cfr                    = "0.152"
   val scalatest     = "3.2.19"
   val cats          = "3.5.7"
   val json4s        = "4.0.7"

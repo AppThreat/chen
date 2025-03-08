@@ -3,7 +3,6 @@ package io.appthreat.jimple2cpg.util
 import better.files.*
 import org.objectweb.asm.ClassReader.SKIP_CODE
 import org.objectweb.asm.{ClassReader, ClassVisitor, Opcodes}
-import org.slf4j.LoggerFactory
 
 import java.io.InputStream
 import java.util.zip.ZipEntry
@@ -12,8 +11,6 @@ import scala.util.{Failure, Left, Success, Try}
 /** Responsible for handling JAR unpacking and handling the temporary build directory.
   */
 object ProgramHandlingUtil:
-
-  private val logger = LoggerFactory.getLogger(ProgramHandlingUtil.getClass)
 
   /** Common properties of a File and ZipEntry, used to determine whether a file in a directory or
     * an entry in an archive is worth emitting/extracting
@@ -66,6 +63,10 @@ object ProgramHandlingUtil:
     *   Whether an entry is an archive to extract
     * @param isClass
     *   Whether an entry is a class file
+    * @param recurse
+    *   Whether to unpack recursively
+    * @param onlyClasses
+    *   Include only .class files
     * @return
     *   The list of class files found, which may either be in [[src]] or in an extracted archive
     *   under [[tmpDir]]
@@ -75,7 +76,8 @@ object ProgramHandlingUtil:
     tmpDir: File,
     isArchive: Entry => Boolean,
     isClass: Entry => Boolean,
-    recurse: Boolean
+    recurse: Boolean,
+    onlyClasses: Boolean
   ): IterableOnce[ClassFile] =
 
     def shouldExtract(e: Entry) =
@@ -86,14 +88,15 @@ object ProgramHandlingUtil:
           case f if isClass(Entry(f)) =>
               Left(ClassFile(f))
           case f if f.isDirectory() =>
-              val files = f.listRecursively.filterNot(_.isDirectory).toList
-              Right(files)
+              var files = f.listRecursively.filterNot(_.isDirectory)
+              if onlyClasses then
+                files = files.filter(_.pathAsString.endsWith(".class"))
+              Right(files.toList)
           case f if isArchive(Entry(f)) && (recurse || f == src) =>
               val xTmp = File.newTemporaryDirectory("extract-archive-", parent = Some(tmpDir))
               val unzipDirs = Try(f.unzipTo(xTmp, e => shouldExtract(Entry(e)))) match
                 case Success(dir) => List(dir)
                 case Failure(e) =>
-                    logger.warn(s"Failed to extract archive", e)
                     List.empty
               Right(unzipDirs)
           case _ =>
@@ -130,7 +133,6 @@ object ProgramHandlingUtil:
     private def getPackagePathFromByteCode(file: File): Option[String] =
         Try(file.fileInputStream.apply(getPackagePathFromByteCode))
             .recover { case e: Throwable =>
-                logger.debug(s"Error reading class file ${file.canonicalPath}", e)
                 None
             }
             .getOrElse(None)
@@ -154,8 +156,6 @@ object ProgramHandlingUtil:
         packagePath
             .map { path =>
               val destClass = destDir / s"$path.class"
-              if destClass.exists() then
-                logger.warn(s"Overwriting class file: ${destClass.path.toAbsolutePath}")
               destClass.parent.createDirectories()
               ClassFile(
                 file.copyTo(destClass)(File.CopyOptions(overwrite = true)),
@@ -163,9 +163,6 @@ object ProgramHandlingUtil:
               )
             }
             .orElse {
-                logger.warn(
-                  s"Missing package path for ${file.canonicalPath}. Failed to copy to ${destDir.canonicalPath}"
-                )
                 None
             }
   end ClassFile
@@ -183,6 +180,8 @@ object ProgramHandlingUtil:
     *   Whether an entry is a class file
     * @param recurse
     *   Whether to unpack recursively
+    * @param onlyClasses
+    *   Include only .class files
     * @return
     *   The copied class files in destDir
     */
@@ -191,12 +190,20 @@ object ProgramHandlingUtil:
     destDir: File,
     isClass: Entry => Boolean,
     isArchive: Entry => Boolean,
-    recurse: Boolean
+    recurse: Boolean,
+    onlyClasses: Boolean
   ): List[ClassFile] =
       File
           .temporaryDirectory("extract-classes-")
           .apply(tmpDir =>
-              extractClassesToTmp(src, tmpDir, isArchive, isClass, recurse: Boolean).iterator
+              extractClassesToTmp(
+                src,
+                tmpDir,
+                isArchive,
+                isClass,
+                recurse: Boolean,
+                onlyClasses: Boolean
+              ).iterator
                   .flatMap(_.copyToPackageLayoutIn(destDir))
                   .toList
           )

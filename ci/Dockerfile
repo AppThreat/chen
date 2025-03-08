@@ -15,11 +15,14 @@ ARG JAVA_VERSION=23.0.2-tem
 ARG MAVEN_VERSION=3.9.9
 ARG GRADLE_VERSION=8.12.1
 ARG RUBY_VERSION=3.4.2
+ARG SCALA_VERSION=3.6.4
 
 ENV JAVA_VERSION=$JAVA_VERSION \
     MAVEN_VERSION=$MAVEN_VERSION \
     GRADLE_VERSION=$GRADLE_VERSION \
     RUBY_VERSION=$RUBY_VERSION \
+    SCALA_VERSION=$SCALA_VERSION \
+    SCALA_HOME="/opt/scala/${SCALA_VERSION}" \
     GRADLE_OPTS="-Dorg.gradle.daemon=false" \
     JAVA_HOME="/opt/java/${JAVA_VERSION}" \
     MAVEN_HOME="/opt/maven/${MAVEN_VERSION}" \
@@ -40,7 +43,7 @@ ENV JAVA_VERSION=$JAVA_VERSION \
     RUBYOPT="--yjit" \
     RUBY_BUILD_BUILD_PATH="/tmp/rbenv" \
     RUBY_BUILD_HTTP_CLIENT=curl
-ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/root/.rbenv/bin:/root/.rbenv/versions/${RUBY_VERSION}/bin:
+ENV PATH=/opt/miniconda3/bin:${PATH}:/opt/platform:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${SCALA_HOME}/bin:${GRADLE_HOME}/bin:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:/root/.rbenv/bin:/root/.rbenv/versions/${RUBY_VERSION}/bin:
 
 WORKDIR /opt
 COPY ./ci/conda-install.sh /opt/
@@ -100,6 +103,7 @@ RUN set -e; \
     && sdk install java $JAVA_VERSION \
     && sdk install maven $MAVEN_VERSION \
     && sdk install gradle $GRADLE_VERSION \
+    && sdk install scala $SCALA_VERSION \
     && sdk offline enable \
     && mv /root/.sdkman/candidates/* /opt/ \
     && rm -rf /root/.sdkman \

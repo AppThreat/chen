@@ -2,7 +2,7 @@
 
 export PATH=/opt/miniconda3/bin:${PATH}:
 conda config --set always_yes yes --set changeps1 no
-pip install -U pip setuptools poetry
+pip install -U pip poetry
 conda install -c conda-forge networkx -y
 conda install -c conda-forge scipy numpy -y
 conda install -c pytorch pytorch torchtext cpuonly -y

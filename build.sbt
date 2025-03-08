@@ -1,6 +1,6 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.3.3"
+ThisBuild / version      := "2.3.4"
 ThisBuild / scalaVersion := "3.6.2"
 
 val cpgVersion = "1.0.1"
@@ -36,8 +36,8 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
 )
 
 ThisBuild / libraryDependencies ++= Seq(
-  "org.slf4j"                % "slf4j-api"         % "2.0.16",
-  "org.slf4j"                % "slf4j-nop"         % "2.0.16" % Optional,
+  "org.slf4j"                % "slf4j-api"         % "2.0.17",
+  "org.slf4j"                % "slf4j-nop"         % "2.0.17" % Optional,
 )
 
 ThisBuild / excludeDependencies ++= Seq(

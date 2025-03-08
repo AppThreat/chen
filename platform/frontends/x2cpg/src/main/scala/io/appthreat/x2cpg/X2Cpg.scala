@@ -16,7 +16,7 @@ import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
 
 object X2CpgConfig:
-  def defaultOutputPath: String = "cpg.bin"
+  def defaultOutputPath: String = "app.atom"
 
 trait X2CpgConfig[R <: X2CpgConfig[R]]:
   var inputPath: String  = ""
