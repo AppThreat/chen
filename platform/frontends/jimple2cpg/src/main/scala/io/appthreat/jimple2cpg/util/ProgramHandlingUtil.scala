@@ -3,7 +3,6 @@ package io.appthreat.jimple2cpg.util
 import better.files.*
 import org.objectweb.asm.ClassReader.SKIP_CODE
 import org.objectweb.asm.{ClassReader, ClassVisitor, Opcodes}
-import org.slf4j.LoggerFactory
 
 import java.io.InputStream
 import java.util.zip.ZipEntry
@@ -12,8 +11,6 @@ import scala.util.{Failure, Left, Success, Try}
 /** Responsible for handling JAR unpacking and handling the temporary build directory.
   */
 object ProgramHandlingUtil:
-
-  private val logger = LoggerFactory.getLogger(ProgramHandlingUtil.getClass)
 
   /** Common properties of a File and ZipEntry, used to determine whether a file in a directory or
     * an entry in an archive is worth emitting/extracting
@@ -100,7 +97,6 @@ object ProgramHandlingUtil:
               val unzipDirs = Try(f.unzipTo(xTmp, e => shouldExtract(Entry(e)))) match
                 case Success(dir) => List(dir)
                 case Failure(e) =>
-                    logger.warn(s"Failed to extract archive", e)
                     List.empty
               Right(unzipDirs)
           case _ =>
@@ -137,7 +133,6 @@ object ProgramHandlingUtil:
     private def getPackagePathFromByteCode(file: File): Option[String] =
         Try(file.fileInputStream.apply(getPackagePathFromByteCode))
             .recover { case e: Throwable =>
-                logger.debug(s"Error reading class file ${file.canonicalPath}", e)
                 None
             }
             .getOrElse(None)
@@ -161,8 +156,6 @@ object ProgramHandlingUtil:
         packagePath
             .map { path =>
               val destClass = destDir / s"$path.class"
-              if destClass.exists() then
-                logger.warn(s"Overwriting class file: ${destClass.path.toAbsolutePath}")
               destClass.parent.createDirectories()
               ClassFile(
                 file.copyTo(destClass)(File.CopyOptions(overwrite = true)),
@@ -170,9 +163,6 @@ object ProgramHandlingUtil:
               )
             }
             .orElse {
-                logger.warn(
-                  s"Missing package path for ${file.canonicalPath}. Failed to copy to ${destDir.canonicalPath}"
-                )
                 None
             }
   end ClassFile

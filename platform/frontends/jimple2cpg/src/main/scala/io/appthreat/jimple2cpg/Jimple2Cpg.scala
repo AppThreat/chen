@@ -1,12 +1,7 @@
 package io.appthreat.jimple2cpg
 
 import better.files.File
-import io.appthreat.jimple2cpg.passes.{
-    AstCreationPass,
-    ConfigFileCreationPass,
-    DeclarationRefPass,
-    SootAstCreationPass
-}
+import io.appthreat.jimple2cpg.passes.{AstCreationPass, ConfigFileCreationPass, SootAstCreationPass}
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -94,7 +89,7 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
     val fullyQualifiedClassNames = classFiles.flatMap(_.fullyQualifiedClassName)
     fullyQualifiedClassNames.foreach { fqcn =>
       Scene.v().addBasicClass(fqcn)
-      Scene.v().loadClassAndSupport(fqcn)
+      Try(Scene.v().loadClassAndSupport(fqcn)).getOrElse(null)
     }
     classFiles
   end sootLoad
@@ -130,7 +125,6 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
     TypeNodePass
         .withRegisteredTypes(global.usedTypes.keys().asScala.toList, cpg)
         .createAndApply()
-    DeclarationRefPass(cpg).createAndApply()
     new ConfigFileCreationPass(cpg).createAndApply()
   end cpgApplyPasses
 
