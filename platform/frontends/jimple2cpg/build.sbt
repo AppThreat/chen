@@ -12,8 +12,7 @@ libraryDependencies ++= Seq(
   "org.ow2.asm"            % "asm-util"           % "9.7.1",
   "org.ow2.asm"            % "asm-tree"           % "9.7.1",
   "io.circe"               %% "circe-core"        % Versions.circe,
-  "org.scalatest" %% "scalatest"                  % Versions.scalatest % Test,
-    "org.benf"       % "cfr"               % Versions.cfr
+  "org.scalatest" %% "scalatest"                  % Versions.scalatest % Test
 )
 
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)
