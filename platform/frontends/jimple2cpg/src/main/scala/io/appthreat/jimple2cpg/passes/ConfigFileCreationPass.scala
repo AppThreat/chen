@@ -32,6 +32,8 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     // Bom
     pathEndFilter("bom.json"),
     pathEndFilter(".cdx.json"),
-    pathEndFilter("chennai.json")
+    // Custom
+    pathEndFilter("chennai.json"),
+    pathEndFilter("semantics.slices.json")
   )
 end ConfigFileCreationPass
