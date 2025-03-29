@@ -11,9 +11,9 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
-ARG JAVA_VERSION=23.0.2-tem
+ARG JAVA_VERSION=24-tem
 ARG MAVEN_VERSION=3.9.9
-ARG GRADLE_VERSION=8.12.1
+ARG GRADLE_VERSION=8.13
 ARG RUBY_VERSION=3.4.2
 ARG SCALA_VERSION=3.6.4
 
