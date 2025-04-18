@@ -55,7 +55,7 @@ jobs:
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom
-          python3.12 -m pip install --upgrade pip
+          python3.12 -m pip install --upgrade pip setuptools
           python3.12 -m pip install poetry
           python3.12 -m poetry config virtualenvs.create false
           python3.12 -m poetry install --no-cache
