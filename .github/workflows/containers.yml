@@ -91,13 +91,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_USERNAME: ${{ github.actor }}
-      - name: Setup nydus
-        run: |
-          curl -LO https://github.com/dragonflyoss/nydus/releases/download/v2.3.1/nydus-static-v2.3.1-linux-amd64.tgz
-          tar -xvf nydus-static-v2.3.1-linux-amd64.tgz
-          chmod +x nydus-static/*
-          mv nydus-static/* /usr/local/bin/
-          rm -rf nydus-static-v2.3.1-linux-amd64.tgz nydus-static
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -117,6 +110,7 @@ jobs:
           flavor: latest=false,suffix=-amd64
       - name: Build and push Docker images
         uses: docker/build-push-action@v5
+        id: build
         with:
           file: ci/Dockerfile
           context: .
@@ -124,12 +118,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - name: nydusify
-        run: |
-          nydusify convert --oci --oci-ref --source ${{ steps.meta.outputs.tags }} --target ${{ steps.meta.outputs.tags }}-nydus --prefetch-dir /opt
-          nydusify check --target ${{ steps.meta.outputs.tags }}-nydus
-        if: github.ref == 'refs/heads/main'
-        continue-on-error: true
 
   deploy-arm:
     if: github.repository_owner == 'appthreat'
@@ -203,6 +191,7 @@ jobs:
           flavor: latest=false,suffix=-arm64
       - name: Build and push Docker images
         uses: docker/build-push-action@v5
+        id: build
         with:
           file: ci/Dockerfile
           context: .
