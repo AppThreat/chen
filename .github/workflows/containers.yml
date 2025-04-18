@@ -21,6 +21,8 @@ jobs:
   deploy:
     if: github.repository_owner == 'appthreat'
     runs-on: ubuntu-24.04
+    outputs:
+      image-uri: ghcr.io/appthreat/chen@${{ steps.build.outputs.digest }}
     permissions:
       contents: write
       packages: write
@@ -96,7 +98,8 @@ jobs:
           chmod +x nydus-static/*
           mv nydus-static/* /usr/local/bin/
           rm -rf nydus-static-v2.3.1-linux-amd64.tgz nydus-static
-      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to the Container registry
@@ -111,12 +114,13 @@ jobs:
         with:
           images: |
             ghcr.io/appthreat/chen
+          flavor: latest=false,suffix=-amd64
       - name: Build and push Docker images
         uses: docker/build-push-action@v5
         with:
           file: ci/Dockerfile
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -126,3 +130,114 @@ jobs:
           nydusify check --target ${{ steps.meta.outputs.tags }}-nydus
         if: github.ref == 'refs/heads/main'
         continue-on-error: true
+
+  deploy-arm:
+    if: github.repository_owner == 'appthreat'
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      image-uri: ghcr.io/appthreat/chen@${{ steps.build.outputs.digest }}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: sbt/setup-sbt@v1
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          coverage: "none"
+          php-version: "8.3"
+          tools: composer:v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '23.x'
+      - name: Trim CI agent
+        run: |
+          chmod +x ci/free_disk_space.sh
+          ./ci/free_disk_space.sh
+      - name: Delete `.rustup` directory
+        run: rm -rf /home/runner/.rustup # to save disk space
+        if: runner.os == 'Linux'
+      - name: Delete `.cargo` directory # to save disk space
+        run: rm -rf /home/runner/.cargo
+        if: runner.os == 'Linux'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.sbt
+            ~/.coursier
+          key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
+      - run: |
+          sbt stage createDistribution
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCALAPY_PYTHON_LIBRARY: "python3.12"
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/appthreat/chen
+          flavor: latest=false,suffix=-arm64
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          file: ci/Dockerfile
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-manifest:
+    if: github.repository_owner == 'appthreat'
+    runs-on: ubuntu-24.04
+    needs: [deploy, deploy-arm]
+    outputs:
+      image-uri: ghcr.io/appthreat/chen@${{ steps.build.outputs.digest }}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}
+      - uses: int128/docker-manifest-create-action@v2
+        id: build
+        with:
+          index-annotations: ${{ steps.metadata.outputs.labels }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          sources: |
+            ${{ needs.deploy.outputs.image-uri }}
+            ${{ needs.deploy-arm.outputs.image-uri }}
