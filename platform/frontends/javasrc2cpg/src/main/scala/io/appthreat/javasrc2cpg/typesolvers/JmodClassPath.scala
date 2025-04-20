@@ -7,7 +7,7 @@ import javassist.ClassPath
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 import java.io.InputStream
-import java.net.URL
+import java.net.{URI, URL}
 import java.util.jar.{JarEntry, JarFile}
 
 class JmodClassPath(jmodPath: String) extends ClassPath:
@@ -31,7 +31,7 @@ class JmodClassPath(jmodPath: String) extends ClassPath:
     val jarname = classname.replace('.', '/') + ".class"
 
     if entries.contains(classname) then
-      Try(new URL(s"jmod:${jarfileURL}!/${jarname}")).getOrElse(null)
+      Try(URI.create(s"jmod:${jarfileURL}!/${jarname}").toURL).getOrElse(null)
     else null
 
   override def openClassfile(classname: String): InputStream =

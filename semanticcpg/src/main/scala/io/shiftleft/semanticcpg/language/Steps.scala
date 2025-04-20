@@ -94,7 +94,7 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
   def pyg =
     val tmpDir = Files.createTempDirectory("pyg-gml-export").toFile.getAbsolutePath
     traversal match
-      case methods: Iterator[Method] =>
+      case methods: Iterator[Method @unchecked] =>
           val exportResult = methods.gml(tmpDir)
           exportResult.files.map(Torch.to_pyg)
 end Steps
@@ -103,7 +103,7 @@ object Steps:
   private lazy val nodeSerializer = new CustomSerializer[AbstractNode](implicit format =>
       (
         { case _ => ??? },
-        { case node: AbstractNode with Product =>
+        { case node: (AbstractNode & Product) =>
             val elementMap = (0 until node.productArity).map { i =>
               val label   = node.productElementName(i)
               val element = node.productElement(i)

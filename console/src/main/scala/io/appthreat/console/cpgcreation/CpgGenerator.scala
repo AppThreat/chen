@@ -7,8 +7,8 @@ import scala.sys.process.*
 import scala.util.Try
 
 /** A CpgGenerator generates Code Property Graphs from code. Each supported language implements a
-  * Generator, e.g., [[JavaCpgGenerator]] implements Java Archive to CPG conversion, while
-  * [[CSharpCpgGenerator]] translates C# projects into code property graphs.
+  * Generator, e.g., JavaCpgGenerator implements Java Archive to CPG conversion, while
+  * CSharpCpgGenerator translates C# projects into code property graphs.
   */
 abstract class CpgGenerator():
 
