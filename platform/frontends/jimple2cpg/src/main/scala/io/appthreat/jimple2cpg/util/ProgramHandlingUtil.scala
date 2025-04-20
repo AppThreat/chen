@@ -144,7 +144,7 @@ object ProgramHandlingUtil:
 
     val fullyQualifiedClassName: Option[String] = components.map(_.mkString("."))
 
-    /** Copy the class file to its package path relative to [[destDir]]. This will overwrite a class
+    /** Copy the class file to its package path relative to destDir. This will overwrite a class
       * file at the destination if it exists.
       * @param destDir
       *   The directory in which to place the class file
@@ -168,7 +168,7 @@ object ProgramHandlingUtil:
   end ClassFile
 
   /** Find <pre>.class</pre> files, including those inside archives and copy them to their package
-    * path location relative to [[destDir]]
+    * path location relative to destDir
     *
     * @param src
     *   The file/directory to search.
