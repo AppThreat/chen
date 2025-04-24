@@ -36,9 +36,15 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       }
     else if language == Languages.PYTHON || language == Languages.PYTHONSRC then
       atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
-      atom.call.methodFullName(Operators.equals).codeExact(
-        "__name__ == '__main__'"
+      atom.call.methodFullName(Operators.equals).code(
+        """__name__ == ["']__main__["']"""
       ).controls.isCall.filterNot(_.name.startsWith("<operator")).newTagNode(
+        "cli-source"
+      ).store()(dstGraph)
+      atom.tag.name("cli-source").call.callee(NoResolve).newTagNode(
+        "cli-source"
+      ).store()(dstGraph)
+      atom.method.filename(".*(cli|main|command).*").parameter.newTagNode(
         "cli-source"
       ).store()(dstGraph)
     end if
