@@ -34,6 +34,19 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       ).argument.isCall.methodFullName.filterNot(_.startsWith("<")).foreach { m =>
           atom.method.nameExact(m).newTagNode("exported").store()(dstGraph)
       }
+      // DOM-related events
+      atom.method.external.name(
+        "(addEventListener|fetch|createElement|createTextNode|importNode|appendChild|insertBefore)"
+      ).parameter.newTagNode(
+        "dom"
+      ).store()(
+        dstGraph
+      )
+      atom.method.internal.name("(GET|POST|PUT|DELETE|HEAD|OPTIONS|request)").parameter.newTagNode(
+        "http"
+      ).store()(
+        dstGraph
+      )
     else if language == Languages.PYTHON || language == Languages.PYTHONSRC then
       atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
       atom.call.methodFullName(Operators.equals).code(
