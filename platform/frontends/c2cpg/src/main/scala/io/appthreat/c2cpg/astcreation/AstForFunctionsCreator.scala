@@ -124,6 +124,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
             Ast()
         case typeDef: ITypedef =>
             Ast()
+        case variable: IVariable =>
+            Ast()
+        case _ =>
+            Ast()
   end astForFunctionDeclarator
 
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
