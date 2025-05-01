@@ -65,6 +65,21 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     then
       atom.method.internal.name("main").parameter.newTagNode("cli-source").store()(dstGraph)
       atom.method.internal.name("wmain").parameter.newTagNode("cli-source").store()(dstGraph)
+      atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("event").store()(
+        dstGraph
+      )
+      atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("framework-input")
+          .store()(
+            dstGraph
+          )
+      Seq("json", "glibc", "decode", "wasm", "execution").foreach { stag =>
+        atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(stag)
+            .store()(dstGraph)
+        atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(
+          "library-call"
+        )
+            .store()(dstGraph)
+      }
       atom.method.external.name("(cuda|curl_|BIO_).*").parameter.newTagNode(
         "library-call"
       ).store()(
