@@ -14,10 +14,15 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   override def run(dstGraph: DiffGraphBuilder): Unit =
     atom.method.internal.name(".*(valid|check).*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name("is[A-Z].*").newTagNode("validation").store()(dstGraph)
+    atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
+    atom.method.internal.name("has_[a-z].*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name(".*(encode|escape|sanit).*").newTagNode("sanitization").store()(
       dstGraph
     )
     atom.method.internal.name(".*(login|authenti).*").newTagNode("authentication").store()(
+      dstGraph
+    )
+    atom.method.internal.name(".*(has_perm|get_perms).*").newTagNode("authentication").store()(
       dstGraph
     )
     atom.method.internal.name(".*(authori).*").newTagNode("authorization").store()(dstGraph)
@@ -72,13 +77,15 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           .store()(
             dstGraph
           )
-      Seq("json", "glibc", "decode", "wasm", "execution").foreach { stag =>
-        atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(stag)
-            .store()(dstGraph)
-        atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(
-          "library-call"
-        )
-            .store()(dstGraph)
+      // TODO: Find a way to make these generic
+      Seq("json", "glibc", "regex", "decode", "wasm", "execution", "unicode", "utf8").foreach {
+          stag =>
+            atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(stag)
+                .store()(dstGraph)
+            atom.method.external.name(s".*${stag}.*").callIn(NoResolve).argument.newTagNode(
+              "library-call"
+            )
+                .store()(dstGraph)
       }
       atom.method.external.name("(cuda|curl_|BIO_).*").parameter.newTagNode(
         "library-call"

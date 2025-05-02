@@ -43,6 +43,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
       )
 
   private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
+  private def PY_RESPONSE_PATTERNS =
+      Array(".*views.py:.*HttpResponse.*", ".*views.py:.*render.*", ".*views.py:.*get_object_.*")
 
   private def containsRegex(str: String) =
     val reChars = "[](){}*+&|?.,\\$"
@@ -91,6 +93,12 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
           PY_REQUEST_PATTERNS
               .foreach(p =>
                   atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
+                    dstGraph
+                  )
+              )
+          PY_RESPONSE_PATTERNS
+              .foreach(p =>
+                  atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
                     dstGraph
                   )
               )
