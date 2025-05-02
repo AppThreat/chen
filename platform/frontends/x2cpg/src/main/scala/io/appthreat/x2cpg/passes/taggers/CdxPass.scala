@@ -97,11 +97,12 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                   )
               )
           PY_RESPONSE_PATTERNS
-              .foreach(p =>
-                  atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
-                    dstGraph
-                  )
-              )
+              .foreach { p =>
+                atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
+                  dstGraph
+                )
+                atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
+              }
         components.foreach { comp =>
           val PURL_TYPE = "purl"
           val compPurl  = comp.hcursor.downField(PURL_TYPE).as[String].getOrElse("")
