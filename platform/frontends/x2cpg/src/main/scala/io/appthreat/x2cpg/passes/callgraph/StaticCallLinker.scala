@@ -5,13 +5,11 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
 
 class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg):
 
-  import StaticCallLinker.*
   private val methodFullNameToNode = mutable.Map.empty[String, List[Method]]
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
@@ -27,8 +25,7 @@ class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg):
         try
           linkCall(call, dstGraph)
         catch
-          case exception: Exception =>
-              throw new RuntimeException(exception)
+          case _: Exception =>
     }
 
   private def linkCall(call: Call, dstGraph: DiffGraphBuilder): Unit =
@@ -37,20 +34,11 @@ class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg):
             linkStaticCall(call, dstGraph)
         case DispatchTypes.DYNAMIC_DISPATCH =>
         // Do nothing
-        case _ => logger.debug(s"Unknown dispatch type on dynamic CALL ${call.code}")
+        case _ =>
 
   private def linkStaticCall(call: Call, dstGraph: DiffGraphBuilder): Unit =
-    val resolvedMethodOption = methodFullNameToNode.get(call.methodFullName)
-    if resolvedMethodOption.isDefined then
-      resolvedMethodOption.get.foreach { dst =>
-          dstGraph.addEdge(call, dst, EdgeTypes.CALL)
-      }
-    else
-      logger.debug(
-        s"Unable to link static CALL with METHOD_FULL_NAME ${call.methodFullName}, NAME ${call.name}, " +
-            s"SIGNATURE ${call.signature}, CODE ${call.code}"
-      )
+      for
+        mnodes ← methodFullNameToNode.get(call.methodFullName)
+        dst    ← mnodes
+      do dstGraph.addEdge(call, dst, EdgeTypes.CALL)
 end StaticCallLinker
-
-object StaticCallLinker:
-  private val logger: Logger = LoggerFactory.getLogger(classOf[StaticCallLinker])
