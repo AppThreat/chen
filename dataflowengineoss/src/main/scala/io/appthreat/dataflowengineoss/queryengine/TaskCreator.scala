@@ -85,8 +85,6 @@ class TaskCreator(context: EngineContext):
   private def paramToArgs(param: MethodParameterIn): List[Expression] =
     val args = paramToArgsOfCallers(param) ++ paramToMethodRefCallReceivers(param)
     if args.size > context.config.maxArgsToAllow then
-      logger.warn(s"Too many arguments for parameter: ${args.size}. Not expanding")
-      logger.warn("Method name: " + param.method.fullName)
       List()
     else
       args
@@ -211,6 +209,5 @@ class TaskCreator(context: EngineContext):
       if l.size <= context.config.maxOutputArgsExpansion then
         l
       else
-        logger.warn("Too many new tasks in expansion of unresolved output arguments")
         Vector()
 end TaskCreator
