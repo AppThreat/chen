@@ -6,7 +6,6 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.ForkJoinParallelCpgPass
 import io.shiftleft.semanticcpg.language.*
-import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable
 
@@ -15,21 +14,14 @@ import scala.collection.mutable
 class ReachingDefPass(cpg: Cpg, maxNumberOfDefinitions: Int = 4000)(implicit s: Semantics)
     extends ForkJoinParallelCpgPass[Method](cpg):
 
-  private val logger: Logger = LoggerFactory.getLogger(this.getClass)
   // If there are any regex method full names, load them early
   s.loadRegexSemantics(cpg)
 
   override def generateParts(): Array[Method] = cpg.method.toArray
 
   override def runOnPart(dstGraph: DiffGraphBuilder, method: Method): Unit =
-    logger.debug(
-      "Calculating reaching definitions for: {} in {}",
-      method.fullName,
-      method.filename
-    )
     val problem = ReachingDefProblem.create(method)
     if shouldBailOut(method, problem) then
-      logger.warn("Skipping.")
       return
 
     val solution     = new DataFlowSolver().calculateMopSolutionForwards(problem)
@@ -49,9 +41,7 @@ class ReachingDefPass(cpg: Cpg, maxNumberOfDefinitions: Int = 4000)(implicit s: 
     // For each node, the `gen` map contains the list of definitions it generates
     // We add up the sizes of these lists to obtain the total number of definitions
     val numberOfDefinitions = transferFunction.gen.foldLeft(0)(_ + _._2.size)
-    logger.debug("Number of definitions for {}: {}", method.fullName, numberOfDefinitions)
     if numberOfDefinitions > maxNumberOfDefinitions then
-      logger.warn("{} has more than {} definitions", method.fullName, maxNumberOfDefinitions)
       true
     else
       false

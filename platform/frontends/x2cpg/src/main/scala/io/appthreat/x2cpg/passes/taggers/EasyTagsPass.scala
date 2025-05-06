@@ -10,8 +10,55 @@ import io.shiftleft.semanticcpg.language.*
 class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   val language: String = atom.metaData.language.head
+  // FIXME: Replace these with semantic fingerprints
+  private def JS_REQUEST_PATTERNS =
+      Array(
+        "(?s)(?i).*(req|ctx|context)\\.(originalUrl|path|protocol|route|secure|signedCookies|stale|subdomains|xhr|app|pipe|file|files|baseUrl|fresh|hostname|ip|url|ips|method|body|param|params|query|cookies|request).*"
+      )
+
+  private def JS_RESPONSE_PATTERNS =
+      Array(
+        "(?s)(?i).*(res|ctx|context)\\.(append|attachment|body|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|vary).*",
+        "(?s)(?i).*res\\.(set|writeHead|setHeader).*",
+        "(?s)(?i).*(db|dao|mongo|mongoclient).*",
+        "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
+      )
+
+  private def PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
+  private def PY_RESPONSE_PATTERNS =
+      Array(".*views.py:.*HttpResponse.*", ".*views.py:.*render.*", ".*views.py:.*get_object_.*")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
+    if language == Languages.JSSRC || language == Languages.JAVASCRIPT then
+      JS_REQUEST_PATTERNS.foreach(p =>
+          atom.call.code(p).newTagNode("framework-input").store()(dstGraph)
+      )
+      JS_RESPONSE_PATTERNS.foreach(p =>
+          atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
+      )
+    if language == Languages.PHP then
+      atom.parameter.name("request.*").newTagNode("framework-input").store()(dstGraph)
+      atom.parameter.name("response.*").newTagNode("framework-output").store()(dstGraph)
+      atom.ret
+          .where(_.method.parameter.name("request.*"))
+          .newTagNode("framework-output")
+          .store()(dstGraph)
+    if language == Languages.PYTHON || language == Languages.PYTHONSRC then
+      PY_REQUEST_PATTERNS
+          .foreach(p =>
+              atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
+                dstGraph
+              )
+          )
+      PY_RESPONSE_PATTERNS
+          .foreach { p =>
+            atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
+              dstGraph
+            )
+            atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
+          }
+      atom.call.where(_.file.name(".*views.py.*")).code(".*(HttpResponse|render|get_object_).*")
+          .newTagNode("framework-output").store()(dstGraph)
     atom.method.internal.name(".*(valid|check).*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name("is[A-Z].*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
@@ -77,6 +124,35 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           .store()(
             dstGraph
           )
+      val eventVerbs = Seq("call", "handle", "emit", "invoke", "store")
+      atom.method.internal.name(raw".*(?:${eventVerbs.mkString("|")})[_A-Z].*")
+          .parameter.newTagNode(
+            "event"
+          ).store()(
+            dstGraph
+          )
+      atom.method.internal.name(raw".*(?:${eventVerbs.mkString("|")})[_A-Z].*")
+          .callIn(NoResolve).argument.newTagNode(
+            "event"
+          ).store()(
+            dstGraph
+          )
+      val validationVerbs = Seq("validate", "check", "verify")
+      atom.method.internal.name(raw".*(?:${validationVerbs.mkString("|")})[_A-Z].*").parameter.newTagNode(
+        "validation"
+      ).store()(
+        dstGraph
+      )
+      atom.method.internal.name(raw".*(?:${validationVerbs.mkString("|")})[_A-Z].*").callIn(
+        NoResolve
+      ).argument.newTagNode(
+        "validation"
+      ).store()(
+        dstGraph
+      )
+      atom.method.internal.name(".*(parse[_A-Z]).*").parameter.newTagNode("parse").store()(
+        dstGraph
+      )
       // TODO: Find a way to make these generic
       Seq("json", "glibc", "regex", "decode", "wasm", "execution", "unicode", "utf8").foreach {
           stag =>

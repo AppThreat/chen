@@ -8,7 +8,6 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Properties}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
-import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.Edge
 
 import java.util.concurrent.*
@@ -26,7 +25,6 @@ class Engine(context: EngineContext):
 
   import Engine.*
 
-  private val logger: Logger = LoggerFactory.getLogger(this.getClass)
   private val executorService: ExecutorService =
       Executors.newVirtualThreadPerTaskExecutor()
   private val completionService =
@@ -45,10 +43,6 @@ class Engine(context: EngineContext):
     * the analysis.
     */
   def backwards(sinks: List[CfgNode], sources: List[CfgNode]): List[TableEntry] =
-    if sources.isEmpty then
-      logger.debug("Attempting to determine flows from empty list of sources.")
-    if sinks.isEmpty then
-      logger.debug("Attempting to determine flows to empty list of sinks.")
     reset()
     val sourcesSet = sources.toSet
     val tasks      = createOneTaskPerSink(sinks)
@@ -103,24 +97,10 @@ class Engine(context: EngineContext):
                 numberOfTasksRunning -= 1
 
     submitTasks(tasks.toVector, sources)
-    val startTimeSec: Long = System.currentTimeMillis / 1000
     runUntilAllTasksAreSolved()
-    val taskFinishTimeSec: Long = System.currentTimeMillis / 1000
-    logger.debug(
-      "Time measurement -----> Task processing done in " +
-          (taskFinishTimeSec - startTimeSec) + " seconds"
-    )
     new HeldTaskCompletion(held.toList, mainResultTable).completeHeldTasks()
-    val dedupResult          = deduplicateFinal(extractResultsFromTable(sinks))
-    val allDoneTimeSec: Long = System.currentTimeMillis / 1000
-
-    logger.debug(
-      "Time measurement -----> Task processing: " +
-          (taskFinishTimeSec - startTimeSec) + " seconds" +
-          ", Deduplication: " + (allDoneTimeSec - taskFinishTimeSec) +
-          ", Deduped results size: " + dedupResult.length
-    )
-    dedupResult
+    // Deal with duplicates in downstream tools
+    extractResultsFromTable(sinks)
   end solveTasks
 
   private def submitTasks(tasks: Vector[ReachableByTask], sources: Set[CfgNode]): Unit =
@@ -314,11 +294,11 @@ case class EngineContext(
   *   max limit on number arguments for which tasks will be created for unresolved arguments
   */
 case class EngineConfig(
-  var maxCallDepth: Int = 4,
+  var maxCallDepth: Int = 3,
   initialTable: Option[mutable.Map[TaskFingerprint, Vector[ReachableByResult]]] = None,
   shareCacheBetweenTasks: Boolean = true,
-  maxArgsToAllow: Int = 1000,
-  maxOutputArgsExpansion: Int = 1000
+  maxArgsToAllow: Int = 100,
+  maxOutputArgsExpansion: Int = 100
 )
 
 /** Tracks various performance characteristics of the query engine.

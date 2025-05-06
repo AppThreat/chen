@@ -25,7 +25,8 @@ class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg):
         try
           linkCall(call, dstGraph)
         catch
-          case _: Exception =>
+          case exception: Exception =>
+              throw new RuntimeException(exception)
     }
 
   private def linkCall(call: Call, dstGraph: DiffGraphBuilder): Unit =
@@ -37,8 +38,10 @@ class StaticCallLinker(cpg: Cpg) extends CpgPass(cpg):
         case _ =>
 
   private def linkStaticCall(call: Call, dstGraph: DiffGraphBuilder): Unit =
-      for
-        mnodes ← methodFullNameToNode.get(call.methodFullName)
-        dst    ← mnodes
-      do dstGraph.addEdge(call, dst, EdgeTypes.CALL)
+    val resolvedMethodOption = methodFullNameToNode.get(call.methodFullName)
+    if resolvedMethodOption.isDefined then
+      resolvedMethodOption.get.foreach { dst =>
+          dstGraph.addEdge(call, dst, EdgeTypes.CALL)
+      }
+
 end StaticCallLinker
