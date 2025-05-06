@@ -43,13 +43,11 @@ object AccessPathUsage:
             // assume: MemberAccess.isGenericMemberAccessName(call.name)
             val argOne = memberAccess.argumentOption(1)
             if argOne.isEmpty then
-              logger.debug(s"Missing first argument on call ${memberAccess.code}.")
               return (TrackedUnknown, Nil)
             val (base, tail) = toTrackedBaseAndAccessPathInternal(argOne.get)
             val path         = AccessPathHandling.memberAccessToPath(memberAccess, tail)
             (base, path)
         case _ =>
-            logger.debug(s"Missing handling for node type ${node.getClass}.")
             (TrackedUnknown, Nil)
     end if
   end toTrackedBaseAndAccessPathInternal

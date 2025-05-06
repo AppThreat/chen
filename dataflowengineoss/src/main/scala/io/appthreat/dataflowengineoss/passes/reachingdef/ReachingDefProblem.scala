@@ -39,8 +39,6 @@ object ReachingDefProblem:
   */
 class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
 
-  private val logger: Logger = LoggerFactory.getLogger(this.getClass)
-
   val entryNode: StoredNode = method
   val exitNode: StoredNode  = method.methodReturn
 
@@ -89,7 +87,6 @@ class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
           case paramOut: MethodParameterOut => paramOut -> nextParamOutOrExit(paramOut)
           case cfgNode: CfgNode             => cfgNode  -> cfgNextOrFirstOutParam(cfgNode)
           case n =>
-              logger.warn(s"Node type ${n.getClass.getSimpleName} should not be part of the CFG")
               n -> List()
       }.toMap
 
@@ -105,7 +102,6 @@ class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
           case n if n == exitNode     => n -> lastOutputParamOrLastNodeOfBody()
           case n @ (cfgNode: CfgNode) => n -> cfgNode.cfgPrev.l
           case n =>
-              logger.warn(s"Node type ${n.getClass.getSimpleName} should not be part of the CFG")
               n -> List()
       }.toMap
 

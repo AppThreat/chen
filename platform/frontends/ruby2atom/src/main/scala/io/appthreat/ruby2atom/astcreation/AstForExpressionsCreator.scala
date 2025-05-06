@@ -591,6 +591,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 matchSplatExpression,
                 reassign(lhs, op, thenClause, transform)
               )(x.span)
+          case InClause(pattern, body) =>
+              InClause(pattern, reassign(lhs, op, body, transform))(x.span)
 
     rhs match
       case StatementList(statements) =>
