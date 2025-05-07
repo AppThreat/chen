@@ -35,7 +35,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
   // maximum length of code fields in number of characters
-  private val MaxCodeLength: Int = 1000
+  private val MaxCodeLength: Int = 16000
   private val MinCodeLength: Int = 50
 
   protected def createBabelNodeInfo(json: Value): BabelNodeInfo =
