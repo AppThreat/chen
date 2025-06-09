@@ -32,7 +32,7 @@ trait AstNodeBuilder[Node, NodeProcessor]:
   protected def columnEnd(element: Node): Option[Integer]
 
   private val MinCodeLength: Int        = 50
-  private val DefaultMaxCodeLength: Int = 16000
+  private val DefaultMaxCodeLength: Int = 100000
   // maximum length of code fields in number of characters
   private lazy val MaxCodeLength: Int =
       sys.env.get("CHEN_MAX_CODE_LENGTH").flatMap(_.toIntOption).getOrElse(DefaultMaxCodeLength)
