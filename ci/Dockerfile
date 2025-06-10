@@ -12,7 +12,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
 ARG JAVA_VERSION=23.0.2-tem
-ARG MAVEN_VERSION=3.9.9
+ARG MAVEN_VERSION=3.9.10
 ARG GRADLE_VERSION=8.13
 ARG RUBY_VERSION=3.4.4
 ARG SCALA_VERSION=3.6.4
