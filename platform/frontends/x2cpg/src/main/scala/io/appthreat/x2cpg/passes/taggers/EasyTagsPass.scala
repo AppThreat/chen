@@ -97,6 +97,50 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             dstGraph
           )
       }
+      // http client calls
+      Seq(
+        "got",
+        "axios",
+        "undici",
+        "ky",
+        "node-fetch",
+        "cross-fetch",
+        "superagent",
+        "needle",
+        "isomorphic-fetch",
+        "unfetch",
+        "wretch",
+        "request",
+        "cacheable-lookup",
+        "cacheable-request",
+        "http2-wrapper",
+        "responselike"
+      ).foreach { httpclientPkg =>
+        atom.tag.name(s"pkg:npm/${httpclientPkg}@.*").method.callIn(NoResolve).newTagNode(
+          "http-client"
+        ).store()(
+          dstGraph
+        )
+        atom.tag.name(s"pkg:npm/${httpclientPkg}@.*").method.callIn(NoResolve).argument.isIdentifier
+            .typeFullName(s"${httpclientPkg}.*").newTagNode(
+              "http-client"
+            ).store()(
+              dstGraph
+            )
+        atom.tag.name(s"pkg:npm/${httpclientPkg}@.*").method.callIn(NoResolve).argument.isLiteral.newTagNode(
+          "http-endpoint"
+        ).store()(
+          dstGraph
+        )
+        atom.tag.name(s"pkg:npm/${httpclientPkg}@.*").method.callIn(NoResolve).argument.isIdentifier
+            .typeFullNameExact(
+              "__ecma.String"
+            ).filter((i) => i.name == i.name.toUpperCase()).newTagNode(
+              "http-endpoint"
+            ).store()(
+              dstGraph
+            )
+      }
       // Tag cli source
       atom.method.internal.fullName("(index|app).(js|jsx|ts|tsx)::program").newTagNode(
         "cli-source"
