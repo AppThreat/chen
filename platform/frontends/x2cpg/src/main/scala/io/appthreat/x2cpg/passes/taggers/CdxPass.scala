@@ -120,22 +120,17 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                     if language == Languages.JAVA || language == Languages.JAVASRC then
                       bpkg = bpkg.split("\\.").take(PKG_NS_SIZE).mkString(".").concat(
                         ".*"
-                      )
-                      bpkg =
-                          bpkg.replace(File.separator, Pattern.quote(File.separator))
+                      ).replace(File.separator, Pattern.quote(File.separator))
                     if language == Languages.JSSRC || language == Languages.JAVASCRIPT
                     then
-                      bpkg = s".*${bpkg}.*"
-                      bpkg =
-                          bpkg.replace(File.separator, Pattern.quote(File.separator))
+                      bpkg = bpkg.replace(File.separator, Pattern.quote(File.separator))
                     if language == Languages.PYTHON || language == Languages.PYTHONSRC
                     then bpkg = toPyModuleForm(bpkg)
                     if language == Languages.RUBYSRC
                     then bpkg = toRubyModuleForm(bpkg)
                     if language == Languages.PHP
                     then
-                      bpkg = bpkg.replaceAll("""\\""", """\\\\""")
-                      bpkg = s"""$bpkg.*"""
+                      bpkg = bpkg.replace("\\", "\\\\").concat(".*")
                     if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
                       donePkgs.put(bpkg, true)
                       // Ruby
@@ -240,15 +235,44 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                         )
                         if language == Languages.JSSRC || language == Languages.JAVASCRIPT
                         then
-                          atom.call.code(bpkg).argument.newTagNode(
+                          atom.method.name(bpkg).external.newTagNode(
                             compPurl
                           ).store()(dstGraph)
-                          atom.identifier.code(bpkg).newTagNode(compPurl).store()(
-                            dstGraph
-                          )
-                          atom.identifier.code(bpkg).inCall.newTagNode(
+                          atom.method.name(bpkg).external.parameter.newTagNode(
                             compPurl
                           ).store()(dstGraph)
+                          atom.method.name(bpkg).external.callIn(NoResolve).argument.newTagNode(
+                            compPurl
+                          ).store()(dstGraph)
+                          if bpkg.contains(File.separator) then
+                            val segments   = bpkg.split(Pattern.quote(File.separator))
+                            val truncated  = segments.take(2).mkString(File.separator)
+                            val re_variant = s".*${truncated}.*"
+                            atom.method.fullName(re_variant).external.newTagNode(
+                              compPurl
+                            ).store()(dstGraph)
+                            atom.method.fullName(re_variant).external.parameter.newTagNode(
+                              compPurl
+                            ).store()(dstGraph)
+                            atom.method.fullName(re_variant).external.callIn(NoResolve).argument.newTagNode(
+                              compPurl
+                            ).store()(dstGraph)
+                            if compType != "library" then
+                              atom.method.fullName(re_variant).external.parameter.newTagNode(
+                                compType
+                              ).store()(dstGraph)
+                              atom.method.fullName(re_variant).external.callIn(NoResolve).argument.newTagNode(
+                                compType
+                              ).store()(dstGraph)
+                          end if
+                          if compType != "library" then
+                            atom.method.name(bpkg).external.parameter.newTagNode(
+                              compType
+                            ).store()(dstGraph)
+                            atom.method.name(bpkg).external.callIn(NoResolve).argument.newTagNode(
+                              compType
+                            ).store()(dstGraph)
+                        end if
                         if language == Languages.PYTHON || language == Languages.PYTHONSRC
                         then
                           atom.call.where(
@@ -285,17 +309,6 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
                           atom.method.fullName(bpkg).newTagNode(compType).store()(
                             dstGraph
                           )
-                          if language == Languages.JSSRC || language == Languages.JAVASCRIPT
-                          then
-                            atom.call.code(bpkg).argument.newTagNode(
-                              compType
-                            ).store()(dstGraph)
-                            atom.identifier.code(bpkg).newTagNode(
-                              compType
-                            ).store()(dstGraph)
-                            atom.identifier.code(bpkg).inCall.newTagNode(
-                              compType
-                            ).store()(dstGraph)
                           if language == Languages.PYTHON || language == Languages.PYTHONSRC
                           then
                             atom.call.where(
