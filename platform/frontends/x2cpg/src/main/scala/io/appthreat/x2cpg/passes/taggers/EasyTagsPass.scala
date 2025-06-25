@@ -74,6 +74,29 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     )
     atom.method.internal.name(".*(authori).*").newTagNode("authorization").store()(dstGraph)
     if language == Languages.JSSRC || language == Languages.JAVASCRIPT then
+      // proto risks
+      atom.method.name("create").external.callIn(NoResolve).argumentIndex(1).codeExact(
+        "Object.create(null)"
+      ).newTagNode(
+        "no-proto"
+      ).store()(
+        dstGraph
+      )
+      Seq(
+        "Object.assign",
+        "Object.defineProperty",
+        "Object.defineProperties",
+        "Object.setPrototypeOf",
+        "Reflect.defineProperty",
+        "Reflect.setPrototypeOf",
+        "Reflect.set"
+      ).foreach { ptypes =>
+          atom.call.filter(_.dynamicTypeHintFullName.contains(ptypes)).newTagNode(
+            "proto-assign"
+          ).store()(
+            dstGraph
+          )
+      }
       // Tag cli source
       atom.method.internal.fullName("(index|app).(js|jsx|ts|tsx)::program").newTagNode(
         "cli-source"
