@@ -11,7 +11,7 @@ libraryDependencies ++= Seq(
   "io.appthreat"              %% "cpg2" % Versions.cpg,
   "com.lihaoyi"               %% "upickle"           % Versions.upickle,
   "com.typesafe"               % "config"            % "1.4.3",
-  "com.michaelpollmeier"       % "versionsort"       % "1.0.13",
+  "com.michaelpollmeier"       % "versionsort"       % "1.0.17",
   "org.scalatest"             %% "scalatest"         % Versions.scalatest % Test
 )
 
