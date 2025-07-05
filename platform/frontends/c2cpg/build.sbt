@@ -10,7 +10,7 @@ libraryDependencies ++= Seq(
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface"),
     ExclusionRule(organization = "org.eclipse.platform", name = "org.eclipse.jface.text")
   ),
-  "org.jline"               % "jline"                      % "3.29.0",
+  "org.jline"               % "jline"                      % "3.30.4",
   "org.scalatest"          %% "scalatest"                  % Versions.scalatest % Test
 )
 
