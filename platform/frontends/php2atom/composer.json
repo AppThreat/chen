@@ -3,7 +3,7 @@
     "description": "Convert PHP source to atom",
     "type": "library",
     "require": {
-        "nikic/php-parser": "^4.18"
+        "nikic/php-parser": "^5.5"
     },
     "license": "Apache-2.0",
     "authors": [

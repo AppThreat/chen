@@ -12,7 +12,6 @@ object Versions {
   val upickle       = "4.2.1"
   val scalaReplPP   = "0.1.85"
   val commonsCompress = "1.27.1"
-  val jRuby           = "9.4.9.0"
   val typeSafeConfig  = "1.4.3"
   val versionSort     = "1.0.17"
   val scalaParallel   = "1.2.0"
