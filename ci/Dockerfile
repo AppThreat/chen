@@ -88,10 +88,13 @@ RUN set -e; \
     && rm -rf /opt/miniconda3/miniconda.sh \
     && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && conda install python=3.12 -y \
-    && conda config --set solver classic \
-    && conda update -n base -c defaults conda -y \
+    && conda config --set always_yes yes --set changeps1 no \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
     && conda config --add channels conda-forge \
+    && conda config --set solver classic \
+    && conda install python=3.12 -y \
+    && conda update -n base -c defaults conda -y \
     && conda init bash \
     && bash -c /opt/conda-install.sh \
     && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
