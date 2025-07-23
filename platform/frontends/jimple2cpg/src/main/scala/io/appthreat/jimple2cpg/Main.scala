@@ -59,7 +59,7 @@ private object Frontend:
           .action((_, config) => config.withOnlyClasses(true)),
       opt[Unit]("full-resolver")
           .text(
-            "enables full transitive resolution of all references found in all classes that are resolved"
+            "enables whole program analysis and full transitive resolution of all references found in all classes that are resolved"
           )
           .action((_, config) => config.withFullResolver(true)),
       opt[Unit]("recurse")

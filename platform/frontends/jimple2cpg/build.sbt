@@ -4,7 +4,7 @@ dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->t
 
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"              % Versions.cpg,
-  "commons-io"             % "commons-io"         % "2.19.0",
+  "commons-io"             % "commons-io"         % "2.20.0",
   "org.soot-oss"           % "soot"               % "4.6.0",
   "org.scala-lang.modules" % "scala-asm"          % "9.8.0-scala-1",
   "org.ow2.asm"            % "asm"                % "9.8",
