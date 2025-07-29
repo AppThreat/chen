@@ -29,36 +29,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       Array(".*views.py:.*HttpResponse.*", ".*views.py:.*render.*", ".*views.py:.*get_object_.*")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
-    if language == Languages.JSSRC || language == Languages.JAVASCRIPT then
-      JS_REQUEST_PATTERNS.foreach(p =>
-          atom.call.code(p).newTagNode("framework-input").store()(dstGraph)
-      )
-      JS_RESPONSE_PATTERNS.foreach(p =>
-          atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
-      )
-    if language == Languages.PHP then
-      atom.parameter.name("request.*").newTagNode("framework-input").store()(dstGraph)
-      atom.parameter.name("response.*").newTagNode("framework-output").store()(dstGraph)
-      atom.ret
-          .where(_.method.parameter.name("request.*"))
-          .newTagNode("framework-output")
-          .store()(dstGraph)
-    if language == Languages.PYTHON || language == Languages.PYTHONSRC then
-      PY_REQUEST_PATTERNS
-          .foreach(p =>
-              atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
-                dstGraph
-              )
-          )
-      PY_RESPONSE_PATTERNS
-          .foreach { p =>
-            atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
-              dstGraph
-            )
-            atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
-          }
-      atom.call.where(_.file.name(".*views.py.*")).code(".*(HttpResponse|render|get_object_).*")
-          .newTagNode("framework-output").store()(dstGraph)
+    // Common operations
     atom.method.internal.name(".*(valid|check).*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name("is[A-Z].*").newTagNode("validation").store()(dstGraph)
     atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
@@ -73,7 +44,31 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       dstGraph
     )
     atom.method.internal.name(".*(authori).*").newTagNode("authorization").store()(dstGraph)
+    if language == Languages.RUBYSRC then
+      Seq("URI", "Net::HTTP", "HTTParty", "RestClient", "Faraday", "HTTP", "Excon").foreach {
+          httpLib =>
+            val httpClientMethod = s".*${httpLib}.*(new|get|post|parse).*"
+            atom.call.code(httpClientMethod).newTagNode(
+              "http-client"
+            ).store()(
+              dstGraph
+            )
+            atom.call.code(httpClientMethod).argument.isLiteral
+                .filterNot(l => l.code.size < 4)
+                .filterNot(l => l.code.startsWith("'/#"))
+                .filter(l => Seq("http", "api", "/").exists(l.code.contains)).newTagNode(
+                  "http-endpoint"
+                ).store()(
+                  dstGraph
+                )
+      }
     if language == Languages.JSSRC || language == Languages.JAVASCRIPT then
+      JS_REQUEST_PATTERNS.foreach(p =>
+          atom.call.code(p).newTagNode("framework-input").store()(dstGraph)
+      )
+      JS_RESPONSE_PATTERNS.foreach(p =>
+          atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
+      )
       // proto risks
       atom.method.name("create").external.callIn(NoResolve).argumentIndex(1).codeExact(
         "Object.create(null)"
@@ -166,7 +161,23 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       ).store()(
         dstGraph
       )
-    else if language == Languages.PYTHON || language == Languages.PYTHONSRC then
+    end if
+    if language == Languages.PYTHON || language == Languages.PYTHONSRC then
+      PY_REQUEST_PATTERNS
+          .foreach(p =>
+              atom.method.fullName(p).parameter.newTagNode("framework-input").store()(
+                dstGraph
+              )
+          )
+      PY_RESPONSE_PATTERNS
+          .foreach { p =>
+            atom.method.fullName(p).parameter.newTagNode("framework-output").store()(
+              dstGraph
+            )
+            atom.call.code(p).newTagNode("framework-output").store()(dstGraph)
+          }
+      atom.call.where(_.file.name(".*views.py.*")).code(".*(HttpResponse|render|get_object_).*")
+          .newTagNode("framework-output").store()(dstGraph)
       atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(dstGraph)
       atom.call.methodFullName(Operators.equals).code(
         """__name__ == ["']__main__["']"""
@@ -178,6 +189,23 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       ).store()(dstGraph)
       atom.method.filename(".*(cli|main|command).*").parameter.newTagNode(
         "cli-source"
+      ).store()(dstGraph)
+      val known_crypto_libs = "(cryptography|Crypto|ecdsa|nacl).*"
+      atom.identifier.typeFullName(known_crypto_libs).newTagNode(
+        "crypto"
+      ).store()(dstGraph)
+      atom.call.methodFullName(known_crypto_libs).newTagNode(
+        "crypto"
+      ).store()(dstGraph)
+      atom.call.methodFullName(
+        s"${known_crypto_libs}(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem).*"
+      ).newTagNode(
+        "crypto-generate"
+      ).store()(dstGraph)
+      atom.call.name("[A-Z0-9]+").methodFullName(
+        s"${known_crypto_libs}(primitives|serialization).*"
+      ).argument.inCall.newTagNode(
+        "crypto-algorithm"
       ).store()(dstGraph)
     end if
     if language == Languages.NEWC || language == Languages.C
@@ -275,6 +303,12 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     end if
     if language == Languages.PHP
     then
+      atom.parameter.name("request.*").newTagNode("framework-input").store()(dstGraph)
+      atom.parameter.name("response.*").newTagNode("framework-output").store()(dstGraph)
+      atom.ret
+          .where(_.method.parameter.name("request.*"))
+          .newTagNode("framework-output")
+          .store()(dstGraph)
       atom.call.code("\\$_(GET|POST|FILES|REQUEST|COOKIE|SESSION|ENV).*").argument.newTagNode(
         "framework-input"
       ).store()(dstGraph)
@@ -338,23 +372,5 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         "\"(DSA|ECDSA|GOST-3410|ECGOST-3410|MD5|SHA1|SHA224|SHA384|SHA512|ECDH|PKCS12|DES|DESEDE|IDEA|RC2|RC5|MD2|MD4|MD5|RIPEMD128|RIPEMD160|RIPEMD256|AES|Blowfish|CAST5|CAST6|DES|DESEDE|GOST-28147|IDEA|RC6|Rijndael|Serpent|Skipjack|Twofish|OpenPGPCFB|PKCS7Padding|ISO10126-2Padding|ISO7816-4Padding|TBCPadding|X9.23Padding|ZeroBytePadding|PBEWithMD5AndDES|PBEWithSHA1AndDES|PBEWithSHA1AndRC2|PBEWithMD5AndRC2|PBEWithSHA1AndIDEA|PBEWithSHA1And3-KeyTripleDES|PBEWithSHA1And2-KeyTripleDES|PBEWithSHA1And40BitRC2|PBEWithSHA1And40BitRC4|PBEWithSHA1And128BitRC2|PBEWithSHA1And128BitRC4|PBEWithSHA1AndTwofish|ChaCha20|ChaCha20-Poly1305|DESede|DiffieHellman|OAEP|PBEWithMD5AndDES|PBEWithHmacSHA256AndAES|RSASSA-PSS|X25519|X448|XDH|X.509|PKCS7|PkiPath|PKIX|AESWrap|ARCFOUR|ISO10126Padding|OAEPWithMD5AndMGF1Padding|OAEPWithSHA-512AndMGF1Padding|PKCS1Padding|PKCS5Padding|SSL3Padding|ECMQV|HmacMD5|HmacSHA1|HmacSHA224|HmacSHA256|HmacSHA384|HmacSHA512|HmacSHA3-224|HmacSHA3-256|HmacSHA3-384|HmacSHA3-512|SHA3-224|SHA3-256|SHA3-384|SHA3-512|SHA-1|SHA-224|SHA-256|SHA-384|SHA-512|CRAM-MD5|DIGEST-MD5|GSSAPI|NTLM|PBKDF2WithHmacSHA256|NativePRNG|NativePRNGBlocking|NativePRNGNonBlocking|SHA1PRNG|Windows-PRNG|NONEwithRSA|MD2withRSA|MD5withRSA|SHA1withRSA|SHA224withRSA|SHA256withRSA|SHA384withRSA|SHA512withRSA|SHA3-224withRSA|SHA3-256withRSA|SHA3-384withRSA|SHA3-512withRSA|NONEwithECDSAinP1363Format|SHA1withECDSAinP1363Format|SHA224withECDSAinP1363Format|SHA256withECDSAinP1363Format|SHA384withECDSAinP1363Format|SHA512withECDSAinP1363Format|SSLv2|SSLv3|TLSv1|DTLS|SSL_|TLS_).*"
       ).newTagNode("crypto-algorithm").store()(dstGraph)
     end if
-    if language == Languages.PYTHON || language == Languages.PYTHONSRC then
-      val known_crypto_libs = "(cryptography|Crypto|ecdsa|nacl).*"
-      atom.identifier.typeFullName(known_crypto_libs).newTagNode(
-        "crypto"
-      ).store()(dstGraph)
-      atom.call.methodFullName(known_crypto_libs).newTagNode(
-        "crypto"
-      ).store()(dstGraph)
-      atom.call.methodFullName(
-        s"${known_crypto_libs}(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem).*"
-      ).newTagNode(
-        "crypto-generate"
-      ).store()(dstGraph)
-      atom.call.name("[A-Z0-9]+").methodFullName(
-        s"${known_crypto_libs}(primitives|serialization).*"
-      ).argument.inCall.newTagNode(
-        "crypto-algorithm"
-      ).store()(dstGraph)
   end run
 end EasyTagsPass
