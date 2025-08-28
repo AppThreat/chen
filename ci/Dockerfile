@@ -94,6 +94,8 @@ RUN set -e; \
     && conda config --add channels conda-forge \
     && conda config --set solver classic \
     && conda install python=3.12 -y \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
     && conda update -n base -c defaults conda -y \
     && conda init bash \
     && bash -c /opt/conda-install.sh \
