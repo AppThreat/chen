@@ -8,7 +8,6 @@ import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method}
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import io.shiftleft.semanticcpg.language.*
-import org.slf4j.LoggerFactory
 
 import scala.jdk.OptionConverters.RichOptional
 import io.appthreat.x2cpg.Defines.UnresolvedNamespace

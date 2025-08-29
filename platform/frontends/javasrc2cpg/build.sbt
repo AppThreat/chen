@@ -4,7 +4,7 @@ dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->t
 
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"             % Versions.cpg,
-  "com.github.javaparser"   % "javaparser-symbol-solver-core" % "3.26.4",
+  "com.github.javaparser"   % "javaparser-symbol-solver-core" % "3.27.0",
   "org.scalatest"          %% "scalatest"                     % Versions.scalatest % Test,
   "org.projectlombok"       % "lombok"                        % "1.18.38",
   "org.scala-lang.modules" %% "scala-parallel-collections"    % Versions.scalaParallel,

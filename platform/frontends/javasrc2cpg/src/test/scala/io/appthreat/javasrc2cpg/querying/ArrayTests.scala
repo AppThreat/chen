@@ -27,7 +27,7 @@ class ArrayTests extends JavaSrcCode2CpgFixture {
 
           arrayInitializer.name shouldBe Operators.arrayInitializer
           arrayInitializer.methodFullName shouldBe Operators.arrayInitializer
-          arrayInitializer.code shouldBe "new int[] { 1, 2, 3 }"
+          arrayInitializer.code shouldBe "new int[] {1, 2, 3}"
           arrayInitializer.typeFullName shouldBe "int[]"
 
         case result => fail(s"Expected array initializer assignment args but got $result")
@@ -37,7 +37,7 @@ class ArrayTests extends JavaSrcCode2CpgFixture {
       val cpg = code("""
                        |class Foo {
                        |  public static void foo() {
-                       |    int[] xs = new int[] { 1, 2, 3 };
+                       |    int[] xs = new int[] {1, 2, 3};
                        |  }
                        |}
                        |""".stripMargin)
@@ -51,7 +51,7 @@ class ArrayTests extends JavaSrcCode2CpgFixture {
 
           arrayInitializer.name shouldBe Operators.arrayInitializer
           arrayInitializer.methodFullName shouldBe Operators.arrayInitializer
-          arrayInitializer.code shouldBe "new int[] { 1, 2, 3 }"
+          arrayInitializer.code shouldBe "new int[] {1, 2, 3}"
           arrayInitializer.typeFullName shouldBe "int[]"
 
         case result => fail(s"Expected array initializer assignment args but got $result")
@@ -73,7 +73,7 @@ class ArrayTests extends JavaSrcCode2CpgFixture {
       arg1.code shouldBe "x"
       arg1.typeFullName shouldBe "int[]"
 
-      arg2.code shouldBe "{ 0, 1, 2 }"
+      arg2.code shouldBe "{0, 1, 2}"
       arg2.methodFullName shouldBe "<operator>.arrayInitializer"
       arg2.astChildren.zipWithIndex.foreach { case (arg, idx) =>
         arg shouldBe a[Literal]
