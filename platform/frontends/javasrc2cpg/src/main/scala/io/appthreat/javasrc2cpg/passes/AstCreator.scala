@@ -328,11 +328,8 @@ class AstCreator(
         Ast(namespaceBlock).withChildren(typeDeclAsts).withChildren(importNodes)
       catch
         case t: UnsolvedSymbolException =>
-            logger.error(s"Unsolved symbol exception caught in $filename")
             Ast()
         case t: Throwable =>
-            logger.debug(s"Parsing file $filename failed with $t")
-            logger.debug(s"Caused by ${t.getCause}")
             Ast()
 
   /** Translate package declaration into AST consisting of a corresponding namespace block.
@@ -358,7 +355,6 @@ class AstCreator(
         // unterminated recursion in some cases where types cannot be resolved.
         // Update: This must be fixed with https://github.com/javaparser/javaparser/pull/4236
         case e: StackOverflowError =>
-            logger.debug(s"Caught StackOverflowError in $filename")
             Failure(e)
 
   private def composeSignature(
@@ -410,9 +406,6 @@ class AstCreator(
   def getBindingTable(typeDecl: ResolvedReferenceTypeDeclaration): BindingTable =
     val fullName = typeInfoCalc.fullName(typeDecl).getOrElse {
         val qualifiedName = typeDecl.getQualifiedName
-        logger.debug(
-          s"Could not get full name for resolved type decl $qualifiedName. THIS SHOULD NOT HAPPEN!"
-        )
         qualifiedName
     }
     bindingTableCache.getOrElseUpdate(
@@ -499,9 +492,6 @@ class AstCreator(
         case unhandled =>
             // AnnotationMemberDeclarations and InitializerDeclarations as children of typeDecls are the
             // expected cases.
-            logger.debug(
-              s"Found unhandled typeDecl member ${unhandled.getClass} in file $filename"
-            )
             AstWithStaticInit.empty
 
   private def identifierForResolvedTypeParameter(typeParameter: ResolvedTypeParameterDeclaration)
@@ -775,7 +765,6 @@ class AstCreator(
     // Ex - private Consumer<String, Integer> consumer;
     // From Consumer<String, Integer> we need to get to Consumer so splitting it by '<' and then combining with '<' to
     // form typeFullName as Consumer<String, Integer>
-
     val typeFullNameWithoutGenericSplit = typeInfoCalc
         .fullName(v.getType)
         .orElse(scope.lookupType(v.getTypeAsString))
@@ -795,7 +784,8 @@ class AstCreator(
                     .slice(1, splitByLeftAngular.size)
                     .mkString(Defines.LeftAngularBracket, Defines.LeftAngularBracket, "")
             case None => typeFullNameWithoutGenericSplit
-        else typeFullNameWithoutGenericSplit
+        else if typeFullNameWithoutGenericSplit.nonEmpty then typeFullNameWithoutGenericSplit
+        else v.getTypeAsString
     val name           = v.getName.toString
     val node           = memberNode(v, name, s"$typeFullName $name", typeFullName)
     val memberAst      = Ast(node)
@@ -924,9 +914,6 @@ class AstCreator(
             None
 
         case _ =>
-            logger.debug(
-              s"convertAnnotationValueExpr not yet implemented for unknown case ${expr.getClass}"
-            )
             None
 
   private def astForAnnotationLiteralExpr(literalExpr: LiteralExpr): Ast =
@@ -993,7 +980,26 @@ class AstCreator(
               "Native"
             ).contains(x) => s"java.lang.$x"
         case y if y.startsWith("java.") => y
-        case _                          => s"${Defines.UnresolvedNamespace}.${initString}"
+        case z
+            if Seq(
+              "byte",
+              "short",
+              "int",
+              "long",
+              "float",
+              "double",
+              "char",
+              "boolean",
+              "java.lang.Byte",
+              "java.lang.Short",
+              "java.lang.Integer",
+              "java.lang.Long",
+              "java.lang.Float",
+              "java.lang.Double",
+              "java.lang.Character",
+              "java.lang.Boolean"
+            ).equals(z) => z
+        case _ => s"${Defines.UnresolvedNamespace}.${initString}"
 
   private def astForAnnotationExpr(annotationExpr: AnnotationExpr): Ast =
     val fallbackType = guessTypeFullName(annotationExpr.getNameAsString)
@@ -1531,13 +1537,9 @@ class AstCreator(
     // Create item local
     val maybeVariable = stmt.getVariable.getVariables.asScala.toList match
       case Nil =>
-          logger.debug(s"ForEach statement has empty variable list: $filename$lineNo")
           None
       case variable :: Nil => Some(variable)
       case variable :: _ =>
-          logger.debug(
-            s"ForEach statement defines multiple variables. Dropping all but the first: $filename$lineNo"
-          )
           Some(variable)
 
     val partialLocalNode = NewLocal().lineNumber(lineNo)
@@ -2168,10 +2170,6 @@ class AstCreator(
       val assignAst = callAst(callNode, targetAst ++ argsAsts)
       Seq(assignAst)
     else
-      if partialConstructorQueue.size > 1 then
-        logger.debug(
-          "BUG: Received multiple partial constructors from assignment. Dropping all but the first."
-        )
       val partialConstructor = partialConstructorQueue.head
       partialConstructorQueue.clear()
 
@@ -2195,11 +2193,12 @@ class AstCreator(
   private def localsForVarDecl(varDecl: VariableDeclarationExpr): List[NewLocal] =
       varDecl.getVariables.asScala.map { variable =>
         val name = variable.getName.toString
-        val typeFullName =
+        var typeFullName =
             tryWithSafeStackOverflow(typeInfoCalc.fullName(variable.getType)).toOption.flatten
                 .orElse(scope.lookupType(variable.getTypeAsString))
                 .getOrElse(TypeConstants.Any)
-        val code = s"${variable.getType} $name"
+        if typeFullName.isEmpty then typeFullName = variable.getTypeAsString
+        val code = s"${variable.getTypeAsString} $name"
         NewLocal()
             .name(name)
             .code(code)
@@ -2226,13 +2225,9 @@ class AstCreator(
                   callAst(fieldAccess.copy, args)
 
               case _ =>
-                  logger.debug(
-                    s"Attempting to copy field access without required children: ${fieldAccess.code}"
-                  )
                   Ast()
 
         case Some(root) =>
-            logger.debug(s"Attempting to copy unhandled root type for var decl init: $root")
             Ast()
 
         case None =>
@@ -2257,7 +2252,7 @@ class AstCreator(
               .orElse(scope.lookupVariable(name).typeFullName)
               .orElse(scope.lookupType(javaParserVarType))
 
-      val typeFullName =
+      var typeFullName =
           variableTypeFullName.orElse(initializerTypeFullName)
 
       // Need the actual resolvedType here for when the RHS is a lambda expression.
@@ -2269,9 +2264,12 @@ class AstCreator(
       val initializerAsts =
           astsForExpression(initializer, ExpectedType(typeFullName, resolvedExpectedType))
 
-      val typeName = typeFullName
+      var typeName = typeFullName
           .map(TypeNodePass.fullToShortName)
           .getOrElse(guessTypeFullName(variable.getTypeAsString))
+      if typeName.isEmpty && variable.getTypeAsString.nonEmpty then
+        typeName = variable.getTypeAsString
+        typeFullName = Some(variable.getTypeAsString)
       val code = s"$typeName $name = ${initializerAsts.rootCodeOrEmpty}"
 
       val callNode = newOperatorCallNode(

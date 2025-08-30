@@ -218,7 +218,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
         |""".stripMargin)
     "test annotation node properties" in {
       val annotationNode = cpg.method.name("function").annotation.head
-      annotationNode.code shouldBe "@NormalAnnotation(value = { \"aaa\", \"bbb\" })"
+      annotationNode.code shouldBe "@NormalAnnotation(value = {\"aaa\", \"bbb\"})"
       annotationNode.name shouldBe "NormalAnnotation"
       annotationNode.fullName shouldBe "some.NormalAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
@@ -227,7 +227,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
 
     "test annotation node parameter assignment child" in {
       val Seq(paramAssign) = cpg.method.name("function").annotation.parameterAssign.l
-      paramAssign.code shouldBe "value = { \"aaa\", \"bbb\" }"
+      paramAssign.code shouldBe "value = {\"aaa\", \"bbb\"}"
       paramAssign.order shouldBe 1
     }
 
@@ -240,7 +240,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
     "test annotation node parameter value" in {
       val Seq(paramValue: ArrayInitializer) =
         cpg.method.name("function").annotation.parameterAssign.value.isArrayInitializer.l
-      paramValue.code shouldBe "{ \"aaa\", \"bbb\" }"
+      paramValue.code shouldBe "{\"aaa\", \"bbb\"}"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
     }

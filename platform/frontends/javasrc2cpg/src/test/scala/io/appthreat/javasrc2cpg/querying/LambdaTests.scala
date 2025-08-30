@@ -105,7 +105,7 @@ class LambdaTests extends JavaSrcCode2CpgFixture {
     "create a method body for the lambda method" in {
       cpg.typeDecl.name("Foo").method.name(".*lambda.*").block.astChildren.l match {
         case List(_: Local, _: Local, returnNode: Return) =>
-          returnNode.code shouldBe "return lambdaInput.length() > 5 ? \"Long\" : fallback;"
+          returnNode.code shouldBe "return lambdaInput.length() > 5 ? \"Long\" : fallback"
           returnNode.astChildren.l match {
             case List(expr: Call) =>
               expr.methodFullName shouldBe Operators.conditional
