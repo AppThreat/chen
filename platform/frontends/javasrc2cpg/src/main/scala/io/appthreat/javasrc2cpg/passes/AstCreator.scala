@@ -2193,11 +2193,15 @@ class AstCreator(
   private def localsForVarDecl(varDecl: VariableDeclarationExpr): List[NewLocal] =
       varDecl.getVariables.asScala.map { variable =>
         val name = variable.getName.toString
-        var typeFullName =
-            tryWithSafeStackOverflow(typeInfoCalc.fullName(variable.getType)).toOption.flatten
+        val initialTypeFullName =
+            tryWithSafeStackOverflow(typeInfoCalc.fullName(variable.getType))
+                .toOption
+                .flatten
                 .orElse(scope.lookupType(variable.getTypeAsString))
                 .getOrElse(TypeConstants.Any)
-        if typeFullName.isEmpty then typeFullName = variable.getTypeAsString
+        val typeFullName =
+            if initialTypeFullName.isEmpty then variable.getTypeAsString
+            else initialTypeFullName
         val code = s"${variable.getTypeAsString} $name"
         NewLocal()
             .name(name)
@@ -2251,10 +2255,17 @@ class AstCreator(
               // TODO: Surely the variable being declared can't already be in scope?
               .orElse(scope.lookupVariable(name).typeFullName)
               .orElse(scope.lookupType(javaParserVarType))
+      val (typeFullName, typeName) =
+        val initialTypeFullName = variableTypeFullName.orElse(initializerTypeFullName)
+        val initialTypeName = initialTypeFullName
+            .map(TypeNodePass.fullToShortName)
+            .getOrElse(guessTypeFullName(variable.getTypeAsString))
 
-      var typeFullName =
-          variableTypeFullName.orElse(initializerTypeFullName)
-
+        if initialTypeName.isEmpty && variable.getTypeAsString.nonEmpty then
+          (Some(variable.getTypeAsString), variable.getTypeAsString)
+        else
+          (initialTypeFullName, initialTypeName
+        )
       // Need the actual resolvedType here for when the RHS is a lambda expression.
       val resolvedExpectedType =
           tryWithSafeStackOverflow(symbolSolver.toResolvedType(
@@ -2263,15 +2274,7 @@ class AstCreator(
           )).toOption
       val initializerAsts =
           astsForExpression(initializer, ExpectedType(typeFullName, resolvedExpectedType))
-
-      var typeName = typeFullName
-          .map(TypeNodePass.fullToShortName)
-          .getOrElse(guessTypeFullName(variable.getTypeAsString))
-      if typeName.isEmpty && variable.getTypeAsString.nonEmpty then
-        typeName = variable.getTypeAsString
-        typeFullName = Some(variable.getTypeAsString)
       val code = s"$typeName $name = ${initializerAsts.rootCodeOrEmpty}"
-
       val callNode = newOperatorCallNode(
         Operators.assignment,
         code,
@@ -3352,11 +3355,15 @@ class AstCreator(
     val codePrefix    = codePrefixForMethodCall(call)
     val callCode      = s"$codePrefix${call.getNameAsString}($argumentsCode)"
 
-    val callName        = call.getNameAsString
-    val namespace       = receiverType.getOrElse(Defines.UnresolvedNamespace)
-    val signature       = composeSignature(returnType, argumentTypes, argumentAsts.size)
-    val methodFullName  = composeMethodFullName(namespace, callName, signature)
-    val typeFullNameStr = expressionTypeFullName.getOrElse(TypeConstants.Any)
+    val callName       = call.getNameAsString
+    val namespace      = receiverType.getOrElse(Defines.UnresolvedNamespace)
+    val signature      = composeSignature(returnType, argumentTypes, argumentAsts.size)
+    val methodFullName = composeMethodFullName(namespace, callName, signature)
+    val typeFullNameStr = (expressionTypeFullName, expectedReturnType.resolvedType) match
+      case (Some(name), _) if name.nonEmpty => name
+      case (_, Some(resolved)) if resolved.isPrimitive =>
+          resolved.asPrimitive().name().toLowerCase()
+      case _ => TypeConstants.Any
     val callRoot = NewCall()
         .name(callName)
         .methodFullName(methodFullName)
