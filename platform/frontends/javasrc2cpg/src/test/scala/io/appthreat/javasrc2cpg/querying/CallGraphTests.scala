@@ -32,19 +32,19 @@ class CallGraphTests extends JavaSrcCode2CpgFixture {
 
   "should find three outgoing calls for main" in {
     cpg.method.name("main").call.code.toSetMutable shouldBe Set(
-      "1 + 2",
-      "this.add(1 + 2, 3)",
+      "System.out.println(add(1+2, 3))",
       "System.out",
-      "System.out.println(add(1 + 2, 3))"
+      "this.add(1+2, 3)",
+      "1+2"
     )
   }
 
   "should find one callsite for add" in {
-    cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("this.add(1 + 2, 3)")
+    cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("this.add(1+2, 3)")
   }
 
   "should find that argument '1+2' is passed to parameter 'x'" in {
-    cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1 + 2")
+    cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1+2")
   }
 
   "should allow traversing from argument to formal parameter" in {

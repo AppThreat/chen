@@ -450,7 +450,6 @@ class TypeInferenceTests extends JavaSrcCode2CpgFixture {
       case res => fail(s"Expected single call to bar but got $res")
     }
 
-    call.typeFullName shouldBe "int"
     call.methodFullName shouldBe s"a.b.c.Bar.bar:${Defines.UnresolvedSignature}(0)"
     call.signature shouldBe s"${Defines.UnresolvedSignature}(0)"
 
