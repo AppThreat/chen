@@ -35,7 +35,9 @@ import io.appthreat.pythonparser.ast.{
     EllipsisConstant,
     Eq,
     ErrorStatement,
+    ExceptionHandler,
     ExceptHandler,
+    ExceptStarHandler,
     Expr,
     FloatConstant,
     FloorDiv,
@@ -100,6 +102,7 @@ import io.appthreat.pythonparser.ast.{
     Sub,
     Subscript,
     Try,
+    TryStar,
     Tuple,
     TypeIgnore,
     UAdd,
@@ -146,6 +149,7 @@ trait AstVisitor[T]:
   def visit(matchStmt: Match): T
   def visit(raise: Raise): T
   def visit(tryStmt: Try): T
+  def visit(tryStarStmt: TryStar): T
   def visit(assert: Assert): T
   def visit(importStmt: Import): T
   def visit(importFrom: ImportFrom): T
@@ -228,6 +232,8 @@ trait AstVisitor[T]:
   def visit(comprehension: Comprehension): T
 
   def visit(exceptHandler: ExceptHandler): T
+  def visit(exceptStarHandler: ExceptStarHandler): T
+  def visit(exceptionHandler: ExceptionHandler): T
 
   def visit(arguments: Arguments): T
 

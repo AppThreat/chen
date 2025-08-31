@@ -334,6 +334,24 @@ case class Try(
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
+case class TryStar(
+  body: CollType[istmt],
+  handlers: CollType[ExceptionHandler],
+  orelse: CollType[istmt],
+  finalbody: CollType[istmt],
+  attributeProvider: AttributeProvider
+) extends istmt:
+  def this(
+    body: util.ArrayList[istmt],
+    handlers: util.ArrayList[ExceptionHandler],
+    orelse: util.ArrayList[istmt],
+    finalbody: util.ArrayList[istmt],
+    attributeProvider: AttributeProvider
+  ) =
+      this(body.asScala, handlers.asScala, orelse.asScala, finalbody.asScala, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T =
+      visitor.visit(this)
+
 case class Assert(test: iexpr, msg: Option[iexpr], attributeProvider: AttributeProvider)
     extends istmt:
   def this(test: iexpr, msg: iexpr, attributeProvider: AttributeProvider) =
@@ -810,12 +828,34 @@ case class Comprehension(target: iexpr, iter: iexpr, ifs: CollType[iexpr], is_as
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // AST exceptHandler classes
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+trait ExceptionHandler extends iast with iattributes:
+  def typ: Option[iexpr]
+  def name: Option[String]
+  def body: CollType[istmt]
+
 case class ExceptHandler(
   typ: Option[iexpr],
   name: Option[String],
   body: CollType[istmt],
   attributeProvider: AttributeProvider
-) extends iast
+) extends ExceptionHandler
+    with iattributes:
+  def this(
+    typ: iexpr,
+    name: String,
+    body: util.ArrayList[istmt],
+    attributeProvider: AttributeProvider
+  ) =
+      this(Option(typ), Option(name), body.asScala, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T =
+      visitor.visit(this)
+
+case class ExceptStarHandler(
+  typ: Option[iexpr],
+  name: Option[String],
+  body: CollType[istmt],
+  attributeProvider: AttributeProvider
+) extends ExceptionHandler
     with iattributes:
   def this(
     typ: iexpr,

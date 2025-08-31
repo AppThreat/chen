@@ -202,7 +202,9 @@ TOKEN: {
 | <WITH: "with">
 | <RETURN: "return">
 | <TRY: "try">
+| <TRY_STAR: "try*">
 | <EXCEPT: "except">
+| <EXCEPT_STAR: "except*">
 | <FINALLY: "finally">
 | <CLASS: "class">
 | <WHILE: "while">
@@ -222,6 +224,8 @@ TOKEN: {
 | <NONE: "None">
 | <TRUE: "True">
 | <FALSE: "False">
+| <MATCH: "match">
+| <CASE: "case">
 | <ARROW: "->">
 | <ELLIPSIS: "...">
 | <COLON: ":"> {
@@ -1452,7 +1456,7 @@ MatchCase caseBlock(): {
   iexpr guard = null;
   ArrayList<istmt> blockStmts;
 } {
-  <NAME> { if (!token.image.equals("case")) throw new ParseException("case keyword expected"); }
+  <CASE>
   isSequence = groupOrSequenceCore(patterns) { patternEndToken = token; }
   (guard = guard())?
   <COLON>
@@ -2049,7 +2053,9 @@ istmt compoundStatement(): {
   | stmt = forStatement(false, null)
   | stmt = withStatement(false, null)
   | stmt = tryStatement()
+  | stmt = tryStarStatement()
   | stmt = whileStatement()
+  | stmt = matchStatement()
   )
   { return stmt; }
 }
@@ -2608,10 +2614,40 @@ Try tryStatement(): {
     { return new Try(blockStmts, exceptHandlers, new ArrayList<istmt>(), finallyStmts,
      attributes(startToken, token)); }
   | (
-      (exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); })+
+      (
+         exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
+      )+
       (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
       (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })
       { return new Try(blockStmts, exceptHandlers, elseStmts, finallyStmts,
+       attributes(startToken, token)); }
+    )
+  )
+}
+
+TryStar tryStarStatement(): {
+  Token startToken;
+  ArrayList<istmt> blockStmts;
+  ExceptionHandler exceptHandler;
+  ArrayList<ExceptionHandler> exceptHandlers = new ArrayList<ExceptionHandler>();
+  ArrayList<istmt> elseStmts;
+  ArrayList<istmt> finallyStmts;
+} {
+  <TRY_STAR> { startToken = token; }
+  <COLON>
+  blockStmts = block()
+  (
+    finallyStmts = finallyBlock()
+    { return new TryStar(blockStmts, exceptHandlers, new ArrayList<istmt>(), finallyStmts,
+     attributes(startToken, token)); }
+  | (
+      (
+         exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
+         | exceptHandler = exceptStarBlock() { exceptHandlers.add(exceptHandler); }
+      )+
+      (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
+      (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })
+      { return new TryStar(blockStmts, exceptHandlers, elseStmts, finallyStmts,
        attributes(startToken, token)); }
     )
   )
@@ -2636,6 +2672,24 @@ ExceptHandler exceptBlock(): {
   { return new ExceptHandler(typeExpr, name, blockStmts, attributes(startToken, token)); }
 }
 
+ExceptStarHandler exceptStarBlock(): {
+  Token startToken;
+  iexpr typeExpr = null;
+  String name = null;
+  ArrayList<istmt> blockStmts;
+} {
+  <EXCEPT_STAR> { startToken = token; }
+  (
+    typeExpr = expression()
+    (
+      <AS> <NAME> { name = token.image; }
+    )?
+  )?
+  <COLON>
+  blockStmts = block()
+  { return new ExceptStarHandler(typeExpr, name, blockStmts, attributes(startToken, token)); }
+}
+
 ArrayList<istmt> finallyBlock(): {
   ArrayList<istmt> blockStmts;
 } {
@@ -2657,6 +2711,45 @@ While whileStatement(): {
   blockStmts = block()
   (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
   { return new While(testExpr, blockStmts, elseStmts, attributes(startToken, token)); }
+}
+
+Match matchStatement(): {
+  Name matchName;
+  ArrayList<iexpr> expressions = new ArrayList<>();
+  iexpr subjectExpr;
+  boolean isTuple = false;
+  MatchCase matchCase;
+  ArrayList<MatchCase> cases = new ArrayList<>();
+} {
+  <MATCH> { matchName = new Name(token.image, attributes(token, token)); }
+  subjectExpr = starNamedExpression() { expressions.add(subjectExpr); }
+  (LOOKAHEAD(2)
+    <COMMA> { isTuple = true; }
+    subjectExpr = starNamedExpression() { expressions.add(subjectExpr); }
+  )*
+  (
+    <COMMA> { isTuple = true; }
+  | {
+      if (expressions == null && subjectExpr instanceof Starred) {
+        throw new ParseException("Single starred subject requires trailing comma.");
+      }
+    }
+  )
+  {
+    if (isTuple) {
+      subjectExpr = new Tuple(expressions, attributes(expressions.get(0), token));
+    }
+  }
+  <COLON>
+  <NEWLINE>
+  <INDENT>
+  (
+    matchCase = caseBlock() { cases.add(matchCase); }
+  )+
+  (<DEDENT> | <EOF>)
+  {
+    return new Match(subjectExpr, cases, attributes(matchName, token));
+  }
 }
 
 ArrayList<istmt> block(): {

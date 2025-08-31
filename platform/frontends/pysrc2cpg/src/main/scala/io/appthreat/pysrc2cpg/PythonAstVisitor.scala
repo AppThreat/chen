@@ -199,6 +199,7 @@ class PythonAstVisitor(
         case node: ast.Match            => convert(node)
         case node: ast.Raise            => convert(node)
         case node: ast.Try              => convert(node)
+        case node: ast.TryStar          => convert(node)
         case node: ast.Assert           => convert(node)
         case node: ast.Import           => convert(node)
         case node: ast.ImportFrom       => convert(node)
@@ -1243,7 +1244,8 @@ class PythonAstVisitor(
           Nil
         ) :: Nil
 
-    val tryBlock = createTry(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
+    val tryBlock     = createTry(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
+    val tryStarBlock = createTryStar(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
 
     val blockStmts = mutable.ArrayBuffer.empty[nodes.NewNode]
     blockStmts.append(assignmentToManager)
@@ -1251,6 +1253,7 @@ class PythonAstVisitor(
     blockStmts.append(assignmentToExit)
     blockStmts.append(assignmentToValue)
     blockStmts.append(tryBlock)
+    blockStmts.append(tryStarBlock)
 
     createBlock(blockStmts, lineAndCol)
   end convertWithItem
@@ -1309,6 +1312,15 @@ class PythonAstVisitor(
         tryStmt.finalbody.map(convert),
         tryStmt.orelse.map(convert),
         lineAndColOf(tryStmt)
+      )
+
+  def convert(tryStarStmt: ast.TryStar): NewNode =
+      createTryStar(
+        tryStarStmt.body.map(convert),
+        tryStarStmt.handlers.map(convert),
+        tryStarStmt.finalbody.map(convert),
+        tryStarStmt.orelse.map(convert),
+        lineAndColOf(tryStarStmt)
       )
 
   def convert(assert: ast.Assert): NewNode =
@@ -2101,11 +2113,8 @@ class PythonAstVisitor(
 
     callNode
 
-  // TODO Since there is now real concept of reflecting exception handlers
-  // semantically in the CPG we just make sure that the variable scoping
-  // is right and that we convert the exception handler body.
-  // TODO tests
-  def convert(exceptHandler: ast.ExceptHandler): NewNode =
+  def convert(exceptHandler: ast.ExceptHandler | ast.ExceptStarHandler | ast.ExceptionHandler)
+    : NewNode =
     contextStack.pushSpecialContext()
     val specialTargetLocals = mutable.ArrayBuffer.empty[nodes.NewLocal]
     if exceptHandler.name.isDefined then
@@ -2184,8 +2193,7 @@ object PythonAstVisitor:
   val metaClassSuffix = "<meta>"
 
   // This list contains all functions from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // for python version 3.9.5.
-  // There is a corresponding list in policies which needs to be updated if this one is updated and vice versa.
+  // Updated for Python 3.13
   val builtinFunctionsV3: Iterable[String] = Iterable(
     "abs",
     "aiter",
@@ -2242,8 +2250,9 @@ object PythonAstVisitor:
     "zip",
     "__import__"
   )
+
   // This list contains all classes from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // for python version 3.9.5.
+  // Updated for Python 3.13
   val builtinClassesV3: Iterable[String] = Iterable(
     "bool",
     "bytearray",
@@ -2262,8 +2271,74 @@ object PythonAstVisitor:
     "slice",
     "str",
     "tuple",
-    "type"
+    "type",
+    "BaseException",
+    "Exception",
+    "BaseExceptionGroup",
+    "GeneratorExit",
+    "KeyboardInterrupt",
+    "SystemExit",
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "BufferError",
+    "EOFError",
+    "ImportError",
+    "LookupError",
+    "MemoryError",
+    "NameError",
+    "OSError",
+    "ReferenceError",
+    "RuntimeError",
+    "StopIteration",
+    "SyntaxError",
+    "SystemError",
+    "TypeError",
+    "ValueError",
+    "Warning",
+    "FloatingPointError",
+    "OverflowError",
+    "ZeroDivisionError",
+    "ModuleNotFoundError",
+    "IndexError",
+    "KeyError",
+    "UnboundLocalError",
+    "BlockingIOError",
+    "ChildProcessError",
+    "ConnectionError",
+    "FileExistsError",
+    "FileNotFoundError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "NotADirectoryError",
+    "PermissionError",
+    "ProcessLookupError",
+    "TimeoutError",
+    "BrokenPipeError",
+    "ConnectionAbortedError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "NotImplementedError",
+    "RecursionError",
+    "IndentationError",
+    "TabError",
+    "UnicodeError",
+    "StopAsyncIteration",
+    "UnicodeDecodeError",
+    "UnicodeEncodeError",
+    "UnicodeTranslateError",
+    "BytesWarning",
+    "DeprecationWarning",
+    "FutureWarning",
+    "ImportWarning",
+    "PendingDeprecationWarning",
+    "ResourceWarning",
+    "RuntimeWarning",
+    "SyntaxWarning",
+    "UnicodeWarning",
+    "UserWarning"
   )
+
   // This list contains all functions from https://docs.python.org/2.7/library/functions.html
   val builtinFunctionsV2: Iterable[String] = Iterable(
     "abs",
@@ -2326,6 +2401,7 @@ object PythonAstVisitor:
     "zip",
     "__import__"
   )
+
   // This list contains all classes from https://docs.python.org/2.7/library/functions.html
   val builtinClassesV2: Iterable[String] = Iterable(
     "bool",
@@ -2417,18 +2493,29 @@ object PythonAstVisitor:
     "Pattern",
     "TextIO",
     "AnyStr",
+    "Never",
+    "NoReturn",
+    "Self",
+    "TypeAlias",
+    "TypeGuard",
+    "assert_never",
+    "assert_type",
     "cast",
+    "clear_overloads",
     "final",
     "get_args",
     "get_origin",
     "get_type_hints",
+    "is_typeddict",
     "NewType",
     "no_type_check",
     "no_type_check_decorator",
-    "NoReturn",
     "overload",
+    "reveal_type",
     "runtime_checkable",
+    "dataclass_transform",
     "Text",
     "TYPE_CHECKING"
   )
+
 end PythonAstVisitor

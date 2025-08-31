@@ -2264,8 +2264,7 @@ class AstCreator(
         if initialTypeName.isEmpty && variable.getTypeAsString.nonEmpty then
           (Some(variable.getTypeAsString), variable.getTypeAsString)
         else
-          (initialTypeFullName, initialTypeName
-        )
+          (initialTypeFullName, initialTypeName)
       // Need the actual resolvedType here for when the RHS is a lambda expression.
       val resolvedExpectedType =
           tryWithSafeStackOverflow(symbolSolver.toResolvedType(

@@ -57,6 +57,33 @@ trait PythonAstVisitorHelpers:
     controlStructureNode
   end createTry
 
+  protected def createTryStar(
+    body: Iterable[NewNode],
+    handlers: Iterable[NewNode],
+    finalBlock: Iterable[NewNode],
+    orElseBlock: Iterable[NewNode],
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+    val controlStructureNode =
+        nodeBuilder.controlStructureNode("try*: ...", ControlStructureTypes.TRY, lineAndColumn)
+
+    val bodyBlockNode     = createBlock(body, lineAndColumn)
+    val handlersBlockNode = createBlock(handlers, lineAndColumn)
+    val finalBlockNode    = createBlock(finalBlock, lineAndColumn)
+    val orElseBlockNode   = createBlock(orElseBlock, lineAndColumn)
+
+    addAstChildNodes(
+      controlStructureNode,
+      1,
+      bodyBlockNode,
+      handlersBlockNode,
+      finalBlockNode,
+      orElseBlockNode
+    )
+
+    controlStructureNode
+  end createTryStar
+
   protected def createTransformedImport(
     from: String,
     names: Iterable[ast.Alias],

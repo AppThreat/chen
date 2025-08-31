@@ -275,6 +275,34 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
         finallyString
   end visit
 
+  override def visit(tryStarStmt: TryStar): String =
+    val elseString =
+        if tryStarStmt.orelse.nonEmpty then
+          s"${ls}else:" +
+              tryStarStmt.orelse.map(printIndented).mkString(ls, ls, "")
+        else
+          ""
+
+    val finallyString =
+        if tryStarStmt.finalbody.nonEmpty then
+          s"${ls}finally:" +
+              tryStarStmt.finalbody.map(printIndented).mkString(ls, ls, "")
+        else
+          ""
+
+    val handlersString =
+        if tryStarStmt.handlers.nonEmpty then
+          tryStarStmt.handlers.map(print).mkString(ls, ls, "")
+        else
+          ""
+
+    "try*:" +
+        tryStarStmt.body.map(printIndented).mkString(ls, ls, "") +
+        handlersString +
+        elseString +
+        finallyString
+  end visit
+
   override def visit(assert: Assert): String =
       "assert " + print(assert.test) + assert.msg.map(m => ", " + print(m)).getOrElse("")
 
@@ -528,12 +556,21 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
   override def visit(ellipsisConstant: EllipsisConstant.type): String =
       "..."
 
-  override def visit(exceptHandler: ExceptHandler): String =
-      "except" +
-          exceptHandler.typ.map(t => " " + print(t)).getOrElse("") +
-          exceptHandler.name.map(n => " as " + n).getOrElse("") +
+  private def formatExceptionHandler(prefix: String, handler: ExceptionHandler): String =
+      prefix +
+          handler.typ.map(t => " " + print(t)).getOrElse("") +
+          handler.name.map(n => " as " + n).getOrElse("") +
           ":" +
-          exceptHandler.body.map(printIndented).mkString(ls, ls, "")
+          handler.body.map(printIndented).mkString(ls, ls, "")
+
+  override def visit(exceptHandler: ExceptionHandler): String =
+      formatExceptionHandler("except", exceptHandler)
+
+  override def visit(exceptHandler: ExceptHandler): String =
+      formatExceptionHandler("except", exceptHandler)
+
+  override def visit(exceptStarHandler: ExceptStarHandler): String =
+      formatExceptionHandler("except*", exceptStarHandler)
 
   override def visit(keyword: Keyword): String =
       keyword.arg match
