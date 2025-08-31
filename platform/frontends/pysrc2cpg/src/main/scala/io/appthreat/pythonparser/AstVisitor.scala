@@ -35,6 +35,7 @@ import io.appthreat.pythonparser.ast.{
     EllipsisConstant,
     Eq,
     ErrorStatement,
+    ExceptionHandler,
     ExceptHandler,
     ExceptStarHandler,
     Expr,
@@ -232,6 +233,7 @@ trait AstVisitor[T]:
 
   def visit(exceptHandler: ExceptHandler): T
   def visit(exceptStarHandler: ExceptStarHandler): T
+  def visit(exceptionHandler: ExceptionHandler): T
 
   def visit(arguments: Arguments): T
 

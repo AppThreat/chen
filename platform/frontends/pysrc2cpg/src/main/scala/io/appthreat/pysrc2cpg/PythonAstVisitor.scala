@@ -1244,7 +1244,8 @@ class PythonAstVisitor(
           Nil
         ) :: Nil
 
-    val tryBlock = createTry(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
+    val tryBlock     = createTry(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
+    val tryStarBlock = createTryStar(tryBody, Nil, finalBlockStmts, Nil, lineAndCol)
 
     val blockStmts = mutable.ArrayBuffer.empty[nodes.NewNode]
     blockStmts.append(assignmentToManager)
@@ -1252,6 +1253,7 @@ class PythonAstVisitor(
     blockStmts.append(assignmentToExit)
     blockStmts.append(assignmentToValue)
     blockStmts.append(tryBlock)
+    blockStmts.append(tryStarBlock)
 
     createBlock(blockStmts, lineAndCol)
   end convertWithItem
@@ -2111,11 +2113,8 @@ class PythonAstVisitor(
 
     callNode
 
-  // TODO Since there is now real concept of reflecting exception handlers
-  // semantically in the CPG we just make sure that the variable scoping
-  // is right and that we convert the exception handler body.
-  // TODO tests
-  def convert(exceptHandler: ast.ExceptHandler): NewNode =
+  def convert(exceptHandler: ast.ExceptHandler | ast.ExceptStarHandler | ast.ExceptionHandler)
+    : NewNode =
     contextStack.pushSpecialContext()
     val specialTargetLocals = mutable.ArrayBuffer.empty[nodes.NewLocal]
     if exceptHandler.name.isDefined then

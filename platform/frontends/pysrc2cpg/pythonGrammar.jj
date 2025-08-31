@@ -2052,8 +2052,8 @@ istmt compoundStatement(): {
   | stmt = classDef(new ArrayList<iexpr>())
   | stmt = forStatement(false, null)
   | stmt = withStatement(false, null)
-  | stmt = tryStarStatement()
   | stmt = tryStatement()
+  | stmt = tryStarStatement()
   | stmt = whileStatement()
   | stmt = matchStatement()
   )
@@ -2601,8 +2601,8 @@ Withitem withItem(): {
 Try tryStatement(): {
   Token startToken;
   ArrayList<istmt> blockStmts;
-  ExceptionHandler exceptHandler;
-  ArrayList<ExceptionHandler> exceptHandlers = new ArrayList<ExceptionHandler>();
+  ExceptHandler exceptHandler;
+  ArrayList<ExceptHandler> exceptHandlers = new ArrayList<ExceptHandler>();
   ArrayList<istmt> elseStmts;
   ArrayList<istmt> finallyStmts;
 } {
@@ -2616,7 +2616,6 @@ Try tryStatement(): {
   | (
       (
          exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
-         | exceptHandler = exceptStarBlock() { exceptHandlers.add(exceptHandler); }
       )+
       (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
       (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })

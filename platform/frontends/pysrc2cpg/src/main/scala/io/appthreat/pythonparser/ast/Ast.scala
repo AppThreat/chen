@@ -318,14 +318,14 @@ case class Raise(exc: Option[iexpr], cause: Option[iexpr], attributeProvider: At
 
 case class Try(
   body: CollType[istmt],
-  handlers: CollType[ExceptionHandler],
+  handlers: CollType[ExceptHandler],
   orelse: CollType[istmt],
   finalbody: CollType[istmt],
   attributeProvider: AttributeProvider
 ) extends istmt:
   def this(
     body: util.ArrayList[istmt],
-    handlers: util.ArrayList[ExceptionHandler],
+    handlers: util.ArrayList[ExceptHandler],
     orelse: util.ArrayList[istmt],
     finalbody: util.ArrayList[istmt],
     attributeProvider: AttributeProvider

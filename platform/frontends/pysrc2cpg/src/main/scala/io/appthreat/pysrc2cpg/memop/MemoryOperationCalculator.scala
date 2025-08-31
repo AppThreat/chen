@@ -453,17 +453,29 @@ class MemoryOperationCalculator extends AstVisitor[Unit]:
     accept(comprehension.iter)
     accept(comprehension.ifs)
 
-  override def visit(exceptHandler: ast.ExceptHandler): Unit =
+  override def visit(
+    exceptHandler: ast.ExceptHandler
+  ): Unit =
     push(Load)
     accept(exceptHandler.typ)
     pop()
     accept(exceptHandler.body)
 
-  override def visit(exceptStarHandler: ast.ExceptStarHandler): Unit =
+  override def visit(
+    exceptHandler: ast.ExceptStarHandler
+  ): Unit =
     push(Load)
-    accept(exceptStarHandler.typ)
+    accept(exceptHandler.typ)
     pop()
-    accept(exceptStarHandler.body)
+    accept(exceptHandler.body)
+
+  override def visit(
+    exceptHandler: ast.ExceptionHandler
+  ): Unit =
+    push(Load)
+    accept(exceptHandler.typ)
+    pop()
+    accept(exceptHandler.body)
 
   override def visit(arguments: ast.Arguments): Unit =
     accept(arguments.posonlyargs)

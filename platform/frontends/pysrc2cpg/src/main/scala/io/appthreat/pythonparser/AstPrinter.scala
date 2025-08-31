@@ -556,6 +556,13 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
   override def visit(ellipsisConstant: EllipsisConstant.type): String =
       "..."
 
+  override def visit(exceptHandler: ExceptionHandler): String =
+      "except" +
+          exceptHandler.typ.map(t => " " + print(t)).getOrElse("") +
+          exceptHandler.name.map(n => " as " + n).getOrElse("") +
+          ":" +
+          exceptHandler.body.map(printIndented).mkString(ls, ls, "")
+
   override def visit(exceptHandler: ExceptHandler): String =
       "except" +
           exceptHandler.typ.map(t => " " + print(t)).getOrElse("") +
