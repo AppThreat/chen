@@ -334,6 +334,24 @@ case class Try(
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
+case class TryStar(
+  body: CollType[istmt],
+  handlers: CollType[ExceptHandler],
+  orelse: CollType[istmt],
+  finalbody: CollType[istmt],
+  attributeProvider: AttributeProvider
+) extends istmt:
+  def this(
+    body: util.ArrayList[istmt],
+    handlers: util.ArrayList[ExceptHandler],
+    orelse: util.ArrayList[istmt],
+    finalbody: util.ArrayList[istmt],
+    attributeProvider: AttributeProvider
+  ) =
+      this(body.asScala, handlers.asScala, orelse.asScala, finalbody.asScala, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T =
+      visitor.visit(this)
+
 case class Assert(test: iexpr, msg: Option[iexpr], attributeProvider: AttributeProvider)
     extends istmt:
   def this(test: iexpr, msg: iexpr, attributeProvider: AttributeProvider) =

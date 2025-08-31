@@ -275,6 +275,34 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
         finallyString
   end visit
 
+  override def visit(tryStarStmt: TryStar): String =
+    val elseString =
+        if tryStarStmt.orelse.nonEmpty then
+          s"${ls}else:" +
+              tryStarStmt.orelse.map(printIndented).mkString(ls, ls, "")
+        else
+          ""
+
+    val finallyString =
+        if tryStarStmt.finalbody.nonEmpty then
+          s"${ls}finally:" +
+              tryStarStmt.finalbody.map(printIndented).mkString(ls, ls, "")
+        else
+          ""
+
+    val handlersString =
+        if tryStarStmt.handlers.nonEmpty then
+          tryStarStmt.handlers.map(print).mkString(ls, ls, "")
+        else
+          ""
+
+    "try*:" +
+        tryStarStmt.body.map(printIndented).mkString(ls, ls, "") +
+        handlersString +
+        elseString +
+        finallyString
+  end visit
+
   override def visit(assert: Assert): String =
       "assert " + print(assert.test) + assert.msg.map(m => ", " + print(m)).getOrElse("")
 

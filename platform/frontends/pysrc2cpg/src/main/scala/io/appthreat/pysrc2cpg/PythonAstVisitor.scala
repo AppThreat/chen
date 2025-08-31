@@ -199,6 +199,7 @@ class PythonAstVisitor(
         case node: ast.Match            => convert(node)
         case node: ast.Raise            => convert(node)
         case node: ast.Try              => convert(node)
+        case node: ast.TryStar          => convert(node)
         case node: ast.Assert           => convert(node)
         case node: ast.Import           => convert(node)
         case node: ast.ImportFrom       => convert(node)
@@ -1309,6 +1310,15 @@ class PythonAstVisitor(
         tryStmt.finalbody.map(convert),
         tryStmt.orelse.map(convert),
         lineAndColOf(tryStmt)
+      )
+
+  def convert(tryStarStmt: ast.TryStar): NewNode =
+      createTry(
+        tryStarStmt.body.map(convert),
+        tryStarStmt.handlers.map(convert),
+        tryStarStmt.finalbody.map(convert),
+        tryStarStmt.orelse.map(convert),
+        lineAndColOf(tryStarStmt)
       )
 
   def convert(assert: ast.Assert): NewNode =
