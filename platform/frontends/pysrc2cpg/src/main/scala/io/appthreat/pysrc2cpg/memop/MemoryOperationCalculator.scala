@@ -46,7 +46,6 @@ import io.appthreat.pythonparser.ast.{
     Raise,
     RaiseP2,
     Return,
-    Try,
     TryStar,
     UnaryOp,
     While,
@@ -211,12 +210,6 @@ class MemoryOperationCalculator extends AstVisitor[Unit]:
     accept(raise.exc)
     accept(raise.cause)
     pop()
-
-  override def visit(tryStmt: Try): Unit =
-    accept(tryStmt.body)
-    accept(tryStmt.handlers)
-    accept(tryStmt.orelse)
-    accept(tryStmt.finalbody)
 
   override def visit(tryStarStmt: TryStar): Unit =
     accept(tryStarStmt.body)

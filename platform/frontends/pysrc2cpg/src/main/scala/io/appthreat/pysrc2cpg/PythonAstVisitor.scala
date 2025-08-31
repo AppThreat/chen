@@ -198,7 +198,6 @@ class PythonAstVisitor(
         case node: ast.AsyncWith        => convert(node)
         case node: ast.Match            => convert(node)
         case node: ast.Raise            => convert(node)
-        case node: ast.Try              => convert(node)
         case node: ast.TryStar          => convert(node)
         case node: ast.Assert           => convert(node)
         case node: ast.Import           => convert(node)
@@ -1304,15 +1303,6 @@ class PythonAstVisitor(
 
     callNode
   end convert
-
-  def convert(tryStmt: ast.Try): NewNode =
-      createTry(
-        tryStmt.body.map(convert),
-        tryStmt.handlers.map(convert),
-        tryStmt.finalbody.map(convert),
-        tryStmt.orelse.map(convert),
-        lineAndColOf(tryStmt)
-      )
 
   def convert(tryStarStmt: ast.TryStar): NewNode =
       createTryStar(

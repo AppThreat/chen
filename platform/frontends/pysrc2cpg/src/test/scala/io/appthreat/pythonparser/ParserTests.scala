@@ -202,7 +202,7 @@ class ParserTests extends AnyFreeSpec with Matchers {
                     |  z
                     |finally:
                     |  a""".stripMargin)
-            testS("""try*:
+            testS("""try:
                     |  x
                     |except* e as f:
                     |  y
@@ -210,7 +210,7 @@ class ParserTests extends AnyFreeSpec with Matchers {
                     |  z
                     |finally:
                     |  a""".stripMargin)
-            testS("""try*:
+            testS("""try:
                     |  x
                     |except* e as f:
                     |  y

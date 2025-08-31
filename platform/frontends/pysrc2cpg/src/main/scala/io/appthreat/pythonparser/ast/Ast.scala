@@ -316,24 +316,6 @@ case class Raise(exc: Option[iexpr], cause: Option[iexpr], attributeProvider: At
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
-case class Try(
-  body: CollType[istmt],
-  handlers: CollType[ExceptHandler],
-  orelse: CollType[istmt],
-  finalbody: CollType[istmt],
-  attributeProvider: AttributeProvider
-) extends istmt:
-  def this(
-    body: util.ArrayList[istmt],
-    handlers: util.ArrayList[ExceptHandler],
-    orelse: util.ArrayList[istmt],
-    finalbody: util.ArrayList[istmt],
-    attributeProvider: AttributeProvider
-  ) =
-      this(body.asScala, handlers.asScala, orelse.asScala, finalbody.asScala, attributeProvider)
-  override def accept[T](visitor: AstVisitor[T]): T =
-      visitor.visit(this)
-
 case class TryStar(
   body: CollType[istmt],
   handlers: CollType[ExceptionHandler],

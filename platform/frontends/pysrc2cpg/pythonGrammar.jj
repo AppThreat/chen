@@ -202,7 +202,6 @@ TOKEN: {
 | <WITH: "with">
 | <RETURN: "return">
 | <TRY: "try">
-| <TRY_STAR: "try*">
 | <EXCEPT: "except">
 | <EXCEPT_STAR: "except*">
 | <FINALLY: "finally">
@@ -2053,7 +2052,6 @@ istmt compoundStatement(): {
   | stmt = forStatement(false, null)
   | stmt = withStatement(false, null)
   | stmt = tryStatement()
-  | stmt = tryStarStatement()
   | stmt = whileStatement()
   | stmt = matchStatement()
   )
@@ -2598,34 +2596,7 @@ Withitem withItem(): {
   { return new Withitem(contextExpr, optionalVars); }
 }
 
-Try tryStatement(): {
-  Token startToken;
-  ArrayList<istmt> blockStmts;
-  ExceptHandler exceptHandler;
-  ArrayList<ExceptHandler> exceptHandlers = new ArrayList<ExceptHandler>();
-  ArrayList<istmt> elseStmts;
-  ArrayList<istmt> finallyStmts;
-} {
-  <TRY> { startToken = token; }
-  <COLON>
-  blockStmts = block()
-  (
-    finallyStmts = finallyBlock()
-    { return new Try(blockStmts, exceptHandlers, new ArrayList<istmt>(), finallyStmts,
-     attributes(startToken, token)); }
-  | (
-      (
-         exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
-      )+
-      (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
-      (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })
-      { return new Try(blockStmts, exceptHandlers, elseStmts, finallyStmts,
-       attributes(startToken, token)); }
-    )
-  )
-}
-
-TryStar tryStarStatement(): {
+TryStar tryStatement(): {
   Token startToken;
   ArrayList<istmt> blockStmts;
   ExceptionHandler exceptHandler;
@@ -2633,7 +2604,7 @@ TryStar tryStarStatement(): {
   ArrayList<istmt> elseStmts;
   ArrayList<istmt> finallyStmts;
 } {
-  <TRY_STAR> { startToken = token; }
+  <TRY> { startToken = token; }
   <COLON>
   blockStmts = block()
   (

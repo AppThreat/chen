@@ -9,7 +9,7 @@ class TryStarCpgTests extends PySrc2CpgFixture():
       "TryStar statement with except*" in {
           val cpg = code(
             """def handle_exception_group():
-                           |    try*:
+                           |    try:
                            |        user_input = get_user_input()
                            |        process(user_input)
                            |    except* ValueError as e:
@@ -27,7 +27,7 @@ class TryStarCpgTests extends PySrc2CpgFixture():
       "TryStar statement with finally" in {
           val cpg = code(
             """def handle_exception_group():
-                           |    try*:
+                           |    try:
                            |        user_input = get_user_input()
                            |        process(user_input)
                            |    except* ValueError as e:
@@ -44,7 +44,7 @@ class TryStarCpgTests extends PySrc2CpgFixture():
       "TryStar statement with else" in {
           val cpg = code(
             """def handle_exception_group():
-                           |    try*:
+                           |    try:
                            |        user_input = get_user_input()
                            |        process(user_input)
                            |    except* ValueError as e:
@@ -61,7 +61,7 @@ class TryStarCpgTests extends PySrc2CpgFixture():
       "TryStar statement with try mixed" in {
           val cpg = code(
             """def handle_mixed_exceptions():
-                           |    try*:
+                           |    try:
                            |        user_input = get_user_input()
                            |        process(user_input)
                            |    except* ValueError as e:
