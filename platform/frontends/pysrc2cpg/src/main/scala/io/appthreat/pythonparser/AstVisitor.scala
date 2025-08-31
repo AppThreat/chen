@@ -101,7 +101,6 @@ import io.appthreat.pythonparser.ast.{
     StringExpList,
     Sub,
     Subscript,
-    Try,
     TryStar,
     Tuple,
     TypeIgnore,
@@ -148,7 +147,6 @@ trait AstVisitor[T]:
   def visit(withStmt: AsyncWith): T
   def visit(matchStmt: Match): T
   def visit(raise: Raise): T
-  def visit(tryStmt: Try): T
   def visit(tryStarStmt: TryStar): T
   def visit(assert: Assert): T
   def visit(importStmt: Import): T

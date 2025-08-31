@@ -99,7 +99,7 @@ import io.appthreat.pythonparser.ast.{
     StringExpList,
     Sub,
     Subscript,
-    Try,
+    TryStar,
     Tuple,
     TypeIgnore,
     UAdd,
@@ -247,34 +247,6 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       "raise" + raise.exc.map(e => " " + print(e)).getOrElse("") +
           raise.cause.map(c => " from " + print(c)).getOrElse("")
 
-  override def visit(tryStmt: Try): String =
-    val elseString =
-        if tryStmt.orelse.nonEmpty then
-          s"${ls}else:" +
-              tryStmt.orelse.map(printIndented).mkString(ls, ls, "")
-        else
-          ""
-
-    val finallyString =
-        if tryStmt.finalbody.nonEmpty then
-          s"${ls}finally:" +
-              tryStmt.finalbody.map(printIndented).mkString(ls, ls, "")
-        else
-          ""
-
-    val handlersString =
-        if tryStmt.handlers.nonEmpty then
-          tryStmt.handlers.map(print).mkString(ls, ls, "")
-        else
-          ""
-
-    "try:" +
-        tryStmt.body.map(printIndented).mkString(ls, ls, "") +
-        handlersString +
-        elseString +
-        finallyString
-  end visit
-
   override def visit(tryStarStmt: TryStar): String =
     val elseString =
         if tryStarStmt.orelse.nonEmpty then
@@ -296,7 +268,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
         else
           ""
 
-    "try*:" +
+    "try:" +
         tryStarStmt.body.map(printIndented).mkString(ls, ls, "") +
         handlersString +
         elseString +

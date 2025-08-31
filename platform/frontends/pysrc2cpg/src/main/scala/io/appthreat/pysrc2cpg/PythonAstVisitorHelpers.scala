@@ -65,7 +65,7 @@ trait PythonAstVisitorHelpers:
     lineAndColumn: LineAndColumn
   ): NewNode =
     val controlStructureNode =
-        nodeBuilder.controlStructureNode("try*: ...", ControlStructureTypes.TRY, lineAndColumn)
+        nodeBuilder.controlStructureNode("try: ...", ControlStructureTypes.TRY, lineAndColumn)
 
     val bodyBlockNode     = createBlock(body, lineAndColumn)
     val handlersBlockNode = createBlock(handlers, lineAndColumn)
