@@ -556,26 +556,21 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
   override def visit(ellipsisConstant: EllipsisConstant.type): String =
       "..."
 
-  override def visit(exceptHandler: ExceptionHandler): String =
-      "except" +
-          exceptHandler.typ.map(t => " " + print(t)).getOrElse("") +
-          exceptHandler.name.map(n => " as " + n).getOrElse("") +
+  private def formatExceptionHandler(prefix: String, handler: ExceptionHandler): String =
+      prefix +
+          handler.typ.map(t => " " + print(t)).getOrElse("") +
+          handler.name.map(n => " as " + n).getOrElse("") +
           ":" +
-          exceptHandler.body.map(printIndented).mkString(ls, ls, "")
+          handler.body.map(printIndented).mkString(ls, ls, "")
+
+  override def visit(exceptHandler: ExceptionHandler): String =
+      formatExceptionHandler("except", exceptHandler)
 
   override def visit(exceptHandler: ExceptHandler): String =
-      "except" +
-          exceptHandler.typ.map(t => " " + print(t)).getOrElse("") +
-          exceptHandler.name.map(n => " as " + n).getOrElse("") +
-          ":" +
-          exceptHandler.body.map(printIndented).mkString(ls, ls, "")
+      formatExceptionHandler("except", exceptHandler)
 
   override def visit(exceptStarHandler: ExceptStarHandler): String =
-      "except*" +
-          exceptStarHandler.typ.map(t => " " + print(t)).getOrElse("") +
-          exceptStarHandler.name.map(n => " as " + n).getOrElse("") +
-          ":" +
-          exceptStarHandler.body.map(printIndented).mkString(ls, ls, "")
+      formatExceptionHandler("except*", exceptStarHandler)
 
   override def visit(keyword: Keyword): String =
       keyword.arg match
