@@ -201,8 +201,8 @@ TOKEN: {
 | <FOR: "for">
 | <WITH: "with">
 | <RETURN: "return">
-| <TRY_STAR: "try*">
 | <TRY: "try">
+| <TRY_STAR: "try*">
 | <EXCEPT: "except">
 | <EXCEPT_STAR: "except*">
 | <FINALLY: "finally">
@@ -2601,8 +2601,8 @@ Withitem withItem(): {
 Try tryStatement(): {
   Token startToken;
   ArrayList<istmt> blockStmts;
-  ExceptHandler exceptHandler;
-  ArrayList<ExceptHandler> exceptHandlers = new ArrayList<ExceptHandler>();
+  ExceptionHandler exceptHandler;
+  ArrayList<ExceptionHandler> exceptHandlers = new ArrayList<ExceptionHandler>();
   ArrayList<istmt> elseStmts;
   ArrayList<istmt> finallyStmts;
 } {
@@ -2614,7 +2614,10 @@ Try tryStatement(): {
     { return new Try(blockStmts, exceptHandlers, new ArrayList<istmt>(), finallyStmts,
      attributes(startToken, token)); }
   | (
-      (exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); })+
+      (
+         exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
+         | exceptHandler = exceptStarBlock() { exceptHandlers.add(exceptHandler); }
+      )+
       (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
       (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })
       { return new Try(blockStmts, exceptHandlers, elseStmts, finallyStmts,
@@ -2626,8 +2629,8 @@ Try tryStatement(): {
 TryStar tryStarStatement(): {
   Token startToken;
   ArrayList<istmt> blockStmts;
-  ExceptHandler exceptHandler;
-  ArrayList<ExceptHandler> exceptHandlers = new ArrayList<ExceptHandler>();
+  ExceptionHandler exceptHandler;
+  ArrayList<ExceptionHandler> exceptHandlers = new ArrayList<ExceptionHandler>();
   ArrayList<istmt> elseStmts;
   ArrayList<istmt> finallyStmts;
 } {
@@ -2639,7 +2642,10 @@ TryStar tryStarStatement(): {
     { return new TryStar(blockStmts, exceptHandlers, new ArrayList<istmt>(), finallyStmts,
      attributes(startToken, token)); }
   | (
-      (exceptHandler = exceptStarBlock() { exceptHandlers.add(exceptHandler); })+
+      (
+         exceptHandler = exceptBlock() { exceptHandlers.add(exceptHandler); }
+         | exceptHandler = exceptStarBlock() { exceptHandlers.add(exceptHandler); }
+      )+
       (elseStmts = elseBlock() | { elseStmts = new ArrayList<istmt>(); })
       (finallyStmts = finallyBlock() | { finallyStmts = new ArrayList<istmt>(); })
       { return new TryStar(blockStmts, exceptHandlers, elseStmts, finallyStmts,
@@ -2667,7 +2673,7 @@ ExceptHandler exceptBlock(): {
   { return new ExceptHandler(typeExpr, name, blockStmts, attributes(startToken, token)); }
 }
 
-ExceptHandler exceptStarBlock(): {
+ExceptStarHandler exceptStarBlock(): {
   Token startToken;
   iexpr typeExpr = null;
   String name = null;
@@ -2682,7 +2688,7 @@ ExceptHandler exceptStarBlock(): {
   )?
   <COLON>
   blockStmts = block()
-  { return new ExceptHandler(typeExpr, name, blockStmts, attributes(startToken, token)); }
+  { return new ExceptStarHandler(typeExpr, name, blockStmts, attributes(startToken, token)); }
 }
 
 ArrayList<istmt> finallyBlock(): {

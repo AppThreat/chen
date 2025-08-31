@@ -563,6 +563,13 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
           ":" +
           exceptHandler.body.map(printIndented).mkString(ls, ls, "")
 
+  override def visit(exceptStarHandler: ExceptStarHandler): String =
+      "except*" +
+          exceptStarHandler.typ.map(t => " " + print(t)).getOrElse("") +
+          exceptStarHandler.name.map(n => " as " + n).getOrElse("") +
+          ":" +
+          exceptStarHandler.body.map(printIndented).mkString(ls, ls, "")
+
   override def visit(keyword: Keyword): String =
       keyword.arg match
         case Some(argName) =>

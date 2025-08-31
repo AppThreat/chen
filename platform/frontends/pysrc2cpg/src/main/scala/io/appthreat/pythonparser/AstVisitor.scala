@@ -36,6 +36,7 @@ import io.appthreat.pythonparser.ast.{
     Eq,
     ErrorStatement,
     ExceptHandler,
+    ExceptStarHandler,
     Expr,
     FloatConstant,
     FloorDiv,
@@ -230,6 +231,7 @@ trait AstVisitor[T]:
   def visit(comprehension: Comprehension): T
 
   def visit(exceptHandler: ExceptHandler): T
+  def visit(exceptStarHandler: ExceptStarHandler): T
 
   def visit(arguments: Arguments): T
 

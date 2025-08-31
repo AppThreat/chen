@@ -1313,7 +1313,7 @@ class PythonAstVisitor(
       )
 
   def convert(tryStarStmt: ast.TryStar): NewNode =
-      createTry(
+      createTryStar(
         tryStarStmt.body.map(convert),
         tryStarStmt.handlers.map(convert),
         tryStarStmt.finalbody.map(convert),
