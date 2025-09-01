@@ -281,6 +281,7 @@ class PythonAstVisitor(
   def convert(functionDef: ast.AsyncFunctionDef): NewNode =
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
+    val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -290,7 +291,7 @@ class PythonAstVisitor(
       ),
       () => functionDef.body.map(convert),
       functionDef.returns,
-      typeParamNames = List.empty,
+      typeParamNames = typeParamNames,
       isAsync = true,
       lineAndColOf(functionDef)
     )
