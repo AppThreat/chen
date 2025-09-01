@@ -172,7 +172,15 @@ class NodeBuilder(diffGraph: DiffGraphBuilder):
               case attr: ast.Attribute =>
                   extractTypesFromHint(Some(attr.value)).map { x => x + "." + attr.attr }
               case n: ast.Subscript if n.value.isInstanceOf[ast.Name] =>
-                  Option(n.value.asInstanceOf[ast.Name].id)
+                  val baseType = n.value.asInstanceOf[ast.Name].id
+                  // Simple slice types only for now
+                  // This could get complex with Subscript that include Union and BinOp
+                  val sliceType =
+                      if n.slice.isInstanceOf[ast.Name] && Option(n.slice.asInstanceOf[ast.Name].id).nonEmpty
+                      then
+                        s"[${n.slice.asInstanceOf[ast.Name].id}]"
+                      else ""
+                  Option(baseType + sliceType)
               case n: ast.Constant if n.value.isInstanceOf[ast.StringConstant] =>
                   Option(n.value.asInstanceOf[ast.StringConstant].value)
               case _ => None

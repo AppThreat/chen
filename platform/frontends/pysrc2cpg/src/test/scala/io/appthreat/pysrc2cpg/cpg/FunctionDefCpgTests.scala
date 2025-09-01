@@ -165,7 +165,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
                 .parameter
                 .typeFullName
                 .dedup
-                .l shouldBe Seq("typing.Optional")
+                .l shouldBe Seq("Optional[str]")
         }
 
         "test return hint of method definition using built-in types" in {
@@ -222,7 +222,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
             val methodNode = cpg.method.name("process_items").head
             methodNode.name shouldBe "process_items"
             methodNode.fullName shouldBe "test.py:<module>.process_items"
-            methodNode.methodReturn.typeFullName.headOption shouldBe Some('_') // Bug: must be dict[T, U]
+            methodNode.methodReturn.typeFullName shouldBe "__builtin.dict"
             val param = methodNode.parameter.name("items").head
             param.typeFullName shouldBe "T" // Bug: must be list[T]
         }
