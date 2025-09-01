@@ -102,6 +102,7 @@ import io.appthreat.pythonparser.ast.{
     TryStar,
     Tuple,
     TypeIgnore,
+    TypeVar,
     UAdd,
     USub,
     UnaryOp,
@@ -144,15 +145,26 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
 
   override def visit(stmt: istmt): String = ???
 
+  override def visit(typeVar: TypeVar): String =
+    val boundStr   = typeVar.bound.map(b => " : " + print(b)).getOrElse("")
+    val defaultStr = typeVar.default_value.map(dv => " = " + print(dv)).getOrElse("")
+    typeVar.name + boundStr + defaultStr
+
   override def visit(functionDef: FunctionDef): String =
       functionDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
           "def " + functionDef.name + "(" + print(functionDef.args) + ")" +
+          (if functionDef.type_params.nonEmpty then
+             "[" + functionDef.type_params.map(print).mkString(", ") + "]"
+           else "") +
           functionDef.returns.map(r => " -> " + print(r)).getOrElse("") +
           ":" + functionDef.body.map(printIndented).mkString(ls, ls, "")
 
   override def visit(functionDef: AsyncFunctionDef): String =
       functionDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
           "async def " + functionDef.name + "(" + print(functionDef.args) + ")" +
+          (if functionDef.type_params.nonEmpty then
+             "[" + functionDef.type_params.map(print).mkString(", ") + "]"
+           else "") +
           functionDef.returns.map(r => " -> " + print(r)).getOrElse("") +
           ":" + functionDef.body.map(printIndented).mkString(ls, ls, "")
 
@@ -162,6 +174,9 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
 
     classDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
         "class " + classDef.name +
+        (if classDef.type_params.nonEmpty then
+           "[" + classDef.type_params.map(print).mkString(", ") + "]"
+         else "") +
         "(" +
         classDef.bases.map(print).mkString(", ") +
         optionArgEndComma +
