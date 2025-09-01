@@ -103,6 +103,7 @@ import io.appthreat.pythonparser.ast.{
     Subscript,
     TryStar,
     Tuple,
+    TypeVar,
     TypeIgnore,
     UAdd,
     USub,
@@ -187,6 +188,7 @@ trait AstVisitor[T]:
   def visit(name: Name): T
   def visit(list: ast.List): T
   def visit(tuple: Tuple): T
+  def visit(typeVar: TypeVar): T
   def visit(slice: Slice): T
   def visit(stringExpList: StringExpList): T
 

@@ -291,6 +291,7 @@ TOKEN: {
 | <STR_CONVERSION: "!s">
 | <REPR_CONVERSION: "!r">
 | <ASCII_CONVERSION: "!a">
+| <TYPE: "type">
 }
 
 // Number tokens:
@@ -2054,6 +2055,7 @@ istmt compoundStatement(): {
   | stmt = tryStatement()
   | stmt = whileStatement()
   | stmt = matchStatement()
+  | stmt = type_stmt()
   )
   { return stmt; }
 }
@@ -2088,12 +2090,14 @@ istmt asyncStatement(): {
 istmt functionDef(ArrayList<iexpr> decorators, boolean isAsync, Token asyncToken): {
   Token startToken = asyncToken;
   String name;
+  ArrayList<TypeParam> typeParams = new ArrayList<>();
   Arguments parameters;
   iexpr returnExpr = null;
   ArrayList<istmt> blockStmts;
 } {
-  <DEF> { if (!isAsync) {startToken = token;} }
+  <DEF>{ if (!isAsync) {startToken = token;} }
   <NAME> { name = token.image; }
+  ( typeParams = type_params() )?
   <PAREN_OPEN>
   parameters = parameters()
   <PAREN_CLOSE>
@@ -2103,10 +2107,10 @@ istmt functionDef(ArrayList<iexpr> decorators, boolean isAsync, Token asyncToken
   {
     if (isAsync) {
       return new AsyncFunctionDef(name, parameters, blockStmts, decorators,
-        returnExpr, null, attributes(startToken, token));
+        returnExpr, null, typeParams, attributes(startToken, token));
     } else {
       return new FunctionDef(name, parameters, blockStmts, decorators,
-        returnExpr, null, attributes(startToken, token));
+        returnExpr, null, typeParams, attributes(startToken, token));
     }
   }
 }
@@ -2492,18 +2496,82 @@ ArrayList<istmt> elseBlock(): {
   <ELSE> <COLON> stmts = block() { return stmts; }
 }
 
+ArrayList<TypeParam> type_params():
+{
+    ArrayList<TypeParam> params = new ArrayList<>();
+    TypeParam param;
+}
+{
+    <SQUARE_OPEN>
+    (
+       param = type_param() { params.add(param); }
+       (
+           LOOKAHEAD(2)
+           <COMMA> param = type_param() { params.add(param); }
+       )*
+       (<COMMA>)?
+    )?
+    <SQUARE_CLOSE>
+    { return params; }
+}
+
+TypeParam type_param():
+{
+    Token nameToken;
+    iexpr bound = null;
+    iexpr defaultValue = null;
+}
+{
+    (
+        // ParamSpec: ** NAME (= expression)?
+        LOOKAHEAD(2) // Need lookahead for "** NAME"
+        <DOUBLE_STAR> nameToken = <NAME>
+        ( <ASSIGN> defaultValue = expression() )?
+        { return new ParamSpec(nameToken.image, defaultValue, attributes(nameToken, token)); }
+    |
+        // TypeVarTuple: * NAME (= expression)?
+        <STAR> nameToken = <NAME>
+        ( <ASSIGN> defaultValue = expression() )?
+        { return new TypeVarTuple(nameToken.image, defaultValue, attributes(nameToken, token)); }
+    |
+        // TypeVar: NAME (':' expression)? ('=' expression)?
+        nameToken = <NAME>
+        ( <COLON> bound = expression() )?
+        ( <ASSIGN> defaultValue = expression() )?
+        { return new TypeVar(nameToken.image, bound, defaultValue, attributes(nameToken, token)); }
+    )
+}
+
+TypeAlias type_stmt():
+{
+    Token startToken;
+    Name nameNode;
+    ArrayList<TypeParam> typeParams = new ArrayList<>();
+    iexpr value;
+}
+{
+    <TYPE> { startToken = token; }
+    nameNode = name()
+    ( typeParams = type_params() )?
+    <ASSIGN>
+    value = expression()
+    { return new TypeAlias(nameNode, typeParams, value, attributes(startToken, token)); }
+}
+
 ClassDef classDef(ArrayList<iexpr> decorators): {
   Token startToken;
   String name;
+  ArrayList<TypeParam> typeParams = new ArrayList<>();
   ArrayList<iexpr> bases = new ArrayList<iexpr>();
   ArrayList<Keyword> keywords = new ArrayList<Keyword>();
   ArrayList<istmt> blockStmts;
 } {
   <CLASS> { startToken = token; } <NAME> { name = token.image; }
+  ( typeParams = type_params() )?
   (<PAREN_OPEN> arguments(bases, keywords) <PAREN_CLOSE>)?
   <COLON>
   blockStmts = block()
-  { return new ClassDef(name, bases, keywords, blockStmts, decorators,
+  { return new ClassDef(name, bases, keywords, blockStmts, decorators, typeParams,
      attributes(startToken, token)); }
 }
 
@@ -2949,7 +3017,7 @@ iexpr conditionalExpression(): {
   iexpr elseExpression = null;
 } {
   expression = disjunction()
-  (<IF> testExpression = disjunction() <ELSE> elseExpression = expression())?
+  (LOOKAHEAD(3)<IF> testExpression = disjunction() <ELSE> elseExpression = expression())?
   {
     if (testExpression != null) {
       return new IfExp(testExpression, expression, elseExpression, attributes(expression, token));
@@ -3033,7 +3101,7 @@ iexpr comparison(): {
   ArrayList<iexpr> comparators = null;
 } {
   expression = bitwiseOr()
-  ((
+  (LOOKAHEAD(2)(
   <EQ> { op = Eq$.MODULE$; }
 | <NEQ> { op = NotEq$.MODULE$; }
 | <LT> { op = Lt$.MODULE$; }
@@ -3130,7 +3198,7 @@ iexpr sum(): {
   ioperator op;
 } {
   expr = term()
-  (
+  (LOOKAHEAD(2)
     (<PLUS> { op = Add$.MODULE$; } | <MINUS> { op = Sub$.MODULE$; })
     nextExpr = term()
     { expr = new BinOp(expr, op, nextExpr, attributes(expr, token)); }
@@ -3144,7 +3212,7 @@ iexpr term(): {
   ioperator op;
 } {
   expr = factor()
-  (
+  (LOOKAHEAD(2)
     (
       <STAR> { op = Mult$.MODULE$; }
     | <DIV> { op = Div$.MODULE$; }
@@ -3380,7 +3448,7 @@ iexpr strings(): {
   ArrayList<iexpr> strings = null;
 } {
   expr = string()
-  (
+  (LOOKAHEAD(2)
     {
       if (strings == null) {
         strings = new ArrayList<iexpr>();

@@ -56,6 +56,56 @@ case class Module(stmts: CollType[istmt], type_ignores: CollType[TypeIgnore]) ex
 
 trait istmt extends iast with iattributes
 
+// Base trait for type parameters
+sealed trait TypeParam extends iast with iattributes
+
+// Represents typing.TypeVar
+case class TypeVar(
+  name: String,
+  bound: Option[iexpr],
+  default_value: Option[iexpr], // Python 3.13+
+  attributeProvider: AttributeProvider
+) extends TypeParam:
+  def this(name: String, bound: iexpr, default_value: iexpr, attributeProvider: AttributeProvider) =
+      this(name, Option(bound), Option(default_value), attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T = visitor.visit(this)
+
+// Represents typing.ParamSpec
+case class ParamSpec(
+  name: String,
+  default_value: Option[iexpr], // Python 3.13+
+  attributeProvider: AttributeProvider
+) extends TypeParam:
+  def this(name: String, default_value: iexpr, attributeProvider: AttributeProvider) =
+      this(name, Option(default_value), attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T = visitor.visit(this)
+
+// Represents typing.TypeVarTuple
+case class TypeVarTuple(
+  name: String,
+  default_value: Option[iexpr], // Python 3.13+
+  attributeProvider: AttributeProvider
+) extends TypeParam:
+  def this(name: String, default_value: iexpr, attributeProvider: AttributeProvider) =
+      this(name, Option(default_value), attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T = visitor.visit(this)
+
+// Represents the 'type' statement (Python 3.12+)
+case class TypeAlias(
+  name: Name,
+  type_params: CollType[TypeParam],
+  value: iexpr,
+  attributeProvider: AttributeProvider
+) extends istmt:
+  def this(
+    name: Name,
+    type_params: util.ArrayList[TypeParam],
+    value: iexpr,
+    attributeProvider: AttributeProvider
+  ) =
+      this(name, type_params.asScala, value, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T = visitor.visit(this)
+
 case class FunctionDef(
   name: String,
   args: Arguments,
@@ -63,6 +113,7 @@ case class FunctionDef(
   decorator_list: CollType[iexpr],
   returns: Option[iexpr],
   type_comment: Option[String],
+  type_params: CollType[TypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt:
   def this(
@@ -72,6 +123,7 @@ case class FunctionDef(
     decorator_list: util.ArrayList[iexpr],
     returns: iexpr,
     type_comment: String,
+    type_params: util.ArrayList[TypeParam],
     attributeProvider: AttributeProvider
   ) =
       this(
@@ -81,8 +133,10 @@ case class FunctionDef(
         decorator_list.asScala,
         Option(returns),
         Option(type_comment),
+        type_params.asScala,
         attributeProvider
       )
+  end this
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 end FunctionDef
@@ -94,6 +148,7 @@ case class AsyncFunctionDef(
   decorator_list: CollType[iexpr],
   returns: Option[iexpr],
   type_comment: Option[String],
+  type_params: CollType[TypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt:
   def this(
@@ -103,6 +158,7 @@ case class AsyncFunctionDef(
     decorator_list: util.ArrayList[iexpr],
     returns: iexpr,
     type_comment: String,
+    type_params: util.ArrayList[TypeParam],
     attributeProvider: AttributeProvider
   ) =
       this(
@@ -112,8 +168,10 @@ case class AsyncFunctionDef(
         decorator_list.asScala,
         Option(returns),
         Option(type_comment),
+        type_params.asScala,
         attributeProvider
       )
+  end this
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 end AsyncFunctionDef
@@ -124,6 +182,7 @@ case class ClassDef(
   keywords: CollType[Keyword],
   body: CollType[istmt],
   decorator_list: CollType[iexpr],
+  type_params: CollType[TypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt:
   def this(
@@ -132,6 +191,7 @@ case class ClassDef(
     keywords: util.ArrayList[Keyword],
     body: util.ArrayList[istmt],
     decorator_list: util.ArrayList[iexpr],
+    type_params: util.ArrayList[TypeParam],
     attributeProvider: AttributeProvider
   ) =
       this(
@@ -140,6 +200,7 @@ case class ClassDef(
         keywords.asScala,
         body.asScala,
         decorator_list.asScala,
+        type_params.asScala,
         attributeProvider
       )
   override def accept[T](visitor: AstVisitor[T]): T =

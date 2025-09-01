@@ -104,6 +104,7 @@ class PythonAstVisitor(
           bodyProvider = () =>
               createBuiltinIdentifiers(memOpCalculator.names) ++ module.stmts.map(convert),
           returns = None,
+          typeParamNames = List.empty,
           isAsync = false,
           methodRefNode = None,
           returnTypeHint = None,
@@ -199,6 +200,7 @@ class PythonAstVisitor(
         case node: ast.Match            => convert(node)
         case node: ast.Raise            => convert(node)
         case node: ast.TryStar          => convert(node)
+        case node: ast.TypeVar          => convertTypeVar(node)
         case node: ast.Assert           => convert(node)
         case node: ast.Import           => convert(node)
         case node: ast.ImportFrom       => convert(node)
@@ -211,9 +213,18 @@ class PythonAstVisitor(
         case node: ast.RaiseP2          => unhandled(node)
         case node: ast.ErrorStatement   => convert(node)
 
+  def convertTypeVar(typeVar: ast.TypeVar): NewNode =
+      createTypeRef(typeVar.name, calculateFullNameFromContext(typeVar.name), lineAndColOf(typeVar))
+  def convertTypeParam(typeParam: ast.TypeParam): String =
+    val s = typeParam.toString
+    if s.startsWith("TypeVar(") then
+      s.split("TypeVar\\(").last.takeWhile(c => c != ',')
+    else s
+
   def convert(functionDef: ast.FunctionDef): NewNode =
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
+    val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -223,6 +234,7 @@ class PythonAstVisitor(
       ),
       () => functionDef.body.map(convert),
       functionDef.returns,
+      typeParamNames = typeParamNames,
       isAsync = false,
       lineAndColOf(functionDef)
     )
@@ -278,6 +290,7 @@ class PythonAstVisitor(
       ),
       () => functionDef.body.map(convert),
       functionDef.returns,
+      typeParamNames = List.empty,
       isAsync = true,
       lineAndColOf(functionDef)
     )
@@ -320,6 +333,7 @@ class PythonAstVisitor(
     parameterProvider: () => MethodParameters,
     bodyProvider: () => Iterable[nodes.NewNode],
     returns: Option[ast.iexpr],
+    typeParamNames: List[String],
     isAsync: Boolean,
     lineAndColumn: LineAndColumn
   ): (nodes.NewMethod, nodes.NewMethodRef) =
@@ -336,7 +350,8 @@ class PythonAstVisitor(
           parameterProvider,
           bodyProvider,
           returns,
-          isAsync = true,
+          typeParamNames = typeParamNames,
+          isAsync = isAsync,
           Some(methodRefNode),
           returnTypeHint = None,
           lineAndColumn
@@ -355,6 +370,7 @@ class PythonAstVisitor(
     parameterProvider: () => MethodParameters,
     bodyProvider: () => Iterable[nodes.NewNode],
     returns: Option[ast.iexpr],
+    typeParamNames: List[String] = List.empty,
     isAsync: Boolean,
     methodRefNode: Option[nodes.NewMethodRef],
     returnTypeHint: Option[String],
@@ -375,8 +391,11 @@ class PythonAstVisitor(
     val parameterOrder  = new AutoIncIndex(methodParameter.posStartIndex)
 
     methodParameter.positionalParams.foreach { parameterNode =>
+      val porder = parameterOrder.getAndInc
+      if typeParamNames.nonEmpty && typeParamNames.length >= porder then
+        parameterNode.typeFullName(typeParamNames(porder - 1))
       contextStack.addParameter(parameterNode)
-      edgeBuilder.astEdge(parameterNode, methodNode, parameterOrder.getAndInc)
+      edgeBuilder.astEdge(parameterNode, methodNode, porder)
     }
 
     val methodReturnNode =
@@ -472,6 +491,7 @@ class PythonAstVisitor(
       parameterProvider = () => MethodParameters.empty(),
       bodyProvider = () => classDef.body.map(convert),
       None,
+      typeParamNames = List.empty,
       isAsync = false,
       lineAndColOf(classDef)
     )
@@ -648,6 +668,7 @@ class PythonAstVisitor(
         returnNode :: Nil
       ,
       returns = None,
+      typeParamNames = List.empty,
       isAsync = false,
       methodRefNode = None,
       returnTypeHint = None,
@@ -758,6 +779,7 @@ class PythonAstVisitor(
         returnNode :: Nil
       ,
       returns = None,
+      typeParamNames = List.empty,
       isAsync = false,
       methodRefNode = None,
       returnTypeHint = Some(instanceTypeDeclFullName),
@@ -839,6 +861,7 @@ class PythonAstVisitor(
         assignmentToNewInstance :: initCall :: returnNode :: Nil
       ,
       returns = None,
+      typeParamNames = List.empty,
       isAsync = false,
       methodRefNode = None,
       returnTypeHint = None,
@@ -1519,6 +1542,7 @@ class PythonAstVisitor(
       createParameterProcessingFunction(lambda.args, isStatic = false),
       () => Iterable.single(convert(new ast.Return(lambda.body, lambda.attributeProvider))),
       returns = None,
+      typeParamNames = List.empty,
       isAsync = false,
       lineAndColOf(lambda)
     )

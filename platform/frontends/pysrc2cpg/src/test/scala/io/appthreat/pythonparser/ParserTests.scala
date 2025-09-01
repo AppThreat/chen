@@ -171,6 +171,11 @@ class ParserTests extends AnyFreeSpec with Matchers {
             testT("@x\n@y\nclass z():\n\tpass")
         }
 
+        "class def statement tests with type parameters" in {
+            testT("@x\n@y\nclass MultiGeneric[T, U, V]():\n\tdef get_u(self) -> U:\n\t\tpass")
+            testT("@x\n@y\nclass DefaultGeneric[T = int]():\n\tdef get_u(self) -> B:\n\t\tpass")
+        }
+
         "try statement tests" in {
             testS("""try:
                     |  x
