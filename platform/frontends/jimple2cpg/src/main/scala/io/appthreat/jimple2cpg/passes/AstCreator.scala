@@ -569,9 +569,10 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       case _: InstanceInvokeExpr     => DispatchTypes.DYNAMIC_DISPATCH
       case _                         => DispatchTypes.STATIC_DISPATCH
 
-    val signature =
-        s"${registerType(callee.getReturnType.toQuotedString)}(${(for (i <- 0 until callee.getParameterTypes.size())
-                yield registerType(callee.getParameterType(i).toQuotedString)).mkString(",")})"
+    val paramTypeFullNames = (for (i <- 0 until callee.getParameterTypes.size())
+        yield registerType(callee.getParameterType(i).toQuotedString)).toList
+    val returnTypeFullName = registerType(callee.getReturnType.toQuotedString)
+    val signature          = s"$returnTypeFullName(${paramTypeFullNames.mkString(",")})"
     val thisAsts = invokeExpr match
       case expr: InstanceInvokeExpr => astsForValue(expr.getBase, 0, parentUnit)
       case _                        => Seq(createThisNode(callee, NewIdentifier()))
@@ -581,28 +582,38 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
           registerType(callee.getDeclaringClass.getType.getClassName)
         else
           callee.getName
-
+    val explicitReturnType: Option[String] = callee match
+      case mr if mr.getDeclaringClass.getType.getClassName == "java.lang.Class" =>
+          mr.getName match
+            case "getMethod" | "getDeclaredMethod" =>
+                Some(registerType("java.lang.reflect.Method"))
+            case "getField" | "getDeclaredField" =>
+                Some(registerType("java.lang.reflect.Field"))
+            case "getConstructor" | "getDeclaredConstructor" =>
+                Some(registerType("java.lang.reflect.Constructor"))
+            case _ => None
+      case mr if mr.getDeclaringClass.getType.getClassName == "java.lang.reflect.Method" =>
+          mr.getName match
+            case "invoke" =>
+                Some(registerType("java.lang.Object"))
+            case _ => None
+      case mr if mr.getDeclaringClass.getType.getClassName == "java.lang.reflect.Field" =>
+          mr.getName match
+            case "get" =>
+                Some(registerType("java.lang.Object"))
+            case "set" | "setBoolean" | "setByte" | "setChar" | "setShort" | "setInt" | "setLong" | "setFloat" | "setDouble" =>
+                Some(registerType("void"))
+            case _ => None
+      case mr if mr.getDeclaringClass.getType.getClassName == "java.lang.reflect.Constructor" =>
+          mr.getName match
+            case "newInstance" =>
+                Some(registerType("java.lang.Object"))
+            case _ => None
+      case _ => None
     val calleeType = registerType(callee.getDeclaringClass.getType.toQuotedString)
-    val callType =
-        if callee.isConstructor then "void"
-        else calleeType
-
-    val code = invokeExpr match
-      case expr: InstanceInvokeExpr =>
-          s"${expr.getBase}.$methodName(${invokeExpr.getArgs.asScala.mkString(", ")})"
-      case _ => s"$methodName(${invokeExpr.getArgs.asScala.mkString(", ")})"
-
-    val callNode = NewCall()
-        .name(callee.getName)
-        .code(code)
-        .dispatchType(dispatchType)
-        .order(order)
-        .argumentIndex(order)
-        .methodFullName(s"$calleeType.${callee.getName}:$signature")
-        .signature(signature)
-        .typeFullName(callType)
-        .lineNumber(line(parentUnit))
-        .columnNumber(column(parentUnit))
+    val callType = explicitReturnType.getOrElse {
+        if callee.isConstructor then "void" else calleeType
+    }
 
     val argAsts = withOrder(invokeExpr match
       case x: DynamicInvokeExpr => x.getArgs.asScala ++ x.getBootstrapArgs.asScala
@@ -610,6 +621,28 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     ) { case (arg, order) =>
         astsForValue(arg, order, parentUnit)
     }.flatten
+    val argCodeParts =
+        argAsts.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString(", ")
+
+    val code = invokeExpr match
+      case expr: InstanceInvokeExpr =>
+          val baseAst = astsForValue(expr.getBase, -1, parentUnit)
+          val baseCode =
+              baseAst.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
+          s"$baseCode.$methodName($argCodeParts)"
+      case _ => s"$methodName($argCodeParts)"
+    val methodFullNameStr = s"$calleeType.$methodName:$signature"
+    val callNode = NewCall()
+        .name(callee.getName)
+        .code(code)
+        .dispatchType(dispatchType)
+        .order(order)
+        .argumentIndex(order)
+        .methodFullName(methodFullNameStr)
+        .signature(signature)
+        .typeFullName(callType)
+        .lineNumber(line(parentUnit))
+        .columnNumber(column(parentUnit))
 
     val callAst = Ast(callNode)
         .withChildren(thisAsts)
@@ -771,30 +804,27 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   private def astsForDefinition(assignStmt: DefinitionStmt, order: Int): Seq[Ast] =
     val initializer = assignStmt.getRightOp
     val leftOp      = assignStmt.getLeftOp
-
-    val identifier = leftOp match
+    val identifierAsts = leftOp match
       case x: soot.Local => Seq(astForLocal(x, 1, assignStmt))
       case x: FieldRef   => Seq(astForFieldRef(x, 1, assignStmt))
       case x             => astsForValue(x, 1, assignStmt)
     val lhsCode =
-        identifier.flatMap(_.root).flatMap(_.properties.get(PropertyNames.CODE)).mkString
-
+        identifierAsts.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
     val initAsts = astsForValue(initializer, 2, assignStmt)
     val rhsCode = initAsts
         .flatMap(_.root)
         .map(_.properties.getOrElse(PropertyNames.CODE, ""))
         .mkString(", ")
-
+    val assignmentCode = s"$lhsCode = $rhsCode"
     val assignment = NewCall()
         .name(Operators.assignment)
         .methodFullName(Operators.assignment)
-        .code(s"$lhsCode = $rhsCode")
+        .code(assignmentCode)
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
         .order(order)
         .argumentIndex(order)
         .typeFullName(registerType(assignStmt.getLeftOp.getType.toQuotedString))
-    val initializerAst = Seq(callAst(assignment, identifier ++ initAsts))
-    initializerAst.toList
+    Seq(callAst(assignment, identifierAsts ++ initAsts)).toList
   end astsForDefinition
 
   private def astsForIfStmt(ifStmt: IfStmt, order: Int): Seq[Ast] =
@@ -898,7 +928,9 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   end astsForTableSwitchStmt
 
   private def astsForThrowStmt(throwStmt: ThrowStmt, order: Int): Seq[Ast] =
-    val opAst = astsForValue(throwStmt.getOp, 1, throwStmt)
+    val opAsts = astsForValue(throwStmt.getOp, 1, throwStmt)
+    val opCode =
+        opAsts.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString(" ")
     val throwNode = NewCall()
         .name("<operator>.throw")
         .methodFullName("<operator>.throw")
@@ -910,7 +942,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
     Seq(
       Ast(throwNode)
-          .withChildren(opAst)
+          .withChildren(opAsts).withArgEdges(throwNode, opAsts.flatMap(_.root))
     )
 
   private def astsForMonitorStmt(monitorStmt: MonitorStmt, order: Int): Seq[Ast] =
@@ -974,18 +1006,25 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       )
 
   private def astForFieldRef(fieldRef: FieldRef, order: Int, parentUnit: soot.Unit): Ast =
-    val leftOpString = fieldRef match
-      case x: StaticFieldRef   => x.getFieldRef.declaringClass().toString
-      case x: InstanceFieldRef => x.getBase.toString()
-      case _                   => fieldRef.getFieldRef.declaringClass().toString
-    val leftOpType = fieldRef match
-      case x: StaticFieldRef   => x.getFieldRef.declaringClass().getType
-      case x: InstanceFieldRef => x.getBase.getType
-      case _                   => fieldRef.getFieldRef.declaringClass().getType
-
+    val (leftOpString, leftOpType, baseAsts) = fieldRef match
+      case x: StaticFieldRef =>
+          (x.getFieldRef.declaringClass().toString, x.getFieldRef.declaringClass().getType, Seq())
+      case x: InstanceFieldRef =>
+          val baseAst = astsForValue(x.getBase, -1, parentUnit)
+          val baseCode =
+              baseAst.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
+          (baseCode, x.getBase.getType, baseAst)
+      case _ =>
+          (
+            fieldRef.getFieldRef.declaringClass().toString,
+            fieldRef.getFieldRef.declaringClass().getType,
+            Seq()
+          )
+    val fieldName       = fieldRef.getFieldRef.name()
+    val fieldAccessCode = s"$leftOpString.$fieldName"
     val fieldAccessBlock = NewCall()
         .name(Operators.fieldAccess)
-        .code(s"$leftOpString.${fieldRef.getFieldRef.name()}")
+        .code(fieldAccessCode)
         .typeFullName(registerType(fieldRef.getType.toQuotedString))
         .methodFullName(Operators.fieldAccess)
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
@@ -1008,12 +1047,12 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
           .argumentIndex(2)
           .lineNumber(line(parentUnit))
           .columnNumber(column(parentUnit))
-          .canonicalName(fieldRef.getFieldRef.name())
-          .code(fieldRef.getFieldRef.name())
+          .canonicalName(fieldName)
+          .code(fieldName)
     ).map(Ast(_))
-
+    val allAsts = baseAsts ++ argAsts
     Ast(fieldAccessBlock)
-        .withChildren(argAsts)
+        .withChildren(allAsts)
         .withArgEdges(fieldAccessBlock, argAsts.flatMap(_.root))
   end astForFieldRef
 
@@ -1107,17 +1146,20 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     Ast(methodReturnNode)
 
   private def createMethodNode(methodDeclaration: SootMethod, typeDecl: RefType, childNum: Int) =
-    val fullName       = methodFullName(typeDecl, methodDeclaration)
-    val methodDeclType = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val fullName           = methodFullName(typeDecl, methodDeclaration)
+    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val methodName         = methodDeclaration.getName
+    val paramCodePart      = paramListSignature(methodDeclaration, withParams = true)
     val code = if !methodDeclaration.isConstructor then
-      s"$methodDeclType ${methodDeclaration.getName}${paramListSignature(methodDeclaration, withParams = true)}"
+      s"$returnTypeFullName $methodName$paramCodePart"
     else
-      s"${typeDecl.getClassName}${paramListSignature(methodDeclaration, withParams = true)}"
+      s"${typeDecl.getClassName}$paramCodePart" // Constructor name matches class
+    val signature = returnTypeFullName + paramListSignature(methodDeclaration)
     NewMethod()
         .name(methodDeclaration.getName)
         .fullName(fullName)
         .code(code)
-        .signature(methodDeclType + paramListSignature(methodDeclaration))
+        .signature(signature)
         .isExternal(false)
         .order(childNum)
         .filename(filename)
@@ -1128,10 +1170,11 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   end createMethodNode
 
   private def methodFullName(typeDecl: RefType, methodDeclaration: SootMethod): String =
-    val typeName   = registerType(typeDecl.toQuotedString)
-    val returnType = registerType(methodDeclaration.getReturnType.toQuotedString)
-    val methodName = methodDeclaration.getName
-    s"$typeName.$methodName:$returnType${paramListSignature(methodDeclaration)}"
+    val typeName           = registerType(typeDecl.toQuotedString)
+    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val methodName         = methodDeclaration.getName
+    val paramSigPart       = paramListSignature(methodDeclaration)
+    s"$typeName.$methodName:$returnTypeFullName$paramSigPart"
 
   private def paramListSignature(methodDeclaration: SootMethod, withParams: Boolean = false) =
     val paramTypes =
@@ -1140,9 +1183,9 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     val paramNames =
         if !methodDeclaration.isPhantom && Try(methodDeclaration.retrieveActiveBody()).isSuccess
         then
-          methodDeclaration.retrieveActiveBody().getParameterLocals.asScala.map(_.getName)
+          methodDeclaration.retrieveActiveBody().getParameterLocals.asScala.map(_.getName).toList
         else
-          paramTypes.zipWithIndex.map(x => s"param${x._2 + 1}")
+          paramTypes.zipWithIndex.map { case (_, index) => s"param${index + 1}" }
     if !withParams then
       "(" + paramTypes.mkString(",") + ")"
     else
