@@ -4,8 +4,8 @@ import better.files.File
 import io.appthreat.jimple2cpg.passes.{
     AstCreationPass,
     ConfigFileCreationPass,
-    SootAstCreationPass,
-    ReflectionTypeInferencePass
+    SootAstCreationPass
+//    ReflectionTypeInferencePass
 }
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg

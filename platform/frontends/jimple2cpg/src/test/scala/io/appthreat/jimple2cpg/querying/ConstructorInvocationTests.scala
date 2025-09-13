@@ -282,7 +282,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
                                   |""".stripMargin).cpg
 
         val throwCall = cpgWithThrow.method.name("thrower").call.name("<operator>.throw").head
-        throwCall.code shouldBe "throw new java.lang.RuntimeException()"
+        throwCall.code shouldBe "throw e"
         throwCall.argument.size shouldBe 1
         throwCall.argument.head.code shouldBe "e"
 

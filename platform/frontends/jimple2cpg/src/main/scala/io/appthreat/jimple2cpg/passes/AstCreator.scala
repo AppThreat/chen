@@ -936,7 +936,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .methodFullName("<operator>.throw")
         .lineNumber(line(throwStmt))
         .columnNumber(column(throwStmt))
-        .code(s"throw new ${throwStmt.getOp.getType}()")
+        .code(s"throw $opCode")
         .order(order)
         .argumentIndex(order)
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
