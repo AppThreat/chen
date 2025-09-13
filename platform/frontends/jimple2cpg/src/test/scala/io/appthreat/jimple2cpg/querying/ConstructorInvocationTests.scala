@@ -54,7 +54,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
 
   "it should create correct method nodes for constructors" in {
     cpg.method.name(io.appthreat.x2cpg.Defines.ConstructorMethodName).where(_.fullName("^Foo.*")).l match {
-      case List(cons: Method, bar: Method) =>
+      case List(cons: Method) =>
         cons.fullName shouldBe "Foo.<init>:void(int)"
         cons.signature shouldBe "void(int)"
         cons.code.trim.startsWith("public void <init>(int)") shouldBe true
@@ -67,14 +67,13 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         otherParam.name shouldBe "x"
         otherParam.typeFullName shouldBe "int"
         otherParam.dynamicTypeHintFullName shouldBe Seq()
-        bar.fullName shouldBe "Foo.Foo:void(int)"
 
       case res =>
         fail(s"Expected single Foo constructor, but got $res")
     }
 
     cpg.method.name(io.appthreat.x2cpg.Defines.ConstructorMethodName).where(_.fullName("^Bar.*")).l match {
-      case List(cons1: Method, cons2: Method, cons3: Method, cons4: Method) =>
+      case List(cons1: Method, cons2: Method) =>
         cons1.fullName shouldBe "Bar.<init>:void(int)"
         cons1.signature shouldBe "void(int)"
         cons1.code.trim.startsWith("public void <init>(int)") shouldBe true
@@ -89,11 +88,6 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         cons2.parameter.index(0).head.name shouldBe "this"
         cons2.parameter.index(1).head.name shouldBe "x"
         cons2.parameter.index(2).head.name shouldBe "y"
-
-        cons3.fullName shouldBe "Bar.Bar:void(int)"
-        cons3.signature shouldBe "void(int)"
-        cons4.fullName shouldBe "Bar.Bar:void(int,int)"
-        cons4.signature shouldBe "void(int,int)"
 
       case res =>
         fail(s"Expected 2 Bar constructors, but got $res")
@@ -117,8 +111,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         alloc.argument.size shouldBe 0
 
         init.name shouldBe io.appthreat.x2cpg.Defines.ConstructorMethodName
-        init.methodFullName shouldBe "Bar.Bar:void(int,int)"
-        init.callOut.head.fullName shouldBe "Bar.Bar:void(int,int)"
+        init.methodFullName shouldBe "Bar.<init>:void(int,int)"
+        init.callOut.head.fullName shouldBe "Bar.<init>:void(int,int)"
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         init.typeFullName shouldBe "void"
         init.signature shouldBe "void(int,int)"
@@ -155,8 +149,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         alloc.argument.size shouldBe 0
 
         init.name shouldBe io.appthreat.x2cpg.Defines.ConstructorMethodName
-        init.methodFullName shouldBe "Bar.Bar:void(int,int)"
-        init.callOut.head.fullName shouldBe "Bar.Bar:void(int,int)"
+        init.methodFullName shouldBe "Bar.<init>:void(int,int)"
+        init.callOut.head.fullName shouldBe "Bar.<init>:void(int,int)"
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         init.typeFullName shouldBe "void"
         init.signature shouldBe "void(int,int)"
@@ -199,8 +193,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         alloc.argument.size shouldBe 0
 
         init.name shouldBe io.appthreat.x2cpg.Defines.ConstructorMethodName
-        init.methodFullName shouldBe "Bar.Bar:void(int)"
-        init.callOut.head.fullName shouldBe "Bar.Bar:void(int)"
+        init.methodFullName shouldBe "Bar.<init>:void(int)"
+        init.callOut.head.fullName shouldBe "Bar.<init>:void(int)"
         init.signature shouldBe "void(int)"
         init.code shouldBe "$stack1.Bar(42)"
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
@@ -224,7 +218,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         val List(assignAddition: Call, init: Call, addition: Call) = method.call.l
 
         init.name shouldBe io.appthreat.x2cpg.Defines.ConstructorMethodName
-        init.methodFullName shouldBe "Bar.Bar:void(int)"
+        init.methodFullName shouldBe "Bar.<init>:void(int)"
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         init.typeFullName shouldBe "void"
         init.signature shouldBe "void(int)"
@@ -254,7 +248,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
       case List(method) =>
         val List(alloc: Call) = method.call.l
         alloc.name shouldBe io.appthreat.x2cpg.Defines.ConstructorMethodName
-        alloc.methodFullName shouldBe "Foo.Foo:void(int)"
+        alloc.methodFullName shouldBe "Foo.<init>:void(int)"
         alloc.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         alloc.typeFullName shouldBe "void"
         alloc.signature shouldBe "void(int)"
@@ -306,14 +300,14 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         val test1Method = cpg.typeDecl.name("Bar").method.name("test1").head
 
         val initCall = test1Method.call.name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
-            .methodFullNameExact("Bar.Bar:void(int,int)").head
+            .methodFullNameExact("Bar.<init>:void(int,int)").head
 
         initCall.signature shouldBe "void(int,int)"
-        initCall.methodFullName shouldBe "Bar.Bar:void(int,int)"
+        initCall.methodFullName shouldBe "Bar.<init>:void(int,int)"
 
-        val barConstructor2 = cpg.method.fullNameExact("Bar.Bar:void(int,int)").head
+        val barConstructor2 = cpg.method.fullNameExact("Bar.<init>:void(int,int)").head
         barConstructor2.signature shouldBe "void(int,int)"
-        barConstructor2.fullName shouldBe "Bar.Bar:void(int,int)"
+        barConstructor2.fullName shouldBe "Bar.<init>:void(int,int)"
 
         initCall.signature shouldBe barConstructor2.signature
 
@@ -326,7 +320,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         allocCall.name shouldBe Operators.alloc
 
         val initCall = test1Method.call.name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
-            .methodFullNameExact("Bar.Bar:void(int,int)").head
+            .methodFullNameExact("Bar.<init>:void(int,int)").head
         initCall.code shouldBe "$stack1.Bar(4, 2)"
 
     }

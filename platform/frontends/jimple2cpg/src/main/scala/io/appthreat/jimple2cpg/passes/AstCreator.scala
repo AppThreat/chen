@@ -631,14 +631,13 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
               baseAst.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
           s"$baseCode.$methodName($argCodeParts)"
       case _ => s"$methodName($argCodeParts)"
-    val methodFullNameStr = s"$calleeType.$methodName:$signature"
     val callNode = NewCall()
         .name(callee.getName)
         .code(code)
         .dispatchType(dispatchType)
         .order(order)
         .argumentIndex(order)
-        .methodFullName(methodFullNameStr)
+        .methodFullName(s"$calleeType.${callee.getName}:$signature")
         .signature(signature)
         .typeFullName(callType)
         .lineNumber(line(parentUnit))
