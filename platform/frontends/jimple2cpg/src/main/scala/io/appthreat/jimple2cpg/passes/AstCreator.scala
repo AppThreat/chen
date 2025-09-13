@@ -1009,16 +1009,17 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       case x: StaticFieldRef =>
           (x.getFieldRef.declaringClass().toString, x.getFieldRef.declaringClass().getType, Seq())
       case x: InstanceFieldRef =>
-          val baseAst = astsForValue(x.getBase, -1, parentUnit)
-          val baseCode =
-              baseAst.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
-          (baseCode, x.getBase.getType, baseAst)
+          val baseAstSeq = astsForValue(x.getBase, -1, parentUnit)
+          val baseCodeStr =
+              baseAstSeq.flatMap(_.root).map(_.properties.getOrElse(PropertyNames.CODE, "")).mkString
+          (baseCodeStr, x.getBase.getType, baseAstSeq)
       case _ =>
           (
             fieldRef.getFieldRef.declaringClass().toString,
             fieldRef.getFieldRef.declaringClass().getType,
             Seq()
           )
+
     val fieldName       = fieldRef.getFieldRef.name()
     val fieldAccessCode = s"$leftOpString.$fieldName"
     val fieldAccessBlock = NewCall()
@@ -1032,27 +1033,41 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .lineNumber(line(parentUnit))
         .columnNumber(column(parentUnit))
 
-    val argAsts = Seq(
-      NewIdentifier()
-          .order(1)
-          .argumentIndex(1)
-          .lineNumber(line(parentUnit))
-          .columnNumber(column(parentUnit))
-          .name(leftOpString)
-          .code(leftOpString)
-          .typeFullName(registerType(leftOpType.toQuotedString)),
-      NewFieldIdentifier()
-          .order(2)
-          .argumentIndex(2)
-          .lineNumber(line(parentUnit))
-          .columnNumber(column(parentUnit))
-          .canonicalName(fieldName)
-          .code(fieldName)
-    ).map(Ast(_))
-    val allAsts = baseAsts ++ argAsts
+    val baseArgNodeOpt: Option[NewNode] = fieldRef match
+      case _: InstanceFieldRef =>
+          baseAsts.headOption.flatMap(_.root)
+      case _ =>
+          Some(
+            NewIdentifier()
+                .name(leftOpString)
+                .code(leftOpString)
+                .typeFullName(registerType(leftOpType.toQuotedString))
+                .order(1)
+                .argumentIndex(1)
+          )
+
+    val fieldIdentifierNode = NewFieldIdentifier()
+        .order(2)
+        .argumentIndex(2)
+        .lineNumber(line(parentUnit))
+        .columnNumber(column(parentUnit))
+        .canonicalName(fieldName)
+        .code(fieldName)
+    val fieldIdentifierAst = Ast(fieldIdentifierNode)
+
+    val argNodesForEdges: List[NewNode] = List(baseArgNodeOpt, Some(fieldIdentifierNode)).flatten
+
+    val structuralChildren: Seq[Ast] = baseAsts :+ fieldIdentifierAst
+    val argAstsForChildren: Seq[Ast] = fieldRef match
+      case _: InstanceFieldRef =>
+          baseAsts :+ fieldIdentifierAst
+      case _ =>
+          val staticBaseArgAst = baseArgNodeOpt.map(Ast(_)).toList
+          staticBaseArgAst :+ fieldIdentifierAst
+
     Ast(fieldAccessBlock)
-        .withChildren(allAsts)
-        .withArgEdges(fieldAccessBlock, argAsts.flatMap(_.root))
+        .withChildren(argAstsForChildren)
+        .withArgEdges(fieldAccessBlock, argNodesForEdges)
   end astForFieldRef
 
   private def astForCaughtExceptionRef(
