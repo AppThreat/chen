@@ -160,10 +160,10 @@ class FieldAccessTests extends JimpleCode2CpgFixture {
         }.l
         setValueThisAccesses should not be empty
         val setValueThisAccess = setValueThisAccesses.head
-        setValueThisAccess.code shouldBe "this.value" // Should be 'this.value'
+        setValueThisAccess.code shouldBe "this.value"
 
         val maxValueAccessesInSetValue = setValueMethod.call.name("<operator>.fieldAccess").filter { fa =>
-            fa.argument.order(1).headOption.exists(_.code == "Foo") // Assuming static access base is 'Foo'
+            fa.argument.order(1).headOption.exists(_.code == "Foo")
         }.l
         maxValueAccessesInSetValue should not be empty
         val firstMaxValueInSetValue = maxValueAccessesInSetValue.head
