@@ -4,5 +4,5 @@ libraryDependencies ++= Seq(
   "net.lingala.zip4j"     % "zip4j"        % "2.11.5",
   "com.github.pathikrit" %% "better-files" % "3.9.2",
   "net.java.dev.javacc"   % "javacc"       % "7.0.13",
-  "com.lihaoyi"          %% "os-lib"       % "0.11.4"
+  "com.lihaoyi"          %% "os-lib"       % "0.11.5"
 )

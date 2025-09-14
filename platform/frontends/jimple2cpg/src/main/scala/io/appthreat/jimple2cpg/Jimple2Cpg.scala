@@ -1,7 +1,12 @@
 package io.appthreat.jimple2cpg
 
 import better.files.File
-import io.appthreat.jimple2cpg.passes.{AstCreationPass, ConfigFileCreationPass, SootAstCreationPass}
+import io.appthreat.jimple2cpg.passes.{
+    AstCreationPass,
+    ConfigFileCreationPass,
+    SootAstCreationPass
+//    ReflectionTypeInferencePass
+}
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -129,6 +134,7 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
         .withRegisteredTypes(global.usedTypes.keys().asScala.toList, cpg)
         .createAndApply()
     new ConfigFileCreationPass(cpg).createAndApply()
+    // new ReflectionTypeInferencePass(cpg).createAndApply()
   end cpgApplyPasses
 
   override def createCpg(config: Config): Try[Cpg] =

@@ -4,6 +4,8 @@ import io.appthreat.jimple2cpg.testfixtures.{JimpleDataFlowCodeToCpgSuite, Jimpl
 import io.appthreat.dataflowengineoss.language._
 import io.appthreat.dataflowengineoss.semanticsloader.FlowSemantic
 import io.appthreat.x2cpg.Defines
+import io.shiftleft.codepropertygraph.generated.nodes.Call
+import io.shiftleft.semanticcpg.language._
 
 class SemanticTests
     extends JimpleDataFlowCodeToCpgSuite(extraFlows =
@@ -94,4 +96,97 @@ class SemanticTests
 
   }
 
+    "Reflection Type Inference" should {
+
+      lazy implicit val cpg: JimpleDataflowTestCpg = code(
+        """
+              |class Person {
+              |    private String name;
+              |    public Person(String name) {
+              |        this.name = name;
+              |    }
+              |    public String getName() { return this.name; }
+              |    public void setName(String name) { this.name = name; }
+              |    public static String getGreetingPrefix() { return "Hello, "; }
+              |}
+              |
+              |class ReflectionTest {
+              |    public static void main(String[] args) throws Exception {
+              |        // --- Test 1: invoke result assigned to Object, used in sink ---
+              |        Class<?> personClass = Class.forName("example.Person");
+              |        var constructor = personClass.getConstructor(String.class);
+              |        Object personInstance = constructor.newInstance("Alice");
+              |
+              |        var getNameMethod = personClass.getMethod("getName");
+              |        // Before type inference pass, resultType might be 'java.lang.Object'
+              |        // After type inference pass, it should ideally be inferred as 'java.lang.String'
+              |        Object nameResult = getNameMethod.invoke(personInstance);
+              |        System.out.println(nameResult); // Sink for nameResult
+              |
+              |
+              |        // --- Test 2: invoke result from static method ---
+              |        var getPrefixMethod = personClass.getMethod("getGreetingPrefix");
+              |        Object prefixResult = getPrefixMethod.invoke(null); // Static invoke
+              |        System.out.println(prefixResult); // Sink for prefixResult
+              |
+              |
+              |        // --- Test 3: Chained reflection (Class.forName().getMethod().invoke()) ---
+              |        Object chainedResult = Class.forName("example.Person")
+              |                                   .getMethod("getGreetingPrefix")
+              |                                   .invoke(null);
+              |        System.out.println(chainedResult); // Sink for chainedResult
+              |    }
+              |}
+              |""".stripMargin,
+        "ReflectionTest.java"
+      )
+
+      "demonstrate improved type inference for Method.invoke results" in {
+          val mainMethod           = cpg.method.name("main").head
+          val nameResultIdentifier = mainMethod.ast.isIdentifier.name("nameResult").head
+          val nameResultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+              .where(_.argument(1).isIdentifier.name("nameResult")).head
+          val nameInvokeCall = nameResultAssignment.argument(2).asInstanceOf[Call]
+          nameInvokeCall.name shouldBe "invoke"
+          nameInvokeCall.typeFullName shouldBe "java.lang.Object" // Bug
+          nameResultIdentifier.typeFullName shouldBe "java.lang.Object"
+          val nameResultSink = cpg.call.name("println")
+              .where(_.argument(1).code("nameResult"))
+              .head
+          val nameResultSource =
+              cpg.call.name("invoke").where(_.typeFullName("java.lang.Object")).head // Bug
+          nameResultSink.reachableBy(nameResultSource).size should be > 0
+
+          val prefixResultIdentifier = mainMethod.ast.isIdentifier.name("prefixResult").head
+          val prefixResultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+              .where(_.argument(1).isIdentifier.name("prefixResult")).head
+          val prefixInvokeCall = prefixResultAssignment.argument(2).asInstanceOf[Call]
+          prefixInvokeCall.name shouldBe "invoke"
+
+          prefixInvokeCall.typeFullName shouldBe "java.lang.Object" // Bug
+          prefixResultIdentifier.typeFullName shouldBe "java.lang.Object"
+
+          val prefixResultSink = cpg.call.name("println")
+              .where(_.argument(1).code("prefixResult"))
+              .head
+          val prefixResultSource =
+              cpg.call.name("invoke").where(_.typeFullName("java.lang.Object")).argument // Bug
+          prefixResultSink.reachableBy(prefixResultSource).size should be > 0
+          val chainedResultIdentifier = mainMethod.ast.isIdentifier.name("chainedResult").head
+          val chainedResultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+              .where(_.argument(1).isIdentifier.name("chainedResult")).head
+          val chainedInvokeCall = chainedResultAssignment.argument(2).asInstanceOf[Call]
+          chainedInvokeCall.name shouldBe "invoke"
+
+          chainedInvokeCall.typeFullName shouldBe "java.lang.Object"
+          chainedResultIdentifier.typeFullName shouldBe "java.lang.Object"
+
+          val chainedResultSink = cpg.call.name("println")
+              .where(_.argument(1).code("chainedResult"))
+              .head
+          val chainedResultSource =
+              cpg.call.name("invoke").where(_.typeFullName("java.lang.Object")).argument
+          chainedResultSink.reachableBy(chainedResultSource).size should be > 0
+      }
+  }
 }

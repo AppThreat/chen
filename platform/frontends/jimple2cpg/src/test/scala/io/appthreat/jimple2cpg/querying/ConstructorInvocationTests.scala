@@ -258,4 +258,70 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
     }
   }
 
+    "it should demonstrate enhanced code generation for various nodes" in {
+        val fooConstructor = cpg.method.fullNameExact("Foo.<init>:void(int)").head
+        fooConstructor.code.startsWith("void <init>(int param1)")
+
+        val getValueCall = cpg.method.name("getValue").call.head
+        getValueCall.argument.size >= 1 shouldBe true
+        getValueCall.code shouldBe "$stack1 = this.x"
+
+        val cpgWithThrow = code("""
+                                  |class TestThrow {
+                                  |  public void thrower() {
+                                  |     RuntimeException e = new RuntimeException("test");
+                                  |     throw e;
+                                  |  }
+                                  |}
+                                  |""".stripMargin).cpg
+
+        val throwCall = cpgWithThrow.method.name("thrower").call.name("<operator>.throw").head
+        throwCall.code shouldBe "throw e"
+        throwCall.argument.size shouldBe 1
+        throwCall.argument.head.code shouldBe "e"
+
+        val fieldAssignLine = cpg.method.fullNameExact("Foo.<init>:void(int)").ast.isCall.name(Operators.assignment).head
+        val fieldAccessCall = fieldAssignLine.argument.isCall.name(Operators.fieldAccess).head
+        fieldAccessCall.code shouldBe "this.x"
+
+        val cpgWithCast = code("""
+                                 |class TestCast {
+                                 |  public void caster(Object o) {
+                                 |     String s = (String) o;
+                                 |  }
+                                 |}
+                                 |""".stripMargin).cpg
+        val castCall = cpgWithCast.method.name("caster").call.name(Operators.cast).head
+        castCall.code shouldBe "(java.lang.String) o"
+
+    }
+
+    "it should demonstrate precise signatures and fullNames using SootMethodRef details" in {
+        val test1Method = cpg.typeDecl.name("Bar").method.name("test1").head
+
+        val initCall = test1Method.call.name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
+            .methodFullNameExact("Bar.<init>:void(int,int)").head
+
+        initCall.signature shouldBe "void(int,int)"
+        initCall.methodFullName shouldBe "Bar.<init>:void(int,int)"
+
+        val barConstructor2 = cpg.method.fullNameExact("Bar.<init>:void(int,int)").head
+        barConstructor2.signature shouldBe "void(int,int)"
+        barConstructor2.fullName shouldBe "Bar.<init>:void(int,int)"
+
+        initCall.signature shouldBe barConstructor2.signature
+
+    }
+
+    "it should correctly link alloc and init calls for constructor invocations" in {
+        val test1Method = cpg.typeDecl.name("Bar").method.name("test1").head
+        val assignmentCall = test1Method.ast.isCall.name(Operators.assignment).head
+        val allocCall = assignmentCall.argument(2).asInstanceOf[Call]
+        allocCall.name shouldBe Operators.alloc
+
+        val initCall = test1Method.call.name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
+            .methodFullNameExact("Bar.<init>:void(int,int)").head
+        initCall.code shouldBe "$stack1.Bar(4, 2)"
+
+    }
 }
