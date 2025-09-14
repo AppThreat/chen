@@ -46,12 +46,17 @@ object ProgramHandlingUtil:
     */
   private def unfoldArchives[A](
     src: File,
-    emitOrUnpack: File => Either[A, List[File]]
+    emitOrUnpack: File => Either[A, List[File]],
+    depth: Int = 0,
+    maxDepth: Int = 10 // Prevent infinite recursion
   ): IterableOnce[A] =
-      // TODO: add recursion depth limit
-      emitOrUnpack(src) match
-        case Left(a)             => Seq(a)
-        case Right(disposeFiles) => disposeFiles.flatMap(x => unfoldArchives(x, emitOrUnpack))
+    if depth > maxDepth then
+      return Seq.empty
+
+    emitOrUnpack(src) match
+      case Left(a) => Seq(a)
+      case Right(disposeFiles) =>
+          disposeFiles.flatMap(x => unfoldArchives(x, emitOrUnpack, depth + 1, maxDepth))
 
   /** Find <pre>.class</pre> files, including those inside archives.
     *
@@ -77,7 +82,8 @@ object ProgramHandlingUtil:
     isArchive: Entry => Boolean,
     isClass: Entry => Boolean,
     recurse: Boolean,
-    onlyClasses: Boolean
+    onlyClasses: Boolean,
+    rootArchivePath: Option[String]
   ): IterableOnce[ClassFile] =
 
     def shouldExtract(e: Entry) =
@@ -86,16 +92,24 @@ object ProgramHandlingUtil:
       src,
       {
           case f if isClass(Entry(f)) =>
-              Left(ClassFile(f))
+              Left(ClassFile(f, rootArchivePath))
           case f if f.isDirectory() =>
               var files = f.listRecursively.filterNot(_.isDirectory)
               if onlyClasses then
                 files = files.filter(_.pathAsString.endsWith(".class"))
+              val dirSourceArchivePath = if src.isDirectory then None else rootArchivePath
               Right(files.toList)
           case f if isArchive(Entry(f)) && (recurse || f == src) =>
               val xTmp = File.newTemporaryDirectory("extract-archive-", parent = Some(tmpDir))
               val unzipDirs = Try(f.unzipTo(xTmp, e => shouldExtract(Entry(e)))) match
-                case Success(dir) => List(dir)
+                case Success(dir) =>
+                    val nestedArchives = if recurse then
+                      dir.listRecursively.filter(file =>
+                          file.isRegularFile && isArchive(Entry(file))
+                      ).toList
+                    else
+                      List.empty[File]
+                    dir :: nestedArchives
                 case Failure(e) =>
                     List.empty
               Right(unzipDirs)
@@ -106,7 +120,7 @@ object ProgramHandlingUtil:
   end extractClassesToTmp
 
   object ClassFile:
-    private def getPackagePathFromByteCode(is: InputStream): Option[String] =
+    private def readPackagePathFromStream(is: InputStream): Option[String] =
       val cr = new ClassReader(is)
       sealed class ClassNameVisitor extends ClassVisitor(Opcodes.ASM9):
         var path: Option[String] = None
@@ -131,14 +145,20 @@ object ProgramHandlingUtil:
       *   The package path if successfully retrieved
       */
     private def getPackagePathFromByteCode(file: File): Option[String] =
-        Try(file.fileInputStream.apply(getPackagePathFromByteCode))
+        Try(file.fileInputStream.apply(readPackagePathFromStream))
             .recover { case e: Throwable =>
                 None
             }
             .getOrElse(None)
   end ClassFile
-  sealed class ClassFile(val file: File, val packagePath: Option[String]):
-    def this(file: File) = this(file, ClassFile.getPackagePathFromByteCode(file))
+
+  sealed class ClassFile(
+    val file: File,
+    val packagePath: Option[String],
+    val sourceArchivePath: Option[String]
+  ):
+    def this(file: File, sourceArchivePath: Option[String]) =
+        this(file, ClassFile.getPackagePathFromByteCode(file), sourceArchivePath)
 
     private val components: Option[Array[String]] = packagePath.map(_.split("/"))
 
@@ -159,7 +179,8 @@ object ProgramHandlingUtil:
               destClass.parent.createDirectories()
               ClassFile(
                 file.copyTo(destClass)(File.CopyOptions(overwrite = true)),
-                packagePath
+                packagePath,
+                sourceArchivePath
               )
             }
             .orElse {
@@ -192,19 +213,25 @@ object ProgramHandlingUtil:
     isArchive: Entry => Boolean,
     recurse: Boolean,
     onlyClasses: Boolean
-  ): List[ClassFile] =
-      File
-          .temporaryDirectory("extract-classes-")
-          .apply(tmpDir =>
-              extractClassesToTmp(
-                src,
-                tmpDir,
-                isArchive,
-                isClass,
-                recurse: Boolean,
-                onlyClasses: Boolean
-              ).iterator
-                  .flatMap(_.copyToPackageLayoutIn(destDir))
-                  .toList
-          )
+  ): (List[ClassFile], Option[String]) =
+    val rootArchivePath: Option[String] =
+        if isArchive(new Entry(src)) then Some(src.pathAsString) else None
+    File
+        .temporaryDirectory("extract-classes-")
+        .apply { tmpDir =>
+          val result = extractClassesToTmp(
+            src,
+            tmpDir,
+            isArchive,
+            isClass,
+            recurse: Boolean,
+            onlyClasses: Boolean,
+            rootArchivePath
+          ).iterator
+              .flatMap(_.copyToPackageLayoutIn(destDir))
+              .toList
+
+          (result, rootArchivePath)
+        }
+  end extractClassesInPackageLayout
 end ProgramHandlingUtil

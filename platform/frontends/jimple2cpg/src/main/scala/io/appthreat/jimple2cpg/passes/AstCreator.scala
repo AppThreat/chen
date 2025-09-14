@@ -7,6 +7,8 @@ import io.appthreat.x2cpg.{Ast, AstCreatorBase, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import org.objectweb.asm.Type
+import org.objectweb.asm.commons.Method
+import scala.util.matching.Regex
 import org.slf4j.LoggerFactory
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import soot.jimple.*
@@ -444,11 +446,9 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       case _: IdentityStmt     => Seq() // Identity statements redefine parameters as locals
       case _: NopStmt          => Seq() // Ignore NOP statements
       case x =>
-          logger.warn(s"Unhandled soot.Unit type ${x.getClass}")
           Seq(astForUnknownStmt(x, None, order))
     unitToAsts.put(statement, stmt)
     stmt
-  end astsForStatement
 
   private def astForBinOpExpr(binOp: BinopExpr, order: Int, parentUnit: soot.Unit): Ast =
     // https://javadoc.io/static/org.soot-oss/soot/4.3.0/soot/jimple/BinopExpr.html
@@ -474,9 +474,6 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       case _: EqExpr   => Operators.equals
       case _: NeExpr   => Operators.notEquals
       case _ =>
-          logger.warn(
-            s"Unhandled binary operator ${binOp.getSymbol} (${binOp.getClass}). This is unexpected behaviour."
-          )
           "<operator>.unknown"
 
     val callNode = NewCall()
@@ -504,7 +501,6 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
             Seq(astForUnaryExpr(Operators.lengthOf, x, x.getOp, order, parentUnit))
         case x: NegExpr => Seq(astForUnaryExpr(Operators.minus, x, x.getOp, order, parentUnit))
         case x =>
-            logger.warn(s"Unhandled soot.Expr type ${x.getClass}")
             Seq()
 
   private def astsForValue(value: soot.Value, order: Int, parentUnit: soot.Unit): Seq[Ast] =
@@ -519,7 +515,6 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         case x: IdentityRef        => Seq(astForIdentityRef(x, order, parentUnit))
         case x: ArrayRef           => Seq(astForArrayRef(x, order, parentUnit))
         case x =>
-            logger.warn(s"Unhandled soot.Value type ${x.getClass}")
             Seq()
 
   private def astForArrayRef(arrRef: ArrayRef, order: Int, parentUnit: soot.Unit): Ast =
@@ -1241,8 +1236,92 @@ end AstCreator
   */
 implicit class JvmStringOpts(s: String):
 
-  /** Parses the string as a ASM Java type descriptor and returns a fully qualified type. Also
-    * converts symbols such as <code>I</code> to <code>int</code>.
+  /** Parses the string as an ASM Java type descriptor (field type) or method descriptor and returns
+    * a human-readable representation. Converts primitive symbols (e.g., <code>I</code>) to keywords
+    * (e.g., <code>int</code>). Converts object descriptors (e.g., <code>Ljava/lang/String;</code>)
+    * to class names (e.g., <code>java.lang.String</code>). Converts array descriptors
+    * appropriately. Attempts to handle method descriptors gracefully.
+    *
     * @return
+    *   A human-readable type/method signature string, or a placeholder if parsing fails.
     */
-  def parseAsJavaType: String = Type.getType(s).getClassName.replaceAll("/", ".")
+  def parseAsJavaType: String =
+    if s == null || s.isEmpty then
+      return "void"
+
+    try
+      val asmType = Type.getType(s)
+      asmType.getSort match
+        case Type.VOID    => "void"
+        case Type.BOOLEAN => "boolean"
+        case Type.CHAR    => "char"
+        case Type.BYTE    => "byte"
+        case Type.SHORT   => "short"
+        case Type.INT     => "int"
+        case Type.FLOAT   => "float"
+        case Type.LONG    => "long"
+        case Type.DOUBLE  => "double"
+        case Type.ARRAY | Type.OBJECT =>
+            asmType.getClassName()
+        case _ =>
+            asmType.getClassName()
+    catch
+      case ae: java.lang.AssertionError =>
+          handleTypeParsingError(s, ae)
+      case iae: java.lang.IllegalArgumentException =>
+          handleTypeParsingError(s, iae)
+      case e: Exception =>
+          s
+    end try
+  end parseAsJavaType
+
+  private def handleTypeParsingError(s: String, error: Throwable): String =
+    error match
+      case _: java.lang.AssertionError =>
+      case _: java.lang.IllegalArgumentException =>
+          ()
+    if s.startsWith("(") then
+      try
+        val method        = Method.getMethod(s)
+        val returnTypeStr = method.getReturnType.getClassName
+        val argTypeStrs   = method.getArgumentTypes.map(_.getClassName)
+        s"$returnTypeStr(${argTypeStrs.mkString(",")})"
+      catch
+        case _: Exception =>
+            try
+              val regexResult = parseMethodDescriptorWithRegex(s)
+              if regexResult != s then return regexResult
+              else
+                return s
+            catch
+              case _: Exception =>
+            s
+    else
+      s
+  end handleTypeParsingError
+
+  private def parseMethodDescriptorWithRegex(desc: String): String =
+    val methodDescRegex: Regex = """^\((.*?)\)(.+)$""".r
+    val typeRegex: Regex       = """(\[*(?:L[^;]+;|[ZBCSIJFDV]))""".r
+    desc match
+      case methodDescRegex(paramsPart, returnPart) =>
+          try
+            val paramTypes = typeRegex.findAllIn(paramsPart).map { t =>
+                try
+                  Type.getType(t).getClassName
+                catch
+                  case _: Exception => t
+            }.toList
+            val returnType =
+                try
+                  Type.getType(returnPart).getClassName
+                catch
+                  case _: Exception => returnPart
+            s"$returnType(${paramTypes.mkString(",")})"
+          catch
+            case _: Exception => desc
+      case _ =>
+          desc
+    end match
+  end parseMethodDescriptorWithRegex
+end JvmStringOpts
