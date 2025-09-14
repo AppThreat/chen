@@ -417,51 +417,11 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         val code         = s"$typeFullName $name"
         Ast(NewLocal().name(name).code(code).typeFullName(typeFullName).order(order))
     }
-
-    val processedAsts = new ListBuffer[Ast]()
-    var currentOrder  = 1 + locals.size
-
-    val stmtAsts = withOrder(body.getUnits.asScala.filterNot(isIgnoredUnit)) { (x, order) =>
-        astsForStatement(x, order)
-    }.flatten
-
-    val stmtIterator = stmtAsts.iterator
-    while stmtIterator.hasNext do
-      val currentStmtAstSeq = stmtIterator.next()
-      val correspondingUnitOpt = unitToAsts.find { case (unit, astSeq) =>
-          astSeq eq currentStmtAstSeq
-      }.map(_._1)
-
-      correspondingUnitOpt match
-        case Some(unit) if tryBlockInfo.contains(unit) =>
-            val (endUnit, exceptionTypeFullName) = tryBlockInfo(unit)
-            val tryCode                          = "try"
-            val tryControlStructure = NewControlStructure()
-                .controlStructureType(ControlStructureTypes.TRY)
-                .code(tryCode)
-                .order(currentOrder)
-                .argumentIndex(currentOrder)
-                .lineNumber(line(unit))
-                .columnNumber(column(unit))
-
-            val tryAst = Ast(tryControlStructure)
-            processedAsts += tryAst
-            currentOrder += 1
-
-            processedAsts += currentStmtAstSeq
-            currentOrder += 1
-
-        case _ =>
-            processedAsts += currentStmtAstSeq
-            currentOrder += 1
-      end match
-    end while
-
-    val allBodyChildren = locals ++ processedAsts
-
     Ast(block)
-        .withChildren(allBodyChildren)
-  end astForMethodBody
+        .withChildren(locals)
+        .withChildren(withOrder(body.getUnits.asScala.filterNot(isIgnoredUnit)) { (x, order) =>
+            astsForStatement(x, order + locals.size)
+        }.flatten)
 
   private def isIgnoredUnit(unit: soot.Unit): Boolean =
       unit match
