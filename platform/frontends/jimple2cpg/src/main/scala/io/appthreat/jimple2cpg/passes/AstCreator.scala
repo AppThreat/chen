@@ -29,6 +29,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   private val logger         = LoggerFactory.getLogger(classOf[AstCreationPass])
   private val unitToAsts     = mutable.HashMap[soot.Unit, Seq[Ast]]()
   private val controlTargets = mutable.HashMap[Seq[Ast], soot.Unit]()
+  private val tryBlockInfo   = mutable.HashMap[soot.Unit, (soot.Unit, String)]()
   // There are many, but the popular ones should do https://en.wikipedia.org/wiki/List_of_JVM_languages
   private val JVM_LANGS = HashSet("scala", "clojure", "groovy", "kotlin", "jython", "jruby")
 
@@ -192,6 +193,15 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         val methodBody = Try(methodDeclaration.getActiveBody) match
           case Failure(_)    => methodDeclaration.retrieveActiveBody()
           case Success(body) => body
+        tryBlockInfo.clear()
+        methodBody.getTraps.asScala.foreach { trap =>
+          val beginUnit             = trap.getBeginUnit
+          val endUnit               = trap.getEndUnit
+          val exceptionType         = trap.getException
+          val exceptionTypeFullName = registerType(exceptionType.getType.toQuotedString)
+          tryBlockInfo.put(beginUnit, (endUnit, exceptionTypeFullName))
+        }
+
         val parameterAsts =
             Seq(createThisNode(methodDeclaration, NewMethodParameterIn())) ++ withOrder(
               methodBody.getParameterLocals
@@ -246,9 +256,9 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
                 )
             case None =>
       })
-      // Clear these maps
       controlTargets.clear()
       unitToAsts.clear()
+      tryBlockInfo.clear()
     end try
   end astForMethod
 
@@ -398,7 +408,6 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   private def astForMethodBody(body: Body, order: Int): Ast =
     val block        = NewBlock().order(order).lineNumber(line(body)).columnNumber(column(body))
     val jimpleParams = body.getParameterLocals.asScala.toList
-    // Don't let parameters also become locals (avoiding duplication)
     val jimpleLocals = body.getLocals.asScala.filterNot(l =>
         jimpleParams.contains(l) || l.getName == "this"
     ).toList
@@ -408,11 +417,51 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         val code         = s"$typeFullName $name"
         Ast(NewLocal().name(name).code(code).typeFullName(typeFullName).order(order))
     }
+
+    val processedAsts = new ListBuffer[Ast]()
+    var currentOrder  = 1 + locals.size
+
+    val stmtAsts = withOrder(body.getUnits.asScala.filterNot(isIgnoredUnit)) { (x, order) =>
+        astsForStatement(x, order)
+    }.flatten
+
+    val stmtIterator = stmtAsts.iterator
+    while stmtIterator.hasNext do
+      val currentStmtAstSeq = stmtIterator.next()
+      val correspondingUnitOpt = unitToAsts.find { case (unit, astSeq) =>
+          astSeq eq currentStmtAstSeq
+      }.map(_._1)
+
+      correspondingUnitOpt match
+        case Some(unit) if tryBlockInfo.contains(unit) =>
+            val (endUnit, exceptionTypeFullName) = tryBlockInfo(unit)
+            val tryCode                          = "try"
+            val tryControlStructure = NewControlStructure()
+                .controlStructureType(ControlStructureTypes.TRY)
+                .code(tryCode)
+                .order(currentOrder)
+                .argumentIndex(currentOrder)
+                .lineNumber(line(unit))
+                .columnNumber(column(unit))
+
+            val tryAst = Ast(tryControlStructure)
+            processedAsts += tryAst
+            currentOrder += 1
+
+            processedAsts += currentStmtAstSeq
+            currentOrder += 1
+
+        case _ =>
+            processedAsts += currentStmtAstSeq
+            currentOrder += 1
+      end match
+    end while
+
+    val allBodyChildren = locals ++ processedAsts
+
     Ast(block)
-        .withChildren(locals)
-        .withChildren(withOrder(body.getUnits.asScala.filterNot(isIgnoredUnit)) { (x, order) =>
-            astsForStatement(x, order + locals.size)
-        }.flatten)
+        .withChildren(allBodyChildren)
+  end astForMethodBody
 
   private def isIgnoredUnit(unit: soot.Unit): Boolean =
       unit match
