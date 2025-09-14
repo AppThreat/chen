@@ -10,7 +10,7 @@ dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->t
 libraryDependencies ++= Seq(
   "io.appthreat"              %% "cpg2" % Versions.cpg,
   "com.lihaoyi"               %% "upickle"           % Versions.upickle,
-  "com.typesafe"               % "config"            % "1.4.4",
+  "com.typesafe"               % "config"            % "1.4.5",
   "com.michaelpollmeier"       % "versionsort"       % "1.0.17",
   "org.scalatest"             %% "scalatest"         % Versions.scalatest % Test
 )
