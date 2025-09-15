@@ -1,12 +1,7 @@
 package io.appthreat.jimple2cpg
 
 import better.files.File
-import io.appthreat.jimple2cpg.passes.{
-    AstCreationPass,
-    ConfigFileCreationPass,
-    SootAstCreationPass
-//    ReflectionTypeInferencePass
-}
+import io.appthreat.jimple2cpg.passes.{AstCreationPass, ConfigFileCreationPass, SootAstCreationPass}
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -59,7 +54,7 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
     onlyClasses: Boolean
   ): List[ClassFile] =
     val archiveFileExtensions = Set(".jar", ".war", ".zip", ".apkm", ".xapk")
-    extractClassesInPackageLayout(
+    val (result, rootArchivePath) = extractClassesInPackageLayout(
       src,
       tmpDir,
       isClass = e => e.extension.contains(".class"),
@@ -67,6 +62,7 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
       recurse,
       onlyClasses
     )
+    result
 
   /** Extract all class files found, place them in their package layout and load them into soot.
     *
@@ -134,7 +130,6 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
         .withRegisteredTypes(global.usedTypes.keys().asScala.toList, cpg)
         .createAndApply()
     new ConfigFileCreationPass(cpg).createAndApply()
-    // new ReflectionTypeInferencePass(cpg).createAndApply()
   end cpgApplyPasses
 
   override def createCpg(config: Config): Try[Cpg] =
