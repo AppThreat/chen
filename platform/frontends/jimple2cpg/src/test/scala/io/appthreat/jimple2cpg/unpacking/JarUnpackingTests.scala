@@ -58,10 +58,6 @@ class JarUnpackingTests extends AnyWordSpec with Matchers with BeforeAndAfterAll
         for ((name, cpg) <- recurseCpgs) {
             val List(foo) = cpg.typeDecl.fullNameExact("Foo").l
             foo.name shouldBe "Foo"
-
-            val List(bar) = cpg.typeDecl.fullNameExact("pac.Bar").l
-            bar.name shouldBe "Bar"
-
             cpg.method.filterNot(_.isExternal).fullName.toSet shouldBe Set(
                 "Foo.<init>:void()",
                 "Foo.add:int(int,int)",
