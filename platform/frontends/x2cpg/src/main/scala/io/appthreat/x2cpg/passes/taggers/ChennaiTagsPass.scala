@@ -9,222 +9,304 @@ import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
 import java.util.regex.Pattern
+import scala.util.{Try, Using}
 
-/** Creates tags on any node
-  */
+/** Creates tags on any node based on framework patterns and configuration */
 class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
 
-  val language: String             = atom.metaData.language.head
   private val FRAMEWORK_ROUTE      = "framework-route"
   private val FRAMEWORK_INPUT      = "framework-input"
   private val FRAMEWORK_OUTPUT     = "framework-output"
   private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
+  private val RE_CHARS             = "[](){}*+&|?.,\\$"
 
-  private val PYTHON_ROUTES_CALL_REGEXES =
-      Array(
-        s"django$EscapedFileSeparator(conf$EscapedFileSeparator)?urls.py:<module>.(path|re_path|url).*"
-            .r,
-        ".*(route|web\\.|add_resource).*".r
-      )
-
-  private def C_ROUTES_CALL_REGEXES = Array(
-    "Routes::(Post|Get|Delete|Head|Options|Put).*",
-    "API_CALL",
-    "API_CALL_ASYNC",
-    "ENDPOINT",
-    "ENDPOINT_ASYNC",
-    "ENDPOINT_INTERCEPTOR",
-    "ENDPOINT_INTERCEPTOR_ASYNC",
-    "registerHandler",
-    "PATH_ADD",
-    "ADD_METHOD_TO",
-    "ADD_METHOD_VIA_REGEX",
-    "WS_PATH_ADD",
-    "svr\\.(Post|Get|Delete|Head|Options|Put)"
+  // Language-specific route patterns
+  private val PYTHON_ROUTES_CALL_REGEXES = Array(
+    s"django$EscapedFileSeparator(conf$EscapedFileSeparator)?urls.py:<module>.(path|re_path|url).*".r,
+    ".*(route|web\\.|add_resource).*".r
   )
+
   private val PYTHON_ROUTES_DECORATORS_REGEXES = Array(
     ".*(route|endpoint|_request|require_http_methods|require_GET|require_POST|require_safe|_required|api\\.doc|api\\.response|api\\.errorhandler)\\(.*",
     ".*def\\s(get|post|put)\\(.*"
   )
+
   private val PHP_ROUTES_METHODS_REGEXES = Array(
     ".*(router|routes|r|app|map)->(addRoute|add|before|mount|get|post|put|delete|head|option).*",
     ".*(Router)::(scope|connect|get|post|put|delete|head|option).*"
   )
-  private val HTTP_METHODS_REGEX = ".*(request|session)\\.(args|get|post|put|form).*"
 
-  private def containsRegex(str: String) =
-    val reChars = "[](){}*+&|?.,\\$"
-    str.exists(reChars.contains(_))
+  private val HTTP_METHODS_REGEX  = ".*(request|session)\\.(args|get|post|put|form).*"
+  private val CHENNAI_CONFIG_FILE = "chennai.json"
 
+  private def language: String = atom.metaData.language.headOption.getOrElse("")
+
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+    tagFrameworkRoutes(dstGraph)
+    processChennaiConfig(dstGraph)
+
+  private def tagFrameworkRoutes(dstGraph: DiffGraphBuilder): Unit =
+      language match
+        case lang if lang == Languages.PYTHON || lang == Languages.PYTHONSRC =>
+            tagPythonRoutes(dstGraph)
+        case lang if lang == Languages.NEWC || lang == Languages.C =>
+            tagCRoutes(dstGraph)
+        case lang if lang == Languages.PHP =>
+            tagPhpRoutes(dstGraph)
+        case lang if lang == Languages.RUBYSRC =>
+            tagRubyRoutes(dstGraph)
+        case _ => // No specific routing for this language
   private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
-      C_ROUTES_CALL_REGEXES.foreach { r =>
-        atom.method.fullName(r).parameter.newTagNode(FRAMEWORK_INPUT).store()(
-          dstGraph
-        )
-        atom.call
-            .where(_.methodFullName(r))
-            .argument
-            .isLiteral
-            .newTagNode(FRAMEWORK_ROUTE)
-            .store()(dstGraph)
-      }
+    val cRoutePatterns = Array(
+      "Routes::(Post|Get|Delete|Head|Options|Put).*",
+      "API_CALL",
+      "API_CALL_ASYNC",
+      "ENDPOINT",
+      "ENDPOINT_ASYNC",
+      "ENDPOINT_INTERCEPTOR",
+      "ENDPOINT_INTERCEPTOR_ASYNC",
+      "registerHandler",
+      "PATH_ADD",
+      "ADD_METHOD_TO",
+      "ADD_METHOD_VIA_REGEX",
+      "WS_PATH_ADD",
+      "svr\\.(Post|Get|Delete|Head|Options|Put)"
+    )
+
+    cRoutePatterns.foreach { pattern =>
+      atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+      atom.call
+          .where(_.methodFullName(pattern))
+          .argument
+          .isLiteral
+          .newTagNode(FRAMEWORK_ROUTE)
+          .store()(dstGraph)
+    }
+  end tagCRoutes
+
   private def tagPythonRoutes(dstGraph: DiffGraphBuilder): Unit =
-    PYTHON_ROUTES_CALL_REGEXES.foreach { r =>
+    // Tag route calls
+    PYTHON_ROUTES_CALL_REGEXES.foreach { regex =>
         atom.call
-            .where(_.methodFullName(r.toString()))
+            .where(_.methodFullName(regex.toString()))
             .argument
             .isLiteral
             .newTagNode(FRAMEWORK_ROUTE)
             .store()(dstGraph)
     }
-    PYTHON_ROUTES_DECORATORS_REGEXES.foreach { r =>
-      def decoratedMethods = atom.methodRef
-          .where(_.inCall.code(r).argument)
+
+    // Tag decorated methods
+    PYTHON_ROUTES_DECORATORS_REGEXES.foreach { pattern =>
+      val decoratedMethods = atom.methodRef
+          .where(_.inCall.code(pattern).argument)
           ._refOut
           .collectAll[Method]
+
       decoratedMethods.call.assignment
           .code(HTTP_METHODS_REGEX)
           .argument
           .isIdentifier
           .newTagNode(FRAMEWORK_INPUT)
           .store()(dstGraph)
-      decoratedMethods
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
-      decoratedMethods.parameter
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
+
+      decoratedMethods.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+      decoratedMethods.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
     }
-    atom.file.name(".*views.py.*").method.parameter.name("request").method.newTagNode(
-      FRAMEWORK_INPUT
-    ).store()(dstGraph)
-    atom.file.name(".*controllers.*.py.*").method.name(
-      "get|post|put|delete|head|option"
-    ).parameter.filterNot(_.name == "self").newTagNode(
-      FRAMEWORK_INPUT
-    ).store()(dstGraph)
-    atom.file.name(".*controllers.*.py.*").method.name(
-      "get|post|put|delete|head|option"
-    ).methodReturn.newTagNode(
-      FRAMEWORK_OUTPUT
-    ).store()(dstGraph)
+
+    // Django views
+    atom.file.name(".*views.py.*")
+        .method
+        .parameter
+        .name("request")
+        .method
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(dstGraph)
+
+    // Controller methods
+    val controllerMethods = atom.file.name(".*controllers.*.py.*")
+        .method
+        .name("get|post|put|delete|head|option")
+
+    controllerMethods
+        .parameter
+        .filterNot(_.name == "self")
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(dstGraph)
+
+    controllerMethods
+        .methodReturn
+        .newTagNode(FRAMEWORK_OUTPUT)
+        .store()(dstGraph)
   end tagPythonRoutes
+
   private def tagPhpRoutes(dstGraph: DiffGraphBuilder): Unit =
-      PHP_ROUTES_METHODS_REGEXES.foreach { r =>
-        atom.method.fullName(r).parameter.newTagNode(FRAMEWORK_INPUT).store()(
-          dstGraph
-        )
-        atom.call.where(_.methodFullName(r)).argument.isLiteral.newTagNode(
-          FRAMEWORK_ROUTE
-        ).store()(dstGraph)
+      PHP_ROUTES_METHODS_REGEXES.foreach { pattern =>
+        atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+        atom.call
+            .where(_.methodFullName(pattern))
+            .argument
+            .isLiteral
+            .newTagNode(FRAMEWORK_ROUTE)
+            .store()(dstGraph)
       }
-  end tagPhpRoutes
+
   private def tagRubyRoutes(dstGraph: DiffGraphBuilder): Unit =
-    // rails
+    // Rails routes
     val railsRoutePrefix = ".*(get|post|put|delete|head|option|resources|namespace)\\s('|\").*"
-    atom.method.where(
-      _.filename("config/routes.rb").code(
-        railsRoutePrefix
-      )
-    ).newTagNode(
-      FRAMEWORK_ROUTE
-    ).store()(dstGraph)
-    atom.method.where(
-      _.filename("config/routes.rb").code(
-        railsRoutePrefix
-      )
-    ).parameter.newTagNode(FRAMEWORK_INPUT).store()(
-      dstGraph
+
+    val railsRoutes = atom.method.where(
+      _.filename("config/routes.rb").code(railsRoutePrefix)
     )
-    atom.method.filename(".*controller.rb.*").parameter.newTagNode(FRAMEWORK_INPUT).store()(
-      dstGraph
-    )
-    atom.method.filename(".*controller.rb.*").methodReturn.newTagNode(
-      FRAMEWORK_OUTPUT
-    ).store()(dstGraph)
-    // sinatra
+
+    railsRoutes.newTagNode(FRAMEWORK_ROUTE).store()(dstGraph)
+    railsRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+
+    // Rails controllers
+    val railsControllers = atom.method.filename(".*controller.rb.*")
+    railsControllers.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+    railsControllers.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(dstGraph)
+
+    // Sinatra routes
     val sinatraRoutePrefix =
         "(app\\.namespace|app\\.)?(get|post|delete|head|options|put)\\s('|\").*"
-    atom.method.code(sinatraRoutePrefix).newTagNode(
-      FRAMEWORK_ROUTE
-    ).store()(dstGraph)
-    atom.method.code(sinatraRoutePrefix).parameter
-        .newTagNode(FRAMEWORK_INPUT).store()(
-          dstGraph
-        )
-    atom.method.code(sinatraRoutePrefix).methodReturn.newTagNode(
-      FRAMEWORK_OUTPUT
-    ).store()(dstGraph)
+
+    val sinatraRoutes = atom.method.code(sinatraRoutePrefix)
+    sinatraRoutes.newTagNode(FRAMEWORK_ROUTE).store()(dstGraph)
+    sinatraRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+    sinatraRoutes.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(dstGraph)
   end tagRubyRoutes
-  override def run(dstGraph: DiffGraphBuilder): Unit =
-    if language == Languages.PYTHON || language == Languages.PYTHONSRC then
-      tagPythonRoutes(dstGraph)
-    if language == Languages.NEWC || language == Languages.C then
-      tagCRoutes(dstGraph)
-    if language == Languages.PHP then tagPhpRoutes(dstGraph)
-    if language == Languages.RUBYSRC then tagRubyRoutes(dstGraph)
-    atom.configFile("chennai.json").content.foreach { cdxData =>
-      val ctagsJson       = parse(cdxData).getOrElse(Json.Null)
-      val cursor: HCursor = ctagsJson.hcursor
-      val tags = cursor.downField("tags").focus.flatMap(_.asArray).getOrElse(Vector.empty)
-      tags.foreach { comp =>
-        val tagName = comp.hcursor.downField("name").as[String].getOrElse("")
-        val tagParams = comp.hcursor.downField("parameters").focus.flatMap(
-          _.asArray
-        ).getOrElse(Vector.empty)
-        val tagMethods = comp.hcursor.downField("methods").focus.flatMap(
-          _.asArray
-        ).getOrElse(Vector.empty)
-        val tagTypes =
-            comp.hcursor.downField("types").focus.flatMap(_.asArray).getOrElse(Vector.empty)
-        val tagFiles =
-            comp.hcursor.downField("files").focus.flatMap(_.asArray).getOrElse(Vector.empty)
-        tagParams.foreach { paramName =>
-          val pn = paramName.asString.getOrElse("")
-          if pn.nonEmpty then
-            atom.method.parameter.typeFullNameExact(pn).newTagNode(tagName).store()(
-              dstGraph
-            )
-            if !containsRegex(pn) then
-              atom.method.parameter.typeFullName(
-                s".*${Pattern.quote(pn)}.*"
-              ).newTagNode(tagName).store()(dstGraph)
-        }
-        tagMethods.foreach { methodName =>
-          val mn = methodName.asString.getOrElse("")
-          if mn.nonEmpty then
-            atom.method.fullNameExact(mn).newTagNode(tagName).store()(dstGraph)
-            if !containsRegex(mn) then
-              atom.method.fullName(s".*${Pattern.quote(mn)}.*").newTagNode(
-                tagName
-              ).store()(dstGraph)
-        }
-        tagTypes.foreach { typeName =>
-          val tn = typeName.asString.getOrElse("")
-          if tn.nonEmpty then
-            atom.method.parameter.typeFullNameExact(tn).newTagNode(tagName).store()(
-              dstGraph
-            )
-            if !containsRegex(tn) then
-              atom.method.parameter.typeFullName(
-                s".*${Pattern.quote(tn)}.*"
-              ).newTagNode(tagName).store()(dstGraph)
-            atom.call.typeFullNameExact(tn).newTagNode(tagName).store()(dstGraph)
-            if !tn.contains("[") && !tn.contains("*") then
-              atom.call.typeFullName(s".*${Pattern.quote(tn)}.*").newTagNode(
-                tagName
-              ).store()(dstGraph)
-        }
-        tagFiles.foreach { fileName =>
-          val fn = fileName.asString.getOrElse("")
-          if fn.nonEmpty then
-            atom.file.nameExact(fn).newTagNode(tagName).store()(dstGraph)
-            if !containsRegex(fn) then
-              atom.file.name(s".*${Pattern.quote(fn)}.*").newTagNode(tagName).store()(
-                dstGraph
-              )
-        }
+
+  private def processChennaiConfig(dstGraph: DiffGraphBuilder): Unit =
+      atom.configFile(CHENNAI_CONFIG_FILE).content.foreach { configData =>
+          parse(configData) match
+            case Right(json) =>
+                val tags = json.hcursor
+                    .downField("tags")
+                    .focus
+                    .flatMap(_.asArray)
+                    .getOrElse(Vector.empty)
+
+                tags.foreach(processTag(_, dstGraph))
+
+            case Left(error) =>
+                System.err.println(s"Failed to parse Chennai config: $error")
       }
+
+  private def processTag(tagJson: Json, dstGraph: DiffGraphBuilder): Unit =
+    val cursor  = tagJson.hcursor
+    val tagName = cursor.downField("name").as[String].getOrElse("")
+
+    if tagName.nonEmpty then
+      processTagParameters(cursor, tagName, dstGraph)
+      processTagMethods(cursor, tagName, dstGraph)
+      processTagTypes(cursor, tagName, dstGraph)
+      processTagFiles(cursor, tagName, dstGraph)
+
+  private def processTagParameters(
+    cursor: HCursor,
+    tagName: String,
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+    val parameters = cursor
+        .downField("parameters")
+        .focus
+        .flatMap(_.asArray)
+        .getOrElse(Vector.empty)
+
+    parameters.foreach { param =>
+        param.asString.foreach { paramName =>
+            if paramName.nonEmpty then
+              atom.method.parameter.typeFullNameExact(paramName)
+                  .newTagNode(tagName)
+                  .store()(dstGraph)
+
+              if !containsRegex(paramName) then
+                atom.method.parameter.typeFullName(s".*${Pattern.quote(paramName)}.*")
+                    .newTagNode(tagName)
+                    .store()(dstGraph)
+        }
     }
-  end run
+  end processTagParameters
+
+  private def processTagMethods(
+    cursor: HCursor,
+    tagName: String,
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+    val methods = cursor
+        .downField("methods")
+        .focus
+        .flatMap(_.asArray)
+        .getOrElse(Vector.empty)
+
+    methods.foreach { method =>
+        method.asString.foreach { methodName =>
+            if methodName.nonEmpty then
+              atom.method.fullNameExact(methodName)
+                  .newTagNode(tagName)
+                  .store()(dstGraph)
+
+              if !containsRegex(methodName) then
+                atom.method.fullName(s".*${Pattern.quote(methodName)}.*")
+                    .newTagNode(tagName)
+                    .store()(dstGraph)
+        }
+    }
+  end processTagMethods
+
+  private def processTagTypes(cursor: HCursor, tagName: String, dstGraph: DiffGraphBuilder): Unit =
+    val types = cursor
+        .downField("types")
+        .focus
+        .flatMap(_.asArray)
+        .getOrElse(Vector.empty)
+
+    types.foreach { typ =>
+        typ.asString.foreach { typeName =>
+            if typeName.nonEmpty then
+              atom.method.parameter.typeFullNameExact(typeName)
+                  .newTagNode(tagName)
+                  .store()(dstGraph)
+
+              if !containsRegex(typeName) then
+                atom.method.parameter.typeFullName(s".*${Pattern.quote(typeName)}.*")
+                    .newTagNode(tagName)
+                    .store()(dstGraph)
+
+              atom.call.typeFullNameExact(typeName)
+                  .newTagNode(tagName)
+                  .store()(dstGraph)
+
+              if !typeName.contains("[") && !typeName.contains("*") then
+                atom.call.typeFullName(s".*${Pattern.quote(typeName)}.*")
+                    .newTagNode(tagName)
+                    .store()(dstGraph)
+        }
+    }
+  end processTagTypes
+
+  private def processTagFiles(cursor: HCursor, tagName: String, dstGraph: DiffGraphBuilder): Unit =
+    val files = cursor
+        .downField("files")
+        .focus
+        .flatMap(_.asArray)
+        .getOrElse(Vector.empty)
+
+    files.foreach { file =>
+        file.asString.foreach { fileName =>
+            if fileName.nonEmpty then
+              atom.file.nameExact(fileName)
+                  .newTagNode(tagName)
+                  .store()(dstGraph)
+
+              if !containsRegex(fileName) then
+                atom.file.name(s".*${Pattern.quote(fileName)}.*")
+                    .newTagNode(tagName)
+                    .store()(dstGraph)
+        }
+    }
+  end processTagFiles
+
+  private def containsRegex(str: String): Boolean =
+      str.exists(RE_CHARS.contains)
 end ChennaiTagsPass
