@@ -12,9 +12,9 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
         |<template>
         |<img v-for="image in images" :src="image.url" :attr="image.name" v-bind:alt="image.description" />
         |</template>""".stripMargin,
-      "test.vue"
+      "foo.vue"
     ) { cpg =>
-      cpg.file.name.l shouldBe List("test.vue")
+      cpg.file.name.l shouldBe List("foo.vue")
       cpg.templateDom.nameExact("JSXAttribute").code.l shouldBe List(
         "v-for=\"image in images\"",
         ":src=\"image.url\"",
@@ -67,9 +67,9 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
         |</style>
         |
         |""".stripMargin,
-      "test.vue"
+      "foo.vue"
     ) { cpg =>
-      cpg.file.name.l shouldBe List("test.vue")
+      cpg.file.name.l shouldBe List("foo.vue")
       cpg.call.size shouldBe 0
       cpg.identifier.size shouldBe 0
       templateDomName(cpg) shouldBe Set(
@@ -165,14 +165,14 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
         |</style>
         |
         |""".stripMargin,
-      "test.vue"
+      "foo.vue"
     ) { cpg =>
-      cpg.file.name.l shouldBe List("test.vue")
+      cpg.file.name.l shouldBe List("foo.vue")
       cpg.assignment.code.l shouldBe List(
         "var Component = require(\"vue-property-decorator\").Component",
         "var Prop = require(\"vue-property-decorator\").Prop",
         "var Vue = require(\"vue-property-decorator\").Vue",
-        "HelloWorld = test.vue::program:HelloWorld:<init>",
+        "HelloWorld = foo.vue::program:HelloWorld:<init>",
         "exports[\"default\"] = HelloWorld"
       )
       cpg.local.code.l shouldBe List("Component", "Prop", "Vue", "HelloWorld", "msg")
@@ -230,6 +230,146 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
       )
     }
 
+      "handle Vue 3 Composition API with script setup" in AstFixture(
+          """
+            |<template>
+            |  <div>
+            |    <h1>{{ title }}</h1>
+            |    <button @click="increment">Count: {{ count }}</button>
+            |    <input v-model="inputValue" :placeholder="placeholderText" />
+            |    <div v-if="isVisible">
+            |      <p v-for="item in items" :key="item.id">{{ item.name }}</p>
+            |    </div>
+            |  </div>
+            |</template>
+            |
+            |<script setup lang="ts">
+            |import { ref, computed, reactive } from 'vue'
+            |import MyComponent from './MyComponent.vue'
+            |
+            |// Reactive references
+            |const count = ref(0)
+            |const title = ref('Hello Vue 3')
+            |const inputValue = ref('')
+            |
+            |// Reactive object
+            |const state = reactive({
+            |  isVisible: true,
+            |  items: [
+            |    { id: 1, name: 'Item 1' },
+            |    { id: 2, name: 'Item 2' }
+            |  ]
+            |})
+            |
+            |// Computed property
+            |const placeholderText = computed(() => `Enter text for ${title.value}`)
+            |
+            |// Methods
+            |const increment = () => {
+            |  count.value++
+            |}
+            |
+            |// Props
+            |const props = defineProps({
+            |  initialCount: {
+            |    type: Number,
+            |    default: 0
+            |  }
+            |})
+            |
+            |// Emits
+            |const emit = defineEmits(['update'])
+            |</script>
+            |""".stripMargin,
+          "CompositionAPI.vue"
+      ) { cpg =>
+          cpg.file.name.l shouldBe List("CompositionAPI.vue")
+
+          // Test imports
+          cpg.imports.size shouldBe 4
+          cpg.imports.importedEntity.l should contain("vue:ref")
+          cpg.imports.importedEntity.l should contain("vue:computed")
+          cpg.imports.importedEntity.l should contain("./MyComponent.vue:MyComponent")
+
+          // Test reactive variables
+          cpg.local.name.l should contain allOf ("count", "title", "inputValue", "state")
+
+          // Test template structure
+          templateDomName(cpg) shouldBe Set(
+              "JSXElement",
+              "JSXExpressionContainer",
+              "JSXOpeningElement",
+              "JSXAttribute",
+              "JSXClosingElement",
+              "JSXText"
+          )
+
+          // Test Vue directives
+          cpg.templateDom.nameExact("JSXAttribute").code.l should contain allOf (
+              "click=\"increment\"",
+              "v-model=\"inputValue\"",
+              ":placeholder=\"placeholderText\"",
+              "v-if=\"isVisible\"",
+              "v-for=\"item in items\"",
+              ":key=\"item.id\""
+          )
+      }
+
+      "handle complex nested templates with conditional rendering" in AstFixture(
+          """
+            |<template>
+            |  <div>
+            |    <div v-if="user">
+            |      <h1>Welcome, {{ user.name }}!</h1>
+            |      <div v-if="user.isAdmin">
+            |        <p>Admin panel</p>
+            |        <ul v-else-if="user.isModerator">
+            |          <li>Moderator tools</li>
+            |        </ul>
+            |        <div v-else>
+            |          <p>User dashboard</p>
+            |        </div>
+            |      </div>
+            |    </div>
+            |    <div v-else-if="loading">
+            |      <p>Loading...</p>
+            |    </div>
+            |    <div v-else>
+            |      <button @click="login">Login</button>
+            |    </div>
+            |  </div>
+            |</template>
+            |
+            |<script>
+            |export default {
+            |  data() {
+            |    return {
+            |      user: null,
+            |      loading: false
+            |    }
+            |  },
+            |  methods: {
+            |    login() {
+            |      // Login logic
+            |    }
+            |  }
+            |}
+            |</script>
+            |""".stripMargin,
+          "ConditionalRendering.vue"
+      ) { cpg =>
+          cpg.file.name.l shouldBe List("ConditionalRendering.vue")
+
+          // Test nested conditional rendering
+          cpg.templateDom.nameExact("JSXAttribute").code.l should contain allOf (
+              "v-if=\"user\"",
+              "v-if=\"user.isAdmin\"",
+              "v-else-if=\"user.isModerator\"",
+              "v-else",
+              "v-else-if=\"loading\"",
+              "click=\"login\""
+          )
+      }
   }
 
 }
