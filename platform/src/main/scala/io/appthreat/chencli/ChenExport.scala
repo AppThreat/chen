@@ -201,7 +201,7 @@ object ChenExport:
     fileExtension: String,
     windowsFilenameDeduplicationHelper: mutable.Set[String]
   ): String =
-    val sanitizedMethodName = methodName.replaceAll("[^a-zA-Z0-9-_\\.]", "_")
+    val sanitizedMethodName = methodName.replaceAll("[^a-zA-Z0-9-_.]", "_")
     val sanitizedFilename =
         if scala.util.Properties.isWin then
           // windows has some quirks in it's file system, e.g. we need to ensure paths aren't too long - so we're using a

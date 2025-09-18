@@ -3,7 +3,7 @@ import java.net.URI
 import java.nio.file.{Files, Path, Paths}
 
 object DownloadHelper {
-  val LocalStorageDir = Paths.get(".local/source-urls")
+  val LocalStorageDir: Path = Paths.get(".local/source-urls")
 
   /** Downloads the remote file from the given url if either
     * - the localFile is not available, 

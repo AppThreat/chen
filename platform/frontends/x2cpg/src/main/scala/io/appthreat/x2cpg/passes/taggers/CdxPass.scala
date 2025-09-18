@@ -33,7 +33,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
 
                 components.foreach(processComponent(_, donePkgs, dstGraph))
             case Left(error) =>
-                System.err.println(s"Failed to parse CDX JSON: $error")
+                System.err.println(s"Failed to parse cdx json: $error")
       }
 
   private def processComponent(

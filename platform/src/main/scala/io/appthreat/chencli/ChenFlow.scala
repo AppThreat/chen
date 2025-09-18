@@ -20,7 +20,7 @@ case class FlowConfig(
 )
 
 object ChenFlow:
-  def main(args: Array[String]) =
+  def main(args: Array[String]): Unit =
       parseConfig(args).foreach { config =>
         def debugOut(msg: String): Unit =
             if config.verbose then

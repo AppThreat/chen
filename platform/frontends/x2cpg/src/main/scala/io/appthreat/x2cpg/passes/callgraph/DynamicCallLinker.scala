@@ -57,7 +57,7 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
     // ValidM maps class C and method name N to the set of
     // func ptrs implementing N for C and its subclasses
     for
-      typeDecl <- cpg.typeDecl;
+      typeDecl <- cpg.typeDecl
       method   <- typeDecl._methodViaAstOut
     do
       val methodName = method.fullName

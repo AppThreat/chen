@@ -1,7 +1,7 @@
-import sbt.{IO, URL}
+import sbt.IO
+
 import java.io.File
-import java.net.URI
-import java.net.URLEncoder
+import java.net.{URI, URLEncoder}
 
 object SimpleCache {
   val LocalCacheDir = ".local"
