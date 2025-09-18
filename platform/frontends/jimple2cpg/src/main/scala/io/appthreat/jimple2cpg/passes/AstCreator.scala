@@ -1262,9 +1262,9 @@ implicit class JvmStringOpts(s: String):
         case Type.LONG    => "long"
         case Type.DOUBLE  => "double"
         case Type.ARRAY | Type.OBJECT =>
-            asmType.getClassName()
+            asmType.getClassName
         case _ =>
-            asmType.getClassName()
+            asmType.getClassName
     catch
       case ae: java.lang.AssertionError =>
           handleTypeParsingError(s, ae)

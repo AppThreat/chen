@@ -20,8 +20,6 @@ object AstGenRunner:
 
   private val TypeDefinitionFileExtensions = List(".t.ts", ".d.ts")
 
-  private val MinifiedPathRegex: Regex = ".*([.-]min\\..*js|bundle\\.js)".r
-
   private val IgnoredTestsRegex: Seq[Regex] =
       List(
         ".*cypress\\.json".r,
