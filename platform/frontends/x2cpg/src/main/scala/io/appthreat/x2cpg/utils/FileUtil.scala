@@ -3,6 +3,7 @@ package io.appthreat.x2cpg.utils
 import java.io.{BufferedOutputStream, FileNotFoundException, IOException, InputStream, OutputStream}
 import java.nio.file.{
     FileAlreadyExistsException,
+    FileVisitResult,
     Files,
     LinkOption,
     NoSuchFileException,
@@ -105,7 +106,7 @@ object FileUtil:
         p.resolve(child)
 
     def copyToDirectory(destination: Path): Unit =
-      require(Files.isDirectory(destination), s"${destination} must be a directory")
+      require(Files.isDirectory(destination), s"$destination must be a directory")
       copyTo(destination / p.getFileName.toString)
 
     def copyTo(
@@ -118,11 +119,14 @@ object FileUtil:
             new SimpleFileVisitor[Path]:
               def newPath(subPath: Path): Path = destination.resolve(p.relativize(subPath))
 
-              override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) =
+              override def preVisitDirectory(
+                dir: Path,
+                attrs: BasicFileAttributes
+              ): FileVisitResult =
                 Files.createDirectories(newPath(dir))
                 super.preVisitDirectory(dir, attrs)
 
-              override def visitFile(file: Path, attrs: BasicFileAttributes) =
+              override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult =
                 Files.copy(file, newPath(file), copyOption)
                 super.visitFile(file, attrs)
           )
@@ -198,7 +202,7 @@ object FileUtil:
                 try
                   Files.size(f)
                 catch
-                  case (_: FileNotFoundException | _: NoSuchFileException)
+                  case _: FileNotFoundException | _: NoSuchFileException
                       if Files.isDirectory(f) => 0L
             }
             .sum

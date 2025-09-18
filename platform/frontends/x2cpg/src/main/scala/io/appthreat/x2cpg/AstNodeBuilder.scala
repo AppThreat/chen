@@ -21,7 +21,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
     NewTypeRef,
     NewUnknown
 }
-import io.shiftleft.codepropertygraph.generated.nodes.Block.{PropertyDefaults as BlockDefaults}
+import io.shiftleft.codepropertygraph.generated.nodes.Block.PropertyDefaults as BlockDefaults
 import org.apache.commons.lang.StringUtils
 import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode
 trait AstNodeBuilder[Node, NodeProcessor]:

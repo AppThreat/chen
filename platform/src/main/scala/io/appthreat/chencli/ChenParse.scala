@@ -5,6 +5,7 @@ import io.appthreat.console.cpgcreation.{CpgGenerator, cpgGeneratorForLanguage, 
 import io.appthreat.console.{FrontendConfig, InstallConfig}
 import CpgBasedTool.newCpgCreatedString
 import io.shiftleft.codepropertygraph.generated.Languages
+import scopt.OptionParser
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -24,7 +25,7 @@ object ChenParse:
             err.printStackTrace()
             System.exit(1)
 
-  val optionParser = new scopt.OptionParser[ParserConfig]("chen-parse"):
+  val optionParser: OptionParser[ParserConfig] = new scopt.OptionParser[ParserConfig]("chen-parse"):
     arg[String]("input")
         .optional()
         .text("source file or directory containing source files")

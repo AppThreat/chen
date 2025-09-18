@@ -31,10 +31,10 @@ class NodeTypeStarters(cpg: Cpg):
           .nameExact("registerReceiver")
           .where(_.argument(2).isIdentifier.typeFullNameExact("android.content.IntentFilter"))
 
-  def registeredBroadcastReceivers =
+  def registeredBroadcastReceivers: Traversal[TypeDecl] =
       cpg.broadcastReceivers.filter { broadcastReceiver =>
-          cpg.registerReceiver.argument(1).isIdentifier.typeFullName.exists(
-            _ == broadcastReceiver.fullName
+          cpg.registerReceiver.argument(1).isIdentifier.typeFullName.contains(
+            broadcastReceiver.fullName
           )
       }
 end NodeTypeStarters

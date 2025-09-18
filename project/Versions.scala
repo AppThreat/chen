@@ -1,6 +1,6 @@
 /* reads version declarations from /build.sbt so that we can declare them in one place */
 object Versions {
-  val cpg = parseVersion("cpgVersion")
+  val cpg: String = parseVersion("cpgVersion")
   val antlr         = "4.13.2"
   val cfr                    = "0.152"
   val scalatest     = "3.2.19"

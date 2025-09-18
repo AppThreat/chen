@@ -130,7 +130,7 @@ object JoernVectors:
     dimToFeature: Boolean = false
   )
 
-  def main(args: Array[String]) =
+  def main(args: Array[String]): Unit =
       parseConfig(args).foreach { config =>
         exitIfInvalid(config.outDir, config.cpgFileName)
         Using.resource(CpgBasedTool.loadFromOdb(config.cpgFileName)) { cpg =>

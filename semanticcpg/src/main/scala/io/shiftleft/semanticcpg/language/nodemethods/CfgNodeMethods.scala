@@ -94,9 +94,10 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
     case node: Method => node
     case _: MethodParameterIn | _: MethodParameterOut | _: MethodReturn =>
         walkUpAst(node)
-    case _: CallRepr if !node.isInstanceOf[Call] => walkUpAst(node)
-    case _: Annotation | _: AnnotationLiteral    => node.inAst.collectAll[Method].head
-    case _: Expression | _: JumpTarget           => walkUpContains(node)
+    case _: CallRepr if !node.isInstanceOf[Call]    => walkUpAst(node)
+    case _: Annotation | _: AnnotationLiteral       => node.inAst.collectAll[Method].head
+    case _: Expression | _: JumpTarget | _: Literal => walkUpContains(node)
+    case _ => throw new MatchError(s"Unexpected node type: ${node.getClass}")
 
   /** Obtain hexadecimal string representation of lineNumber field.
     *

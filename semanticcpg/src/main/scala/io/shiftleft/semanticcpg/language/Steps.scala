@@ -25,11 +25,11 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
 
   /** Execute the traversal and convert it to a mutable buffer
     */
-  def toBuffer(): mutable.Buffer[A] = traversal.to(mutable.Buffer)
+  def toBuffer: mutable.Buffer[A] = traversal.to(mutable.Buffer)
 
   /** Shorthand for `toBuffer`
     */
-  def b: mutable.Buffer[A] = toBuffer()
+  def b: mutable.Buffer[A] = toBuffer
 
   /** Alias for `toList`
     * @deprecated
@@ -38,11 +38,11 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
 
   /** Execute the travel and convert it to a Java stream.
     */
-  def toStream(): LazyList[A] = traversal.to(LazyList)
+  def toStream: LazyList[A] = traversal.to(LazyList)
 
   /** Alias for `toStream`
     */
-  def s: LazyList[A] = toStream()
+  def s: LazyList[A] = toStream
 
   /** Execute the traversal and convert it into a Java list (as opposed to the Scala list obtained
     * via `toList`)
@@ -64,7 +64,7 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
 
   @Doc(info = "execute this traversal and show the pretty-printed results in `less`")
   // uses scala-repl-pp's `#|^` operator which let's `less` inherit stdin and stdout
-  def browse: Unit =
+  def browse(): Unit =
     given Colors = Colors.Default
     traversal #|^ "less"
 
@@ -91,7 +91,7 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
   @Doc(info = "execute traversal and convert the result to python object")
   def toPy: me.shadaj.scalapy.py.Dynamic = pyJson.loads(toJson(false))
 
-  def pyg =
+  def pyg: Seq[py.Dynamic] =
     val tmpDir = Files.createTempDirectory("pyg-gml-export").toFile.getAbsolutePath
     traversal match
       case methods: Iterator[Method @unchecked] =>

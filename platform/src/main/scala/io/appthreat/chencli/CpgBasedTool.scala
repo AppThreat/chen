@@ -23,7 +23,7 @@ object CpgBasedTool:
   /** Add the data flow layer to the CPG if it does not exist yet.
     */
   def addDataFlowOverlayIfNonExistent(cpg: Cpg)(implicit s: Semantics): Unit =
-      if !cpg.metaData.overlays.exists(_ == OssDataFlow.overlayName) then
+      if !cpg.metaData.overlays.contains(OssDataFlow.overlayName) then
         System.err.println("CPG does not have dataflow overlay. Calculating.")
         val opts    = new OssDataFlowOptions()
         val context = new LayerCreatorContext(cpg)

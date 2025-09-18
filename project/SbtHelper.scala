@@ -1,4 +1,4 @@
-import java.io.{File => JFile}
+import java.io.File as JFile
 import sbt.librarymanagement.UpdateReport
 
 object SbtHelper {

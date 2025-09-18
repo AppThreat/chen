@@ -40,7 +40,7 @@ object MavenCoordinates:
     ^g1 ------------------^^g2 ^
     ```
      */
-    val pattern = """^[| ]*[+\\]\s*[-]*\s*([^:]+:[^:]+:)([^\s]+)(\s+->\s+)?([^\s]+)?""".r
+    val pattern = """^[| ]*[+\\]\s*-*\s*([^:]+:[^:]+:)(\S+)(\s+->\s+)?(\S+)?""".r
     lines
         .flatMap { l =>
             pattern.findFirstMatchIn(l) match

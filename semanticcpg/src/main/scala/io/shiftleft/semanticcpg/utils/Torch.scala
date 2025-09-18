@@ -19,17 +19,17 @@ object Torch:
       |    SCIENCE_PACK_AVAILABLE = False
       |""".stripMargin)
 
-  def convert_graphml(gml_file: Path) =
+  def convert_graphml(gml_file: Path): py.Dynamic =
       py.Dynamic.global.convert_graphml(gml_file.toAbsolutePath.toString)
 
-  def to_pyg(gml_file: Path) = py.Dynamic.global.to_pyg(convert_graphml(gml_file))
+  def to_pyg(gml_file: Path): py.Dynamic = py.Dynamic.global.to_pyg(convert_graphml(gml_file))
 
   def diff_graph(
     first_gml_file: Path,
     second_gml_file: Path,
     include_common: Boolean = false,
     as_dict: Boolean = false
-  ) =
+  ): py.Dynamic =
     val first_graph = py.Dynamic.global.convert_graphml(first_gml_file.toAbsolutePath.toString)
     val second_graph =
         py.Dynamic.global.convert_graphml(second_gml_file.toAbsolutePath.toString)
@@ -103,7 +103,8 @@ object Torch:
     vocab_size: Int = 20000,
     model_type: String = "unigram",
     model_prefix: String = "m_user"
-  ) = py.Dynamic.global.generate_sp_model(filename, vocab_size, model_type, model_prefix)
+  ): py.Dynamic =
+      py.Dynamic.global.generate_sp_model(filename, vocab_size, model_type, model_prefix)
 
-  def load_sp_model(filename: String) = py.Dynamic.global.load_sp_model(filename)
+  def load_sp_model(filename: String): py.Dynamic = py.Dynamic.global.load_sp_model(filename)
 end Torch

@@ -4,7 +4,7 @@ import io.shiftleft.semanticcpg.utils.SecureXmlParsing
 import io.shiftleft.codepropertygraph.generated.nodes
 
 class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends AnyVal:
-  def usesCleartextTraffic =
+  def usesCleartextTraffic: Iterator[Boolean] =
       traversal
           .filter(_.name.endsWith(Constants.androidManifestXml))
           .map(_.content)
@@ -18,7 +18,7 @@ class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends Any
             activityName.map(_.toString == "true")
           }
 
-  def hasReadExternalStoragePermission =
+  def hasReadExternalStoragePermission: Iterator[Boolean] =
       traversal
           .filter(_.name.endsWith(Constants.androidManifestXml))
           .map(_.content)
@@ -34,7 +34,7 @@ class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends Any
               case _ => None
           }
 
-  def exportedAndroidActivityNames =
+  def exportedAndroidActivityNames: Iterator[String] =
       traversal
           .filter(_.name.endsWith(Constants.androidManifestXml))
           .map(_.content)
@@ -72,7 +72,7 @@ class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends Any
             else None
           }
 
-  def exportedBroadcastReceiverNames =
+  def exportedBroadcastReceiverNames: Iterator[String] =
       traversal
           .filter(_.name.endsWith(Constants.androidManifestXml))
           .map(_.content)
@@ -84,7 +84,7 @@ class ConfigFileTraversal(val traversal: Iterator[nodes.ConfigFile]) extends Any
           .filter(_.label == "receiver")
           .flatMap { receiverNode =>
             val hasIntentFilter =
-                receiverNode.flatMap(_.child).filter(_.label == "intent-filter").nonEmpty
+                receiverNode.flatMap(_.child).exists(_.label == "intent-filter")
             if hasIntentFilter then
               val isExported = receiverNode.attribute(Constants.androidUri, "exported")
               isExported match
