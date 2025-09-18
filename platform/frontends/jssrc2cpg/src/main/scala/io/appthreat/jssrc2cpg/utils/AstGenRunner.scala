@@ -18,40 +18,19 @@ import scala.util.Try
 
 object AstGenRunner:
 
-  private val LineLengthThreshold: Int = 10000
-
   private val TypeDefinitionFileExtensions = List(".t.ts", ".d.ts")
 
   private val MinifiedPathRegex: Regex = ".*([.-]min\\..*js|bundle\\.js)".r
 
   private val IgnoredTestsRegex: Seq[Regex] =
       List(
-        ".*[.-]spec\\.js".r,
-        ".*[.-]mock\\.js".r,
-        ".*[.-]e2e\\.js".r,
-        ".*[.-]test\\.js".r,
         ".*cypress\\.json".r,
         ".*test.*\\.json".r
       )
 
   private val IgnoredFilesRegex: Seq[Regex] = List(
-    ".*jest\\.config.*".r,
-    ".*webpack\\..*\\.js".r,
-    ".*vue\\.config\\.js".r,
-    ".*babel\\.config\\.js".r,
-    ".*chunk-vendors.*\\.js".r, // commonly found in webpack / vue.js projects
-    ".*app~.*\\.js".r,          // commonly found in webpack / vue.js projects
-    ".*\\.chunk\\.js".r,
-    ".*\\.babelrc.*".r,
-    ".*\\.eslint.*".r,
-    ".*\\.tslint.*".r,
-    ".*\\.stylelintrc\\.js".r,
-    ".*rollup\\.config.*".r,
     ".*\\.types\\.js".r,
-    ".*\\.cjs\\.js".r,
-    ".*eslint-local-rules\\.js".r,
     ".*\\.devcontainer\\.json".r,
-    ".*Gruntfile\\.js".r,
     ".*i18n.*\\.json".r
   )
 
@@ -90,54 +69,19 @@ class AstGenRunner(config: Config):
     else
       false
 
-  private def isMinifiedFile(filePath: String): Boolean = filePath match
-    case p if MinifiedPathRegex.matches(p) => true
-    case p if File(p).exists && p.endsWith(".js") =>
-        val lines             = IOUtils.readLinesInFile(File(filePath).path)
-        val linesOfCode       = lines.size
-        val longestLineLength = if lines.isEmpty then 0 else lines.map(_.length).max
-        if longestLineLength >= LineLengthThreshold && linesOfCode <= 50 then
-          true
-        else false
-    case _ => false
-
   private def isIgnoredByDefault(filePath: String): Boolean =
     lazy val isIgnored     = IgnoredFilesRegex.exists(_.matches(filePath))
     lazy val isIgnoredTest = IgnoredTestsRegex.exists(_.matches(filePath))
-    lazy val isMinified    = isMinifiedFile(filePath)
-    if isIgnored || isIgnoredTest || isMinified then
+    if isIgnored || isIgnoredTest then
       true
     else
       false
-
-  private def isTranspiledFile(filePath: String): Boolean =
-    val file = File(filePath)
-    // We ignore files iff:
-    // - they are *.js files and
-    // - they contain a //sourceMappingURL comment or have an associated source map file and
-    // - a file with the same name is located directly next to them
-    lazy val isJsFile = file.exists && file.extension.contains(".js")
-    lazy val hasSourceMapComment =
-        IOUtils.readLinesInFile(file.path).exists(_.contains("//sourceMappingURL"))
-    lazy val hasSourceMapFile = File(s"$filePath.map").exists
-    lazy val hasSourceMap     = hasSourceMapComment || hasSourceMapFile
-    lazy val hasFileWithSameName =
-        file.siblings.exists(_.nameWithoutExtension(includeAll =
-            false
-        ) == file.nameWithoutExtension)
-    if isJsFile && hasSourceMap && hasFileWithSameName then
-      true
-    else
-      false
-  end isTranspiledFile
 
   private def filterFiles(files: List[String], out: File): List[String] =
       files.filter { file =>
           file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match
             case filePath if TypeDefinitionFileExtensions.exists(filePath.endsWith) => false
             case filePath if isIgnoredByUserConfig(filePath)                        => false
-            case filePath if isIgnoredByDefault(filePath)                           => false
-            case filePath if isTranspiledFile(filePath)                             => false
             case _                                                                  => true
       }
 
@@ -154,20 +98,16 @@ class AstGenRunner(config: Config):
 
   private def processEjsFiles(in: File, out: File, ejsFiles: List[String]): Try[Seq[String]] =
     val tmpJsFiles = ejsFiles.map { ejsFilePath =>
-      val ejsFile             = File(ejsFilePath)
-      val maybeTranspiledFile = File(s"${ejsFilePath.stripSuffix(".ejs")}.js")
-      if isTranspiledFile(maybeTranspiledFile.pathAsString) then
-        maybeTranspiledFile
-      else
-        val sourceFileContent = IOUtils.readEntireFile(ejsFile.path)
-        val preprocessContent = new EjsPreprocessor().preprocess(sourceFileContent)
-        (out / in.relativize(ejsFile).toString).parent.createDirectoryIfNotExists(createParents =
-            true
-        )
-        val newEjsFile = ejsFile.copyTo(out / in.relativize(ejsFile).toString)
-        val jsFile     = changeExtensionTo(newEjsFile, ".js").writeText(preprocessContent)
-        newEjsFile.createFile().writeText(sourceFileContent)
-        jsFile
+      val ejsFile           = File(ejsFilePath)
+      val sourceFileContent = IOUtils.readEntireFile(ejsFile.path)
+      val preprocessContent = new EjsPreprocessor().preprocess(sourceFileContent)
+      (out / in.relativize(ejsFile).toString).parent.createDirectoryIfNotExists(createParents =
+          true
+      )
+      val newEjsFile = ejsFile.copyTo(out / in.relativize(ejsFile).toString)
+      val jsFile     = changeExtensionTo(newEjsFile, ".js").writeText(preprocessContent)
+      newEjsFile.createFile().writeText(sourceFileContent)
+      jsFile
     }
 
     val result =
