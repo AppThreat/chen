@@ -22,8 +22,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
     NewUnknown
 }
 import io.shiftleft.codepropertygraph.generated.nodes.Block.PropertyDefaults as BlockDefaults
-import org.apache.commons.lang.StringUtils
 import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode
+import io.appthreat.x2cpg.utils.StringUtils
 trait AstNodeBuilder[Node, NodeProcessor]:
   this: NodeProcessor =>
   protected def line(node: Node): Option[Integer]

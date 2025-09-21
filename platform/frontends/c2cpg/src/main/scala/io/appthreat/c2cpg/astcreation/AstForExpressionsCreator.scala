@@ -331,11 +331,21 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     idExpr: CASTIdExpression,
     callTypeFullName: String
   ): Ast =
-    val name      = idExpr.getName.getLastName.toString
-    val signature = ""
+    val name = idExpr.getName.getLastName.toString
+    val (signature: String, fullName: String) =
+        idExpr.getName.getBinding match
+          case function: IFunction =>
+              val functionType: IFunctionType = function.getType
+              val derivedSignature            = functionTypeToSignature(functionType)
+              val nameFromBinding             = function.getName
+              val constructedFullName         = s"$nameFromBinding:$derivedSignature"
+              (derivedSignature, constructedFullName)
+
+          case _ =>
+              val fallbackSignature = ""
+              (fallbackSignature, s"$name:$fallbackSignature")
 
     val dispatchType = DispatchTypes.STATIC_DISPATCH
-
     val callCpgNode = callNode(
       call,
       code(call),

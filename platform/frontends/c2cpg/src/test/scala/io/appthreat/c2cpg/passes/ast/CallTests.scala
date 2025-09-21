@@ -381,7 +381,7 @@ class CallTests extends CCodeToCpgSuite {
       )
 
       val List(call) = cpg.call.nameExact("foo").l
-      call.signature shouldBe ""
+      call.signature shouldBe "void(int)"
       call.methodFullName shouldBe "foo"
       call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
       call.typeFullName shouldBe "void"
@@ -534,8 +534,8 @@ class CallTests extends CCodeToCpgSuite {
       )
 
       val List(call) = cpg.call.nameExact("foo").l
-      call.signature shouldBe ""
-      call.methodFullName shouldBe s"foo"
+      call.signature shouldBe "void()"
+      call.methodFullName shouldBe "foo"
       call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
       call.typeFullName shouldBe X2CpgDefines.Any
 

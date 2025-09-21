@@ -3,10 +3,10 @@ package io.appthreat.c2cpg.astcreation
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.newModifierNode
+import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
-import org.apache.commons.lang.StringUtils
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.ICPPASTLambdaExpression
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator

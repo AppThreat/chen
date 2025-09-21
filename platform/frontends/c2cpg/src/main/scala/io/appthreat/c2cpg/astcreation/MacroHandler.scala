@@ -10,8 +10,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
     NewNode
 }
 import io.appthreat.x2cpg.{Ast, AstEdge, ValidationMode}
+import io.appthreat.x2cpg.utils.StringUtils
 import io.shiftleft.codepropertygraph.generated.nodes.NewLocal
-import org.apache.commons.lang.StringUtils
 import org.eclipse.cdt.core.dom.ast.{
     IASTMacroExpansionLocation,
     IASTNode,

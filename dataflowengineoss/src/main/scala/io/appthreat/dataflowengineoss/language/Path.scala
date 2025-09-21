@@ -3,8 +3,7 @@ package io.appthreat.dataflowengineoss.language
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import me.shadaj.scalapy.py
-import org.apache.commons.lang.StringUtils
-
+import io.appthreat.x2cpg.utils.StringUtils
 import scala.collection.mutable.{ArrayBuffer, Set}
 
 case class Path(elements: List[AstNode]):

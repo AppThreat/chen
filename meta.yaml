@@ -1,4 +1,4 @@
-{% set version = "2.5.3" %}
+{% set version = "2.5.4" %}
 
 package:
   name: chen
