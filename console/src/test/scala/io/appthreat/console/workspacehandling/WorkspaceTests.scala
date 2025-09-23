@@ -27,10 +27,10 @@ class WorkspaceTests extends AnyWordSpec with Matchers {
         val workspace   = new Workspace(projects)
         val output      = workspace.toString
         val lines       = output.split("\n")
-        lines.length shouldBe 5
-        lines(4).contains(project.name) shouldBe true
-        lines(4).contains(inputPath)
-        lines(4).contains("foo,bar")
+        lines.length shouldBe 4
+        lines(3).contains(project.name) shouldBe true
+        lines(3).contains(inputPath)
+        lines(3).contains("foo,bar")
       }
 
     }

@@ -1,8 +1,8 @@
 package io.appthreat.console
 
-import org.apache.commons.lang.WordUtils
 import overflowdb.traversal.help.DocFinder.*
 import overflowdb.traversal.help.{Table, DocFinder}
+import io.appthreat.x2cpg.utils.{StringUtils, WordUtils}
 
 object Help:
 

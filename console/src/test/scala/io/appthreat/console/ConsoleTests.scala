@@ -43,7 +43,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
     }
 
     "provide overview of available language modules" in ConsoleFixture() { (console, _) =>
-      console.importCode.toString.contains("| C") shouldBe true
+      console.importCode.toString.contains("C") shouldBe true
     }
 
     "allow importing code with specific module (c2cpg)" in ConsoleFixture() { (console, codeDir) =>

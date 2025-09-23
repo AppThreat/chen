@@ -15,6 +15,7 @@ import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.jssrc2cpg.datastructures.*
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
+import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.utils.NodeBuilders.{newClosureBindingNode, newLocalNode}
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies}
@@ -22,7 +23,6 @@ import io.shiftleft.codepropertygraph.generated.nodes.NewIdentifier
 import io.shiftleft.codepropertygraph.generated.nodes.NewNamespaceBlock
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeRef
-import org.apache.commons.lang.StringUtils
 import ujson.Value
 
 import scala.collection.mutable
