@@ -122,7 +122,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             val operatorName = Operators.assignment
             val left         = astForNode(declarator.getName)
             val right        = astForNode(i.getInitializerClause)
-            val code         = i.getInitializerClause.getRawSignature;
+            val code         = i.getInitializerClause.getRawSignature
             val dispatchType =
                 if code.nonEmpty && (code.startsWith("&") || code.contains("->")) then
                   DispatchTypes.DYNAMIC_DISPATCH

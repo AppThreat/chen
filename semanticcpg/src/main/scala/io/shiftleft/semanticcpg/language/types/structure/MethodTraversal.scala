@@ -106,7 +106,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   @Doc(info = "Type this method is defined in")
   def definingTypeDecl: Iterator[TypeDecl] =
       traversal
-          .repeat(_._astIn)(_.until(_.collectAll[TypeDecl]))
+          .repeat(_._astIn)(using _.until(_.collectAll[TypeDecl]))
           .cast[TypeDecl]
 
   /** The type declaration associated with this method, e.g., the class it is defined in. Alias for
@@ -120,7 +120,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   @Doc(info = "Method this method is defined in")
   def definingMethod: Iterator[Method] =
       traversal
-          .repeat(_._astIn)(_.until(_.collectAll[Method]))
+          .repeat(_._astIn)(using _.until(_.collectAll[Method]))
           .cast[Method]
 
   /** Traverse only to methods that are stubs, e.g., their code is not available or the method body

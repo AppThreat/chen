@@ -22,7 +22,8 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
             _.flatMap(
               callResolver.getMethodCallsitesAsTraversal
             )._containsIn // expand to method
-          )(_.dedup.emit(_.collect {
+          )(using
+          _.dedup.emit(_.collect {
               case method: Method if sourceMethods.contains(method) => method
           }))
           .cast[Method]
@@ -30,12 +31,12 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   /** Traverse to direct callers of this method
     */
   def caller(implicit callResolver: ICallResolver): Iterator[Method] =
-      callIn(callResolver).method
+      callIn(using callResolver).method
 
   /** Traverse to methods called by this method
     */
   def callee(implicit callResolver: ICallResolver): Iterator[Method] =
-      call.callee(callResolver)
+      call.callee(using callResolver)
 
   /** Incoming call sites
     */
@@ -49,7 +50,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   def calledBy(sourceTrav: Iterator[Method])(implicit
     callResolver: ICallResolver
   ): Iterator[Method] =
-      caller(callResolver).calledByIncludingSink(sourceTrav)(callResolver)
+      caller(using callResolver).calledByIncludingSink(sourceTrav)(using callResolver)
 
   @deprecated("Use call", "")
   def callOut: Iterator[Call] =

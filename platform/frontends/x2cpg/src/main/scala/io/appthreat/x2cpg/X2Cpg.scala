@@ -163,7 +163,7 @@ trait X2CpgFrontend[T <: X2CpgConfig[?]]:
   /** Create a CPG in memory for file at `inputName` with default configuration.
     */
   def createCpg(inputName: String)(implicit defaultConfig: T): Try[Cpg] =
-      createCpg(inputName, None)(defaultConfig)
+      createCpg(inputName, None)(using defaultConfig)
 end X2CpgFrontend
 
 object X2Cpg:

@@ -1,9 +1,9 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.5.4"
+ThisBuild / version      := "2.5.5"
 ThisBuild / scalaVersion := "3.6.2"
 
-val cpgVersion = "2.0.1"
+val cpgVersion = "2.1.1"
 
 lazy val platform          = Projects.platform
 lazy val console           = Projects.console
@@ -47,7 +47,6 @@ ThisBuild / excludeDependencies ++= Seq(
 )
 
 ThisBuild / compile / javacOptions ++= Seq(
-  "-g", // debug symbols
   "-Xlint",
   "--release=21"
 ) ++ {
@@ -58,7 +57,7 @@ ThisBuild / compile / javacOptions ++= Seq(
 }
 
 ThisBuild / scalacOptions ++= Seq(
-  "-deprecation", // Emit warning and location for usages of deprecated APIs.
+  "-deprecation",
   "--release",
   "21"
 )

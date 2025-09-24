@@ -16,7 +16,7 @@ trait PythonFrontend extends LanguageFrontend:
 
     override def execute(sourceCodePath: java.io.File): Cpg =
         new Py2CpgOnFileSystem().createCpg(sourceCodePath.getAbsolutePath)(
-          new Py2CpgOnFileSystemConfig()
+          using new Py2CpgOnFileSystemConfig()
         ).get
 
 class PySrcTestCpg extends TestCpg with PythonFrontend:

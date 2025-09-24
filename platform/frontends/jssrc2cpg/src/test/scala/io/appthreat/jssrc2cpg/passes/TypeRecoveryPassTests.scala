@@ -188,7 +188,7 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite:
               "d.createTable",
               "flask_sqlalchemy:SQLAlchemy:createTable"
             )
-            d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
+            d.callee(using NoResolve).isExternal.headOption shouldBe Some(true)
         }
 
         "resolve a 'deleteTable' call directly from 'foo.db' field access correctly" in {
@@ -202,7 +202,7 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite:
               "db.deleteTable",
               "flask_sqlalchemy:SQLAlchemy:deleteTable"
             )
-            d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
+            d.callee(using NoResolve).isExternal.headOption shouldBe Some(true)
         }
 
     }

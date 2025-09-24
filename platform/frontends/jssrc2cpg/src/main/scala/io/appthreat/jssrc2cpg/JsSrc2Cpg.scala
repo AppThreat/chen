@@ -42,7 +42,8 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
             })
 
             val astCreationPass =
-                new AstCreationPass(cpg, astGenResult, config, report)(config.schemaValidation)
+                new AstCreationPass(cpg, astGenResult, config, report)(using
+                config.schemaValidation)
             astCreationPass.createAndApply()
 
             new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()

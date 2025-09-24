@@ -13,7 +13,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
     */
   @Doc(info = "All nodes of the abstract syntax tree")
   def ast: Iterator[AstNode] =
-      traversal.repeat(_.out(EdgeTypes.AST))(_.emit).cast[AstNode]
+      traversal.repeat(_.out(EdgeTypes.AST))(using _.emit).cast[AstNode]
 
   /** All nodes of the abstract syntax tree rooted in this node, which match `predicate`. Equivalent
     * of `match` in the original CPG paper.
@@ -37,7 +37,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
   /** Nodes of the AST rooted in this node, minus the node itself
     */
   def astMinusRoot: Iterator[AstNode] =
-      traversal.repeat(_.out(EdgeTypes.AST))(_.emitAllButFirst).cast[AstNode]
+      traversal.repeat(_.out(EdgeTypes.AST))(using _.emitAllButFirst).cast[AstNode]
 
   /** Direct children of node in the AST. Siblings are ordered by their `order` fields
     */
@@ -57,7 +57,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
   /** Traverses up the AST and returns the first block node.
     */
   def parentBlock: Iterator[Block] =
-      traversal.repeat(_.in(EdgeTypes.AST))(_.emit.until(_.hasLabel(NodeTypes.BLOCK))).collectAll[
+      traversal.repeat(_.in(EdgeTypes.AST))(using _.emit.until(_.hasLabel(NodeTypes.BLOCK))).collectAll[
         Block
       ]
 
@@ -78,6 +78,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
   def inAst(root: AstNode): Iterator[AstNode] =
       traversal
           .repeat(_.in(EdgeTypes.AST))(
+            using
             _.emit
                 .until(_.or(
                   _.hasLabel(NodeTypes.METHOD),
@@ -92,6 +93,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
   def inAstMinusLeaf(root: AstNode): Iterator[AstNode] =
       traversal
           .repeat(_.in(EdgeTypes.AST))(
+            using
             _.emitAllButFirst
                 .until(_.or(
                   _.hasLabel(NodeTypes.METHOD),
@@ -219,7 +221,7 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal:
 
   def walkAstUntilReaching(labels: List[String]): Iterator[StoredNode] =
       traversal
-          .repeat(_.out(EdgeTypes.AST))(_.emitAllButFirst.until(_.hasLabel(labels*)))
+          .repeat(_.out(EdgeTypes.AST))(using _.emitAllButFirst.until(_.hasLabel(labels*)))
           .dedup
           .cast[StoredNode]
 end AstNodeTraversal

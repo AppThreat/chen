@@ -30,7 +30,7 @@ class AstParentInfoPass(cpg: Cpg) extends ConcurrentWriterCpgPass[AstNode](cpg):
   def findParent(node: AstNode): Option[AstNode] =
       node.start
           .repeat(_.astParent)(
-            _.until(hasValidContainingNodes(_)).emit(hasValidContainingNodes(_))
+            using _.until(hasValidContainingNodes(_)).emit(hasValidContainingNodes(_))
           )
           .find(_ != node)
 end AstParentInfoPass

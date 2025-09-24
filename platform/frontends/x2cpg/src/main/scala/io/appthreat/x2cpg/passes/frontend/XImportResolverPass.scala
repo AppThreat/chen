@@ -38,7 +38,7 @@ abstract class XImportResolverPass(cpg: Cpg) extends ConcurrentWriterCpgPass[Imp
     importCall: Call,
     diffGraph: DiffGraphBuilder
   ): Unit =
-      importCall.start.newTagNodePair(x.label, x.serialize).store()(diffGraph)
+      importCall.start.newTagNodePair(x.label, x.serialize).store()(using diffGraph)
 end XImportResolverPass
 
 object ImportsPass:

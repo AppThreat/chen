@@ -26,7 +26,7 @@ class AstCreationPass(classFiles: List[ClassFile], cpg: Cpg, config: Config)
         val sootClass = Scene.v().loadClassAndSupport(classFile.fullyQualifiedClassName.get)
         sootClass.setApplicationClass()
         val localDiff = AstCreator(classFile.file.canonicalPath, sootClass, global)(
-          config.schemaValidation
+          using config.schemaValidation
         ).createAst()
         builder.absorb(localDiff)
       catch

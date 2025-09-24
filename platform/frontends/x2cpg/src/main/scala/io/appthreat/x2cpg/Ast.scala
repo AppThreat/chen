@@ -5,6 +5,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.nodes.AstNode.PropertyDefaults
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.SchemaViolationException
+import scala.collection.mutable
 
 case class AstEdge(src: NewNode, dst: NewNode)
 
@@ -209,34 +210,39 @@ case class Ast(
     dsts.foreach(dst => Ast.neighbourValidation(src, dst, EdgeTypes.CAPTURE))
     this.copy(captureEdges = captureEdges ++ dsts.map(AstEdge(src, _)))
 
-  /** Returns a deep copy of the sub tree rooted in `node`. If `order` is set, then the `order` and
-    * `argumentIndex` fields of the new root node are set to `order`. If `replacementNode` is set,
-    * then this replaces `node` in the new copy.
-    */
+    /** Returns a deep copy of the sub tree rooted in `node`. If `order` is set, then the `order`
+      * and `argumentIndex` fields of the new root node are set to `order`. If `replacementNode` is
+      * set, then this replaces `node` in the new copy. This method is now cycle-aware to prevent
+      * infinite recursion.
+      */
   def subTreeCopy(
     node: AstNodeNew,
     argIndex: Int = -1,
-    replacementNode: Option[AstNodeNew] = None
+    replacementNode: Option[AstNodeNew] = None,
+    copyMap: mutable.Map[AstNodeNew, AstNodeNew] = mutable.Map.empty
   ): Ast =
+    copyMap.get(node) match
+      case Some(existingCopy) =>
+          return Ast(Vector(existingCopy))
+      case None =>
     val newNode = replacementNode match
       case Some(n) => n
       case None    => node.copy
     if argIndex != -1 then
-      // newNode.order = argIndex
       newNode match
         case expr: ExpressionNew =>
             expr.argumentIndex = argIndex
         case _ =>
-
-    val astChildren = edges.filter(_.src == node).map(_.dst)
+    copyMap += (node -> newNode)
+    val astChildren = edges.filter(_.src == node).map(_.dst).asInstanceOf[Seq[AstNodeNew]]
     val newChildren = astChildren.map { x =>
-        this.subTreeCopy(x.asInstanceOf[AstNodeNew])
+        this.subTreeCopy(x, argIndex = -1, None, copyMap)
     }
-
     val oldToNew = astChildren.zip(newChildren).map { case (old, n) => old -> n.root.get }.toMap
-    def newIfExists(x: NewNode) =
-        oldToNew.getOrElse(x, x)
-
+    def newIfExists(x: NewNode) = copyMap.getOrElse(
+      x.asInstanceOf[AstNodeNew],
+      oldToNew.getOrElse(x.asInstanceOf[AstNodeNew], x.asInstanceOf[AstNodeNew])
+    )
     val newArgEdges =
         argEdges.filter(_.src == node).map(x => AstEdge(newNode, newIfExists(x.dst)))
     val newConditionEdges =
@@ -247,7 +253,6 @@ case class Ast(
         bindsEdges.filter(_.src == node).map(x => AstEdge(newNode, newIfExists(x.dst)))
     val newReceiverEdges =
         receiverEdges.filter(_.src == node).map(x => AstEdge(newNode, newIfExists(x.dst)))
-
     Ast(newNode)
         .copy(
           argEdges = newArgEdges,

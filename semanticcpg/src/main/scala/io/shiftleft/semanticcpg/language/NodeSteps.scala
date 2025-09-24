@@ -29,7 +29,8 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Iterator[NodeType]) exten
               case NodeTypes.NAMESPACE => _.in(EdgeTypes.REF).out(EdgeTypes.SOURCE_FILE)
               case NodeTypes.COMMENT   => _.in(EdgeTypes.AST).hasLabel(NodeTypes.FILE)
               case _ =>
-                  _.repeat(_.coalesce(_.out(EdgeTypes.SOURCE_FILE), _.in(EdgeTypes.AST)))(_.until(
+                  _.repeat(_.coalesce(_.out(EdgeTypes.SOURCE_FILE), _.in(EdgeTypes.AST)))(using
+                  _.until(
                     _.hasLabel(NodeTypes.FILE)
                   ))
           }
@@ -88,7 +89,7 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Iterator[NodeType]) exten
   /* follow the incoming edges of the given type as long as possible */
   protected def walkIn(edgeType: String): Iterator[Node] =
       traversal
-          .repeat(_.in(edgeType))(_.until(_.in(edgeType).countTrav.filter(_ == 0)))
+          .repeat(_.in(edgeType))(using _.until(_.in(edgeType).countTrav.filter(_ == 0)))
 
   @Doc(
     info = "Tag node with `tagName`",

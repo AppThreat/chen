@@ -70,6 +70,6 @@ object Ruby2Atom:
           projectRoot,
           enableFileContents = false,
           rootNode = rubyProgram
-        )(config.schemaValidation)
+        )(using config.schemaValidation)
       }.iterator
 end Ruby2Atom

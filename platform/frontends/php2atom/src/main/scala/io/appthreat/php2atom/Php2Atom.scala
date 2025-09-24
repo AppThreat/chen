@@ -42,7 +42,7 @@ class Php2Atom extends X2CpgFrontend[Config]:
       withNewEmptyCpg(config.outputPath, config: Config) { (cpg, config) =>
         new MetaDataPass(cpg, Languages.PHP, config.inputPath).createAndApply()
         new AstCreationPass(config, cpg, parser.get)(
-          config.schemaValidation
+          using config.schemaValidation
         ).createAndApply()
         new ConfigFileCreationPass(cpg).createAndApply()
         new AstParentInfoPass(cpg).createAndApply()

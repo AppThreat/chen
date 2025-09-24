@@ -29,12 +29,12 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         |  }
         |}""".stripMargin)
 
-      inside(cpg.method("b").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method("b").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "this.b()"
         call.methodFullName should endWith(".js::program:Foo:b")
       }
 
-      inside(cpg.method("c").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method("c").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "new this.bar().c()"
         call.methodFullName should endWith(".js::program:Foo:Bar:c")
       }
@@ -53,7 +53,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         m.fullName should endWith(".js::program:sayhi")
       }
 
-      inside(cpg.method("sayhi").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method("sayhi").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "sayhi()"
         call.methodFullName should endWith(".js::program:sayhi")
       }
@@ -97,7 +97,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         m.fullName shouldBe "bar.js::program:anonymous"
       }
 
-      inside(cpg.method.fullNameExact("bar.js::program:anonymous").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method.fullNameExact("bar.js::program:anonymous").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "bar.sayhi()"
         call.methodFullName shouldBe "bar.js::program:anonymous"
         inside(call.expressionDown.isIdentifier.l) { case List(receiver: Identifier) =>
@@ -111,7 +111,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         m.fullName shouldBe "baz.js::program:anonymous"
       }
 
-      inside(cpg.method.fullNameExact("baz.js::program:anonymous").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method.fullNameExact("baz.js::program:anonymous").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "baz.sayhowdy()"
         call.methodFullName shouldBe "baz.js::program:anonymous"
         inside(call.expressionDown.isIdentifier.l) { case List(receiver: Identifier) =>
@@ -151,7 +151,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
       )
 
       // Because of flow-insensitivity, it could point to either "sayhi"
-      inside(cpg.call("sayhi").callee(NoResolve).l) { case List(m1, m2) =>
+      inside(cpg.call("sayhi").callee(using NoResolve).l) { case List(m1, m2) =>
         m1.fullName shouldBe "bar.js::program:anonymous"
         m2.fullName shouldBe "baz.js::program:anonymous"
       }
@@ -161,7 +161,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         m.fullName shouldBe "bar.js::program:anonymous"
       }
 
-      inside(cpg.method.fullNameExact("bar.js::program:anonymous").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method.fullNameExact("bar.js::program:anonymous").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "barOrBaz.sayhi()"
         call.methodFullName shouldBe "<unknownFullName>"
         inside(call.expressionDown.isIdentifier.l) { case List(receiver: Identifier) =>
@@ -175,7 +175,7 @@ class CallLinkerPassTest extends DataFlowCodeToCpgSuite {
         m.fullName shouldBe "baz.js::program:anonymous"
       }
 
-      inside(cpg.method.fullNameExact("baz.js::program:anonymous").callIn(NoResolve).l) { case List(call) =>
+      inside(cpg.method.fullNameExact("baz.js::program:anonymous").callIn(using NoResolve).l) { case List(call) =>
         call.code shouldBe "barOrBaz.sayhi()"
         call.methodFullName shouldBe "<unknownFullName>"
         inside(call.expressionDown.isIdentifier.l) { case List(receiver: Identifier) =>

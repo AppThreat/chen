@@ -7,13 +7,11 @@ import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Prope
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.{NodeDb, NodeRef}
-
+import overflowdb.BatchedUpdate.DiffGraphBuilder
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
 class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
-
-  import DynamicCallLinker.*
 
   private lazy val typeMap: Map[String, TypeDecl] =
       cpg.typeDecl.map(td => td.fullName -> td).toMap
@@ -33,14 +31,21 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
     buildMethodCandidates()
     subclassCache.clear()
 
-    cpg.call
-        .filter(_.dispatchType == DispatchTypes.DYNAMIC_DISPATCH)
-        .foreach { call =>
-            try linkDynamicCall(call, dstGraph)
-            catch
-              case ex: Exception =>
-                  throw new RuntimeException(ex)
-        }
+    val dynamicCalls = cpg.call
+        .where(_.dispatchTypeExact(DispatchTypes.DYNAMIC_DISPATCH))
+        .l
+
+    dynamicCalls.grouped(10).foreach { callBatch =>
+      callBatch.foreach { call =>
+          try
+            linkDynamicCall(call, dstGraph)
+          catch
+            case ex: Exception =>
+                System.err.println(s"Error linking dynamic call ${call.code}: ${ex.getMessage}")
+      }
+      System.gc()
+    }
+  end run
 
   private def buildMethodCandidates(): Unit =
       for
@@ -49,7 +54,8 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
       do
         val methodName = method.fullName
         val candidates = allSubclasses(typeDecl.fullName).flatMap(staticLookup(_, method))
-        methodCandidatesByFullName.put(methodName, candidates)
+        if candidates.nonEmpty then
+          methodCandidatesByFullName.put(methodName, candidates)
 
   private def allSubclasses(typeDeclFullName: String): mutable.LinkedHashSet[String] =
       inheritanceTraversal(typeDeclFullName, subclassCache, inSuperDirection = false)
@@ -214,5 +220,3 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
   private def nodesWithFullName(name: String): Iterable[NodeRef[? <: NodeDb]] =
       cpg.graph.indexManager.lookup(PropertyNames.FULL_NAME, name).asScala
 end DynamicCallLinker
-
-object DynamicCallLinker {}

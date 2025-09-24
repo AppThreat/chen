@@ -40,7 +40,7 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
         case Some(parseResult) =>
             diffGraph.absorb(
               new AstCreator(relativeFilename, parseResult)(
-                config.schemaValidation
+                using config.schemaValidation
               ).createAst()
             )
 

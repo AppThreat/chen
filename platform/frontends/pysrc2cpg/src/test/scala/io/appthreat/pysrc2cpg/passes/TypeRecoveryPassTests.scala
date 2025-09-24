@@ -283,7 +283,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
                 .l
             d.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.createTable"
             d.dynamicTypeHintFullName shouldBe Seq()
-            d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
+            d.callee(using NoResolve).isExternal.headOption shouldBe Some(true)
         }
 
         "resolve a 'deleteTable' call directly from 'foo.db' field access correctly" in {
@@ -296,7 +296,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
 
             d.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.deleteTable"
             d.dynamicTypeHintFullName shouldBe Seq()
-            d.callee(NoResolve).isExternal.headOption shouldBe Some(true)
+            d.callee(using NoResolve).isExternal.headOption shouldBe Some(true)
         }
 
     }
@@ -368,7 +368,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
                 .headOption: @unchecked
             addCall.typeFullName shouldBe "ANY"
             addCall.methodFullName shouldBe "flask_sqlalchemy.py:<module>.SQLAlchemy.<member>(session).add"
-            addCall.callee(NoResolve).isExternal.headOption shouldBe Some(true)
+            addCall.callee(using NoResolve).isExternal.headOption shouldBe Some(true)
         }
 
     }

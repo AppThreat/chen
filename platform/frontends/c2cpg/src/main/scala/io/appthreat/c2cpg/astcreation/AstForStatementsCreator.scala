@@ -145,7 +145,13 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       case label: IASTLabelStatement              => astsForLabelStatement(label)
       case _: IASTNullStatement                   => Seq.empty
       case _                                      => Seq(astForNode(statement))
-    r.map(x => asChildOfMacroCall(statement, x))
+    try
+      r.map(x => asChildOfMacroCall(statement, x))
+    catch
+      case e: StackOverflowError => r
+      case e: RuntimeException
+          if e.getMessage != null && e.getMessage.contains("maximum nested depth") => r
+      case e: Throwable => r
   end astsForStatement
 
   private def astForConditionExpression(

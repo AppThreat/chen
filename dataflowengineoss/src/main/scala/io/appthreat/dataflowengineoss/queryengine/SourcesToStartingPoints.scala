@@ -59,7 +59,7 @@ end SourceTravsToStartingPointsTask
   */
 class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode]]:
 
-  private val cpg = Cpg(src.graph())
+  private val cpg = Cpg(using src.graph())
 
   override def compute(): List[CfgNode] = sourceToStartingPoints(src)
 
