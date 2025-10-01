@@ -41,7 +41,7 @@ class ClosureRefPass(cpg: Cpg) extends ConcurrentWriterCpgPass[ClosureBinding](c
 
   private def getMethod(methodRef: MethodRef): Option[Method] =
       methodRef.start.repeat(_.astParent)(
-        _.until(_.isMethod).emit(_.isMethod)
+        using _.until(_.isMethod).emit(_.isMethod)
       ).isMethod.headOption
 
   private def addRefToCapturedNode(
@@ -59,7 +59,7 @@ class ClosureRefPass(cpg: Cpg) extends ConcurrentWriterCpgPass[ClosureBinding](c
             closureBinding.closureOriginalName.foreach { name =>
               lazy val locals =
                   method.start.repeat(_.astChildren.filterNot(_.isMethod))(
-                    _.emit(_.isLocal)
+                    using _.emit(_.isLocal)
                   ).collectAll[Local]
               val maybeCaptured =
                   method.parameter

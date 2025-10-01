@@ -39,7 +39,9 @@ private object Frontend:
 end Frontend
 
 object NewMain
-    extends X2CpgMain(cmdLineParser, new Py2CpgOnFileSystem())(new Py2CpgOnFileSystemConfig()):
+    extends X2CpgMain(cmdLineParser, new Py2CpgOnFileSystem())(using
+      new Py2CpgOnFileSystemConfig()
+    ):
   def run(config: Py2CpgOnFileSystemConfig, frontend: Py2CpgOnFileSystem): Unit =
       frontend.run(config)
 

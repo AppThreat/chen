@@ -325,8 +325,8 @@ class StepsTest extends AnyWordSpec with Matchers {
     method.head.call.size shouldBe 1
 
     // callForCallGraph - only verifying that it compiles
-    call.callee(NoResolve)
-    call.head.callee(NoResolve)
+    call.callee(using NoResolve)
+    call.head.callee(using NoResolve)
 
     // AstNodeDot - only verifying that it compiles
     ast.dotAst

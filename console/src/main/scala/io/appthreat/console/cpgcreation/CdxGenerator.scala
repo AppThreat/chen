@@ -17,8 +17,8 @@ case class CdxGenerator(config: FrontendConfig, rootPath: Path, language: String
     */
   override def generate(inputPath: String, outputPath: String = "bom.json"): Try[String] =
     var outFile =
-        if File(outputPath).isDirectory(linkOptions = LinkOptions.noFollow) then
-          (File(outputPath) / "bom.json").pathAsString
+        if File(outputPath).isDirectory(using linkOptions = LinkOptions.noFollow) then
+          (File(inputPath) / s"sbom-build-$language.cdx.json").pathAsString
         else outputPath
     val arguments =
         Seq("-o", outFile, "-t", language, "--deep", inputPath) ++ config.cmdLineParams

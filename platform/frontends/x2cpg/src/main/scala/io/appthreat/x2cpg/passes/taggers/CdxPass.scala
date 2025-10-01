@@ -81,8 +81,8 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
               forms.foreach { bpkg =>
                   if bpkg.nonEmpty && !donePkgs.contains(bpkg) then
                     donePkgs.put(bpkg, true)
-                    atom.call.where(_.methodFullName(bpkg)).newTagNode(purl).store()(dstGraph)
-                    atom.identifier.typeFullName(bpkg).newTagNode(purl).store()(dstGraph)
+                    atom.call.where(_.methodFullName(bpkg)).newTagNode(purl).store()(using dstGraph)
+                    atom.identifier.typeFullName(bpkg).newTagNode(purl).store()(using dstGraph)
               }
             }
 
@@ -158,15 +158,16 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
     compType: String,
     dstGraph: DiffGraphBuilder
   ): Unit =
-    atom.call.code(bpkg).argument.newTagNode(purl).store()(dstGraph)
+    atom.call.code(bpkg).argument.newTagNode(purl).store()(using dstGraph)
     atom.call.code(bpkg).receiver.isMethod.where(_.fullName(
       s"((app|config)${Pattern.quote(File.separator)})?(routes|controller(s)?|model(s)?|application).*\\.rb.*"
     ))
-        .parameter.newTagNode("framework-input").store()(dstGraph)
-    atom.call.code(bpkg).receiver.newTagNode(s"$compType-value").store()(dstGraph)
-    atom.call.code(bpkg).callee(NoResolve).isMethod.parameter.newTagNode(s"$compType-input").store()(
-      dstGraph
-    )
+        .parameter.newTagNode("framework-input").store()(using dstGraph)
+    atom.call.code(bpkg).receiver.newTagNode(s"$compType-value").store()(using dstGraph)
+    atom.call.code(bpkg).callee(using NoResolve).isMethod.parameter.newTagNode(s"$compType-input")
+        .store()(
+          using dstGraph
+        )
 
   private def tagCpp(
     bpkg: String,
@@ -178,26 +179,29 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
     val isRegex = containsRegex(bpkg)
     val pattern = if isRegex then Pattern.quote(bpkg) else bpkg
 
-    atom.method.fullNameExact(bpkg).callIn(NoResolve).newTagNode(purl).store()(dstGraph)
-    atom.method.fullNameExact(bpkg).callIn(NoResolve).newTagNode("library-call").store()(dstGraph)
-    atom.method.fullNameExact(bpkg).newTagNode(purl).store()(dstGraph)
+    atom.method.fullNameExact(bpkg).callIn(using NoResolve).newTagNode(purl).store()(using dstGraph)
+    atom.method.fullNameExact(bpkg).callIn(using NoResolve).newTagNode("library-call").store()(using
+    dstGraph)
+    atom.method.fullNameExact(bpkg).newTagNode(purl).store()(using dstGraph)
 
     if !isRegex then
-      atom.parameter.typeFullName(s"$bpkg.*").newTagNode(purl).store()(dstGraph)
-      atom.parameter.typeFullName(s"$bpkg.*").newTagNode("framework-input").store()(dstGraph)
-      atom.parameter.typeFullName(s"$bpkg.*").method.callIn(NoResolve).newTagNode(purl).store()(
-        dstGraph
+      atom.parameter.typeFullName(s"$bpkg.*").newTagNode(purl).store()(using dstGraph)
+      atom.parameter.typeFullName(s"$bpkg.*").newTagNode("framework-input").store()(using dstGraph)
+      atom.parameter.typeFullName(s"$bpkg.*").method.callIn(using NoResolve).newTagNode(purl).store()(
+        using dstGraph
       )
-      atom.call.code(s".*\\.$bpkg.*").newTagNode(purl).store()(dstGraph)
-      atom.call.code(s".*\\.$bpkg.*").newTagNode("library-call").store()(dstGraph)
-      atom.call.code(s"$bpkg->.*").newTagNode(purl).store()(dstGraph)
-      atom.call.code(s"$bpkg->.*").newTagNode("library-call").store()(dstGraph)
+      atom.call.code(s".*\\.$bpkg.*").newTagNode(purl).store()(using dstGraph)
+      atom.call.code(s".*\\.$bpkg.*").newTagNode("library-call").store()(using dstGraph)
+      atom.call.code(s"$bpkg->.*").newTagNode(purl).store()(using dstGraph)
+      atom.call.code(s"$bpkg->.*").newTagNode("library-call").store()(using dstGraph)
     else
-      atom.parameter.typeFullName(s"$pattern.*").newTagNode(purl).store()(dstGraph)
-      atom.parameter.typeFullName(s"$pattern.*").newTagNode("framework-input").store()(dstGraph)
-      atom.parameter.typeFullName(s"$pattern.*").method.callIn(NoResolve).newTagNode(purl).store()(
-        dstGraph
-      )
+      atom.parameter.typeFullName(s"$pattern.*").newTagNode(purl).store()(using dstGraph)
+      atom.parameter.typeFullName(s"$pattern.*").newTagNode("framework-input").store()(using
+      dstGraph)
+      atom.parameter.typeFullName(s"$pattern.*").method.callIn(using NoResolve).newTagNode(purl)
+          .store()(
+            using dstGraph
+          )
   end tagCpp
 
   private def tagGeneric(
@@ -210,39 +214,41 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
     val isRegex = containsRegex(bpkg)
     val pattern = if isRegex then Pattern.quote(bpkg) else bpkg
 
-    atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(dstGraph)
+    atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(using
+    dstGraph)
     atom.identifier.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(
-      dstGraph
+      using dstGraph
     )
     atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(
-      dstGraph
+      using dstGraph
     )
 
     if !isRegex then
-      atom.method.fullName(s"$pattern.*").newTagNode(purl).store()(dstGraph)
+      atom.method.fullName(s"$pattern.*").newTagNode(purl).store()(using dstGraph)
     else
-      atom.method.fullName(bpkg).newTagNode(purl).store()(dstGraph)
+      atom.method.fullName(bpkg).newTagNode(purl).store()(using dstGraph)
 
     if compType != "library" then
       atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(compType).store()(
-        dstGraph
+        using dstGraph
       )
       atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(compType)
-          .store()(dstGraph)
+          .store()(using dstGraph)
       atom.method.fullName(if isRegex then bpkg else s"$pattern.*").newTagNode(compType).store()(
-        dstGraph
+        using dstGraph
       )
 
     descTags.foreach { tag =>
-      atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(dstGraph)
+      atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(using
+      dstGraph)
       atom.identifier.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(
-        dstGraph
+        using dstGraph
       )
       atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(
-        dstGraph
+        using dstGraph
       )
       atom.method.fullName(if isRegex then bpkg else s"$pattern.*").newTagNode(tag).store()(
-        dstGraph
+        using dstGraph
       )
     }
   end tagGeneric

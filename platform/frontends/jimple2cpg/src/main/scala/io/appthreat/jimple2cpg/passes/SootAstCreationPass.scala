@@ -19,7 +19,7 @@ class SootAstCreationPass(cpg: Cpg, config: Config) extends ConcurrentWriterCpgP
     val jimpleFile = SourceLocator.v().getSourceForClass(part.getName)
     try
       val localDiff =
-          new AstCreator(jimpleFile, part, global)(config.schemaValidation).createAst()
+          new AstCreator(jimpleFile, part, global)(using config.schemaValidation).createAst()
       builder.absorb(localDiff)
     catch
       case e: Exception =>

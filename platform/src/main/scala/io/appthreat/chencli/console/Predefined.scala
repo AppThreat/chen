@@ -80,5 +80,5 @@ object Predefined:
           Seq("import _root_.io.appthreat.chencli.console.Chen._") ++
           Run.codeForRunCommand().linesIterator ++
           Help.codeForHelpCommand(classOf[ChenConsole]).linesIterator ++
-          Seq("ossDataFlowOptions = opts.ossdataflow")
+          Seq("def ossDataFlowOptions = opts.ossdataflow")
 end Predefined

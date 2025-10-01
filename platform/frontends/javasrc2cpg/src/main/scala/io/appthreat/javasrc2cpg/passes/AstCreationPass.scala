@@ -48,7 +48,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
               symbolSolver,
               packagesJarMappings
             )(
-              config.schemaValidation
+              using config.schemaValidation
             ).createAst()
           )
 

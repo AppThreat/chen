@@ -1,6 +1,6 @@
 package io.appthreat.c2cpg.astcreation
 
-import io.appthreat.x2cpg.utils.NodeBuilders.{newMethodReturnNode as newMethodReturnNode_}
+import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode as newMethodReturnNode_
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import org.eclipse.cdt.core.dom.ast.{IASTLabelStatement, IASTNode}
 import org.eclipse.cdt.core.dom.ast.IASTPreprocessorIncludeStatement

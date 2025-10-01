@@ -112,7 +112,16 @@ class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
         cfgNext(n)
 
   private def cfgNext(n: CfgNode): List[StoredNode] =
-      n.out(EdgeTypes.CFG).map(_.asInstanceOf[StoredNode]).l
+      try
+        if n != null then
+          n.out(EdgeTypes.CFG).map(_.asInstanceOf[StoredNode]).l
+        else
+          List.empty
+      catch
+        case _: NullPointerException =>
+            List.empty
+        case _: Exception =>
+            List.empty
 
   private def nextParamOrBody(param: MethodParameterIn): List[StoredNode] =
     val nextParam = param.method.parameter.index(param.index + 1).headOption
@@ -126,7 +135,14 @@ class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
 
   private def cfgNextOrFirstOutParam(cfgNode: CfgNode): List[StoredNode] =
     // `.cfgNext` would be wrong here because it filters `METHOD_RETURN`
-    val successors = cfgNode.out(EdgeTypes.CFG).map(_.asInstanceOf[StoredNode]).l
+    val successors =
+        try
+          if cfgNode != null then
+            cfgNode.out(EdgeTypes.CFG).map(_.asInstanceOf[StoredNode]).l
+          else
+            List.empty
+        catch
+          case _: Exception => List.empty
     if successors == List(exitNode) && firstOutputParam.isDefined then
       List(firstOutputParam.get)
     else
@@ -173,44 +189,66 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     */
   def initGen(method: Method): Map[StoredNode, mutable.BitSet] =
 
-    val defsForParams = method.parameter.l.map { param =>
-        param -> mutable.BitSet(Definition.fromNode(
-          param.asInstanceOf[StoredNode],
-          nodeToNumber
-        ))
-    }
+    val defsForParams =
+        try
+          method.parameter.l.map { param =>
+              if param != null then
+                param -> mutable.BitSet(Definition.fromNode(
+                  param.asInstanceOf[StoredNode],
+                  nodeToNumber
+                ))
+              else
+                param -> mutable.BitSet()
+          }
+        catch
+          case _: Exception => List.empty[(MethodParameterIn, mutable.BitSet)]
 
     // We filter out field accesses to ensure that they propagate
     // taint unharmed.
 
-    val defsForCalls = method.call
-        .filterNot(x => isFieldAccess(x.name))
-        .l
-        .map { call =>
-            call -> {
-                val retVal = List(call)
-                val args = call.argument
-                    .filter(hasValidGenType)
-                    .l
-                mutable.BitSet(
-                  (retVal ++ args)
-                      .collect {
-                          case x if nodeToNumber.contains(x) =>
-                              Definition.fromNode(x.asInstanceOf[StoredNode], nodeToNumber)
-                      }*
-                )
-            }
-        }
+    val defsForCalls =
+        try
+          method.call
+              .filterNot { x =>
+                  try
+                    x == null || isFieldAccess(x.name)
+                  catch
+                    case _: Exception => true
+              }
+              .l
+              .map { call =>
+                  try
+                    call -> {
+                        val retVal = List(call).filter(_ != null)
+                        val args = call.argument
+                            .filter(hasValidGenType)
+                            .l
+                            .filter(_ != null)
+                        mutable.BitSet(
+                          (retVal ++ args)
+                              .collect {
+                                  case x if nodeToNumber.contains(x) =>
+                                      Definition.fromNode(x.asInstanceOf[StoredNode], nodeToNumber)
+                              }*
+                        )
+                    }
+                  catch
+                    case _: Exception => call -> mutable.BitSet()
+              }
+        catch
+          case _: Exception => List.empty[(Call, mutable.BitSet)]
+
     (defsForParams ++ defsForCalls).toMap
   end initGen
 
   /** Restricts the types of nodes that represent definitions.
     */
   private def hasValidGenType(node: Expression): Boolean =
-      node match
+      node != null && (node match
         case _: Call       => true
         case _: Identifier => true
         case _             => false
+      )
 
   /** Initialize the map `kill`, a map that contains killed definitions for each flow graph node.
     *
@@ -225,31 +263,60 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
 
     val allIdentifiers: Map[String, List[CfgNode]] =
       val results = mutable.Map.empty[String, List[CfgNode]]
-      method.ast
-          .collect {
-              case identifier: Identifier =>
-                  (identifier.name, identifier)
-              case methodParameterIn: MethodParameterIn =>
-                  (methodParameterIn.name, methodParameterIn)
-          }
-          .foreach { case (name, node) =>
-              val oldValues = results.getOrElse(name, Nil)
-              results.put(name, node :: oldValues)
-          }
+      try
+        method.ast
+            .collect {
+                case identifier: Identifier if identifier != null && identifier.name != null =>
+                    (identifier.name, identifier)
+                case methodParameterIn: MethodParameterIn
+                    if methodParameterIn != null && methodParameterIn.name != null =>
+                    (methodParameterIn.name, methodParameterIn)
+            }
+            .foreach { case (name, node) =>
+                try
+                  val oldValues = results.getOrElse(name, Nil)
+                  results.put(name, node :: oldValues)
+                catch
+                  case _: Exception =>
+                      // Skip if there's an issue with this node
+                      ()
+            }
+      catch
+        case _: Exception =>
+            // If AST traversal fails completely, return empty map
+            ()
+      end try
       results.toMap
+    end allIdentifiers
 
     val allCalls: Map[String, List[Call]] =
-        method.call.l
-            .groupBy(_.code)
-            .withDefaultValue(List.empty[Call])
+        try
+          method.call.l
+              .filter { call =>
+                  call != null && call.code != null
+              }
+              .groupBy(_.code)
+              .withDefaultValue(List.empty[Call])
+        catch
+          case _: Exception => Map.empty[String, List[Call]].withDefaultValue(List.empty[Call])
 
     // We filter out field accesses to ensure that they propagate
     // taint unharmed.
 
     method.call
-        .filterNot(x => isGenericMemberAccessName(x.name))
+        .filterNot { call =>
+            try
+              call == null || isGenericMemberAccessName(call.name)
+            catch
+              case _: Exception => true
+        }
         .map { call =>
-            call -> killsForGens(gen(call), allIdentifiers, allCalls)
+            try
+              call -> killsForGens(gen(call), allIdentifiers, allCalls)
+            catch
+              case _: Exception =>
+                  // If we can't process this call, return empty kill set
+                  call -> mutable.BitSet()
         }
         .toMap
   end initKill
@@ -277,9 +344,20 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
               * example, a reassignment `x = new Box()` should kill any previous calls to `x.value`,
               * `x.length()`, etc.
               */
-            val sameObjects: Iterator[Call] = allCalls.valuesIterator.flatten
-                .filter(_.name == Operators.fieldAccess)
-                .filter(_.ast.isIdentifier.nameExact(identifier.name).nonEmpty)
+            val sameObjects: Iterator[Call] =
+                try
+                  allCalls.valuesIterator.flatten
+                      .filter { call =>
+                          try
+                            call != null && call.name == Operators.fieldAccess &&
+                                call.ast != null &&
+                                call.ast.isIdentifier != null &&
+                                call.ast.isIdentifier.nameExact(identifier.name).nonEmpty
+                          catch
+                            case _: Exception => false
+                      }
+                catch
+                  case _: Exception => Iterator.empty
 
             sameIdentifiers ++ sameObjects
         case call: Call =>
@@ -296,7 +374,12 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
 
     val res = mutable.BitSet()
     for definition <- genOfCall do
-      res.addAll(definitionsOfSameVariable(definition))
+      try
+        res.addAll(definitionsOfSameVariable(definition))
+      catch
+        case _: Exception =>
+            // Skip this definition if it causes issues due to corrupted CPG
+            ()
     res
   end killsForGens
 end ReachingDefTransferFunction
@@ -312,14 +395,29 @@ class OptimizedReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     extends ReachingDefTransferFunction(flowGraph):
 
   lazy val loneIdentifiers: Map[Call, List[Definition]] =
-    val identifiersInReturns = method._returnViaContainsOut.ast.isIdentifier.name.l
-    val paramAndLocalNames   = method.parameter.name.l ++ method.local.name.l
-    val callArgPairs = method.call.flatMap { call =>
-        call.argument.isIdentifier
-            .filterNot(i => paramAndLocalNames.contains(i.name))
-            .filterNot(i => identifiersInReturns.contains(i.name))
-            .map(arg => (arg.name, call, arg))
-    }.l
+    val identifiersInReturns =
+        try
+          method._returnViaContainsOut.ast.isIdentifier.name.l
+        catch
+          case _: Exception => List.empty[String]
+    val paramAndLocalNames =
+        try
+          method.parameter.name.l ++ method.local.name.l
+        catch
+          case _: Exception => List.empty[String]
+    val callArgPairs =
+        try
+          method.call.flatMap { call =>
+              try
+                call.argument.isIdentifier
+                    .filterNot(i => paramAndLocalNames.contains(i.name))
+                    .filterNot(i => identifiersInReturns.contains(i.name))
+                    .map(arg => (arg.name, call, arg))
+              catch
+                case _: Exception => List.empty[(String, Call, Identifier)]
+          }.l
+        catch
+          case _: Exception => List.empty[(String, Call, Identifier)]
 
     callArgPairs
         .groupBy(_._1)

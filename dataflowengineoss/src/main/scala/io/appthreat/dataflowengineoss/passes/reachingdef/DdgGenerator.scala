@@ -109,16 +109,18 @@ class DdgGenerator(semantics: Semantics):
       // This handles `return new Bar()`, which is lowered to
       // `return {Bar tmp = Bar.alloc(); tmp.init(); tmp}`
       usageAnalyzer.uses(ret).collectAll[Block].foreach(block => addEdgeForBlock(block, ret))
-      usageAnalyzer.usedIncomingDefs(ret).foreach { case (use: CfgNode, inElements) =>
-          addEdge(use, ret, use.code)
-          inElements
-              .filterNot(x => numberToNode.get(x).contains(use))
-              .flatMap(numberToNode.get)
-              .foreach { inElemNode =>
-                  addEdge(inElemNode, use, nodeToEdgeLabel(inElemNode))
-              }
-          if inElements.isEmpty then
-            addEdge(method, ret)
+      usageAnalyzer.usedIncomingDefs(ret).foreach {
+          case (use: CfgNode, inElements) =>
+              addEdge(use, ret, use.code)
+              inElements
+                  .filterNot(x => numberToNode.get(x).contains(use))
+                  .flatMap(numberToNode.get)
+                  .foreach { inElemNode =>
+                      addEdge(inElemNode, use, nodeToEdgeLabel(inElemNode))
+                  }
+              if inElements.isEmpty then
+                addEdge(method, ret)
+          case (_, _) =>
       }
       addEdge(ret, method.methodReturn, "<RET>")
 

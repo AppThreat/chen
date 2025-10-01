@@ -178,7 +178,7 @@ object ProgramHandlingUtil:
               val destClass = destDir / s"$path.class"
               destClass.parent.createDirectories()
               ClassFile(
-                file.copyTo(destClass)(File.CopyOptions(overwrite = true)),
+                file.copyTo(destClass)(using File.CopyOptions(overwrite = true)),
                 packagePath,
                 sourceArchivePath
               )

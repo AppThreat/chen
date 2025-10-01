@@ -42,7 +42,7 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private val includePaths     = parserConfig.userIncludePaths
   private val log              = new DefaultLogService
 
-  private var stayCpp: Boolean = false;
+  private var stayCpp: Boolean = false
 
   private val cScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
     definedSymbols,
@@ -117,7 +117,7 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
       catch
         case u: UnsupportedClassVersionError =>
             logger.debug(
-              "c2cpg requires at least JRE-17 to run. Please check your Java Runtime Environment!",
+              "c2cpg requires at least JRE-21 to run. Please check your Java Runtime Environment!",
               u
             )
             System.exit(1)

@@ -52,8 +52,8 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
 
   def getTypesFileLines(relativeFilename: String): Try[Iterable[String]] =
     val typesFilename = typesRoot.resolve(relativeFilename).toString
-    Try(File(typesFilename).lines(Charset.defaultCharset()))
-        .orElse(Try(File(typesFilename).lines(StandardCharsets.ISO_8859_1)))
+    Try(File(typesFilename).lines(using Charset.defaultCharset()))
+        .orElse(Try(File(typesFilename).lines(using StandardCharsets.ISO_8859_1)))
 
   def doesTypesFileExist(relativeFilename: String): Boolean =
       File(typesRoot.resolve(relativeFilename)).isRegularFile

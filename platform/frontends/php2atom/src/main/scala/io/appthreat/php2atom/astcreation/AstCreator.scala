@@ -22,7 +22,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     with AstNodeBuilder[PhpNode, AstCreator]:
 
   private val logger          = LoggerFactory.getLogger(AstCreator.getClass)
-  private val scope           = new Scope()(() => nextClosureName())
+  private val scope           = new Scope()(using () => nextClosureName())
   private val tmpKeyPool      = new IntervalKeyPool(first = 0, last = Long.MaxValue)
   private val globalNamespace = globalNamespaceBlock()
 

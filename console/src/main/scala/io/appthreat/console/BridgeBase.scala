@@ -225,13 +225,13 @@ end BridgeBase
 
 trait InteractiveShell:
   this: BridgeBase =>
-  protected def startInteractiveShell(config: Config) =
+  protected def startInteractiveShell(config: Config): Unit =
     val replConfig = config.cpgToLoad.map { cpgFile =>
         "importCpg(\"" + cpgFile + "\")"
     } ++ config.forInputPath.map { name =>
         s"""
-         |openForInputPath(\"$name\")
-         |""".stripMargin
+               |openForInputPath(\"$name\")
+               |""".stripMargin
     }
 
     val predefFile = createPredefFile(replConfig.toSeq)
@@ -248,7 +248,6 @@ trait InteractiveShell:
             ),
         greeting = Option(greeting),
         prompt = Option(promptStr),
-        onExitCode = Option(onExitCode),
         maxHeight = config.maxHeight
       )
     )
@@ -293,8 +292,8 @@ trait ScriptExecution:
           "importAtom(\"" + cpgFile + "\")"
       }.toList ++ config.forInputPath.map { name =>
           s"""
-         |openForInputPath(\"$name\")
-         |""".stripMargin
+               |openForInputPath(\"$name\")
+               |""".stripMargin
       }
 end ScriptExecution
 
@@ -315,9 +314,9 @@ trait PluginHandling:
 
   private def codeToListPlugins(): String =
       """
-      |println(run)
-      |
-      |""".stripMargin
+          |println(run)
+          |
+          |""".stripMargin
 
   /** Run plugin by generating a temporary script based on the given config and execute the script
     */
@@ -344,20 +343,20 @@ trait PluginHandling:
     val argsString  = argsStringFromConfig(config)
 
     s"""
-       | if (${config.overwrite} || !workspace.projectExists("$src")) {
-       |   workspace.projects
-       |   .filter(_.inputPath == "$src")
-       |   .map(_.name).foreach(n => workspace.removeProject(n))
-       |   importCode.$language("$src"$argsString)
-       |   $runDataflow
-       |   save
-       | } else {
-       |    println("Using existing CPG - Use `--overwrite` if this is not what you want")
-       |    openForInputPath(\"$src\")
-       | }
-       | run.$bundleName
-       | $storeCode
-       |""".stripMargin
+           | if (${config.overwrite} || !workspace.projectExists("$src")) {
+           |   workspace.projects
+           |   .filter(_.inputPath == "$src")
+           |   .map(_.name).foreach(n => workspace.removeProject(n))
+           |   importCode.$language("$src"$argsString)
+           |   $runDataflow
+           |   save
+           | } else {
+           |    println("Using existing CPG - Use `--overwrite` if this is not what you want")
+           |    openForInputPath(\"$src\")
+           | }
+           | run.$bundleName
+           | $storeCode
+           |""".stripMargin
   end loadOrCreateCpg
 
   private def languageFromConfig(config: Config, src: String): String =

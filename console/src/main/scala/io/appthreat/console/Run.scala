@@ -19,7 +19,7 @@ object Run:
           val pass: CpgPass = new CpgPass(console.cpg):
             override val name = "custom"
             override def run(builder: DiffGraphBuilder): Unit =
-                query.store()(builder)
+                query.store()(using builder)
           runPass(pass, context, storeUndoInfo)
       )
 

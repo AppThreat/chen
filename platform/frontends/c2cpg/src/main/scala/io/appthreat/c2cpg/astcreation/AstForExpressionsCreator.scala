@@ -7,6 +7,8 @@ import io.appthreat.x2cpg.Defines as X2CpgDefines
 import org.eclipse.cdt.core.dom.ast
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
+import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPTypedef
+import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.TypeOfDependentExpression
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTCompoundStatementExpression
 import org.eclipse.cdt.core.model.IMethod
 import org.eclipse.cdt.internal.core.dom.parser.c.{
@@ -116,6 +118,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val functionNameExpr = call.getFunctionNameExpression
     val typ              = functionNameExpr.getExpressionType
     typ match
+      case _: TypeOfDependentExpression =>
+          astForCppCallExpressionUntyped(call)
       case pointerType: IPointerType =>
           createPointerCallAst(call, cleanType(ASTTypeUtil.getType(call.getExpressionType)))
       case functionType: ICPPFunctionType =>
@@ -162,7 +166,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 val fullName      = s"$classFullName.$name:$signature"
 
                 fieldRefExpr.getFieldName.resolveBinding()
-                val method = fieldRefExpr.getFieldName.getBinding().asInstanceOf[ICPPMethod]
+                val method = fieldRefExpr.getFieldName.getBinding.asInstanceOf[ICPPMethod]
                 val (dispatchType, receiver) =
                     if method.isVirtual || method.isPureVirtual then
                       (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
@@ -179,65 +183,83 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 )
 
                 createCallAst(callCpgNode, args, base = Some(instanceAst), receiver)
-      case classType: ICPPClassType =>
-          val evaluation   = call.getEvaluation.asInstanceOf[EvalFunctionCall]
-          val functionType = evaluation.getOverload.getType
-          val signature    = functionTypeToSignature(functionType)
-          val name         = "<operator>()"
-
-          classType match
-            case closureType: CPPClosureType =>
-                val fullName     = s"$name:$signature"
-                val dispatchType = DispatchTypes.DYNAMIC_DISPATCH
-
-                val callCpgNode = callNode(
-                  call,
-                  code(call),
-                  name,
-                  fullName,
-                  dispatchType,
-                  Some(signature),
-                  Some(cleanType(ASTTypeUtil.getType(call.getExpressionType)))
-                )
-
-                val receiverAst = astForExpression(functionNameExpr)
-                val args        = call.getArguments.toList.map(a => astForNode(a))
-
-                createCallAst(callCpgNode, args, receiver = Some(receiverAst))
+            case unaryExpr: IASTUnaryExpression =>
+                astForCppCallExpressionUntyped(call)
             case _ =>
-                val classFullName = cleanType(ASTTypeUtil.getType(classType))
-                val fullName      = s"$classFullName.$name:$signature"
-
-                val method = evaluation.getOverload.asInstanceOf[ICPPMethod]
-                val dispatchType =
-                    if method.isVirtual || method.isPureVirtual then
-                      DispatchTypes.DYNAMIC_DISPATCH
-                    else
-                      DispatchTypes.STATIC_DISPATCH
-
-                val callCpgNode = callNode(
-                  call,
-                  code(call),
-                  name,
-                  fullName,
-                  dispatchType,
-                  Some(signature),
-                  Some(cleanType(ASTTypeUtil.getType(call.getExpressionType)))
-                )
-
-                val instanceAst = astForExpression(functionNameExpr)
-                val args        = call.getArguments.toList.map(a => astForNode(a))
-
-                createCallAst(
-                  callCpgNode,
-                  args,
-                  base = Some(instanceAst),
-                  receiver = Some(instanceAst)
-                )
+                astForCppCallExpressionUntyped(call)
+      case classType: ICPPClassType =>
+          val evaluation = call.getEvaluation
+          evaluation match
+            case evalFuncCall: EvalFunctionCall =>
+                val overloadOpt: Option[ICPPFunction] =
+                    try
+                      val overload = evalFuncCall.getOverload
+                      Option(overload)
+                    catch
+                      case _: NullPointerException => // CDT parsing bugs
+                          None
+                overloadOpt match
+                  case Some(overload) =>
+                      val functionType = overload.getType
+                      val signature    = functionTypeToSignature(functionType)
+                      val name         = "<operator>()"
+                      classType match
+                        case closureType: CPPClosureType =>
+                            val fullName     = s"$name:$signature"
+                            val dispatchType = DispatchTypes.DYNAMIC_DISPATCH
+                            val callCpgNode = callNode(
+                              call,
+                              code(call),
+                              name,
+                              fullName,
+                              dispatchType,
+                              Some(signature),
+                              Some(cleanType(ASTTypeUtil.getType(call.getExpressionType)))
+                            )
+                            val receiverAst = astForExpression(functionNameExpr)
+                            val args        = call.getArguments.toList.map(a => astForNode(a))
+                            createCallAst(callCpgNode, args, receiver = Some(receiverAst))
+                        case _ =>
+                            val classFullName = cleanType(ASTTypeUtil.getType(classType))
+                            val fullName      = s"$classFullName.$name:$signature"
+                            val method        = overload.asInstanceOf[ICPPMethod]
+                            val dispatchType =
+                                if method.isVirtual || method.isPureVirtual then
+                                  DispatchTypes.DYNAMIC_DISPATCH
+                                else
+                                  DispatchTypes.STATIC_DISPATCH
+                            val callCpgNode = callNode(
+                              call,
+                              code(call),
+                              name,
+                              fullName,
+                              dispatchType,
+                              Some(signature),
+                              Some(cleanType(ASTTypeUtil.getType(call.getExpressionType)))
+                            )
+                            val instanceAst = astForExpression(functionNameExpr)
+                            val args        = call.getArguments.toList.map(a => astForNode(a))
+                            createCallAst(
+                              callCpgNode,
+                              args,
+                              base = Some(instanceAst),
+                              receiver = Some(instanceAst)
+                            )
+                      end match
+                  case None => astForCppCallExpressionUntyped(call)
+                end match
+            case _ =>
+                astForCppCallExpressionUntyped(call)
           end match
+      case _: ICPPReferenceType =>
+          astForCppCallExpressionUntyped(call)
+      case _: ITypedef =>
+          astForCppCallExpressionUntyped(call)
       case _: IProblemType =>
           astForCppCallExpressionUntyped(call)
       case _: IProblemBinding =>
+          astForCppCallExpressionUntyped(call)
+      case _ =>
           astForCppCallExpressionUntyped(call)
     end match
   end astForCppCallExpression

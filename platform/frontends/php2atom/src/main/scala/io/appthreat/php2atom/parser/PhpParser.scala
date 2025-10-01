@@ -106,7 +106,7 @@ object PhpParser:
           defaultValue
 
     File(pathString) match
-      case file if file.exists() && file.isRegularFile(File.LinkOptions.follow) =>
+      case file if file.exists() && file.isRegularFile(using File.LinkOptions.follow) =>
           Some(file.canonicalPath)
       case _ => Some(defaultValue)
 

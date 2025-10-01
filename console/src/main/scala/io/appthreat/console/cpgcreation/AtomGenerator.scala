@@ -30,7 +30,7 @@ case class AtomGenerator(
         cdxLanguage,
         "--deep",
         "-o",
-        (File(inputPath) / "bom.json").pathAsString,
+        (File(inputPath) / s"sbom-build-$cdxLanguage.cdx.json").pathAsString,
         inputPath
       )
       runShellCommand(cdxgenCommand, arguments)

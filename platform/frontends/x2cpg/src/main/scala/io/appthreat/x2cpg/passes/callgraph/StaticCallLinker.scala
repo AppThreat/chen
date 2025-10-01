@@ -7,10 +7,10 @@ import io.shiftleft.passes.ForkJoinParallelCpgPass
 import io.shiftleft.semanticcpg.language.*
 import scala.collection.mutable
 
-class StaticCallLinker(cpg: Cpg) extends ForkJoinParallelCpgPass[Seq[Call]](cpg):
+class StaticCallLinker(cpg: Cpg) extends ForkJoinParallelCpgPass[Seq[Call]](cpg, maxChunkSize = 25):
 
   override def generateParts(): Array[Seq[Call]] =
-      cpg.call.toList.grouped(100).toArray
+      cpg.call.where(_.dispatchTypeNot(DispatchTypes.DYNAMIC_DISPATCH)).grouped(10).toArray
 
   override def runOnPart(builder: DiffGraphBuilder, calls: Seq[Call]): Unit =
       calls.foreach { call =>
@@ -29,7 +29,6 @@ class StaticCallLinker(cpg: Cpg) extends ForkJoinParallelCpgPass[Seq[Call]](cpg)
             val resolvedMethods = cpg.method.fullNameExact(call.methodFullName).l
             resolvedMethods.foreach(dst => builder.addEdge(call, dst, EdgeTypes.CALL))
         case DispatchTypes.DYNAMIC_DISPATCH =>
-        // Do nothing
-        case _ =>
+        case _                              =>
 
 end StaticCallLinker

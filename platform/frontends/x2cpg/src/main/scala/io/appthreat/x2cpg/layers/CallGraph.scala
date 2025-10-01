@@ -22,6 +22,7 @@ class CallGraph extends LayerCreator:
     val cpg = context.cpg
     CallGraph.passes(cpg).zipWithIndex.foreach { case (pass, index) =>
         runPass(pass, context, storeUndoInfo, index)
+        System.gc()
     }
 
   // LayerCreators need one-arg constructor, because they're called by reflection from io.appthreat.console.Run

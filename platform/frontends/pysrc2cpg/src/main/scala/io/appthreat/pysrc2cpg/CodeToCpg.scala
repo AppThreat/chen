@@ -24,7 +24,7 @@ class CodeToCpg(
       val astRoot                = parser.parse(lineBreakCorrectedCode)
       val nodeToCode             = new NodeToCode(lineBreakCorrectedCode)
       val astVisitor = new PythonAstVisitor(inputPair.relFileName, nodeToCode, PythonV2AndV3)(
-        schemaValidationMode
+        using schemaValidationMode
       )
       astVisitor.convert(astRoot)
 

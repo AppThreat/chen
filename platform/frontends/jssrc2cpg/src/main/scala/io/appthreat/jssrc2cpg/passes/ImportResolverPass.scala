@@ -80,7 +80,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
          exp.argument.l match
            case ::(expCall: Call, ::(b: Identifier, _))
                if expCall.code.matches("^(module.)?exports[.]?.*") && b.name == alias =>
-               val moduleMethods      = targetModule.repeat(_.astChildren.isMethod)(_.emit).l
+               val moduleMethods      = targetModule.repeat(_.astChildren.isMethod)(using _.emit).l
                lazy val methodMatches = moduleMethods.name(b.name).l
                lazy val constructorMatches =
                    moduleMethods.fullName(
@@ -97,7 +97,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                  methodPaths.flatMap(x =>
                    cpg.method.fullNameExact(x).newTagNode(
                      "exported"
-                   ).store()(diffGraph)
+                   ).store()(using diffGraph)
                    Set(ResolvedMethod(x, alias, Option("this")), ResolvedTypeDecl(x))
                  )
                else if moduleExportsThisVariable then
@@ -113,7 +113,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                    else
                      cpg.method.fullNameExact(methodName).newTagNode(
                        "exported"
-                     ).store()(diffGraph)
+                     ).store()(using diffGraph)
                      (methodName, Option(alias))
                b.referencedMethod.astParent.iterator
                    .collectAll[Method]
@@ -125,7 +125,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
                y.ast.isMethodRef.map(mRef =>
                  cpg.method.fullNameExact(mRef.methodFullName).newTagNode(
                    "exported"
-                 ).store()(diffGraph)
+                 ).store()(using diffGraph)
                  ResolvedMethod(mRef.methodFullName, alias, Option("this"))
                ).toSet
            case _ =>

@@ -74,13 +74,13 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     )
 
     cRoutePatterns.foreach { pattern =>
-      atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+      atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
       atom.call
           .where(_.methodFullName(pattern))
           .argument
           .isLiteral
           .newTagNode(FRAMEWORK_ROUTE)
-          .store()(dstGraph)
+          .store()(using dstGraph)
     }
   end tagCRoutes
 
@@ -92,7 +92,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             .argument
             .isLiteral
             .newTagNode(FRAMEWORK_ROUTE)
-            .store()(dstGraph)
+            .store()(using dstGraph)
     }
 
     // Tag decorated methods
@@ -107,10 +107,10 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
           .argument
           .isIdentifier
           .newTagNode(FRAMEWORK_INPUT)
-          .store()(dstGraph)
+          .store()(using dstGraph)
 
-      decoratedMethods.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
-      decoratedMethods.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+      decoratedMethods.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+      decoratedMethods.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
     }
 
     // Django views
@@ -120,7 +120,7 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
         .name("request")
         .method
         .newTagNode(FRAMEWORK_INPUT)
-        .store()(dstGraph)
+        .store()(using dstGraph)
 
     // Controller methods
     val controllerMethods = atom.file.name(".*controllers.*.py.*")
@@ -131,23 +131,23 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
         .parameter
         .filterNot(_.name == "self")
         .newTagNode(FRAMEWORK_INPUT)
-        .store()(dstGraph)
+        .store()(using dstGraph)
 
     controllerMethods
         .methodReturn
         .newTagNode(FRAMEWORK_OUTPUT)
-        .store()(dstGraph)
+        .store()(using dstGraph)
   end tagPythonRoutes
 
   private def tagPhpRoutes(dstGraph: DiffGraphBuilder): Unit =
       PHP_ROUTES_METHODS_REGEXES.foreach { pattern =>
-        atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+        atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
         atom.call
             .where(_.methodFullName(pattern))
             .argument
             .isLiteral
             .newTagNode(FRAMEWORK_ROUTE)
-            .store()(dstGraph)
+            .store()(using dstGraph)
       }
 
   private def tagRubyRoutes(dstGraph: DiffGraphBuilder): Unit =
@@ -158,22 +158,22 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
       _.filename("config/routes.rb").code(railsRoutePrefix)
     )
 
-    railsRoutes.newTagNode(FRAMEWORK_ROUTE).store()(dstGraph)
-    railsRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
+    railsRoutes.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    railsRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
 
     // Rails controllers
     val railsControllers = atom.method.filename(".*controller.rb.*")
-    railsControllers.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
-    railsControllers.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(dstGraph)
+    railsControllers.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+    railsControllers.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
 
     // Sinatra routes
     val sinatraRoutePrefix =
         "(app\\.namespace|app\\.)?(get|post|delete|head|options|put)\\s('|\").*"
 
     val sinatraRoutes = atom.method.code(sinatraRoutePrefix)
-    sinatraRoutes.newTagNode(FRAMEWORK_ROUTE).store()(dstGraph)
-    sinatraRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(dstGraph)
-    sinatraRoutes.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(dstGraph)
+    sinatraRoutes.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    sinatraRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+    sinatraRoutes.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
   end tagRubyRoutes
 
   private def processChennaiConfig(dstGraph: DiffGraphBuilder): Unit =
@@ -218,12 +218,12 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             if paramName.nonEmpty then
               atom.method.parameter.typeFullNameExact(paramName)
                   .newTagNode(tagName)
-                  .store()(dstGraph)
+                  .store()(using dstGraph)
 
               if !containsRegex(paramName) then
                 atom.method.parameter.typeFullName(s".*${Pattern.quote(paramName)}.*")
                     .newTagNode(tagName)
-                    .store()(dstGraph)
+                    .store()(using dstGraph)
         }
     }
   end processTagParameters
@@ -244,12 +244,12 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             if methodName.nonEmpty then
               atom.method.fullNameExact(methodName)
                   .newTagNode(tagName)
-                  .store()(dstGraph)
+                  .store()(using dstGraph)
 
               if !containsRegex(methodName) then
                 atom.method.fullName(s".*${Pattern.quote(methodName)}.*")
                     .newTagNode(tagName)
-                    .store()(dstGraph)
+                    .store()(using dstGraph)
         }
     }
   end processTagMethods
@@ -266,21 +266,21 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             if typeName.nonEmpty then
               atom.method.parameter.typeFullNameExact(typeName)
                   .newTagNode(tagName)
-                  .store()(dstGraph)
+                  .store()(using dstGraph)
 
               if !containsRegex(typeName) then
                 atom.method.parameter.typeFullName(s".*${Pattern.quote(typeName)}.*")
                     .newTagNode(tagName)
-                    .store()(dstGraph)
+                    .store()(using dstGraph)
 
               atom.call.typeFullNameExact(typeName)
                   .newTagNode(tagName)
-                  .store()(dstGraph)
+                  .store()(using dstGraph)
 
               if !typeName.contains("[") && !typeName.contains("*") then
                 atom.call.typeFullName(s".*${Pattern.quote(typeName)}.*")
                     .newTagNode(tagName)
-                    .store()(dstGraph)
+                    .store()(using dstGraph)
         }
     }
   end processTagTypes
@@ -297,12 +297,12 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             if fileName.nonEmpty then
               atom.file.nameExact(fileName)
                   .newTagNode(tagName)
-                  .store()(dstGraph)
+                  .store()(using dstGraph)
 
               if !containsRegex(fileName) then
                 atom.file.name(s".*${Pattern.quote(fileName)}.*")
                     .newTagNode(tagName)
-                    .store()(dstGraph)
+                    .store()(using dstGraph)
         }
     }
   end processTagFiles

@@ -57,7 +57,7 @@ class TypeDeclTraversal(val traversal: Iterator[TypeDecl]) extends AnyVal:
   /** Direct and transitive base type declaration.
     */
   def derivedTypeDeclTransitive: Iterator[TypeDecl] =
-      traversal.repeat(_.derivedTypeDecl)(_.emitAllButFirst.dedup)
+      traversal.repeat(_.derivedTypeDecl)(using _.emitAllButFirst.dedup)
 
   /** Direct base type declaration.
     */
@@ -67,7 +67,7 @@ class TypeDeclTraversal(val traversal: Iterator[TypeDecl]) extends AnyVal:
   /** Direct and transitive base type declaration.
     */
   def baseTypeDeclTransitive: Iterator[TypeDecl] =
-      traversal.repeat(_.baseTypeDecl)(_.emitAllButFirst.dedup)
+      traversal.repeat(_.baseTypeDecl)(using _.emitAllButFirst.dedup)
 
   /** Traverse to alias type declarations.
     */
@@ -96,7 +96,7 @@ class TypeDeclTraversal(val traversal: Iterator[TypeDecl]) extends AnyVal:
     * declaration.
     */
   def canonicalType: Iterator[TypeDecl] =
-      traversal.repeat(_.unravelAlias)(_.until(_.isCanonical).maxDepth(maxAliasExpansions))
+      traversal.repeat(_.unravelAlias)(using _.until(_.isCanonical).maxDepth(maxAliasExpansions))
 
   /** Direct alias type declarations.
     */
@@ -106,7 +106,7 @@ class TypeDeclTraversal(val traversal: Iterator[TypeDecl]) extends AnyVal:
   /** Direct and transitive alias type declarations.
     */
   def aliasTypeDeclTransitive: Iterator[TypeDecl] =
-      traversal.repeat(_.aliasTypeDecl)(_.emitAllButFirst.dedup)
+      traversal.repeat(_.aliasTypeDecl)(using _.emitAllButFirst.dedup)
 end TypeDeclTraversal
 
 object TypeDeclTraversal:

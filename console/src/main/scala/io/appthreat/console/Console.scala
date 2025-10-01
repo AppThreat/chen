@@ -551,11 +551,11 @@ class Console[T <: Project](
                         mtree
                             .add(
                               c.methodFullName + (if c.callee(
-                                                      NoResolve
+                                                      using NoResolve
                                                     ).nonEmpty && c.callee(
-                                                      NoResolve
+                                                      using NoResolve
                                                     ).head.nonEmpty && c.callee(
-                                                      NoResolve
+                                                      using NoResolve
                                                     ).head.isExternal
                                                   then " :right_arrow_curving_up:"
                                                   else "")

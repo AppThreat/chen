@@ -76,25 +76,26 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     */
   private def extractMatchingMacro(node: IASTNode)
     : Option[(IASTPreprocessorMacroDefinition, List[String])] =
-    val expansionLocations =
-        expandedFromMacro(node).filterNot(isExpandedFrom(node.getParent, _))
-    val nodeOffset    = node.getFileLocation.getNodeOffset
     var matchingMacro = Option.empty[(IASTPreprocessorMacroDefinition, List[String])]
+    val fileLocation  = node.getFileLocation
+    if fileLocation != null then
+      val nodeOffset = fileLocation.getNodeOffset
+      val expansionLocations =
+          expandedFromMacro(node).filterNot(isExpandedFrom(node.getParent, _))
 
-    expansionLocations.foreach { macroLocation =>
-        while matchingMacro.isEmpty && nodeOffsetMacroPairs.headOption.exists(
-            _._1 <= nodeOffset
-          )
-        do
-          val (_, macroDefinition) = nodeOffsetMacroPairs.pop()
-          val macroExpansionName = ASTStringUtil.getSimpleName(
-            macroLocation.getExpansion.getMacroDefinition.getName
-          )
-          val macroDefinitionName = ASTStringUtil.getSimpleName(macroDefinition.getName)
-          if macroExpansionName == macroDefinitionName then
-            matchingMacro = Option((macroDefinition, List[String]()))
-    }
-
+      expansionLocations.foreach { macroLocation =>
+          while matchingMacro.isEmpty && nodeOffsetMacroPairs.headOption.exists(
+              _._1 <= nodeOffset
+            )
+          do
+            val (_, macroDefinition) = nodeOffsetMacroPairs.pop()
+            val macroExpansionName = ASTStringUtil.getSimpleName(
+              macroLocation.getExpansion.getMacroDefinition.getName
+            )
+            val macroDefinitionName = ASTStringUtil.getSimpleName(macroDefinition.getName)
+            if macroExpansionName == macroDefinitionName then
+              matchingMacro = Option((macroDefinition, List[String]()))
+      }
     matchingMacro
   end extractMatchingMacro
 
