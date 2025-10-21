@@ -3,7 +3,7 @@ name := "console"
 enablePlugins(JavaAppPackaging)
 
 val ScoptVersion          = "4.1.0"
-val CaskVersion           = "0.10.2"
+val CaskVersion           = "0.11.3"
 
 dependsOn(
   Projects.semanticcpg,
@@ -22,11 +22,11 @@ libraryDependencies ++= Seq(
   "io.circe"             %% "circe-generic"     % Versions.circe,
   "io.circe"             %% "circe-parser"      % Versions.circe,
   "org.zeroturnaround"    % "zt-zip"            % Versions.ZeroturnaroundVersion,
-  "com.lihaoyi"          %% "os-lib"            % "0.11.5",
+  "com.lihaoyi"          %% "os-lib"            % "0.11.6",
   "com.lihaoyi"          %% "pprint"            % "0.9.4",
   "com.lihaoyi"          %% "cask"              % CaskVersion,
   "dev.scalapy"          %% "scalapy-core"      % "0.5.3",
-  "org.scala-lang.modules" % "scala-asm"        % "9.8.0-scala-1",
+  "org.scala-lang.modules" % "scala-asm"        % "9.9.0-scala-1",
   "org.scalatest"        %% "scalatest"         % Versions.scalatest % Test,
   "org.scala-lang"       %% "scala3-compiler"   % "3.6.2"
 )
