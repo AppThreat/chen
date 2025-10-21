@@ -45,11 +45,11 @@ object Path:
       acc
     }
 
-    val hasCheckLike  = tableRows.exists(row => isCheckLike(row.tags))
-    val caption       = buildCaption(pathInfo, hasCheckLike)
-    val richTableRows = tableRows.map(_.toRichTableRow)
-
-    printFlows(richTableRows, caption)
+    val hasCheckLike = tableRows.exists(row => isCheckLike(row.tags))
+    val caption      = buildCaption(pathInfo, hasCheckLike)
+    if tableRows.size > 1 then
+      val richTableRows = tableRows.map(_.toRichTableRow)
+      printFlows(richTableRows, caption)
     caption
 
   private def buildCaption(pathInfo: PathInfo, hasCheckLike: Boolean): String =
@@ -167,9 +167,8 @@ private object PathInfoExtractor:
 end PathInfoExtractor
 
 private object PathRowBuilder:
-  private val addedPaths = mutable.Set[String]()
-
   def build(astNode: AstNode, hasPreviousRows: Boolean, maxTrackedWidth: Int): Option[TableRow] =
+    val addedPaths   = mutable.Set[String]()
     val nodeType     = astNode.getClass.getSimpleName
     val lineNumber   = astNode.lineNumber.getOrElse("").toString
     val fileName     = astNode.file.name.headOption.getOrElse("").replace("<unknown>", "")
