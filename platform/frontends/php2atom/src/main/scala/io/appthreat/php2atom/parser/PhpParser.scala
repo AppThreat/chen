@@ -12,12 +12,11 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
 
   private def phpParseCommand(filename: String): String =
     val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
-    val quotedFilename    = s"'$filename'"
     phpParserPath match
       case "phpastgen" =>
-          s"$phpParserPath $phpParserCommands $quotedFilename"
+          s"$phpParserPath $phpParserCommands $filename"
       case _ =>
-          s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $quotedFilename"
+          s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
 
   def parseFile(inputPath: String, phpIniOverride: Option[String]): Option[PhpFile] =
     val inputFile      = File(inputPath)
