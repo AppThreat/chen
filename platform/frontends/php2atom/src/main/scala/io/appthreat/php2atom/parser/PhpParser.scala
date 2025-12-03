@@ -38,18 +38,16 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     maybeJson.flatMap(jsonValueToPhpFile(_, filename))
 
   private def linesToJsonValue(lines: Seq[String], filename: String): Option[ujson.Value] =
-      if lines.exists(_.startsWith("[")) then
-        val jsonString = lines.dropWhile(_.charAt(0) != '[').mkString("\n")
-        Try(Option(ujson.read(jsonString))) match
-          case Success(Some(value)) => Some(value)
+    val jsonLines = lines.dropWhile(!_.startsWith("["))
 
-          case Success(None) =>
-              None
-
-          case Failure(exception) =>
-              None
-      else
-        None
+    if jsonLines.isEmpty then
+      None
+    else
+      val jsonString = jsonLines.mkString("\n")
+      Try(ujson.read(jsonString)) match
+        case Success(value) => Some(value)
+        case Failure(e) =>
+            None
 
   private def jsonValueToPhpFile(json: ujson.Value, filename: String): Option[PhpFile] =
       Try(Domain.fromJson(json)) match
@@ -63,7 +61,7 @@ object PhpParser:
 
   val PhpParserBinEnvVar = "PHP_PARSER_BIN"
 
-  private def defaultPhpIni: String =
+  private lazy val defaultPhpIni: String =
     val tmpIni = File.newTemporaryFile(suffix = "-php.ini").deleteOnExit()
     tmpIni.writeText("memory_limit = -1")
     tmpIni.canonicalPath

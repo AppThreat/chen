@@ -6,7 +6,7 @@ on:
     tags: ["*"]
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,7 +18,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '23'
+          java-version: '24'
       - uses: sbt/setup-sbt@v1
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -33,7 +33,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '23.x'
+          node-version: '25.x'
       - uses: oras-project/setup-oras@v1
       - name: Delete `.rustup` directory
         run: rm -rf /home/runner/.rustup # to save disk space
