@@ -104,6 +104,7 @@ object BabelAst:
   object ImportAttribute                 extends BabelNode
   object ImportDeclaration               extends BabelNode
   object ImportDefaultSpecifier          extends BabelNode
+  object ImportExpression                extends Expression
   object ImportNamespaceSpecifier        extends BabelNode
   object ImportSpecifier                 extends BabelNode
   object IndexedAccessType               extends FlowType
@@ -188,6 +189,7 @@ object BabelAst:
   object TSBigIntKeyword                 extends TSType
   object TSBooleanKeyword                extends TSType
   object TSCallSignatureDeclaration      extends BabelNode
+  object TSClassImplements               extends BabelNode
   object TSConditionalType               extends TSType
   object TSConstructSignatureDeclaration extends BabelNode
   object TSConstructorType               extends TSType
@@ -207,6 +209,7 @@ object BabelAst:
   object TSInstantiationExpression       extends Expression
   object TSInterfaceBody                 extends BabelNode
   object TSInterfaceDeclaration          extends BabelNode
+  object TSInterfaceHeritage             extends BabelNode
   object TSIntersectionType              extends TSType
   object TSIntrinsicKeyword              extends TSType
   object TSLiteralType                   extends TSType
