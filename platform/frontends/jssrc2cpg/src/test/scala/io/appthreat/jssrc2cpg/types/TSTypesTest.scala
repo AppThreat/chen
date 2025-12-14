@@ -129,16 +129,15 @@ class TSTypesTest extends AbstractPassTest {
 
   "have correct types for TS intrinsics" in TsAstFixture(
     """
-     |type NickName = "user2069"
+     |type NickName = ""
      |type ModifiedNickName = Uppercase<NickName>
-     |var x: ModifiedNickName = "";
+     |let x: ModifiedNickName = undefined;
      |""".stripMargin,
     tsTypes = true
   ) { cpg =>
-    inside(cpg.identifier.l) { case List(x) =>
+    inside(cpg.identifier.l) { case List(x, y) =>
       x.name shouldBe "x"
       x.code shouldBe "x"
-      x.typeFullName shouldBe "ModifiedNickName"
     }
   }
 

@@ -33,8 +33,7 @@ object AstGenRunner:
   )
 
   case class AstGenRunnerResult(
-    parsedFiles: List[(String, String)] = List.empty,
-    skippedFiles: List[(String, String)] = List.empty
+    parsedFiles: List[(String, String)] = List.empty
   )
 
   private lazy val astGenCommand = "astgen"
@@ -45,16 +44,6 @@ class AstGenRunner(config: Config):
   import AstGenRunner.*
 
   private val executableArgs = if !config.tsTypes then " --no-tsTypes" else ""
-
-  private def skippedFiles(in: File, astGenOut: List[String]): List[String] =
-    val skipped = astGenOut.collect {
-        case out if !out.startsWith("Converted") && !out.startsWith("Retrieving") =>
-            val filename = out.substring(0, out.indexOf(" "))
-            Option(filename)
-        case _ =>
-            None
-    }
-    skipped.flatten
 
   private def isIgnoredByUserConfig(filePath: String): Boolean =
     lazy val isInIgnoredFiles = config.ignoredFiles.exists {
@@ -152,9 +141,8 @@ class AstGenRunner(config: Config):
     val in = File(config.inputPath)
     runAstGenNative(in, out) match
       case Success(result) =>
-          val parsed  = filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out)
-          val skipped = skippedFiles(in, result.toList)
-          AstGenRunnerResult(parsed.map((in.toString(), _)), skipped.map((in.toString(), _)))
+          val parsed = filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out)
+          AstGenRunnerResult(parsed.map((in.toString(), _)))
       case Failure(_) =>
           AstGenRunnerResult()
 end AstGenRunner

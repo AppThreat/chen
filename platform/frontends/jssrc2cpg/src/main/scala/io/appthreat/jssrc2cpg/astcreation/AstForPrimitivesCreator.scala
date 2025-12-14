@@ -103,4 +103,35 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       callAst(templateCall, argAsts)
     end if
   end astForTemplateLiteral
+
+  protected def astForImportExpression(importExpr: BabelNodeInfo): Ast =
+    val sourceJson = importExpr.json("source")
+    val sourceAst  = astForNodeWithFunctionReference(sourceJson)
+
+    val args = if hasKey(importExpr.json, "options") && !importExpr.json("options").isNull then
+      List(sourceAst, astForNodeWithFunctionReference(importExpr.json("options")))
+    else
+      List(sourceAst)
+
+    val callCode = s"import(${args.map(a => codeOf(a.nodes.head)).mkString(", ")})"
+    val callNode = createStaticCallNode(
+      callCode,
+      "import",
+      "import",
+      importExpr.lineNumber,
+      importExpr.columnNumber
+    )
+
+    callAst(callNode, args)
+  end astForImportExpression
+
+  protected def astForTSInstantiationExpression(instantiationExpr: BabelNodeInfo): Ast =
+    val exprAst = astForNodeWithFunctionReference(instantiationExpr.json("expression"))
+    if hasKey(instantiationExpr.json, "typeParameters") then
+      val typeParams = instantiationExpr.json("typeParameters")
+      if hasKey(typeParams, "params") then
+        typeParams("params").arr.foreach { param =>
+            typeFor(createBabelNodeInfo(param))
+        }
+    exprAst
 end AstForPrimitivesCreator

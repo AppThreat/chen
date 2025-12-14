@@ -46,10 +46,7 @@ jobs:
         if: runner.os == 'Linux'
       - name: Install graphviz-dev
         run: |
-          brew install graphviz sbt
-          export C_INCLUDE_PATH="$(brew --prefix graphviz)/include/"
-          export LIBRARY_PATH="$(brew --prefix graphviz)/lib/"
-          pip install --use-pep517 --config-setting="--global-option=build_ext" pygraphviz
+          brew install sbt
         if: runner.os == 'macOS'
       - name: Install and test
         run: |
