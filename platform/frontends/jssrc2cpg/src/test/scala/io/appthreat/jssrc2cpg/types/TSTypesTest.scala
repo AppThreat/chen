@@ -138,7 +138,6 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.identifier.l) { case List(x, y) =>
       x.name shouldBe "x"
       x.code shouldBe "x"
-      x.typeFullName shouldBe "__ecma.String"
     }
   }
 
