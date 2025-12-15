@@ -60,7 +60,18 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForCallExpression(callExpr: BabelNodeInfo): Ast =
     val callee     = createBabelNodeInfo(callExpr.json("callee"))
     val calleeCode = callee.code
-    if GlobalBuiltins.builtins.contains(calleeCode) then
+
+    if callee.node == Import then
+      val args     = astForNodes(callExpr.json("arguments").arr.toList)
+      val callCode = s"import(${args.map(a => codeOf(a.nodes.head)).mkString(", ")})"
+      val importCallNode = callNode(
+        callExpr,
+        callCode,
+        "import",
+        DispatchTypes.DYNAMIC_DISPATCH
+      )
+      callAst(importCallNode, args)
+    else if GlobalBuiltins.builtins.contains(calleeCode) then
       createBuiltinStaticCall(callExpr, callee, calleeCode)
     else
       val (receiverAst, baseNode, callName) = callee.node match
@@ -280,15 +291,22 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val typ = typeFor(castExpr) match
       case t if GlobalBuiltins.builtins.contains(t) => s"__ecma.$t"
       case t                                        => t
+
     val lhsNode = castExpr.json("typeAnnotation")
+    val lhsCode = if hasKey(lhsNode, "typeAnnotation") then
+      code(lhsNode("typeAnnotation"))
+    else
+      code(lhsNode)
+
     val lhsAst =
-        Ast(literalNode(castExpr, code(lhsNode), None).dynamicTypeHintFullName(Seq(typ)))
+        Ast(literalNode(castExpr, lhsCode, None).dynamicTypeHintFullName(Seq(typ)))
     val rhsAst = astForNodeWithFunctionReference(castExpr.json("expression"))
     val node =
         callNode(castExpr, castExpr.code, op, DispatchTypes.STATIC_DISPATCH)
             .dynamicTypeHintFullName(Seq(typ))
     val argAsts = List(lhsAst, rhsAst)
     callAst(node, argAsts)
+  end astForCastExpression
 
   protected def astForBinaryExpression(binExpr: BabelNodeInfo): Ast =
     val op = binExpr.json("operator").str match

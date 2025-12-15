@@ -98,8 +98,10 @@ class AstGenRunner(config: Config):
       yield jsResult ++ vueResult
 
   def execute(out: File): AstGenRunnerResult =
-    val in = File(config.inputPath)
-    runAstGenNative(in, out) match
+    val in              = File(config.inputPath)
+    val shouldRunAstGen = config.astGenOutDir.isEmpty
+    val runResult       = if shouldRunAstGen then runAstGenNative(in, out) else Success(Seq.empty)
+    runResult match
       case Success(result) =>
           val parsed = filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out)
           AstGenRunnerResult(parsed.map((in.toString(), _)))
