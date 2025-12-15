@@ -6,7 +6,6 @@ import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
 import io.shiftleft.utils.IOUtils
 import com.typesafe.config.ConfigFactory
 import io.appthreat.jssrc2cpg.Config
-import io.appthreat.jssrc2cpg.preprocessing.EjsPreprocessor
 import org.slf4j.LoggerFactory
 import versionsort.VersionHelper
 
@@ -44,7 +43,7 @@ class AstGenRunner(config: Config):
   import AstGenRunner.*
 
   private val executableArgs = if !config.tsTypes then " --no-tsTypes" else ""
-
+  private val typeArgs       = if config.flow then "flow" else "ts"
   private def isIgnoredByUserConfig(filePath: String): Boolean =
     lazy val isInIgnoredFiles = config.ignoredFiles.exists {
         case ignorePath if File(ignorePath).isDirectory => filePath.startsWith(ignorePath)
@@ -83,44 +82,6 @@ class AstGenRunner(config: Config):
     else if file.notExists then File(newName)
     else file
 
-  private def processEjsFiles(in: File, out: File, ejsFiles: List[String]): Try[Seq[String]] =
-    val tmpJsFiles = ejsFiles.map { ejsFilePath =>
-      val ejsFile           = File(ejsFilePath)
-      val sourceFileContent = IOUtils.readEntireFile(ejsFile.path)
-      val preprocessContent = new EjsPreprocessor().preprocess(sourceFileContent)
-      (out / in.relativize(ejsFile).toString).parent.createDirectoryIfNotExists(createParents =
-          true
-      )
-      val newEjsFile = ejsFile.copyTo(out / in.relativize(ejsFile).toString)
-      val jsFile     = changeExtensionTo(newEjsFile, ".js").writeText(preprocessContent)
-      newEjsFile.createFile().writeText(sourceFileContent)
-      jsFile
-    }
-
-    val result =
-        ExternalCommand.run(s"$astGenCommand$executableArgs -t ts -o $out", out.toString())
-
-    val jsons = SourceFiles.determine(out.toString(), Set(".json"))
-    jsons.foreach { jsonPath =>
-      val jsonFile    = File(jsonPath)
-      val jsonContent = IOUtils.readEntireFile(jsonFile.path)
-      val json        = ujson.read(jsonContent)
-      val fileName    = json("fullName").str
-      val newFileName = fileName.patch(fileName.lastIndexOf(".js"), ".ejs", 3)
-      json("relativeName") = newFileName
-      json("fullName") = newFileName
-      jsonFile.writeText(json.toString())
-    }
-
-    tmpJsFiles.foreach(_.delete())
-    result
-  end processEjsFiles
-
-  private def ejsFiles(in: File, out: File): Try[Seq[String]] =
-    val files = SourceFiles.determine(in.pathAsString, Set(".ejs"))
-    if files.nonEmpty then processEjsFiles(in, out, files)
-    else Success(Seq.empty)
-
   private def vueFiles(in: File, out: File): Try[Seq[String]] =
     val files = SourceFiles.determine(in.pathAsString, Set(".vue"))
     if files.nonEmpty then
@@ -128,14 +89,13 @@ class AstGenRunner(config: Config):
     else Success(Seq.empty)
 
   private def jsFiles(in: File, out: File): Try[Seq[String]] =
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t ts -o $out", in.toString())
+      ExternalCommand.run(s"$astGenCommand$executableArgs -t $typeArgs -o $out", in.toString())
 
   private def runAstGenNative(in: File, out: File): Try[Seq[String]] =
       for
-        ejsResult <- ejsFiles(in, out)
-        vueResult <- vueFiles(in, out)
         jsResult  <- jsFiles(in, out)
-      yield jsResult ++ vueResult ++ ejsResult
+        vueResult <- vueFiles(in, out)
+      yield jsResult ++ vueResult
 
   def execute(out: File): AstGenRunnerResult =
     val in = File(config.inputPath)

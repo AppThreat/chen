@@ -8,11 +8,14 @@ import scopt.OParser
 
 import java.nio.file.Paths
 
-final case class Config(tsTypes: Boolean = true) extends X2CpgConfig[Config]
+final case class Config(tsTypes: Boolean = true, flow: Boolean = false) extends X2CpgConfig[Config]
     with TypeRecoveryParserConfig[Config]:
 
   def withTsTypes(value: Boolean): Config =
       copy(tsTypes = value).withInheritedFields(this)
+
+  def withFlow(value: Boolean): Config =
+      copy(flow = value).withInheritedFields(this)
 
 object Frontend:
   implicit val defaultConfig: Config = Config()
@@ -23,9 +26,11 @@ object Frontend:
     OParser.sequence(
       programName("jssrc2cpg"),
       opt[Unit]("no-tsTypes")
-          .hidden()
           .action((_, c) => c.withTsTypes(false))
           .text("disable generation of types via Typescript"),
+      opt[Unit]("flow")
+          .action((_, c) => c.withFlow(true))
+          .text("enable flow mode (astgen -t flow)"),
       XTypeRecovery.parserOptions
     )
 
