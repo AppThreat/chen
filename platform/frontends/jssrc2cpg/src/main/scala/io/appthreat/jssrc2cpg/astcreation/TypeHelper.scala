@@ -35,11 +35,12 @@ trait TypeHelper:
 
   protected def isPlainTypeAlias(alias: BabelNodeInfo): Boolean =
       if hasKey(alias.json, "right") then
-        createBabelNodeInfo(alias.json("right")).node.toString == TSTypeReference.toString
+        val rhsNode = createBabelNodeInfo(alias.json("right")).node
+        rhsNode == TSTypeReference || rhsNode == GenericTypeAnnotation
       else
         createBabelNodeInfo(
           alias.json("typeAnnotation")
-        ).node.toString == TSTypeReference.toString
+        ).node == TSTypeReference
 
   private def typeForFlowType(flowType: BabelNodeInfo): String = flowType.node match
     case BooleanTypeAnnotation        => Defines.Boolean
@@ -47,12 +48,18 @@ trait TypeHelper:
     case ObjectTypeAnnotation         => Defines.Object
     case StringTypeAnnotation         => Defines.String
     case SymbolTypeAnnotation         => Defines.Symbol
+    case VoidTypeAnnotation           => Defines.Void
+    case AnyTypeAnnotation            => Defines.Any
+    case MixedTypeAnnotation          => Defines.Unknown
+    case EmptyTypeAnnotation          => Defines.Never
     case NumberLiteralTypeAnnotation  => code(flowType.json)
     case ArrayTypeAnnotation          => code(flowType.json)
     case BooleanLiteralTypeAnnotation => code(flowType.json)
     case NullLiteralTypeAnnotation    => code(flowType.json)
     case StringLiteralTypeAnnotation  => code(flowType.json)
     case GenericTypeAnnotation        => code(flowType.json("id"))
+    case UnionTypeAnnotation          => code(flowType.json)
+    case IntersectionTypeAnnotation   => code(flowType.json)
     case ThisTypeAnnotation =>
         typeHintForThisExpression(Option(flowType)).headOption.getOrElse(Defines.Any);
     case NullableTypeAnnotation =>
@@ -126,9 +133,18 @@ trait TypeHelper:
       case None => value
 
   protected def typeFor(node: BabelNodeInfo): String =
-    val tpe = Seq(TypeAnnotationKey, ReturnTypeKey).find(hasKey(node.json, _)) match
-      case Some(key) => typeForTypeAnnotation(createBabelNodeInfo(node.json(key)))
-      case None      => typeFromTypeMap(node)
+    val json = node.json
+    val typeNodeOpt = if hasKey(json, TypeAnnotationKey) then
+      Some(createBabelNodeInfo(json(TypeAnnotationKey)))
+    else if hasKey(json, ReturnTypeKey) then
+      Some(createBabelNodeInfo(json(ReturnTypeKey)))
+    else if node.node == ObjectTypeProperty && hasKey(json, "value") then
+      Some(createBabelNodeInfo(json("value")))
+    else
+      None
+    val tpe = typeNodeOpt match
+      case Some(typeNode) => typeForTypeAnnotation(typeNode)
+      case None           => typeFromTypeMap(node)
     registerType(tpe, tpe)
     tpe
 

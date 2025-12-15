@@ -7,7 +7,7 @@ import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.{newDependencyNode, newLocalNode}
-import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewImport}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewImport, NewTypeDecl}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
 import ujson.Value
 
@@ -368,10 +368,30 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     val declaratorCode = s"$kind ${code(declarator)}"
     val typeFullName   = typeFor(declNodeInfo)
 
+    // Check for inline ObjectTypeAnnotation/TSTypeLiteral
+    val actualTypeFullName =
+        if hasKey(idNodeInfo.json, "typeAnnotation") && hasKey(
+            idNodeInfo.json("typeAnnotation"),
+            "typeAnnotation"
+          )
+        then
+          val innerType = createBabelNodeInfo(idNodeInfo.json("typeAnnotation")("typeAnnotation"))
+          innerType.node match
+            case ObjectTypeAnnotation | TSTypeLiteral =>
+                val idName = idNodeInfo.node match
+                  case Identifier => idNodeInfo.json("name").str
+                  case _          => idNodeInfo.code
+                val typeDecl = astForTypeAlias(innerType, Option(idName))
+                Ast.storeInDiffGraph(typeDecl, diffGraph)
+                typeDecl.root.collect { case t: NewTypeDecl => t.fullName }.getOrElse(typeFullName)
+            case _ => typeFullName
+        else
+          typeFullName
+
     val idName = idNodeInfo.node match
       case Identifier => idNodeInfo.json("name").str
       case _          => idNodeInfo.code
-    val localNode = newLocalNode(idName, typeFullName).order(0)
+    val localNode = newLocalNode(idName, actualTypeFullName).order(0)
     scope.addVariable(idName, localNode, scopeType)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
 
@@ -396,7 +416,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
             astForDeconstruction(nodeInfo, sourceAst, declaratorCode)
         case _ =>
             val destAst = idNodeInfo.node match
-              case Identifier => astForIdentifier(idNodeInfo, Option(typeFullName))
+              case Identifier => astForIdentifier(idNodeInfo, Option(actualTypeFullName))
               case _          => astForNode(idNodeInfo.json)
 
             val assignmentCallAst =

@@ -119,11 +119,17 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     case Success(value) if value.nonEmpty => Option(value)
     case _                                => None
 
-  private def start(node: Value): Option[Int] = Try(node("start").num.toInt).toOption
+  private def start(node: Value): Option[Int] =
+      Try(node("start").num.toInt)
+          .orElse(Try(node("loc")("start")("index").num.toInt))
+          .toOption
 
-  private def end(node: Value): Option[Int] = Try(node("end").num.toInt).toOption
+  private def end(node: Value): Option[Int] =
+      Try(node("end").num.toInt)
+          .orElse(Try(node("loc")("end")("index").num.toInt))
+          .toOption
 
-  protected def pos(node: Value): Option[Int] = Try(node("start").num.toInt).toOption
+  protected def pos(node: Value): Option[Int] = start(node)
 
   protected def line(node: Value): Option[Integer] = start(node).map(getLineOfSource)
 
@@ -187,8 +193,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         else code(func.json("key"))
     case _ if safeStr(func.json, "kind").contains("constructor") =>
         io.appthreat.x2cpg.Defines.ConstructorMethodName
-    case _ if func.json("id").isNull => "anonymous"
-    case _                           => func.json("id")("name").str
+    case _ if !hasKey(func.json, "id") || func.json("id").isNull => "anonymous"
+    case _                                                       => func.json("id")("name").str
 
   protected def calcMethodNameAndFullName(func: BabelNodeInfo): (String, String) =
       // functionNode.getName is not necessarily unique and thus the full name calculated based on the scope

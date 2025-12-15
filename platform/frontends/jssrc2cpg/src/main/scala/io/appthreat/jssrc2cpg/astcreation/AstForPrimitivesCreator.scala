@@ -114,16 +114,14 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       List(sourceAst)
 
     val callCode = s"import(${args.map(a => codeOf(a.nodes.head)).mkString(", ")})"
-    val callNode = createStaticCallNode(
+    val importCallNode = callNode(
+      importExpr,
       callCode,
       "import",
-      "import",
-      importExpr.lineNumber,
-      importExpr.columnNumber
+      DispatchTypes.DYNAMIC_DISPATCH
     )
 
-    callAst(callNode, args)
-  end astForImportExpression
+    callAst(importCallNode, args)
 
   protected def astForTSInstantiationExpression(instantiationExpr: BabelNodeInfo): Ast =
     val exprAst = astForNodeWithFunctionReference(instantiationExpr.json("expression"))

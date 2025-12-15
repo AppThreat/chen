@@ -35,26 +35,33 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
 
   def createCpg(config: Config): Try[Cpg] =
       withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
-          File.usingTemporaryDirectory("jssrc2cpgOut") { tmpDir =>
-            val astGenResult = new AstGenRunner(config).execute(tmpDir)
-            val hash = HashUtil.sha256(astGenResult.parsedFiles.map { case (_, file) =>
-                File(file).path
-            })
+        def processAstGenDir(astGenDir: File): Unit =
+          val astGenResult = new AstGenRunner(config).execute(astGenDir)
+          val hash = HashUtil.sha256(astGenResult.parsedFiles.map { case (_, file) =>
+              File(file).path
+          })
 
-            val astCreationPass =
-                new AstCreationPass(cpg, astGenResult, config, report)(using
-                config.schemaValidation)
-            astCreationPass.createAndApply()
+          val astCreationPass =
+              new AstCreationPass(cpg, astGenResult, config, report)(using config.schemaValidation)
+          astCreationPass.createAndApply()
 
-            new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
-            new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
-            new BuiltinTypesPass(cpg).createAndApply()
-            new ConfigPass(cpg, config, report).createAndApply()
-            new PrivateKeyFilePass(cpg, config, report).createAndApply()
-            new ImportsPass(cpg).createAndApply()
+          new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
+          new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
+          new BuiltinTypesPass(cpg).createAndApply()
+          new ConfigPass(cpg, config, report).createAndApply()
+          new PrivateKeyFilePass(cpg, config, report).createAndApply()
+          new ImportsPass(cpg).createAndApply()
 
-            report.print()
-          }
+          report.print()
+        config.astGenOutDir match
+          case Some(dirPath) =>
+              val outDir = File(dirPath)
+              outDir.createDirectoryIfNotExists(createParents = true)
+              processAstGenDir(outDir)
+          case None =>
+              File.usingTemporaryDirectory("jssrc2cpgOut") { tmpDir =>
+                  processAstGenDir(tmpDir)
+              }
       }
 
   // This method is intended for internal use only and may be removed at any time.

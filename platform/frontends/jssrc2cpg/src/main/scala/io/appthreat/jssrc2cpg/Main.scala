@@ -8,7 +8,11 @@ import scopt.OParser
 
 import java.nio.file.Paths
 
-final case class Config(tsTypes: Boolean = true, flow: Boolean = false) extends X2CpgConfig[Config]
+final case class Config(
+  tsTypes: Boolean = true,
+  flow: Boolean = false,
+  astGenOutDir: Option[String] = None
+) extends X2CpgConfig[Config]
     with TypeRecoveryParserConfig[Config]:
 
   def withTsTypes(value: Boolean): Config =
@@ -16,6 +20,9 @@ final case class Config(tsTypes: Boolean = true, flow: Boolean = false) extends 
 
   def withFlow(value: Boolean): Config =
       copy(flow = value).withInheritedFields(this)
+
+  def withAstGenOutDir(value: String): Config =
+      copy(astGenOutDir = Option(value)).withInheritedFields(this)
 
 object Frontend:
   implicit val defaultConfig: Config = Config()
@@ -31,6 +38,9 @@ object Frontend:
       opt[Unit]("flow")
           .action((_, c) => c.withFlow(true))
           .text("enable flow mode (astgen -t flow)"),
+      opt[String]("astgen-out")
+          .action((x, c) => c.withAstGenOutDir(x))
+          .text("Configure a permanent directory for astgen output"),
       XTypeRecovery.parserOptions
     )
 

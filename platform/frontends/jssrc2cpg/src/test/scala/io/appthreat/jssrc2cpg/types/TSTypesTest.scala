@@ -175,7 +175,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.typeDecl("Alias").l) { case List(alias) =>
       alias.fullName shouldBe "code.ts::program:Alias"
       alias.code shouldBe "type Alias = ObjectFoo"
-      alias.aliasTypeFullName shouldBe empty
+      alias.aliasTypeFullName shouldBe Some("ObjectFoo")
     }
   }
 
@@ -194,7 +194,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.typeDecl("Alias").l) { case List(alias) =>
       alias.fullName shouldBe "code.ts::program:Alias"
       alias.code shouldBe "type Alias = Foo"
-      alias.aliasTypeFullName shouldBe empty
+      alias.aliasTypeFullName shouldBe Some("Foo")
     }
   }
 
@@ -216,7 +216,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.typeDecl("Alias").l) { case List(alias) =>
       alias.fullName shouldBe "code.ts::program:Alias"
       alias.code shouldBe "type Alias = ObjectFoo"
-      alias.aliasTypeFullName shouldBe empty
+      alias.aliasTypeFullName shouldBe Some("ObjectFoo")
     }
   }
 
@@ -235,7 +235,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.typeDecl("Alias").l) { case List(alias) =>
       alias.fullName shouldBe "code.ts::program:Alias"
       alias.code shouldBe "type Alias = Foo"
-      alias.aliasTypeFullName shouldBe empty
+      alias.aliasTypeFullName shouldBe Some("Foo")
     }
   }
 
@@ -250,7 +250,7 @@ class TSTypesTest extends AbstractPassTest {
     inside(cpg.typeDecl("Alias").l) { case List(alias) =>
       alias.fullName shouldBe "code.ts::program:Alias"
       alias.code shouldBe "type Alias = string"
-      alias.aliasTypeFullName shouldBe empty
+      alias.aliasTypeFullName shouldBe Some("__ecma.String")
     }
   }
 
