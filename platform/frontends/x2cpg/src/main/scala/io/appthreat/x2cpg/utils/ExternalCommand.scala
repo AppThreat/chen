@@ -32,13 +32,21 @@ object ExternalCommand:
                        |""".stripMargin
           Failure(new RuntimeException(message))
 
-  def run(command: String, cwd: String, separateStdErr: Boolean = false): Try[Seq[String]] =
+  def run(command: String, cwd: String, separateStdErr: Boolean): Try[Seq[String]] =
+      run(command, cwd, Map.empty, separateStdErr)
+
+  def run(
+    command: String,
+    cwd: String,
+    extraEnv: Map[String, String] = Map.empty,
+    separateStdErr: Boolean = false
+  ): Try[Seq[String]] =
     val stdOutOutput = new ConcurrentLinkedQueue[String]
     val stdErrOutput =
         if separateStdErr then new ConcurrentLinkedQueue[String] else stdOutOutput
     val processLogger = ProcessLogger(stdOutOutput.add, stdErrOutput.add)
 
-    Process(shellPrefix :+ command, new java.io.File(cwd)).!(processLogger) match
+    Process(shellPrefix :+ command, new java.io.File(cwd), extraEnv.toList*).!(processLogger) match
       case 0 =>
           Success(stdOutOutput.asScala.toSeq)
       case _ =>
