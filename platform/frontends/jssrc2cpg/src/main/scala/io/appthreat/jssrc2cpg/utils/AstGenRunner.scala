@@ -44,7 +44,6 @@ class AstGenRunner(config: Config):
 
   private val executableArgs = if !config.tsTypes then " --no-tsTypes" else ""
   private val typeArgs       = if config.flow then "flow" else "ts"
-  private val env            = Map("NODE_OPTIONS" -> "--expose-gc")
   private def isIgnoredByUserConfig(filePath: String): Boolean =
     lazy val isInIgnoredFiles = config.ignoredFiles.exists {
         case ignorePath if File(ignorePath).isDirectory => filePath.startsWith(ignorePath)
@@ -86,11 +85,11 @@ class AstGenRunner(config: Config):
   private def vueFiles(in: File, out: File): Try[Seq[String]] =
     val files = SourceFiles.determine(in.pathAsString, Set(".vue"))
     if files.nonEmpty then
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t vue -o $out", in.toString(), env)
+      ExternalCommand.run(s"$astGenCommand$executableArgs -t vue -o $out", in.toString())
     else Success(Seq.empty)
 
   private def jsFiles(in: File, out: File): Try[Seq[String]] =
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t $typeArgs -o $out", in.toString(), env)
+      ExternalCommand.run(s"$astGenCommand$executableArgs -t $typeArgs -o $out", in.toString())
 
   private def runAstGenNative(in: File, out: File): Try[Seq[String]] =
       for
