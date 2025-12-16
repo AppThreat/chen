@@ -23,12 +23,31 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside {
         val file = dir / filename
         file.write(code)
         val config       = Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
+        if code.contains("@flow") then config.withFlow(true)
         val astGenResult = new AstGenRunner(config).execute(dir)
         new AstCreationPass(cpg, astGenResult, config).createAndApply()
         f(cpg)
         file.delete()
       }
     }
+  }
+
+  protected object FlowAstFixture extends Fixture:
+    def apply(
+      code: String,
+      filename: String = "code.js",
+      tsTypes: Boolean = false
+    )(f: Cpg => Unit): Unit =
+        File.usingTemporaryDirectory("jssrc2cpgTests") { dir =>
+          val cpg  = newEmptyCpg()
+          val file = dir / filename
+          file.write(code)
+          val config =
+              Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString).withFlow(true)
+          val astGenResult = new AstGenRunner(config).execute(dir)
+          new AstCreationPass(cpg, astGenResult, config).createAndApply()
+          f(cpg)
+          file.delete()
   }
 
   protected object TsAstFixture extends Fixture {

@@ -32,6 +32,7 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           nodeInfo.node match
             case ImportDeclaration                                    => 0
             case FunctionDeclaration                                  => 1
+            case DeclareFunction                                      => 1
             case DeclareTypeAlias if isPlainTypeAlias(nodeInfo)       => 4
             case TypeAlias if isPlainTypeAlias(nodeInfo)              => 4
             case TSTypeAliasDeclaration if isPlainTypeAlias(nodeInfo) => 4

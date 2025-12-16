@@ -44,6 +44,9 @@ class AstCreationPass(
             diffGraph.absorb(localDiff)
         } match
           case Failure(exception) =>
+              println(
+                s"$jsonFilename failed due to ${exception.getStackTrace.take(20).mkString("\n")}"
+              )
               (false, parseResult.filename)
           case Success(_) =>
               (true, parseResult.filename)

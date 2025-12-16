@@ -67,7 +67,13 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val members = (alias.node match
       case TSTypeLiteral => classMembersForTypeAlias(alias)
       case ObjectPattern => Try(alias.json("properties").arr).toOption.toSeq.flatten
-      case _ => classMembersForTypeAlias(createBabelNodeInfo(alias.json("typeAnnotation")))
+      case _ =>
+          if hasKey(alias.json, "right") then
+            classMembersForTypeAlias(createBabelNodeInfo(alias.json("right")))
+          else if hasKey(alias.json, "typeAnnotation") then
+            classMembersForTypeAlias(createBabelNodeInfo(alias.json("typeAnnotation")))
+          else
+            Seq.empty
     ).filter(member =>
         isClassMethodOrUninitializedMemberOrObjectProperty(member) && !isStaticMember(member)
     )
