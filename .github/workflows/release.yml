@@ -68,7 +68,7 @@ jobs:
           SCALAPY_PYTHON_LIBRARY: "python3.12"
       - name: Install and test
         run: |
-          npm install -g @appthreat/atom
+          npm install @appthreat/atom-parsetools
           python -m pip install --upgrade pip setuptools wheel
           pip install poetry
           sudo apt install -y graphviz-dev
@@ -83,10 +83,13 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
       - name: Build Anaconda
         run: |
+          export VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Building version: $VERSION"
           mkdir /tmp/conda-out
-          $CONDA/bin/conda update -n base -c defaults conda
-          $CONDA/bin/conda install anaconda-client conda-build conda-verify
-          $CONDA/bin/conda build -c conda-forge --no-anaconda-upload --output-folder /tmp/conda-out/ .
+          source $CONDA/etc/profile.d/conda.sh
+          $CONDA/bin/conda update -n base -c defaults conda -y
+          $CONDA/bin/conda install -y anaconda-client conda-build conda-verify
+          VERSION=$VERSION $CONDA/bin/conda build -c conda-forge --no-anaconda-upload --output-folder /tmp/conda-out/ .
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
         continue-on-error: true

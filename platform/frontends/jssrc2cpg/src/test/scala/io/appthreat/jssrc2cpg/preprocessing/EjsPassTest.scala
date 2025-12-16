@@ -4,7 +4,6 @@ import io.appthreat.jssrc2cpg.passes.AbstractPassTest
 import io.shiftleft.semanticcpg.language._
 import org.scalatest._
 
-@Ignore
 class EjsPassTest extends AbstractPassTest {
 
   "ejs files" should {

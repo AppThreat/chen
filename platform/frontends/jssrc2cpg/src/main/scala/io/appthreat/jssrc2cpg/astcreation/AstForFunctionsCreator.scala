@@ -119,9 +119,12 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                   case _ =>
                       additionalBlockStatements.addOne(convertParamWithDefault(nodeInfo))
                       val tpe = typeFor(lhsNodeInfo)
+                      val name = lhsNodeInfo.node match
+                        case Identifier => lhsNodeInfo.json("name").str
+                        case _          => lhsNodeInfo.code
                       parameterInNode(
                         lhsNodeInfo,
-                        lhsNodeInfo.code,
+                        name,
                         nodeInfo.code,
                         index,
                         false,
@@ -311,6 +314,24 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                     )
                 scope.addVariable(name, node, MethodScope)
                 node
+            case FunctionTypeParam =>
+                val nameNode = nodeInfo.json("name")
+                val name = if !nameNode.isNull && hasKey(nameNode, "name") then
+                  nameNode("name").str
+                else
+                  generateUnusedVariableName(usedVariableNames, s"param$index")
+                val tpe = typeFor(nodeInfo)
+                val node = parameterInNode(
+                  nodeInfo,
+                  name,
+                  nodeInfo.code,
+                  index,
+                  false,
+                  EvaluationStrategies.BY_VALUE,
+                  Option(tpe)
+                )
+                scope.addVariable(name, node, MethodScope)
+                node
             case _ =>
                 val tpe = typeFor(nodeInfo)
                 val node =
@@ -338,11 +359,14 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     val rhsElement = element.json("right")
 
     val rhsAst = astForNodeWithFunctionReference(rhsElement)
-
     val lhsAst = astForNode(lhsElement)
+    val lhsCode = if lhsAst.nodes.nonEmpty then
+      codeOf(lhsAst.nodes.head)
+    else
+      createBabelNodeInfo(lhsElement).code
 
     val testAst =
-      val keyNode = identifierNode(element, codeOf(lhsAst.nodes.head))
+      val keyNode = identifierNode(element, lhsCode)
       val voidCallNode =
           callNode(element, "void 0", "<operator>.void", DispatchTypes.STATIC_DISPATCH)
       val equalsCallAst = createEqualsCallAst(
@@ -352,7 +376,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         element.columnNumber
       )
       equalsCallAst
-    val falseNode = identifierNode(element, codeOf(lhsAst.nodes.head))
+    val falseNode = identifierNode(element, lhsCode)
     val ternaryNodeAst =
         createTernaryCallAst(
           testAst,
@@ -364,7 +388,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     createAssignmentCallAst(
       lhsAst,
       ternaryNodeAst,
-      s"${codeOf(lhsAst.nodes.head)} = ${codeOf(ternaryNodeAst.nodes.head)}",
+      s"$lhsCode = ${codeOf(ternaryNodeAst.nodes.head)}",
       element.lineNumber,
       element.columnNumber
     )
@@ -395,19 +419,24 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         parameterInNode(func, "this", "this", 0, false, EvaluationStrategies.BY_VALUE)
             .dynamicTypeHintFullName(typeHintForThisExpression())
     scope.addVariable("this", thisNode, MethodScope)
-
-    val paramNodes = if hasKey(func.json, "parameters") then
-      handleParameters(
-        func.json("parameters").arr.toSeq,
-        mutable.ArrayBuffer.empty[Ast],
-        createLocals = false
-      )
+    val paramJsonArr = if hasKey(func.json, "parameters") then
+      func.json("parameters").arr.toSeq
+    else if hasKey(func.json, "params") then
+      func.json("params").arr.toSeq
+    else if func.node == DeclareFunction &&
+      hasKey(func.json, "id") &&
+      hasKey(func.json("id"), "typeAnnotation") &&
+      hasKey(func.json("id")("typeAnnotation"), "typeAnnotation") &&
+      hasKey(func.json("id")("typeAnnotation")("typeAnnotation"), "params")
+    then
+      func.json("id")("typeAnnotation")("typeAnnotation")("params").arr.toSeq
     else
-      handleParameters(
-        func.json("params").arr.toSeq,
-        mutable.ArrayBuffer.empty[Ast],
-        createLocals = false
-      )
+      Seq.empty
+    val paramNodes = handleParameters(
+      paramJsonArr,
+      mutable.ArrayBuffer.empty[Ast],
+      createLocals = false
+    )
 
     val methodReturnNode = createMethodReturnNode(func)
 
