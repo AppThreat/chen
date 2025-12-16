@@ -1,4 +1,4 @@
-{% set version = "2.5.9" %}
+{% set version = os.environ.get('VERSION', '2.5.9') %}
 
 package:
   name: chen
@@ -33,6 +33,7 @@ build:
   include_recipe: False
   pin_depends: record
   noarch: python
+  number: 0
   script: |
     cp ${RECIPE_DIR}/pyproject.toml ${SRC_DIR}/
     cp ${RECIPE_DIR}/poetry.lock ${SRC_DIR}/
