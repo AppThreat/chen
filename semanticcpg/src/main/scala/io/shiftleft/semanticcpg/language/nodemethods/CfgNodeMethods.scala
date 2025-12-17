@@ -108,20 +108,31 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
       node.lineNumber.map(_.toLong.toHexString)
 
   private def walkUpAst(node: CfgNode): Method =
-      node._astIn.onlyChecked.asInstanceOf[Method]
+    val parent = node._astIn.nextOption().orNull
+    parent match
+      case m: Method  => m
+      case c: CfgNode => walkUpAst(c)
+      case _          => null
 
   private def walkUpContains(node: StoredNode): Method =
-      node._containsIn.onlyChecked match
-        case method: Method => method
-        case typeDecl: TypeDecl =>
-            typeDecl.astParent match
-              case namespaceBlock: NamespaceBlock =>
-                  // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
-                  namespaceBlock.inAst.collectAll[Method].headOption.orNull
-              case method: Method =>
-                  // For a language such as Javascript, types may be dynamically declared under procedures
-                  method
-              case _ =>
-                  // there are csharp CPGs that have typedecls here, which is invalid.
-                  null
+    val parent = node._containsIn.nextOption().orNull
+    parent match
+      case method: Method => method
+      case typeDecl: TypeDecl =>
+          typeDecl.astParent match
+            case namespaceBlock: NamespaceBlock =>
+                // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
+                namespaceBlock.inAst.collectAll[Method].headOption.orNull
+            case method: Method =>
+                // For a language such as Javascript, types may be dynamically declared under procedures
+                method
+            case _ =>
+                // there are csharp CPGs that have typedecls here, which is invalid.
+                null
+      case other: StoredNode =>
+          walkUpContains(other)
+      case null =>
+          if node.isInstanceOf[CfgNode] then walkUpAst(node.asInstanceOf[CfgNode])
+          else null
+  end walkUpContains
 end CfgNodeMethods
