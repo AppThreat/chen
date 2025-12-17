@@ -5,6 +5,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.NodeExtension
 import io.shiftleft.semanticcpg.language.*
 
+import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
 
 class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
@@ -107,6 +108,7 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
   def address: Option[String] =
       node.lineNumber.map(_.toLong.toHexString)
 
+  @tailrec
   private def walkUpAst(node: CfgNode): Method =
     val parent = node._astIn.nextOption().orNull
     parent match
@@ -114,6 +116,7 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
       case c: CfgNode => walkUpAst(c)
       case _          => null
 
+  @tailrec
   private def walkUpContains(node: StoredNode): Method =
     val parent = node._containsIn.nextOption().orNull
     parent match
@@ -132,7 +135,8 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
       case other: StoredNode =>
           walkUpContains(other)
       case null =>
-          if node.isInstanceOf[CfgNode] then walkUpAst(node.asInstanceOf[CfgNode])
-          else null
+          node match
+            case node: CfgNode => walkUpAst(node)
+            case _             => null
   end walkUpContains
 end CfgNodeMethods
