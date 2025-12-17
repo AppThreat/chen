@@ -5,6 +5,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.NodeExtension
 import io.shiftleft.semanticcpg.language.*
 
+import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
 
 class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
@@ -94,8 +95,9 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
     case node: Method => node
     case _: MethodParameterIn | _: MethodParameterOut | _: MethodReturn =>
         walkUpAst(node)
-    case _: CallRepr if !node.isInstanceOf[Call]    => walkUpAst(node)
-    case _: Annotation | _: AnnotationLiteral       => node.inAst.collectAll[Method].head
+    case _: CallRepr if !node.isInstanceOf[Call] => walkUpAst(node)
+    case _: Annotation | _: AnnotationLiteral =>
+        node.inAst.collectAll[Method].headOption.orNull
     case _: Expression | _: JumpTarget | _: Literal => walkUpContains(node)
     case _ => throw new MatchError(s"Unexpected node type: ${node.getClass}")
 
@@ -107,21 +109,37 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
   def address: Option[String] =
       node.lineNumber.map(_.toLong.toHexString)
 
+  @tailrec
   private def walkUpAst(node: CfgNode): Method =
-      node._astIn.onlyChecked.asInstanceOf[Method]
+    val parent = node._astIn.nextOption().orNull
+    parent match
+      case m: Method  => m
+      case c: CfgNode => walkUpAst(c)
+      case _          => null
 
+  @tailrec
   private def walkUpContains(node: StoredNode): Method =
-      node._containsIn.onlyChecked match
-        case method: Method => method
-        case typeDecl: TypeDecl =>
-            typeDecl.astParent match
-              case namespaceBlock: NamespaceBlock =>
-                  // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
-                  namespaceBlock.inAst.collectAll[Method].headOption.orNull
-              case method: Method =>
-                  // For a language such as Javascript, types may be dynamically declared under procedures
-                  method
-              case _ =>
-                  // there are csharp CPGs that have typedecls here, which is invalid.
-                  null
+    val parent = node._containsIn.nextOption().orNull
+    parent match
+      case method: Method => method
+      case typeDecl: TypeDecl =>
+          val astParent = typeDecl._astIn.nextOption().orNull
+          astParent match
+            case namespaceBlock: NamespaceBlock =>
+                // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
+                namespaceBlock.inAst.collectAll[Method].headOption.orNull
+            case method: Method =>
+                // For a language such as Javascript, types may be dynamically declared under procedures
+                method
+            case _ =>
+                // there are csharp CPGs that have typedecls here, which is invalid.
+                null
+      case other: StoredNode =>
+          walkUpContains(other)
+      case null =>
+          node match
+            case node: CfgNode => walkUpAst(node)
+            case _             => null
+    end match
+  end walkUpContains
 end CfgNodeMethods
