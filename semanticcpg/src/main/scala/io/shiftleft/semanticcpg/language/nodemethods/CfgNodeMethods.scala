@@ -95,8 +95,9 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
     case node: Method => node
     case _: MethodParameterIn | _: MethodParameterOut | _: MethodReturn =>
         walkUpAst(node)
-    case _: CallRepr if !node.isInstanceOf[Call]    => walkUpAst(node)
-    case _: Annotation | _: AnnotationLiteral       => node.inAst.collectAll[Method].head
+    case _: CallRepr if !node.isInstanceOf[Call] => walkUpAst(node)
+    case _: Annotation | _: AnnotationLiteral =>
+        node.inAst.collectAll[Method].headOption.orNull
     case _: Expression | _: JumpTarget | _: Literal => walkUpContains(node)
     case _ => throw new MatchError(s"Unexpected node type: ${node.getClass}")
 
@@ -122,7 +123,8 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
     parent match
       case method: Method => method
       case typeDecl: TypeDecl =>
-          typeDecl.astParent match
+          val astParent = typeDecl._astIn.nextOption().orNull
+          astParent match
             case namespaceBlock: NamespaceBlock =>
                 // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
                 namespaceBlock.inAst.collectAll[Method].headOption.orNull
@@ -138,5 +140,6 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension:
           node match
             case node: CfgNode => walkUpAst(node)
             case _             => null
+    end match
   end walkUpContains
 end CfgNodeMethods
