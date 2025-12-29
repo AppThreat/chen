@@ -234,7 +234,8 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
               )
             )
         }
-        .reduce(plus)
+        .reduceOption(plus)
+        .getOrElse(ExportResult(0, 0, Seq.empty, None))
   end gml
 
   def gml: ExportResult = gml(null)
@@ -261,7 +262,8 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
               )
             )
         }
-        .reduce(plus)
+        .reduceOption(plus)
+        .getOrElse(ExportResult(0, 0, Seq.empty, None))
   end dot
 
   def dot: ExportResult = dot(null)
