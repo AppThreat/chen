@@ -133,8 +133,9 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     macroDef: IASTPreprocessorMacroDefinition,
     arguments: List[String]
   ): Ast =
-    val name    = ASTStringUtil.getSimpleName(macroDef.getName)
-    val code    = node.getRawSignature.stripSuffix(";")
+    val name = ASTStringUtil.getSimpleName(macroDef.getName)
+    // FIX: Use safe getter. getRawSignature causes arraycopy crash on broken macros
+    val code    = safeGetRawSignature(node).stripSuffix(";")
     val argAsts = argumentTrees(arguments, ast).map(_.getOrElse(Ast()))
 
     val callName     = StringUtils.normalizeSpace(name)
@@ -167,16 +168,29 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     */
   @nowarn
   def nodeSignature(node: IASTNode): String =
-    import org.eclipse.cdt.core.dom.ast.ASTSignatureUtil.getNodeSignature
     val sig = if isExpandedFromMacro(node) then
-      val sig = getNodeSignature(node)
+      val sig = safeGetNodeSignature(node)
       if sig.isEmpty then
-        node.getRawSignature
+        safeGetRawSignature(node)
       else
         sig
     else
-      node.getRawSignature
+      safeGetRawSignature(node)
     shortenCode(sig)
+
+  private def safeGetRawSignature(node: IASTNode): String =
+      try
+        node.getRawSignature
+      catch
+        case _: Throwable => ""
+
+  @nowarn
+  private def safeGetNodeSignature(node: IASTNode): String =
+    import org.eclipse.cdt.core.dom.ast.ASTSignatureUtil.getNodeSignature
+    try
+      getNodeSignature(node)
+    catch
+      case _: Throwable => ""
 
   private def isExpandedFromMacro(node: IASTNode): Boolean = expandedFromMacro(node).nonEmpty
 

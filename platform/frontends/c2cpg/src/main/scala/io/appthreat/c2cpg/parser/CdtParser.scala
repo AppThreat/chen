@@ -36,11 +36,12 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
 
   import CdtParser.*
 
-  private val headerFileFinder = new HeaderFileFinder(config.inputPath)
-  private val parserConfig     = ParserConfig.fromConfig(config)
-  private val definedSymbols   = parserConfig.definedSymbols.asJava
-  private val includePaths     = parserConfig.userIncludePaths
-  private val log              = new DefaultLogService
+  private val headerFileFinder    = new HeaderFileFinder(config.inputPath)
+  private val fileContentProvider = new CustomFileContentProvider(headerFileFinder)
+  private val parserConfig        = ParserConfig.fromConfig(config)
+  private val definedSymbols      = parserConfig.definedSymbols.asJava
+  private val includePaths        = parserConfig.userIncludePaths
+  private val log                 = new DefaultLogService
 
   private var stayCpp: Boolean = false
 
@@ -65,14 +66,16 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
       val allProjects: Array[ICProject] = CoreModel.getDefault.getCModel.getCProjects
       index = Option(CCorePlugin.getIndexManager.getIndex(allProjects))
     catch
-      case e: Throwable =>
+      case e: Throwable => logger.warn("Failed to initialize Eclipse CDT Project Index", e)
 
   // enables parsing of code behind disabled preprocessor defines:
-  private var opts: Int = ILanguage.OPTION_PARSE_INACTIVE_CODE
+  private var opts: Int = 0
+  if config.parseInactiveCode then opts |= ILanguage.OPTION_PARSE_INACTIVE_CODE
   // instructs the parser to skip function and method bodies
   if !config.includeFunctionBodies then opts |= ILanguage.OPTION_SKIP_FUNCTION_BODIES
   // performance optimization, allows the parser not to create image-locations
   if !config.includeImageLocations then opts |= ILanguage.OPTION_NO_IMAGE_LOCATIONS
+  opts |= ILanguage.OPTION_SKIP_TRIVIAL_EXPRESSIONS_IN_AGGREGATE_INITIALIZERS
 
   private def createParseLanguage(file: Path): ILanguage =
       if FileDefaults.isCPPFile(file.toString) then
@@ -89,11 +92,11 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private def parseInternal(file: Path): ParseResult =
     val realPath = File(file)
     if realPath.isRegularFile then // handling potentially broken symlinks
+      fileContentProvider.setContext(realPath.path)
       try
-        val fileContent         = readFileAsFileContent(realPath.path)
-        val fileContentProvider = new CustomFileContentProvider(headerFileFinder)
-        val lang                = createParseLanguage(realPath.path)
-        val scannerInfo         = createScannerInfo(realPath.path)
+        val fileContent = readFileAsFileContent(realPath.path)
+        val lang        = createParseLanguage(realPath.path)
+        val scannerInfo = createScannerInfo(realPath.path)
         index match
           case Some(x) => if x.isFullyInitialized then x.acquireReadLock()
           case _       =>
@@ -128,9 +131,11 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         case e: Throwable =>
             ParseResult(None, failure = Option(e))
       finally
+        fileContentProvider.clearContext()
         index match
           case Some(x) => x.releaseReadLock()
           case _       =>
+      end try
     else
       ParseResult(
         None,

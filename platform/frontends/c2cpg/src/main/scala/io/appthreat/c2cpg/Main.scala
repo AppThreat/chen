@@ -20,7 +20,8 @@ final case class Config(
   includePathsAutoDiscovery: Boolean = false,
   includeFunctionBodies: Boolean = false,
   includeImageLocations: Boolean = false,
-  useProjectIndex: Boolean = true
+  useProjectIndex: Boolean = false,
+  parseInactiveCode: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -55,6 +56,9 @@ final case class Config(
 
   def withProjectIndexes(value: Boolean): Config =
       this.copy(useProjectIndex = value).withInheritedFields(this)
+
+  def withParseInactiveCode(value: Boolean): Config =
+      this.copy(parseInactiveCode = value).withInheritedFields(this)
 end Config
 
 private object Frontend:
