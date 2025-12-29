@@ -51,7 +51,7 @@ jobs:
       - name: Install and test
         run: |
           bash ./platform/frontends/php2atom/install.sh
-          npm install -g @appthreat/atom-parsetools
+          npm install -g @appthreat/atom-parsetools@1.0.16
           python3.12 -m pip install --upgrade pip setuptools
           python3.12 -m pip install poetry
           python3.12 -m poetry config virtualenvs.create false

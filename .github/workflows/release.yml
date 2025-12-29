@@ -68,7 +68,7 @@ jobs:
           SCALAPY_PYTHON_LIBRARY: "python3.12"
       - name: Install and test
         run: |
-          npm install @appthreat/atom-parsetools
+          npm install @appthreat/atom-parsetools@1.0.16
           python -m pip install --upgrade pip setuptools wheel
           pip install poetry
           sudo apt install -y graphviz-dev

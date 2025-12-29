@@ -121,7 +121,7 @@ RUN set -e; \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' --sdk_root=/opt/android-sdk-linux \
     && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;34.0.0' --sdk_root=/opt/android-sdk-linux \
-    && npm install -g @appthreat/atom @cyclonedx/cdxgen --omit=optional \
+    && npm install -g @appthreat/atom-parsetools@1.0.16 @cyclonedx/cdxgen --omit=optional \
     && php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && php composer-setup.php \
     && mv composer.phar /usr/local/bin/composer
 ENV LC_ALL=en_US.UTF-8 \
