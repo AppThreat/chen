@@ -22,8 +22,9 @@ class CustomFileContentProvider(headerFileFinder: HeaderFileFinder, currentFileC
       case Some(foundPath) =>
           try
             val canonicalPath = Paths.get(foundPath).toRealPath().toString
-            val raw           = CdtParser.readFileAsFileContent(Paths.get(canonicalPath))
-            raw.asInstanceOf[InternalFileContent]
+            CdtParser.readFileAsFileContent(Paths.get(canonicalPath)).asInstanceOf[
+              InternalFileContent
+            ]
           catch
             case e: Throwable => null
       case None => null
