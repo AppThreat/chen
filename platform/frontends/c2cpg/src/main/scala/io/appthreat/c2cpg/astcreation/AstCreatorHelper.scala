@@ -121,7 +121,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       nullSafeFileLocationLast(node).map(_.getEndingLineNumber)
 
   private def nullSafeFileLocationLast(node: IASTNode): Option[IASTFileLocation] =
-      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations.lastOption.toArray)).map(
+    val locations = node.getNodeLocations
+    if locations == null || locations.isEmpty then
+      None
+    else
+      Option(cdtAst.flattenLocationsToFile(locations.lastOption.toArray)).map(
         _.asFileLocation()
       )
 
@@ -166,7 +170,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     SourceFiles.toRelativePath(path, config.inputPath)
 
   private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
-      Option(cdtAst.flattenLocationsToFile(node.getNodeLocations)).map(_.asFileLocation())
+    val locations = node.getNodeLocations
+    if locations == null then
+      None
+    else
+      Option(cdtAst.flattenLocationsToFile(locations)).map(_.asFileLocation())
 
   protected def registerType(typeName: String): String =
     val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
@@ -227,10 +235,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             case Some(evaluation: EvalBinding) =>
                 cleanType(evaluation.getType.toString, stripKeywords)
             case _ =>
-                val rawType = ASTTypeUtil.getType(f.getFieldOwner.getExpressionType)
+                val rawType = safeGetType(f.getFieldOwner.getExpressionType)
                 cleanType(rawType, stripKeywords)
       case f: IASTFieldReference =>
-          val rawType = ASTTypeUtil.getType(f.getFieldOwner.getExpressionType)
+          val rawType = safeGetType(f.getFieldOwner.getExpressionType)
           cleanType(rawType, stripKeywords)
       case a: IASTArrayDeclarator if ASTTypeUtil.getNodeType(a).startsWith("? ") =>
           val tpe = getNodeSignature(a).replace("[]", "").strip()

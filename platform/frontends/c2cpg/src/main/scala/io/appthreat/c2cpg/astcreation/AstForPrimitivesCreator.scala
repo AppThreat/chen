@@ -23,24 +23,30 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     : (Option[String], Option[String]) =
     val definition = binding match
       // sadly, there is no common interface defining .getDefinition
-      case b: ICInternalBinding   => b.getDefinition.asInstanceOf[IASTFunctionDeclarator]
-      case b: ICPPInternalBinding => b.getDefinition.asInstanceOf[IASTFunctionDeclarator]
-    val typeFullName = definition.getParent match
-      case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
-      case _                         => None
-    (Some(this.fullName(definition)), typeFullName)
+      case b: ICInternalBinding   => b.getDefinition
+      case b: ICPPInternalBinding => b.getDefinition
+    if definition == null then
+      (None, None)
+    else
+      val functionDeclarator = definition.asInstanceOf[IASTFunctionDeclarator]
+      val typeFullName = functionDeclarator.getParent match
+        case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
+        case _                         => None
+      (Some(this.fullName(functionDeclarator)), typeFullName)
 
   private def maybeMethodRefForIdentifier(ident: IASTNode): Option[NewMethodRef] =
       ident match
         case id: IASTIdExpression if id.getName != null =>
-            id.getName.resolveBinding()
-            val (mayBeFullName, mayBeTypeFullName) = id.getName.getBinding match
-              case binding: ICInternalBinding
-                  if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(binding)
-              case binding: ICPPInternalBinding
-                  if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(binding)
+            val binding = id.getName.resolveBinding()
+            if binding == null then return None
+
+            val (mayBeFullName, mayBeTypeFullName) = binding match
+              case b: ICInternalBinding
+                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
+                  namesForBinding(b)
+              case b: ICPPInternalBinding
+                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
+                  namesForBinding(b)
               case _ => (None, None)
             for
               fullName     <- mayBeFullName
@@ -63,20 +69,22 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             val variableOption = scope.lookupVariable(identifierName)
             val identifierTypeName = variableOption match
               case Some((_, variableTypeName)) => variableTypeName
-              case None
-                  if ident.isInstanceOf[IASTName] && ident.asInstanceOf[
-                    IASTName
-                  ].getBinding != null =>
-                  val id = ident.asInstanceOf[IASTName]
-                  id.getBinding match
-                    case v: IVariable =>
-                        v.getType match
-                          case f: IFunctionType => f.getReturnType.toString
-                          case other            => other.toString
-                    case other => other.getName
-              case None if ident.isInstanceOf[IASTName] =>
-                  typeFor(ident.getParent)
-              case None => typeFor(ident)
+              case None =>
+                  if ident.isInstanceOf[IASTName] then
+                    val id      = ident.asInstanceOf[IASTName]
+                    val binding = id.getBinding
+                    if binding != null then
+                      binding match
+                        case v: IVariable =>
+                            v.getType match
+                              case f: IFunctionType       => f.getReturnType.toString
+                              case other if other != null => other.toString
+                              case _                      => Defines.anyTypeName
+                        case other => other.getName
+                    else
+                      typeFor(ident.getParent)
+                  else
+                    typeFor(ident)
 
             val node = identifierNode(
               ident,

@@ -64,79 +64,84 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   end astForMethodRefForLambda
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
-      funcDecl.getName.resolveBinding() match
-        case function: IFunction =>
-            val returnType = typeForDeclSpecifier(
-              funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+    val binding = funcDecl.getName.resolveBinding()
+    binding match
+      case function: IFunction =>
+          val returnType = typeForDeclSpecifier(
+            funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+          )
+          val name     = shortName(funcDecl)
+          val fullname = fullName(funcDecl)
+          val fixedName = if name.isEmpty then
+            nextClosureName()
+          else name
+          val fixedFullName = if fullname.isEmpty then
+            s"${X2CpgDefines.UnresolvedNamespace}.$name"
+          else fullname
+          val templateParams = templateParameters(funcDecl).getOrElse("")
+          val signature =
+              s"$returnType${parameterListSignature(funcDecl)}"
+
+          if seenFunctionFullnames.add(fullname) then
+            val name       = shortName(funcDecl)
+            val codeString = code(funcDecl.getParent)
+            val filename   = fileName(funcDecl)
+            val methodNode_ = methodNode(
+              funcDecl,
+              fixedName,
+              codeString,
+              fixedFullName,
+              Some(signature),
+              filename
             )
-            val name     = shortName(funcDecl)
-            val fullname = fullName(funcDecl)
-            val fixedName = if name.isEmpty then
-              nextClosureName()
-            else name
-            val fixedFullName = if fullname.isEmpty then
-              s"${X2CpgDefines.UnresolvedNamespace}.$name"
-            else fullname
-            val templateParams = templateParameters(funcDecl).getOrElse("")
-            val signature =
-                s"$returnType${parameterListSignature(funcDecl)}"
 
-            if seenFunctionFullnames.add(fullname) then
-              val name       = shortName(funcDecl)
-              val codeString = code(funcDecl.getParent)
-              val filename   = fileName(funcDecl)
-              val methodNode_ = methodNode(
-                funcDecl,
-                fixedName,
-                codeString,
-                fixedFullName,
-                Some(signature),
-                filename
-              )
+            scope.pushNewScope(methodNode_)
 
-              scope.pushNewScope(methodNode_)
+            val parameterNodes = withIndex(parameters(funcDecl)) { (p, i) =>
+                parameterNode(p, i)
+            }
+            setVariadic(parameterNodes, funcDecl)
 
-              val parameterNodes = withIndex(parameters(funcDecl)) { (p, i) =>
-                  parameterNode(p, i)
-              }
-              setVariadic(parameterNodes, funcDecl)
+            scope.popScope()
 
-              scope.popScope()
-
-              val stubAst =
-                  methodStubAst(
-                    methodNode_,
-                    parameterNodes,
-                    newMethodReturnNode(funcDecl, registerType(returnType))
-                  )
-              val typeDeclAst = createFunctionTypeAndTypeDecl(
-                funcDecl,
-                methodNode_,
-                fixedName,
-                fixedFullName,
-                signature
-              )
-              stubAst.merge(typeDeclAst)
-            else
-              Ast()
-            end if
-        case field: IField =>
+            val stubAst =
+                methodStubAst(
+                  methodNode_,
+                  parameterNodes,
+                  newMethodReturnNode(funcDecl, registerType(returnType))
+                )
+            val typeDeclAst = createFunctionTypeAndTypeDecl(
+              funcDecl,
+              methodNode_,
+              fixedName,
+              fixedFullName,
+              signature
+            )
+            stubAst.merge(typeDeclAst)
+          else
             Ast()
-        case typeDef: ITypedef =>
-            Ast()
-        case variable: IVariable =>
-            Ast()
-        case _ =>
-            Ast()
+          end if
+      case field: IField =>
+          Ast()
+      case typeDef: ITypedef =>
+          Ast()
+      case variable: IVariable =>
+          Ast()
+      case _ =>
+          Ast()
+    end match
   end astForFunctionDeclarator
 
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
     val filename = fileName(funcDef)
     val returnType = if isCppConstructor(funcDef) then
-      typeFor(funcDef.asInstanceOf[
-        CPPASTFunctionDefinition
-      ].getMemberInitializers.head.getInitializer)
-    else typeForDeclSpecifier(funcDef.getDeclSpecifier)
+      val cppFunc = funcDef.asInstanceOf[CPPASTFunctionDefinition]
+      cppFunc.getMemberInitializers.headOption
+          .map(m => typeFor(m.getInitializer))
+          .getOrElse(Defines.anyTypeName)
+    else
+      typeForDeclSpecifier(funcDef.getDeclSpecifier)
+
     val name           = shortName(funcDef)
     val fullname       = fullName(funcDef)
     val templateParams = templateParameters(funcDef).getOrElse("")

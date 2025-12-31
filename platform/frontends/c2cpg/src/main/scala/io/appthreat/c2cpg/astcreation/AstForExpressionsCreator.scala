@@ -125,40 +125,48 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case functionType: ICPPFunctionType =>
           functionNameExpr match
             case idExpr: CPPASTIdExpression =>
-                val function = idExpr.getName.getBinding.asInstanceOf[ICPPFunction]
-                val name     = idExpr.getName.getLastName.toString
-                val signature =
-                    if function.isExternC then
-                      ""
-                    else
-                      functionTypeToSignature(functionType)
+                val binding = idExpr.getName.getBinding
+                // Check if binding is ICPPFunction.
+                // It could be a CPPParameter (function pointer argument) or a variable.
+                if binding != null && binding.isInstanceOf[ICPPFunction] then
+                  val function = binding.asInstanceOf[ICPPFunction]
+                  val name     = idExpr.getName.getLastName.toString
+                  val signature =
+                      if function.isExternC then
+                        ""
+                      else
+                        functionTypeToSignature(functionType)
 
-                val fullName =
-                    if function.isExternC then
-                      name
-                    else
-                      val fullNameNoSig = function.getQualifiedName.mkString(".")
-                      s"$fullNameNoSig:$signature"
+                  val fullName =
+                      if function.isExternC then
+                        name
+                      else
+                        val fullNameNoSig = function.getQualifiedName.mkString(".")
+                        s"$fullNameNoSig:$signature"
 
-                val dispatchType = DispatchTypes.STATIC_DISPATCH
+                  val dispatchType = DispatchTypes.STATIC_DISPATCH
 
-                val callCpgNode = callNode(
-                  call,
-                  code(call),
-                  name,
-                  fullName,
-                  dispatchType,
-                  Some(signature),
-                  Some(registerType(cleanType(safeGetType(call.getExpressionType))))
-                )
-                val args = call.getArguments.toList.map(a => astForNode(a))
+                  val callCpgNode = callNode(
+                    call,
+                    code(call),
+                    name,
+                    fullName,
+                    dispatchType,
+                    Some(signature),
+                    Some(registerType(cleanType(safeGetType(call.getExpressionType))))
+                  )
+                  val args = call.getArguments.toList.map(a => astForNode(a))
 
-                createCallAst(callCpgNode, args)
+                  createCallAst(callCpgNode, args)
+                else
+                  // function pointers, parameters, or unresolved bindings
+                  astForCppCallExpressionUntyped(call)
+                end if
+
             case fieldRefExpr: ICPPASTFieldReference =>
                 val instanceAst = astForExpression(fieldRefExpr.getFieldOwner)
                 val args        = call.getArguments.toList.map(a => astForNode(a))
 
-                // TODO This wont do if the name is a reference.
                 val name      = fieldRefExpr.getFieldName.toString
                 val signature = functionTypeToSignature(functionType)
 
@@ -166,10 +174,14 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 val fullName      = s"$classFullName.$name:$signature"
 
                 fieldRefExpr.getFieldName.resolveBinding()
-                val method = fieldRefExpr.getFieldName.getBinding.asInstanceOf[ICPPMethod]
+                val binding = fieldRefExpr.getFieldName.getBinding
                 val (dispatchType, receiver) =
-                    if method.isVirtual || method.isPureVirtual then
-                      (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
+                    if binding != null && binding.isInstanceOf[ICPPMethod] then
+                      val method = binding.asInstanceOf[ICPPMethod]
+                      if method.isVirtual || method.isPureVirtual then
+                        (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
+                      else
+                        (DispatchTypes.STATIC_DISPATCH, None)
                     else
                       (DispatchTypes.STATIC_DISPATCH, None)
                 val callCpgNode = callNode(
@@ -355,17 +367,18 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   ): Ast =
     val name = idExpr.getName.getLastName.toString
     val (signature: String, fullName: String) =
-        idExpr.getName.getBinding match
-          case function: IFunction =>
-              val functionType: IFunctionType = function.getType
-              val derivedSignature            = functionTypeToSignature(functionType)
-              val nameFromBinding             = function.getName
-              val constructedFullName         = s"$nameFromBinding:$derivedSignature"
-              (derivedSignature, constructedFullName)
+      val binding = idExpr.getName.getBinding
+      binding match
+        case function: IFunction =>
+            val functionType: IFunctionType = function.getType
+            val derivedSignature            = functionTypeToSignature(functionType)
+            val nameFromBinding             = function.getName
+            val constructedFullName         = s"$nameFromBinding:$derivedSignature"
+            (derivedSignature, constructedFullName)
 
-          case _ =>
-              val fallbackSignature = ""
-              (fallbackSignature, s"$name:$fallbackSignature")
+        case _ =>
+            val fallbackSignature = ""
+            (fallbackSignature, s"$name:$fallbackSignature")
 
     val dispatchType = DispatchTypes.STATIC_DISPATCH
     val callCpgNode = callNode(

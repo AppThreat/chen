@@ -6,31 +6,28 @@ import org.eclipse.cdt.internal.core.parser.scanner.{
     InternalFileContent,
     InternalFileContentProvider
 }
-import org.slf4j.LoggerFactory
 
-import java.nio.file.Paths
+import java.nio.file.{Path, Paths}
 
-class CustomFileContentProvider(headerFileFinder: HeaderFileFinder)
+class CustomFileContentProvider(headerFileFinder: HeaderFileFinder, currentFileContext: Path)
     extends InternalFileContentProvider:
-
-  private val logger = LoggerFactory.getLogger(classOf[CustomFileContentProvider])
 
   private def loadContent(path: String): InternalFileContent =
     val maybeFullPath = if !getInclusionExists(path) then
-      headerFileFinder.find(path)
+      headerFileFinder.find(path, Option(currentFileContext))
     else
       Option(path)
-    maybeFullPath
-        .map { foundPath =>
-          logger.debug(s"Loading header file '$foundPath'")
-          CdtParser.readFileAsFileContent(Paths.get(foundPath)).asInstanceOf[
-            InternalFileContent
-          ]
-        }
-        .getOrElse {
-            logger.debug(s"Cannot find header file for '$path'")
-            null
-        }
+
+    maybeFullPath match
+      case Some(foundPath) =>
+          try
+            val canonicalPath = Paths.get(foundPath).toRealPath().toString
+            CdtParser.readFileAsFileContent(Paths.get(canonicalPath)).asInstanceOf[
+              InternalFileContent
+            ]
+          catch
+            case e: Throwable => null
+      case None => null
 
   override def getContentForInclusion(
     path: String,

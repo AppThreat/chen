@@ -20,11 +20,13 @@ import org.eclipse.cdt.core.dom.ast.{
 import org.eclipse.cdt.core.dom.ast.IASTBinaryExpression
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
+import java.util.regex.Pattern
 import scala.annotation.nowarn
 import scala.collection.mutable
 
 trait MacroHandler(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
+  private val TokenizerPattern = Pattern.compile("(?<=[^a-zA-Z0-9_])|(?=[^a-zA-Z0-9_])")
 
   private val nodeOffsetMacroPairs: mutable.Stack[(Int, IASTPreprocessorMacroDefinition)] =
       mutable.Stack.from(
@@ -112,15 +114,23 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           rootNode.map(x => ast.subTreeCopy(x.asInstanceOf[AstNodeNew], i + 1))
       }
 
+  private def tokenize(s: String): Seq[String] =
+      TokenizerPattern.split(s).map(_.trim).filter(_.nonEmpty).toSeq
+
   private def argForCode(code: String, ast: Ast): Option[NewNode] =
-    val normalizedCode = code.replace(" ", "")
-    if normalizedCode == "" then
+    val argTokens = tokenize(code)
+    if argTokens.isEmpty then
       None
     else
-      ast.nodes.collectFirst {
-          case x: ExpressionNew
-              if !x.isInstanceOf[NewFieldIdentifier] && x.code == normalizedCode => x
+      val strictMatch = ast.nodes.collectFirst {
+          case x: ExpressionNew if !x.isInstanceOf[NewFieldIdentifier] && x.code == code => x
       }
+      if strictMatch.isDefined then strictMatch
+      else
+        ast.nodes.collectFirst {
+            case x: ExpressionNew
+                if !x.isInstanceOf[NewFieldIdentifier] && tokenize(x.code) == argTokens => x
+        }
 
   /** Create an AST that represents a macro expansion as a call. The AST is rooted in a CALL node
     * and contains sub trees for arguments. These are also connected to the AST via ARGUMENT edges.
@@ -134,7 +144,7 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     arguments: List[String]
   ): Ast =
     val name    = ASTStringUtil.getSimpleName(macroDef.getName)
-    val code    = node.getRawSignature.stripSuffix(";")
+    val code    = safeGetRawSignature(node).stripSuffix(";")
     val argAsts = argumentTrees(arguments, ast).map(_.getOrElse(Ast()))
 
     val callName     = StringUtils.normalizeSpace(name)
@@ -167,16 +177,29 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     */
   @nowarn
   def nodeSignature(node: IASTNode): String =
-    import org.eclipse.cdt.core.dom.ast.ASTSignatureUtil.getNodeSignature
     val sig = if isExpandedFromMacro(node) then
-      val sig = getNodeSignature(node)
+      val sig = safeGetNodeSignature(node)
       if sig.isEmpty then
-        node.getRawSignature
+        safeGetRawSignature(node)
       else
         sig
     else
-      node.getRawSignature
+      safeGetRawSignature(node)
     shortenCode(sig)
+
+  private def safeGetRawSignature(node: IASTNode): String =
+      try
+        node.getRawSignature
+      catch
+        case _: Throwable => ""
+
+  @nowarn
+  private def safeGetNodeSignature(node: IASTNode): String =
+    import org.eclipse.cdt.core.dom.ast.ASTSignatureUtil.getNodeSignature
+    try
+      getNodeSignature(node)
+    catch
+      case _: Throwable => ""
 
   private def isExpandedFromMacro(node: IASTNode): Boolean = expandedFromMacro(node).nonEmpty
 
