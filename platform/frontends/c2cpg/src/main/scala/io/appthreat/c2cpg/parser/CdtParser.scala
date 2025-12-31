@@ -37,12 +37,11 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
 
   import CdtParser.*
 
-  private val headerFileFinder    = new HeaderFileFinder(config.inputPath)
-  private val fileContentProvider = new CustomFileContentProvider(headerFileFinder)
-  private val parserConfig        = ParserConfig.fromConfig(config)
-  private val definedSymbols      = parserConfig.definedSymbols.asJava
-  private val includePaths        = parserConfig.userIncludePaths
-  private val log                 = new DefaultLogService
+  private val headerFileFinder = new HeaderFileFinder(config.inputPath)
+  private val parserConfig     = ParserConfig.fromConfig(config)
+  private val definedSymbols   = parserConfig.definedSymbols.asJava
+  private val includePaths     = parserConfig.userIncludePaths
+  private val log              = new DefaultLogService
 
   private var stayCpp: Boolean = false
 
@@ -112,7 +111,7 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   private def parseInternal(file: Path): ParseResult =
     val realPath = File(file)
     if realPath.isRegularFile then // handling potentially broken symlinks
-      fileContentProvider.setContext(realPath.path)
+      val fileContentProvider = new CustomFileContentProvider(headerFileFinder, realPath.path)
       try
         val fileContent = readFileAsFileContent(realPath.path)
         val lang        = createParseLanguage(realPath.path)
@@ -151,7 +150,6 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
         case e: Throwable =>
             ParseResult(None, failure = Option(e))
       finally
-        fileContentProvider.clearContext()
         index match
           case Some(x) => x.releaseReadLock()
           case _       =>

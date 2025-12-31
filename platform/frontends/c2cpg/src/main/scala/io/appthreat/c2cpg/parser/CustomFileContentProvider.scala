@@ -9,15 +9,12 @@ import org.eclipse.cdt.internal.core.parser.scanner.{
 
 import java.nio.file.{Path, Paths}
 
-class CustomFileContentProvider(headerFileFinder: HeaderFileFinder)
+class CustomFileContentProvider(headerFileFinder: HeaderFileFinder, currentFileContext: Path)
     extends InternalFileContentProvider:
-  private val currentFileContext = new ThreadLocal[Path]()
 
-  def setContext(path: Path): Unit = currentFileContext.set(path)
-  def clearContext(): Unit         = currentFileContext.remove()
   private def loadContent(path: String): InternalFileContent =
     val maybeFullPath = if !getInclusionExists(path) then
-      headerFileFinder.find(path, Option(currentFileContext.get()))
+      headerFileFinder.find(path, Option(currentFileContext))
     else
       Option(path)
 
