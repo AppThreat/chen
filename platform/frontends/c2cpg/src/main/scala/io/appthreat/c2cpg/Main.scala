@@ -13,6 +13,7 @@ final case class Config(
   includePaths: Set[String] = Set.empty,
   macroFiles: Set[String] = Set.empty,
   defines: Set[String] = Set.empty,
+  cppStandard: String = "",
   includeComments: Boolean = false,
   logProblems: Boolean = false,
   logPreprocessor: Boolean = false,
@@ -32,6 +33,8 @@ final case class Config(
       this.copy(macroFiles = macroFiles).withInheritedFields(this)
   def withDefines(defines: Set[String]): Config =
       this.copy(defines = defines).withInheritedFields(this)
+  def withCppStandard(cppStandard: String): Config =
+      this.copy(cppStandard = cppStandard).withInheritedFields(this)
 
   def withIncludeComments(value: Boolean): Config =
       this.copy(includeComments = value).withInheritedFields(this)
@@ -117,7 +120,10 @@ private object Frontend:
       opt[String]("define")
           .unbounded()
           .text("define a name")
-          .action((d, c) => c.withDefines(c.defines + d))
+          .action((d, c) => c.withDefines(c.defines + d)),
+      opt[String]("cpp-standard")
+          .text("C++ standard version (e.g., c++17, c++20).")
+          .action((s, c) => c.withCppStandard(s))
     )
   end cmdLineParser
 end Frontend

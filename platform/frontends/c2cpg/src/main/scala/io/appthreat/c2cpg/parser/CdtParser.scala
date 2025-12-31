@@ -15,6 +15,7 @@ import org.eclipse.cdt.internal.core.index.EmptyCIndex
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{NoSuchFileException, Path}
+import java.util.HashMap
 import scala.jdk.CollectionConverters.*
 
 object CdtParser:
@@ -52,12 +53,31 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
     parserConfig.includeFiles.map(_.toString).toArray
   )
 
-  private val cppScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
-    definedSymbols,
-    (includePaths ++ parserConfig.systemIncludePathsCPP).map(_.toString).toArray,
-    parserConfig.macroFiles.map(_.toString).toArray,
-    parserConfig.includeFiles.map(_.toString).toArray
-  )
+  private val cppScannerInfo: ExtendedScannerInfo =
+    val symbolMap = new HashMap[String, String](definedSymbols)
+
+    val stdVal = config.cppStandard.toLowerCase match
+      case ""                => ""
+      case "c++98" | "c++03" => "199711L"
+      case "c++11"           => "201103L"
+      case "c++14"           => "201402L"
+      case "c++17"           => "201703L"
+      case "c++20"           => "202002L"
+      case "c++23"           => "202302L"
+      case other             => other
+
+    if stdVal.nonEmpty then
+      symbolMap.put("__cplusplus", stdVal)
+    else if !symbolMap.containsKey("__cplusplus") then
+      symbolMap.put("__cplusplus", "201703L")
+
+    new ExtendedScannerInfo(
+      symbolMap,
+      (includePaths ++ parserConfig.systemIncludePathsCPP).map(_.toString).toArray,
+      parserConfig.macroFiles.map(_.toString).toArray,
+      parserConfig.includeFiles.map(_.toString).toArray
+    )
+  end cppScannerInfo
 
   // Setup indexing
   var index: Option[IIndex] = Option(EmptyCIndex.INSTANCE)
