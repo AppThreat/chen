@@ -364,6 +364,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                       return ""
                     else
                       return s"$fixedFullName"
+                case _ =>
           case declarator: CASTFunctionDeclarator =>
               val fn = declarator.getName.toString
               return fn

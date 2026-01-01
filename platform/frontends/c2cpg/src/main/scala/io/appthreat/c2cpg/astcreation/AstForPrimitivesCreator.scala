@@ -70,21 +70,20 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             val identifierTypeName = variableOption match
               case Some((_, variableTypeName)) => variableTypeName
               case None =>
-                  if ident.isInstanceOf[IASTName] then
-                    val id      = ident.asInstanceOf[IASTName]
-                    val binding = id.getBinding
-                    if binding != null then
-                      binding match
-                        case v: IVariable =>
-                            v.getType match
-                              case f: IFunctionType       => f.getReturnType.toString
-                              case other if other != null => other.toString
-                              case _                      => Defines.anyTypeName
-                        case other => other.getName
-                    else
-                      typeFor(ident.getParent)
-                  else
-                    typeFor(ident)
+                  ident match
+                    case id: IASTName =>
+                        val binding = id.getBinding
+                        if binding != null then
+                          binding match
+                            case v: IVariable =>
+                                v.getType match
+                                  case f: IFunctionType       => f.getReturnType.toString
+                                  case other if other != null => other.toString
+                                  case _                      => Defines.anyTypeName
+                            case other => other.getName
+                        else
+                          typeFor(ident.getParent)
+                    case _ => typeFor(ident)
 
             val node = identifierNode(
               ident,
