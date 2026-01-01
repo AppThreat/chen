@@ -17,8 +17,8 @@ import scala.util.matching.Regex
 class AstCreationPass(
   cpg: Cpg,
   config: Config,
-  timeoutDuration: FiniteDuration = 2.minutes,
-  parseTimeoutDuration: FiniteDuration = 2.minutes
+  timeoutDuration: FiniteDuration = 5.minutes,
+  parseTimeoutDuration: FiniteDuration = 5.minutes
 ) extends OrderedParallelCpgPass[String](cpg):
 
   private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
@@ -74,6 +74,7 @@ class AstCreationPass(
           throw e
     finally
       computationExecutor.shutdown()
+      sharedHeaderFileFinder.clear()
       try
         if !computationExecutor.awaitTermination(10, TimeUnit.SECONDS) then
           computationExecutor.shutdownNow()
@@ -95,10 +96,4 @@ class AstCreationPass(
         case _: TimeoutException =>
             future.cancel(true)
             throw new TimeoutException(s"Operation timed out after ${timeout}")
-
-  override def finish(): Unit =
-      try
-          sharedHeaderFileFinder.clear()
-      finally
-          super.finish()
 end AstCreationPass
