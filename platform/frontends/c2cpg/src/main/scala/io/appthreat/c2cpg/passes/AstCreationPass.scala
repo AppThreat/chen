@@ -17,8 +17,8 @@ import scala.util.matching.Regex
 class AstCreationPass(
   cpg: Cpg,
   config: Config,
-  timeoutDuration: FiniteDuration = 5.minutes,
-  parseTimeoutDuration: FiniteDuration = 5.minutes
+  timeoutDuration: FiniteDuration = 2.minutes,
+  parseTimeoutDuration: FiniteDuration = 2.minutes
 ) extends OrderedParallelCpgPass[String](cpg):
 
   private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
