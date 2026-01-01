@@ -33,26 +33,26 @@ object CdtParser:
     val lines = IOUtils.readLinesInFile(path).mkString("\n").toArray
     FileContent.create(path.toString, true, lines)
 
-class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorStatementsLogger:
+class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends ParseProblemsLogger
+    with PreprocessorStatementsLogger:
 
   import CdtParser.*
 
-  private val headerFileFinder = new HeaderFileFinder(config.inputPath)
-  private val parserConfig     = ParserConfig.fromConfig(config)
-  private val definedSymbols   = parserConfig.definedSymbols.asJava
-  private val includePaths     = parserConfig.userIncludePaths
-  private val log              = new DefaultLogService
+  private val parserConfig   = ParserConfig.fromConfig(config)
+  private val definedSymbols = parserConfig.definedSymbols.asJava
+  private val includePaths   = parserConfig.userIncludePaths
+  private val log            = new DefaultLogService
 
   private var stayCpp: Boolean = false
 
-  private val cScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
+  private lazy val cScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
     definedSymbols,
     (includePaths ++ parserConfig.systemIncludePathsC).map(_.toString).toArray,
     parserConfig.macroFiles.map(_.toString).toArray,
     parserConfig.includeFiles.map(_.toString).toArray
   )
 
-  private val cppScannerInfo: ExtendedScannerInfo =
+  private lazy val cppScannerInfo: ExtendedScannerInfo =
     val symbolMap = new HashMap[String, String](definedSymbols)
 
     val stdVal = config.cppStandard.toLowerCase match
@@ -94,7 +94,8 @@ class CdtParser(config: Config) extends ParseProblemsLogger with PreprocessorSta
   if !config.includeFunctionBodies then opts |= ILanguage.OPTION_SKIP_FUNCTION_BODIES
   // performance optimization, allows the parser not to create image-locations
   if !config.includeImageLocations then opts |= ILanguage.OPTION_NO_IMAGE_LOCATIONS
-  opts |= ILanguage.OPTION_SKIP_TRIVIAL_EXPRESSIONS_IN_AGGREGATE_INITIALIZERS
+  if !config.includeTrivialExpressions then
+    opts |= ILanguage.OPTION_SKIP_TRIVIAL_EXPRESSIONS_IN_AGGREGATE_INITIALIZERS
 
   private def createParseLanguage(file: Path): ILanguage =
       if FileDefaults.isCPPFile(file.toString) then

@@ -22,46 +22,39 @@ final case class Config(
   includeFunctionBodies: Boolean = false,
   includeImageLocations: Boolean = false,
   useProjectIndex: Boolean = false,
-  parseInactiveCode: Boolean = false
+  parseInactiveCode: Boolean = false,
+  includeTrivialExpressions: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
   def withIncludePaths(includePaths: Set[String]): Config =
       this.copy(includePaths = includePaths).withInheritedFields(this)
-
   def withMacroFiles(macroFiles: Set[String]): Config =
       this.copy(macroFiles = macroFiles).withInheritedFields(this)
   def withDefines(defines: Set[String]): Config =
       this.copy(defines = defines).withInheritedFields(this)
   def withCppStandard(cppStandard: String): Config =
       this.copy(cppStandard = cppStandard).withInheritedFields(this)
-
   def withIncludeComments(value: Boolean): Config =
       this.copy(includeComments = value).withInheritedFields(this)
-
   def withLogProblems(value: Boolean): Config =
       this.copy(logProblems = value).withInheritedFields(this)
-
   def withLogPreprocessor(value: Boolean): Config =
       this.copy(logPreprocessor = value).withInheritedFields(this)
-
   def withPrintIfDefsOnly(value: Boolean): Config =
       this.copy(printIfDefsOnly = value).withInheritedFields(this)
-
   def withIncludePathsAutoDiscovery(value: Boolean): Config =
       this.copy(includePathsAutoDiscovery = value).withInheritedFields(this)
-
   def withFunctionBodies(value: Boolean): Config =
       this.copy(includeFunctionBodies = value).withInheritedFields(this)
-
   def withImageLocations(value: Boolean): Config =
       this.copy(includeImageLocations = value).withInheritedFields(this)
-
   def withProjectIndexes(value: Boolean): Config =
       this.copy(useProjectIndex = value).withInheritedFields(this)
-
   def withParseInactiveCode(value: Boolean): Config =
       this.copy(parseInactiveCode = value).withInheritedFields(this)
+  def withIncludeTrivialExpressions(value: Boolean): Config =
+      this.copy(includeTrivialExpressions = value).withInheritedFields(this)
 end Config
 
 private object Frontend:

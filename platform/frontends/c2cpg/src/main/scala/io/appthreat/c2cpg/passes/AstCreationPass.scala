@@ -2,10 +2,10 @@ package io.appthreat.c2cpg.passes
 
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.astcreation.AstCreator
-import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults}
+import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.SourceFiles
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.passes.ConcurrentWriterCpgPass
+import io.shiftleft.passes.OrderedParallelCpgPass
 
 import java.nio.file.Paths
 import java.util.concurrent.*
@@ -13,19 +13,16 @@ import java.util.regex.Pattern
 import scala.concurrent.duration.*
 import scala.jdk.DurationConverters.*
 import scala.util.matching.Regex
-import scala.util.{Try, Success, Failure}
 
 class AstCreationPass(
   cpg: Cpg,
   config: Config,
   timeoutDuration: FiniteDuration = 2.minutes,
   parseTimeoutDuration: FiniteDuration = 2.minutes
-) extends ConcurrentWriterCpgPass[String](cpg):
+) extends OrderedParallelCpgPass[String](cpg):
 
-  private val file2OffsetTable: ConcurrentHashMap[String, Array[Int]] = new ConcurrentHashMap()
-  private val parser: CdtParser                                       = new CdtParser(config)
-
-  private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
+  private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
+  private val EscapedFileSeparator   = Pattern.quote(java.io.File.separator)
   private val DefaultIgnoredFolders: List[Regex] = List(
     "\\..*".r,
     s"(.*[$EscapedFileSeparator])?tests?[$EscapedFileSeparator].*".r,
@@ -45,14 +42,14 @@ class AstCreationPass(
           .toArray
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
-    val path    = Paths.get(filename).toAbsolutePath
-    val relPath = SourceFiles.toRelativePath(path.toString, config.inputPath)
-
+    val path                = Paths.get(filename).toAbsolutePath
+    val relPath             = SourceFiles.toRelativePath(path.toString, config.inputPath)
     val computationExecutor = Executors.newVirtualThreadPerTaskExecutor()
-
+    val file2OffsetTable    = new ConcurrentHashMap[String, Array[Int]]()
     try
-      val parseFuture = computationExecutor.submit(() => parser.parse(path))
-      val parseResult = runWithTimeout(parseFuture, parseTimeoutDuration, computationExecutor)
+      val parser: CdtParser = new CdtParser(config, sharedHeaderFileFinder)
+      val parseFuture       = computationExecutor.submit(() => parser.parse(path))
+      val parseResult       = runWithTimeout(parseFuture, parseTimeoutDuration, computationExecutor)
       parseResult match
         case Some(translationUnit: org.eclipse.cdt.core.dom.ast.IASTTranslationUnit) =>
             val astFuture = computationExecutor.submit(() =>
@@ -77,6 +74,7 @@ class AstCreationPass(
           throw e
     finally
       computationExecutor.shutdown()
+      sharedHeaderFileFinder.clear()
       try
         if !computationExecutor.awaitTermination(10, TimeUnit.SECONDS) then
           computationExecutor.shutdownNow()

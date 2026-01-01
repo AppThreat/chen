@@ -337,13 +337,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     s"$returnType(${parameterTypes.mkString(",")})"
 
   protected def fullName(node: IASTNode): String =
-    val visitedNodes = ThreadLocal.withInitial(() => mutable.Set.empty[IASTNode])
+    val visitedNodes = mutable.Set.empty[IASTNode]
     def fullNameInternal(node: IASTNode): String =
       if node == null then return ""
-      if visitedNodes.get().contains(node) then
+      if visitedNodes.contains(node) then
         return uniqueName("recursive_type", "", "")._1
       try
-        visitedNodes.get() += node
+        visitedNodes += node
 
         node match
           case declarator: CPPASTFunctionDeclarator =>
@@ -364,6 +364,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                       return ""
                     else
                       return s"$fixedFullName"
+                case _ =>
           case declarator: CASTFunctionDeclarator =>
               val fn = declarator.getName.toString
               return fn
@@ -441,7 +442,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           case null                   => ""
         fixQualifiedName(qualifiedName).stripPrefix(".")
       finally
-        visitedNodes.get() -= node
+        visitedNodes -= node
       end try
     end fullNameInternal
 

@@ -9,7 +9,7 @@ object Versions {
   val gradleTooling = "8.10.1"
   val circe         = "0.14.15"
   val requests      = "0.9.0"
-  val upickle       = "4.4.1"
+  val upickle       = "4.4.2"
   val scalaReplPP   = "0.1.85"
   val commonsCompress = "1.27.1"
   val typeSafeConfig  = "1.4.5"

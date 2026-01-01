@@ -1,7 +1,7 @@
 package io.appthreat.c2cpg.passes
 
 import io.appthreat.c2cpg.Config
-import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults}
+import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.SourceFiles
 import org.eclipse.cdt.core.dom.ast.{
     IASTPreprocessorIfStatement,
@@ -15,7 +15,8 @@ import scala.collection.parallel.immutable.ParIterable
 
 class PreprocessorPass(config: Config):
 
-  private val parser = new CdtParser(config)
+  private val headerFileFinder = new HeaderFileFinder(config.inputPath)
+  private val parser           = new CdtParser(config, headerFileFinder)
 
   def run(): ParIterable[String] =
       SourceFiles.determine(config.inputPath, FileDefaults.SOURCE_FILE_EXTENSIONS).par.flatMap(

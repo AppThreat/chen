@@ -36,6 +36,9 @@ class HeaderFileFinder(root: String):
     val sourceDir = currentSourceFile.map(_.getParent.toString)
     findCache.computeIfAbsent((path, sourceDir), _ => calculateMatch(path, currentSourceFile))
 
+  def clear(): Unit =
+      findCache.clear()
+
   private def calculateMatch(path: String, currentSourceFile: Option[Path]): Option[String] =
     val requestedFile = File(path)
     val requestedName = requestedFile.name
@@ -61,8 +64,8 @@ class HeaderFileFinder(root: String):
                     .takeWhile { case (s, c) => s == c }.length
               else
                 0
-
-              (suffixScore, proximityScore)
+              val pathLengthScore = -candidateSegments.length
+              (suffixScore, proximityScore, pathLengthScore)
           }
 
           Option(bestMatchPath.toString)
