@@ -21,7 +21,6 @@ class AstCreationPass(
   parseTimeoutDuration: FiniteDuration = 2.minutes
 ) extends ConcurrentWriterCpgPass[String](cpg):
 
-  private val file2OffsetTable: ConcurrentHashMap[String, Array[Int]] = new ConcurrentHashMap()
   private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
   private val EscapedFileSeparator   = Pattern.quote(java.io.File.separator)
   private val DefaultIgnoredFolders: List[Regex] = List(
@@ -46,6 +45,7 @@ class AstCreationPass(
     val path                = Paths.get(filename).toAbsolutePath
     val relPath             = SourceFiles.toRelativePath(path.toString, config.inputPath)
     val computationExecutor = Executors.newVirtualThreadPerTaskExecutor()
+    val file2OffsetTable    = new ConcurrentHashMap[String, Array[Int]]()
     try
       val parser: CdtParser = new CdtParser(config, sharedHeaderFileFinder)
       val parseFuture       = computationExecutor.submit(() => parser.parse(path))
