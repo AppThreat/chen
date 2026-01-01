@@ -64,8 +64,8 @@ class HeaderFileFinder(root: String):
                     .takeWhile { case (s, c) => s == c }.length
               else
                 0
-
-              (suffixScore, proximityScore)
+              val pathLengthScore = -candidateSegments.length
+              (suffixScore, proximityScore, pathLengthScore)
           }
 
           Option(bestMatchPath.toString)
