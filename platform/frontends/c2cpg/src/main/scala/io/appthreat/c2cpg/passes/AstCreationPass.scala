@@ -5,7 +5,7 @@ import io.appthreat.c2cpg.astcreation.AstCreator
 import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.SourceFiles
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.passes.ConcurrentWriterCpgPass
+import io.shiftleft.passes.StreamingCpgPass
 
 import java.nio.file.Paths
 import java.util.concurrent.*
@@ -19,7 +19,7 @@ class AstCreationPass(
   config: Config,
   timeoutDuration: FiniteDuration = 2.minutes,
   parseTimeoutDuration: FiniteDuration = 2.minutes
-) extends ConcurrentWriterCpgPass[String](cpg):
+) extends StreamingCpgPass[String](cpg):
 
   private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
   private val EscapedFileSeparator   = Pattern.quote(java.io.File.separator)
