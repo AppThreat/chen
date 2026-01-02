@@ -6,14 +6,15 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.utils.Fingerprinting
 import overflowdb.*
-import overflowdb.formats.ExportResult
-import overflowdb.formats.dot.DotExporter
-import overflowdb.formats.graphml.GraphMLExporter
+import overflowdb.formats.{ExportResult, Exporter}
 import overflowdb.traversal.help
 import overflowdb.traversal.help.Doc
-
-import java.nio.file.{Files, Paths}
+import java.io.BufferedWriter
+import java.nio.file.{Files, Path, Paths}
+import java.util.concurrent.atomic.AtomicInteger
+import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import scala.util.Using
 
 case class MethodSubGraph(
   methodName: String,
@@ -35,6 +36,281 @@ def plus(resultA: ExportResult, resultB: ExportResult): ExportResult =
       files = resultA.files ++ resultB.files,
       additionalInfo = resultA.additionalInfo
     )
+
+object SubgraphGraphMLExporter extends Exporter:
+  override def defaultFileExtension = "xml"
+
+  private val KeyForNodeLabel = "labelV"
+  private val KeyForEdgeLabel = "labelE"
+
+  override def runExport(
+    nodes: IterableOnce[Node],
+    edges: IterableOnce[Edge],
+    outputFile: Path
+  ): ExportResult =
+    val outFile                    = resolveOutputFile(outputFile, defaultFileExtension)
+    val nodePropertyContextById    = mutable.Map.empty[String, PropertyContext]
+    val edgePropertyContextById    = mutable.Map.empty[String, PropertyContext]
+    val discardedListPropertyCount = new AtomicInteger(0)
+
+    val nodeList = nodes.iterator.toSeq
+    val edgeList = edges.iterator.toSeq
+
+    nodeList.foreach(collectKeys(_, "node", nodePropertyContextById, discardedListPropertyCount))
+    edgeList.foreach(collectKeys(_, "edge", edgePropertyContextById, discardedListPropertyCount))
+
+    var nodeCount = 0
+    var edgeCount = 0
+
+    Using.resource(Files.newBufferedWriter(outFile)) { writer =>
+      writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+      writer.newLine()
+      writer.write(
+        "<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd\">"
+      )
+      writer.newLine()
+
+      writeKeyDefs(writer, "node", nodePropertyContextById)
+      writeKeyDefs(writer, "edge", edgePropertyContextById)
+
+      writer.write("    <graph id=\"G\" edgedefault=\"directed\">")
+      writer.newLine()
+
+      nodeList.foreach { node =>
+        nodeCount += 1
+        writeNode(writer, node, nodePropertyContextById)
+      }
+
+      edgeList.foreach { edge =>
+        edgeCount += 1
+        writeEdge(writer, edge, edgePropertyContextById)
+      }
+
+      writer.write("    </graph>")
+      writer.newLine()
+      writer.write("</graphml>")
+    }
+
+    val additionalInfo =
+        Some(discardedListPropertyCount.get).filter(_ > 0).map { count =>
+            s"warning: discarded $count list properties (because they are not supported by the graphml spec)"
+        }
+
+    ExportResult(nodeCount, edgeCount, Seq(outFile), additionalInfo)
+  end runExport
+
+  private def resolveOutputFile(path: Path, ext: String): Path =
+      if path.toString.endsWith(s".$ext") then path else Paths.get(path.toString + s".$ext")
+
+  private def isList(clazz: Class[?]): Boolean =
+      classOf[java.util.List[?]].isAssignableFrom(clazz) || clazz.isArray
+
+  private case class PropertyContext(name: String, tpe: String)
+
+  private object Type:
+    def fromRuntimeClass(clazz: Class[?]): String =
+        if clazz == classOf[Boolean] || clazz == classOf[java.lang.Boolean] then "boolean"
+        else if clazz == classOf[Int] || clazz == classOf[java.lang.Integer] then "int"
+        else if clazz == classOf[Long] || clazz == classOf[java.lang.Long] then "long"
+        else if clazz == classOf[Float] || clazz == classOf[java.lang.Float] then "float"
+        else if clazz == classOf[Double] || clazz == classOf[java.lang.Double] then "double"
+        else "string"
+
+  private def collectKeys(
+    element: Element,
+    prefix: String,
+    context: mutable.Map[String, PropertyContext],
+    discarded: AtomicInteger
+  ): Unit =
+    val it = element.propertiesMap.entrySet().iterator()
+    while it.hasNext do
+      val entry = it.next()
+      if isList(entry.getValue.getClass) then
+        discarded.incrementAndGet()
+      else
+        val encodedName = s"${prefix}__${element.label}__${entry.getKey}"
+        if !context.contains(encodedName) then
+          context.put(
+            encodedName,
+            PropertyContext(entry.getKey, Type.fromRuntimeClass(entry.getValue.getClass))
+          )
+
+  private def writeKeyDefs(
+    writer: java.io.BufferedWriter,
+    forAttr: String,
+    context: mutable.Map[String, PropertyContext]
+  ): Unit =
+    writer.write(
+      s"""    <key id="$KeyForNodeLabel" for="node" attr.name="$KeyForNodeLabel" attr.type="string"></key>"""
+    )
+    writer.newLine()
+    writer.write(
+      s"""    <key id="$KeyForEdgeLabel" for="edge" attr.name="$KeyForEdgeLabel" attr.type="string"></key>"""
+    )
+    writer.newLine()
+
+    context.foreach { case (key, PropertyContext(name, tpe)) =>
+        writer.write(
+          s"""    <key id="$key" for="$forAttr" attr.name="$name" attr.type="$tpe"></key>"""
+        )
+        writer.newLine()
+    }
+  end writeKeyDefs
+
+  private def writeNode(
+    writer: java.io.BufferedWriter,
+    node: Node,
+    context: mutable.Map[String, PropertyContext]
+  ): Unit =
+    writer.write(s"""        <node id="${node.id}">""")
+    writer.newLine()
+    writer.write(s"""            <data key="$KeyForNodeLabel">${node.label}</data>""")
+    writer.newLine()
+    writeDataEntries(writer, "node", node, context)
+    writer.write("        </node>")
+    writer.newLine()
+
+  private def writeEdge(
+    writer: java.io.BufferedWriter,
+    edge: Edge,
+    context: mutable.Map[String, PropertyContext]
+  ): Unit =
+    writer.write(s"""        <edge source="${edge.outNode.id}" target="${edge.inNode.id}">""")
+    writer.newLine()
+    writer.write(s"""            <data key="$KeyForEdgeLabel">${edge.label}</data>""")
+    writer.newLine()
+    writeDataEntries(writer, "edge", edge, context)
+    writer.write("        </edge>")
+    writer.newLine()
+
+  private def writeDataEntries(
+    writer: java.io.BufferedWriter,
+    prefix: String,
+    element: Element,
+    context: mutable.Map[String, PropertyContext]
+  ): Unit =
+    val it = element.propertiesMap.entrySet().iterator()
+    while it.hasNext do
+      val entry = it.next()
+      if !isList(entry.getValue.getClass) then
+        val encodedName = s"${prefix}__${element.label}__${entry.getKey}"
+        val xmlEncoded  = escapeXml(entry.getValue.toString)
+        writer.write(s"""            <data key="$encodedName">$xmlEncoded</data>""")
+        writer.newLine()
+
+  private def escapeXml(s: String): String =
+    val sb = new StringBuilder(s.length)
+    var i  = 0
+    while i < s.length do
+      s.charAt(i) match
+        case '<'  => sb.append("&lt;")
+        case '>'  => sb.append("&gt;")
+        case '&'  => sb.append("&amp;")
+        case '"'  => sb.append("&quot;")
+        case '\'' => sb.append("&apos;")
+        case c    => sb.append(c)
+      i += 1
+    sb.toString
+end SubgraphGraphMLExporter
+
+object SubgraphDotExporter extends Exporter:
+  override def defaultFileExtension = "dot"
+
+  override def runExport(
+    nodes: IterableOnce[Node],
+    edges: IterableOnce[Edge],
+    outputFile: Path
+  ): ExportResult =
+    val outFile   = resolveOutputFile(outputFile, defaultFileExtension)
+    var nodeCount = 0
+    var edgeCount = 0
+
+    Using.resource(Files.newBufferedWriter(outFile)) { writer =>
+      writer.write("digraph {"); writer.newLine()
+
+      nodes.iterator.foreach { node =>
+        nodeCount += 1
+        writeNode(writer, node)
+      }
+
+      edges.iterator.foreach { edge =>
+        edgeCount += 1
+        writeEdge(writer, edge)
+      }
+
+      writer.write("}")
+      writer.newLine()
+    }
+    ExportResult(nodeCount, edgeCount, Seq(outFile), None)
+  end runExport
+
+  private def resolveOutputFile(path: Path, ext: String): Path =
+      if path.toString.endsWith(s".$ext") then path else Paths.get(path.toString + s".$ext")
+
+  private def writeNode(writer: BufferedWriter, node: Node): Unit =
+    writer.write(s"  ${node.id} [label=${node.label}")
+    writeProperties(writer, node.propertiesMap)
+    writer.write("]")
+    writer.newLine()
+
+  private def writeEdge(writer: BufferedWriter, edge: Edge): Unit =
+    writer.write(s"  ${edge.outNode.id} -> ${edge.inNode.id} [label=${edge.label}")
+    writeProperties(writer, edge.propertiesMap)
+    writer.write("]")
+    writer.newLine()
+
+  private def writeProperties(
+    writer: BufferedWriter,
+    properties: java.util.Map[String, Object]
+  ): Unit =
+      if !properties.isEmpty then
+        properties.forEach { (key, value) =>
+          writer.write(" ")
+          writer.write(key)
+          writer.write("=")
+          writer.write(encodePropertyValue(value))
+        }
+
+  private def encodePropertyValue(value: Object): String =
+      value match
+        case s: String =>
+            escapeString(s)
+        case l: java.lang.Iterable[?] =>
+            val sb = new StringBuilder()
+            sb.append('"')
+            val it    = l.iterator()
+            var first = true
+            while it.hasNext do
+              if !first then sb.append(';')
+              sb.append(it.next().toString)
+              first = false
+            sb.append('"')
+            sb.toString
+        case arr: Array[?] =>
+            val sb = new StringBuilder()
+            sb.append('"')
+            var first = true
+            for item <- arr do
+              if !first then sb.append(';')
+              sb.append(item.toString)
+              first = false
+            sb.append('"')
+            sb.toString
+        case _ => value.toString
+
+  private def escapeString(s: String): String =
+    val sb = new StringBuilder(s.length + 2)
+    sb.append('"')
+    var i = 0
+    while i < s.length do
+      val c = s.charAt(i)
+      if c == '"' then sb.append("\\\"")
+      else if c == '\\' then sb.append("\\\\")
+      else sb.append(c)
+      i += 1
+    sb.append('"')
+    sb.toString
+end SubgraphDotExporter
 
 /** A method, function, or procedure
   */
@@ -198,8 +474,8 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
 
   def numberOfLines: Iterator[Int] = traversal.map(_.numberOfLines)
 
-  def sanitizeFilename(filename: String) =
-      Paths.get(filename).getFileName.toString.replaceAll("[^a-zA-Z0-9-_\\.]", "_")
+  def sanitizeFilename(filename: String): String =
+      Paths.get(filename).getFileName.toString.replaceAll("[^a-zA-Z0-9-_.]", "_")
 
   def getOrCreateExportPath(pathToUse: String): String =
       try
@@ -213,7 +489,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
 
   @Doc(info = "Export the methods to graphml")
   def gml(gmlDir: String = null): ExportResult =
-    var pathToUse = getOrCreateExportPath(gmlDir)
+    val pathToUse = getOrCreateExportPath(gmlDir)
     traversal
         .map { method =>
             MethodSubGraph(
@@ -225,12 +501,12 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
         }
         .map { case subGraph @ MethodSubGraph(methodName, methodFullName, filename, nodes) =>
             val methodHash = Fingerprinting.calculate_hash(methodFullName)
-            GraphMLExporter.runExport(
+            SubgraphGraphMLExporter.runExport(
               nodes,
               subGraph.edges,
               Paths.get(
                 pathToUse,
-                s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.graphml"
+                s"$methodName-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.graphml"
               )
             )
         }
@@ -241,7 +517,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   def gml: ExportResult = gml(null)
 
   def dot(dotDir: String = null): ExportResult =
-    var pathToUse = getOrCreateExportPath(dotDir)
+    val pathToUse = getOrCreateExportPath(dotDir)
     traversal
         .map { method =>
             MethodSubGraph(
@@ -253,12 +529,12 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
         }
         .map { case subGraph @ MethodSubGraph(methodName, methodFullName, filename, nodes) =>
             val methodHash = Fingerprinting.calculate_hash(methodFullName)
-            DotExporter.runExport(
+            SubgraphDotExporter.runExport(
               nodes,
               subGraph.edges,
               Paths.get(
                 pathToUse,
-                s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.dot"
+                s"$methodName-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}.dot"
               )
             )
         }
@@ -269,7 +545,7 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
   def dot: ExportResult = dot(null)
 
   def exportAllRepr(dotCfgDir: String = null): Unit =
-    var pathToUse = getOrCreateExportPath(dotCfgDir)
+    val pathToUse = getOrCreateExportPath(dotCfgDir)
     traversal
         .foreach { method =>
           val methodName     = method.name
@@ -278,19 +554,19 @@ class MethodTraversal(val traversal: Iterator[Method]) extends AnyVal:
           val methodHash     = Fingerprinting.calculate_hash(methodFullName)
           File(
             pathToUse,
-            s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-ast.dot"
+            s"$methodName-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-ast.dot"
           ).write(method.dotAst.head)
           File(
             pathToUse,
-            s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cdg.dot"
+            s"$methodName-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cdg.dot"
           ).write(method.dotCdg.head)
           File(
             pathToUse,
-            s"${methodName}-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cfg.dot"
+            s"$methodName-${sanitizeFilename(filename)}-${methodHash.slice(0, 8)}-cfg.dot"
           ).write(method.dotCfg.head)
         }
   end exportAllRepr
 
-  def exportAllRepr: Unit = exportAllRepr(null)
+  def exportAllRepr(): Unit = exportAllRepr(null)
 
 end MethodTraversal

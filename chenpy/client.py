@@ -395,7 +395,7 @@ async def graphml_export(connection, filter_str="method"):
             [
                 """
 import overflowdb.formats.ExportResult
-import overflowdb.formats.graphml.GraphMLExporter
+import io.shiftleft.semanticcpg.language.types.structure.SubgraphGraphMLExporter
 import java.nio.file.{Path, Paths}
 
 case class MethodSubGraph(methodName: String, nodes: Set[Node]) {
@@ -427,7 +427,7 @@ def splitByMethod(cpg: Cpg): IterableOnce[MethodSubGraph] = {
                 """
 ({splitByMethod(cpg).iterator
   .map { case subGraph @ MethodSubGraph(methodName, nodes) =>
-    GraphMLExporter.runExport(nodes, subGraph.edges, Paths.get("%(gml_file)s"))
+    SubgraphGraphMLExporter.runExport(nodes, subGraph.edges, Paths.get("%(gml_file)s"))
   }
   .reduce(plus)
 })
