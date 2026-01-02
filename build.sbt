@@ -1,9 +1,9 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.5.12"
+ThisBuild / version      := "2.5.13"
 ThisBuild / scalaVersion := "3.6.2"
 
-val cpgVersion = "2.1.2"
+val cpgVersion = "2.1.3"
 
 lazy val platform          = Projects.platform
 lazy val console           = Projects.console
