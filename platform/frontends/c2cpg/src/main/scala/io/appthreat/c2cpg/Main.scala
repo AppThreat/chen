@@ -23,7 +23,9 @@ final case class Config(
   includeImageLocations: Boolean = false,
   useProjectIndex: Boolean = false,
   parseInactiveCode: Boolean = false,
-  includeTrivialExpressions: Boolean = false
+  includeTrivialExpressions: Boolean = false,
+  enableAstCache: Boolean = false,
+  cacheDir: String = System.getProperty("java.io.tmpdir")
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -55,6 +57,10 @@ final case class Config(
       this.copy(parseInactiveCode = value).withInheritedFields(this)
   def withIncludeTrivialExpressions(value: Boolean): Config =
       this.copy(includeTrivialExpressions = value).withInheritedFields(this)
+  def withAstCache(value: Boolean): Config =
+      this.copy(enableAstCache = value).withInheritedFields(this)
+  def withCacheDir(value: String): Config =
+      this.copy(cacheDir = value).withInheritedFields(this)
 end Config
 
 private object Frontend:
@@ -116,7 +122,15 @@ private object Frontend:
           .action((d, c) => c.withDefines(c.defines + d)),
       opt[String]("cpp-standard")
           .text("C++ standard version (e.g., c++17, c++20).")
-          .action((s, c) => c.withCppStandard(s))
+          .action((s, c) => c.withCppStandard(s)),
+      opt[Unit]("enable-ast-cache")
+          .text(
+            "Enables AST caching to disk. If the file path and content haven't changed, the cached AST is used."
+          )
+          .action((_, c) => c.withAstCache(true)),
+      opt[String]("cache-dir")
+          .text("Directory to store cached AST files (defaults to system temp).")
+          .action((d, c) => c.withCacheDir(d))
     )
   end cmdLineParser
 end Frontend
