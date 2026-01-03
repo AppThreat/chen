@@ -21,9 +21,11 @@ class C2Cpg extends X2CpgFrontend[Config]:
       withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
         new MetaDataPass(cpg, Languages.NEWC, config.inputPath).createAndApply()
         new AstCreationPass(cpg, config).createAndApply()
-        new ConfigFileCreationPass(cpg).createAndApply()
-        TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
-        new TypeDeclNodePass(cpg)(using config.schemaValidation).createAndApply()
+
+        if !config.onlyAstCache then
+          new ConfigFileCreationPass(cpg).createAndApply()
+          TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
+          new TypeDeclNodePass(cpg)(using config.schemaValidation).createAndApply()
       }
 
   def printIfDefsOnly(config: Config): Unit =

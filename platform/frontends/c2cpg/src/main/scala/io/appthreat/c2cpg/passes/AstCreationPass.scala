@@ -6,7 +6,7 @@ import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.{Ast, SourceFiles}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
-import io.shiftleft.passes.OrderedParallelCpgPass
+import io.shiftleft.passes.StreamingCpgPass
 
 import java.io.*
 import java.nio.file.{Files, Path, Paths}
@@ -72,7 +72,7 @@ class AstCreationPass(
   config: Config,
   timeoutDuration: FiniteDuration = 2.minutes,
   parseTimeoutDuration: FiniteDuration = 2.minutes
-) extends OrderedParallelCpgPass[String](cpg):
+) extends StreamingCpgPass[String](cpg):
 
   import AstCreationPass.*
 
@@ -113,7 +113,7 @@ class AstCreationPass(
       val cachedAst: Option[Ast] = fileHash.flatMap(h => checkAndLoadCache(h, config.cacheDir))
       cachedAst match
         case Some(ast) =>
-            Ast.storeInDiffGraph(ast, diffGraph)
+            if !config.onlyAstCache then Ast.storeInDiffGraph(ast, diffGraph)
         case None =>
             val parser: CdtParser = new CdtParser(config, sharedHeaderFileFinder)
             val parseFuture       = computationExecutor.submit(() => parser.parse(path))
@@ -128,7 +128,7 @@ class AstCreationPass(
                   )
 
                   val localDiff = runWithTimeout(astFuture, timeoutDuration, computationExecutor)
-                  diffGraph.absorb(localDiff)
+                  if !config.onlyAstCache then diffGraph.absorb(localDiff)
               case None =>
       end match
     catch

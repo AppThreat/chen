@@ -52,7 +52,8 @@ class AstCreator(
     val ast = generateAst(cdtAst)
     if config.enableAstCache && fileHash.isDefined then
       saveToCache(ast, fileHash.get)
-    Ast.storeInDiffGraph(ast, diffGraph)
+    if !config.onlyAstCache then
+      Ast.storeInDiffGraph(ast, diffGraph)
     diffGraph
 
   private def saveToCache(ast: Ast, hash: String): Unit =
