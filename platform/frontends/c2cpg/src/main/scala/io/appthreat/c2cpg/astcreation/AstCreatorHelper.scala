@@ -240,17 +240,17 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       case f: IASTFieldReference =>
           val rawType = safeGetType(f.getFieldOwner.getExpressionType)
           cleanType(rawType, stripKeywords)
-      case a: IASTArrayDeclarator if ASTTypeUtil.getNodeType(a).startsWith("? ") =>
+      case a: IASTArrayDeclarator if safeGetNodeType(a).startsWith("? ") =>
           val tpe = getNodeSignature(a).replace("[]", "").strip()
-          val arr = ASTTypeUtil.getNodeType(a).replace("? ", "")
+          val arr = safeGetNodeType(a).replace("? ", "")
           s"$tpe$arr"
-      case a: IASTArrayDeclarator if ASTTypeUtil.getNodeType(a).contains("} ") =>
+      case a: IASTArrayDeclarator if safeGetNodeType(a).contains("} ") =>
           val tpe      = getNodeSignature(a).replace("[]", "").strip()
-          val nodeType = ASTTypeUtil.getNodeType(node)
+          val nodeType = safeGetNodeType(node)
           val arr      = nodeType.substring(nodeType.indexOf("["), nodeType.indexOf("]") + 1)
           s"$tpe$arr"
-      case a: IASTArrayDeclarator if ASTTypeUtil.getNodeType(a).contains(" [") =>
-          cleanType(ASTTypeUtil.getNodeType(node))
+      case a: IASTArrayDeclarator if safeGetNodeType(a).contains(" [") =>
+          cleanType(safeGetNodeType(node))
       case s: CPPASTIdExpression =>
           safeGetEvaluation(s) match
             case Some(evaluation: EvalMemberAccess) =>
@@ -261,13 +261,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                       val bindingFullName = fullName(m.getDefinition)
                       cleanType(bindingFullName, stripKeywords)
                   case _ =>
-                      val nodeType = ASTTypeUtil.getNodeType(s)
+                      val nodeType = safeGetNodeType(s)
                       cleanType(nodeType, stripKeywords)
             case _ =>
-                val nodeType = ASTTypeUtil.getNodeType(s)
+                val nodeType = safeGetNodeType(s)
                 cleanType(nodeType, stripKeywords)
       case _: IASTIdExpression | _: IASTName | _: IASTDeclarator =>
-          val nodeType = ASTTypeUtil.getNodeType(node)
+          val nodeType = safeGetNodeType(node)
           cleanType(nodeType, stripKeywords)
       case s: IASTNamedTypeSpecifier =>
           cleanType(ASTStringUtil.getReturnTypeString(s, null), stripKeywords)
@@ -278,10 +278,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       case s: IASTElaboratedTypeSpecifier =>
           cleanType(ASTStringUtil.getReturnTypeString(s, null), stripKeywords)
       case l: IASTLiteralExpression =>
-          val rawType = ASTTypeUtil.getType(l.getExpressionType)
+          val rawType = safeGetType(l.getExpressionType)
           cleanType(rawType)
       case e: IASTExpression =>
-          val nodeType = ASTTypeUtil.getNodeType(e)
+          val nodeType = safeGetNodeType(e)
           cleanType(nodeType, stripKeywords)
       case c: ICPPASTConstructorInitializer
           if c.getParent.isInstanceOf[ICPPASTConstructorChainInitializer] =>
@@ -332,8 +332,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     cleanedName.split(Defines.qualifiedNameSeparator).lastOption.getOrElse(cleanedName)
 
   protected def functionTypeToSignature(typ: IFunctionType): String =
-    val returnType     = ASTTypeUtil.getType(typ.getReturnType)
-    val parameterTypes = typ.getParameterTypes.map(ASTTypeUtil.getType)
+    val returnType     = safeGetType(typ.getReturnType)
+    val parameterTypes = typ.getParameterTypes.map(safeGetType)
     s"$returnType(${parameterTypes.mkString(",")})"
 
   protected def fullName(node: IASTNode): String =
@@ -607,6 +607,9 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
 
   protected def safeGetType(tpe: IType): String =
       Try(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
+
+  protected def safeGetNodeType(node: IASTNode): String =
+      Try(ASTTypeUtil.getNodeType(node)).getOrElse(Defines.anyTypeName)
 
   private def notHandledText(node: IASTNode): String =
       s"""Node '${node.getClass.getSimpleName}' not handled yet!

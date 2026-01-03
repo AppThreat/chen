@@ -3,9 +3,10 @@ package io.appthreat.c2cpg.utils
 import io.appthreat.c2cpg.Config
 import org.slf4j.LoggerFactory
 
-import java.nio.file.{Path, Paths}
-import scala.util.Failure
-import scala.util.Success
+import java.nio.file.{Files, Path, Paths}
+import java.util.stream.Collectors
+import scala.jdk.CollectionConverters.*
+import scala.util.{Failure, Success, Try}
 
 object IncludeAutoDiscovery:
 
@@ -171,5 +172,23 @@ object IncludeAutoDiscovery:
 
   def discoverIncludePathsCPP(config: Config): Set[Path] =
       discoverIncludePathsCPP_GCC(config) ++ discoverIncludePathsCPP_Clang(config)
+
+  def discoverProjectIncludePaths(rootPath: Path): Set[Path] =
+    if !Files.exists(rootPath) || !Files.isDirectory(rootPath) then return Set.empty
+
+    Try {
+        val roots = Set(rootPath.toAbsolutePath)
+        val subDirs = Files.walk(rootPath, 8)
+            .filter(Files.isDirectory(_))
+            .filter { p =>
+              val name = p.getFileName.toString.toLowerCase
+              name == "include" || name == "includes" || name == "src" || name == "headers" || name == "third_party"
+            }
+            .map(_.toAbsolutePath)
+            .collect(Collectors.toSet[Path])
+            .asScala
+            .toSet
+        roots ++ subDirs
+    }.getOrElse(Set.empty)
 
 end IncludeAutoDiscovery

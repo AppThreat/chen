@@ -5,9 +5,10 @@ import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.NewMethodRef
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding
-import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTQualifiedName
-import org.eclipse.cdt.internal.core.dom.parser.cpp.ICPPInternalBinding
+import org.eclipse.cdt.internal.core.dom.parser.cpp.{CPPASTQualifiedName, ICPPInternalBinding}
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
+
+import scala.util.Try
 
 trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
@@ -16,7 +17,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       Ast(newCommentNode(comment, nodeSignature(comment), fileName(comment)))
 
   protected def astForLiteral(lit: IASTLiteralExpression): Ast =
-    val tpe = cleanType(ASTTypeUtil.getType(lit.getExpressionType))
+    val tpe = cleanType(safeGetType(lit.getExpressionType))
     Ast(literalNode(lit, nodeSignature(lit), registerType(tpe)))
 
   private def namesForBinding(binding: ICInternalBinding | ICPPInternalBinding)
@@ -76,7 +77,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                         if binding != null then
                           binding match
                             case v: IVariable =>
-                                v.getType match
+                                Try(v.getType).getOrElse(null) match
                                   case f: IFunctionType       => f.getReturnType.toString
                                   case other if other != null => other.toString
                                   case _                      => Defines.anyTypeName
