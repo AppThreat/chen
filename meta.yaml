@@ -1,4 +1,4 @@
-{% set version = os.environ.get('VERSION', '2.5.15') %}
+{% set version = os.environ.get('VERSION', '2.5.16') %}
 
 package:
   name: chen
