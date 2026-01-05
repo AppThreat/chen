@@ -4,7 +4,7 @@ import io.circe.*
 import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
-import io.shiftleft.codepropertygraph.generated.nodes.Method
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, MethodRef}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -36,6 +36,10 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
     ".*(Router)::(scope|connect|get|post|put|delete|head|option).*"
   )
 
+  private val JS_ROUTES_CALL_REGEX =
+      ".*(?i)(app|router|route|server)\\.(get|post|put|delete|patch|head|options|all|use|registerRoute).*"
+  private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
+
   private val HTTP_METHODS_REGEX  = ".*(request|session)\\.(args|get|post|put|form).*"
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
@@ -55,7 +59,48 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
             tagPhpRoutes(dstGraph)
         case lang if lang == Languages.RUBYSRC =>
             tagRubyRoutes(dstGraph)
+        case lang if lang == Languages.JSSRC || lang == Languages.JAVASCRIPT =>
+            tagJsRoutes(dstGraph)
         case _ => // No specific routing for this language
+  private def tagJsRoutes(dstGraph: DiffGraphBuilder): Unit =
+    val routeCalls = atom.call.filter { c =>
+        c.methodFullName.matches(JS_ROUTES_CALL_REGEX) ||
+        c.code.matches(JS_ROUTES_CALL_REGEX)
+    }
+    routeCalls.foreach { call =>
+      call.argument
+          .isLiteral
+          .headOption
+          .newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+      call.argument
+          .lastOption
+          .flatMap {
+              case r: MethodRef => r._refOut.collectFirst { case m: Method => m }
+              case arg          => arg._refOut.collectFirst { case m: Method => m }
+          }
+          .foreach { handlerMethod =>
+            val params = handlerMethod.parameter.l.sortBy(_.order)
+            if params.nonEmpty then
+              Iterator(params.head).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+            if params.size >= 2 then
+              Iterator(params(1)).newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
+          }
+    }
+    atom.call
+        .code(VUE_ROUTE_INPUT_REGEX)
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+    val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
+        .method
+        .internal
+        .filterNot(_.name.contains("<"))
+    controllerMethods
+        .parameter
+        .filterNot(_.name == "this")
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+  end tagJsRoutes
+
   private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
     val cRoutePatterns = Array(
       "Routes::(Post|Get|Delete|Head|Options|Put).*",
