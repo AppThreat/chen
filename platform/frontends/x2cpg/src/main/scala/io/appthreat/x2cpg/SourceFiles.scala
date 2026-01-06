@@ -257,6 +257,7 @@ object SourceFiles:
     Files.walkFileTree(dir.path, visitOptions.toSet.asJava, Int.MaxValue, visitor)
     val matchingFiles = visitor.files().map(_.pathAsString)
     matchingFiles.toList.sorted
+  end determine
 
   def determineWithConfig(
     inputPath: String,

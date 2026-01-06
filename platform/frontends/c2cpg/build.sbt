@@ -3,6 +3,7 @@ name := "c2cpg"
 dependsOn(Projects.semanticcpg, Projects.dataflowengineoss % Test, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
+  "com.lihaoyi"               %% "upickle"           % Versions.upickle,
   "org.scala-lang.modules" %% "scala-parallel-collections" % Versions.scalaParallel,
   "org.eclipse.platform"    % "org.eclipse.equinox.common"       % "3.20.300",
   "org.eclipse.platform"    % "org.eclipse.core.resources"       % "3.23.100" excludeAll(

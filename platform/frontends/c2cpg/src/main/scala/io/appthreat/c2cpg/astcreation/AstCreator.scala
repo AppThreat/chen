@@ -1,6 +1,7 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.c2cpg.Config
+import io.appthreat.c2cpg.passes.AstCreationPass
 import io.appthreat.x2cpg.datastructures.Scope
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.{
@@ -16,8 +17,11 @@ import org.eclipse.cdt.core.dom.ast.{IASTNode, IASTTranslationUnit}
 import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
+import java.io.*
+import java.nio.file.{Files, Paths, StandardCopyOption}
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
+import scala.util.Using
 
 /** Translates the Eclipse CDT AST into a CPG AST.
   */
@@ -25,7 +29,8 @@ class AstCreator(
   val filename: String,
   val config: Config,
   val cdtAst: IASTTranslationUnit,
-  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]]
+  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]],
+  val fileHash: Option[String] = None
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(filename)
     with AstForTypesCreator
@@ -51,10 +56,27 @@ class AstCreator(
 
   def createAst(): DiffGraphBuilder =
     val ast = astForTranslationUnit(cdtAst)
-    Ast.storeInDiffGraph(ast, diffGraph)
+    if config.enableAstCache && fileHash.isDefined then
+      saveToCache(ast, fileHash.get)
+    if !config.onlyAstCache then
+      Ast.storeInDiffGraph(ast, diffGraph)
     diffGraph
 
-  private def astForTranslationUnit(iASTTranslationUnit: IASTTranslationUnit): Ast =
+  private def saveToCache(ast: Ast, hash: String): Unit =
+    val finalPath = Paths.get(config.cacheDir, s"$hash.json")
+    val tmpPath   = Paths.get(config.cacheDir, s"$hash.json.tmp")
+
+    try
+      val cachedModel = AstCreationPass.Serialization.toCached(ast)
+      val bytes       = upickle.default.writeBinary(cachedModel)
+      Files.write(tmpPath, bytes)
+      Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
+    catch
+      case e: Exception =>
+          logger.warn(s"Critical error saving AST cache for $filename: ${e.getMessage}")
+          Files.deleteIfExists(tmpPath)
+
+  def generateAst(iASTTranslationUnit: IASTTranslationUnit): Ast =
     val namespaceBlock = globalNamespaceBlock()
     methodAstParentStack.push(namespaceBlock)
     val translationUnitAst =
@@ -68,6 +90,9 @@ class AstCreator(
     val childrenAsts       = depsAndImportsAsts ++ Seq(translationUnitAst) ++ commentsAsts
     setArgumentIndices(childrenAsts)
     Ast(namespaceBlock).withChildren(childrenAsts)
+
+  private def astForTranslationUnit(iASTTranslationUnit: IASTTranslationUnit): Ast =
+      generateAst(iASTTranslationUnit)
 
   /** Creates an AST of all declarations found in the translation unit - wrapped in a fake method.
     */
