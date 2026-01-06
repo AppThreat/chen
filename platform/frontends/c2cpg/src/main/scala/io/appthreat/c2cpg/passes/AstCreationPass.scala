@@ -19,8 +19,9 @@ import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 
 object AstCreationPass:
-  private val MaxConcurrentParsers = Math.max(1, Runtime.getRuntime.availableProcessors() / 3)
-  private val semaphore            = new Semaphore(MaxConcurrentParsers)
+  private val theoriticalMaxProcs  = Math.max(1, Runtime.getRuntime.availableProcessors() / 3)
+  private val maxConcurrentParsers = Math.min(4, theoriticalMaxProcs)
+  private val astCreationSemaphore = new Semaphore(maxConcurrentParsers)
   private val parseExecutor        = Executors.newCachedThreadPool()
 
   case class CachedNode(className: String, properties: Map[String, ujson.Value])
@@ -192,7 +193,7 @@ class AstCreationPass(
     val file2OffsetTable = new ConcurrentHashMap[String, Array[Int]]()
     val fileHash         = if config.enableAstCache then Option(computeEntryHash(path)) else None
 
-    AstCreationPass.semaphore.acquire()
+    AstCreationPass.astCreationSemaphore.acquire()
     try
       val cachedAst: Option[Ast] = fileHash.flatMap(h => checkAndLoadCache(h, config.cacheDir))
       cachedAst match
@@ -232,7 +233,7 @@ class AstCreationPass(
           println(s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}")
 //          e.printStackTrace()
     finally
-      AstCreationPass.semaphore.release()
+      AstCreationPass.astCreationSemaphore.release()
       sharedHeaderFileFinder.clear()
     end try
   end runOnPart
