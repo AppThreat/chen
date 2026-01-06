@@ -233,6 +233,7 @@ class AstCreationPass(
 //          e.printStackTrace()
     finally
       AstCreationPass.semaphore.release()
+      sharedHeaderFileFinder.clear()
     end try
   end runOnPart
 
