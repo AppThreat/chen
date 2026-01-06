@@ -267,4 +267,9 @@ class AstCreationPass(
       case _: TimeoutException =>
           future.cancel(true)
           throw new TimeoutException(s"Operation timed out after $timeout")
+      case e: InterruptedException =>
+          future.cancel(true)
+          val cause = e.getCause
+          cause.printStackTrace()
+          throw new InterruptedException(s"Operation interrupted - ${cause.getMessage}")
 end AstCreationPass
