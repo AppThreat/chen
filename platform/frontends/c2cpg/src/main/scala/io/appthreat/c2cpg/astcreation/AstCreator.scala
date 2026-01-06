@@ -1,11 +1,11 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.c2cpg.Config
-import io.appthreat.c2cpg.passes.AstCreationPass
 import io.appthreat.x2cpg.datastructures.Scope
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.{
     Ast,
+    AstCache,
     AstCreatorBase,
     ValidationMode,
     AstNodeBuilder as X2CpgAstNodeBuilder
@@ -21,7 +21,7 @@ import java.io.*
 import java.nio.file.{Files, Paths, StandardCopyOption}
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
-import scala.util.Using
+import upickle.default.*
 
 /** Translates the Eclipse CDT AST into a CPG AST.
   */
@@ -63,12 +63,12 @@ class AstCreator(
     diffGraph
 
   private def saveToCache(ast: Ast, hash: String): Unit =
-    val finalPath = Paths.get(config.cacheDir, s"$hash.json")
-    val tmpPath   = Paths.get(config.cacheDir, s"$hash.json.tmp")
+    val finalPath = Paths.get(config.cacheDir, s"$hash.ast")
+    val tmpPath   = Paths.get(config.cacheDir, s"$hash.ast.tmp")
 
     try
-      val cachedModel = AstCreationPass.Serialization.toCached(ast)
-      val bytes       = upickle.default.writeBinary(cachedModel)
+      val bitcode = AstCache.toBitcode(ast)
+      val bytes   = upickle.default.writeBinary(bitcode)
       Files.write(tmpPath, bytes)
       Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
     catch
