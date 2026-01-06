@@ -6,7 +6,7 @@ import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.{Ast, AstEdge, SourceFiles, ValidationMode}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
-import io.shiftleft.passes.OrderedParallelCpgPass
+import io.shiftleft.passes.StreamingCpgPass
 import upickle.default.*
 
 import java.nio.file.{Files, Path, Paths}
@@ -156,7 +156,7 @@ class AstCreationPass(
   config: Config,
   timeoutDuration: FiniteDuration = 2.minutes,
   parseTimeoutDuration: FiniteDuration = 2.minutes
-) extends OrderedParallelCpgPass[String](cpg):
+) extends StreamingCpgPass[String](cpg):
 
   import AstCreationPass.*
 
