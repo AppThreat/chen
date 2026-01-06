@@ -4,6 +4,8 @@ import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.passes.AstCreationPass
 import io.appthreat.c2cpg.testfixtures.AbstractPassTest
 import io.appthreat.x2cpg.X2Cpg.newEmptyCpg
+import io.appthreat.x2cpg.AstCache
+import io.appthreat.x2cpg.AstCache.{AstBitcode, AstNodeBitcode}
 import io.shiftleft.codepropertygraph.Cpg
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import better.files.File
@@ -67,7 +69,7 @@ class AstCacheTests extends AbstractPassTest {
 
                 val cacheFiles = Files.list(cacheDir).iterator().asScala.toList
                 cacheFiles.size shouldBe 1
-                cacheFiles.head.toString should endWith(".json")
+                cacheFiles.head.toString should endWith(".ast")
             }
         }
 
@@ -124,13 +126,11 @@ class AstCacheTests extends AbstractPassTest {
                 val filename = filePath.toAbsolutePath.toString
 
                 val hash = computeHash(filePath)
-                val cacheFile = cacheDir.resolve(s"$hash.json")
+                val cacheFile = cacheDir.resolve(s"$hash.ast")
 
-                import AstCreationPass.{CachedAst, CachedNode}
+                val maliciousNode = AstNodeBitcode("java.io.File", Map("path" -> ujson.Str("/tmp/hacked")))
 
-                val maliciousNode = CachedNode("java.io.File", Map("path" -> ujson.Str("/tmp/hacked")))
-
-                val maliciousAst = CachedAst(
+                val maliciousAst = AstBitcode(
                     rootIdx = Some(0),
                     nodes = List(maliciousNode),
                     edges = List.empty
@@ -145,7 +145,7 @@ class AstCacheTests extends AbstractPassTest {
                 noException should be thrownBy pass.runOnPart(diffGraph, filename)
 
                 val newBytes = Files.readAllBytes(cacheFile)
-                val newAst = readBinary[CachedAst](newBytes)
+                val newAst = readBinary[AstBitcode](newBytes)
 
                 val rootNode = newAst.nodes(newAst.rootIdx.get)
                 rootNode.className should startWith ("io.shiftleft.codepropertygraph.generated.nodes")
@@ -158,7 +158,7 @@ class AstCacheTests extends AbstractPassTest {
                 val filePath = rootDir.resolve("file.c")
                 val filename = filePath.toAbsolutePath.toString
                 val hash = computeHash(filePath)
-                val cacheFile = cacheDir.resolve(s"$hash.json")
+                val cacheFile = cacheDir.resolve(s"$hash.ast")
 
                 Files.writeString(cacheFile, "THIS IS NOT VALID MSG PACK DATA")
 
@@ -166,7 +166,7 @@ class AstCacheTests extends AbstractPassTest {
                 noException should be thrownBy pass.runOnPart(new DiffGraphBuilder, filename)
 
                 val newBytes = Files.readAllBytes(cacheFile)
-                Try(readBinary[AstCreationPass.CachedAst](newBytes)).isSuccess shouldBe true
+                Try(readBinary[AstBitcode](newBytes)).isSuccess shouldBe true
             }
         }
     }

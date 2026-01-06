@@ -500,8 +500,9 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       val name            = include.getName.toString
       val _dependencyNode = newDependencyNode(name, name, IncludeKeyword)
       val importNode      = newImportNode(nodeSignature(include), name, name, include)
-      diffGraph.addNode(_dependencyNode)
-      diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+      if !config.onlyAstCache then
+        diffGraph.addNode(_dependencyNode)
+        diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
       Ast(importNode)
     }
 
