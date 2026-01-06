@@ -182,7 +182,7 @@ object IncludeAutoDiscovery:
             .filter(Files.isDirectory(_))
             .filter { p =>
               val name = p.getFileName.toString.toLowerCase
-              name == "include" || name == "includes" || name == "src" || name == "headers" || name == "third_party"
+              name.startsWith("include") || name == "headers" || name == "library"
             }
             .map(_.toAbsolutePath)
             .collect(Collectors.toSet[Path])

@@ -6,7 +6,7 @@ import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
 import io.appthreat.x2cpg.{Ast, AstEdge, SourceFiles, ValidationMode}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
-import io.shiftleft.passes.StreamingCpgPass
+import io.shiftleft.passes.OrderedParallelCpgPass
 import upickle.default.*
 
 import java.nio.file.{Files, Path, Paths}
@@ -156,7 +156,7 @@ class AstCreationPass(
   config: Config,
   timeoutDuration: FiniteDuration = 2.minutes,
   parseTimeoutDuration: FiniteDuration = 2.minutes
-) extends StreamingCpgPass[String](cpg):
+) extends OrderedParallelCpgPass[String](cpg):
 
   import AstCreationPass.*
 
@@ -227,10 +227,10 @@ class AstCreationPass(
           println(
             s"Exception processing file $path: ${cause.getClass.getSimpleName} - ${cause.getMessage}"
           )
-          cause.printStackTrace()
+//          cause.printStackTrace()
       case e: Throwable =>
           println(s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}")
-          e.printStackTrace()
+//          e.printStackTrace()
     finally
       AstCreationPass.semaphore.release()
     end try

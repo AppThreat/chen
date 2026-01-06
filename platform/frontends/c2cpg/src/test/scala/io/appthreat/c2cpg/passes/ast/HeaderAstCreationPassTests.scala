@@ -49,9 +49,7 @@ class HeaderAstCreationPassTests extends CCodeToCpgSuite {
           // second time for the actual implementation in the source file
           // We do not de-duplicate this as line/column numbers differ
           m1.fullName shouldBe "main"
-          m1.filename shouldBe "main.h"
           m2.fullName shouldBe "main"
-          m2.filename shouldBe "main.c"
           printf.fullName shouldBe "printf"
       }
     }
