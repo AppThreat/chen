@@ -276,8 +276,8 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * `TrueEdge`.
     */
   protected def cfgForAndExpression(call: Call): Cfg =
-    val leftCfg  = cfgFor(call.argument(1))
-    val rightCfg = cfgFor(call.argument(2))
+    val leftCfg  = call.argumentOption(1).map(cfgFor).getOrElse(Cfg.empty)
+    val rightCfg = call.argumentOption(2).map(cfgFor).getOrElse(Cfg.empty)
     val diffGraphs = edgesFromFringeTo(
       leftCfg,
       rightCfg.entryNode,
@@ -295,8 +295,8 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * CFG is `FalseEdge`.
     */
   protected def cfgForOrExpression(call: Call): Cfg =
-    val leftCfg  = cfgFor(call.argument(1))
-    val rightCfg = cfgFor(call.argument(2))
+    val leftCfg  = call.argumentOption(1).map(cfgFor).getOrElse(Cfg.empty)
+    val rightCfg = call.argumentOption(2).map(cfgFor).getOrElse(Cfg.empty)
     val diffGraphs = edgesFromFringeTo(
       leftCfg,
       rightCfg.entryNode,
@@ -316,7 +316,7 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * node.
     */
   protected def cfgForConditionalExpression(call: Call): Cfg =
-    val conditionCfg = cfgFor(call.argument(1))
+    val conditionCfg = call.argumentOption(1).map(cfgFor).getOrElse(Cfg.empty)
     val trueCfg      = call.argumentOption(2).map(cfgFor).getOrElse(Cfg.empty)
     val falseCfg     = call.argumentOption(3).map(cfgFor).getOrElse(Cfg.empty)
     val diffGraphs = edgesFromFringeTo(conditionCfg, trueCfg.entryNode, TrueEdge) ++
