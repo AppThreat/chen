@@ -67,6 +67,16 @@ class EagerSourceTypeSolver(
 
   override def tryToSolveType(name: String): SymbolReference[ResolvedReferenceTypeDeclaration] =
       foundTypes.getOrElse(name, SymbolReference.unsolved())
+
+  def tryToSolveTypeInModule(
+    qualifiedModuleName: String,
+    simpleTypeName: String
+  ): SymbolReference[ResolvedReferenceTypeDeclaration] =
+      foundTypes.getOrElse(
+        qualifiedModuleName,
+        foundTypes.getOrElse(simpleTypeName, SymbolReference.unsolved())
+      )
+
 end EagerSourceTypeSolver
 
 object EagerSourceTypeSolver:

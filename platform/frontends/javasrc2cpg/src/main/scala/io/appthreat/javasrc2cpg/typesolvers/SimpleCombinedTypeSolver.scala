@@ -48,6 +48,12 @@ class SimpleCombinedTypeSolver extends TypeSolver:
                     result
                 }
 
+  def tryToSolveTypeInModule(
+    qualifiedModuleName: String,
+    simpleTypeName: String
+  ): SymbolReference[ResolvedReferenceTypeDeclaration] =
+      tryToSolveType(qualifiedModuleName)
+
   private def findSolvedTypeWithSolvers(
     typeSolvers: mutable.ArrayBuffer[TypeSolver],
     className: String
