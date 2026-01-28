@@ -1,20 +1,13 @@
 package io.shiftleft.semanticcpg.language
 
 import io.shiftleft.codepropertygraph.generated.nodes.{AbstractNode, Method}
-import io.shiftleft.semanticcpg.utils.Torch
 import org.json4s.native.Serialization.{write, writePretty}
 import org.json4s.{CustomSerializer, Extraction, Formats}
 import overflowdb.traversal.help.Doc
-import replpp.Colors
-import replpp.Operators.*
 
 import java.util.List as JList
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
-import me.shadaj.scalapy.py
-import me.shadaj.scalapy.py.SeqConverters
-import py.PyQuote
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 import java.nio.file.Files
 
@@ -63,10 +56,8 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
       traversal.toList.map(show.apply)
 
   @Doc(info = "execute this traversal and show the pretty-printed results in `less`")
-  // uses scala-repl-pp's `#|^` operator which let's `less` inherit stdin and stdout
   def browse(): Unit =
-    given Colors = Colors.Default
-    traversal #|^ "less"
+      traversal.toList
 
   /** Execute traversal and convert the result to json. `toJson` (export) contains the exact same
     * information as `toList`, only in json format. Typically, the user will call this method upon
@@ -86,17 +77,6 @@ class Steps[A](val traversal: Iterator[A]) extends AnyVal:
     val results = traversal.toList
     if pretty then writePretty(results)
     else write(results)
-
-  private def pyJson = py.module("json")
-  @Doc(info = "execute traversal and convert the result to python object")
-  def toPy: me.shadaj.scalapy.py.Dynamic = pyJson.loads(toJson(false))
-
-  def pyg: Seq[py.Dynamic] =
-    val tmpDir = Files.createTempDirectory("pyg-gml-export").toFile.getAbsolutePath
-    traversal match
-      case methods: Iterator[Method @unchecked] =>
-          val exportResult = methods.gml(tmpDir)
-          exportResult.files.map(Torch.to_pyg)
 end Steps
 
 object Steps:

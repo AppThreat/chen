@@ -10,7 +10,6 @@ object Versions {
     val circe         = "0.14.15"
     val requests      = "0.9.3"
     val upickle       = "4.4.3"
-    val scalaReplPP   = "0.1.85"
     val commonsCompress = "1.27.1"
     val typeSafeConfig  = "1.4.6"
     val versionSort     = "1.0.17"

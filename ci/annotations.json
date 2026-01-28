@@ -1,8 +1,0 @@
-{
-    "$config": {
-        "org.opencontainers.image.title": "chen-platform",
-        "org.opencontainers.image.vendor": "appthreat",
-        "org.opencontainers.image.licenses": "Apache-2.0",
-        "org.opencontainers.image.description": "Code Hierarchy Exploration Net"
-    }
-}
