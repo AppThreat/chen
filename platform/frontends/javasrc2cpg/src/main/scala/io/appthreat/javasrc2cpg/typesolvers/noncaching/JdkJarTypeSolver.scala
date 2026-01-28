@@ -48,6 +48,12 @@ class JdkJarTypeSolver extends TypeSolver:
     else
       SymbolReference.unsolved()
 
+  def tryToSolveTypeInModule(
+    qualifiedModuleName: String,
+    simpleTypeName: String
+  ): SymbolReference[ResolvedReferenceTypeDeclaration] =
+      tryToSolveType(qualifiedModuleName)
+
   private def lookupType(javaParserName: String)
     : SymbolReference[ResolvedReferenceTypeDeclaration] =
     val name = convertJavaParserNameToStandard(javaParserName)
