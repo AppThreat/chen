@@ -32,9 +32,13 @@ object AstCache:
         case m: scala.collection.Map[?, ?] => m
         case null                          => Map.empty
 
-      val safeProps = propsMap.map {
-          case (k: String, v) => k          -> toUjson(v)
-          case (k, v)         => k.toString -> toUjson(v)
+      val safeProps = propsMap.map { entry =>
+        val k = entry._1
+        val v = entry._2
+        val key = k match
+          case s: String => s
+          case _         => k.toString
+        key -> toUjson(v)
       }.toMap
 
       AstNodeBitcode(n.getClass.getName, safeProps)

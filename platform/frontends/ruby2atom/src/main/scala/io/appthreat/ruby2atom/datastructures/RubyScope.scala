@@ -413,5 +413,6 @@ class RubyScope(summary: RubyProgramSummary, projectRoot: Option[String])
               case ScopeElement(x: NamespaceLikeScope, _) => x.fullName
               case ScopeElement(x: TypeLikeScope, _)      => x.fullName
               case ScopeElement(x: MethodLikeScope, _)    => x.fullName
+              case _                                      => ""
           }
 end RubyScope
