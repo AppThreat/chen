@@ -1,8 +1,5 @@
 package io.shiftleft.semanticcpg.utils
 
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
-import me.shadaj.scalapy.py
-
 import java.security.MessageDigest
 
 object Fingerprinting:

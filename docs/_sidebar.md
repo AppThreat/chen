@@ -1,4 +1,4 @@
 - [Home](/)
 - [CLI Usage](CLI.md)
-- [Server Usage](SERVER.md)
+- [Traversal](TRAVERSAL.md)
 - [Enterprise Support](SUPPORT.md)
