@@ -2,9 +2,7 @@ name := "semanticcpg"
 
 libraryDependencies ++= Seq(
   "io.appthreat"  %% "cpg2" % Versions.cpg,
-  "com.michaelpollmeier" %% "scala-repl-pp" % Versions.scalaReplPP,
   "org.json4s"    %% "json4s-native"     % Versions.json4s,
-  "dev.scalapy"     %% "scalapy-core"      % "0.5.3",
   "org.scalatest" %% "scalatest"         % Versions.scalatest % Test
 )
 

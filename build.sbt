@@ -1,14 +1,12 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
-ThisBuild / version      := "2.5.18"
-ThisBuild / scalaVersion := "3.6.2"
+ThisBuild / version      := "3.0.0"
+ThisBuild / scalaVersion := "3.8.1"
 
 val cpgVersion = "2.1.6"
 
 lazy val platform          = Projects.platform
-lazy val console           = Projects.console
 lazy val dataflowengineoss = Projects.dataflowengineoss
-lazy val macros            = Projects.macros
 lazy val semanticcpg       = Projects.semanticcpg
 lazy val c2cpg             = Projects.c2cpg
 lazy val x2cpg             = Projects.x2cpg
@@ -21,9 +19,7 @@ lazy val ruby2atom         = Projects.ruby2atom
 
 lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   platform,
-  console,
   dataflowengineoss,
-  macros,
   semanticcpg,
   c2cpg,
   x2cpg,

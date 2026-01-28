@@ -56,4 +56,5 @@ object TimeUtils:
         case MINUTES      => "min"
         case HOURS        => "h"
         case DAYS         => "d"
+        case _            => ""
 end TimeUtils

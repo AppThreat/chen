@@ -28,10 +28,6 @@ jobs:
           coverage: "none"
           php-version: "8.4"
           tools: composer:v2
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -53,11 +49,6 @@ jobs:
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom-parsetools@1.0.16
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install poetry
-          python3 -m poetry config virtualenvs.create false
-          python3 -m poetry install --no-cache
-          poetry run flake8 chenpy --count --select=E9,F63,F7,F82 --show-source --statistics
       - uses: actions/cache@v4
         with:
           path: |
@@ -70,8 +61,7 @@ jobs:
           sbt clean +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python3.12"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         if: runner.os != 'Windows'
       - name: Compile and run tests
         run: |
@@ -79,6 +69,5 @@ jobs:
           sbt clean +test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Djna.library.path=${{ env.Python3_ROOT_DIR }}"
-          SCALAPY_PYTHON_LIBRARY: "python312"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         if: runner.os == 'Windows'
