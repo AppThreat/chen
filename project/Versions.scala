@@ -8,15 +8,15 @@ object Versions {
     val json4s        = "4.0.7"
     val gradleTooling = "8.10.1"
     val circe         = "0.14.15"
-    val requests      = "0.9.0"
-    val upickle       = "4.4.2"
+    val requests      = "0.9.3"
+    val upickle       = "4.4.3"
     val scalaReplPP   = "0.1.85"
     val commonsCompress = "1.27.1"
-    val typeSafeConfig  = "1.4.5"
+    val typeSafeConfig  = "1.4.6"
     val versionSort     = "1.0.17"
     val scalaParallel   = "1.2.0"
     val ZeroturnaroundVersion = "1.17"
-    val osLib                 = "0.11.7"
+    val osLib                 = "0.11.8"
 
     private def parseVersion(key: String): String = {
         val versionRegexp = s""".*val $key[ ]+=[ ]?"(.*?)"""".r
