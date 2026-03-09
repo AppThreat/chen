@@ -61,7 +61,7 @@ docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -p 8080:8080 -it g
 
 ```shell
 # Install atom-parsetools and cdxgen
-sudo npm install -g @appthreat/atom-parsetools@1.0.16 @cyclonedx/cdxgen --omit=optional
+sudo npm install -g @appthreat/atom-parsetools@1.1.3 @cyclonedx/cdxgen --omit=optional
 
 # Install chen from pypi
 pip install appthreat-chen
