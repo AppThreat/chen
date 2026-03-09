@@ -24,11 +24,15 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
-  private val PY_REQUEST_PATTERNS = Array(".*views.py:<module>.*")
+  private val PY_REQUEST_PATTERNS = Array(
+    ".*(views|engine|api|base|http).py:<module>.*",
+    ".*(flask_request|request\\.(form|remote_addr|host|method|full_path|user_agent|headers|args|cookies|data|json)).*",
+    ".*get_value.*"
+  )
+
   private val PY_RESPONSE_PATTERNS = Array(
-    ".*views.py:.*HttpResponse.*",
-    ".*views.py:.*render.*",
-    ".*views.py:.*get_object_.*"
+    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*",
+    ".*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*"
   )
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
@@ -73,7 +77,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             if Seq(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE", "ANDROID", "APK", "DEX")
                 .contains(lang) =>
             tagJavaPatterns(dstGraph)
-        case _ => // No specific patterns for this language
+        case _ =>
+
   private def tagRubyPatterns(dstGraph: DiffGraphBuilder): Unit =
     val httpLibraries =
         Seq("URI", "Net::HTTP", "HTTParty", "RestClient", "Faraday", "HTTP", "Excon")
@@ -219,7 +224,6 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   end tagJavaScriptPatterns
 
   private def tagPythonPatterns(dstGraph: DiffGraphBuilder): Unit =
-    // Request/Response patterns
     PY_REQUEST_PATTERNS.foreach(p =>
         atom.method.fullName(p).parameter.newTagNode("framework-input").store()(using dstGraph)
     )
@@ -230,8 +234,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     }
 
     atom.call
-        .where(_.file.name(".*views.py.*"))
-        .code(".*(HttpResponse|render|get_object_).*")
+        .where(_.file.name(".*(views|engine|core|api|base|http).py.*"))
+        .code(
+          ".*(HttpResponse|render|get_object_|Response|abort|jsonify|make_response|render_template).*"
+        )
         .newTagNode("framework-output")
         .store()(using dstGraph)
 
@@ -258,14 +264,60 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         .newTagNode("cli-source")
         .store()(using dstGraph)
 
-    // Crypto patterns
-    val cryptoLibs = "(cryptography|Crypto|ecdsa|nacl).*"
+    atom.identifier.name("flask_request").newTagNode("framework-input").store()(using dstGraph)
+    atom.call.name("get_value").newTagNode("framework-input").store()(using dstGraph)
+
+    // HTTP / Network / Sockets
+    atom.call.methodFullName(".*aiohttp.*").newTagNode("http-client").store()(using dstGraph)
+    atom.identifier.typeFullName(".*aiohttp.*").newTagNode("http-client").store()(using dstGraph)
+    atom.call.methodFullName(
+      ".*socket\\.(socket|connect|send|recv|sendto|recvfrom|wrap_socket|getprotobyname).*"
+    ).newTagNode("network").store()(using dstGraph)
+    atom.call.methodFullName(
+      ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*"
+    ).newTagNode("network").store()(using dstGraph)
+    atom.call.methodFullName(
+      ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*"
+    ).newTagNode("network").store()(using dstGraph)
+
+    // File IO
+    atom.call.name("open").newTagNode("file-io").store()(using dstGraph)
+    atom.call.methodFullName(".*(shutil\\.copy|Path\\.open).*").newTagNode("file-io").store()(using
+    dstGraph)
+
+    // Serialization & Regex
+    atom.call.methodFullName(".*(json\\.(loads|dumps)|yaml\\.dump|csv\\.DictWriter).*").newTagNode(
+      "serialization"
+    ).store()(using dstGraph)
+    atom.call.methodFullName(".*re\\.(compile|findall|search|match).*").newTagNode("regex").store()(
+      using dstGraph
+    )
+
+    // Code Execution & Reflection
+    atom.call.name("(eval|exec)").newTagNode("code-execution").store()(using dstGraph)
+    atom.call.methodFullName(".*importlib\\.import_module.*").newTagNode("reflection").store()(using
+    dstGraph)
+    atom.call.name("getattr|delattr|setattr").newTagNode("reflection").store()(using dstGraph)
+
+    // SQL / Database
+    atom.call.methodFullName(
+      ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|query|add|commit|create_engine|sessionmaker).*"
+    ).newTagNode("sql").store()(using dstGraph)
+    atom.identifier.typeFullName(".*(sqlalchemy|apsw|sqlite3).*").newTagNode("sql").store()(using
+    dstGraph)
+
+    // Concurrency / Parallelism
+    atom.call.methodFullName(".*(multiprocess|multiprocessing|threading)\\.(Process|Thread).*")
+        .newTagNode("concurrent").store()(using dstGraph)
+
+    // Crypto
+    val cryptoLibs = "(cryptography|Crypto|ecdsa|nacl|OpenSSL).*"
 
     atom.identifier.typeFullName(cryptoLibs).newTagNode("crypto").store()(using dstGraph)
     atom.call.methodFullName(cryptoLibs).newTagNode("crypto").store()(using dstGraph)
 
     atom.call.methodFullName(
-      s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem).*"
+      s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem|load_certificate).*"
     ).newTagNode("crypto-generate").store()(using dstGraph)
 
     atom.call.name("[A-Z0-9]+")

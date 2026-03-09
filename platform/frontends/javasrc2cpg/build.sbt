@@ -9,7 +9,7 @@ libraryDependencies ++= Seq(
   "org.projectlombok"       % "lombok"                        % "1.18.42",
   "org.scala-lang.modules" %% "scala-parallel-collections"    % Versions.scalaParallel,
   "org.scala-lang.modules" %% "scala-parser-combinators"      % "2.4.0",
-  "net.lingala.zip4j"       % "zip4j"                         % "2.11.5"
+  "net.lingala.zip4j"       % "zip4j"                         % "2.11.6"
 )
 
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)

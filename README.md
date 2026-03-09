@@ -4,6 +4,8 @@
 
 Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy. This repo contains the source code for chen library and an advanced REPL console called chennai (chen not AI).
 
+[![SBOM](https://img.shields.io/badge/SBOM-with_%E2%9D%A4%EF%B8%8F_by_cdxgen-FF753D)](https://github.com/cdxgen/cdxgen)
+
 ## Requirements
 
 - Java >= 21
@@ -59,7 +61,7 @@ docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -p 8080:8080 -it g
 
 ```shell
 # Install atom-parsetools and cdxgen
-sudo npm install -g @appthreat/atom-parsetools@1.0.16 @cyclonedx/cdxgen --omit=optional
+sudo npm install -g @appthreat/atom-parsetools@1.1.3 @cyclonedx/cdxgen --omit=optional
 
 # Install chen from pypi
 pip install appthreat-chen
