@@ -276,11 +276,9 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     atom.call.methodFullName(
       ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*"
     ).newTagNode("network").store()(using dstGraph)
-    atom.call.methodFullName(".*ftplib\\.FTP.*").newTagNode("network").store()(using dstGraph)
-    atom.call.methodFullName(".*poplib\\.POP3.*").newTagNode("network").store()(using dstGraph)
-    atom.call.methodFullName(".*impacket\\.smbconnection.*").newTagNode("network").store()(using
-    dstGraph)
-    atom.call.methodFullName(".*telnetlib\\.Telnet.*").newTagNode("network").store()(using dstGraph)
+    atom.call.methodFullName(
+      ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*"
+    ).newTagNode("network").store()(using dstGraph)
 
     // File IO
     atom.call.name("open").newTagNode("file-io").store()(using dstGraph)
@@ -296,11 +294,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     )
 
     // Code Execution & Reflection
-    atom.call.name("eval").newTagNode("code-execution").store()(using dstGraph)
-    atom.call.name("exec").newTagNode("code-execution").store()(using dstGraph)
+    atom.call.name("(eval|exec)").newTagNode("code-execution").store()(using dstGraph)
     atom.call.methodFullName(".*importlib\\.import_module.*").newTagNode("reflection").store()(using
     dstGraph)
-    atom.call.name("getattr").newTagNode("reflection").store()(using dstGraph)
+    atom.call.name("getattr|delattr|setattr").newTagNode("reflection").store()(using dstGraph)
 
     // SQL / Database
     atom.call.methodFullName(
