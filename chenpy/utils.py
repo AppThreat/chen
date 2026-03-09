@@ -12,7 +12,6 @@ from hashlib import blake2b
 
 import httpx
 import orjson
-import pkg_resources
 import psutil
 import rich.progress
 from packageurl import PackageURL
@@ -586,13 +585,6 @@ def colorize_dot_data(
                 fdot_list.append(d)
         return fdot_list[0] if fdot_list and len(fdot_list) == 1 else fdot_list
     return dot_data
-
-
-def get_version():
-    """
-    Returns the version of depscan
-    """
-    return pkg_resources.get_distribution("appthreat-chen").version
 
 
 def unzip_unsafe(zf, to_dir):

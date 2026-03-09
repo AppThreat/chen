@@ -13,7 +13,7 @@ from rich.progress import Progress
 import chenpy.config as config
 from chenpy.client import ChenDistributionRegistry
 from chenpy.logger import LOG, console
-from chenpy.utils import USE_SHELL, check_command, get_version, max_memory, unzip_unsafe
+from chenpy.utils import USE_SHELL, check_command, max_memory, unzip_unsafe
 
 try:
     os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -55,7 +55,7 @@ def build_args():
         "--version",
         help="Display the version",
         action="version",
-        version="%(prog)s " + get_version(),
+        version="%(prog)s",
     )
     return parser.parse_args()
 
