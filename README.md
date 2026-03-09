@@ -4,6 +4,8 @@
 
 Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy. This repo contains the source code for chen library and an advanced REPL console called chennai (chen not AI).
 
+[![SBOM](https://img.shields.io/badge/SBOM-with_%E2%9D%A4%EF%B8%8F_by_cdxgen-FF753D)](https://github.com/cdxgen/cdxgen)
+
 ## Requirements
 
 - Java >= 21
