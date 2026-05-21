@@ -240,6 +240,8 @@ class PythonAstVisitor(
     )
     functionDefToMethod.put(functionDef, methodNode)
 
+    addDecoratorAnnotations(methodNode, functionDef.decorator_list)
+
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)
 
@@ -278,6 +280,53 @@ class PythonAstVisitor(
           )
       )
 
+  /** For each decorator on a function definition, emit a CPG `Annotation` node
+    * and attach it as an AST child of the given method node. This mirrors how
+    * javasrc2cpg surfaces Java method annotations (`@RequestMapping`,
+    * `@GetMapping`, etc.) so downstream consumers can query `Method.annotation`
+    * uniformly across languages.
+    *
+    * The annotation's `code` field carries the full decorator source text
+    * (e.g. `@app.route("/users", methods=["GET"])`), which is what slice
+    * consumers use to recover URL paths and HTTP verbs for OpenAPI generation.
+    *
+    * Note: this is additive — `wrapMethodRefWithDecorators` still produces the
+    * runtime-semantics call lowering. The Annotation nodes added here are pure
+    * static metadata that consumers that don't care about them simply ignore.
+    */
+  private def addDecoratorAnnotations(
+    methodNode: nodes.NewMethod,
+    decoratorList: Iterable[ast.iexpr]
+  ): Unit =
+      decoratorList.foreach { decorator =>
+          val decoratorCode = "@" + nodeToCode.getCode(decorator)
+          val name          = extractDecoratorName(decorator)
+          val pos           = lineAndColOf(decorator)
+          val annotationNode = nodes
+              .NewAnnotation()
+              .code(decoratorCode)
+              .name(name)
+              .fullName(name)
+              .lineNumber(pos.line)
+              .columnNumber(pos.column)
+          diffGraph.addNode(annotationNode)
+          diffGraph.addEdge(methodNode, annotationNode, EdgeTypes.AST)
+      }
+
+  /** Best-effort extraction of a stable short name for a decorator expression,
+    * matching what javasrc2cpg puts in `Annotation.name`.
+    *   - `@auth`                -> "auth"
+    *   - `@app.route(...)`      -> "app.route"
+    *   - `@module.cls.method()` -> "module.cls.method"
+    *   - other dynamic forms   -> "" (the full source remains in `code`)
+    */
+  private def extractDecoratorName(expr: ast.iexpr): String =
+      expr match
+          case n: ast.Name      => n.id
+          case a: ast.Attribute => s"${extractDecoratorName(a.value)}.${a.attr}"
+          case c: ast.Call      => extractDecoratorName(c.func)
+          case _                => ""
+
   def convert(functionDef: ast.AsyncFunctionDef): NewNode =
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
@@ -296,6 +345,8 @@ class PythonAstVisitor(
       lineAndColOf(functionDef)
     )
     functionDefToMethod.put(functionDef, methodNode)
+
+    addDecoratorAnnotations(methodNode, functionDef.decorator_list)
 
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)

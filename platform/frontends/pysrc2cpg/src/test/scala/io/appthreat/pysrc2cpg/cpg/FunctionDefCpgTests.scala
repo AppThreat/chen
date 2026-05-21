@@ -273,4 +273,71 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
         }
     }
 
+    "decorator annotations are surfaced on methods" - {
+        "simple bare decorator -> annotation node attached to method" in {
+            val cpg = Py2CpgTestContext.buildCpg("""@auth_required
+                                                   |def handler():
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            val ann = cpg.method.name("handler").annotation.head
+            ann.code shouldBe "@auth_required"
+            ann.name shouldBe "auth_required"
+        }
+
+        "Flask-style decorator with URL literal preserves the path in `code`" in {
+            val cpg = Py2CpgTestContext.buildCpg("""@app.route("/users/v1", methods=["GET"])
+                                                   |def get_users():
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            val ann = cpg.method.name("get_users").annotation.head
+            ann.code should include("/users/v1")
+            ann.code should include("GET")
+            ann.name shouldBe "app.route"
+        }
+
+        "FastAPI-style decorator with URL literal preserves the path" in {
+            val cpg = Py2CpgTestContext.buildCpg("""@app.get("/items/{id}")
+                                                   |def get_item(id):
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            val ann = cpg.method.name("get_item").annotation.head
+            ann.code should include("/items/{id}")
+            ann.name shouldBe "app.get"
+        }
+
+        "stacked decorators produce one annotation per decorator" in {
+            val cpg = Py2CpgTestContext.buildCpg("""@auth_required
+                                                   |@app.route("/admin")
+                                                   |def admin_panel():
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            val codes = cpg.method.name("admin_panel").annotation.code.l.toSet
+            codes should contain("@auth_required")
+            codes.exists(_.contains("/admin")) shouldBe true
+        }
+
+        "async function decorators are surfaced the same way" in {
+            val cpg = Py2CpgTestContext.buildCpg("""@router.post("/login")
+                                                   |async def login():
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            val ann = cpg.method.name("login").annotation.head
+            ann.code should include("/login")
+            ann.name shouldBe "router.post"
+        }
+
+        "function without decorators has no annotations (regression check)" in {
+            val cpg = Py2CpgTestContext.buildCpg("""def plain():
+                                                   |    pass
+                                                   |""".stripMargin)
+
+            cpg.method.name("plain").annotation.l shouldBe empty
+        }
+    }
+
 }
