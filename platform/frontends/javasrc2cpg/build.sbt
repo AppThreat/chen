@@ -6,7 +6,7 @@ libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"             % Versions.cpg,
   "com.github.javaparser"   % "javaparser-symbol-solver-core" % "3.27.1",
   "org.scalatest"          %% "scalatest"                     % Versions.scalatest % Test,
-  "org.projectlombok"       % "lombok"                        % "1.18.42",
+  "org.projectlombok"       % "lombok"                        % "1.18.46",
   "org.scala-lang.modules" %% "scala-parallel-collections"    % Versions.scalaParallel,
   "org.scala-lang.modules" %% "scala-parser-combinators"      % "2.4.0",
   "net.lingala.zip4j"       % "zip4j"                         % "2.11.6"
