@@ -140,8 +140,6 @@ jobs:
     if: github.repository_owner == 'appthreat'
     runs-on: ubuntu-24.04
     needs: [deploy]
-    outputs:
-      image-uri: ghcr.io/appthreat/chen@${{ steps.build.outputs.digest }}
     permissions:
       contents: write
       packages: write
@@ -158,7 +156,7 @@ jobs:
       - uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf  # v6.0.0
         id: metadata
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/appthreat/chen
       - uses: cloudposse/github-action-matrix-outputs-read@33cac12fa9282a7230a418d859b93fdbc4f27b5a  # 1.0.0
         id: read
         with:
