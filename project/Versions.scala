@@ -3,7 +3,7 @@ object Versions {
     val cpg: String = parseVersion("cpgVersion")
     val antlr         = "4.13.2"
     val cfr                    = "0.152"
-    val scalatest     = "3.2.19"
+    val scalatest     = "3.2.20"
     val cats          = "3.6.3"
     val json4s        = "4.0.7"
     val gradleTooling = "8.10.1"
@@ -12,7 +12,7 @@ object Versions {
     val upickle       = "4.4.3"
     val scalaReplPP   = "0.1.85"
     val commonsCompress = "1.27.1"
-    val typeSafeConfig  = "1.4.6"
+    val typeSafeConfig  = "1.4.8"
     val versionSort     = "1.0.17"
     val scalaParallel   = "1.2.0"
     val ZeroturnaroundVersion = "1.17"
