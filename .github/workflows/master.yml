@@ -2,7 +2,7 @@ name: master
 on:
   workflow_dispatch:    # allow to manually trigger this workflow
   push:
-    branches: [main]
+    branches: [main, "release/*"]
     tags: ["*"]
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
