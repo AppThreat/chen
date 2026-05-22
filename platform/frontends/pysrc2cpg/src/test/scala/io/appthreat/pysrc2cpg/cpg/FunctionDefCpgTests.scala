@@ -1,142 +1,143 @@
 package io.appthreat.pysrc2cpg.cpg
 
 import io.appthreat.pysrc2cpg.{Constants, Py2CpgTestContext}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
-    "normal argument function" - {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b):
+class FunctionDefCpgTests extends AnyFreeSpec with Matchers:
+  "normal argument function" - {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b):
                                                     |  pass
                                                     |""".stripMargin)
 
-        "test method node properties" in {
-            val methodNode = cpg.method.fullName("test.py:<module>.func").head
-            methodNode.name shouldBe "func"
-            methodNode.fullName shouldBe "test.py:<module>.func"
-            methodNode.filename shouldBe "test.py"
-            methodNode.isExternal shouldBe false
-            methodNode.lineNumber shouldBe Some(1)
-            methodNode.columnNumber shouldBe Some(1)
-            methodNode.lineNumberEnd shouldBe Some(2)
-            methodNode.columnNumberEnd shouldBe Some(6)
-        }
+      "test method node properties" in {
+          val methodNode = cpg.method.fullName("test.py:<module>.func").head
+          methodNode.name shouldBe "func"
+          methodNode.fullName shouldBe "test.py:<module>.func"
+          methodNode.filename shouldBe "test.py"
+          methodNode.isExternal shouldBe false
+          methodNode.lineNumber shouldBe Some(1)
+          methodNode.columnNumber shouldBe Some(1)
+          methodNode.lineNumberEnd shouldBe Some(2)
+          methodNode.columnNumberEnd shouldBe Some(6)
+      }
 
-        "test method modifier" in {
-            cpg.method.fullName("test.py:<module>.func").isVirtual.nonEmpty shouldBe true
-        }
+      "test method modifier" in {
+          cpg.method.fullName("test.py:<module>.func").isVirtual.nonEmpty shouldBe true
+      }
 
-        "test method parameter nodes" in {
-            val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
-            parameter1.name shouldBe "a"
-            parameter1.index shouldBe 1
-            parameter1.typeFullName shouldBe Constants.ANY
+      "test method parameter nodes" in {
+          val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+          parameter1.name shouldBe "a"
+          parameter1.index shouldBe 1
+          parameter1.typeFullName shouldBe Constants.ANY
 
-            val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
-            parameter2.name shouldBe "b"
-            parameter2.index shouldBe 2
-            parameter2.typeFullName shouldBe Constants.ANY
-        }
+          val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+          parameter2.name shouldBe "b"
+          parameter2.index shouldBe 2
+          parameter2.typeFullName shouldBe Constants.ANY
+      }
 
-        "test method return node" in {
-            cpg.method.fullName("test.py:<module>.func").methodReturn.code.head shouldBe "RET"
-            cpg.method.fullName("test.py:<module>.func").methodReturn.typeFullName.head shouldBe Constants.ANY
-        }
+      "test method return node" in {
+          cpg.method.fullName("test.py:<module>.func").methodReturn.code.head shouldBe "RET"
+          cpg.method.fullName("test.py:<module>.func").methodReturn.typeFullName
+              .head shouldBe Constants.ANY
+      }
 
-        "test method body" in {
-            val topLevelExprs = cpg.method.fullName("test.py:<module>.func").topLevelExpressions.l
-            topLevelExprs.size shouldBe 1
-            topLevelExprs.isCall.head.code shouldBe "pass"
-            topLevelExprs.isCall.head.methodFullName shouldBe "<operator>.pass"
-        }
+      "test method body" in {
+          val topLevelExprs = cpg.method.fullName("test.py:<module>.func").topLevelExpressions.l
+          topLevelExprs.size shouldBe 1
+          topLevelExprs.isCall.head.code shouldBe "pass"
+          topLevelExprs.isCall.head.methodFullName shouldBe "<operator>.pass"
+      }
 
-        "test function method ref" in {
-            cpg.methodRef("func").referencedMethod.fullName.head shouldBe
-                "test.py:<module>.func"
-        }
+      "test function method ref" in {
+          cpg.methodRef("func").referencedMethod.fullName.head shouldBe
+              "test.py:<module>.func"
+      }
 
-        "test assignment of method ref to local variable" in {
-            val assignNode = cpg.methodRef("func").astParent.isCall.head
-            assignNode.code shouldBe "func = def func(...)"
-        }
+      "test assignment of method ref to local variable" in {
+          val assignNode = cpg.methodRef("func").astParent.isCall.head
+          assignNode.code shouldBe "func = def func(...)"
+      }
 
-        "test existence of local variable in module function" in {
-            cpg.method.fullName("test.py:<module>").local.name.l should contain("func")
-        }
+      "test existence of local variable in module function" in {
+          cpg.method.fullName("test.py:<module>").local.name.l should contain("func")
+      }
 
-        "test corresponding type, typeDecl and binding" in {
-            val bindingTypeDecl =
-                cpg.method.fullName("test.py:<module>.func").referencingBinding.bindingTypeDecl.head
+      "test corresponding type, typeDecl and binding" in {
+          val bindingTypeDecl =
+              cpg.method.fullName("test.py:<module>.func").referencingBinding.bindingTypeDecl.head
 
-            bindingTypeDecl.name shouldBe "func"
-            bindingTypeDecl.fullName shouldBe "test.py:<module>.func"
-            bindingTypeDecl.filename shouldBe "test.py"
-            bindingTypeDecl.lineNumber shouldBe Some(1)
-            bindingTypeDecl.columnNumber shouldBe Some(1)
+          bindingTypeDecl.name shouldBe "func"
+          bindingTypeDecl.fullName shouldBe "test.py:<module>.func"
+          bindingTypeDecl.filename shouldBe "test.py"
+          bindingTypeDecl.lineNumber shouldBe Some(1)
+          bindingTypeDecl.columnNumber shouldBe Some(1)
 
-            bindingTypeDecl.referencingType.name.head shouldBe "func"
-            bindingTypeDecl.referencingType.fullName.head shouldBe "test.py:<module>.func"
-        }
-    }
+          bindingTypeDecl.referencingType.name.head shouldBe "func"
+          bindingTypeDecl.referencingType.fullName.head shouldBe "test.py:<module>.func"
+      }
+  }
 
-    "positional argument function" - {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b, /):
+  "positional argument function" - {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b, /):
                                                     |  pass
                                                     |""".stripMargin)
 
-        "test method parameter nodes" in {
-            val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
-            parameter1.name shouldBe "a"
-            parameter1.index shouldBe 1
-            parameter1.typeFullName shouldBe Constants.ANY
+      "test method parameter nodes" in {
+          val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+          parameter1.name shouldBe "a"
+          parameter1.index shouldBe 1
+          parameter1.typeFullName shouldBe Constants.ANY
 
-            val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
-            parameter2.name shouldBe "b"
-            parameter2.index shouldBe 2
-            parameter2.typeFullName shouldBe Constants.ANY
-        }
-    }
+          val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+          parameter2.name shouldBe "b"
+          parameter2.index shouldBe 2
+          parameter2.typeFullName shouldBe Constants.ANY
+      }
+  }
 
-    "mixed argument function" - {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b, /, c):
+  "mixed argument function" - {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""def func(a, b, /, c):
                                                     |  pass
                                                     |""".stripMargin)
 
-        "test method parameter nodes" in {
-            val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
-            parameter1.name shouldBe "a"
-            parameter1.index shouldBe 1
-            parameter1.typeFullName shouldBe Constants.ANY
+      "test method parameter nodes" in {
+          val parameter1 = cpg.method.fullName("test.py:<module>.func").parameter.order(1).head
+          parameter1.name shouldBe "a"
+          parameter1.index shouldBe 1
+          parameter1.typeFullName shouldBe Constants.ANY
 
-            val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
-            parameter2.name shouldBe "b"
-            parameter2.index shouldBe 2
-            parameter2.typeFullName shouldBe Constants.ANY
+          val parameter2 = cpg.method.fullName("test.py:<module>.func").parameter.order(2).head
+          parameter2.name shouldBe "b"
+          parameter2.index shouldBe 2
+          parameter2.typeFullName shouldBe Constants.ANY
 
-            val parameter3 = cpg.method.fullName("test.py:<module>.func").parameter.order(3).head
-            parameter3.name shouldBe "c"
-            parameter3.index shouldBe 3
-            parameter3.typeFullName shouldBe Constants.ANY
-        }
-    }
+          val parameter3 = cpg.method.fullName("test.py:<module>.func").parameter.order(3).head
+          parameter3.name shouldBe "c"
+          parameter3.index shouldBe 3
+          parameter3.typeFullName shouldBe Constants.ANY
+      }
+  }
 
-    "decorated function" - {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""@abc(arg)
+  "decorated function" - {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""@abc(arg)
                                                     |@staticmethod
                                                     |def func():
                                                     |  pass
                                                     |""".stripMargin)
 
-        "test decorator wrapping of method reference" in {
-            cpg.methodRef("func").astParent.astParent.astParent.isCall.head.code shouldBe
-                "func = abc(arg)(staticmethod(def func(...)))"
-        }
+      "test decorator wrapping of method reference" in {
+          cpg.methodRef("func").astParent.astParent.astParent.isCall.head.code shouldBe
+              "func = abc(arg)(staticmethod(def func(...)))"
+      }
 
-    }
+  }
 
-    "type hinted function" - {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""
+  "type hinted function" - {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""
                                                     |from typing import List, Optional
                                                     |
                                                     |def func1(a: int, b: int) -> float:
@@ -150,194 +151,196 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
                                                     |
                                                     |""".stripMargin)
 
-        "test parameter hint of method definition using built-in types" in {
-            cpg.method
-                .name("func1")
-                .parameter
-                .typeFullName
-                .dedup
-                .l shouldBe Seq("__builtin.int")
-        }
+      "test parameter hint of method definition using built-in types" in {
+          cpg.method
+              .name("func1")
+              .parameter
+              .typeFullName
+              .dedup
+              .l shouldBe Seq("__builtin.int")
+      }
 
-        "test parameter hint of method definition using types from 'typing'" in {
-            cpg.method
-                .name("func2")
-                .parameter
-                .typeFullName
-                .dedup
-                .l shouldBe Seq("Optional[str]")
-        }
+      "test parameter hint of method definition using types from 'typing'" in {
+          cpg.method
+              .name("func2")
+              .parameter
+              .typeFullName
+              .dedup
+              .l shouldBe Seq("Optional[str]")
+      }
 
-        "test return hint of method definition using built-in types" in {
-            cpg.method
-                .name("func1")
-                .methodReturn
-                .typeFullName
-                .dedup
-                .l shouldBe Seq("__builtin.float")
-        }
+      "test return hint of method definition using built-in types" in {
+          cpg.method
+              .name("func1")
+              .methodReturn
+              .typeFullName
+              .dedup
+              .l shouldBe Seq("__builtin.float")
+      }
 
-        "test a return hint of method definition using types from 'typing'" in {
-            cpg.method
-                .name("func2")
-                .methodReturn
-                .typeFullName
-                .dedup
-                .l shouldBe Seq("typing.List")
-        }
+      "test a return hint of method definition using types from 'typing'" in {
+          cpg.method
+              .name("func2")
+              .methodReturn
+              .typeFullName
+              .dedup
+              .l shouldBe Seq("typing.List")
+      }
 
-        "test parameter hint of the form abc.def" in {
-            cpg.method
-                .name("func3")
-                .parameter
-                .typeFullName
-                .dedup
-                .l shouldBe Seq("abc.Def")
-        }
-    }
+      "test parameter hint of the form abc.def" in {
+          cpg.method
+              .name("func3")
+              .parameter
+              .typeFullName
+              .dedup
+              .l shouldBe Seq("abc.Def")
+      }
+  }
 
-    "function with type parameters" - {
-        "handle simple type parameter" in {
-            val cpg = Py2CpgTestContext.buildCpg("""def identity[T](value: T, value2: Bar) -> T:
+  "function with type parameters" - {
+      "handle simple type parameter" in {
+          val cpg = Py2CpgTestContext.buildCpg("""def identity[T](value: T, value2: Bar) -> T:
                                                    |    return value
                                                    |""".stripMargin)
 
-            val methodNode = cpg.method.name("identity").head
-            methodNode.name shouldBe "identity"
-            methodNode.fullName shouldBe "test.py:<module>.identity"
-            // signature is always empty. Please contribute a feature
-            // methodNode.signature shouldBe "def identity[T](value: T) -> T:"
-            val param = methodNode.parameter.name("value").head
-            param.typeFullName shouldBe "T"
-            val param2 = methodNode.parameter.name("value2").head
-            param2.typeFullName shouldBe "Bar"
-            methodNode.methodReturn.typeFullName.headOption shouldBe Some('T')
-        }
+          val methodNode = cpg.method.name("identity").head
+          methodNode.name shouldBe "identity"
+          methodNode.fullName shouldBe "test.py:<module>.identity"
+          // signature is always empty. Please contribute a feature
+          // methodNode.signature shouldBe "def identity[T](value: T) -> T:"
+          val param = methodNode.parameter.name("value").head
+          param.typeFullName shouldBe "T"
+          val param2 = methodNode.parameter.name("value2").head
+          param2.typeFullName shouldBe "Bar"
+          methodNode.methodReturn.typeFullName.headOption shouldBe Some('T')
+      }
 
-        "handle multiple type parameters" in {
-            val cpg = Py2CpgTestContext.buildCpg("""def process_items[T, U](items: list[T]) -> dict[T, U]:
+      "handle multiple type parameters" in {
+          val cpg =
+              Py2CpgTestContext.buildCpg("""def process_items[T, U](items: list[T]) -> dict[T, U]:
                                                    |    ...
                                                    |""".stripMargin)
 
-            val methodNode = cpg.method.name("process_items").head
-            methodNode.name shouldBe "process_items"
-            methodNode.fullName shouldBe "test.py:<module>.process_items"
-            methodNode.methodReturn.typeFullName shouldBe "__builtin.dict"
-            val param = methodNode.parameter.name("items").head
-            param.typeFullName shouldBe "T" // Bug: must be list[T]
-        }
+          val methodNode = cpg.method.name("process_items").head
+          methodNode.name shouldBe "process_items"
+          methodNode.fullName shouldBe "test.py:<module>.process_items"
+          methodNode.methodReturn.typeFullName shouldBe "__builtin.dict"
+          val param = methodNode.parameter.name("items").head
+          param.typeFullName shouldBe "T" // Bug: must be list[T]
+      }
 
-        "handle bound type parameter in function" in {
-            val cpg = Py2CpgTestContext.buildCpg("""def sort_values[T: Comparable](values: list[T]) -> list[T]:
+      "handle bound type parameter in function" in {
+          val cpg = Py2CpgTestContext.buildCpg(
+            """def sort_values[T: Comparable](values: list[T]) -> list[T]:
                                                    |    ...
-                                                   |""".stripMargin)
+                                                   |""".stripMargin
+          )
 
-            val methodNode = cpg.method.name("sort_values").head
-            methodNode.name shouldBe "sort_values"
-            methodNode.fullName shouldBe "test.py:<module>.sort_values"
-        }
+          val methodNode = cpg.method.name("sort_values").head
+          methodNode.name shouldBe "sort_values"
+          methodNode.fullName shouldBe "test.py:<module>.sort_values"
+      }
 
-        "handle ParamSpec in function" in {
-            val cpg = Py2CpgTestContext.buildCpg("""from typing import ParamSpec, Callable
+      "handle ParamSpec in function" in {
+          val cpg = Py2CpgTestContext.buildCpg("""from typing import ParamSpec, Callable
                                                    |P = ParamSpec('P')
                                                    |def call_func[**P](func: Callable[P, int], *args: P.args, **kwargs: P.kwargs) -> int:
                                                    |    return func(*args, **kwargs)
                                                    |""".stripMargin)
 
-            val methodNode = cpg.method.name("call_func").head
-            methodNode.name shouldBe "call_func"
-            methodNode.fullName shouldBe "test.py:<module>.call_func"
-        }
+          val methodNode = cpg.method.name("call_func").head
+          methodNode.name shouldBe "call_func"
+          methodNode.fullName shouldBe "test.py:<module>.call_func"
+      }
 
-         "handle type parameter with default in function" in {
-           val cpg = Py2CpgTestContext.buildCpg("""def default_identity[T = str](value: T) -> T:
+      "handle type parameter with default in function" in {
+          val cpg = Py2CpgTestContext.buildCpg("""def default_identity[T = str](value: T) -> T:
                                                   |    return value
                                                   |""".stripMargin)
 
-           val methodNode = cpg.method.name("default_identity").head
-           methodNode.name shouldBe "default_identity"
-           methodNode.fullName shouldBe "test.py:<module>.default_identity"
-         }
+          val methodNode = cpg.method.name("default_identity").head
+          methodNode.name shouldBe "default_identity"
+          methodNode.fullName shouldBe "test.py:<module>.default_identity"
+      }
 
-    }
+  }
 
-    "async function with type parameters" - {
-        "handle type parameters correctly" in {
-            val cpg = Py2CpgTestContext.buildCpg("""async def async_process[T](value: T) -> T:
+  "async function with type parameters" - {
+      "handle type parameters correctly" in {
+          val cpg = Py2CpgTestContext.buildCpg("""async def async_process[T](value: T) -> T:
                                                    |    ...
                                                    |""".stripMargin)
 
-            val methodNode = cpg.method.name("async_process").head
-            methodNode.name shouldBe "async_process"
-            methodNode.fullName shouldBe "test.py:<module>.async_process"
-        }
-    }
+          val methodNode = cpg.method.name("async_process").head
+          methodNode.name shouldBe "async_process"
+          methodNode.fullName shouldBe "test.py:<module>.async_process"
+      }
+  }
 
-    "decorator annotations are surfaced on methods" - {
-        "simple bare decorator -> annotation node attached to method" in {
-            val cpg = Py2CpgTestContext.buildCpg("""@auth_required
+  "decorator annotations are surfaced on methods" - {
+      "simple bare decorator -> annotation node attached to method" in {
+          val cpg = Py2CpgTestContext.buildCpg("""@auth_required
                                                    |def handler():
                                                    |    pass
                                                    |""".stripMargin)
 
-            val ann = cpg.method.name("handler").annotation.head
-            ann.code shouldBe "@auth_required"
-            ann.name shouldBe "auth_required"
-        }
+          val ann = cpg.method.name("handler").annotation.head
+          ann.code shouldBe "@auth_required"
+          ann.name shouldBe "auth_required"
+      }
 
-        "Flask-style decorator with URL literal preserves the path in `code`" in {
-            val cpg = Py2CpgTestContext.buildCpg("""@app.route("/users/v1", methods=["GET"])
+      "Flask-style decorator with URL literal preserves the path in `code`" in {
+          val cpg = Py2CpgTestContext.buildCpg("""@app.route("/users/v1", methods=["GET"])
                                                    |def get_users():
                                                    |    pass
                                                    |""".stripMargin)
 
-            val ann = cpg.method.name("get_users").annotation.head
-            ann.code should include("/users/v1")
-            ann.code should include("GET")
-            ann.name shouldBe "app.route"
-        }
+          val ann = cpg.method.name("get_users").annotation.head
+          ann.code should include("/users/v1")
+          ann.code should include("GET")
+          ann.name shouldBe "app.route"
+      }
 
-        "FastAPI-style decorator with URL literal preserves the path" in {
-            val cpg = Py2CpgTestContext.buildCpg("""@app.get("/items/{id}")
+      "FastAPI-style decorator with URL literal preserves the path" in {
+          val cpg = Py2CpgTestContext.buildCpg("""@app.get("/items/{id}")
                                                    |def get_item(id):
                                                    |    pass
                                                    |""".stripMargin)
 
-            val ann = cpg.method.name("get_item").annotation.head
-            ann.code should include("/items/{id}")
-            ann.name shouldBe "app.get"
-        }
+          val ann = cpg.method.name("get_item").annotation.head
+          ann.code should include("/items/{id}")
+          ann.name shouldBe "app.get"
+      }
 
-        "stacked decorators produce one annotation per decorator" in {
-            val cpg = Py2CpgTestContext.buildCpg("""@auth_required
+      "stacked decorators produce one annotation per decorator" in {
+          val cpg = Py2CpgTestContext.buildCpg("""@auth_required
                                                    |@app.route("/admin")
                                                    |def admin_panel():
                                                    |    pass
                                                    |""".stripMargin)
 
-            val codes = cpg.method.name("admin_panel").annotation.code.l.toSet
-            codes should contain("@auth_required")
-            codes.exists(_.contains("/admin")) shouldBe true
-        }
+          val codes = cpg.method.name("admin_panel").annotation.code.l.toSet
+          codes should contain("@auth_required")
+          codes.exists(_.contains("/admin")) shouldBe true
+      }
 
-        "async function decorators are surfaced the same way" in {
-            val cpg = Py2CpgTestContext.buildCpg("""@router.post("/login")
+      "async function decorators are surfaced the same way" in {
+          val cpg = Py2CpgTestContext.buildCpg("""@router.post("/login")
                                                    |async def login():
                                                    |    pass
                                                    |""".stripMargin)
 
-            val ann = cpg.method.name("login").annotation.head
-            ann.code should include("/login")
-            ann.name shouldBe "router.post"
-        }
+          val ann = cpg.method.name("login").annotation.head
+          ann.code should include("/login")
+          ann.name shouldBe "router.post"
+      }
 
-        "function without decorators has no annotations (regression check)" in {
-            val cpg = Py2CpgTestContext.buildCpg("""def plain():
+      "function without decorators has no annotations (regression check)" in {
+          val cpg = Py2CpgTestContext.buildCpg("""def plain():
                                                    |    pass
                                                    |""".stripMargin)
 
-            cpg.method.name("plain").annotation.l shouldBe empty
-        }
-    }
-
-}
+          cpg.method.name("plain").annotation.l shouldBe empty
+      }
+  }
+end FunctionDefCpgTests
