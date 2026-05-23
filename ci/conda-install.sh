@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-export PATH=/opt/miniconda3/bin:${PATH}:
+export PATH=/opt/miniconda3/bin:${PATH}
 conda config --set always_yes yes --set changeps1 no
 conda config --add channels conda-forge
 conda config --set solver classic
