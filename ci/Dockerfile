@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM ghcr.io/appthreat/base:main
 
 LABEL maintainer="appthreat" \
@@ -9,7 +10,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="chen" \
       org.opencontainers.image.description="Container image for AppThreat chen code analysis platform" \
-      org.opencontainers.docker.cmd="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
+      "org.opencontainers.docker.cmd"="docker run --rm -v /tmp:/tmp -v $HOME:$HOME -v $(pwd):/app:rw -it ghcr.io/appthreat/chen chennai"
 
 ARG JAVA_VERSION=23.0.2-tem
 ARG MAVEN_VERSION=3.9.11
@@ -49,9 +50,13 @@ WORKDIR /opt
 COPY ./ci/conda-install.sh /opt/
 COPY README.md /opt/
 COPY ./platform/frontends/php2atom/composer.json /opt/composer.json
-COPY ./platform/frontends/php2atom/composer.json /opt/composer.lock
+COPY ./platform/frontends/php2atom/composer.lock /opt/composer.lock
 
-RUN set -e; \
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked \
+    --mount=type=cache,target=/opt/miniconda3/pkgs,sharing=locked \
+    --mount=type=cache,target=/root/.cache,sharing=locked \
+    --mount=type=cache,target=/root/.npm,sharing=locked \
+    set -e; \
     ARCH_NAME="$(rpm --eval '%{_arch}')"; \
     url=; \
     case "${ARCH_NAME##*-}" in \
@@ -88,17 +93,8 @@ RUN set -e; \
     && rm -rf /opt/miniconda3/miniconda.sh \
     && ln -s /opt/miniconda3/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && conda config --set always_yes yes --set changeps1 no \
-    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
-    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
-    && conda config --add channels conda-forge \
-    && conda config --set solver classic \
-    && conda install python=3.12 -y \
-    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
-    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
-    && conda update -n base -c defaults conda -y \
     && conda init bash \
-    && bash -c /opt/conda-install.sh \
+    && bash /opt/conda-install.sh \
     && curl -LO https://repo.almalinux.org/almalinux/9/CRB/${ARCH_NAME}/os/Packages/graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
     && rpm -ivh graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
     && rm graphviz-devel-2.44.0-26.el9.${ARCH_NAME}.rpm \
@@ -132,8 +128,9 @@ COPY ./chenpy /opt/chenpy
 COPY ./pyproject.toml /opt/
 COPY ./target/chen.zip .
 COPY ./notebooks /opt/notebooks
-RUN unzip -q chen.zip \
-    && composer update --no-progress --prefer-dist --ignore-platform-reqs \
+RUN --mount=type=cache,target=/tmp/composer-cache,sharing=locked \
+    unzip -q chen.zip \
+    && COMPOSER_CACHE_DIR=/tmp/composer-cache composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader --ignore-platform-reqs \
     && python -m pip install --no-deps . \
     && rm chen.zip conda-install.sh pyproject.toml \
     && microdnf clean all
