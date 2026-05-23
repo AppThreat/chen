@@ -1,6 +1,12 @@
 ###################
 ###################
 
+.git/
+.github/
+.venv/
+__pycache__/
+**/__pycache__/
+
 project/project
 .idea/
 tests/smoke-test-repos
@@ -32,6 +38,27 @@ platform/workspace
 **/goastgen-macos
 **/goastgen-macos-arm64
 slices.json
+
+# Docker image build inputs are limited to README.md, chenpy/, pyproject.toml,
+# notebooks/, ci/conda-install.sh, target/chen.zip, and php2atom Composer files.
+/console/
+/dataflowengineoss/
+/docs/
+/macros/
+/project/
+/scripts/
+/semanticcpg/
+/tests/
+**/target/
+!/target/
+/target/*
+!/target/chen.zip
+/platform/**
+!/platform/
+!/platform/frontends/
+!/platform/frontends/php2atom/
+!/platform/frontends/php2atom/composer.json
+!/platform/frontends/php2atom/composer.lock
 
 ##############
 # Nix flakes #
