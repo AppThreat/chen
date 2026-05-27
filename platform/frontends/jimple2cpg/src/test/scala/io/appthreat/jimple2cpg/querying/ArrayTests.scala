@@ -30,10 +30,7 @@ class ArrayTests extends JimpleCode2CpgFixture {
   "should initialize array with three address code initialization expressions" in {
     def m = cpg.method(".*foo.*")
 
-    val List(placeholderArg: Identifier, arrayInit: Call) =
-      m.assignment.codeExact("$stack2 = new int[3]").argument.l: @unchecked
-    placeholderArg.code shouldBe "$stack2"
-    placeholderArg.typeFullName shouldBe "int[]"
+    val List(arrayInit: Call) = m.call.nameExact(Operators.alloc).code("new int\\[3\\]").l: @unchecked
 
     arrayInit.code shouldBe "new int[3]"
     arrayInit.methodFullName shouldBe Operators.alloc
@@ -44,37 +41,37 @@ class ArrayTests extends JimpleCode2CpgFixture {
       case None => Failed("arrayInitializer should have a literal with the value of 3")
     }
 
-    val List(stackAt0: Call, arg0: Literal) = m.assignment.codeExact("$stack2[0] = 0").argument.l: @unchecked
+    val List(stackAt0: Call, arg0: Literal) = m.assignment.code(".*\\[0\\] = 0").argument.l: @unchecked
 
     arg0.code shouldBe "0"
     arg0.typeFullName shouldBe "int"
 
-    stackAt0.code shouldBe "$stack2[0]"
+    stackAt0.code.endsWith("[0]") shouldBe true
     stackAt0.methodFullName shouldBe Operators.indexAccess
     val List(stackPointerAt0: Identifier, zero: Literal) = stackAt0.astChildren.l: @unchecked
-    stackPointerAt0.code shouldBe "$stack2"
+    stackPointerAt0.typeFullName shouldBe "int[]"
     zero.code shouldBe "0"
 
-    val List(stackAt1: Call, arg1: Literal) = m.assignment.codeExact("$stack2[1] = 1").argument.l: @unchecked
+    val List(stackAt1: Call, arg1: Literal) = m.assignment.code(".*\\[1\\] = 1").argument.l: @unchecked
 
     arg1.code shouldBe "1"
     arg1.typeFullName shouldBe "int"
 
-    stackAt1.code shouldBe "$stack2[1]"
+    stackAt1.code.endsWith("[1]") shouldBe true
     stackAt1.methodFullName shouldBe Operators.indexAccess
     val List(stackPointerAt1: Identifier, one: Literal) = stackAt1.astChildren.l: @unchecked
-    stackPointerAt1.code shouldBe "$stack2"
+    stackPointerAt1.typeFullName shouldBe "int[]"
     one.code shouldBe "1"
 
-    val List(stackAt2: Call, arg2: Literal) = m.assignment.codeExact("$stack2[2] = 2").argument.l: @unchecked
+    val List(stackAt2: Call, arg2: Literal) = m.assignment.code(".*\\[2\\] = 2").argument.l: @unchecked
 
     arg2.code shouldBe "2"
     arg2.typeFullName shouldBe "int"
 
-    stackAt2.code shouldBe "$stack2[2]"
+    stackAt2.code.endsWith("[2]") shouldBe true
     stackAt2.methodFullName shouldBe Operators.indexAccess
     val List(stackPointerAt2: Identifier, two: Literal) = stackAt2.astChildren.l: @unchecked
-    stackPointerAt2.code shouldBe "$stack2"
+    stackPointerAt2.typeFullName shouldBe "int[]"
     two.code shouldBe "2"
   }
 
@@ -95,7 +92,7 @@ class ArrayTests extends JimpleCode2CpgFixture {
   "should handle arrayIndexAccesses correctly (3-address code form)" in {
     def m = cpg.method(".*baz.*")
 
-    val List(indexAccess: Call, rhsStub: Identifier) = m.assignment.codeExact("x[1] = $stack3").argument.l: @unchecked
+    val List(indexAccess: Call, rhsStub: Identifier) = m.assignment.code("x\\[1\\] = .*\\+ 2").argument.l: @unchecked
     indexAccess.name shouldBe Operators.indexAccess
     indexAccess.methodFullName shouldBe Operators.indexAccess
 
@@ -108,9 +105,9 @@ class ArrayTests extends JimpleCode2CpgFixture {
     }
 
     withClue("placeholder in expr on RHS of assignment") {
-      rhsStub.name shouldBe "$stack3"
+      rhsStub.code shouldBe "x[0]"
+      rhsStub.name should not be "x"
       rhsStub.typeFullName shouldBe "int"
-      rhsStub.code shouldBe "$stack3"
     }
   }
 }

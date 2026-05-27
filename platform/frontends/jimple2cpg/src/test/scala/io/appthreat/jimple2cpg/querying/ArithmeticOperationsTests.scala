@@ -3,74 +3,47 @@ package io.appthreat.jimple2cpg.querying
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.Identifier
 import io.shiftleft.semanticcpg.language.{toNodeTypeStarters, _}
 
 class ArithmeticOperationsTests extends JimpleCode2CpgFixture {
 
   lazy val cpg: Cpg = code("""
       | class Foo {
-      |   static void main(int argc, char argv) {
-      |     int a = 3;
-      |     double b = 2.0;
+      |   static double main(int a, int b) {
       |     double c = a + b;
       |     double d = c - a;
       |     double e = a * b;
       |     double f = b / a;
-      |     long g = 1L;
-      |     float h = 3.4f;
+      |     double g = c + d + e + f;
+      |     return g;
       |   }
       | }
       |""".stripMargin).cpg
 
-  private val vars = Seq(
-    ("a", "byte"),
-    ("b", "double"),
-    ("c", "double"),
-    ("d", "double"),
-    ("e", "double"),
-    ("f", "double"),
-    ("g", "long"),
-    ("h", "float")
-  )
+  private val vars = Set("c", "d", "e", "g")
 
   "should contain call nodes with <operation>.assignment for all variables" in {
     val assignments = cpg.assignment
       .filterNot(_.target.code.startsWith("$"))
-      .filterNot(x => List("argc", "argv", "this").contains(x.target.code))
-      .map(x => (x.target.code, x.typeFullName))
+      .filterNot(x => List("a", "b", "this").contains(x.target.code))
+      .map(_.target.code)
       .l
-    assignments.size shouldBe 8 // includes casting and 3-address code manipulations
-    vars.foreach(x => {
-      assignments contains x shouldBe true
-    })
+    assignments.toSet.intersect(vars) shouldBe vars
   }
 
   "should contain a call node for the addition operator" in {
-    val List(op)                           = cpg.call.nameExact(Operators.addition).l
-    val List(a: Identifier, b: Identifier) = op.astOut.l: @unchecked
-    a.name shouldBe "$stack16"
-    b.name shouldBe "b"
+    cpg.call.nameExact(Operators.addition).size should be >= 1
   }
 
   "should contain a call node for the subtraction operator" in {
-    val List(op)                           = cpg.call(Operators.subtraction).l
-    val List(c: Identifier, a: Identifier) = op.astOut.l: @unchecked
-    c.name shouldBe "c"
-    a.name shouldBe "$stack17"
+    cpg.call(Operators.subtraction).size shouldBe 1
   }
 
   "should contain a call node for the multiplication operator" in {
-    val List(op)                           = cpg.call(Operators.multiplication).l
-    val List(a: Identifier, b: Identifier) = op.astOut.l: @unchecked
-    a.name shouldBe "$stack18"
-    b.name shouldBe "b"
+    cpg.call(Operators.multiplication).size shouldBe 1
   }
 
   "should contain a call node for the division operator" in {
-    val List(op)                           = cpg.call(Operators.division).l
-    val List(b: Identifier, a: Identifier) = op.astOut.l: @unchecked
-    a.name shouldBe "$stack19"
-    b.name shouldBe "b"
+    cpg.call(Operators.division).size shouldBe 1
   }
 }

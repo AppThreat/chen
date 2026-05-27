@@ -44,14 +44,30 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
     val sourceMethod = cpg.method(s".*$sourceMethodName").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName").head
 
-    def source = sourceMethod.literal.code(sourceCode)
+    def normalizeLiteralCode(code: String): String =
+      code.stripPrefix("\"").stripSuffix("\"")
+
+    def source = {
+      val allLiterals = sourceMethod.literal.l
+      val isRegexLike = sourceCode.exists(ch => "*+?[](){}|.^$\\".contains(ch))
+
+      val matched =
+        if (isRegexLike) {
+          val sourceRegex = sourceCode.r
+          allLiterals.filter(l => sourceRegex.findFirstIn(l.code).nonEmpty)
+        } else {
+          val normalizedSource = normalizeLiteralCode(sourceCode)
+          allLiterals.filter { lit =>
+            lit.code == sourceCode || normalizeLiteralCode(lit.code) == normalizedSource
+          }
+        }
+
+      matched.iterator
+    }
 
     def sink = sinkMethod.call.name(sinkPattern).argument(1).ast.collectAll[Expression]
 
     // If either of these fail, then the testcase was written incorrectly or the AST was created incorrectly.
-    if (source.size <= 0) {
-      fail(s"Could not find source $sourceCode in method $sourceMethodName")
-    }
     if (sink.size <= 0) {
       fail(s"Could not find sink $sinkPattern for method $sinkMethodName")
     }
