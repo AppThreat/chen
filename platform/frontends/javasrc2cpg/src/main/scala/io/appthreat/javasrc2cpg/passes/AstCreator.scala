@@ -2550,6 +2550,64 @@ class AstCreator(
       maybeResolvedMethodLike.toOption
           .flatMap(calcParameterTypes(_, ResolvedTypeParametersMap.empty()))
 
+  private def returnTypeForAstMethod(methodDecl: MethodDeclaration): Option[String] =
+      typeInfoCalc
+          .fullName(methodDecl.getType)
+          .orElse(scope.lookupType(methodDecl.getTypeAsString))
+
+  private def parameterTypesForAstMethod(methodDecl: MethodDeclaration): Option[List[String]] =
+    val parameterTypes = methodDecl.getParameters.asScala.toList.map { parameter =>
+        typeInfoCalc
+            .fullName(parameter.getType)
+            .orElse(scope.lookupType(parameter.getTypeAsString))
+    }
+    toOptionList(parameterTypes)
+
+  private lazy val typeDeclsInUnitByName: Map[String, List[TypeDeclaration[?]]] =
+      javaParserAst
+          .findAll(classOf[TypeDeclaration[?]])
+          .asScala
+          .toList
+          .groupBy(_.getNameAsString)
+
+  private def findTypeDeclInUnit(typeName: String): Option[TypeDeclaration[?]] =
+      typeDeclsInUnitByName.get(typeName).flatMap(_.headOption)
+
+  private def findMethodInTypeHierarchy(
+    typeDecl: TypeDeclaration[?],
+    methodName: String,
+    arity: Int
+  ): Option[MethodDeclaration] =
+    val localMatch =
+        typeDecl
+            .getMethodsByName(methodName)
+            .asScala
+            .find(_.getParameters.size == arity)
+
+    localMatch.orElse {
+        typeDecl match
+          case classOrInterface: ClassOrInterfaceDeclaration =>
+              classOrInterface.getExtendedTypes.asScala.toList
+                  .flatMap(typ => findTypeDeclInUnit(typ.getNameAsString))
+                  .view
+                  .flatMap(findMethodInTypeHierarchy(_, methodName, arity))
+                  .headOption
+          case _ => None
+    }
+  end findMethodInTypeHierarchy
+
+  private def unresolvedImplicitThisMethod(call: MethodCallExpr): Option[MethodDeclaration] =
+      call.getScope.toScala match
+        case Some(_) => None
+        case None =>
+            call.findAncestor(classOf[TypeDeclaration[?]]).toScala.flatMap { enclosingType =>
+                findMethodInTypeHierarchy(
+                  enclosingType,
+                  call.getNameAsString,
+                  call.getArguments.size
+                )
+            }
+
   private def initNode(
     namespaceName: Option[String],
     argumentTypes: Option[List[String]],
@@ -3319,18 +3377,24 @@ class AstCreator(
 
   private def astForMethodCall(call: MethodCallExpr, expectedReturnType: ExpectedType): Ast =
     val maybeResolvedCall = tryWithSafeStackOverflow(call.resolve())
-    val argumentAsts      = argAstsForCall(call, maybeResolvedCall, call.getArguments)
+    // Fallback used when JavaParser cannot resolve a local implicit-this call through external types.
+    val unresolvedMethod =
+        maybeResolvedCall.failed.toOption.flatMap(_ => unresolvedImplicitThisMethod(call))
+    val argumentAsts = argAstsForCall(call, maybeResolvedCall, call.getArguments)
 
     val expressionTypeFullName =
         expressionReturnTypeFullName(call).orElse(expectedReturnType.fullName)
 
-    val argumentTypes = argumentTypesForMethodLike(maybeResolvedCall)
+    val argumentTypes =
+        argumentTypesForMethodLike(maybeResolvedCall)
+            .orElse(unresolvedMethod.flatMap(parameterTypesForAstMethod))
     val returnType = maybeResolvedCall
         .map { resolvedCall =>
             typeInfoCalc.fullName(resolvedCall.getReturnType, ResolvedTypeParametersMap.empty())
         }
         .toOption
         .flatten
+        .orElse(unresolvedMethod.flatMap(returnTypeForAstMethod))
         .orElse(expressionTypeFullName)
     val dispatchType = dispatchTypeForCall(maybeResolvedCall, call.getScope.toScala)
 

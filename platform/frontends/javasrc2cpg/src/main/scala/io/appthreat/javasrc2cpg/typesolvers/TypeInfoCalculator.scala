@@ -63,7 +63,13 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver):
   ): Option[String] =
       typ match
         case refType: ResolvedReferenceType =>
-            nameOrFullName(refType.getTypeDeclaration.get, fullyQualified)
+            refType.getTypeDeclaration.toScala
+                .flatMap(nameOrFullName(_, fullyQualified))
+                .orElse {
+                    val describedType = Option(refType.describe()).filter(_.nonEmpty)
+                    if fullyQualified then describedType
+                    else describedType.map(_.split("\\.").last)
+                }
         case lazyType: LazyType =>
             lazyType match
               case _ if lazyType.isReferenceType =>
