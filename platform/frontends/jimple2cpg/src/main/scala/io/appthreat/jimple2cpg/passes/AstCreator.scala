@@ -74,12 +74,12 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     */
   private def inheritedAndImplementedClasses(clazz: SootClass): (List[String], List[String]) =
     val implementsTypeFullName = clazz.getInterfaces.asScala.map { (i: SootClass) =>
-        registerType(i.getType.toQuotedString)
+        registerType(i.getType.toString)
     }.toList
     val inheritsFromTypeFullName =
-        if clazz.hasSuperclass && clazz.getSuperclass.getType.toQuotedString != "java.lang.Object"
+        if clazz.hasSuperclass && clazz.getSuperclass.getType.toString != "java.lang.Object"
         then
-          List(registerType(clazz.getSuperclass.getType.toQuotedString))
+          List(registerType(clazz.getSuperclass.getType.toString))
         else if implementsTypeFullName.isEmpty then
           List(registerType("java.lang.Object"))
         else List()
@@ -89,7 +89,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   /** Creates the AST root for type declarations and acts as the entry point for method generation.
     */
   private def astForTypeDecl(typ: RefType, namespaceBlockFullName: String): Ast =
-    val fullName  = registerType(typ.toQuotedString)
+    val fullName  = registerType(typ.toString)
     val shortName = typ.getSootClass.getShortJavaStyleName
     val clz       = typ.getSootClass
     val code      = new mutable.StringBuilder()
@@ -142,9 +142,10 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   end astForTypeDecl
 
   private def astForField(field: SootField, order: Int): Ast =
-    val typeFullName = registerType(field.getType.toQuotedString)
+    val typeFullName = registerType(field.getType.toString)
     val name         = field.getName
-    val code = if field.getDeclaration.contains("enum") then name else s"$typeFullName $name"
+    val isEnumField  = soot.Modifier.isEnum(field.getModifiers)
+    val code         = if isEnumField then name else s"$typeFullName $name"
     val annotations = field.getTags.asScala
         .collect { case x: VisibilityAnnotationTag => x }
         .flatMap(_.getAnnotations.asScala)
@@ -200,7 +201,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
           val beginUnit             = trap.getBeginUnit
           val endUnit               = trap.getEndUnit
           val exceptionType         = trap.getException
-          val exceptionTypeFullName = registerType(exceptionType.getType.toQuotedString)
+          val exceptionTypeFullName = registerType(exceptionType.getType.toString)
           tryBlockInfo.put(beginUnit, (endUnit, exceptionTypeFullName))
         }
 
@@ -214,7 +215,6 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         Ast(
           methodNode
               .lineNumberEnd(methodBody.toString.split('\n').filterNot(_.isBlank).length)
-              .code(methodBody.toString)
         )
             .withChildren(astsForModifiers(methodDeclaration))
             .withChildren(parameterAsts)
@@ -278,7 +278,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     methodDeclaration: SootMethod,
     parameterAnnotations: Map[String, VisibilityAnnotationTag]
   ): Ast =
-    val typeFullName = registerType(parameter.getType.toQuotedString)
+    val typeFullName = registerType(parameter.getType.toString)
 
     val parameterNode = Ast(
       NewMethodParameterIn()
@@ -415,7 +415,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     ).toList
     val locals = withOrder(jimpleLocals) { case (l, order) =>
         val name         = l.getName
-        val typeFullName = registerType(l.getType.toQuotedString)
+        val typeFullName = registerType(l.getType.toString)
         val code         = s"$typeFullName $name"
         Ast(NewLocal().name(name).code(code).typeFullName(typeFullName).order(order))
     }
@@ -527,7 +527,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .argumentIndex(order)
         .lineNumber(line(parentUnit))
         .columnNumber(column(parentUnit))
-        .typeFullName(registerType(arrRef.getType.toQuotedString))
+        .typeFullName(registerType(arrRef.getType.toString))
 
     val astChildren = astsForValue(arrRef.getBase, 1, parentUnit) ++ astsForValue(
       arrRef.getIndex,
@@ -541,7 +541,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
 
   private def astForLocal(local: soot.Local, order: Int, parentUnit: soot.Unit): Ast =
     val name         = local.getName
-    val typeFullName = registerType(local.getType.toQuotedString)
+    val typeFullName = registerType(local.getType.toString)
     Ast(
       NewIdentifier()
           .name(name)
@@ -560,7 +560,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
             .name(x.toString())
             .order(order)
             .argumentIndex(order)
-            .typeFullName(registerType(x.getType.toQuotedString))
+            .typeFullName(registerType(x.getType.toString))
             .lineNumber(line(parentUnit))
             .columnNumber(column(parentUnit))
       )
@@ -574,8 +574,8 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       case _                         => DispatchTypes.STATIC_DISPATCH
 
     val paramTypeFullNames = (for (i <- 0 until callee.getParameterTypes.size())
-        yield registerType(callee.getParameterType(i).toQuotedString)).toList
-    val returnTypeFullName = registerType(callee.getReturnType.toQuotedString)
+        yield registerType(callee.getParameterType(i).toString)).toList
+    val returnTypeFullName = registerType(callee.getReturnType.toString)
     val signature          = s"$returnTypeFullName(${paramTypeFullNames.mkString(",")})"
     val thisAsts = invokeExpr match
       case expr: InstanceInvokeExpr => astsForValue(expr.getBase, 0, parentUnit)
@@ -614,7 +614,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
                 Some(registerType("java.lang.Object"))
             case _ => None
       case _ => None
-    val calleeType = registerType(callee.getDeclaringClass.getType.toQuotedString)
+    val calleeType = registerType(callee.getDeclaringClass.getType.toString)
     val callType = explicitReturnType.getOrElse {
         if callee.isConstructor then "void" else calleeType
     }
@@ -665,7 +665,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         case u: NewMultiArrayExpr =>
             astForArrayCreateExpr(x, u.getSizes.asScala, order, parentUnit)
         case _ =>
-            val parentType = registerType(x.getType.toQuotedString)
+            val parentType = registerType(x.getType.toString)
             Ast(
               NewCall()
                   .name(Operators.alloc)
@@ -687,7 +687,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   ): Ast =
     // Jimple does not have Operators.arrayInitializer
     // to enforce 3 address code form
-    val arrayBaseType = registerType(arrayInitExpr.getType.toQuotedString)
+    val arrayBaseType = registerType(arrayInitExpr.getType.toString)
     val code =
         s"new ${arrayBaseType.substring(0, arrayBaseType.indexOf('['))}${sizes.map(s => s"[$s]").mkString}"
     val callBlock = NewCall()
@@ -721,7 +721,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .code(unaryExpr.toString())
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
         .order(order)
-        .typeFullName(registerType(unaryExpr.getType.toQuotedString))
+        .typeFullName(registerType(unaryExpr.getType.toString))
         .argumentIndex(order)
         .lineNumber(line(parentUnit))
         .columnNumber(column(parentUnit))
@@ -742,10 +742,10 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
 
     val valueAsts = unaryExpr match
       case instanceOfExpr: InstanceOfExpr =>
-          val t = registerType(instanceOfExpr.getCheckType.toQuotedString)
+          val t = registerType(instanceOfExpr.getCheckType.toString)
           astsForValue(op, 1, parentUnit) ++ astForTypeRef(t, 2)
       case castExpr: CastExpr =>
-          val t = registerType(castExpr.getCastType.toQuotedString)
+          val t = registerType(castExpr.getCastType.toString)
           astForTypeRef(t, 1) ++ astsForValue(op, 2, parentUnit)
       case _ => astsForValue(op, 1, parentUnit)
 
@@ -759,8 +759,8 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         NewIdentifier()
             .name("this")
             .code("this")
-            .typeFullName(registerType(method.getType.toQuotedString))
-            .dynamicTypeHintFullName(Seq(registerType(method.getType.toQuotedString)))
+            .typeFullName(registerType(method.getType.toString))
+            .dynamicTypeHintFullName(Seq(registerType(method.getType.toString)))
             .order(0)
             .argumentIndex(0)
       )
@@ -771,7 +771,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
   private def createThisNode(method: SootMethodRef, builder: NewNode): Ast =
       if !method.isStatic || method.isConstructor then
         val parentType =
-            registerType(Try(method.getDeclaringClass.getType.toQuotedString).getOrElse("ANY"))
+            registerType(Try(method.getDeclaringClass.getType.toString).getOrElse("ANY"))
         Ast(builder match
           case x: NewIdentifier =>
               x.name("this")
@@ -797,7 +797,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       NewIdentifier()
           .name(name)
           .code(name)
-          .typeFullName(registerType(parameterRef.getType.toQuotedString))
+          .typeFullName(registerType(parameterRef.getType.toString))
           .order(order)
           .argumentIndex(order)
     )
@@ -826,7 +826,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
         .order(order)
         .argumentIndex(order)
-        .typeFullName(registerType(assignStmt.getLeftOp.getType.toQuotedString))
+        .typeFullName(registerType(assignStmt.getLeftOp.getType.toString))
     Seq(callAst(assignment, identifierAsts ++ initAsts)).toList
   end astsForDefinition
 
@@ -1029,7 +1029,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     val fieldAccessBlock = NewCall()
         .name(Operators.fieldAccess)
         .code(fieldAccessCode)
-        .typeFullName(registerType(fieldRef.getType.toQuotedString))
+        .typeFullName(registerType(fieldRef.getType.toString))
         .methodFullName(Operators.fieldAccess)
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
         .order(order)
@@ -1045,7 +1045,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
             NewIdentifier()
                 .name(leftOpString)
                 .code(leftOpString)
-                .typeFullName(registerType(leftOpType.toQuotedString))
+                .typeFullName(registerType(leftOpType.toString))
                 .order(1)
                 .argumentIndex(1)
           )
@@ -1087,7 +1087,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
             .columnNumber(column(parentUnit))
             .name(caughtException.toString())
             .code(caughtException.toString())
-            .typeFullName(registerType(caughtException.getType.toQuotedString))
+            .typeFullName(registerType(caughtException.getType.toString))
       )
 
   private def astForConstantExpr(constant: Constant, order: Int): Ast =
@@ -1098,7 +1098,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
                   .order(order)
                   .argumentIndex(order)
                   .code(s"${x.value.parseAsJavaType}.class")
-                  .typeFullName(registerType(x.getType.toQuotedString))
+                  .typeFullName(registerType(x.getType.toString))
             )
         case _: NullConstant =>
             Ast(
@@ -1114,7 +1114,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
                   .order(order)
                   .argumentIndex(order)
                   .code(constant.toString)
-                  .typeFullName(registerType(constant.getType.toQuotedString))
+                  .typeFullName(registerType(constant.getType.toString))
             )
 
   private def callAst(rootNode: NewNode, args: Seq[Ast]): Ast =
@@ -1157,7 +1157,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
       }
 
   private def astForMethodReturn(methodDeclaration: SootMethod): Ast =
-    val typeFullName = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val typeFullName = registerType(methodDeclaration.getReturnType.toString)
     val methodReturnNode = NodeBuilders
         .newMethodReturnNode(typeFullName, None, line(methodDeclaration), None)
         .order(methodDeclaration.getParameterCount + 2)
@@ -1165,7 +1165,7 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
 
   private def createMethodNode(methodDeclaration: SootMethod, typeDecl: RefType, childNum: Int) =
     val fullName           = methodFullName(typeDecl, methodDeclaration)
-    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toString)
     val methodName         = methodDeclaration.getName
     val paramCodePart      = paramListSignature(methodDeclaration, withParams = true)
     val code = if !methodDeclaration.isConstructor then
@@ -1182,21 +1182,21 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
         .order(childNum)
         .filename(filename)
         .astParentType(NodeTypes.TYPE_DECL)
-        .astParentFullName(typeDecl.toQuotedString)
+        .astParentFullName(typeDecl.toString)
         .lineNumber(line(methodDeclaration))
         .columnNumber(column(methodDeclaration))
   end createMethodNode
 
   private def methodFullName(typeDecl: RefType, methodDeclaration: SootMethod): String =
-    val typeName           = registerType(typeDecl.toQuotedString)
-    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toQuotedString)
+    val typeName           = registerType(typeDecl.toString)
+    val returnTypeFullName = registerType(methodDeclaration.getReturnType.toString)
     val methodName         = methodDeclaration.getName
     val paramSigPart       = paramListSignature(methodDeclaration)
     s"$typeName.$methodName:$returnTypeFullName$paramSigPart"
 
   private def paramListSignature(methodDeclaration: SootMethod, withParams: Boolean = false) =
     val paramTypes =
-        methodDeclaration.getParameterTypes.asScala.map(x => registerType(x.toQuotedString))
+        methodDeclaration.getParameterTypes.asScala.map(x => registerType(x.toString))
 
     val paramNames =
         if !methodDeclaration.isPhantom && Try(methodDeclaration.retrieveActiveBody()).isSuccess
