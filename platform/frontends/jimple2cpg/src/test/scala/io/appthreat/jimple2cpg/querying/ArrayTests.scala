@@ -92,7 +92,19 @@ class ArrayTests extends JimpleCode2CpgFixture {
   "should handle arrayIndexAccesses correctly (3-address code form)" in {
     def m = cpg.method(".*baz.*")
 
-    val List(indexAccess: Call, rhsStub: Identifier) = m.assignment.code("x\\[1\\] = .*\\+ 2").argument.l: @unchecked
+    val targetAssigns =
+      m.assignment
+        .where(
+          _.argument(1)
+            .isCall
+            .nameExact(Operators.indexAccess)
+            .where(_.argument(1).isIdentifier.nameExact("x"))
+            .where(_.argument(2).isLiteral.codeExact("1"))
+        )
+        .l
+
+    targetAssigns.size shouldBe 1
+    val List(indexAccess: Call, rhsNode) = targetAssigns.head.argument.l: @unchecked
     indexAccess.name shouldBe Operators.indexAccess
     indexAccess.methodFullName shouldBe Operators.indexAccess
 
@@ -104,10 +116,35 @@ class ArrayTests extends JimpleCode2CpgFixture {
       arg2.code shouldBe "1"
     }
 
-    withClue("placeholder in expr on RHS of assignment") {
-      rhsStub.code shouldBe "x[0]"
-      rhsStub.name should not be "x"
-      rhsStub.typeFullName shouldBe "int"
+    withClue("expr on RHS of assignment preserves x[0] + 2 semantics") {
+      rhsNode match {
+        case rhsCall: Call =>
+          rhsCall.name shouldBe Operators.addition
+          rhsCall.argument.isLiteral.codeExact("2").size shouldBe 1
+          rhsCall.argument
+            .isCall
+            .nameExact(Operators.indexAccess)
+            .where(_.argument(1).isIdentifier.nameExact("x"))
+            .where(_.argument(2).isLiteral.codeExact("0"))
+            .size shouldBe 1
+
+        case rhsStub: Identifier =>
+          rhsStub.typeFullName shouldBe "int"
+          val producerCalls =
+            m.assignment
+              .where(_.argument(1).isIdentifier.nameExact(rhsStub.name))
+              .argument(2)
+              .isCall
+              .nameExact(Operators.addition)
+              .l
+
+          producerCalls.size shouldBe 1
+          val producer = producerCalls.head
+          producer.code should include("+")
+          producer.code should include("2")
+
+        case other => Failed(s"unexpected RHS node type: ${other.label}")
+      }
     }
   }
 }
