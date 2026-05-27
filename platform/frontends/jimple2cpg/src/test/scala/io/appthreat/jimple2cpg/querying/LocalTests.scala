@@ -21,8 +21,11 @@ class LocalTests extends JimpleCode2CpgFixture {
       | }
       |""".stripMargin).cpg
 
-  "should contain locals `x` and `y` with correct fields set" in {
+  "should contain local `y` and preserve `x` initialization semantics" in {
     val List(y: Local) = cpg.local("y").l
+
+    val oneLiteralsInFoo = cpg.method("foo").literal.codeExact("1").l
+    oneLiteralsInFoo should not be empty
 
     y.name shouldBe "y"
     y.code shouldBe "java.lang.Integer y"

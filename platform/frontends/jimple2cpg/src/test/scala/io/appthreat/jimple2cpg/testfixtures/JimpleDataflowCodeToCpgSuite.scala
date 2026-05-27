@@ -29,17 +29,23 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
 
   implicit var context: EngineContext = EngineContext()
 
-  def getConstSourceSink(methodName: String, sourceCode: String = "\"MALICIOUS\"", sinkPattern: String = ".*println.*")(
+  def getConstSourceSink(
+    methodName: String,
+    sourceCode: String = "\"MALICIOUS\"",
+    sinkPattern: String = ".*println.*",
+    requireSourceMatch: Boolean = false
+  )(
     implicit cpg: Cpg
   ): (Iterator[Literal], Iterator[Expression]) = {
-    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern)
+    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern, requireSourceMatch)
   }
 
   def getMultiFnSourceSink(
     sourceMethodName: String,
     sinkMethodName: String,
     sourceCode: String = "\"MALICIOUS\"",
-    sinkPattern: String = ".*println.*"
+    sinkPattern: String = ".*println.*",
+    requireSourceMatch: Boolean = false
   )(implicit cpg: Cpg): (Iterator[Literal], Iterator[Expression]) = {
     val sourceMethod = cpg.method(s".*$sourceMethodName").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName").head
@@ -61,6 +67,10 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
             lit.code == sourceCode || normalizeLiteralCode(lit.code) == normalizedSource
           }
         }
+
+      if (requireSourceMatch && matched.isEmpty) {
+        fail(s"Could not find source literal $sourceCode for method $sourceMethodName")
+      }
 
       matched.iterator
     }

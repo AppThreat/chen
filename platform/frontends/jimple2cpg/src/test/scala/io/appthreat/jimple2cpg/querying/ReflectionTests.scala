@@ -22,7 +22,7 @@ class ReflectionTests extends JimpleCode2CpgFixture {
       |""".stripMargin).cpg
 
     "should assign the class and method variables correctly" in {
-        val identifiers = cpg.method("foo").ast.isIdentifier.name("fooClazz", "fooMethod").l
+        val identifiers = cpg.method("foo").ast.isIdentifier.name("fooClazz").l
         identifiers.exists(_.name == "fooClazz") shouldBe true
         val identifierMap = identifiers.groupBy(_.name).view.mapValues(_.head).toMap
         val fooClazz = identifierMap.getOrElse("fooClazz", fail("Identifier 'fooClazz' not found"))
@@ -39,7 +39,10 @@ class ReflectionTests extends JimpleCode2CpgFixture {
                 }
             case _ => fail("fooClazz identifier should be the LHS (child) of an <operator>.assignment call")
         }
-        cpg.method("foo").call.name("getMethod").size shouldBe 1
+
+        val getMethodCalls = cpg.method("foo").call.name("getMethod").l
+        getMethodCalls.size shouldBe 1
+        getMethodCalls.head.typeFullName shouldBe "java.lang.reflect.Method"
     }
 
     "should handle chained reflection calls like Class.forName().getMethod().invoke()" in {
