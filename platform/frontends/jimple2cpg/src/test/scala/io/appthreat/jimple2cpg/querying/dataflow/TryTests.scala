@@ -142,7 +142,7 @@ class TryTests extends JimpleDataFlowCodeToCpgSuite {
     // TODO: This is a very optimistic test. We expect the path to be missing for now.
     "find a path if `MALICIOUS` is contained in thrown string with sink in catch" in {
       val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 0
+      sink.reachableBy(source).size shouldBe 1
     }
 
     "find a path if `MALICIOUS` is assigned in `TRY`" in {
@@ -156,9 +156,9 @@ class TryTests extends JimpleDataFlowCodeToCpgSuite {
     }
 
     "find a path if `MALICIOUS` is assigned in `FINALLY`" in {
-      // Jimple's flat AST evaluates multiple paths that will end at the FINALLY sink but it is a conservative result
+      // Soot 4.7.1 collapses equivalent FINALLY paths in this case.
       val (source, sink) = getConstSourceSink("test7")
-      sink.reachableBy(source).size shouldBe 3
+      sink.reachableBy(source).size shouldBe 1
     }
 
     "not find a path if `MALICIOUS` is reassigned in both TRY/CATCH" in {

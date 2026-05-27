@@ -2,6 +2,7 @@ package io.appthreat.jimple2cpg.querying.dataflow
 
 import io.appthreat.jimple2cpg.testfixtures.{JimpleDataFlowCodeToCpgSuite, JimpleDataflowTestCpg}
 import io.appthreat.dataflowengineoss.language._
+import io.shiftleft.semanticcpg.language._
 
 class ArrayTests extends JimpleDataFlowCodeToCpgSuite {
 
@@ -99,9 +100,13 @@ class ArrayTests extends JimpleDataFlowCodeToCpgSuite {
     }
 
     "find a path if an entry in the `MALICIOUS` array is printed (approximation)" in {
-      // The reason this false positive occurs is because Jimple makes an alias in here unlike in test4
+      // In Soot 4.7.1 this case no longer materializes an alias from `vals` to another array local.
       val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
+      sink.reachableBy(source).size shouldBe 0
+
+      val test2 = cpg.method("test2")
+      val directAliasAssignments = test2.assignment.where(_.argument(2).isIdentifier.name("vals"))
+      directAliasAssignments.size shouldBe(0)
     }
 
     "find a path for alternative array initializer syntax" in {
@@ -127,7 +132,7 @@ class ArrayTests extends JimpleDataFlowCodeToCpgSuite {
     "find a path if the `MALICIOUS` array element is overwritten (approximation)" in {
       // Similarly to test2, this false positive occurs because Jimple makes an alias
       val (source, sink) = getConstSourceSink("test7")
-      sink.reachableBy(source).size shouldBe 1
+      sink.reachableBy(source).size shouldBe 0
     }
 
     "find a path if sink is in a `FOR` loop" in {

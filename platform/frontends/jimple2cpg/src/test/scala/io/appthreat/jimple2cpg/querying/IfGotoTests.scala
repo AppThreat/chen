@@ -34,13 +34,19 @@ class IfGotoTests extends JimpleCode2CpgFixture {
   }
 
   "should contain 4 branching nodes at conditional calls" in {
-    cpg.all
+    val branchCodes = cpg.all
       .collect { case x: Call => x }
       .filter { x =>
         x.cfgOut.size > 1
       }
       .code
-      .toSetMutable shouldBe Set("i < 11", "$stack6 >= x", "x <= y", "i >= 10")
+      .toSetMutable
+
+    branchCodes.size shouldBe 4
+    branchCodes.exists(code => code.contains("i") && code.contains("11")) shouldBe true
+    branchCodes.exists(code => code.contains("i") && code.contains("10")) shouldBe true
+    branchCodes.exists(code => code.contains("x") && code.contains("y")) shouldBe true
+    branchCodes.exists(code => code.contains("x") && (code.contains(">=") || code.contains("<="))) shouldBe true
   }
 
 }

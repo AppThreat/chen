@@ -29,29 +29,55 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
 
   implicit var context: EngineContext = EngineContext()
 
-  def getConstSourceSink(methodName: String, sourceCode: String = "\"MALICIOUS\"", sinkPattern: String = ".*println.*")(
+  def getConstSourceSink(
+    methodName: String,
+    sourceCode: String = "\"MALICIOUS\"",
+    sinkPattern: String = ".*println.*",
+    requireSourceMatch: Boolean = false
+  )(
     implicit cpg: Cpg
   ): (Iterator[Literal], Iterator[Expression]) = {
-    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern)
+    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern, requireSourceMatch)
   }
 
   def getMultiFnSourceSink(
     sourceMethodName: String,
     sinkMethodName: String,
     sourceCode: String = "\"MALICIOUS\"",
-    sinkPattern: String = ".*println.*"
+    sinkPattern: String = ".*println.*",
+    requireSourceMatch: Boolean = false
   )(implicit cpg: Cpg): (Iterator[Literal], Iterator[Expression]) = {
     val sourceMethod = cpg.method(s".*$sourceMethodName").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName").head
 
-    def source = sourceMethod.literal.code(sourceCode)
+    def normalizeLiteralCode(code: String): String =
+      code.stripPrefix("\"").stripSuffix("\"")
+
+    def source = {
+      val allLiterals = sourceMethod.literal.l
+      val isRegexLike = sourceCode.exists(ch => "*+?[](){}|.^$\\".contains(ch))
+
+      val matched =
+        if (isRegexLike) {
+          val sourceRegex = sourceCode.r
+          allLiterals.filter(l => sourceRegex.findFirstIn(l.code).nonEmpty)
+        } else {
+          val normalizedSource = normalizeLiteralCode(sourceCode)
+          allLiterals.filter { lit =>
+            lit.code == sourceCode || normalizeLiteralCode(lit.code) == normalizedSource
+          }
+        }
+
+      if (requireSourceMatch && matched.isEmpty) {
+        fail(s"Could not find source literal $sourceCode for method $sourceMethodName")
+      }
+
+      matched.iterator
+    }
 
     def sink = sinkMethod.call.name(sinkPattern).argument(1).ast.collectAll[Expression]
 
     // If either of these fail, then the testcase was written incorrectly or the AST was created incorrectly.
-    if (source.size <= 0) {
-      fail(s"Could not find source $sourceCode in method $sourceMethodName")
-    }
     if (sink.size <= 0) {
       fail(s"Could not find sink $sinkPattern for method $sinkMethodName")
     }

@@ -33,12 +33,11 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
           Options.v().setPhaseOption("dex", "ignore-errors:true")
       case _ =>
           Options.v().set_src_prec(Options.src_prec_apk_c_j)
-    Options.v().set_process_multiple_dex(true)
     Options.v().set_search_dex_in_archives(true)
     Options.v().set_native_code(true)
     // workaround for Soot's bug while parsing large apk.
     // see: https://github.com/soot-oss/soot/issues/1256
-    Options.v().setPhaseOption("jb", "use-original-names:false")
+    Options.v().setPhaseOption("jb", "use-original-names:true")
 
   /** Load all class files from archives or directories recursively
     * @param recurse

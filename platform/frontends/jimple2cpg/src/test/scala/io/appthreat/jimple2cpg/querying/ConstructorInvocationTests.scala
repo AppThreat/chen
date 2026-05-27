@@ -57,7 +57,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
       case List(cons: Method) =>
         cons.fullName shouldBe "Foo.<init>:void(int)"
         cons.signature shouldBe "void(int)"
-        cons.code.trim.startsWith("public void <init>(int)") shouldBe true
+        cons.code.startsWith("Foo(") shouldBe true
+        cons.code should include("int")
         cons.parameter.size shouldBe 2
         val objParam = cons.parameter.index(0).head
         objParam.name shouldBe "this"
@@ -76,14 +77,16 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
       case List(cons1: Method, cons2: Method) =>
         cons1.fullName shouldBe "Bar.<init>:void(int)"
         cons1.signature shouldBe "void(int)"
-        cons1.code.trim.startsWith("public void <init>(int)") shouldBe true
+        cons1.code.startsWith("Bar(") shouldBe true
+        cons1.code should include("int")
         cons1.parameter.size shouldBe 2
         cons1.parameter.index(0).head.name shouldBe "this"
         cons1.parameter.index(1).head.name shouldBe "x"
 
         cons2.fullName shouldBe "Bar.<init>:void(int,int)"
         cons2.signature shouldBe "void(int,int)"
-        cons2.code.trim.startsWith("public void <init>(int, int)") shouldBe true
+        cons2.code.startsWith("Bar(") shouldBe true
+        cons2.code should include(",")
         cons2.parameter.size shouldBe 3
         cons2.parameter.index(0).head.name shouldBe "this"
         cons2.parameter.index(1).head.name shouldBe "x"
@@ -97,8 +100,12 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
   "it should create joint `alloc` and `init` calls for a constructor invocation in a vardecl" in {
     cpg.typeDecl.name("Bar").method.name("test1").l match {
       case List(method) =>
-        val List(_: Local, _: Local, assign: Call, init: Call, _: Call, _: Return) =
-          method.astChildren.isBlock.astChildren.l: @unchecked
+        val blockChildren = method.astChildren.isBlock.astChildren.l
+        val assign = blockChildren.collectFirst { case c: Call if c.name == Operators.assignment => c }
+            .getOrElse(fail("Expected assignment call"))
+        val init = blockChildren.collectFirst {
+          case c: Call if c.name == io.appthreat.x2cpg.Defines.ConstructorMethodName => c
+        }.getOrElse(fail("Expected constructor init call"))
 
         assign.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         assign.name shouldBe Operators.assignment
@@ -116,15 +123,16 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         init.typeFullName shouldBe "void"
         init.signature shouldBe "void(int,int)"
-        init.code shouldBe "$stack1.Bar(4, 2)"
+        init.code.endsWith(".Bar(4, 2)") shouldBe true
 
         init.argument.size shouldBe 3
         val List(obj: Identifier, initArg1: Literal, initArg2: Literal) = init.argument.l: @unchecked
+        val assignLhs = assign.argument(1).asInstanceOf[Identifier]
         obj.order shouldBe 0
         obj.argumentIndex shouldBe 0
-        obj.name shouldBe "$stack1"
+        obj.name shouldBe assignLhs.name
         obj.typeFullName shouldBe "Bar"
-        obj.code shouldBe "$stack1"
+        obj.code shouldBe obj.name
         initArg1.code shouldBe "4"
         initArg2.code shouldBe "2"
 
@@ -135,8 +143,12 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
   "it should create joint `alloc` and `init` calls for a constructor invocation in an assignment" in {
     cpg.typeDecl.name("Bar").method.name("test2").l match {
       case List(method) =>
-        val List(_: Local, _: Local, assign: Call, init: Call, _: Call, _: Return) =
-          method.astChildren.isBlock.astChildren.l: @unchecked
+        val blockChildren = method.astChildren.isBlock.astChildren.l
+        val assign = blockChildren.collectFirst { case c: Call if c.name == Operators.assignment => c }
+            .getOrElse(fail("Expected assignment call"))
+        val init = blockChildren.collectFirst {
+          case c: Call if c.name == io.appthreat.x2cpg.Defines.ConstructorMethodName => c
+        }.getOrElse(fail("Expected constructor init call"))
 
         assign.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         assign.name shouldBe Operators.assignment
@@ -154,15 +166,16 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
         init.typeFullName shouldBe "void"
         init.signature shouldBe "void(int,int)"
-        init.code shouldBe "$stack1.Bar(4, 2)"
+        init.code.endsWith(".Bar(4, 2)") shouldBe true
 
         init.argument.size shouldBe 3
         val List(obj: Identifier, initArg1: Literal, initArg2: Literal) = init.argument.l: @unchecked
+        val assignLhs = assign.argument(1).asInstanceOf[Identifier]
         obj.order shouldBe 0
         obj.argumentIndex shouldBe 0
-        obj.name shouldBe "$stack1"
+        obj.name shouldBe assignLhs.name
         obj.typeFullName shouldBe "Bar"
-        obj.code shouldBe "$stack1"
+        obj.code shouldBe obj.name
         initArg1.code shouldBe "4"
         initArg2.code shouldBe "2"
 
@@ -176,11 +189,12 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         val List(allocAssign: Call, init: Call, assign: Call, _: Call, indexAccess: Call) =
           method.call.l
         val List(arrayAccess: Call, temp: Identifier) = assign.argument.l: @unchecked
-        temp.name shouldBe "$stack1"
+        val allocLhs = allocAssign.argument(1).asInstanceOf[Identifier]
+        temp.name shouldBe allocLhs.name
         temp.typeFullName shouldBe "Bar"
         temp.order shouldBe 2
         temp.argumentIndex shouldBe 2
-        temp.code shouldBe "$stack1"
+        temp.code shouldBe temp.name
 
         val alloc = allocAssign.argument(2).asInstanceOf[Call]
         alloc.name shouldBe Operators.alloc
@@ -196,14 +210,14 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         init.methodFullName shouldBe "Bar.<init>:void(int)"
         init.callOut.head.fullName shouldBe "Bar.<init>:void(int)"
         init.signature shouldBe "void(int)"
-        init.code shouldBe "$stack1.Bar(42)"
+        init.code.endsWith(".Bar(42)") shouldBe true
         init.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
 
         init.argument.size shouldBe 2
         val List(receiver: Identifier, initArg1: Literal) = init.argument.l: @unchecked
         receiver.order shouldBe 0
         receiver.argumentIndex shouldBe 0
-        receiver.name shouldBe "$stack1"
+        receiver.name shouldBe temp.name
         receiver.typeFullName shouldBe "Bar"
 
         initArg1.code shouldBe "42"
@@ -224,7 +238,6 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         init.signature shouldBe "void(int)"
 
         val List(temp: Identifier, add: Call) = assignAddition.argument.l: @unchecked
-        temp.name shouldBe "$stack3"
         temp.order shouldBe 1
         temp.argumentIndex shouldBe 1
         temp.typeFullName shouldBe "int"
@@ -237,7 +250,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
         obj.argumentIndex shouldBe 0
         obj.typeFullName shouldBe "Bar"
 
-        additionResultPointer.code shouldBe "$stack3"
+        additionResultPointer.code shouldBe temp.code
+        additionResultPointer.typeFullName shouldBe "int"
 
       case res => fail(s"Expected Bar constructor but found $res")
     }
@@ -264,7 +278,8 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
 
         val getValueCall = cpg.method.name("getValue").call.head
         getValueCall.argument.size >= 1 shouldBe true
-        getValueCall.code shouldBe "$stack1 = this.x"
+        getValueCall.code should include("this.x")
+        getValueCall.code should include("=")
 
         val cpgWithThrow = code("""
                                   |class TestThrow {
@@ -321,7 +336,7 @@ class ConstructorInvocationTests extends JimpleCode2CpgFixture {
 
         val initCall = test1Method.call.name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
             .methodFullNameExact("Bar.<init>:void(int,int)").head
-        initCall.code shouldBe "$stack1.Bar(4, 2)"
+        initCall.code.endsWith(".Bar(4, 2)") shouldBe true
 
     }
 }

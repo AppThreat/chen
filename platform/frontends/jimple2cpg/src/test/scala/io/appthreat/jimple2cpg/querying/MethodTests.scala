@@ -19,7 +19,7 @@ class MethodTests extends JimpleCode2CpgFixture {
     val List(x) = cpg.method.nameNot(io.appthreat.x2cpg.Defines.ConstructorMethodName).isExternal(false).l
     x.name shouldBe "foo"
     x.fullName shouldBe "Foo.foo:int(int,int)"
-    x.code.trim.startsWith("int foo(int, int)") shouldBe true
+    x.code.trim.startsWith("int foo(") shouldBe true
     x.signature shouldBe "int(int,int)"
     x.isExternal shouldBe false
     x.order shouldBe 1

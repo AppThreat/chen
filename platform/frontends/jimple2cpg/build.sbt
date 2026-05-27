@@ -1,11 +1,11 @@
 name := "jimple2cpg"
 
 dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
-
+resolvers += "Google Maven" at "https://maven.google.com/"
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"              % Versions.cpg,
   "commons-io"             % "commons-io"         % "2.22.0",
-  "org.soot-oss"           % "soot"               % "4.6.0",
+  "org.soot-oss"           % "soot"               % "4.7.1",
   "org.scala-lang.modules" % "scala-asm"          % "9.9.0-scala-1",
   "org.ow2.asm"            % "asm"                % "9.10.1",
   "org.ow2.asm"            % "asm-analysis"       % "9.10.1",
