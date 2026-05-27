@@ -505,15 +505,17 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
 
   private def astsForValue(value: soot.Value, order: Int, parentUnit: soot.Unit): Seq[Ast] =
       value match
-        case x: BinopExpr           => Seq(astForBinOpExpr(x, order, parentUnit))
-        case x: InvokeExpr          => Seq(astForInvokeExpr(x, order, parentUnit))
-        case x: AnyNewExpr          => Seq(astForNewExpr(x, order, parentUnit))
-        case x: CastExpr            => Seq(astForUnaryExpr(Operators.cast, x, x.getOp, order, parentUnit))
-        case x: InstanceOfExpr      => Seq(astForUnaryExpr(Operators.instanceOf, x, x.getOp, order, parentUnit))
-        case x: LengthExpr          => Seq(astForUnaryExpr(Operators.lengthOf, x, x.getOp, order, parentUnit))
-        case x: NegExpr             => Seq(astForUnaryExpr(Operators.minus, x, x.getOp, order, parentUnit))
-        case x: Expr               => astsForExpression(x, order, parentUnit)
-        case x: soot.Local         => Seq(astForLocal(x, order, parentUnit))
+        case x: BinopExpr  => Seq(astForBinOpExpr(x, order, parentUnit))
+        case x: InvokeExpr => Seq(astForInvokeExpr(x, order, parentUnit))
+        case x: AnyNewExpr => Seq(astForNewExpr(x, order, parentUnit))
+        case x: CastExpr   => Seq(astForUnaryExpr(Operators.cast, x, x.getOp, order, parentUnit))
+        case x: InstanceOfExpr =>
+            Seq(astForUnaryExpr(Operators.instanceOf, x, x.getOp, order, parentUnit))
+        case x: LengthExpr =>
+            Seq(astForUnaryExpr(Operators.lengthOf, x, x.getOp, order, parentUnit))
+        case x: NegExpr    => Seq(astForUnaryExpr(Operators.minus, x, x.getOp, order, parentUnit))
+        case x: Expr       => astsForExpression(x, order, parentUnit)
+        case x: soot.Local => Seq(astForLocal(x, order, parentUnit))
         case x: CaughtExceptionRef => Seq(astForCaughtExceptionRef(x, order, parentUnit))
         case x: Constant           => Seq(astForConstantExpr(x, order))
         case x: FieldRef           => Seq(astForFieldRef(x, order, parentUnit))
@@ -621,9 +623,9 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
                 Some(registerType("java.lang.Object"))
             case _ => None
       case _ => None
-    val calleeType       = registerType(callee.getDeclaringClass.getType.toString)
-    val defaultCallType  = if callee.isConstructor then "void" else returnTypeFullName
-    val callType         = explicitReturnType.getOrElse(defaultCallType)
+    val calleeType      = registerType(callee.getDeclaringClass.getType.toString)
+    val defaultCallType = if callee.isConstructor then "void" else returnTypeFullName
+    val callType        = explicitReturnType.getOrElse(defaultCallType)
 
     val argAsts = withOrder(invokeExpr match
       case x: DynamicInvokeExpr => x.getArgs.asScala ++ x.getBootstrapArgs.asScala
