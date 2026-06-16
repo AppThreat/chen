@@ -12,7 +12,7 @@ object Versions {
     val upickle       = "4.4.3"
     val scalaReplPP   = "0.1.85"
     val commonsCompress = "1.27.1"
-    val typeSafeConfig  = "1.4.8"
+    val typeSafeConfig  = "1.4.9"
     val versionSort     = "1.0.17"
     val scalaParallel   = "1.2.0"
     val ZeroturnaroundVersion = "1.17"
