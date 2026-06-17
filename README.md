@@ -155,7 +155,7 @@ Refer to the documentation site to learn more about the commands.
 - H (C/C++ Header and pre-processed .i files alone)
 - Java (Requires compilation)
 - Jar
-- Android APK (Requires Android SDK. Set the environment variable `ANDROID_HOME` or use the container image.)
+- Android APK and split bundles (.apkm, .apks, .xapk). Requires Android SDK. Set the environment variable `ANDROID_HOME` or use the container image. Split bundles are unpacked and the apks that carry dalvik bytecode are analysed. The Android tagger passes attach semantic tags to reachable flows, including personally identifiable information, regulated data such as `pci-dss`, `gdpr`, and `phi-medical`, secrets, third party `tracker` SDKs, and network direction tags such as `service-egress`, `service-ingress`, and `on-device-ai`.
 - JavaScript
 - TypeScript
 - Flow
