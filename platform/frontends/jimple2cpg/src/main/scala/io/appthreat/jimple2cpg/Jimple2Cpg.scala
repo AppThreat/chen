@@ -24,8 +24,8 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
 
   import Jimple2Cpg.*
 
-  private def sootLoadApk(input: File, framework: Option[String] = None): Unit =
-    Options.v().set_process_dir(List(input.canonicalPath).asJava)
+  private def sootLoadApk(inputs: List[File], framework: Option[String]): Unit =
+    Options.v().set_process_dir(inputs.map(_.canonicalPath).asJava)
     framework match
       case Some(value) if value.nonEmpty =>
           Options.v().set_src_prec(Options.src_prec_apk)
@@ -38,6 +38,36 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
     // workaround for Soot's bug while parsing large apk.
     // see: https://github.com/soot-oss/soot/issues/1256
     Options.v().setPhaseOption("jb", "use-original-names:true")
+
+  /** Extract a split bundle (.apkm, .apks, .xapk) and return the apks that carry dalvik bytecode
+    * for soot to process.
+    *
+    * These bundles are zip archives containing a base apk along with configuration splits (per-abi,
+    * per-density and per-locale). Only the apks holding a classes*.dex file are relevant for code
+    * analysis.
+    *
+    * @param input
+    *   The bundle file.
+    * @param tmpDir
+    *   A temporary directory to extract the bundle into.
+    * @return
+    *   The apks containing dalvik bytecode, or all contained apks as a fallback when none could be
+    *   inspected.
+    */
+  private[jimple2cpg] def extractApkBundle(input: File, tmpDir: File): List[File] =
+    val bundleDir = tmpDir.createChild("apk-bundle", asDirectory = true)
+    input.unzipTo(bundleDir)
+    val apks    = bundleDir.listRecursively.filter(_.extension.contains(".apk")).toList
+    val dexApks = apks.filter(apkContainsDex)
+    if dexApks.nonEmpty then dexApks else apks
+
+  /** Check whether an apk contains at least one dalvik executable. */
+  private[jimple2cpg] def apkContainsDex(apk: File): Boolean =
+      Try {
+          val zip = new java.util.zip.ZipFile(apk.toJava)
+          try zip.entries().asScala.exists(_.getName.endsWith(".dex"))
+          finally zip.close()
+      }.getOrElse(false)
 
   /** Load all class files from archives or directories recursively
     * @param recurse
@@ -108,7 +138,14 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
 
     val globalFromAstCreation: () => Global = input.extension match
       case Some(".apk" | ".dex") if input.isRegularFile =>
-          sootLoadApk(input, config.android)
+          sootLoadApk(List(input), config.android)
+          { () =>
+            val astCreator = SootAstCreationPass(cpg, config)
+            astCreator.createAndApply()
+            astCreator.global
+          }
+      case Some(".apkm" | ".apks" | ".xapk") if input.isRegularFile =>
+          sootLoadApk(extractApkBundle(input, tmpDir), config.android)
           { () =>
             val astCreator = SootAstCreationPass(cpg, config)
             astCreator.createAndApply()

@@ -1,10 +1,11 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.Literal
+import io.shiftleft.codepropertygraph.generated.nodes.{Literal, StoredNode}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
+import scala.collection.mutable
 import scala.util.matching.Regex
 
 /** Tags literals, parameters and identifiers that resemble Personally Identifiable Information
@@ -19,9 +20,9 @@ import scala.util.matching.Regex
   *
   * Every matching node receives:
   *   - a fine grained category tag (`pii-email`, `pci-card-number`, `phi-medical-record`, ...)
-  *   - the umbrella tag [[SensitiveData]] (`sensitive-data`)
-  *   - one or more compliance tags ([[Gdpr]], [[Pci]], [[Hipaa]], [[Ccpa]], [[Pii]], [[Secret]]) so
-  *     downstream queries can pivot directly on a benchmark.
+  *   - the umbrella tag `SensitiveData` (`sensitive-data`)
+  *   - one or more compliance tags (`Gdpr`, `Pci`, `Hipaa`, `Ccpa`, `Pii`, `Secret`) so downstream
+  *     queries can pivot directly on a benchmark.
   *
   * @see
   *   https://www.strac.io/blog/sensitive-data-classification-for-hipaa-pci-dss-gdpr-iso-27001-ccpa-and-more
@@ -31,11 +32,23 @@ class PiiTagsPass(atom: Cpg) extends CpgPass(atom):
   import PiiTagsPass.*
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
-    tagLiterals(dstGraph)
-    tagNamedNodes(dstGraph)
+    // Each node kind is traversed exactly once. Matches are accumulated per
+    // category and the tags are emitted in a single batch at the end, rather
+    // than re-traversing the graph for every category.
+    val matchesByCategory =
+        mutable.LinkedHashMap.empty[PiiCategory, mutable.ArrayBuffer[StoredNode]]
+    def record(category: PiiCategory, node: StoredNode): Unit =
+        matchesByCategory.getOrElseUpdate(category, mutable.ArrayBuffer.empty) += node
+
+    tagLiterals(record)
+    tagNamedNodes(record)
+
+    matchesByCategory.foreach { case (category, nodes) =>
+        storeTags(nodes.iterator, category, dstGraph)
+    }
 
   /** Tag string literals whose textual value resembles a sensitive datum. */
-  private def tagLiterals(dstGraph: DiffGraphBuilder): Unit =
+  private def tagLiterals(record: (PiiCategory, StoredNode) => Unit): Unit =
     // Pre-compute the literals once; most atoms contain a large number of them.
     val candidates = atom.literal
         .filter(l => isStringLiteral(l.code))
@@ -45,31 +58,32 @@ class PiiTagsPass(atom: Cpg) extends CpgPass(atom):
         }
         .l
 
-    Categories.foreach { category =>
-        category.valueRegex.foreach { regex =>
-            candidates.foreach { case (lit, value) =>
+    candidates.foreach { case (lit, value) =>
+        Categories.foreach { category =>
+            category.valueRegex.foreach { regex =>
                 if regex.matches(value) && category.valuePredicate(value) then
-                  storeTags(Iterator.single(lit), category, dstGraph)
+                  record(category, lit)
             }
         }
     }
 
-  /** Tag parameters and identifiers whose declared name hints at a sensitive datum. */
-  private def tagNamedNodes(dstGraph: DiffGraphBuilder): Unit =
+  /** Tag parameters, members and identifiers whose declared name hints at a sensitive datum. */
+  private def tagNamedNodes(record: (PiiCategory, StoredNode) => Unit): Unit =
+    // Normalize each name once and test it against every category's name regex.
+    def matchName(node: StoredNode, name: String): Unit =
+      val normalized = normalizeName(name)
       Categories.foreach { category =>
           category.nameRegex.foreach { regex =>
-            val params = atom.parameter.filterNot(_.name == "this").filterNot(_.name == "self")
-                .filter(p => regex.matches(normalizeName(p.name)))
-            storeTags(params, category, dstGraph)
-
-            val members = atom.member.filter(m => regex.matches(normalizeName(m.name)))
-            storeTags(members, category, dstGraph)
-
-            val idents = atom.identifier.filter(i => regex.matches(normalizeName(i.name)))
-            storeTags(idents, category, dstGraph)
+              if regex.matches(normalized) then record(category, node)
           }
       }
-  end tagNamedNodes
+
+    atom.parameter
+        .filterNot(_.name == "this")
+        .filterNot(_.name == "self")
+        .foreach(p => matchName(p, p.name))
+    atom.member.foreach(m => matchName(m, m.name))
+    atom.identifier.foreach(i => matchName(i, i.name))
 
   private def storeTags[A <: io.shiftleft.codepropertygraph.generated.nodes.StoredNode](
     nodes: Iterator[A],

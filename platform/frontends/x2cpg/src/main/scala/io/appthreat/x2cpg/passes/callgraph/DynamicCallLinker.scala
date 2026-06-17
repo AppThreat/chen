@@ -35,17 +35,13 @@ class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
         .where(_.dispatchTypeExact(DispatchTypes.DYNAMIC_DISPATCH))
         .l
 
-    dynamicCalls.grouped(10).foreach { callBatch =>
-      callBatch.foreach { call =>
-          try
-            linkDynamicCall(call, dstGraph)
-          catch
-            case ex: Exception =>
-                System.err.println(s"Error linking dynamic call ${call.code}: ${ex.getMessage}")
-      }
-      System.gc()
+    dynamicCalls.foreach { call =>
+        try
+          linkDynamicCall(call, dstGraph)
+        catch
+          case ex: Exception =>
+              System.err.println(s"Error linking dynamic call ${call.code}: ${ex.getMessage}")
     }
-  end run
 
   private def buildMethodCandidates(): Unit =
       for
