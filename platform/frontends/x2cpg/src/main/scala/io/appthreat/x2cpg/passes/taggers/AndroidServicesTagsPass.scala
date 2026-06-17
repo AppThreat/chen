@@ -86,7 +86,6 @@ class AndroidServicesTagsPass(atom: Cpg) extends CpgPass(atom):
                     atom.member.typeFullName(regex).iterator).l
             storeTags(typed, service, umbrella, dstGraph)
       end match
-
       // Data-receiving (ingress) calls: remote content fetched onto the device. Tagged with the
       // service-ingress umbrella so remote-content -> device sinks can be plotted as flows.
       service.ingressRegex.foreach { verbRegex =>
