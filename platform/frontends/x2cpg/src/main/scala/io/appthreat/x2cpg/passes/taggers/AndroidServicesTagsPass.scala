@@ -24,15 +24,22 @@ import scala.util.Using
   *   - call-argument level: arguments passed to calls into a service SDK (data leaving the device).
   *
   * Tags applied:
-  *   - the umbrella tag [[ServiceEgress]] (`service-egress`)
-  *   - a category tag (`service-cloud`, `service-ai-llm`, `service-social`, `service-messaging`,
-  *     `service-payment`, `service-storage`, `service-analytics`, `service-location`,
-  *     `service-monitoring`, `service-http`)
+  *   - an umbrella tag describing the data-flow direction:
+  *     - [[ServiceEgress]] (`service-egress`) for data leaving the device to a remote service,
+  *     - [[OnDeviceAi]] (`on-device-ai`) for local/on-device AI & LLM inference runtimes (no data
+  *       leaves the device, but PII reaching a local model is still privacy relevant), and
+  *     - [[ServiceIngress]] (`service-ingress`) for the data-receiving calls of HTTP / cloud
+  *       services (remote content fetched onto the device — download / read response body).
+  *   - a category tag (`service-cloud`, `service-ai-llm`, `service-ai-local`, `service-social`,
+  *     `service-messaging`, `service-payment`, `service-storage`, `service-analytics`,
+  *     `service-location`, `service-monitoring`, `service-http`)
   *   - a vendor tag of the form `service:<Name>` for triage / attribution.
   *
   * For generic HTTP clients (the `http` category) only the data-sending calls (post/put/body/
   * execute/...) and their arguments are tagged — listed via the `methods` field of each entry — to
-  * avoid tagging the entire client surface.
+  * avoid tagging the entire client surface. The data-receiving calls listed via `ingressMethods`
+  * (get/getInputStream/body/...) are tagged as ingress so remote-content→device flows can be
+  * plotted.
   *
   * The signature dictionary is bundled as `android-services.json` on the classpath.
   */
@@ -48,49 +55,61 @@ class AndroidServicesTagsPass(atom: Cpg) extends CpgPass(atom):
         Services.foreach(tag(_, dstGraph))
 
   private def tag(service: Service, dstGraph: DiffGraphBuilder): Unit =
+    // Umbrella tag describing the direction of the data flow for this service.
+    val umbrella = if service.local then OnDeviceAi else ServiceEgress
     service.namespaceRegex.foreach { regex =>
-        service.methodRegex match
-          case Some(verbRegex) =>
-              // Generic HTTP clients: tagging the whole client surface is noisy, so restrict to the
-              // data-sending calls (post/put/body/execute/...) and the arguments handed to them.
-              val egressCalls = atom.call.methodFullName(regex).name(verbRegex).l
-              storeTags(egressCalls.iterator, service, dstGraph)
-              storeTags(egressCalls.iterator.flatMap(_.argument), service, dstGraph)
-          case None =>
-              // Dedicated service SDKs: the whole surface is relevant.
-              // The SDK methods/types themselves and parameters around them.
-              val params =
-                  (atom.method.fullName(regex).parameter.iterator ++
-                      atom.parameter.typeFullName(regex).iterator).l
-              storeTags(params, service, dstGraph)
+      service.methodRegex match
+        case Some(verbRegex) =>
+            // Generic HTTP clients: tagging the whole client surface is noisy, so restrict to the
+            // data-sending calls (post/put/body/execute/...) and the arguments handed to them.
+            val egressCalls = atom.call.methodFullName(regex).name(verbRegex).l
+            storeTags(egressCalls.iterator, service, umbrella, dstGraph)
+            storeTags(egressCalls.iterator.flatMap(_.argument), service, umbrella, dstGraph)
+        case None =>
+            // Dedicated service SDKs: the whole surface is relevant.
+            // The SDK methods/types themselves and parameters around them.
+            val params =
+                (atom.method.fullName(regex).parameter.iterator ++
+                    atom.parameter.typeFullName(regex).iterator).l
+            storeTags(params, service, umbrella, dstGraph)
 
-              // Calls into the service plus the arguments handed to those calls (data egress).
-              val serviceCalls = atom.call.methodFullName(regex).l
-              storeTags(serviceCalls.iterator, service, dstGraph)
-              storeTags(serviceCalls.iterator.flatMap(_.argument), service, dstGraph)
+            // Calls into the service plus the arguments handed to those calls (data egress, or
+            // for local AI runtimes, data fed to the on-device model).
+            val serviceCalls = atom.call.methodFullName(regex).l
+            storeTags(serviceCalls.iterator, service, umbrella, dstGraph)
+            storeTags(serviceCalls.iterator.flatMap(_.argument), service, umbrella, dstGraph)
 
-              // Identifiers / locals / members holding service SDK instances.
-              val typed =
-                  (atom.identifier.typeFullName(regex).iterator ++
-                      atom.local.typeFullName(regex).iterator ++
-                      atom.member.typeFullName(regex).iterator).l
-              storeTags(typed, service, dstGraph)
+            // Identifiers / locals / members holding service SDK instances.
+            val typed =
+                (atom.identifier.typeFullName(regex).iterator ++
+                    atom.local.typeFullName(regex).iterator ++
+                    atom.member.typeFullName(regex).iterator).l
+            storeTags(typed, service, umbrella, dstGraph)
+      end match
+
+      // Data-receiving (ingress) calls: remote content fetched onto the device. Tagged with the
+      // service-ingress umbrella so remote-content -> device sinks can be plotted as flows.
+      service.ingressRegex.foreach { verbRegex =>
+        val ingressCalls = atom.call.methodFullName(regex).name(verbRegex).l
+        storeTags(ingressCalls.iterator, service, ServiceIngress, dstGraph)
+      }
     }
 
     // String literals carrying a known service host / endpoint.
     service.hostRegex.foreach { regex =>
-        storeTags(atom.literal.code(regex), service, dstGraph)
+        storeTags(atom.literal.code(regex), service, umbrella, dstGraph)
     }
   end tag
 
   private def storeTags[A <: StoredNode](
     nodes: IterableOnce[A],
     service: Service,
+    umbrella: String,
     dstGraph: DiffGraphBuilder
   ): Unit =
     val matched = nodes.iterator.toList
     if matched.nonEmpty then
-      matched.newTagNode(ServiceEgress).store()(using dstGraph)
+      matched.newTagNode(umbrella).store()(using dstGraph)
       matched.newTagNode(s"service-${service.category}").store()(using dstGraph)
       matched.newTagNode(s"service:${service.name}").store()(using dstGraph)
 
@@ -98,7 +117,9 @@ end AndroidServicesTagsPass
 
 object AndroidServicesTagsPass:
 
-  final val ServiceEgress = "service-egress"
+  final val ServiceEgress  = "service-egress"
+  final val ServiceIngress = "service-ingress"
+  final val OnDeviceAi     = "on-device-ai"
 
   // java and jimple frontends only (jimple covers Android apk/dex output).
   private val SupportedLangs: Set[String] = Set(
@@ -115,7 +136,9 @@ object AndroidServicesTagsPass:
     category: String,
     namespaces: Seq[String],
     hosts: Seq[String],
-    methods: Seq[String]
+    methods: Seq[String],
+    ingressMethods: Seq[String] = Nil,
+    local: Boolean = false
   ):
     /** Anchored full-match regex over the SDK package/type prefixes. */
     lazy val namespaceRegex: Option[String] =
@@ -134,6 +157,13 @@ object AndroidServicesTagsPass:
     lazy val methodRegex: Option[String] =
         if methods.isEmpty then None
         else Some(methods.map(Pattern.quote).mkString("(?i)(", "|", ")"))
+
+    /** Case-insensitive full-match regex over data-receiving (ingress) method short names. When
+      * defined, these calls fetch remote content onto the device and are tagged as ingress.
+      */
+    lazy val ingressRegex: Option[String] =
+        if ingressMethods.isEmpty then None
+        else Some(ingressMethods.map(Pattern.quote).mkString("(?i)(", "|", ")"))
   end Service
 
   /** Service definitions loaded once from the bundled `android-services.json` resource. */
@@ -162,8 +192,11 @@ object AndroidServicesTagsPass:
     val namespaces = c.downField("namespaces").as[List[String]].getOrElse(Nil).filter(_.nonEmpty)
     val hosts      = c.downField("hosts").as[List[String]].getOrElse(Nil).filter(_.nonEmpty)
     val methods    = c.downField("methods").as[List[String]].getOrElse(Nil).filter(_.nonEmpty)
+    val ingress =
+        c.downField("ingressMethods").as[List[String]].getOrElse(Nil).filter(_.nonEmpty)
+    val local = c.downField("local").as[Boolean].getOrElse(false)
     if name.nonEmpty && category.nonEmpty && (namespaces.nonEmpty || hosts.nonEmpty) then
-      Some(Service(name, category, namespaces, hosts, methods))
+      Some(Service(name, category, namespaces, hosts, methods, ingress, local))
     else None
 
 end AndroidServicesTagsPass

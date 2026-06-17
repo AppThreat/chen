@@ -1,6 +1,6 @@
 {
- "version": 2,
- "description": "Android (java/jimple) internet-facing service signatures: cloud, ai-llm, social, messaging, payment, storage, analytics, location, monitoring, http. Used to tag device-data egress. For 'http' entries, 'methods' lists the data-sending call names so only egress calls (and their arguments) are tagged.",
+ "version": 3,
+ "description": "Android (java/jimple) service signatures. Network services (cloud, ai-llm, social, messaging, payment, storage, analytics, location, monitoring, http) tag device-data egress; 'methods' lists data-sending calls and 'ingressMethods' lists remote-content-fetch calls (data reaching the device). 'local:true' entries (ai-local) are on-device AI/ML runtimes with no network egress.",
  "services": [
   {
    "name": "Amazon Web Services",
@@ -12,6 +12,11 @@
    "hosts": [
     "amazonaws.com",
     "s3.amazonaws.com"
+   ],
+   "ingressMethods": [
+    "getObject",
+    "download",
+    "getObjectContent"
    ]
   },
   {
@@ -26,6 +31,12 @@
     "cloudfunctions.net",
     "appspot.com",
     "run.app"
+   ],
+   "ingressMethods": [
+    "get",
+    "download",
+    "readAllBytes",
+    "reader"
    ]
   },
   {
@@ -39,6 +50,12 @@
     "firebasedatabase.app",
     "firebasestorage.googleapis.com",
     "firebaseremoteconfig.googleapis.com"
+   ],
+   "ingressMethods": [
+    "getBytes",
+    "getStream",
+    "getFile",
+    "getDownloadUrl"
    ]
   },
   {
@@ -52,6 +69,11 @@
     "azure.com",
     "azurewebsites.net",
     "blob.core.windows.net"
+   ],
+   "ingressMethods": [
+    "download",
+    "downloadContent",
+    "openInputStream"
    ]
   },
   {
@@ -63,6 +85,9 @@
    "hosts": [
     "cloudinary.com",
     "api.cloudinary.com"
+   ],
+   "ingressMethods": [
+    "download"
    ]
   },
   {
@@ -74,6 +99,9 @@
    "hosts": [
     "dropboxapi.com",
     "content.dropboxapi.com"
+   ],
+   "ingressMethods": [
+    "download"
    ]
   },
   {
@@ -667,6 +695,21 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
   },
   {
@@ -691,6 +734,21 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
   },
   {
@@ -715,6 +773,21 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
   },
   {
@@ -740,6 +813,21 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
   },
   {
@@ -764,6 +852,21 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
   },
   {
@@ -790,7 +893,116 @@
     "url",
     "getOutputStream",
     "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
    ]
+  },
+  {
+   "name": "llama.cpp",
+   "category": "ai-local",
+   "namespaces": [
+    "de.kherud.llama.",
+    "io.github.ggerganov."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "Ollama (local)",
+   "category": "ai-local",
+   "namespaces": [
+    "io.github.ollama4j."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ONNX Runtime",
+   "category": "ai-local",
+   "namespaces": [
+    "ai.onnxruntime.",
+    "com.microsoft.onnxruntime."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "TensorFlow Lite",
+   "category": "ai-local",
+   "namespaces": [
+    "org.tensorflow.lite."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "MediaPipe",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.mediapipe.tasks.genai.",
+    "com.google.mediapipe.tasks.text.",
+    "com.google.mediapipe.tasks.vision."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ExecuTorch",
+   "category": "ai-local",
+   "namespaces": [
+    "org.pytorch.executorch."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "PyTorch Mobile",
+   "category": "ai-local",
+   "namespaces": [
+    "org.pytorch."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "MLC LLM",
+   "category": "ai-local",
+   "namespaces": [
+    "ai.mlc."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ML Kit GenAI (on-device)",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.mlkit.genai."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "Google AI Edge",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.ai.edge."
+   ],
+   "hosts": [],
+   "local": true
   }
  ]
 }

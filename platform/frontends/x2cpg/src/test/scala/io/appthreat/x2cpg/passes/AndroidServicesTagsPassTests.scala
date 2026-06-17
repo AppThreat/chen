@@ -73,6 +73,21 @@ class AndroidServicesTagsPassTests extends AnyWordSpec with Matchers {
         tags should contain("service:Alibaba Cloud")
       }
 
+    "tag a local/on-device AI runtime call with the on-device-ai umbrella" in
+      Fixture(Languages.JAVASRC, callWithArg = Some(("de.kherud.llama.LlamaModel.complete", "\"prompt\""))) { cpg =>
+        val callTags = cpg.call.methodFullName("de.kherud.llama.*").tag.name.toSet
+        callTags should contain("on-device-ai")
+        callTags should contain("service-ai-local")
+        // not egress: nothing leaves the device
+        callTags should not contain "service-egress"
+      }
+
+    "tag an http data-receiving (ingress) call as service-ingress" in
+      Fixture(Languages.JAVASRC, callWithArg = Some(("okhttp3.Response.body", "x"))) { cpg =>
+        val callTags = cpg.call.methodFullName("okhttp3.*").tag.name.toSet
+        callTags should contain("service-ingress")
+      }
+
     "do nothing for non-jvm frontends" in
       Fixture(Languages.PYTHON, literals = Seq("\"https://api.openai.com/v1/chat\"")) { cpg =>
         cpg.literal.code(".*openai.*").tag shouldBe empty
