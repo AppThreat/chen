@@ -8,7 +8,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
-import java.util.regex.Pattern
+import scala.collection.mutable
 import scala.io.Source
 import scala.util.Using
 
@@ -25,11 +25,11 @@ import scala.util.Using
   *
   * Tags applied:
   *   - an umbrella tag describing the data-flow direction:
-  *     - [[ServiceEgress]] (`service-egress`) for data leaving the device to a remote service,
-  *     - [[OnDeviceAi]] (`on-device-ai`) for local/on-device AI & LLM inference runtimes (no data
+  *     - `ServiceEgress` (`service-egress`) for data leaving the device to a remote service,
+  *     - `OnDeviceAi` (`on-device-ai`) for local/on-device AI & LLM inference runtimes (no data
   *       leaves the device, but PII reaching a local model is still privacy relevant), and
-  *     - [[ServiceIngress]] (`service-ingress`) for the data-receiving calls of HTTP / cloud
-  *       services (remote content fetched onto the device — download / read response body).
+  *     - `ServiceIngress` (`service-ingress`) for the data-receiving calls of HTTP / cloud services
+  *       (remote content fetched onto the device — download / read response body).
   *   - a category tag (`service-cloud`, `service-ai-llm`, `service-ai-local`, `service-social`,
   *     `service-messaging`, `service-payment`, `service-storage`, `service-analytics`,
   *     `service-location`, `service-monitoring`, `service-http`)
@@ -50,67 +50,87 @@ class AndroidServicesTagsPass(atom: Cpg) extends CpgPass(atom):
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
-      // Android only: java and jimple frontends.
-      if SupportedLangs.contains(language) then
-        Services.foreach(tag(_, dstGraph))
+    // Android only: java and jimple frontends.
+    if !SupportedLangs.contains(language) then return
+    if Services.isEmpty then return
 
-  private def tag(service: Service, dstGraph: DiffGraphBuilder): Unit =
-    // Umbrella tag describing the direction of the data flow for this service.
-    val umbrella = if service.local then OnDeviceAi else ServiceEgress
-    service.namespaceRegex.foreach { regex =>
-      service.methodRegex match
-        case Some(verbRegex) =>
-            // Generic HTTP clients: tagging the whole client surface is noisy, so restrict to the
-            // data-sending calls (post/put/body/execute/...) and the arguments handed to them.
-            val egressCalls = atom.call.methodFullName(regex).name(verbRegex).l
-            storeTags(egressCalls.iterator, service, umbrella, dstGraph)
-            storeTags(egressCalls.iterator.flatMap(_.argument), service, umbrella, dstGraph)
-        case None =>
-            // Dedicated service SDKs: the whole surface is relevant.
-            // The SDK methods/types themselves and parameters around them.
-            val params =
-                (atom.method.fullName(regex).parameter.iterator ++
-                    atom.parameter.typeFullName(regex).iterator).l
-            storeTags(params, service, umbrella, dstGraph)
+    // Decompose each service into plain-string matchers. The bundled namespaces, hosts and
+    // method names are literal, so `startsWith` / `contains` / lowercased set membership are
+    // exactly equivalent to the per-service regexes but avoid regex overhead.
+    val matchers = Services.map(Matcher.from).toArray
 
-            // Calls into the service plus the arguments handed to those calls (data egress, or
-            // for local AI runtimes, data fed to the on-device model).
-            val serviceCalls = atom.call.methodFullName(regex).l
-            storeTags(serviceCalls.iterator, service, umbrella, dstGraph)
-            storeTags(serviceCalls.iterator.flatMap(_.argument), service, umbrella, dstGraph)
+    // Matches are accumulated per (service, umbrella) so each node kind is traversed exactly
+    // once, instead of re-scanning the whole graph once per service. A node is only tagged once
+    // per umbrella for a given service (the set dedups), then the umbrella, category and vendor
+    // tags are emitted together at the end.
+    val matchesByService =
+        mutable.LinkedHashMap.empty[(Int, String), mutable.LinkedHashSet[StoredNode]]
+    def record(serviceIdx: Int, umbrella: String, node: StoredNode): Unit =
+        matchesByService
+            .getOrElseUpdate((serviceIdx, umbrella), mutable.LinkedHashSet.empty) += node
 
-            // Identifiers / locals / members holding service SDK instances.
-            val typed =
-                (atom.identifier.typeFullName(regex).iterator ++
-                    atom.local.typeFullName(regex).iterator ++
-                    atom.member.typeFullName(regex).iterator).l
-            storeTags(typed, service, umbrella, dstGraph)
-      end match
-      // Data-receiving (ingress) calls: remote content fetched onto the device. Tagged with the
-      // service-ingress umbrella so remote-content -> device sinks can be plotted as flows.
-      service.ingressRegex.foreach { verbRegex =>
-        val ingressCalls = atom.call.methodFullName(regex).name(verbRegex).l
-        storeTags(ingressCalls.iterator, service, ServiceIngress, dstGraph)
-      }
+    // Methods of dedicated SDKs: tag the parameters declared on them.
+    atom.method.foreach { m =>
+      val fullName = m.fullName
+      var i        = 0
+      while i < matchers.length do
+        val s = matchers(i)
+        if !s.hasMethodFilter && s.matchesNamespace(fullName) then
+          m.parameter.foreach(p => record(i, s.umbrella, p))
+        i += 1
     }
 
-    // String literals carrying a known service host / endpoint.
-    service.hostRegex.foreach { regex =>
-        storeTags(atom.literal.code(regex), service, umbrella, dstGraph)
+    // Calls into a service. Generic HTTP clients only contribute their data-sending /
+    // data-receiving verbs; dedicated SDKs contribute their whole call surface.
+    atom.call.foreach { call =>
+      val fullName  = call.methodFullName
+      val shortName = call.name.toLowerCase
+      var i         = 0
+      while i < matchers.length do
+        val s = matchers(i)
+        if s.matchesNamespace(fullName) then
+          if s.hasMethodFilter then
+            if s.egressVerbs.contains(shortName) then
+              record(i, s.umbrella, call)
+              call.argument.foreach(a => record(i, s.umbrella, a))
+          else
+            record(i, s.umbrella, call)
+            call.argument.foreach(a => record(i, s.umbrella, a))
+          if s.ingressVerbs.contains(shortName) then
+            record(i, ServiceIngress, call)
+        i += 1
     }
-  end tag
 
-  private def storeTags[A <: StoredNode](
-    nodes: IterableOnce[A],
-    service: Service,
-    umbrella: String,
-    dstGraph: DiffGraphBuilder
-  ): Unit =
-    val matched = nodes.iterator.toList
-    if matched.nonEmpty then
-      matched.newTagNode(umbrella).store()(using dstGraph)
-      matched.newTagNode(s"service-${service.category}").store()(using dstGraph)
-      matched.newTagNode(s"service:${service.name}").store()(using dstGraph)
+    // Parameters, identifiers, locals and members whose declared type is a dedicated SDK type.
+    def tagTyped(typeFullName: String, node: StoredNode): Unit =
+      var i = 0
+      while i < matchers.length do
+        val s = matchers(i)
+        if !s.hasMethodFilter && s.matchesNamespace(typeFullName) then
+          record(i, s.umbrella, node)
+        i += 1
+    atom.parameter.foreach(p => tagTyped(p.typeFullName, p))
+    atom.identifier.foreach(n => tagTyped(n.typeFullName, n))
+    atom.local.foreach(n => tagTyped(n.typeFullName, n))
+    atom.member.foreach(n => tagTyped(n.typeFullName, n))
+
+    // String literals embedding a known service host / endpoint.
+    atom.literal.foreach { lit =>
+      val code = lit.code
+      var i    = 0
+      while i < matchers.length do
+        val s = matchers(i)
+        if s.hostFragments.exists(code.contains) then record(i, s.umbrella, lit)
+        i += 1
+    }
+
+    matchesByService.foreach { case ((serviceIdx, umbrella), nodes) =>
+        val s = matchers(serviceIdx)
+        nodes.iterator.newTagNode(umbrella).store()(using dstGraph)
+        nodes.iterator.newTagNode(s"service-${s.category}").store()(using dstGraph)
+        nodes.iterator.newTagNode(s"service:${s.name}").store()(using dstGraph)
+    }
+  end run
 
 end AndroidServicesTagsPass
 
@@ -138,32 +158,47 @@ object AndroidServicesTagsPass:
     methods: Seq[String],
     ingressMethods: Seq[String] = Nil,
     local: Boolean = false
+  )
+
+  /** A service compiled into plain-string matchers for single-pass tagging.
+    *
+    * @param umbrella
+    *   the data-flow direction tag for this service (`on-device-ai` for local runtimes, otherwise
+    *   `service-egress`).
+    * @param nsPrefixes
+    *   literal package/type prefixes; a node matches when its name starts with one of them.
+    * @param hostFragments
+    *   literal host strings; a literal matches when its code contains one of them.
+    * @param egressVerbs
+    *   / ingressVerbs lowercased data-sending / data-receiving method short names.
+    * @param hasMethodFilter
+    *   true for generic clients that restrict tagging to [[egressVerbs]] rather than the whole call
+    *   surface.
+    */
+  final case class Matcher(
+    name: String,
+    category: String,
+    umbrella: String,
+    nsPrefixes: Array[String],
+    hostFragments: Array[String],
+    egressVerbs: Set[String],
+    ingressVerbs: Set[String],
+    hasMethodFilter: Boolean
   ):
-    /** Anchored full-match regex over the SDK package/type prefixes. */
-    lazy val namespaceRegex: Option[String] =
-        if namespaces.isEmpty then None
-        else Some(namespaces.map(ns => s"${Pattern.quote(ns)}.*").mkString("(", "|", ")"))
+    def matchesNamespace(value: String): Boolean = nsPrefixes.exists(value.startsWith)
 
-    /** Containment full-match regex over service hosts (matches a literal embedding the host). */
-    lazy val hostRegex: Option[String] =
-        if hosts.isEmpty then None
-        else Some(hosts.map(h => s".*${Pattern.quote(h)}.*").mkString("(", "|", ")"))
-
-    /** Case-insensitive full-match regex over data-sending method short names. When defined, only
-      * these calls (and their arguments) are tagged for the namespace — used to avoid tagging the
-      * entire surface of generic HTTP clients.
-      */
-    lazy val methodRegex: Option[String] =
-        if methods.isEmpty then None
-        else Some(methods.map(Pattern.quote).mkString("(?i)(", "|", ")"))
-
-    /** Case-insensitive full-match regex over data-receiving (ingress) method short names. When
-      * defined, these calls fetch remote content onto the device and are tagged as ingress.
-      */
-    lazy val ingressRegex: Option[String] =
-        if ingressMethods.isEmpty then None
-        else Some(ingressMethods.map(Pattern.quote).mkString("(?i)(", "|", ")"))
-  end Service
+  object Matcher:
+    def from(s: Service): Matcher =
+        Matcher(
+          name = s.name,
+          category = s.category,
+          umbrella = if s.local then OnDeviceAi else ServiceEgress,
+          nsPrefixes = s.namespaces.toArray,
+          hostFragments = s.hosts.toArray,
+          egressVerbs = s.methods.map(_.toLowerCase).toSet,
+          ingressVerbs = s.ingressMethods.map(_.toLowerCase).toSet,
+          hasMethodFilter = s.methods.nonEmpty
+        )
 
   /** Service definitions loaded once from the bundled `android-services.json` resource. */
   lazy val Services: Seq[Service] =

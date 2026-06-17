@@ -4,10 +4,12 @@ import io.circe.*
 import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
+import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
 import java.util.regex.Pattern
+import scala.collection.mutable
 import scala.io.Source
 import scala.util.Using
 
@@ -20,11 +22,11 @@ import scala.util.Using
   * so the pass is useful across the languages chen supports, most importantly Android.
   *
   * For every matching node the pass applies:
-  *   - the umbrella tag [[TrackerTag]] (`tracker`)
+  *   - the umbrella tag `TrackerTag` (`tracker`)
   *   - a category tag per Exodus category (`tracker-analytics`, `tracker-advertisement`,
   *     `tracker-location`, `tracker-profiling`, `tracker-identification`,
   *     `tracker-crash-reporting`)
-  *   - the [[Adware]] tag (`adware`) when the tracker is in the advertisement category
+  *   - the `Adware` tag (`adware`) when the tracker is in the advertisement category
   *   - a vendor tag of the form `tracker:<Name>` for triage / attribution.
   */
 class TrackersTagsPass(atom: Cpg) extends CpgPass(atom):
@@ -51,29 +53,50 @@ class TrackersTagsPass(atom: Cpg) extends CpgPass(atom):
     // When the language is unknown / unsupported by our grouping, fall back to all entries so the
     // pass still provides value (namespaces are distinctive enough to keep false positives low).
     val selected = if entries.nonEmpty then entries else Trackers
-    selected.foreach(tag(_, dstGraph))
+    if selected.isEmpty then return
 
-  private def tag(tracker: Tracker, dstGraph: DiffGraphBuilder): Unit =
-    val regex = tracker.matchRegex
+    // Decompose each tracker's namespaces into anchored package prefixes and free-floating
+    // class-name fragments. The bundled namespaces are literal strings, so a plain `startsWith`
+    // / `contains` check is exactly equivalent to the previous per-tracker regex but avoids
+    // regex overhead.
+    val matchers: Array[(Tracker, Array[String], Array[String])] = selected.map { tracker =>
+      val (fragments, prefixes) = tracker.namespaces.partition(_.startsWith("."))
+      (tracker, prefixes.toArray, fragments.toArray)
+    }.toArray
+
     // Note: TYPE_DECL does not support TAGGED_BY edges, so SDK classes are tagged via the
     // taggable nodes that reference them (calls, type refs, identifiers, members, locals, params).
-    val matched =
-        (atom.method.fullName(regex).iterator ++
-            atom.call.methodFullName(regex).iterator ++
-            atom.typeRef.typeFullName(regex).iterator ++
-            atom.identifier.typeFullName(regex).iterator ++
-            atom.parameter.typeFullName(regex).iterator ++
-            atom.member.typeFullName(regex).iterator ++
-            atom.local.typeFullName(regex).iterator).l
+    // Each node kind is traversed exactly once; every node name is matched against all trackers
+    // and the hits are accumulated per tracker, rather than re-scanning the whole graph once per
+    // tracker.
+    val matchesByTracker = mutable.LinkedHashMap.empty[Tracker, mutable.ArrayBuffer[StoredNode]]
 
-    if matched.nonEmpty then
-      matched.newTagNode(TrackerTag).store()(using dstGraph)
-      matched.newTagNode(s"tracker:${tracker.name}").store()(using dstGraph)
-      tracker.categories.foreach { c =>
-        matched.newTagNode(s"tracker-$c").store()(using dstGraph)
-        if c == "advertisement" then matched.newTagNode(Adware).store()(using dstGraph)
-      }
-  end tag
+    def record(name: String, node: StoredNode): Unit =
+        if name.nonEmpty then
+          var i = 0
+          while i < matchers.length do
+            val (tracker, prefixes, fragments) = matchers(i)
+            if prefixes.exists(name.startsWith) || fragments.exists(name.contains) then
+              matchesByTracker.getOrElseUpdate(tracker, mutable.ArrayBuffer.empty) += node
+            i += 1
+
+    atom.method.foreach(m => record(m.fullName, m))
+    atom.call.foreach(c => record(c.methodFullName, c))
+    atom.typeRef.foreach(t => record(t.typeFullName, t))
+    atom.identifier.foreach(i => record(i.typeFullName, i))
+    atom.parameter.foreach(p => record(p.typeFullName, p))
+    atom.member.foreach(m => record(m.typeFullName, m))
+    atom.local.foreach(l => record(l.typeFullName, l))
+
+    matchesByTracker.foreach { case (tracker, nodes) =>
+        nodes.iterator.newTagNode(TrackerTag).store()(using dstGraph)
+        nodes.iterator.newTagNode(s"tracker:${tracker.name}").store()(using dstGraph)
+        tracker.categories.foreach { c =>
+          nodes.iterator.newTagNode(s"tracker-$c").store()(using dstGraph)
+          if c == "advertisement" then nodes.iterator.newTagNode(Adware).store()(using dstGraph)
+        }
+    }
+  end run
 
 end TrackersTagsPass
 
