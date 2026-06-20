@@ -31,10 +31,10 @@ class FluxReachingDefBenchmark extends CCodeToCpgSuite:
     * large return expression keeping everything live.
     */
   private def bigMethod(nVars: Int): String =
-    val decls   = (0 until nVars).map(i => s"  int v$i = a + $i;").mkString("\n")
-    val loop1   = (0 until nVars - 1).map(i => s"    v$i = v${i + 1} + v$i;").mkString("\n")
-    val loop2   = (1 until nVars).map(i => s"    v$i = v${i - 1} + a;").mkString("\n")
-    val ret     = (0 until nVars).map(i => s"v$i").mkString(" + ")
+    val decls = (0 until nVars).map(i => s"  int v$i = a + $i;").mkString("\n")
+    val loop1 = (0 until nVars - 1).map(i => s"    v$i = v${i + 1} + v$i;").mkString("\n")
+    val loop2 = (1 until nVars).map(i => s"    v$i = v${i - 1} + a;").mkString("\n")
+    val ret   = (0 until nVars).map(i => s"v$i").mkString(" + ")
     s"""
        |int big(int a) {
        |$decls
@@ -48,7 +48,6 @@ class FluxReachingDefBenchmark extends CCodeToCpgSuite:
        |  return $ret;
        |}
        |""".stripMargin
-  end bigMethod
 
   "the Flux reaching-def engine" should:
     "use far less memory than the classic engine on a large method" in:

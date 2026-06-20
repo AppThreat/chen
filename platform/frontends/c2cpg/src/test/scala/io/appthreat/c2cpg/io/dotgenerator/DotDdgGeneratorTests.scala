@@ -1,13 +1,13 @@
 package io.appthreat.c2cpg.io.dotgenerator
 
 import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
-import io.appthreat.dataflowengineoss.language._
-import io.shiftleft.semanticcpg.language._
+import io.appthreat.dataflowengineoss.language.*
+import io.shiftleft.semanticcpg.language.*
 
-class DotDdgGeneratorTests extends DataFlowCodeToCpgSuite {
+class DotDdgGeneratorTests extends DataFlowCodeToCpgSuite:
 
   "DotDdgGeneratorTest1" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo(int param1, char *param2) {
       |   int i = 0;
       |   while(i < 10) {
@@ -19,18 +19,18 @@ class DotDdgGeneratorTests extends DataFlowCodeToCpgSuite {
       |}
       |""".stripMargin)
 
-    "create correct dot graph" in {
-      inside(cpg.method.name("foo").dotDdg.l) { case List(elem) =>
-        val lines = elem.split("\n")
-        lines.head should startWith("digraph \"foo\"")
-        lines.count(x => x.contains("->")) shouldBe 34
-        lines.last should startWith("}")
+      "create correct dot graph" in {
+          inside(cpg.method.name("foo").dotDdg.l) { case List(elem) =>
+              val lines = elem.split("\n")
+              lines.head should startWith("digraph \"foo\"")
+              lines.count(x => x.contains("->")) shouldBe 34
+              lines.last should startWith("}")
+          }
       }
-    }
   }
 
   "DotDdgGeneratorTest2" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |int x = 42;
       |woo(x);
@@ -38,14 +38,13 @@ class DotDdgGeneratorTests extends DataFlowCodeToCpgSuite {
       |}
       |""".stripMargin)
 
-    "A DdgDotGenerator" should {
-      "create correct dot graph" in {
-        inside(cpg.method.name("foo").dotDdg.l) { case List(elem) =>
-          val lines = elem.split("\n")
-          lines.count(x => x.contains("->") && x.contains("\"x\"")) shouldBe 3
-        }
+      "A DdgDotGenerator" should {
+          "create correct dot graph" in {
+              inside(cpg.method.name("foo").dotDdg.l) { case List(elem) =>
+                  val lines = elem.split("\n")
+                  lines.count(x => x.contains("->") && x.contains("\"x\"")) shouldBe 3
+              }
+          }
       }
-    }
   }
-
-}
+end DotDdgGeneratorTests

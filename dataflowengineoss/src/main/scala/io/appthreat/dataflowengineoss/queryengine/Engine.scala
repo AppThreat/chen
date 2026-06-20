@@ -3,6 +3,7 @@ package io.appthreat.dataflowengineoss.queryengine
 import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.language.*
 import io.appthreat.dataflowengineoss.passes.reachingdef.EdgeValidator
+import io.appthreat.dataflowengineoss.queryengine.summaries.MethodFlowSummary
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Properties}
@@ -305,7 +306,13 @@ case class EngineConfig(
   // across sinks loses and non-deterministically reorders flows), so the query engine currently
   // ignores this flag and behaves identically to classic. A correct demand-driven summary engine
   // (CHEN3_PLAN §5) is the proper home for cross-sink reuse.
-  var useFluxEngine: Boolean = false
+  var useFluxEngine: Boolean = false,
+  // Opt-in (atom `--summaries`). When enabled and `summaries` is populated, the engine prunes
+  // cross-call tasks that a method flow summary proves cannot carry taint (for example an output
+  // argument the callee never writes). This only removes provably empty work, so results are
+  // unchanged; it is off by default.
+  var useSummaries: Boolean = false,
+  summaries: Map[String, MethodFlowSummary] = Map.empty
 )
 
 /** Tracks various performance characteristics of the query engine.

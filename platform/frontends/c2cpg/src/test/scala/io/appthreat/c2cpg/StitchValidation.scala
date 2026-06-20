@@ -1,7 +1,11 @@
 package io.appthreat.c2cpg
 
 import _root_.io.appthreat.x2cpg.passes.base.MethodStubCreator
-import _root_.io.appthreat.x2cpg.passes.callgraph.{DynamicCallLinker, MethodRefLinker, StaticCallLinker}
+import _root_.io.appthreat.x2cpg.passes.callgraph.{
+    DynamicCallLinker,
+    MethodRefLinker,
+    StaticCallLinker
+}
 import _root_.io.appthreat.x2cpg.passes.typerelations.{AliasLinkerPass, TypeHierarchyPass}
 import _root_.io.appthreat.x2cpg.passes.linking.StitchPass
 import _root_.io.shiftleft.codepropertygraph.Cpg
@@ -79,7 +83,9 @@ object StitchValidation:
     val cpgB   = Cpg.withStorage(b.toString)
     val stitch = new StitchPass(cpgB)
     time("StitchPass (full)")(stitch.createAndApply())
-    println(s"[stitch] realizedEdges=${stitch.realizedEdges} synthesizedStubs=${stitch.synthesizedStubs}")
+    println(
+      s"[stitch] realizedEdges=${stitch.realizedEdges} synthesizedStubs=${stitch.synthesizedStubs}"
+    )
 
     val diff = DiffTool.compare(cpgA.graph, cpgB.graph).asScala.toList
     println(s"[equivalence] DiffTool difference entries = ${diff.size}")

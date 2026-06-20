@@ -1,14 +1,14 @@
 package io.appthreat.c2cpg.passes.cfg
 
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.codepropertygraph.generated.nodes._
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class MethodCfgLayoutTests extends CCodeToCpgSuite {
+class MethodCfgLayoutTests extends CCodeToCpgSuite:
 
   "CFG layout" should {
-    val cpg = code("""
+      val cpg = code("""
         |void method1() {
         |  int x = 1;
         |}
@@ -22,39 +22,38 @@ class MethodCfgLayoutTests extends CCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "be correct for decl assignment in method1" in {
-      val x = cpg.method.nameExact("method1").cfgNext.collectAll[Identifier].head
-      x.name shouldBe "x"
+      "be correct for decl assignment in method1" in {
+          val x = cpg.method.nameExact("method1").cfgNext.collectAll[Identifier].head
+          x.name shouldBe "x"
 
-      val one = x.cfgOut.collectAll[Literal].head
-      one.code shouldBe "1"
+          val one = x.cfgOut.collectAll[Literal].head
+          one.code shouldBe "1"
 
-      val call = one.cfgOut.collectAll[Call].head
-      call.name shouldBe Operators.assignment
+          val call = one.cfgOut.collectAll[Call].head
+          call.name shouldBe Operators.assignment
 
-      val ret = call.cfgOut.collectAll[MethodReturn].head
-      ret.code shouldBe "RET"
-    }
+          val ret = call.cfgOut.collectAll[MethodReturn].head
+          ret.code shouldBe "RET"
+      }
 
-    "be correct for nested expression in method2" in {
-      val x = cpg.method.nameExact("method2").cfgNext.collectAll[Identifier].head
-      x.name shouldBe "x"
+      "be correct for nested expression in method2" in {
+          val x = cpg.method.nameExact("method2").cfgNext.collectAll[Identifier].head
+          x.name shouldBe "x"
 
-      val y = x.cfgNext.collectAll[Identifier].head
-      y.name shouldBe "y"
+          val y = x.cfgNext.collectAll[Identifier].head
+          y.name shouldBe "y"
 
-      val z = y.cfgNext.collectAll[Identifier].head
-      z.name shouldBe "z"
+          val z = y.cfgNext.collectAll[Identifier].head
+          z.name shouldBe "z"
 
-      val call1 = z.cfgOut.collectAll[Call].head
-      call1.name shouldBe Operators.addition
+          val call1 = z.cfgOut.collectAll[Call].head
+          call1.name shouldBe Operators.addition
 
-      val call2 = call1.cfgOut.collectAll[Call].head
-      call2.name shouldBe Operators.assignment
+          val call2 = call1.cfgOut.collectAll[Call].head
+          call2.name shouldBe Operators.assignment
 
-      val ret = call2.cfgOut.collectAll[MethodReturn].head
-      ret.code shouldBe "RET"
-    }
+          val ret = call2.cfgOut.collectAll[MethodReturn].head
+          ret.code shouldBe "RET"
+      }
   }
-
-}
+end MethodCfgLayoutTests

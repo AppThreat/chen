@@ -2,7 +2,10 @@ package io.appthreat.c2cpg.dataflow
 
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import _root_.io.appthreat.dataflowengineoss.DefaultSemantics
-import _root_.io.appthreat.dataflowengineoss.passes.reachingdef.{FluxReachingDefPass, ReachingDefPass}
+import _root_.io.appthreat.dataflowengineoss.passes.reachingdef.{
+    FluxReachingDefPass,
+    ReachingDefPass
+}
 import _root_.io.appthreat.dataflowengineoss.semanticsloader.Semantics
 import _root_.io.shiftleft.codepropertygraph.Cpg
 import _root_.io.shiftleft.codepropertygraph.generated.{EdgeTypes, PropertyNames}

@@ -43,7 +43,10 @@ class FluxQueryEquivTests extends DataFlowCodeToCpgSuite:
       |}
       |""".stripMargin)
 
-  private def assertSameFlows(sinks: () => Iterator[CfgNode], sources: () => Iterator[CfgNode]): Unit =
+  private def assertSameFlows(
+    sinks: () => Iterator[CfgNode],
+    sources: () => Iterator[CfgNode]
+  ): Unit =
     val classic = flowSet(sinks(), sources())(classicCtx)
     val flux    = flowSet(sinks(), sources())(fluxCtx)
     classic should not be empty

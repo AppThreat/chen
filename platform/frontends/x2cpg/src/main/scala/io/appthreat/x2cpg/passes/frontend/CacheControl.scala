@@ -18,14 +18,16 @@ import scala.collection.concurrent.TrieMap
 object CacheControl:
 
   /** Well-known cache kinds. */
-  final val Ast: String    = "ast"
-  final val Cpg: String    = "cpg"
-  final val Astgen: String = "astgen"
+  final val Ast: String     = "ast"
+  final val Cpg: String     = "cpg"
+  final val Astgen: String  = "astgen"
+  final val Summary: String = "summary"
 
   /** Default on/off per kind when neither code nor a system property says otherwise. */
   private def defaultEnabled(kind: String): Boolean = kind match
-    case Cpg => false // opt-in: only helps unchanged re-runs; fingerprint must be complete
-    case _   => true
+    case Cpg     => false // opt-in: only helps unchanged re-runs; fingerprint must be complete
+    case Summary => false // opt-in: method flow summaries are only built on request
+    case _       => true
 
   @volatile private var allDisabled: Boolean =
       System.getProperty("chen.cache.disabled", "false").equalsIgnoreCase("true")

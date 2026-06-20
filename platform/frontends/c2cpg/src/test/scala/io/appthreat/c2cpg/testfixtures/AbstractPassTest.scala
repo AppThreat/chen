@@ -9,33 +9,34 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.Inside
 
-abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside {
+abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
 
   protected abstract class Fixture
 
-  protected object AstFixture extends Fixture {
-    def apply(code: String, fileName: String = "file.c")(f: Cpg => Unit): Unit = {
-      File.usingTemporaryDirectory("c2cpgtest") { dir =>
-        val cpg  = newEmptyCpg()
-        val file = dir / fileName
-        file.write(code)
-        val config = Config().withInputPath(dir.toString()).withOutputPath(dir.toString()).withFunctionBodies(true)
-        new AstCreationPass(cpg, config).createAndApply()
-        f(cpg)
-        file.delete()
-      }
-    }
+  protected object AstFixture extends Fixture:
+    def apply(code: String, fileName: String = "file.c")(f: Cpg => Unit): Unit =
+        File.usingTemporaryDirectory("c2cpgtest") { dir =>
+          val cpg  = newEmptyCpg()
+          val file = dir / fileName
+          file.write(code)
+          val config = Config().withInputPath(dir.toString()).withOutputPath(dir.toString())
+              .withFunctionBodies(true)
+          new AstCreationPass(cpg, config).createAndApply()
+          f(cpg)
+          file.delete()
+        }
 
-    def createCpg(code: String): Cpg = {
+    def createCpg(code: String): Cpg =
       val cpg = newEmptyCpg()
       File.usingTemporaryDirectory("c2cpgtest") { dir =>
         val file = dir / "file.c"
         file.write(code)
-        val config = Config().withInputPath(dir.toString()).withOutputPath(dir.toString()).withFunctionBodies(true)
+        val config =
+            Config().withInputPath(dir.toString()).withOutputPath(dir.toString()).withFunctionBodies(
+              true
+            )
         new AstCreationPass(cpg, config).createAndApply()
       }
       cpg
-    }
-  }
-
-}
+  end AstFixture
+end AbstractPassTest

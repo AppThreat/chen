@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "3.0.0"
 ThisBuild / scalaVersion := "3.8.4"
 
-val cpgVersion = "3.0.3"
+val cpgVersion = "3.0.4"
 
 lazy val platform          = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss

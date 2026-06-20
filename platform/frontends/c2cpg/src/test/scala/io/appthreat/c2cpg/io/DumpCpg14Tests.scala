@@ -8,26 +8,25 @@ import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 
 import java.nio.file.Files
 
-class DumpCpg14Tests extends DataFlowCodeToCpgSuite {
+class DumpCpg14Tests extends DataFlowCodeToCpgSuite:
 
   "DumpCpg14" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {}
       |int bar() {}
       |""".stripMargin)
 
-    "create two dot files for a CPG containing two methods" in {
-      File.usingTemporaryDirectory("dumpast") { tmpDir =>
-        val opts         = Cpg14DumpOptions(tmpDir.path.toString)
-        val layerContext = new LayerCreatorContext(cpg)
-        new DumpCpg14(opts).run(layerContext)
-        (tmpDir / "0-cpg.dot").exists shouldBe true
-        (tmpDir / "1-cpg.dot").exists shouldBe true
-        Files.size((tmpDir / "0-cpg.dot").path) should not be 0
-        Files.size((tmpDir / "1-cpg.dot").path) should not be 0
+      "create two dot files for a CPG containing two methods" in {
+          File.usingTemporaryDirectory("dumpast") { tmpDir =>
+            val opts         = Cpg14DumpOptions(tmpDir.path.toString)
+            val layerContext = new LayerCreatorContext(cpg)
+            new DumpCpg14(opts).run(layerContext)
+            (tmpDir / "0-cpg.dot").exists shouldBe true
+            (tmpDir / "1-cpg.dot").exists shouldBe true
+            Files.size((tmpDir / "0-cpg.dot").path) should not be 0
+            Files.size((tmpDir / "1-cpg.dot").path) should not be 0
+          }
       }
-    }
 
   }
-
-}
+end DumpCpg14Tests

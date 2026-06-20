@@ -41,6 +41,82 @@ Downstream tools select the engine through `EngineConfig.useFluxEngine` / the da
 in [atom](https://github.com/AppThreat/atom) the Flux engine and per-file fragment caching are on by
 default, and `--legacy-dataflow` switches back to the classic engine.
 
+## Method flow summaries
+
+`dataflowengineoss` can compute a context-independent flow summary for each method. A
+`MethodFlowSummary` records which formal parameters reach the method's return value and which reach
+its output parameters, plus whether the return and each output parameter can be tainted by an origin
+internal to the method. Because the facts are expressed over parameter and return positions rather
+than over the nodes of one particular call, a summary can be reused at every call site.
+
+```scala
+import io.appthreat.dataflowengineoss.queryengine.summaries.FlowSummaryComputer
+
+// Build summaries for every internal method, callee before caller.
+val summaries = FlowSummaryComputer.computeAll(cpg)
+
+// Or reuse a cached set, recomputing only when a method body changed.
+val cached = FlowSummaryComputer.loadOrCompute(cpg, cacheDir = ".")
+```
+
+Summaries are built in callee-before-caller order over the call graph; mutually recursive methods
+form a strongly connected component that is iterated to a fixpoint. The set can be persisted with
+`FlowSummaryStore` (a single JSON file keyed on a fingerprint of the method bodies and the active
+semantics) and is gated by `CacheControl.Summary`.
+
+Flow semantics are respected. A method with a declared semantic gets its summary from that semantic
+rather than from its body, so a declared sanitizer (a semantic with no mappings) summarises as
+carrying nothing to its return, and a pass-through semantic forwards every non-receiver argument.
+Pass `Semantics` to `computeAll` / `loadOrCompute` to enable this (atom passes its default
+semantics).
+
+The backward query engine consumes summaries when `EngineConfig.useSummaries` is set and a summary
+map is supplied:
+
+```scala
+val context = EngineContext(
+  semantics,
+  EngineConfig(useSummaries = true, summaries = summaries)
+)
+```
+
+In this mode the engine prunes cross-call tasks that a summary proves cannot carry taint (for
+example exploring an output argument the callee never writes). The pruning only removes provably
+empty work, so the flows reported are identical to a run with summaries disabled. atom exposes this
+through the `reachables --summaries` flag.
+
+## Filtering flows through validators and sanitisers
+
+`reachableByFlows` returns `Path` values, and the dataflow language layer offers two node-predicate
+filters that are far easier to use than the older `passes` / `passesNot` traversal combinators:
+
+```scala
+import io.appthreat.dataflowengineoss.language.*
+
+flows.passesThrough(_.isCall)                       // keep flows touching a matching node
+flows.doesNotPassThrough(n => sanitizerIds(n.id))   // drop flows touching a matching node
+```
+
+`ChennaiTagsPass` can tag calls to declared sanitisers/validators so these filters have something to
+match. The pass reads a `sanitizers` (and `validators`) section from `chennai.json`, or from a config
+string passed to its constructor:
+
+```json
+{
+  "sanitizers": [
+    {
+      "name": "owasp-encode",
+      "methods": ["org\\.owasp\\.encoder\\.Encode\\..*"],
+      "categories": ["http"]
+    }
+  ]
+}
+```
+
+Each matching call is tagged `sanitizer`, plus one `sanitizer-<category>` tag per declared category.
+In [atom](https://github.com/AppThreat/atom) this is exposed through `reachables --validation-config`,
+which drops reachable flows that pass through a sanitiser covering the flow's sink category.
+
 ## Origin of chen
 
 chen is a fork of the popular [joern](https://github.com/joernio/joern) project. We deviate from the joern project in the following ways:

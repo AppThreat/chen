@@ -49,8 +49,9 @@ class CWarmRestoreTests extends AnyWordSpec with Matchers:
         warmNodes shouldBe coldNodes
         warmEdges shouldBe coldEdges
         warmLabels shouldBe coldLabels
-        methods should contain allOf ("foo", "bar")
+        (methods should contain).allOf("foo", "bar")
       finally
         CacheControl.disableFragments()
         dir.delete(swallowIOExceptions = true)
+      end try
 end CWarmRestoreTests

@@ -9,12 +9,12 @@ import io.shiftleft.codepropertygraph.generated.nodes.Identifier
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
-class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT) {
+class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
   "Namespaces" should {
 
-    "be correct for nested namespaces" in {
-      val cpg = code("""
+      "be correct for nested namespaces" in {
+          val cpg = code("""
         |namespace Q {
         |  namespace V {   // V is a member of Q, and is fully defined within Q
         |    class C { int m(); }; // C is a member of V and is fully defined within V
@@ -34,32 +34,32 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |  { return 0 ; }
         |}
         |""".stripMargin)
-      inside(cpg.method.isNotStub.fullName.l) { case List(f, m) =>
-        f shouldBe "Q.V.f:int()"
-        m shouldBe "Q.V.C.m:int()"
+          inside(cpg.method.isNotStub.fullName.l) { case List(f, m) =>
+              f shouldBe "Q.V.f:int()"
+              m shouldBe "Q.V.C.m:int()"
+          }
+
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>
+              q.fullName shouldBe "Q"
+              v.fullName shouldBe "Q.V"
+
+              inside(v.typeDecl.l) { case List(c) =>
+                  c.name shouldBe "C"
+                  c.fullName shouldBe "Q.V.C"
+              }
+
+              inside(q.method.l) { case List(f, m) =>
+                  f.name shouldBe "f"
+                  f.fullName shouldBe "Q.V.f:int()"
+                  m.name shouldBe "m"
+                  m.fullName shouldBe "Q.V.C.m:int()"
+              }
+          }
+
       }
 
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>
-        q.fullName shouldBe "Q"
-        v.fullName shouldBe "Q.V"
-
-        inside(v.typeDecl.l) { case List(c) =>
-          c.name shouldBe "C"
-          c.fullName shouldBe "Q.V.C"
-        }
-
-        inside(q.method.l) { case List(f, m) =>
-          f.name shouldBe "f"
-          f.fullName shouldBe "Q.V.f:int()"
-          m.name shouldBe "m"
-          m.fullName shouldBe "Q.V.C.m:int()"
-        }
-      }
-
-    }
-
-    "be correct for nested namespaces in C++17 style" in {
-      val cpg = code("""
+      "be correct for nested namespaces in C++17 style" in {
+          val cpg = code("""
         |namespace Q::V {
         |  class C { int m(); }; // C is a member of V and is fully defined within V
         |                        // C::m is only declared
@@ -77,29 +77,29 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |              // enclosing namespaces are the global namespace, Q, and Q::V
         |{ return 0; }
         |""".stripMargin)
-      inside(cpg.method.nameNot("<global>").fullName.l) { case List(m1, f1, f2, h, m2) =>
-        // TODO: this looks strange too it first glance. But as Eclipse CDT does not provide any
-        //  mapping from definitions outside of namespace into them we cant reconstruct proper full-names.
-        m1 shouldBe "Q.V.C.m:int()"
-        f1 shouldBe "Q.V.f:int()"
-        h shouldBe "h:void()"
-        f2 shouldBe "V.f"
-        m2 shouldBe "V.C.m"
+          inside(cpg.method.nameNot("<global>").fullName.l) { case List(m1, f1, f2, h, m2) =>
+              // TODO: this looks strange too it first glance. But as Eclipse CDT does not provide any
+              //  mapping from definitions outside of namespace into them we cant reconstruct proper full-names.
+              m1 shouldBe "Q.V.C.m:int()"
+              f1 shouldBe "Q.V.f:int()"
+              h shouldBe "h:void()"
+              f2 shouldBe "V.f"
+              m2 shouldBe "V.C.m"
+          }
+
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>
+              q.fullName shouldBe "Q"
+              v.fullName shouldBe "Q.V"
+
+              inside(v.typeDecl.l) { case List(c) =>
+                  c.name shouldBe "C"
+                  c.fullName shouldBe "Q.V.C"
+              }
+          }
       }
 
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(q, v) =>
-        q.fullName shouldBe "Q"
-        v.fullName shouldBe "Q.V"
-
-        inside(v.typeDecl.l) { case List(c) =>
-          c.name shouldBe "C"
-          c.fullName shouldBe "Q.V.C"
-        }
-      }
-    }
-
-    "be correct for unnamed namespaces" in {
-      val cpg = code("""
+      "be correct for unnamed namespaces" in {
+          val cpg = code("""
         |namespace {
         |  int i; // defines ::(unique)::i
         |}
@@ -122,28 +122,28 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |  A::i++; // ok, increments ::A::(unique)::i
         |  j++;    // ok, increments ::A::(unique)::j
         |}""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(unnamed1, a, unnamed2) =>
-        unnamed1.fullName shouldBe "anonymous_namespace_0"
-        a.fullName shouldBe "A"
-        unnamed2.fullName shouldBe "A.anonymous_namespace_1"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(unnamed1, a, unnamed2) =>
+              unnamed1.fullName shouldBe "anonymous_namespace_0"
+              a.fullName shouldBe "A"
+              unnamed2.fullName shouldBe "A.anonymous_namespace_1"
+          }
+
+          inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
+              f shouldBe "f:void()"
+              g shouldBe "A.g:void()"
+              h shouldBe "h:void()"
+          }
+
+          inside(cpg.method.nameExact("h").ast.isCall.code.l) { case List(c1, c2, c3, c4) =>
+              c1 shouldBe "i++"
+              c2 shouldBe "A::i++"
+              c3 shouldBe "A::i"
+              c4 shouldBe "j++"
+          }
       }
 
-      inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
-        f shouldBe "f:void()"
-        g shouldBe "A.g:void()"
-        h shouldBe "h:void()"
-      }
-
-      inside(cpg.method.nameExact("h").ast.isCall.code.l) { case List(c1, c2, c3, c4) =>
-        c1 shouldBe "i++"
-        c2 shouldBe "A::i++"
-        c3 shouldBe "A::i"
-        c4 shouldBe "j++"
-      }
-    }
-
-    "be correct for namespaces with using" in {
-      val cpg = code("""
+      "be correct for namespaces with using" in {
+          val cpg = code("""
         |void f();
         |
         |namespace A {
@@ -159,27 +159,27 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |  X::f(); // calls ::f
         |  X::g(); // calls A::g
         |}""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(a, x) =>
-        a.fullName shouldBe "A"
-        x.fullName shouldBe "X"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(a, x) =>
+              a.fullName shouldBe "A"
+              x.fullName shouldBe "X"
+          }
+
+          inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
+              f shouldBe "f:void()"
+              g shouldBe "A.g:void()"
+              h shouldBe "h:void()"
+          }
+
+          inside(cpg.call.filterNot(_.name == Operators.fieldAccess).l) { case List(f, g) =>
+              f.name shouldBe "f"
+              f.methodFullName shouldBe "f:void()"
+              g.name shouldBe "g"
+              g.methodFullName shouldBe "A.g:void()"
+          }
       }
 
-      inside(cpg.method.internal.nameNot("<global>").fullName.l) { case List(f, g, h) =>
-        f shouldBe "f:void()"
-        g shouldBe "A.g:void()"
-        h shouldBe "h:void()"
-      }
-
-      inside(cpg.call.filterNot(_.name == Operators.fieldAccess).l) { case List(f, g) =>
-        f.name shouldBe "f"
-        f.methodFullName shouldBe "f:void()"
-        g.name shouldBe "g"
-        g.methodFullName shouldBe "A.g:void()"
-      }
-    }
-
-    "be correct for namespaces with using and synonyms" in {
-      val cpg = code("""
+      "be correct for namespaces with using and synonyms" in {
+          val cpg = code("""
         |namespace A {
         |  void f(int);
         |}
@@ -197,31 +197,31 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |  using A::f; // this f is a synonym for both A::f(int) and A::f(char)
         |  f('a');     // calls f(char)
         |}""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(a1, a2) =>
-        // TODO: how to handle namespace extension?
-        a1.fullName shouldBe "A"
-        a2.fullName shouldBe "A"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(a1, a2) =>
+              // TODO: how to handle namespace extension?
+              a1.fullName shouldBe "A"
+              a2.fullName shouldBe "A"
+          }
+
+          inside(cpg.method.internal.nameNot("<global>").l) { case List(f1, f2, foo, bar) =>
+              f1.fullName shouldBe "A.f:void(int)"
+              f1.signature shouldBe "void(int)"
+              f2.fullName shouldBe "A.f:void(char)"
+              f2.signature shouldBe "void(char)"
+              foo.fullName shouldBe "foo:void()"
+              bar.fullName shouldBe "bar:void()"
+          }
+
+          inside(cpg.call.l) { case List(c1, c2) =>
+              c1.name shouldBe "f"
+              c1.methodFullName shouldBe "A.f:void(char)"
+              c2.name shouldBe "f"
+              c2.methodFullName shouldBe "A.f:void(char)"
+          }
       }
 
-      inside(cpg.method.internal.nameNot("<global>").l) { case List(f1, f2, foo, bar) =>
-        f1.fullName shouldBe "A.f:void(int)"
-        f1.signature shouldBe "void(int)"
-        f2.fullName shouldBe "A.f:void(char)"
-        f2.signature shouldBe "void(char)"
-        foo.fullName shouldBe "foo:void()"
-        bar.fullName shouldBe "bar:void()"
-      }
-
-      inside(cpg.call.l) { case List(c1, c2) =>
-        c1.name shouldBe "f"
-        c1.methodFullName shouldBe "A.f:void(char)"
-        c2.name shouldBe "f"
-        c2.methodFullName shouldBe "A.f:void(char)"
-      }
-    }
-
-    "be correct for namespaces with alias" in {
-      val cpg = code("""
+      "be correct for namespaces with alias" in {
+          val cpg = code("""
         |namespace foo {
         |  namespace bar {
         |    namespace baz {
@@ -235,39 +235,39 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |int main() {
         |  int x = fbz::qux;
         |}""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar, baz, fbz) =>
-        foo.name shouldBe "foo"
-        foo.fullName shouldBe "foo"
-        bar.name shouldBe "bar"
-        bar.fullName shouldBe "foo.bar"
-        baz.name shouldBe "baz"
-        baz.fullName shouldBe "foo.bar.baz"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar, baz, fbz) =>
+              foo.name shouldBe "foo"
+              foo.fullName shouldBe "foo"
+              bar.name shouldBe "bar"
+              bar.fullName shouldBe "foo.bar"
+              baz.name shouldBe "baz"
+              baz.fullName shouldBe "foo.bar.baz"
 
-        inside(baz.ast.isIdentifier.l) { case List(qux) =>
-          qux.name shouldBe "qux"
-          qux.typeFullName shouldBe "int"
-        }
+              inside(baz.ast.isIdentifier.l) { case List(qux) =>
+                  qux.name shouldBe "qux"
+                  qux.typeFullName shouldBe "int"
+              }
 
-        fbz.name shouldBe "fbz"
-        fbz.fullName shouldBe "foo.bar.baz"
+              fbz.name shouldBe "fbz"
+              fbz.fullName shouldBe "foo.bar.baz"
+          }
+
+          inside(cpg.call.l) { case List(c1, c2, c3) =>
+              c1.code shouldBe "qux = 42"
+              c2.code shouldBe "x = fbz::qux"
+              c3.code shouldBe "fbz::qux"
+              inside(c3.ast.l) { case List(call: Call, x: Identifier, a: FieldIdentifier) =>
+                  call.name shouldBe Operators.fieldAccess
+                  x.order shouldBe 1
+                  x.name shouldBe "fbz"
+                  a.order shouldBe 2
+                  a.code shouldBe "qux"
+              }
+          }
       }
 
-      inside(cpg.call.l) { case List(c1, c2, c3) =>
-        c1.code shouldBe "qux = 42"
-        c2.code shouldBe "x = fbz::qux"
-        c3.code shouldBe "fbz::qux"
-        inside(c3.ast.l) { case List(call: Call, x: Identifier, a: FieldIdentifier) =>
-          call.name shouldBe Operators.fieldAccess
-          x.order shouldBe 1
-          x.name shouldBe "fbz"
-          a.order shouldBe 2
-          a.code shouldBe "qux"
-        }
-      }
-    }
-
-    "be correct for namespaces with alias inside of methods" in {
-      val cpg = code("""
+      "be correct for namespaces with alias inside of methods" in {
+          val cpg = code("""
        |namespace foo {
        |  namespace bar {};
        |};
@@ -275,18 +275,18 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
        |int main() {
        |  namespace x = foo::bar;
        |};""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar, x) =>
-        foo.name shouldBe "foo"
-        foo.fullName shouldBe "foo"
-        bar.name shouldBe "bar"
-        bar.fullName shouldBe "foo.bar"
-        x.name shouldBe "x"
-        x.fullName shouldBe "foo.bar"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar, x) =>
+              foo.name shouldBe "foo"
+              foo.fullName shouldBe "foo"
+              bar.name shouldBe "bar"
+              bar.fullName shouldBe "foo.bar"
+              x.name shouldBe "x"
+              x.fullName shouldBe "foo.bar"
+          }
       }
-    }
 
-    "be correct for using namespaces inside of methods" in {
-      val cpg = code("""
+      "be correct for using namespaces inside of methods" in {
+          val cpg = code("""
        |namespace foo {
        |  namespace bar {};
        |};
@@ -294,16 +294,16 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
        |int main() {
        |  using namespace foo::bar;
        |};""".stripMargin)
-      inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar) =>
-        foo.name shouldBe "foo"
-        foo.fullName shouldBe "foo"
-        bar.name shouldBe "bar"
-        bar.fullName shouldBe "foo.bar"
+          inside(cpg.namespaceBlock.nameNot("<global>").l) { case List(foo, bar) =>
+              foo.name shouldBe "foo"
+              foo.fullName shouldBe "foo"
+              bar.name shouldBe "bar"
+              bar.fullName shouldBe "foo.bar"
+          }
       }
-    }
 
-    "be correct for derived classes in namespaces" in {
-      val cpg = code("""
+      "be correct for derived classes in namespaces" in {
+          val cpg = code("""
         |namespace BaseClasses {
         |
         |class A {
@@ -356,22 +356,24 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
         |  return 0;
         |};
         |""".stripMargin)
-      inside(cpg.namespace.nameNot(NamespaceTraversal.globalNamespaceName).sortBy(_.name).toList) {
-        case List(baseClasses, finalClasses, interClasses) =>
-          baseClasses.name shouldBe "BaseClasses"
-          interClasses.name shouldBe "IntermediateClasses"
-          finalClasses.name shouldBe "FinalClasses"
-      }
-      inside(cpg.namespaceBlock.nameNot(NamespaceTraversal.globalNamespaceName).l) {
-        case List(baseClasses, interClasses, finalClasses) =>
-          baseClasses.name shouldBe "BaseClasses"
-          baseClasses.fullName shouldBe "BaseClasses"
-          interClasses.name shouldBe "IntermediateClasses"
-          interClasses.fullName shouldBe "IntermediateClasses"
-          finalClasses.name shouldBe "FinalClasses"
-          finalClasses.fullName shouldBe "FinalClasses"
-      }
-        cpg.typ.name("A").derivedTypeTransitive.typeDeclFullName.sorted.l shouldBe List(
+          inside(
+            cpg.namespace.nameNot(NamespaceTraversal.globalNamespaceName).sortBy(_.name).toList
+          ) {
+              case List(baseClasses, finalClasses, interClasses) =>
+                  baseClasses.name shouldBe "BaseClasses"
+                  interClasses.name shouldBe "IntermediateClasses"
+                  finalClasses.name shouldBe "FinalClasses"
+          }
+          inside(cpg.namespaceBlock.nameNot(NamespaceTraversal.globalNamespaceName).l) {
+              case List(baseClasses, interClasses, finalClasses) =>
+                  baseClasses.name shouldBe "BaseClasses"
+                  baseClasses.fullName shouldBe "BaseClasses"
+                  interClasses.name shouldBe "IntermediateClasses"
+                  interClasses.fullName shouldBe "IntermediateClasses"
+                  finalClasses.name shouldBe "FinalClasses"
+                  finalClasses.fullName shouldBe "FinalClasses"
+          }
+          cpg.typ.name("A").derivedTypeTransitive.typeDeclFullName.sorted.l shouldBe List(
             "FinalClasses.C11",
             "FinalClasses.C12",
             "FinalClasses.C21",
@@ -381,9 +383,8 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
             "IntermediateClasses.B1*",
             "IntermediateClasses.B2",
             "IntermediateClasses.B2*"
-        )
-    }
+          )
+      }
 
   }
-
-}
+end NamespaceTypeTests

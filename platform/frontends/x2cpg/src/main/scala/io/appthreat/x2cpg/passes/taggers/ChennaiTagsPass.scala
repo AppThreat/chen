@@ -11,12 +11,24 @@ import io.shiftleft.semanticcpg.language.*
 import java.util.regex.Pattern
 import scala.util.{Try, Using}
 
-/** Creates tags on any node based on framework patterns and configuration */
-class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
+/** Creates tags on any node based on framework patterns and configuration.
+  *
+  * @param atom
+  *   the graph to tag.
+  * @param externalConfig
+  *   optional configuration content (the same JSON as the embedded `chennai.json`). When provided,
+  *   it is used in addition to any embedded config, which lets a caller pass a configuration from
+  *   outside the graph - for example an atom command-line flag - without first embedding it.
+  */
+class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPass(atom):
 
-  private val FRAMEWORK_ROUTE      = "framework-route"
-  private val FRAMEWORK_INPUT      = "framework-input"
-  private val FRAMEWORK_OUTPUT     = "framework-output"
+  private val FRAMEWORK_ROUTE  = "framework-route"
+  private val FRAMEWORK_INPUT  = "framework-input"
+  private val FRAMEWORK_OUTPUT = "framework-output"
+  // A call to a declared sanitiser or validator. Flows that pass through such a call are considered
+  // neutralised for the categories the sanitiser covers.
+  private val SANITIZER            = "sanitizer"
+  private val SANITIZER_TAG_PREFIX = "sanitizer-"
   private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
   private val RE_CHARS             = "[](){}*+&|?.,\\$"
 
@@ -222,20 +234,52 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
   end tagRubyRoutes
 
   private def processChennaiConfig(dstGraph: DiffGraphBuilder): Unit =
-      atom.configFile(CHENNAI_CONFIG_FILE).content.foreach { configData =>
+      configSources.foreach { configData =>
           parse(configData) match
             case Right(json) =>
-                val tags = json.hcursor
-                    .downField("tags")
-                    .focus
-                    .flatMap(_.asArray)
-                    .getOrElse(Vector.empty)
-
-                tags.foreach(processTag(_, dstGraph))
+                val cursor = json.hcursor
+                cursor.downField("tags").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+                    .foreach(processTag(_, dstGraph))
+                // A sanitiser/validator section, e.g.
+                //   "sanitizers": [ { "name": "owasp-encode",
+                //                     "methods": ["org\\.owasp\\.encoder\\.Encode\\..*"],
+                //                     "categories": ["http"] } ]
+                // `validators` is accepted as an alias and handled identically.
+                (cursor.downField("sanitizers").focus.flatMap(_.asArray).getOrElse(Vector.empty) ++
+                    cursor.downField("validators").focus.flatMap(_.asArray).getOrElse(Vector.empty))
+                    .foreach(processSanitizer(_, dstGraph))
 
             case Left(error) =>
                 System.err.println(s"Failed to parse Chennai config: $error")
       }
+
+  /** Configuration content from the embedded `chennai.json` and from any externally supplied
+    * config, in that order.
+    */
+  private def configSources: Seq[String] =
+      atom.configFile(CHENNAI_CONFIG_FILE).content.toSeq ++ externalConfig.toSeq
+
+  /** Tags every call to a declared sanitiser/validator method with the `sanitizer` tag, plus one
+    * `sanitizer-<category>` tag per declared category. With no categories the sanitiser is treated
+    * as covering every flow.
+    */
+  private def processSanitizer(sanitizerJson: Json, dstGraph: DiffGraphBuilder): Unit =
+    val cursor = sanitizerJson.hcursor
+    val methods =
+        cursor.downField("methods").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    val categories = cursor.downField("categories").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+        .flatMap(_.asString).filter(_.nonEmpty)
+
+    methods.flatMap(_.asString).filter(_.nonEmpty).foreach { methodPattern =>
+      val calls =
+          if containsRegex(methodPattern) then atom.call.methodFullName(methodPattern)
+          else atom.call.methodFullNameExact(methodPattern)
+      val callList = calls.l
+      callList.iterator.newTagNode(SANITIZER).store()(using dstGraph)
+      categories.foreach { category =>
+          callList.iterator.newTagNode(s"$SANITIZER_TAG_PREFIX$category").store()(using dstGraph)
+      }
+    }
 
   private def processTag(tagJson: Json, dstGraph: DiffGraphBuilder): Unit =
     val cursor  = tagJson.hcursor

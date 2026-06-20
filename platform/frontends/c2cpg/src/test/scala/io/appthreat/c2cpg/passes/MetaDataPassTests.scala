@@ -2,35 +2,35 @@ package io.appthreat.c2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.appthreat.x2cpg.passes.frontend.MetaDataPass
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
-class MetaDataPassTests extends AnyWordSpec with Matchers {
+class MetaDataPassTests extends AnyWordSpec with Matchers:
 
   "MetaDataPass" should {
-    val cpg = Cpg.emptyCpg
-    new MetaDataPass(cpg, Languages.C, "").createAndApply()
+      val cpg = Cpg.emptyCpg
+      new MetaDataPass(cpg, Languages.C, "").createAndApply()
 
-    "create exactly two nodes" in {
-      cpg.graph.V.asScala.size shouldBe 2
-    }
+      "create exactly two nodes" in {
+          cpg.graph.V.asScala.size shouldBe 2
+      }
 
-    "create no edges" in {
-      cpg.graph.E.asScala.size shouldBe 0
-    }
+      "create no edges" in {
+          cpg.graph.E.asScala.size shouldBe 0
+      }
 
-    "create a metadata node with correct language" in {
-      cpg.metaData.language.l shouldBe List("C")
-    }
+      "create a metadata node with correct language" in {
+          cpg.metaData.language.l shouldBe List("C")
+      }
 
-    "create a '<global>' NamespaceBlock" in {
-      cpg.namespaceBlock.name.l shouldBe List(NamespaceTraversal.globalNamespaceName)
-    }
+      "create a '<global>' NamespaceBlock" in {
+          cpg.namespaceBlock.name.l shouldBe List(NamespaceTraversal.globalNamespaceName)
+      }
 
   }
-}
+end MetaDataPassTests

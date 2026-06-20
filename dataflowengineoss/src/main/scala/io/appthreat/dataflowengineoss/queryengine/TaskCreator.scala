@@ -166,6 +166,7 @@ class TaskCreator(context: EngineContext):
                   argToOutputParams(arg).l
                 outParams
                     .filterNot(_.method.isExternal)
+                    .filterNot(summaryProvesUntaintableOutParam)
                     .map { p =>
                       val newStack =
                           arg.inCall.headOption.map { x =>
@@ -204,6 +205,15 @@ class TaskCreator(context: EngineContext):
     }
     restrictSize(forCalls) ++ restrictSize(forArgs) ++ restrictSize(forMethodRefs)
   end tasksForUnresolvedOutArgs
+
+  /** When method flow summaries are enabled, an output parameter whose summary proves it carries no
+    * taint from any origin can be skipped: exploring the callee for a flow into it would find
+    * nothing. With summaries disabled or absent this is always false, so behaviour is unchanged.
+    */
+  private def summaryProvesUntaintableOutParam(param: MethodParameterOut): Boolean =
+      context.config.useSummaries &&
+          context.config.summaries.get(param.method.fullName)
+              .exists(summary => !summary.paramOutTaintable(param.index))
 
   private def restrictSize(l: Vector[ReachableByTask]): Vector[ReachableByTask] =
       if l.size <= context.config.maxOutputArgsExpansion then
