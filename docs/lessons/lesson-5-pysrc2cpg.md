@@ -1,62 +1,101 @@
-# Lesson 5: Python Frontend (pysrc2cpg) and Dynamic Semantic Mapping
+# Lesson 5: Python Frontend (pysrc2cpg)
 
-### Learning Objective
+## Learning Objective
 
-Parse Python source code repositories, map dynamic features (dynamic imports, keyword arguments, and decorators), and run type recovery and call linking passes.
+Understand how `pysrc2cpg` compiles Python source into a CPG using a **native in-process parser**
+(no external AST generator), how it filters virtualenvs and ignored directories, and how the
+chain of import/type-recovery passes recovers Python's runtime semantics.
 
-### Pre-requisites
+## Pre-requisites
 
-To follow this lesson, ensure the following software is installed on your system:
+- JDK 23+ (OpenJDK or GraalVM)
+- SBT 1.10+
+- Local clone of [chen](https://github.com/AppThreat/chen): `sbt compile`
 
-- **JDK 23+**: Standard OpenJDK or GraalVM.
-- **SBT 1.10+**: Standard build utility.
-- **Python 3.10+**: Must be installed on the system path.
-- **Local clone of Chen**: Clone the [chen repository](https://github.com/AppThreat/chen) and run `sbt compile`.
+> Unlike JS/TS or Ruby, `pysrc2cpg` does **not** shell out to an external `astgen` binary. It
+> uses a hand-written Scala parser (`PyParser`, invoked from `CodeToCpg`), so no Python runtime
+> is required to build the graph.
 
-### Conceptual Background
+## Conceptual Background
 
-Python features dynamic imports (e.g. `importlib`), keyword arguments, decorators, list comprehensions, and runtime type assignments. Tracking variables in Python is challenging because typing information is resolved at runtime.
+Python features dynamic imports (`importlib`), keyword arguments, decorators, comprehensions, and
+runtime type assignment. Tracking variables is hard because types are resolved at runtime.
 
-The [pysrc2cpg](https://github.com/AppThreat/chen/tree/main/pysrc2cpg) frontend compiles Python source code into a CPG using the following steps:
+`pysrc2cpg` builds the graph in a single in-process pass and then runs a series of passes to
+recover the dynamic structure. The file-system entry point is
+[`Py2CpgOnFileSystem`](https://github.com/AppThreat/chen/blob/main/platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2CpgOnFileSystem.scala),
+which selects the `.py` files, applies ignore filters, and hands content providers to the inner
+`Py2Cpg` builder.
 
-1. **Python AST Generation**: Runs a python parsing script (`astgen.py`) to generate a JSON representation of the AST.
-2. **AST Parsing**: Imports the JSON AST nodes into CPG representation.
+Source:
+[platform/frontends/pysrc2cpg](https://github.com/AppThreat/chen/tree/main/platform/frontends/pysrc2cpg)
 
-Following this, the frontend runs several post-processing passes:
+## Config Fields (`Py2CpgOnFileSystemConfig`)
 
-- **[PythonImportsPass](https://github.com/AppThreat/chen/blob/main/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/ImportsPass.scala)**: Maps python imports and namespaces.
-- **[DynamicTypeHintFullNamePass](https://github.com/AppThreat/chen/blob/main/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/DynamicTypeHintFullNamePass.scala)**: Translates dynamic type hints (e.g. `typing.Union` or `typing.Optional`) into CPG types.
-- **[PythonInheritanceNamePass](https://github.com/AppThreat/chen/blob/main/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonInheritanceNamePass.scala)**: Traces base classes and resolves class hierarchies.
-- **[PythonTypeRecoveryPass](https://github.com/AppThreat/chen/blob/main/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeRecoveryPass.scala)**: Evaluates variable values and dynamically infers parameter types.
-- **[PythonTypeHintCallLinker](https://github.com/AppThreat/chen/blob/main/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeHintCallLinker.scala)**: Re-evaluates call sites and links them to the resolved methods.
-
-### Real Commands and Code Examples
-
-#### 1. Compiling a Python Project
-
-Compile a Python project to a CPG, ignoring standard directories like virtual environments:
-
-```bash
-./atom.sh -l python -o app.atom /path/to/python/project
+```scala
+case class Py2CpgOnFileSystemConfig(
+  venvDir: Path        = Paths.get(".venv"),  // virtualenv directory to ignore
+  ignoreVenvDir: Boolean = true,              // skip the venv directory
+  ignorePaths: Seq[Path] = Nil,               // explicit paths to ignore
+  ignoreDirNames: Seq[String] = Nil,          // directory *names* to ignore anywhere
+  requirementsTxt: String = "requirements.txt"// dependency manifest to parse
+) extends X2CpgConfig[Py2CpgOnFileSystemConfig]
+    with TypeRecoveryParserConfig[Py2CpgOnFileSystemConfig]
 ```
 
-#### 2. Running Py2Cpg Programmatically in Scala
+Builders: `withVenvDir`, `withIgnoreVenvDir`, `withIgnorePaths`, `withIgnoreDirNames`,
+`withRequirementsTxt`, plus the inherited `withDisableDummyTypes` / `withTypePropagationIterations`.
 
-Below is a code example showing how to invoke `pysrc2cpg` and run post-processing passes:
+## Pass Pipeline
+
+`Py2Cpg.buildCpg()` runs:
+
+1. **CodeToCpg** — the main pass. Reads each file's content, parses it with `PyParser`
+   (line-break corrected), and emits the structural graph.
+2. **ConfigFileCreationPass** — creates `CONFIG_FILE` nodes (`setup.py`, `pyproject.toml`,
+   `requirements.txt`, …).
+3. **DependenciesFromRequirementsTxtPass** — parses `requirements.txt` and records `DEPENDENCY`
+   nodes.
+
+`createCpgWithOverlays` then runs **Base**, **ControlFlow**, **TypeRelations**, **CallGraph**.
+
+### Post-processing passes (run by `atom`)
+
+1. **PythonImportsPass** (`ImportsPass`) — maps imports and namespaces.
+2. **PyImportResolverPass** (`ImportResolverPass`) — resolves imports to their definitions.
+3. **DynamicTypeHintFullNamePass** — translates `typing` hints (`Union`, `Optional`, …) into CPG
+   types.
+4. **PythonInheritanceNamePass** — resolves base classes / class hierarchies.
+5. **PythonTypeRecoveryPass** — iterative interprocedural type recovery (extends `XTypeRecovery`).
+6. **PythonTypeHintCallLinker** — re-links call sites once types are recovered.
+7. **AstLinkerPass** — finalises AST parent/child edges for late-created nodes.
+
+## Real Commands and Code Examples
+
+### atom CLI (`-l python` / `-l py`)
+
+```bash
+atom -l python -o app.atom /path/to/python/project
+```
+
+Virtualenvs (`.venv`) are ignored by default. To ignore extra directories:
+
+```bash
+atom -l python -o app.atom --ignored-dirs "build;dist;migrations" /path/to/python/project
+```
+
+### Build with the Scala API
 
 ```scala
 import io.appthreat.pysrc2cpg.{Py2CpgOnFileSystem, Py2CpgOnFileSystemConfig}
 import io.appthreat.pysrc2cpg.{
-  DynamicTypeHintFullNamePass,
-  PythonInheritanceNamePass,
-  PythonTypeHintCallLinker,
-  PythonTypeRecoveryPass,
-  ImportsPass as PythonImportsPass,
-  ImportResolverPass as PyImportResolverPass
+  DynamicTypeHintFullNamePass, PythonInheritanceNamePass,
+  PythonTypeHintCallLinker, PythonTypeRecoveryPass,
+  ImportsPass as PythonImportsPass, ImportResolverPass as PyImportResolverPass
 }
 import io.appthreat.x2cpg.passes.base.AstLinkerPass
 import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
-import scala.util.Success
+import scala.util.{Success, Failure}
 
 val config = Py2CpgOnFileSystemConfig()
   .withDisableDummyTypes(true)
@@ -64,18 +103,44 @@ val config = Py2CpgOnFileSystemConfig()
   .withInputPath("/path/to/python/source")
   .withOutputPath("/tmp/py_project.atom")
 
-val py2cpg = new Py2CpgOnFileSystem()
-py2cpg.createCpgWithOverlays(config).map { cpg =>
-  // Apply post-processing compiler passes
-  new PythonImportsPass(cpg).createAndApply()
-  new PyImportResolverPass(cpg).createAndApply()
-  new DynamicTypeHintFullNamePass(cpg).createAndApply()
-  new PythonInheritanceNamePass(cpg).createAndApply()
-  new PythonTypeRecoveryPass(cpg, XTypeRecoveryConfig(enabledDummyTypes = false)).createAndApply()
-  new PythonTypeHintCallLinker(cpg).createAndApply()
-  new AstLinkerPass(cpg).createAndApply()
-
-  println(s"Python CPG created successfully. Node count: ${cpg.graph.nodeCount}")
-  cpg.close()
-}
+new Py2CpgOnFileSystem().createCpgWithOverlays(config) match
+  case Success(cpg) =>
+    new PythonImportsPass(cpg).createAndApply()
+    new PyImportResolverPass(cpg).createAndApply()
+    new DynamicTypeHintFullNamePass(cpg).createAndApply()
+    new PythonInheritanceNamePass(cpg).createAndApply()
+    new PythonTypeRecoveryPass(cpg, XTypeRecoveryConfig(enabledDummyTypes = false)).createAndApply()
+    new PythonTypeHintCallLinker(cpg).createAndApply()
+    new AstLinkerPass(cpg).createAndApply()
+    println(s"Methods: ${cpg.method.size}")
+    cpg.close()
+  case Failure(ex) => println(s"Failed: ${ex.getMessage}")
 ```
+
+### Open and query the atom file
+
+```scala
+import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.semanticcpg.language.*
+
+val cpg = Cpg.withStorage("/tmp/py_project.atom")
+
+// Flask / Django route handlers (decorated methods)
+cpg.method.where(_.annotation.name(".*route|.*api_view")).name.l
+
+// subprocess / os command-execution sinks
+cpg.call.methodFullName(".*subprocess.*|.*os\\.system.*").l
+
+// Classes and their resolved base types
+cpg.typeDecl.map(td => (td.name, td.inheritsFromTypeFullName.l)).take(10).l
+```
+
+## Notes for Security Analysts
+
+- Type recovery defaults to 2 iterations; raising `typePropagationIterations` improves precision
+  on heavily dynamic code at the cost of build time. Use `withDisableDummyTypes(true)` to avoid
+  speculative `<...>` placeholder types polluting queries.
+- `DynamicTypeHintFullNamePass` only helps where developers used `typing` annotations; untyped
+  code relies entirely on `PythonTypeRecoveryPass` propagation from assignments and literals.
+- Keep `ignoreVenvDir = true` (the default). Analysing the vendored packages in `.venv` is rarely
+  desired and dramatically inflates the graph.
