@@ -2,11 +2,9 @@
 
 ### Learning Objective
 
-Understand how `StitchPass` links individual mini-graph fragments into a unified CPG, and master the configuration of incremental re-stitching for changed code files using the `SymbolIndex`.
+Understand how `StitchPass` links independently-generated mini-graph fragments into a unified CPG, how the `SymbolIndex` accelerates cross-fragment lookups, and how incremental re-stitching of changed source units works.
 
 ### Pre-requisites
-
-To follow this lesson, ensure the following software is installed on your system:
 
 - **JDK 23+**: Standard OpenJDK or GraalVM.
 - **SBT 1.10+**: Standard build utility.
@@ -14,47 +12,88 @@ To follow this lesson, ensure the following software is installed on your system
 
 ### Conceptual Background
 
-In large-scale codebases, generating a whole-program CPG in a single monolithic pass is memory-intensive and slow. To scale, the compiler can generate small "mini-graphs" (or graph fragments) for individual source units (files) independently. These isolated fragments must then be linked together to form a whole-program graph. This process is called **stitching**.
+In large codebases, generating a whole-program CPG in one monolithic pass is memory-intensive and slow. To scale, Chen can generate small per-unit "mini-graphs" independently, then link them. That linking step is **stitching**.
 
-The [StitchPass](https://github.com/AppThreat/chen/blob/main/platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/StitchPass.scala) class manages this linking in two modes:
+[StitchPass](https://github.com/AppThreat/chen/tree/main/platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/StitchPass.scala) is the public entry point:
 
-1. **Full Stitch**: Performs a global scan, indexing all method definitions and resolving all call sites, references, inheritance trees, and alias nodes.
-2. **Incremental Stitch**: Takes a set of `dirtyUnits` (source files that have changed). Instead of re-linking the entire graph, it only re-stiches call sites and references belonging to the dirty files or targeting symbols in those files, reducing execution time.
+```scala
+class StitchPass(cpg: Cpg, dirtyUnits: Option[Set[String]] = None):
+  @volatile var realizedEdges: Int    = 0
+  @volatile var synthesizedStubs: Int = 0
+  def createAndApply(): Unit
+```
 
-Stitching is backed by the [SymbolIndex](https://github.com/AppThreat/chen/blob/main/platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/SymbolIndex.scala), which maintains:
+The two `@volatile` counters are observable after `createAndApply()` returns and report how much work the pass did: how many `TYPE`/`REF`/`CALL`-style edges were realized, and how many external method stubs were synthesized.
 
-- **unitExports**: A lookup table mapping each source unit to the Fully Qualified Names (FQNs) of symbols it exports.
-- **typeMap / methodMap**: Quick lookup mappings for types and methods across fragment boundaries, avoiding costly whole-graph traversals.
+#### Two modes
+
+1. **Full stitch** — `dirtyUnits = None`. The pass scans the entire graph, synthesizes stubs for every unresolved call target, realizes all cross-fragment edges, and finally runs dynamic call resolution.
+2. **Incremental stitch** — `dirtyUnits = Some(files)`. Only call sites and references that belong to, or target symbols in, the changed files are re-linked. This is the warm path for editor/CI re-analysis.
+
+#### Phases
+
+`StitchPass.createAndApply()` builds a `SymbolIndex` once and runs the following sub-passes in order (all defined inside `object StitchPass`):
+
+1. **`StubSynthesisPass` (extends `CpgPass`)** — creates external `METHOD` stubs for call targets that no fragment defines. It tracks `var synthesizedStubs: Int` and records `synthesizedFullNames: mutable.LinkedHashSet[String]`, registering each new stub back into the `SymbolIndex` so the next phase can resolve against it. Candidate calls are selected by `callsToConsider(cpg, dirtyUnits)`, which narrows to dirty-unit calls in incremental mode.
+2. **`EdgeRealizationPass` (extends `CpgPass with LinkingUtil`)** — realizes the actual edges. It dispatches to `linkTypeAndRefEdgesFull(...)` for a full stitch or `linkTypeAndRefEdgesDirty(...)` for the incremental case, and increments `var realizedEdges: Int`.
+3. **`DynamicCallLinker`** — only in full-stitch mode, resolves dynamic dispatch targets across the now-linked graph.
+
+Internally the pass keys stubs by a `StubKey(name, signature, fullName, dispatchType)` and resolves a node's owning unit with `unitOf(node)`.
+
+#### SymbolIndex
+
+`SymbolIndex.scala` is built via the factory `SymbolIndex(cpg)`. It maintains fast lookups so stitching never falls back to whole-graph traversals:
+
+- method / typeDecl / type lookups keyed by `fullName`
+- `unitExports: Map[String, Set[String]]` — filename → the FQNs that file exports, the foundation for incremental re-stitch (you can compute the closure of affected units from the changed files' exports)
+- `addMethod(...)` — register a freshly synthesized stub
+- internal keying via `SymbolicKey(kind, fqName, arity)`
+
+Alongside it, `FragmentSplicePass.scala` and `FragmentBoundary.scala` (`ChenSymbolicKeys`, `SymbolIndexBoundaryResolver`, `NoBoundaryResolver`) support warm-restoring previously cached fragments into a live graph.
 
 ### Real Commands and Code Examples
 
-#### 1. Running a Stitch Validation Test
+#### 1. Running the stitch validation test
 
-Execute the C2CPG incremental stitching validation script:
+The C frontend ships an end-to-end check that loads a stored atom and stitches it:
 
 ```bash
 sbt "c2cpg/testOnly io.appthreat.c2cpg.StitchValidation"
 ```
 
-#### 2. Running StitchPass Programmatically in Scala
+The test lives at `c2cpg/src/test/scala/io/appthreat/c2cpg/StitchValidation.scala` and uses `Cpg.withStorage` to open the atom.
 
-Below is a code example showing how to invoke `StitchPass` in both full and incremental modes:
+#### 2. Running StitchPass programmatically
 
 ```scala
 import io.appthreat.x2cpg.passes.linking.StitchPass
-import io.shiftleft.codepropertygraph.generated.Cpg
-import java.nio.file.Paths
+import io.shiftleft.codepropertygraph.Cpg
 
-val cpg: Cpg = loadCpg("/tmp/cpg.bin")
+val cpg = Cpg.withStorage("/tmp/app.atom")
 
-// 1. Run a full stitch over the entire graph
-val fullStitch = new StitchPass(cpg)
-fullStitch.createAndApply()
-println(s"Full stitch complete. Realized edges: ${fullStitch.realizedEdges}")
-
-// 2. Run an incremental stitch on specific modified files (dirty units)
-val modifiedFiles = Set("src/main/java/io/appthreat/Service.java")
-val incrementalStitch = new StitchPass(cpg, dirtyUnits = Some(modifiedFiles))
-incrementalStitch.createAndApply()
-println(s"Incremental stitch complete. Realized edges: ${incrementalStitch.realizedEdges}")
+// Full stitch over the entire graph.
+val full = new StitchPass(cpg)
+full.createAndApply()
+println(s"Full stitch: ${full.realizedEdges} edges, ${full.synthesizedStubs} stubs")
 ```
+
+#### 3. Incremental re-stitch of changed files
+
+```scala
+import io.appthreat.x2cpg.passes.linking.StitchPass
+import io.shiftleft.codepropertygraph.Cpg
+
+val cpg = Cpg.withStorage("/tmp/app.atom")
+
+// Only the files that changed since the last analysis.
+val dirty = Set("src/service/auth.c", "src/service/session.c")
+val inc   = new StitchPass(cpg, dirtyUnits = Some(dirty))
+inc.createAndApply()
+println(s"Incremental stitch: ${inc.realizedEdges} edges re-linked")
+```
+
+In incremental mode the pass uses `SymbolIndex.unitExports` to determine which other units depend on the changed files' exported symbols, so callers in unchanged-but-affected files still get re-linked.
+
+### Summary
+
+`StitchPass` turns per-file mini-graphs into a whole-program CPG in three phases — stub synthesis, edge realization, and (for full stitch) dynamic call linking — all backed by a `SymbolIndex` for O(1) cross-fragment lookups. Passing `dirtyUnits` switches it from a global rebuild to a targeted, fast incremental re-link.
