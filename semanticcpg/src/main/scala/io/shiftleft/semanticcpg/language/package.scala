@@ -25,6 +25,8 @@ import io.shiftleft.semanticcpg.language.types.propertyaccessors.*
 import io.shiftleft.semanticcpg.language.types.structure.{MethodTraversal as OriginalMethod, *}
 import overflowdb.NodeOrDetachedNode
 
+import scala.language.implicitConversions
+
 /** Language for traversing the code property graph
   *
   * Implicit conversions to specific steps, based on the node at hand. Automatically in scope when

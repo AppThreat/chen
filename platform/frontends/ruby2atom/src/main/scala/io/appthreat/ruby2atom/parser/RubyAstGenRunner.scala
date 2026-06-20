@@ -9,6 +9,8 @@ import io.appthreat.x2cpg.astgen.AstGenRunner.{
     DefaultAstGenRunnerResult
 }
 import io.appthreat.x2cpg.astgen.AstGenRunnerBase
+import io.appthreat.x2cpg.passes.frontend.{CacheControl, CpgCacheStore, ExternalParseCache}
+import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
 
 import java.io.File.separator
@@ -38,17 +40,39 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
     val excludeArgs = if exclude.isEmpty then "" else s" -e '$exclude'"
     ExternalCommand.run(s"$command$excludeArgs", in, true) match
       case Success(result) =>
-          val srcFiles = SourceFiles.determine(
-            out.pathAsString,
-            Set(".json"),
-            ignoredDefaultRegex = Option(config.defaultIgnoredFilesRegex),
-            ignoredFilesRegex = Option(config.ignoredFilesRegex),
-            ignoredFilesPath = Option(config.ignoredFiles)
-          )
-          val parsed = filterFiles(srcFiles, out)
-          DefaultAstGenRunnerResult(parsed, List.empty)
+          collectResult(out)
       case Failure(f) =>
           DefaultAstGenRunnerResult()
+
+  /** Collect the parsed JSON files produced (or restored from cache) under `out`. */
+  private def collectResult(out: File): AstGenRunnerResult =
+    val srcFiles = SourceFiles.determine(
+      out.pathAsString,
+      Set(".json"),
+      ignoredDefaultRegex = Option(config.defaultIgnoredFilesRegex),
+      ignoredFilesRegex = Option(config.ignoredFilesRegex),
+      ignoredFilesPath = Option(config.ignoredFiles)
+    )
+    val parsed = filterFiles(srcFiles, out)
+    DefaultAstGenRunnerResult(parsed, List.empty)
+
+  /** Best-effort rbastgen version, folded into the cache fingerprint so a parser upgrade
+    * invalidates cached output. Falls back to "unknown" if the version cannot be determined.
+    */
+  private lazy val astGenVersion: String =
+      ExternalCommand
+          .run("rbastgen --version", config.inputPath)
+          .toOption
+          .flatMap(_.headOption)
+          .map(_.trim)
+          .getOrElse("unknown")
+
+  /** Identity of everything (besides the sources) that affects rbastgen's output. */
+  private def astGenFingerprint(excludeRegex: String): String =
+      CpgCacheStore.projectFingerprint(
+        config.inputPath,
+        Seq(s"rbastgen-version=$astGenVersion", s"exclude=$excludeRegex")
+      )
 
   override def execute(out: File): AstGenRunnerResult =
     implicit val metaData: AstGenProgramMetaData = config.astGenMetaData
@@ -67,7 +91,17 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
         else
           ""
 
-    runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
+    // Cache the (expensive) rbastgen output keyed by a cheap project fingerprint.
+    val cache =
+        new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
+    val fp = astGenFingerprint(combineIgnoreRegex)
+    if cache.restore(fp, out.path) then
+      collectResult(out)
+    else
+      val res = runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
+      if res.parsedFiles.nonEmpty then cache.store(fp, out.path)
+      res
+  end execute
 
   private sealed trait ExecutionEnvironment extends AutoCloseable:
     def path: Path

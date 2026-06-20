@@ -4,6 +4,7 @@ import io.appthreat.x2cpg.Defines.DynamicCallUnknownFullName
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, TypeDecl}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, PropertyNames}
+import io.appthreat.x2cpg.passes.linking.SymbolIndex
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.{NodeDb, NodeRef}
@@ -11,15 +12,23 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
-class DynamicCallLinker(cpg: Cpg) extends CpgPass(cpg):
+/** @param symbolIndex
+  *   when supplied (e.g. by [[io.appthreat.x2cpg.passes.linking.StitchPass]] running a shared
+  *   stitch), the `typeMap` / `methodMap` are derived from the prebuilt index instead of
+  *   re-traversing the graph. The default `None` reproduces the original whole-graph behaviour
+  *   exactly, so frontends that run this pass standalone are unaffected.
+  */
+class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) extends CpgPass(cpg):
 
   private lazy val typeMap: Map[String, TypeDecl] =
-      cpg.typeDecl.map(td => td.fullName -> td).toMap
+      symbolIndex.map(_.typeDeclMap).getOrElse(cpg.typeDecl.map(td => td.fullName -> td).toMap)
 
   private lazy val methodMap: Map[String, Method] =
-      cpg.method
-          .filterNot(_.name.startsWith("<operator>"))
-          .map(m => m.fullName -> m).toMap
+      symbolIndex.map(_.nonOperatorMethodMap).getOrElse(
+        cpg.method
+            .filterNot(_.name.startsWith("<operator>"))
+            .map(m => m.fullName -> m).toMap
+      )
 
   private val methodCandidatesByFullName = mutable.Map.empty[String, mutable.LinkedHashSet[String]]
   private val subclassCache              = mutable.Map.empty[String, mutable.LinkedHashSet[String]]

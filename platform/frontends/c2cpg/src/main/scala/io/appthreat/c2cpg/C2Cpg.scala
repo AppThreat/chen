@@ -10,7 +10,9 @@ import io.appthreat.c2cpg.passes.{
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
-import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
+import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
+import io.appthreat.x2cpg.passes.frontend.{AstCacheStore, CacheControl, MetaDataPass, TypeNodePass}
+import io.appthreat.x2cpg.passes.linking.FragmentSplicePass
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 
@@ -31,13 +33,42 @@ class C2Cpg extends X2CpgFrontend[Config]:
         else
           config
 
-        new AstCreationPass(cpg, updatedConfig).createAndApply()
+        if !warmRestoreFromFragments(cpg, updatedConfig) then
+          new AstCreationPass(cpg, updatedConfig).createAndApply()
 
         if !config.onlyAstCache then
           new ConfigFileCreationPass(cpg).createAndApply()
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
           new TypeDeclNodePass(cpg)(using config.schemaValidation).createAndApply()
       }
+
+  /** Fastest-splice warm restore (CHEN3_PLAN §3.4): when fragment caching is enabled (atom
+    * `--flux`) and every source file is already cached as a `.frag`, reconstruct the AST layer by
+    * splicing the cached mini-graphs straight into the graph - skipping parsing AND the diff-graph
+    * rebuild - instead of running the parallel [[AstCreationPass]]. Returns false (so the normal
+    * pass runs) when caching is off, in cache-warming mode, or the project is not fully cached.
+    */
+  private def warmRestoreFromFragments(cpg: Cpg, config: Config): Boolean =
+      if !config.enableAstCache || config.onlyAstCache || !CacheControl.useFragments then false
+      else
+        val files = AstCreationPass.sourceFiles(config)
+        if files.isEmpty then false
+        else
+          val store = new AstCacheStore(
+            config.enableAstCache,
+            resolveCacheDir(config.inputPath, config.cacheDir),
+            config.onlyAstCache
+          )
+          val fragments =
+              files.toSeq.map(f => store.fragmentFor(AstCreationPass.fileCacheKey(f), ""))
+          if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse
+          else
+            new FragmentSplicePass(
+              cpg,
+              fragments.flatten,
+              ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
+            ).createAndApply()
+            true
 
   def printIfDefsOnly(config: Config): Unit =
     val stmts = new PreprocessorPass(config).run().mkString(",")

@@ -3,6 +3,8 @@ package io.shiftleft.semanticcpg.language
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{ConfigFile, Literal, Local, Method}
 
+import scala.language.implicitConversions
+
 /** Language extensions for android. */
 package object android:
 

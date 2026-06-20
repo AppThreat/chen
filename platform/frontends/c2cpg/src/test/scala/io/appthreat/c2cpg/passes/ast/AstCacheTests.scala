@@ -73,6 +73,23 @@ class AstCacheTests extends AbstractPassTest {
             }
         }
 
+        "write no cache when the AST cache is globally disabled via CacheControl" in withCacheDir { cacheDir =>
+            withTempScope("""void foo() { int x = 1; }""") { (cpg, rootDir) =>
+                val config   = createConfig(rootDir, cacheDir)
+                val filename = rootDir.resolve("file.c").toAbsolutePath.toString
+                try {
+                    io.appthreat.x2cpg.passes.frontend.CacheControl.disable(
+                      io.appthreat.x2cpg.passes.frontend.CacheControl.Ast
+                    )
+                    new AstCreationPass(cpg, config).runOnPart(new DiffGraphBuilder, filename)
+                    Files.list(cacheDir).iterator().asScala.toList shouldBe empty
+                } finally
+                    io.appthreat.x2cpg.passes.frontend.CacheControl.enable(
+                      io.appthreat.x2cpg.passes.frontend.CacheControl.Ast
+                    )
+            }
+        }
+
         "reuse AST from disk on second run" in withCacheDir { cacheDir =>
             withTempScope("""void foo() { int y = 2; }""") { (cpg, rootDir) =>
                 val config = createConfig(rootDir, cacheDir)
@@ -91,6 +108,29 @@ class AstCacheTests extends AbstractPassTest {
                 pass.runOnPart(new DiffGraphBuilder, filename)
 
                 Files.getLastModifiedTime(cacheFile) shouldBe lastModifiedTime
+            }
+        }
+
+        "re-register types on a cache hit so TYPE nodes are not lost" in withCacheDir { cacheDir =>
+            withTempScope("""long foo(int x) { char c = 'a'; return x; }""") { (_, rootDir) =>
+                val config   = createConfig(rootDir, cacheDir)
+                val filename = rootDir.resolve("file.c").toAbsolutePath.toString
+
+                // cold run (cache miss): types are registered while parsing
+                io.appthreat.c2cpg.datastructures.CGlobal.usedTypes.clear()
+                new AstCreationPass(newEmptyCpg(), config).runOnPart(new DiffGraphBuilder, filename)
+                val typesAfterCold =
+                    io.appthreat.c2cpg.datastructures.CGlobal.usedTypes.keySet().asScala.toSet
+                typesAfterCold should not be empty
+
+                // warm run (cache hit) in a "fresh process": the global table starts empty and must
+                // be repopulated from the cache, otherwise the type node pass would create no TYPE nodes
+                io.appthreat.c2cpg.datastructures.CGlobal.usedTypes.clear()
+                new AstCreationPass(newEmptyCpg(), config).runOnPart(new DiffGraphBuilder, filename)
+                val typesAfterWarm =
+                    io.appthreat.c2cpg.datastructures.CGlobal.usedTypes.keySet().asScala.toSet
+
+                typesAfterWarm shouldBe typesAfterCold
             }
         }
 
@@ -119,7 +159,7 @@ class AstCacheTests extends AbstractPassTest {
             }
         }
 
-        "SECURITY: reject malicious class names in cache" in withCacheDir { cacheDir =>
+        "discard and recompute caches written by an incompatible build" in withCacheDir { cacheDir =>
             withTempScope("""void safe() {}""") { (cpg, rootDir) =>
                 val config = createConfig(rootDir, cacheDir)
                 val filePath = rootDir.resolve("file.c")
@@ -128,27 +168,22 @@ class AstCacheTests extends AbstractPassTest {
                 val hash = computeHash(filePath)
                 val cacheFile = cacheDir.resolve(s"$hash.ast")
 
-                val maliciousNode = AstNodeBitcode("java.io.File", Map("path" -> ujson.Str("/tmp/hacked")))
-
-                val maliciousAst = AstBitcode(
-                    rootIdx = Some(0),
-                    nodes = List(maliciousNode),
+                // a cache from an incompatible (future) format version must never be loaded
+                val staleAst = AstBitcode(
+                    formatTag = AstCache.FormatTag,
+                    formatVersion = AstCache.FormatVersion + 1,
+                    nodes = List(AstNodeBitcode("LITERAL", List.empty)),
                     edges = List.empty
                 )
-
-                val bytes = writeBinary(maliciousAst)
-                Files.write(cacheFile, bytes)
+                Files.write(cacheFile, writeBinary(staleAst))
 
                 val pass = new AstCreationPass(cpg, config)
-                val diffGraph = new DiffGraphBuilder
 
-                noException should be thrownBy pass.runOnPart(diffGraph, filename)
+                noException should be thrownBy pass.runOnPart(new DiffGraphBuilder, filename)
 
-                val newBytes = Files.readAllBytes(cacheFile)
-                val newAst = readBinary[AstBitcode](newBytes)
-
-                val rootNode = newAst.nodes(newAst.rootIdx.get)
-                rootNode.className should startWith ("io.shiftleft.codepropertygraph.generated.nodes")
+                // the stale cache must have been discarded and replaced by a compatible one
+                val reloaded = readBinary[AstBitcode](Files.readAllBytes(cacheFile))
+                AstCache.isCompatible(reloaded) shouldBe true
             }
         }
 

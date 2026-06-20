@@ -2,6 +2,8 @@ package io.appthreat.jssrc2cpg.utils
 
 import better.files.File
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.passes.frontend.{CacheControl, CpgCacheStore, ExternalParseCache}
+import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
 import io.shiftleft.utils.IOUtils
 import com.typesafe.config.ConfigFactory
@@ -97,14 +99,55 @@ class AstGenRunner(config: Config):
         vueResult <- vueFiles(in, out)
       yield jsResult ++ vueResult
 
+  /** Best-effort astgen version, folded into the cache fingerprint so an astgen upgrade invalidates
+    * cached output. Falls back to "unknown" if the version cannot be determined.
+    */
+  private lazy val astGenVersion: String =
+      ExternalCommand
+          .run(s"$astGenCommand --version", config.inputPath)
+          .toOption
+          .flatMap(_.headOption)
+          .map(_.trim)
+          .getOrElse("unknown")
+
+  /** Identity of everything (besides the sources) that affects astgen's output. */
+  private def astGenFingerprint: String =
+      CpgCacheStore.projectFingerprint(
+        config.inputPath,
+        Seq(
+          s"astgen-version=$astGenVersion",
+          s"tsTypes=${config.tsTypes}",
+          s"flow=${config.flow}"
+        )
+      )
+
   def execute(out: File): AstGenRunnerResult =
-    val in              = File(config.inputPath)
-    val shouldRunAstGen = config.astGenOutDir.isEmpty
-    val runResult       = if shouldRunAstGen then runAstGenNative(in, out) else Success(Seq.empty)
+    val in = File(config.inputPath)
+    val runResult =
+        if config.astGenOutDir.nonEmpty then
+          // A user-provided astgen output directory (e.g. CHEN_ASTGEN_OUT) is authoritative: reuse
+          // its contents ONLY when it actually contains astgen `.json` output, otherwise run astgen
+          // into it (populating it for next time). The shared ExternalParseCache is deliberately
+          // bypassed here so that pointing at an empty directory always triggers a real astgen run
+          // rather than silently restoring a previously cached parse.
+          if out.exists && SourceFiles.determine(out.toString(), Set(".json")).nonEmpty then
+            Success(Seq.empty)
+          else
+            runAstGenNative(in, out)
+        else
+          val cache =
+              new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
+          val fp = astGenFingerprint
+          if cache.restore(fp, out.path) then Success(Seq.empty)
+          else
+            runAstGenNative(in, out).map { res =>
+              cache.store(fp, out.path); res
+            }
     runResult match
-      case Success(result) =>
+      case Success(_) =>
           val parsed = filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out)
           AstGenRunnerResult(parsed.map((in.toString(), _)))
       case Failure(_) =>
           AstGenRunnerResult()
+  end execute
 end AstGenRunner

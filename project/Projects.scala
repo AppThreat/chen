@@ -4,9 +4,7 @@ object Projects {
   val frontendsRoot = file("platform/frontends")
 
   lazy val platform          = project.in(file("platform"))
-  lazy val console           = project.in(file("console"))
   lazy val dataflowengineoss = project.in(file("dataflowengineoss"))
-  lazy val macros            = project.in(file("macros"))
   lazy val semanticcpg       = project.in(file("semanticcpg"))
 
   lazy val c2cpg       = project.in(frontendsRoot / "c2cpg")

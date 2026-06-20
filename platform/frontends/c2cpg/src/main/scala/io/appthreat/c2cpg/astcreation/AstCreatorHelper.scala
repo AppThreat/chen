@@ -41,6 +41,17 @@ object AstCreatorHelper:
 trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
+  /** Type names registered while parsing this file. Tracked per-creator (in addition to the global
+    * table) so the contribution can be cached and replayed on a cache hit.
+    */
+  private val localUsedTypes: java.util.Set[String] =
+      java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+
+  /** The distinct type names this creator registered, for caching. */
+  def usedTypes: Seq[String] =
+    import scala.jdk.CollectionConverters.*
+    localUsedTypes.asScala.toSeq
+
   import AstCreatorHelper.*
 
   private val IncludeKeyword = "include"
@@ -179,6 +190,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   protected def registerType(typeName: String): String =
     val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
     CGlobal.usedTypes.putIfAbsent(fixedTypeName, true)
+    // also track locally so this file's contribution can be cached and re-registered on a cache hit
+    localUsedTypes.add(fixedTypeName)
     fixedTypeName
 
   protected def fixQualifiedName(name: String): String =
@@ -500,9 +513,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       val name            = include.getName.toString
       val _dependencyNode = newDependencyNode(name, name, IncludeKeyword)
       val importNode      = newImportNode(nodeSignature(include), name, name, include)
-      if !config.onlyAstCache then
-        diffGraph.addNode(_dependencyNode)
-        diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+      diffGraph.addNode(_dependencyNode)
+      diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
       Ast(importNode)
     }
 

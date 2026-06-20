@@ -19,7 +19,7 @@ class CdxPass(atom: Cpg) extends CpgPass(atom):
   private val PKG_NS_SIZE   = 3
   private val BOM_JSON_FILE = ".*(bom|cdx).json"
   private val keywords =
-      Using(Source.fromResource("tags-vocab.txt"))(_.getLines.toList).getOrElse(List.empty)
+      Using(Source.fromResource("tags-vocab.txt"))(_.getLines().toList).getOrElse(List.empty)
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
       atom.configFile.name(BOM_JSON_FILE).content.foreach { cdxData =>

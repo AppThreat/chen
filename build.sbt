@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "3.0.0"
 ThisBuild / scalaVersion := "3.8.4"
 
-val cpgVersion = "2.1.6"
+val cpgVersion = "3.0.3"
 
 lazy val platform          = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss
@@ -44,11 +44,11 @@ ThisBuild / excludeDependencies ++= Seq(
 
 ThisBuild / compile / javacOptions ++= Seq(
   "-Xlint",
-  "--release=21"
+  "--release=23"
 ) ++ {
   // fail early if users with JDK8 try to run this
   val javaVersion = sys.props("java.specification.version").toFloat
-  assert(javaVersion.toInt >= 21, s"this build requires JDK21+ - you're using $javaVersion")
+  assert(javaVersion.toInt >= 23, s"this build requires JDK23+ - you're using $javaVersion")
   Nil
 }
 

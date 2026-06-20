@@ -60,7 +60,7 @@ trait LinkingUtil:
     cpg.graph.nodes(srcLabels*).foreach { srcNode =>
         // If the source node does not have any outgoing edges of this type
         // This check is just required for backward compatibility
-        if srcNode.outE(edgeType).isEmpty then
+        if !srcNode.hasOut(edgeType) then
           val key = new PropertyKey[String](dstFullNameKey)
           srcNode
               .propertyOption(key)
@@ -126,7 +126,7 @@ trait LinkingUtil:
     var loggedDeprecationWarning = false
     val dereference              = Dereference(cpg)
     cpg.graph.nodes(srcLabels*).asScala.cast[SRC_NODE_TYPE].foreach { srcNode =>
-        if !srcNode.outE(edgeType).hasNext then
+        if !srcNode.hasOut(edgeType) then
           getDstFullNames(srcNode).foreach { dstFullName =>
             val dereferenceDstFullName = dereference.dereferenceTypeFullName(dstFullName)
             dstNodeMap(dereferenceDstFullName) match

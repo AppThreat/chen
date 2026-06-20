@@ -26,6 +26,21 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 - PHP (Requires PHP >= 7.4. Supports PHP 7.0 to 8.4 with limited support for PHP 5.x)
 - Ruby (Requires Ruby 3.4.7. Supports Ruby 1.8 - 3.4.x syntax)
 
+## Data-flow engine
+
+`dataflowengineoss` ships two interchangeable reaching-definitions solvers:
+
+- **Flux** (`FluxSolver`) — the default. A low-allocation, array + in-place-bitset worklist solver
+  that produces the same `REACHING_DEF` edges as the classic engine while using far less memory and
+  GC time on large (e.g. bundled/transpiled JavaScript) methods. It uses copy-on-write definition
+  sets so unchanged nodes share state rather than each allocating a bitset.
+- **Classic** (`DataFlowSolver`) — the original map-based fixpoint solver, retained as the
+  intra-procedural kernel and for A/B comparison.
+
+Downstream tools select the engine through `EngineConfig.useFluxEngine` / the data-dependency pass;
+in [atom](https://github.com/AppThreat/atom) the Flux engine and per-file fragment caching are on by
+default, and `--legacy-dataflow` switches back to the classic engine.
+
 ## Origin of chen
 
 chen is a fork of the popular [joern](https://github.com/joernio/joern) project. We deviate from the joern project in the following ways:
