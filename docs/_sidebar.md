@@ -1,6 +1,7 @@
 - [Home](/)
 - [CLI Usage](CLI.md)
 - [Traversal](TRAVERSAL.md)
+- [Flux vs Classic Data-Flow](FLOW_ENGINE_COMPARISON.md)
 - Lessons
   - [Lesson 1: C/C++ - c2cpg](lessons/lesson-1-c2cpg.md)
   - [Lesson 2: Java Source - javasrc2cpg](lessons/lesson-2-javasrc2cpg.md)
