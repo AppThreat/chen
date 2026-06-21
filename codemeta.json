@@ -19,7 +19,7 @@
   "programmingLanguage": ["Scala 3"],
   "runtimePlatform": ["JVM"],
   "operatingSystem": ["Linux", "Windows", "MacOS"],
-  "softwareRequirements": ["Java >= 21"],
+  "softwareRequirements": ["Java >= 23"],
   "author": [
     {
       "@type": "Person",

@@ -203,25 +203,31 @@ val flows   = sinks.reachableByFlows(sources).l
 println(s"Flows found: ${flows.size}")
 ```
 
-#### 5. atom CLI — `--summaries` flag
+#### 5. atom CLI — summaries are on by default
+
+Method flow summaries are part of the default Flux bundle in atom. There is no separate flag: they
+are built and used for reachables slicing whenever the Flux engine is active (the default), and are
+disabled together with it by `--legacy-dataflow`.
 
 ```bash
-# Build atom with data-deps, compute + cache summaries, use them during reachables slicing
-atom -l javasrc --with-data-deps --summaries \
+# Build atom with data-deps and run reachables; summaries are computed and used automatically
+atom -l javasrc --with-data-deps \
     -s reachables.json \
     reachables /path/to/project
 ```
 
-In `Atom.scala`, `--summaries` triggers:
+In `Atom.scala`, the default (Flux) path triggers:
 
-1. `CacheControl.enable(CacheControl.Summary)` — activates the per-atom summary cache stored next
-   to the `.atom` file.
-2. `FlowSummaryComputer.loadOrCompute` is called before the backward query engine runs.
-3. The returned map is injected into `EngineConfig.summaries` so the engine can prune provably-
-   empty cross-call tasks.
+1. `CacheControl.enable(CacheControl.Summary)` — activates the per-atom summary JSON cache stored
+   next to the `.atom` file.
+2. During enhancement, `FlowSummaryComputer.computeAll` runs and `FlowSummaryTagsPass` writes a
+   `flow-summary` tag onto each `METHOD` node, so the facts serialize with the atom.
+3. Reachables slicing reads the summaries back from the tags (`FlowSummaryTags.fromCpg`), falling
+   back to `loadOrCompute` (JSON sidecar) when no tags are present, and injects the map into
+   `EngineConfig.summaries` so the engine can prune provably-empty cross-call tasks.
 
-On a second run against the same unchanged atom, `loadOrCompute` detects the fingerprint match and
-restores the summaries from disk in milliseconds instead of recomputing them.
+On a second run against the same unchanged atom, the tags come back with the reused atom (and the
+JSON fingerprint matches), so summaries are restored in milliseconds instead of recomputed.
 
 #### 6. Inspecting a summary manually
 

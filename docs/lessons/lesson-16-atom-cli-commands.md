@@ -30,27 +30,26 @@ subclass (`AtomConfig`, `AtomDataFlowConfig`, `AtomUsagesConfig`, `AtomReachable
 
 Source: `atom/src/main/scala/io/appthreat/atom/Atom.scala`
 
-| CLI flag                     | Default        | Description                                     |
-| ---------------------------- | -------------- | ----------------------------------------------- |
-| `-o` / `--output`            | `app.atom`     | Output atom file path                           |
-| `-s` / `--slice-outfile`     | `slices.json`  | Slice JSON output path                          |
-| `-l` / `--language`          | _(required)_   | Source language identifier                      |
-| `--frontend-args`            | —              | Key=value pairs forwarded to the frontend       |
-| `--with-data-deps`           | `false`        | Generate `REACHING_DEF` edges                   |
-| `--remove-atom`              | `false`        | Delete the atom after slicing                   |
-| `-x` / `--export-atom`       | `false`        | Export to GraphML after build                   |
-| `--reuse-atom`               | `false`        | Skip rebuilding if atom already exists          |
-| `--export-dir`               | `atom-exports` | Directory for graph exports                     |
-| `--export-format`            | `graphml`      | Export format for `-x` flag                     |
-| `--summaries`                | `false`        | Compute & cache per-method flow summaries       |
-| `--config`                   | —              | JSON config file for export/algorithms commands |
-| `--validation-config`        | —              | JSON file declaring sanitizers/validators       |
-| `--file-filter`              | —              | Regex filter on source file names               |
-| `--method-name-filter`       | —              | Regex filter on method names for slices         |
-| `--method-parameter-filter`  | —              | Regex filter on parameter types                 |
-| `--method-annotation-filter` | —              | Regex filter on method annotations              |
-| `--max-num-def`              | `2000`         | Max definitions per method before bail-out      |
-| `--legacy-dataflow`          | `false`        | Disable Flux engine and fragment caching        |
+| CLI flag                     | Default        | Description                                            |
+| ---------------------------- | -------------- | ------------------------------------------------------ |
+| `-o` / `--output`            | `app.atom`     | Output atom file path                                  |
+| `-s` / `--slice-outfile`     | `slices.json`  | Slice JSON output path                                 |
+| `-l` / `--language`          | _(required)_   | Source language identifier                             |
+| `--frontend-args`            | —              | Key=value pairs forwarded to the frontend              |
+| `--with-data-deps`           | `false`        | Generate `REACHING_DEF` edges                          |
+| `--remove-atom`              | `false`        | Delete the atom after slicing                          |
+| `-x` / `--export-atom`       | `false`        | Export to GraphML after build                          |
+| `--reuse-atom`               | `false`        | Skip rebuilding if atom already exists                 |
+| `--export-dir`               | `atom-exports` | Directory for graph exports                            |
+| `--export-format`            | `graphml`      | Export format for `-x` flag                            |
+| `--config`                   | —              | JSON config file for export/algorithms commands        |
+| `--validation-config`        | —              | JSON file declaring sanitizers/validators              |
+| `--file-filter`              | —              | Regex filter on source file names                      |
+| `--method-name-filter`       | —              | Regex filter on method names for slices                |
+| `--method-parameter-filter`  | —              | Regex filter on parameter types                        |
+| `--method-annotation-filter` | —              | Regex filter on method annotations                     |
+| `--max-num-def`              | `2000`         | Max definitions per method before bail-out             |
+| `--legacy-dataflow`          | `false`        | Disable Flux engine, fragment caching & flow summaries |
 
 #### 2. Language identifiers and frontend routing
 
@@ -129,7 +128,8 @@ as input. The tool must be on `PATH` (e.g. via `pip install atom-tools`).
 
 ```bash
 # Reachable taint flows: HTTP inputs → SQL/file-io sinks
-atom -l javasrc --with-data-deps --summaries \
+# (flow summaries are built and used automatically as part of the default Flux bundle)
+atom -l javasrc --with-data-deps \
     -s reachables.json \
     reachables \
     --source-tag "framework-input,cli-source" \
@@ -224,8 +224,8 @@ atom -l jssrc \
 #### 10. Typical end-to-end workflow
 
 ```bash
-# Step 1: Build an atom with data dependencies and flow summaries
-atom -l javasrc --with-data-deps --summaries -o myapp.atom /path/to/java_project
+# Step 1: Build an atom with data dependencies (flow summaries are built by default)
+atom -l javasrc --with-data-deps -o myapp.atom /path/to/java_project
 
 # Step 2: Slice for reachable taint flows
 atom -l javasrc --reuse-atom -o myapp.atom \

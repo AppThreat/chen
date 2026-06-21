@@ -11,8 +11,14 @@ import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.Assignment
   * existing dependency nodes, or, if no suitable dependency node exists, a dependency node is
   * created.
   *
-  * TODO with this, we can have multiple IMPORT nodes that point to the same call: one created
-  * during AST creation, and one using this pass.
+  * The `importedEntity` written here is the '''bare specifier''' (the unquoted `require(...)`
+  * argument, e.g. `require('vue')` → `"vue"`, `require('./bar.js')` → `"./bar.js"`). This differs
+  * from ESM imports, which `AstForDeclarationsCreator` records as `"<package>:<name>"`; consumers
+  * (see `XImportResolverPass.optionalResolveImport`) must handle both shapes.
+  *
+  * Note: `importCallToPart` deliberately skips `var ...` assignments (those import nodes are
+  * already created during AST creation), so a `require` bound with `var` yields one IMPORT node
+  * while one bound with `const`/`let` yields two (AST-creation + this pass) for the same call.
   *
   * TODO Dependency node creation is still missing.
   */

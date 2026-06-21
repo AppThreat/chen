@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "3.0.0"
 ThisBuild / scalaVersion := "3.8.4"
 
-val cpgVersion = "3.0.4"
+val cpgVersion = "3.0.5"
 
 lazy val platform          = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss
@@ -55,7 +55,7 @@ ThisBuild / compile / javacOptions ++= Seq(
 ThisBuild / scalacOptions ++= Seq(
   "-deprecation",
   "--release",
-  "21"
+  "23"
 )
 
 

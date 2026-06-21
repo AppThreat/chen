@@ -51,17 +51,22 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension:
 
   /** The depth of the AST rooted in this node. Upon walking the tree to its leaves, the depth is
     * only increased for nodes where `p(node)` is true.
+    *
+    * Implemented as an explicit heap-stack pre-order walk rather than recursion: the AST of
+    * generated/minified code can nest tens of thousands deep, which overflows the JVM call stack.
+    * The recursive form returned `p(node) + max(childDepths)`; here we carry each node's
+    * accumulated depth-from-root down the stack and take the maximum, which is the same value
+    * path-for-path.
     */
   def depth(p: AstNode => Boolean): Int =
-    val additionalDepth = if p(node) then 1
-    else 0
-
-    val childDepths = node.astChildren.map(_.depth(p)).l
-    additionalDepth + (if childDepths.isEmpty then
-                         0
-                       else
-                         childDepths.max
-    )
+    var maxDepth = 0
+    val stack    = scala.collection.mutable.Stack[(AstNode, Int)]((node, 0))
+    while stack.nonEmpty do
+      val (current, parentDepth) = stack.pop()
+      val accDepth               = parentDepth + (if p(current) then 1 else 0)
+      if accDepth > maxDepth then maxDepth = accDepth
+      current.astChildren.foreach(child => stack.push((child, accDepth)))
+    maxDepth
 
   def astParent: AstNode =
       try

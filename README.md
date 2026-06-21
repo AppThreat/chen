@@ -8,7 +8,7 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 ## Requirements
 
-- Java >= 21
+- Java >= 23
 - Minimum 16GB RAM
 
 ## Languages supported
@@ -30,7 +30,7 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 
 `dataflowengineoss` ships two interchangeable reaching-definitions solvers:
 
-- **Flux** (`FluxSolver`) — the default. A low-allocation, array + in-place-bitset worklist solver
+- **Flux** (`FluxSolver`, _Flow-Lattice Update eXecutor_) — the default. A low-allocation, array + in-place-bitset worklist solver
   that produces the same `REACHING_DEF` edges as the classic engine while using far less memory and
   GC time on large (e.g. bundled/transpiled JavaScript) methods. It uses copy-on-write definition
   sets so unchanged nodes share state rather than each allocating a bitset.
@@ -40,6 +40,21 @@ Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for you
 Downstream tools select the engine through `EngineConfig.useFluxEngine` / the data-dependency pass;
 in [atom](https://github.com/AppThreat/atom) the Flux engine and per-file fragment caching are on by
 default, and `--legacy-dataflow` switches back to the classic engine.
+
+## Performance tuning (system properties)
+
+These runtime knobs apply to any tool built on chen/overflowdb2 — pass them as JVM `-D` flags, no
+rebuild required:
+
+- **`-Dodb.storage.compression=none|lzf|deflate`** — compressor for nodes spilled to disk when the
+  graph overflows the heap. On large codebases the spill/save path is single-threaded, so this
+  often dominates generation and slicing time. `deflate` (the default) produces the smallest store
+  but is markedly slower; `lzf` is several times faster for a modest size increase; `none` skips
+  compression. The compressor is recorded per
+  chunk, so a store written with one mode loads fine under another. Giving the JVM more heap
+  (`-Xmx`) reduces spilling altogether.
+- **`-Dchen.cache.disabled=true`** (or `-Dchen.cache.disabled.<kind>=true`) — disable the AST / CPG /
+  summary caches for A/B comparison or troubleshooting.
 
 ## Method flow summaries
 
@@ -60,9 +75,11 @@ val cached = FlowSummaryComputer.loadOrCompute(cpg, cacheDir = ".")
 ```
 
 Summaries are built in callee-before-caller order over the call graph; mutually recursive methods
-form a strongly connected component that is iterated to a fixpoint. The set can be persisted with
-`FlowSummaryStore` (a single JSON file keyed on a fingerprint of the method bodies and the active
-semantics) and is gated by `CacheControl.Summary`.
+form a strongly connected component that is iterated to a fixpoint. The set can be persisted two
+ways: as CPG-native `flow-summary` tags on each `METHOD` node (`FlowSummaryTagsPass` to write,
+`FlowSummaryTags.fromCpg` to read back), so the facts serialize with the graph and reload without
+recomputation; and with `FlowSummaryStore` (a single JSON file keyed on a fingerprint of the method
+bodies and the active semantics), gated by `CacheControl.Summary`.
 
 Flow semantics are respected. A method with a declared semantic gets its summary from that semantic
 rather than from its body, so a declared sanitizer (a semantic with no mappings) summarises as
@@ -81,9 +98,10 @@ val context = EngineContext(
 ```
 
 In this mode the engine prunes cross-call tasks that a summary proves cannot carry taint (for
-example exploring an output argument the callee never writes). The pruning only removes provably
-empty work, so the flows reported are identical to a run with summaries disabled. atom exposes this
-through the `reachables --summaries` flag.
+example exploring an output argument the callee never writes, or descending into a callee whose
+return value can carry no taint). The pruning only removes provably empty work, so the flows reported
+are identical to a run with summaries disabled. atom turns summaries on as part of its default Flux
+bundle (there is no separate flag; `--legacy-dataflow` disables both the Flux engine and summaries).
 
 ## Filtering flows through validators and sanitisers
 

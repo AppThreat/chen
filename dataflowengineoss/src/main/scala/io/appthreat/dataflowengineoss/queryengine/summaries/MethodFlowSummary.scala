@@ -58,6 +58,22 @@ case class MethodFlowSummary(
   def paramOutTaintable(outIndex: Int): Boolean =
       paramOutFromInternal.contains(outIndex) ||
           paramToParamOut.values.exists(_.contains(outIndex))
+
+  /** Encode the context-independent facts as a compact, single-line string suitable for a CPG tag
+    * value (`flow-summary`). The `methodFullName` is not encoded - it is the identity of the tagged
+    * method node and is supplied again on decode. Sections are `;`-separated; within `o`, parameter
+    * entries are `/`-separated as `src:out,out`.
+    *
+    * Example: `r=1,2;o=0:1,2/3:4;ri=1;pi=0,3`
+    */
+  def encode: String =
+    val r = paramToReturn.toSeq.sorted.mkString(",")
+    val o = paramToParamOut.toSeq.sortBy(_._1).map { case (src, outs) =>
+        s"$src:${outs.toSeq.sorted.mkString(",")}"
+    }.mkString("/")
+    val ri = if returnFromInternal then "1" else "0"
+    val pi = paramOutFromInternal.toSeq.sorted.mkString(",")
+    s"r=$r;o=$o;ri=$ri;pi=$pi"
 end MethodFlowSummary
 
 object MethodFlowSummary:
@@ -71,6 +87,42 @@ object MethodFlowSummary:
   /** The empty summary: nothing flows from a parameter to the return or to an output parameter. */
   def empty(methodFullName: String): MethodFlowSummary =
       MethodFlowSummary(methodFullName, Set.empty, Map.empty, returnFromInternal = false, Set.empty)
+
+  /** Decode a summary previously produced by [[MethodFlowSummary.encode]]. Malformed or missing
+    * sections decode to empty facts, so a corrupt tag degrades to an opaque (no-fact) summary
+    * rather than throwing. Returns `None` only when the value is not in the expected `k=v;...`
+    * shape at all.
+    */
+  def decode(methodFullName: String, encoded: String): Option[MethodFlowSummary] =
+      if encoded == null || !encoded.contains('=') then None
+      else
+        val sections = encoded.split(';').iterator.collect {
+            case s if s.contains('=') =>
+                val idx = s.indexOf('=')
+                s.substring(0, idx) -> s.substring(idx + 1)
+        }.toMap
+        def ints(s: String): Set[Int] =
+            if s == null || s.isEmpty then Set.empty
+            else s.split(',').iterator.flatMap(_.toIntOption).toSet
+        val paramToReturn = ints(sections.getOrElse("r", ""))
+        val paramToParamOut = sections.getOrElse("o", "") match
+          case "" => Map.empty[Int, Set[Int]]
+          case o => o.split('/').iterator.flatMap { entry =>
+                  entry.split(':') match
+                    case Array(src, outs) => src.toIntOption.map(_ -> ints(outs))
+                    case Array(src)       => src.toIntOption.map(_ -> Set.empty[Int])
+                    case _                => None
+              }.toMap
+        val returnFromInternal   = sections.getOrElse("ri", "0") == "1"
+        val paramOutFromInternal = ints(sections.getOrElse("pi", ""))
+        Some(MethodFlowSummary(
+          methodFullName,
+          paramToReturn,
+          paramToParamOut,
+          returnFromInternal,
+          paramOutFromInternal
+        ))
+  end decode
 
   /** Derive a summary directly from a declared flow semantic rather than from the method body. When
     * a method has a semantic, that semantic is authoritative: only the declared parameter-to-return

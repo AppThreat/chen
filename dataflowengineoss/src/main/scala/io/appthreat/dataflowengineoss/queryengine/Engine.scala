@@ -301,12 +301,6 @@ case class EngineConfig(
   shareCacheBetweenTasks: Boolean = true,
   maxArgsToAllow: Int = 100,
   maxOutputArgsExpansion: Int = 100,
-  // Reserved for the Flux query engine (atom `--flux`). A naive shared cross-task result cache was
-  // found to be unsound here (cached partial results carry task-specific context: sharing them
-  // across sinks loses and non-deterministically reorders flows), so the query engine currently
-  // ignores this flag and behaves identically to classic. A correct demand-driven summary engine
-  // (CHEN3_PLAN §5) is the proper home for cross-sink reuse.
-  var useFluxEngine: Boolean = false,
   // Opt-in (atom `--summaries`). When enabled and `summaries` is populated, the engine prunes
   // cross-call tasks that a method flow summary proves cannot carry taint (for example an output
   // argument the callee never writes). This only removes provably empty work, so results are

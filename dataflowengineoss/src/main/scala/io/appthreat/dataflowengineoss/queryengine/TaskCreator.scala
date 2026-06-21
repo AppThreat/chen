@@ -139,6 +139,8 @@ class TaskCreator(context: EngineContext):
                         )
                         ReachableByTask(taskStack, newPath)
                       }
+                    else if summaryProvesUntaintableReturn(method) then
+                      Vector.empty
                     else
                       returnStatements.map { returnStatement =>
                         val newPath =
@@ -214,6 +216,17 @@ class TaskCreator(context: EngineContext):
       context.config.useSummaries &&
           context.config.summaries.get(param.method.fullName)
               .exists(summary => !summary.paramOutTaintable(param.index))
+
+  /** When method flow summaries are enabled, a callee whose summary proves its return value carries
+    * no taint from any origin (no formal parameter and no internal source reaches the return) can
+    * be skipped when tracing backward from a tainted call result: descending into its return
+    * statements would find nothing. With summaries disabled or absent this is always false, so
+    * behaviour is unchanged.
+    */
+  private def summaryProvesUntaintableReturn(method: Method): Boolean =
+      context.config.useSummaries &&
+          context.config.summaries.get(method.fullName)
+              .exists(summary => !summary.returnTaintable)
 
   private def restrictSize(l: Vector[ReachableByTask]): Vector[ReachableByTask] =
       if l.size <= context.config.maxOutputArgsExpansion then

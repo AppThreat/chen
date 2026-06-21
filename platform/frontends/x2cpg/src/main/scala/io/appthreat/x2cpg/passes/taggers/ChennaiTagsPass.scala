@@ -50,6 +50,10 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   private val JS_ROUTES_CALL_REGEX =
       ".*(?i)(app|router|route|server)\\.(get|post|put|delete|patch|head|options|all|use|registerRoute).*"
+  // Precompiled once: `tagJsRoutes` tests this against every call node in the graph, twice each
+  // (methodFullName + code). `String.matches` recompiles the pattern on every call, which dominated
+  // the juice-shop tagging phase (jstack: ChennaiTagsPass -> String.matches -> Pattern.compile).
+  private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
   private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
 
   private val HTTP_METHODS_REGEX  = ".*(request|session)\\.(args|get|post|put|form).*"
@@ -76,8 +80,8 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         case _ => // No specific routing for this language
   private def tagJsRoutes(dstGraph: DiffGraphBuilder): Unit =
     val routeCalls = atom.call.filter { c =>
-        c.methodFullName.matches(JS_ROUTES_CALL_REGEX) ||
-        c.code.matches(JS_ROUTES_CALL_REGEX)
+        JsRoutesCallPattern.matcher(c.methodFullName).matches() ||
+        JsRoutesCallPattern.matcher(c.code).matches()
     }
     routeCalls.foreach { call =>
       call.argument
@@ -98,10 +102,24 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
               Iterator(params(1)).newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
           }
     }
-    atom.call
-        .code(VUE_ROUTE_INPUT_REGEX)
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    // Cheap substring prefilter before the regex: the pattern can only match code containing the
+    // literal "$route", so this skips the regex engine for the vast majority of (bundled-JS) calls.
+    // The Vue `$route` input tagging is only meaningful when the project actually imports Vue.
+    // Checking imports once avoids scanning every call node's code on non-Vue projects, and the
+    // cheap `$route` substring prefilter avoids the regex engine for the remaining calls.
+    // `importedEntity` is the bare specifier for `require(...)` (e.g. "vue") and "<package>:<name>"
+    // for ESM imports (e.g. "vue-router:useRoute", "@vue/composition-api:ref"), so strip the
+    // ESM name suffix before matching the package.
+    val usesVue = atom.imports.importedEntity.exists { e =>
+      val pkg = e.takeWhile(_ != ':')
+      pkg == "vue" || pkg.startsWith("vue-") || pkg.startsWith("vue/") || pkg.startsWith("@vue/")
+    }
+    if usesVue then
+      atom.call
+          .filter(_.code.contains("$route"))
+          .code(VUE_ROUTE_INPUT_REGEX)
+          .newTagNode(FRAMEWORK_INPUT)
+          .store()(using dstGraph)
     val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
         .method
         .internal

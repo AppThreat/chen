@@ -37,10 +37,10 @@ It helps to separate two layers that both get called "the data-flow engine":
         +-----------------------------+              +------------------------------+
 ```
 
-A common source of confusion: there are _two_ unrelated `useFluxEngine` flags. The one on
-`OssDataFlowOptions` selects the construction-layer solver and is the subject of this document. The
-one on `EngineConfig` (query layer) is currently a no-op; an early shared cross-sink cache proved
-unsound, so cross-sink reuse is deferred to the summary engine instead.
+There is a single `useFluxEngine` flag, on `OssDataFlowOptions`, which selects the construction-layer
+solver and is the subject of this document. (An earlier query-layer `EngineConfig.useFluxEngine` flag
+was a no-op — a shared cross-sink cache behind it proved unsound — and has been removed; cross-sink
+reuse now lives only in the summary engine via `EngineConfig.useSummaries`.)
 
 ## 2. The shared lattice framework
 
@@ -189,9 +189,8 @@ config.withUseFluxEngine(false).withCacheFragments(false)   // --legacy-dataflow
 Relevant atom defaults (`atom/package.scala`):
 
 ```scala
-var useFluxEngine: Boolean  = true     // Flux is the default solver
+var useFluxEngine: Boolean  = true     // Flux is the default solver; also enables flow summaries
 var cacheFragments: Boolean = true     // overflowdb2 mini-graph fragment caching
-var useSummaries: Boolean   = false    // interprocedural summaries, opt-in via --summaries
 var validationConfigFile: Option[File] = None   // --validation-config
 ```
 
@@ -208,13 +207,12 @@ new OssDataFlow(new OssDataFlowOptions(
 
 Other knobs that shape the solve and the downstream query:
 
-| Flag                  | Default | Effect                                                       |
-| --------------------- | ------- | ------------------------------------------------------------ |
-| `--legacy-dataflow`   | off     | Force classic `DataFlowSolver` and disable fragment caching  |
-| `--max-num-def <n>`   | 2000    | Per-method reaching-def bailout threshold (`shouldBailOut`)  |
-| `--summaries`         | off     | Build per-method flow summaries, prune cross-call query work |
-| `--validation-config` | none    | JSON of sanitisers/validators (chennai.json schema)          |
-| `--slice-depth <n>`   | 7       | Backward query slice depth for data-flow / reachables        |
+| Flag                  | Default | Effect                                                                      |
+| --------------------- | ------- | --------------------------------------------------------------------------- |
+| `--legacy-dataflow`   | off     | Force classic `DataFlowSolver`, disable fragment caching and flow summaries |
+| `--max-num-def <n>`   | 2000    | Per-method reaching-def bailout threshold (`shouldBailOut`)                 |
+| `--validation-config` | none    | JSON of sanitisers/validators (chennai.json schema)                         |
+| `--slice-depth <n>`   | 7       | Backward query slice depth for data-flow / reachables                       |
 
 Note that atom does not surface `EngineConfig.maxCallDepth` (default 3) or the argument-expansion
 limits as CLI flags; those are query-layer bounds set in chen.
@@ -260,9 +258,11 @@ which solver built the DDG.
 
 ## 7. The summary engine, and how it relates to Flux
 
-`--summaries` turns on an interprocedural pruning mechanism that lives in the _query_ layer. Despite
-the shared "flux/CHEN3" lineage it is unrelated to the `FluxSolver`: Flux speeds up DDG
-_construction_, while summaries prune the Source to Sink _search_.
+Method flow summaries are an interprocedural pruning mechanism that lives in the _query_ layer. They
+are part of the default Flux bundle in atom (on whenever the Flux engine is, disabled together with
+it by `--legacy-dataflow`; there is no separate flag). Despite the shared "flux/CHEN3" lineage the
+mechanism is distinct from the `FluxSolver`: Flux speeds up DDG _construction_, while summaries prune
+the Source to Sink _search_.
 
 A `MethodFlowSummary` (`queryengine/summaries/MethodFlowSummary.scala`) is a context-independent
 fact about one method expressed over formal parameter positions, so it is reusable at every call
@@ -283,7 +283,8 @@ unchanged. `FlowSummaryComputer.computeAll` builds them callee-before-caller: it
 graph over internal methods, computes strongly connected components, topologically sorts the
 condensation and reverses it, then iterates each recursive component to a fixpoint (terminating
 because summaries only grow). The summaries are derived from the _same_ `REACHING_DEF` edges that
-the classic or Flux solver produced, then persisted next to the atom via `FlowSummaryStore`.
+the classic or Flux solver produced, then persisted both as CPG-native `flow-summary` tags on the
+`METHOD` nodes (`FlowSummaryTagsPass`) and as a JSON sidecar next to the atom (`FlowSummaryStore`).
 
 ```mermaid
 flowchart LR
@@ -293,7 +294,7 @@ flowchart LR
   C --> E["REACHING_DEF edges<br/>(identical either way)"]
   D --> E
   E --> F["Query engine<br/>backward Source->Sink"]
-  E --> G["FlowSummaryComputer<br/>(--summaries, optional)"]
+  E --> G["FlowSummaryComputer<br/>(Flux bundle default)"]
   G -. "prunes provably-empty<br/>cross-call tasks" .-> F
   F --> H["Reachable flows<br/>(sanitiser-filtered)"]
 ```
@@ -339,11 +340,11 @@ Flux's dense-array, primitive-id approach is a natural fit for overflowdb2's sto
   points at something outside the solver: a bailout via `maxNumberOfDefinitions`, a tagging
   difference, or nondeterminism in a different pass.
 - **Tune reachability separately from construction.** If you have too few or too many flows, the
-  levers are `--slice-depth`, the source/sink tags, the `--validation-config` sanitisers, and
-  `--summaries`. None of those change what the reaching-def solver computes; they change what the
-  backward query reports.
-- **Use `--summaries` for large interprocedural codebases.** It only removes provably-empty work, so
-  it cannot drop a real flow, and it caches across runs.
+  levers are `--slice-depth`, the source/sink tags, and the `--validation-config` sanitisers. None of
+  those change what the reaching-def solver computes; they change what the backward query reports.
+- **Method flow summaries are on by default** (part of the Flux bundle, disabled only by
+  `--legacy-dataflow`). They only remove provably-empty cross-call work, so they cannot drop a real
+  flow, and they are cached across runs (as `flow-summary` METHOD tags and a JSON sidecar).
 
 ## 10. Key source locations
 

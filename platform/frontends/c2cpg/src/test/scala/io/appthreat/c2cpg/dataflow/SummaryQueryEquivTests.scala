@@ -19,6 +19,7 @@ class SummaryQueryEquivTests extends DataFlowCodeToCpgSuite:
   private val cpg = code("""
       |void copy(int *dst, int src) { *dst = src; }   // writes dst from src
       |void untouched(int *dst, int src) { }          // never writes dst
+      |int constant() { return 42; }                  // return carries no taint
       |
       |int chain(int p0) {
       |  int a = p0;
@@ -26,7 +27,8 @@ class SummaryQueryEquivTests extends DataFlowCodeToCpgSuite:
       |  copy(&out1, a);
       |  int out2 = 0;
       |  untouched(&out2, a);
-      |  return out1 + out2;
+      |  int k = constant();
+      |  return out1 + out2 + k;
       |}
       |""".stripMargin)
 
@@ -60,4 +62,7 @@ class SummaryQueryEquivTests extends DataFlowCodeToCpgSuite:
 
     "match the baseline for flows to arguments of `copy`" in:
       assertSameFlows(() => cpg.call.name("copy").argument(1), () => cpg.identifier)
+
+    "match the baseline when a tainted call result has a non-taintable callee return" in:
+      assertSameFlows(() => cpg.method.name("chain").methodReturn, () => cpg.identifier)
 end SummaryQueryEquivTests
