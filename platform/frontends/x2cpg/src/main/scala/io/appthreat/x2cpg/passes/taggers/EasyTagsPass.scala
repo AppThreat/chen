@@ -30,9 +30,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     ".*get_value.*"
   )
 
+  // NB: get_object_* helpers are ORM reads, not response outputs - they are handled as `db-read`
+  // (G1), not framework-output, so they are intentionally absent here.
   private val PY_RESPONSE_PATTERNS = Array(
-    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*",
-    ".*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*"
+    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*",
+    ".*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*"
   )
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
@@ -227,7 +229,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     val pyRequestRegexes  = PY_REQUEST_PATTERNS.map(_.r)
     val pyResponseRegexes = PY_RESPONSE_PATTERNS.map(_.r)
     val pyResponseCallRegex =
-        ".*(HttpResponse|render|get_object_|Response|abort|jsonify|make_response|render_template).*".r
+        ".*(HttpResponse|render|Response|abort|jsonify|make_response|render_template).*".r
     val pyResponseFileRegex = ".*(views|engine|core|api|base|http).py.*".r
     val validationRegex     = "^is_[a-z].*$".r
     val cliFilenameRegex    = ".*(cli|main|command).*".r
@@ -239,10 +241,39 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*".r
     val netProtocolRegex =
         ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*".r
-    val shutilRegex        = ".*(shutil\\.copy|Path\\.open).*".r
-    val serializationRegex = ".*(json\\.(loads|dumps)|yaml\\.dump|csv\\.DictWriter).*".r
-    val regexLibRegex      = ".*re\\.(compile|findall|search|match).*".r
-    val importlibRegex     = ".*importlib\\.import_module.*".r
+    val shutilRegex = ".*(shutil\\.copy|Path\\.open).*".r
+    // Safe (round-trippable) (de)serialisation: json/yaml-safe/csv. Kept distinct from the unsafe
+    // loaders below so an `appsec`-style profile can treat only the dangerous ones as sinks.
+    val serializationRegex = ".*(json\\.(loads|dumps)|yaml\\.(safe_load|dump)|csv\\.DictWriter).*".r
+    // Unsafe deserialisation: loaders that can instantiate arbitrary objects / execute code when fed
+    // attacker-controlled bytes. base64/json are intentionally excluded (encoding, not deser).
+    val deserializationRegex =
+        ".*(pickle\\.(load|loads)|cPickle\\.(load|loads)|_pickle\\.(load|loads)|yaml\\.(unsafe_load|full_load)|yaml\\.load|marshal\\.(load|loads)|jsonpickle\\.decode|dill\\.(load|loads)|shelve\\.open).*".r
+    // Django/SQLAlchemy ORM read accessors. Their return value is data already persisted in the
+    // datastore, a different trust level from live request input; tagged `db-read` so profiles can
+    // treat the accessor as a declassification barrier and prune object-identity over-tainting.
+    // Matched by call name (helpers) or accessor-name + an `objects`/`query` manager in the
+    // methodFullName, since the frontend lowers the receiver chain to a temporary.
+    val dbReadHelperNames =
+        Set("get_object_or_404", "get_list_or_404", "get_object", "get_queryset")
+    val ormAccessorNames =
+        Set("get", "filter", "first", "last", "all", "get_or_create", "earliest", "latest")
+    // G6+: well-known Django/DRF/stdlib neutralisers. A flow passing through one of these is
+    // considered sanitised for the relevant category (open-redirect guards, HTML/JS escapers,
+    // tag strippers). Tagged `sanitization` so the appsec profile drops the flow.
+    val sanitizerCallNames =
+        Set(
+          "url_has_allowed_host_and_scheme",
+          "is_safe_url",
+          "escape",
+          "conditional_escape",
+          "escapejs",
+          "strip_tags",
+          "format_html",
+          "urlize"
+        )
+    val regexLibRegex  = ".*re\\.(compile|findall|search|match).*".r
+    val importlibRegex = ".*importlib\\.import_module.*".r
     val sqlRegex =
         ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|query|add|commit|create_engine|sessionmaker).*".r
     val sqlIdentifierRegex = ".*(sqlalchemy|apsw|sqlite3).*".r
@@ -307,18 +338,59 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       val methodFullName = call.methodFullName
       val code           = call.code
 
+      // G3/G4: a render/redirect whose dynamic argument is a constant is not an
+      // attacker-influenced output (template name is a literal, redirect target is a
+      // url-name literal or `reverse(...)`). Skip framework-output for these benign sinks.
+      val benignOutput =
+          if name == "render" || name == "render_to_string" || name == "get_template" ||
+            name == "get_template_names" || name == "render_template"
+          then
+            // A template resolver (self.get_template()) is itself benign, and a render whose
+            // template comes from a literal, a resolver call or a member access (self.template)
+            // is not attacker-influenced. The template sits at positional arg 2 of render.
+            name == "get_template" || name == "get_template_names" ||
+            call.argument.isLiteral.exists(l =>
+                Seq(".html", ".txt", ".xml", ".json", ".htm").exists(l.code.contains)
+            ) ||
+            call.argument.isCall.name(
+              "get_template|get_template_names|get_template_name"
+            ).nonEmpty ||
+            call.argument.argumentIndex(2).exists(x => x.label == "CALL" || x.label == "LITERAL")
+          else if name == "redirect" || name == "HttpResponseRedirect" ||
+            name == "HttpResponsePermanentRedirect"
+          then
+            call.argument.isLiteral.nonEmpty || call.argument.isCall.name("reverse").nonEmpty
+          else false
+
       var matchedResp = false
       var i           = 0
       while i < pyResponseRegexes.length do
         if pyResponseRegexes(i).matches(code) then matchedResp = true
         i += 1
-      if matchedResp then
+      if matchedResp && !benignOutput then
         addTag("framework-output", call)
 
-      if pyResponseCallRegex.matches(code) then
+      if !benignOutput && pyResponseCallRegex.matches(code) then
         val filename = call.method.filename
         if pyResponseFileRegex.matches(filename) then
           addTag("framework-output", call)
+
+      // G1: ORM read accessor - return value is persisted data, a distinct trust level
+      // from live request input. Tagged so profiles can use it as a declassification barrier.
+      if dbReadHelperNames.contains(name) ||
+        name.matches("get_object_or_\\w+|get_list_or_\\w+") ||
+        (ormAccessorNames.contains(name) &&
+            (methodFullName.contains(".objects.") || methodFullName.contains(".query.")))
+      then
+        addTag("db-read", call)
+
+      // G6: DRF/serializer validation entrypoint.
+      if name == "is_valid" then
+        addTag("validation", call)
+
+      // G6+: Django/DRF/stdlib security neutralisers (open-redirect guards, HTML escapers, ...).
+      if sanitizerCallNames.contains(name) then
+        addTag("sanitization", call)
 
       if name == "get_value" then
         addTag("framework-input", call)
@@ -344,6 +416,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if serializationRegex.matches(methodFullName) then
         addTag("serialization", call)
 
+      // G5: unsafe deserialisation is a true code-exec-class sink, kept distinct from safe
+      // (de)serialisation above.
+      if deserializationRegex.matches(methodFullName) || deserializationRegex.matches(code) then
+        addTag("unsafe-deserialization", call)
+
       if regexLibRegex.matches(methodFullName) then
         addTag("regex", call)
 
@@ -353,8 +430,19 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if importlibRegex.matches(methodFullName) then
         addTag("reflection", call)
 
+      // G2: getattr/setattr/delattr is only reflection-as-a-sink when the attribute name is
+      // dynamic. A string-literal attribute (e.g. getattr(user, "is_anonymous")) is an ordinary
+      // field access and must not be flagged.
       if name == "getattr" || name == "delattr" || name == "setattr" then
-        addTag("reflection", call)
+        val attrArg = call.argument.argumentIndex(2).headOption
+        // A literal attribute, or a member access on self/cls (self.target_name), is an
+        // effectively constant field name - not attacker-controlled reflection.
+        val constantAttr = attrArg.exists { a =>
+            a.label == "LITERAL" ||
+            (a.label == "CALL" && (a.code.startsWith("self.") || a.code.startsWith("cls.")))
+        }
+        if !constantAttr then
+          addTag("reflection", call)
 
       if sqlRegex.matches(methodFullName) then
         addTag("sql", call)
