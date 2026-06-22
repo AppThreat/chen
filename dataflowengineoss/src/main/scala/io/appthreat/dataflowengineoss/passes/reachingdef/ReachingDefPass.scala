@@ -11,7 +11,11 @@ import scala.collection.mutable
 
 /** A pass that calculates reaching definitions ("data dependencies").
   */
-class ReachingDefPass(cpg: Cpg, maxNumberOfDefinitions: Int = 4000)(implicit s: Semantics)
+class ReachingDefPass(
+  cpg: Cpg,
+  maxNumberOfDefinitions: Int = 4000,
+  maxNumberOfCfgNodes: Int = 50000
+)(implicit s: Semantics)
     extends ForkJoinParallelCpgPass[Method](cpg):
 
   // If there are any regex method full names, load them early
@@ -20,6 +24,12 @@ class ReachingDefPass(cpg: Cpg, maxNumberOfDefinitions: Int = 4000)(implicit s: 
   override def generateParts(): Array[Method] = cpg.method.toArray
 
   override def runOnPart(dstGraph: DiffGraphBuilder, method: Method): Unit =
+    // Cheap structural guard before building the (more expensive) data-flow problem: methods with
+    // an enormous CFG - typically machine-generated / benchmark code - can have few definitions yet
+    // still make the fixpoint and edge generation pathologically slow. Skip them up front.
+    if method.cfgNode.size > maxNumberOfCfgNodes then
+      return
+
     val problem = ReachingDefProblem.create(method)
     if shouldBailOut(method, problem) then
       return

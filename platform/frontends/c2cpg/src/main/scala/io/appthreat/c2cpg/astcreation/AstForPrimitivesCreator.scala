@@ -77,9 +77,13 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                         if binding != null then
                           binding match
                             case v: IVariable =>
+                                // Use CDT's canonical type stringifier (`ASTTypeUtil.getType` via
+                                // `safeGetType`) rather than `IType.toString`, which yields internal
+                                // debug spellings that downstream `cleanType` cannot normalise and
+                                // often degrade to ANY.
                                 Try(v.getType).getOrElse(null) match
-                                  case f: IFunctionType       => f.getReturnType.toString
-                                  case other if other != null => other.toString
+                                  case f: IFunctionType       => safeGetType(f.getReturnType)
+                                  case other if other != null => safeGetType(other)
                                   case _                      => Defines.anyTypeName
                             case other => other.getName
                         else

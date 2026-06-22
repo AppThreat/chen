@@ -3,7 +3,7 @@ package io.appthreat.c2cpg.parser
 import better.files.*
 import io.appthreat.x2cpg.SourceFiles
 
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters.*
 
@@ -30,9 +30,10 @@ class HeaderFileFinder(root: String):
     *   The file currently being parsed (used for proximity scoring)
     */
   def find(path: String, currentSourceFile: Option[Path]): Option[String] =
-    if Files.exists(Paths.get(path)) then
-      return Option(path)
-
+    // NOTE: the sole caller (CustomFileContentProvider.loadContent) only reaches here when
+    // `getInclusionExists(path)` already returned false, i.e. `path` does not exist literally.
+    // We therefore skip a redundant `Files.exists` syscall (which previously ran on every probe,
+    // even on cache hits) and resolve purely by basename against the pre-indexed project headers.
     val sourceDir = currentSourceFile.map(_.getParent.toString)
     findCache.computeIfAbsent((path, sourceDir), _ => calculateMatch(path, currentSourceFile))
 

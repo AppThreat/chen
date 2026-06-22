@@ -16,8 +16,11 @@ class TypeNodePassTests extends CCodeToCpgSuite:
           |""".stripMargin)
           val List(foo) = cpg.typeDecl.nameExact("foo").l
           val List(bar) = cpg.typeDecl.nameExact("bar").l
-          foo.aliasTypeFullName shouldBe Some("char")
-          bar.aliasTypeFullName shouldBe Some("char")
+          // `const char *` retains its pointer star (previously the const-strip dropped it,
+          // yielding the incorrect "char").
+          foo.aliasTypeFullName shouldBe Some("char*")
+          // `bar` is `foo *`, i.e. a pointer to `const char *`, so two stars survive.
+          bar.aliasTypeFullName shouldBe Some("char**")
       }
 
       "be correct for static decl assignment" in {

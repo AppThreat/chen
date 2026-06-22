@@ -12,6 +12,7 @@ import org.eclipse.cdt.core.model.{CoreModel, ICProject, ILanguage}
 import org.eclipse.cdt.core.parser.{DefaultLogService, ExtendedScannerInfo, FileContent}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPVisitor
 import org.eclipse.cdt.internal.core.index.EmptyCIndex
+import org.eclipse.cdt.internal.core.util.{ICancelable, ICanceler}
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{NoSuchFileException, Path}
@@ -29,9 +30,36 @@ object CdtParser:
     failure: Option[Throwable] = None
   )
 
+  /** Reads and UTF-8-decodes a file into an immutable `char[]` of source. Kept separate so the
+    * shared header content cache in [[CustomFileContentProvider]] can memoise the decoded array.
+    */
+  def readFileChars(path: Path): Array[Char] =
+      IOUtils.readLinesInFile(path).mkString("\n").toArray
+
   def readFileAsFileContent(path: Path): FileContent =
-    val lines = IOUtils.readLinesInFile(path).mkString("\n").toArray
-    FileContent.create(path.toString, true, lines)
+      FileContent.create(path.toString, true, readFileChars(path))
+
+  /** A parser log service that also exposes CDT's cooperative cancellation hook.
+    *
+    * `AbstractCLikeLanguage.getASTTranslationUnit` registers an [[ICancelable]] on the log service
+    * when it implements [[ICanceler]] (CDT bug 226682). Calling [[setCanceled]] from another thread
+    * therefore propagates to `scanner.cancel()` / `parser.cancel()`, which makes the parse abort at
+    * the next cancellation check instead of running to completion. Without this, a timed-out parse
+    * keeps a CPU-bound thread alive in the background since CDT does not poll `Thread.interrupt()`.
+    */
+  final class CancelableLogService extends DefaultLogService with ICanceler:
+    @volatile private var cancelable: ICancelable = null
+    @volatile private var canceled: Boolean       = false
+
+    override def setCancelable(c: ICancelable): Unit = synchronized:
+      cancelable = c
+      if canceled && (c ne null) then c.cancel()
+
+    override def setCanceled(value: Boolean): Unit = synchronized:
+      canceled = value
+      if value && (cancelable ne null) then cancelable.cancel()
+
+    override def isCanceled: Boolean = canceled
 
 class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends ParseProblemsLogger
     with PreprocessorStatementsLogger:
@@ -40,8 +68,18 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
 
   private val parserConfig   = ParserConfig.fromConfig(config)
   private val definedSymbols = parserConfig.definedSymbols.asJava
-  private val includePaths   = parserConfig.userIncludePaths
-  private val log            = new DefaultLogService
+  // Probe order matters: CDT's CPreprocessor.findInclusion walks the search path array in order
+  // until a candidate resolves. Sorting shallow-first (fewer path segments) puts general top-level
+  // include roots ahead of deeply nested ones, so the common `<pkg/...>` style includes resolve
+  // with fewer failed probes. Order is deterministic for reproducible parses.
+  private val includePaths =
+      parserConfig.userIncludePaths.toSeq.sortBy(p => (p.getNameCount, p.toString))
+  private val log = new CancelableLogService
+
+  /** Cooperatively cancels an in-flight parse on this parser (see [[CancelableLogService]]). Safe
+    * to call from another thread, e.g. a timeout watchdog.
+    */
+  def cancel(): Unit = log.setCanceled(true)
 
   private var stayCpp: Boolean = false
 

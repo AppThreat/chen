@@ -126,13 +126,8 @@ private object Frontend:
       opt[String]("cpp-standard")
           .text("C++ standard version (e.g., c++17, c++20).")
           .action((s, c) => c.withCppStandard(s)),
-      opt[Unit]("enable-ast-cache")
-          .text(
-            "Enables AST caching to disk (enabled by default). If the file path and content haven't changed, the cached AST is used."
-          )
-          .action((_, c) => c.withAstCache(true)),
       opt[Unit]("no-ast-cache")
-          .text("Disables AST caching to disk.")
+          .text("Disables AST caching to disk (enabled by default).")
           .action((_, c) => c.withAstCache(false)),
       opt[String]("cache-dir")
           .text(

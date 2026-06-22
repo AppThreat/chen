@@ -24,7 +24,7 @@ class FluxReachingDefBenchmark extends CCodeToCpgSuite:
       ManagementFactory.getThreadMXBean.asInstanceOf[com.sun.management.ThreadMXBean]
 
   private def allocatedBytes: Long =
-      threadMx.getThreadAllocatedBytes(Thread.currentThread().getId)
+      threadMx.getThreadAllocatedBytes(Thread.currentThread().threadId())
 
   /** A single big method: many locals, an initialisation chain, two loops whose bodies reassign the
     * locals in terms of one another (loop-carried dependencies force fixpoint iteration), and a

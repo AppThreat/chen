@@ -20,7 +20,8 @@ object OssDataFlow:
 class OssDataFlowOptions(
   var maxNumberOfDefinitions: Int = 4000,
   var extraFlows: List[FlowSemantic] = List.empty[FlowSemantic],
-  var useFluxEngine: Boolean = false
+  var useFluxEngine: Boolean = false,
+  var maxNumberOfCfgNodes: Int = 50000
 ) extends LayerCreatorOptions {}
 
 class OssDataFlow(opts: OssDataFlowOptions)(implicit
@@ -33,8 +34,9 @@ class OssDataFlow(opts: OssDataFlowOptions)(implicit
   override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
     val cpg = context.cpg
     val reachingDefPass: CpgPassBase =
-        if opts.useFluxEngine then new FluxReachingDefPass(cpg, opts.maxNumberOfDefinitions)
-        else new ReachingDefPass(cpg, opts.maxNumberOfDefinitions)
+        if opts.useFluxEngine then
+          new FluxReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)
+        else new ReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)
     val enhancementExecList = Iterator(reachingDefPass)
     enhancementExecList.zipWithIndex.foreach { case (pass, index) =>
         runPass(pass, context, storeUndoInfo, index)

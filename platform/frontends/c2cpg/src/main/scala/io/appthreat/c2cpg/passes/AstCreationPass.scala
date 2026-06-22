@@ -19,8 +19,28 @@ import scala.util.Try
 import scala.util.matching.Regex
 
 object AstCreationPass:
-  private val theoriticalMaxProcs  = Math.max(1, Runtime.getRuntime.availableProcessors() / 3)
-  private val maxConcurrentParsers = Math.min(4, theoriticalMaxProcs)
+  // The parse pool exists only to give each parse a cancellable thread for the timeout below.
+  // Concurrency (and therefore peak memory) is already bounded upstream by StreamingCpgPass's
+  // producer semaphore (~0.7 * cores). Sizing this pool ABOVE that bound is essential: if it is
+  // smaller, admitted files queue here while their `future.get(timeout)` clock is already running,
+  // so a fast file can "time out" purely from waiting behind a couple of slow headers. Sizing to
+  // the full core count guarantees a submitted parse starts immediately, so the timeout measures
+  // real parse time rather than queue wait.
+  private val maxConcurrentParsers = Math.max(4, Runtime.getRuntime.availableProcessors())
+
+  /** Per-file parse/AST timeout. Defaults to 2 minutes; override via `CHEN_CDT_TIMEOUT` (seconds)
+    * for projects with pathologically heavy translation units (e.g. template-heavy SDK headers).
+    */
+  private[passes] val parseTimeout: FiniteDuration =
+      sys.env.get("CHEN_CDT_TIMEOUT").flatMap(s => Try(s.trim.toInt).toOption).filter(_ > 0) match
+        case Some(seconds) => seconds.seconds
+        case None          => 2.minutes
+
+  /** When `CHEN_CDT_DEBUG` is set, log the parse duration of any file that takes over a second.
+    * Useful for pinpointing pathological headers / include-resolution blow-ups.
+    */
+  private[passes] val debugTiming: Boolean =
+      sys.env.get("CHEN_CDT_DEBUG").exists(v => v == "1" || v.equalsIgnoreCase("true"))
 
   private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
   private val DefaultIgnoredFolders: List[Regex] = List(
@@ -57,8 +77,8 @@ end AstCreationPass
 class AstCreationPass(
   cpg: Cpg,
   config: Config,
-  timeoutDuration: FiniteDuration = 2.minutes,
-  parseTimeoutDuration: FiniteDuration = 2.minutes
+  timeoutDuration: FiniteDuration = AstCreationPass.parseTimeout,
+  parseTimeoutDuration: FiniteDuration = AstCreationPass.parseTimeout
 ) extends StreamingCpgPass[String](cpg):
 
   import AstCreationPass.*
@@ -98,8 +118,20 @@ class AstCreationPass(
     val relPath          = SourceFiles.toRelativePath(path.toString, config.inputPath)
     val file2OffsetTable = new ConcurrentHashMap[String, Array[Int]]()
     val parser           = new CdtParser(config, sharedHeaderFileFinder)
+    val parseStart       = if AstCreationPass.debugTiming then System.nanoTime() else 0L
     try
-      runWithTimeout(() => parser.parse(path), parseTimeoutDuration) match
+      val parsed =
+          try runWithTimeout(() => parser.parse(path), parseTimeoutDuration)
+          catch
+            case e: TimeoutException =>
+                // Cooperatively stop the CDT scanner/parser so the cancelled parse does not keep
+                // a thread spinning in the background after future.cancel(true).
+                parser.cancel()
+                throw e
+      if AstCreationPass.debugTiming then
+        val ms = (System.nanoTime() - parseStart) / 1000000L
+        if ms > 1000L then println(s"[c2cpg] parsed $relPath in ${ms}ms")
+      parsed match
         case Some(translationUnit: IASTTranslationUnit) =>
             val astCreator =
                 new AstCreator(relPath, config, translationUnit, file2OffsetTable)(using
@@ -112,6 +144,8 @@ class AstCreationPass(
       case e: Throwable =>
           println(s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}")
           None
+    end try
+  end createAst
 
   private def registerUsedTypes(usedTypes: Seq[String]): Unit =
       usedTypes.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
@@ -121,7 +155,7 @@ class AstCreationPass(
       override def call(): T = block()
     )
     try
-      future.get(timeout.toMinutes, TimeUnit.MINUTES)
+      future.get(timeout.toMillis, TimeUnit.MILLISECONDS)
     catch
       case _: TimeoutException =>
           future.cancel(true)
