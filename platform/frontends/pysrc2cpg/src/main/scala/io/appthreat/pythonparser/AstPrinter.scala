@@ -150,6 +150,20 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
     val defaultStr = typeVar.default_value.map(dv => " = " + print(dv)).getOrElse("")
     typeVar.name + boundStr + defaultStr
 
+  override def visit(typeAlias: TypeAlias): String =
+    val typeParamsStr = if typeAlias.type_params.nonEmpty then
+      "[" + typeAlias.type_params.map(print).mkString(", ") + "]"
+    else ""
+    "type " + print(typeAlias.name) + typeParamsStr + " = " + print(typeAlias.value)
+
+  override def visit(typeVarTuple: TypeVarTuple): String =
+    val defaultStr = typeVarTuple.default_value.map(dv => " = " + print(dv)).getOrElse("")
+    "*" + typeVarTuple.name + defaultStr
+
+  override def visit(paramSpec: ParamSpec): String =
+    val defaultStr = paramSpec.default_value.map(dv => " = " + print(dv)).getOrElse("")
+    "**" + paramSpec.name + defaultStr
+
   override def visit(functionDef: FunctionDef): String =
       functionDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
           "def " + functionDef.name + "(" + print(functionDef.args) + ")" +

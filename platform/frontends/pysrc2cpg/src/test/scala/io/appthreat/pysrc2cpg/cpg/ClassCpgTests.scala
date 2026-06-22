@@ -60,7 +60,7 @@ class ClassCpgTests extends PySrc2CpgFixture(withOssDataflow = false) {
                              |""".stripMargin)
             val typeDecl = cpg.typeDecl.name("MultiGeneric").head
             typeDecl.fullName shouldBe "Test0.py:<module>.MultiGeneric"
-            cpg.member.name("value").head.typeFullName shouldBe "ANY" // Bug: Must be T
+            cpg.member.name("value").head.typeFullName shouldBe "T"
             cpg.method.name("process").parameter.last.typeFullName shouldBe "V"
         }
 

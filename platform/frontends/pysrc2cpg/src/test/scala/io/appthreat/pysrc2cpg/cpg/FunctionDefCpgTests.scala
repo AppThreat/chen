@@ -165,7 +165,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
                 .parameter
                 .typeFullName
                 .dedup
-                .l shouldBe Seq("Optional[str]")
+                .l shouldBe Seq("typing.Optional[__builtin.str]")
         }
 
         "test return hint of method definition using built-in types" in {
@@ -183,7 +183,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
                 .methodReturn
                 .typeFullName
                 .dedup
-                .l shouldBe Seq("typing.List")
+                .l shouldBe Seq("typing.List[typing.Union[__builtin.str | None]]")
         }
 
         "test parameter hint of the form abc.def" in {
@@ -222,9 +222,9 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
             val methodNode = cpg.method.name("process_items").head
             methodNode.name shouldBe "process_items"
             methodNode.fullName shouldBe "test.py:<module>.process_items"
-            methodNode.methodReturn.typeFullName shouldBe "__builtin.dict"
+            methodNode.methodReturn.typeFullName shouldBe "__builtin.dict[T, U]"
             val param = methodNode.parameter.name("items").head
-            param.typeFullName shouldBe "T" // Bug: must be list[T]
+            param.typeFullName shouldBe "__builtin.list[T]"
         }
 
         "handle bound type parameter in function" in {
