@@ -60,6 +60,7 @@ object CdtParser:
       if value && (cancelable ne null) then cancelable.cancel()
 
     override def isCanceled: Boolean = canceled
+end CdtParser
 
 class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends ParseProblemsLogger
     with PreprocessorStatementsLogger:
