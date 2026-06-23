@@ -8,6 +8,7 @@ import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.appthreat.x2cpg.datastructures.Stack.*
+import scala.util.Try
 
 trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
@@ -312,10 +313,23 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
 
     val typeDecl = typeSpecifier match
       case cppClass: ICPPASTCompositeTypeSpecifier =>
-          val baseClassList =
-              cppClass.getBaseSpecifiers.toSeq.map(s =>
-                  registerType(s.getNameSpecifier.toString)
-              )
+          val baseClassList = cppClass.getBaseSpecifiers.toSeq.map { s =>
+            // Prefer the fully-qualified name from the resolved binding so that
+            // `inheritsFromTypeFullName` carries the same dot-separated namespace
+            // path as other type names in the graph (e.g. `Aws.Http.HttpClientFactory`
+            // rather than the bare `HttpClientFactory`).
+            //
+            // ICPPBinding.getQualifiedName drops template arguments (e.g. `X<A>` → `X`),
+            // so we only use the binding-derived name when it is at least as long as the
+            // AST spelling.  This preserves template parameters on base classes while
+            // still gaining namespace qualification for non-template bases.
+            val astSpelling = s.getNameSpecifier.toString
+            val bindingName = Try(s.getNameSpecifier.resolveBinding()).toOption
+                .collect { case b: ICPPBinding => b.getQualifiedName.mkString(".") }
+                .filter(_.length >= astSpelling.length)
+                .getOrElse(astSpelling)
+            registerType(bindingName)
+          }
           typeDeclNode(
             typeSpecifier,
             name,
@@ -386,6 +400,11 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val tpe = enumerator.getParent match
       case enumeration: ICPPASTEnumerationSpecifier if enumeration.getBaseType != null =>
           enumeration.getBaseType.toString
+      case enumeration: IASTEnumerationSpecifier =>
+          // CDT does not expose the enumerator's own type directly; use the enclosing enum's
+          // fully-qualified name so that member typeFullName is the enum type rather than ANY.
+          val enumType = cleanType(fullName(enumeration))
+          if enumType == Defines.anyTypeName then typeFor(enumerator) else enumType
       case _ => typeFor(enumerator)
     val cpgMember = memberNode(
       enumerator,

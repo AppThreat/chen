@@ -360,9 +360,15 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       name
     cleanedName.split(Defines.qualifiedNameSeparator).lastOption.getOrElse(cleanedName)
 
+  /** Converts an [[IFunctionType]] to a human-readable signature string using the CPG dot-separator
+    * convention for namespaces. Both the return type and every parameter type are normalised
+    * through [[cleanType]] so that raw CDT spellings (e.g. `::` separators, `const` qualifiers,
+    * unresolved `?` placeholders, CDT-internal template indices) are canonicalised consistently
+    * with all other type names in the graph.
+    */
   protected def functionTypeToSignature(typ: IFunctionType): String =
-    val returnType     = safeGetType(typ.getReturnType)
-    val parameterTypes = typ.getParameterTypes.map(safeGetType)
+    val returnType     = cleanType(safeGetType(typ.getReturnType))
+    val parameterTypes = typ.getParameterTypes.map(t => cleanType(safeGetType(t)))
     s"$returnType(${parameterTypes.mkString(",")})"
 
   protected def fullName(node: IASTNode): String =

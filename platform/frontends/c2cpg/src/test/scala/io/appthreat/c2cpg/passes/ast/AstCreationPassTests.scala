@@ -1955,7 +1955,7 @@ class AstCreationPassTests extends AbstractPassTest:
       ) { cpg =>
         val List(method) = cpg.method.nameNot("<global>").l
         method.name shouldBe "x"
-        method.fullName shouldBe "Foo.x:char (* (*)[5])()()"
+        method.fullName shouldBe "Foo.x:char (*(*)[5])()()"
         method.code shouldBe "char (*(*x())[5])()"
         method.signature shouldBe "char()"
       }

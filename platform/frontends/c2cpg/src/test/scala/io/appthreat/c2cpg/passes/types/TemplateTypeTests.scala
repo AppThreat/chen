@@ -78,10 +78,10 @@ class TemplateTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
        |""".stripMargin)
           inside(cpg.method.nameNot("<global>").internal.l) { case List(x, y) =>
               x.name shouldBe "x"
-              x.fullName shouldBe "x:void(#0,#1)"
+              x.fullName shouldBe "x:void(ANY,ANY)"
               x.signature shouldBe "void <T,U> (T,U)"
               y.name shouldBe "y"
-              y.fullName shouldBe "y:void(#0,#1)"
+              y.fullName shouldBe "y:void(ANY,ANY)"
               y.signature shouldBe "void(T,U)"
           }
       }

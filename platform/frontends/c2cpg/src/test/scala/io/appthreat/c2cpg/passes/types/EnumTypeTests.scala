@@ -201,5 +201,41 @@ class EnumTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
           }
       }
 
+      "assign the enclosing enum type to each enumerator member" in {
+          val cpg = code("""
+        |enum color { red, green, blue };
+        |""".stripMargin)
+          val members = cpg.typeDecl.nameExact("color").member.l
+          members should not be empty
+          members.foreach { m =>
+              m.typeFullName should not be "ANY"
+              m.typeFullName shouldBe "color"
+          }
+      }
+
+      "assign the fully-qualified enclosing enum type to each enumerator member" in {
+          val cpg = code("""
+        |namespace Aws { namespace Http {
+        |  enum class HttpMethod { GET, POST, PUT, DELETE_ };
+        |}}
+        |""".stripMargin)
+          val members = cpg.typeDecl.nameExact("HttpMethod").member.l
+          members should not be empty
+          members.foreach { m =>
+              m.typeFullName shouldBe "Aws.Http.HttpMethod"
+          }
+      }
+
+      "assign explicit base type to enumerator members when provided" in {
+          val cpg = code("""
+        |enum class Status : unsigned int { OK = 0, ERR = 1 };
+        |""".stripMargin)
+          val members = cpg.typeDecl.nameExact("Status").member.l
+          members should not be empty
+          members.foreach { m =>
+              m.typeFullName should not be "ANY"
+          }
+      }
+
   }
 end EnumTypeTests

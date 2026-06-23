@@ -16,11 +16,38 @@ sealed trait Dereference:
 
 case class CDereference() extends Dereference:
 
-  /** Types from C/C++ can be annotated with * to indicate being a reference. As our CPG schema
-    * currently lacks a separate field for that information the * is part of the type full name and
-    * needs to be removed when linking.
+  /** Owning and non-owning smart-pointer wrappers whose inner type should be used for member
+    * resolution. Stored with the CPG dot-separator convention (e.g. `std.shared_ptr`).
     */
-  override def dereferenceTypeFullName(fullName: String): String = fullName.replace("*", "")
+  private val SmartPointerPrefixes: List[String] = List(
+    "std.shared_ptr",
+    "std.unique_ptr",
+    "std.weak_ptr",
+    "boost.shared_ptr",
+    "boost.scoped_ptr"
+  )
+
+  /** Strips raw pointer stars and, for well-known smart-pointer wrappers, unwraps the inner type
+    * argument so that member-method lookup continues against the pointed-to type rather than the
+    * wrapper itself.
+    *
+    * Examples (CPG dot-separator form):
+    *   - `std.shared_ptr<Aws.Http.HttpRequest>*` → `Aws.Http.HttpRequest`
+    *   - `std.unique_ptr<Foo>` → `Foo`
+    *   - `Aws.Client.AWSClient*` → `Aws.Client.AWSClient`
+    *   - `int*` → `int`
+    */
+  override def dereferenceTypeFullName(fullName: String): String =
+    val withoutStars = fullName.replace("*", "").trim
+    SmartPointerPrefixes
+        .find(prefix => withoutStars.startsWith(s"$prefix<") && withoutStars.endsWith(">"))
+        .map { prefix =>
+          val inner = withoutStars.drop(prefix.length + 1).dropRight(1).trim
+          // Recursively strip nested smart-pointer wrapping (e.g. shared_ptr<unique_ptr<T>>).
+          dereferenceTypeFullName(inner)
+        }
+        .getOrElse(withoutStars)
+end CDereference
 
 case class DefaultDereference() extends Dereference:
 
