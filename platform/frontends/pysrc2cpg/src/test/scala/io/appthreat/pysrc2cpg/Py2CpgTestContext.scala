@@ -19,7 +19,8 @@ class Py2CpgTestContext {
 
   private val codeAndFile     = mutable.ArrayBuffer.empty[Py2Cpg.InputPair]
   private var buildResult     = Option.empty[Cpg]
-  private val absTestFilePath = "<absoluteTestPath>/"
+  private val absTestFilePath =
+    java.nio.file.Files.createTempDirectory("pysrc2cpg-test").toString
 
   def addSource(code: String, file: String = "test.py"): Py2CpgTestContext = {
     if (buildResult.nonEmpty) {

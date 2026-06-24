@@ -71,9 +71,8 @@ class AstCacheStore(
   private val logger: Logger = LoggerFactory.getLogger(classOf[AstCacheStore])
 
   /** The cache directory is only usable if its parent (the project input path) actually exists as a
-    * directory. A real scan always satisfies this; it guards against placeholder/relative input
-    * paths used in tests (e.g. `"<absoluteTestPath>/"`), which would otherwise have the cache
-    * directory materialized in the working tree and left behind.
+    * directory. A real scan always satisfies this; it guards against relative or non-existent input
+    * paths, which would otherwise have the cache directory materialized in an unexpected location.
     */
   private val cacheDirParentExists: Boolean =
       Try {
