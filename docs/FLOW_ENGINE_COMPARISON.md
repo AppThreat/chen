@@ -37,11 +37,6 @@ It helps to separate two layers that both get called "the data-flow engine":
         +-----------------------------+              +------------------------------+
 ```
 
-There is a single `useFluxEngine` flag, on `OssDataFlowOptions`, which selects the construction-layer
-solver and is the subject of this document. (An earlier query-layer `EngineConfig.useFluxEngine` flag
-was a no-op — a shared cross-sink cache behind it proved unsound — and has been removed; cross-sink
-reuse now lives only in the summary engine via `EngineConfig.useSummaries`.)
-
 ## 2. The shared lattice framework
 
 Both solvers consume the identical problem built by `ReachingDefProblem.create(method)`
