@@ -55,9 +55,14 @@ class ReachingDefFlowGraph(val method: Method) extends FlowGraph[StoredNode]:
           x.id != entryNode.id && x.id != exitNode.id
       ) ++ method.parameter.asOutput.toList ++ List(exitNode)
 
+  // Membership test by node id (matching the id-based comparison used above). Using a `List`'s
+  // `contains` here was O(N) per probe, making the `filterNot` O(N^2); on large generated/benchmark
+  // methods (tens of thousands of CFG nodes) this single line dominated runtime and could spin a
+  // worker thread for many minutes. A hash-set lookup makes it O(N) overall.
+  private val reachableNodeIds: Set[Long] = allNodesReversePostOrder.iterator.map(_.id).toSet
   private val allNodesEvenUnreachable =
       allNodesReversePostOrder ++ method.cfgNode.l.filterNot(x =>
-          allNodesReversePostOrder.contains(x)
+          reachableNodeIds.contains(x.id)
       )
   val nodeToNumber: Map[StoredNode, Int] =
       allNodesEvenUnreachable.zipWithIndex.map { case (x, i) => x -> i }.toMap

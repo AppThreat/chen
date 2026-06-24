@@ -267,7 +267,6 @@ private class UsageAnalyzer(
   val numberToNode: Map[Definition, StoredNode] =
       problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
 
-  private val allNodes = in.keys.toList
   private val containerSet =
       Set(
         Operators.fieldAccess,
@@ -278,10 +277,18 @@ private class UsageAnalyzer(
   private val indirectionAccessSet = Set(Operators.addressOf, Operators.indirection)
   val usedIncomingDefs: Map[StoredNode, Map[StoredNode, Set[Definition]]] = initUsedIncomingDefs()
 
+  /** Only `Call`, `Return` and `MethodParameterOut` nodes ever have non-empty `uses` (see
+    * [[uses]]), so only they can have non-empty used-incoming-defs. We therefore compute entries
+    * for those nodes alone and default every other node to the empty map - identical to mapping
+    * over all nodes (which produced empty maps for the rest) but without allocating an entry, and
+    * without calling `uses`, for every identifier/literal/etc. in the method.
+    */
   def initUsedIncomingDefs(): Map[StoredNode, Map[StoredNode, Set[Definition]]] =
-      allNodes.map { node =>
-          node -> usedIncomingDefsForNode(node)
-      }.toMap
+      in.keys.iterator.collect {
+          case node: Call               => node -> usedIncomingDefsForNode(node)
+          case node: Return             => node -> usedIncomingDefsForNode(node)
+          case node: MethodParameterOut => node -> usedIncomingDefsForNode(node)
+      }.toMap.withDefaultValue(Map.empty[StoredNode, Set[Definition]])
 
   private def usedIncomingDefsForNode(node: StoredNode): Map[StoredNode, Set[Definition]] =
       uses(node).map { use =>

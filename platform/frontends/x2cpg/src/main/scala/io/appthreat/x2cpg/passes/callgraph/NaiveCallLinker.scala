@@ -14,7 +14,7 @@ class NaiveCallLinker(cpg: Cpg) extends CpgPass(cpg):
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
     val methodNameToNode = cpg.method.toList.groupBy(_.name)
-    def calls            = cpg.call.filter(_.outE(EdgeTypes.CALL).isEmpty)
+    def calls            = cpg.call.filter(!_.hasOut(EdgeTypes.CALL))
     for
       call    <- calls
       methods <- methodNameToNode.get(call.name)

@@ -189,6 +189,9 @@ trait AstVisitor[T]:
   def visit(list: ast.List): T
   def visit(tuple: Tuple): T
   def visit(typeVar: TypeVar): T
+  def visit(typeAlias: TypeAlias): T
+  def visit(typeVarTuple: TypeVarTuple): T
+  def visit(paramSpec: ParamSpec): T
   def visit(slice: Slice): T
   def visit(stringExpList: StringExpList): T
 

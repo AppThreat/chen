@@ -1,10 +1,10 @@
 package io.appthreat.c2cpg.querying
 
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.semanticcpg.language.{_}
+import io.shiftleft.semanticcpg.language.{*}
 import io.shiftleft.semanticcpg.language.NoResolve
 
-class CallGraphQueryTests extends CCodeToCpgSuite {
+class CallGraphQueryTests extends CCodeToCpgSuite:
 
   private implicit val resolver: NoResolve.type = NoResolve
 
@@ -19,37 +19,41 @@ class CallGraphQueryTests extends CCodeToCpgSuite {
     """.stripMargin)
 
   "should find that add is called by main" in {
-    cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
+      cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
   }
 
   "should find that main calls add and others" in {
-    cpg.method.name("main").callee.name.toSetMutable shouldBe Set("add", "printf", "<operator>.addition")
+      cpg.method.name("main").callee.name.toSetMutable shouldBe Set(
+        "add",
+        "printf",
+        "<operator>.addition"
+      )
   }
 
   "should find three outgoing calls for main" in {
-    cpg.method.name("main").call.code.toSetMutable shouldBe
-      Set("1+2", "add((1+2), 3)", "printf(\"%d\\n\", add((1+2), 3))")
+      cpg.method.name("main").call.code.toSetMutable shouldBe
+          Set("1+2", "add((1+2), 3)", "printf(\"%d\\n\", add((1+2), 3))")
   }
 
   "should find one callsite for add" in {
-    cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("add((1+2), 3)")
+      cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("add((1+2), 3)")
   }
 
   "should find that argument '1+2' is passed to parameter 'x'" in {
-    cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1+2")
+      cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1+2")
   }
 
   "should allow traversing from argument to formal parameter" in {
-    cpg.argument.parameter.name.toSetMutable should not be empty
+      cpg.argument.parameter.name.toSetMutable should not be empty
   }
 
   "should allow traversing from argument to call" in {
-    cpg.method.name("printf").callIn.argument.inCall.name.toSetMutable shouldBe Set("printf")
+      cpg.method.name("printf").callIn.argument.inCall.name.toSetMutable shouldBe Set("printf")
   }
 
-    "CallTest 6" should {
-        val cpg = code(
-            """
+  "CallTest 6" should {
+      val cpg = code(
+        """
               |class Animal {
               |	public:
               |    virtual void eat() {
@@ -80,13 +84,27 @@ class CallGraphQueryTests extends CCodeToCpgSuite {
               |   return 0;
               |}
               |""".stripMargin,
-            "test.cpp"
-        )
-        "have correct type full names for calls" in {
-            cpg.method.name("eat").fullName.toSet shouldBe Set("Animal.eat:void()", "Cat.eat:void()", "People.eat:void()")
-            cpg.method.name("main").callee.fullName.toSet shouldBe Set("Animal.eat:void()", "Cat.eat:void()", "<operator>.addressOf")
-            cpg.method.fullNameExact("Cat.eat:void()").caller.fullName.toSet shouldBe Set("People.feedPets:void()", "main:int()")
-            cpg.method.fullName("Animal.eat.*").caller.fullName.toSet shouldBe Set("People.feedPets:void()", "main:int()")
-        }
-    }
-}
+        "test.cpp"
+      )
+      "have correct type full names for calls" in {
+          cpg.method.name("eat").fullName.toSet shouldBe Set(
+            "Animal.eat:void()",
+            "Cat.eat:void()",
+            "People.eat:void()"
+          )
+          cpg.method.name("main").callee.fullName.toSet shouldBe Set(
+            "Animal.eat:void()",
+            "Cat.eat:void()",
+            "<operator>.addressOf"
+          )
+          cpg.method.fullNameExact("Cat.eat:void()").caller.fullName.toSet shouldBe Set(
+            "People.feedPets:void()",
+            "main:int()"
+          )
+          cpg.method.fullName("Animal.eat.*").caller.fullName.toSet shouldBe Set(
+            "People.feedPets:void()",
+            "main:int()"
+          )
+      }
+  }
+end CallGraphQueryTests

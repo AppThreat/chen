@@ -11,12 +11,24 @@ import io.shiftleft.semanticcpg.language.*
 import java.util.regex.Pattern
 import scala.util.{Try, Using}
 
-/** Creates tags on any node based on framework patterns and configuration */
-class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
+/** Creates tags on any node based on framework patterns and configuration.
+  *
+  * @param atom
+  *   the graph to tag.
+  * @param externalConfig
+  *   optional configuration content (the same JSON as the embedded `chennai.json`). When provided,
+  *   it is used in addition to any embedded config, which lets a caller pass a configuration from
+  *   outside the graph - for example an atom command-line flag - without first embedding it.
+  */
+class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPass(atom):
 
-  private val FRAMEWORK_ROUTE      = "framework-route"
-  private val FRAMEWORK_INPUT      = "framework-input"
-  private val FRAMEWORK_OUTPUT     = "framework-output"
+  private val FRAMEWORK_ROUTE  = "framework-route"
+  private val FRAMEWORK_INPUT  = "framework-input"
+  private val FRAMEWORK_OUTPUT = "framework-output"
+  // A call to a declared sanitiser or validator. Flows that pass through such a call are considered
+  // neutralised for the categories the sanitiser covers.
+  private val SANITIZER            = "sanitizer"
+  private val SANITIZER_TAG_PREFIX = "sanitizer-"
   private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
   private val RE_CHARS             = "[](){}*+&|?.,\\$"
 
@@ -38,6 +50,10 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
 
   private val JS_ROUTES_CALL_REGEX =
       ".*(?i)(app|router|route|server)\\.(get|post|put|delete|patch|head|options|all|use|registerRoute).*"
+  // Precompiled once: `tagJsRoutes` tests this against every call node in the graph, twice each
+  // (methodFullName + code). `String.matches` recompiles the pattern on every call, which dominated
+  // the juice-shop tagging phase (jstack: ChennaiTagsPass -> String.matches -> Pattern.compile).
+  private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
   private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
 
   private val HTTP_METHODS_REGEX  = ".*(request|session)\\.(args|get|post|put|form).*"
@@ -64,8 +80,8 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
         case _ => // No specific routing for this language
   private def tagJsRoutes(dstGraph: DiffGraphBuilder): Unit =
     val routeCalls = atom.call.filter { c =>
-        c.methodFullName.matches(JS_ROUTES_CALL_REGEX) ||
-        c.code.matches(JS_ROUTES_CALL_REGEX)
+        JsRoutesCallPattern.matcher(c.methodFullName).matches() ||
+        JsRoutesCallPattern.matcher(c.code).matches()
     }
     routeCalls.foreach { call =>
       call.argument
@@ -86,10 +102,24 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
               Iterator(params(1)).newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
           }
     }
-    atom.call
-        .code(VUE_ROUTE_INPUT_REGEX)
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    // Cheap substring prefilter before the regex: the pattern can only match code containing the
+    // literal "$route", so this skips the regex engine for the vast majority of (bundled-JS) calls.
+    // The Vue `$route` input tagging is only meaningful when the project actually imports Vue.
+    // Checking imports once avoids scanning every call node's code on non-Vue projects, and the
+    // cheap `$route` substring prefilter avoids the regex engine for the remaining calls.
+    // `importedEntity` is the bare specifier for `require(...)` (e.g. "vue") and "<package>:<name>"
+    // for ESM imports (e.g. "vue-router:useRoute", "@vue/composition-api:ref"), so strip the
+    // ESM name suffix before matching the package.
+    val usesVue = atom.imports.importedEntity.exists { e =>
+      val pkg = e.takeWhile(_ != ':')
+      pkg == "vue" || pkg.startsWith("vue-") || pkg.startsWith("vue/") || pkg.startsWith("@vue/")
+    }
+    if usesVue then
+      atom.call
+          .filter(_.code.contains("$route"))
+          .code(VUE_ROUTE_INPUT_REGEX)
+          .newTagNode(FRAMEWORK_INPUT)
+          .store()(using dstGraph)
     val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
         .method
         .internal
@@ -222,20 +252,52 @@ class ChennaiTagsPass(atom: Cpg) extends CpgPass(atom):
   end tagRubyRoutes
 
   private def processChennaiConfig(dstGraph: DiffGraphBuilder): Unit =
-      atom.configFile(CHENNAI_CONFIG_FILE).content.foreach { configData =>
+      configSources.foreach { configData =>
           parse(configData) match
             case Right(json) =>
-                val tags = json.hcursor
-                    .downField("tags")
-                    .focus
-                    .flatMap(_.asArray)
-                    .getOrElse(Vector.empty)
-
-                tags.foreach(processTag(_, dstGraph))
+                val cursor = json.hcursor
+                cursor.downField("tags").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+                    .foreach(processTag(_, dstGraph))
+                // A sanitiser/validator section, e.g.
+                //   "sanitizers": [ { "name": "owasp-encode",
+                //                     "methods": ["org\\.owasp\\.encoder\\.Encode\\..*"],
+                //                     "categories": ["http"] } ]
+                // `validators` is accepted as an alias and handled identically.
+                (cursor.downField("sanitizers").focus.flatMap(_.asArray).getOrElse(Vector.empty) ++
+                    cursor.downField("validators").focus.flatMap(_.asArray).getOrElse(Vector.empty))
+                    .foreach(processSanitizer(_, dstGraph))
 
             case Left(error) =>
                 System.err.println(s"Failed to parse Chennai config: $error")
       }
+
+  /** Configuration content from the embedded `chennai.json` and from any externally supplied
+    * config, in that order.
+    */
+  private def configSources: Seq[String] =
+      atom.configFile(CHENNAI_CONFIG_FILE).content.toSeq ++ externalConfig.toSeq
+
+  /** Tags every call to a declared sanitiser/validator method with the `sanitizer` tag, plus one
+    * `sanitizer-<category>` tag per declared category. With no categories the sanitiser is treated
+    * as covering every flow.
+    */
+  private def processSanitizer(sanitizerJson: Json, dstGraph: DiffGraphBuilder): Unit =
+    val cursor = sanitizerJson.hcursor
+    val methods =
+        cursor.downField("methods").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+    val categories = cursor.downField("categories").focus.flatMap(_.asArray).getOrElse(Vector.empty)
+        .flatMap(_.asString).filter(_.nonEmpty)
+
+    methods.flatMap(_.asString).filter(_.nonEmpty).foreach { methodPattern =>
+      val calls =
+          if containsRegex(methodPattern) then atom.call.methodFullName(methodPattern)
+          else atom.call.methodFullNameExact(methodPattern)
+      val callList = calls.l
+      callList.iterator.newTagNode(SANITIZER).store()(using dstGraph)
+      categories.foreach { category =>
+          callList.iterator.newTagNode(s"$SANITIZER_TAG_PREFIX$category").store()(using dstGraph)
+      }
+    }
 
   private def processTag(tagJson: Json, dstGraph: DiffGraphBuilder): Unit =
     val cursor  = tagJson.hcursor

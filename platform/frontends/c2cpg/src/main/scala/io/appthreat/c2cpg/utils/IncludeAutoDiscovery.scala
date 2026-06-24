@@ -1,6 +1,7 @@
 package io.appthreat.c2cpg.utils
 
 import io.appthreat.c2cpg.Config
+import io.appthreat.c2cpg.parser.FileDefaults
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Path, Paths}
@@ -173,22 +174,85 @@ object IncludeAutoDiscovery:
   def discoverIncludePathsCPP(config: Config): Set[Path] =
       discoverIncludePathsCPP_GCC(config) ++ discoverIncludePathsCPP_Clang(config)
 
+  // Directory names that never contain first-party project headers worth adding to the include
+  // search path. Including them only inflates the path (every extra entry is probed for every
+  // unresolved `#include`), so we prune them to keep header resolution fast.
+  private val ExcludedDirNames: Set[String] = Set(
+    "build",
+    "cmake",
+    "cmakefiles",
+    "test",
+    "tests",
+    "testing",
+    "node_modules",
+    "third_party",
+    "third-party",
+    "thirdparty",
+    "vendor",
+    "examples",
+    "docs",
+    "doc"
+  )
+
+  /** Upper bound on the number of auto-discovered project include directories. Every entry is
+    * probed for every unresolved `#include`, so an unbounded search path (aws-sdk-cpp discovers
+    * ~450) makes `CPreprocessor.findInclusion` quadratic. Capping keeps resolution fast; the
+    * shallowest (most general) include roots are kept first. Override via `CHEN_MAX_INCLUDE_PATHS`.
+    */
+  private val MaxProjectIncludePaths: Int =
+      sys.env.get("CHEN_MAX_INCLUDE_PATHS").flatMap(s => Try(s.trim.toInt).toOption).filter(
+        _ > 0
+      ).getOrElse(50)
+
+  private def isExcludedPath(p: Path): Boolean =
+      p.iterator().asScala.exists { seg =>
+        val name = seg.toString.toLowerCase
+        name.startsWith(".") || ExcludedDirNames.contains(name)
+      }
+
+  /** True when `dir` contains at least one header file anywhere in its subtree. Uses a
+    * short-circuit stream so it stops at the first match instead of materialising the whole
+    * subtree.
+    */
+  private def containsHeaderFile(dir: Path): Boolean =
+      Try {
+          val stream = Files.walk(dir)
+          try
+              stream
+                  .filter(Files.isRegularFile(_))
+                  .anyMatch(p => FileDefaults.isHeaderFile(p.getFileName.toString))
+          finally stream.close()
+      }.getOrElse(true) // on error, keep the dir rather than risk dropping a valid include root
+
   def discoverProjectIncludePaths(rootPath: Path): Set[Path] =
     if !Files.exists(rootPath) || !Files.isDirectory(rootPath) then return Set.empty
 
     Try {
         val roots = Set(rootPath.toAbsolutePath)
-        val subDirs = Files.walk(rootPath, 8)
+        val candidateDirs = Files.walk(rootPath, 8)
             .filter(Files.isDirectory(_))
             .filter { p =>
               val name = p.getFileName.toString.toLowerCase
-              name.startsWith("include") || name == "headers" || name == "library"
+              (name.startsWith("include") || name == "headers" || name == "library") &&
+              !isExcludedPath(p)
             }
             .map(_.toAbsolutePath)
             .collect(Collectors.toSet[Path])
             .asScala
             .toSet
-        roots ++ subDirs
+        // Drop include directories that contain no header files anywhere beneath them. The walk
+        // matches purely on directory name, so it picks up empty/irrelevant `include` dirs that
+        // only add failed probes to CPreprocessor.findInclusion without ever resolving anything.
+        val subDirs = candidateDirs.filter(containsHeaderFile)
+        // Cap the search path: keep the project roots, then fill with the shallowest (most general)
+        // include roots up to the limit. Shallow-first matches the probe order in CdtParser.
+        val budget = Math.max(0, MaxProjectIncludePaths - roots.size)
+        val cappedSubDirs = subDirs.toSeq
+            .sortBy(p => (p.getNameCount, p.toString))
+            .take(budget)
+            .toSet
+        roots ++ cappedSubDirs
     }.getOrElse(Set.empty)
+  end discoverProjectIncludePaths
 
 end IncludeAutoDiscovery

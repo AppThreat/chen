@@ -223,7 +223,6 @@ class ParserTests extends AnyFreeSpec with Matchers {
                     |  z
                     |except IOError as e:
                     |  a""".stripMargin)
-            // Python2 style COMMA syntax.
             testS(
                 """try:
                   |  x
@@ -232,6 +231,16 @@ class ParserTests extends AnyFreeSpec with Matchers {
                 """try:
                   |  x
                   |except e as f:
+                  |  y""".stripMargin
+            )
+            testS(
+                """try:
+                  |  x
+                  |except e, f, g:
+                  |  y""".stripMargin,
+                """try:
+                  |  x
+                  |except (e,f,g):
                   |  y""".stripMargin
             )
         }
@@ -288,6 +297,9 @@ class ParserTests extends AnyFreeSpec with Matchers {
             testT("*x, *y = 1", "(*x,*y) = 1")
             testT("x = yield y")
             testT("x = y, z = 1", "x = (y,z) = 1")
+            testT("match = 1")
+            testT("case = 2")
+            testT("type = 3")
         }
 
         "annotated assign statement tests" in {
@@ -1119,5 +1131,12 @@ class ParserTests extends AnyFreeSpec with Matchers {
         testT("print(ƹ0)")
         testT("print(ש0)")
         testT("print(ߕ)")
+    }
+
+    "type statement (type alias) tests" in {
+        testT("type Point = tuple[float, float]", "type Point = tuple[(float,float)]")
+        testT("type Point[T] = tuple[T, T]", "type Point[T] = tuple[(T,T)]")
+        testT("type Point[T, *Ts, **P] = tuple[T, Ts, P]", "type Point[T, *Ts, **P] = tuple[(T,Ts,P)]")
+        testT("type Point[T = int] = tuple[T, T]", "type Point[T = int] = tuple[(T,T)]")
     }
 }

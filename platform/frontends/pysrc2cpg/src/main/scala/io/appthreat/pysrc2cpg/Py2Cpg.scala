@@ -55,7 +55,7 @@ class Py2Cpg(
     )
     edgeBuilder.astEdge(anyTypeDecl, globalNamespaceBlock, 0)
     BatchedUpdate.applyDiff(outputCpg.graph, diffGraph)
-    new CodeToCpg(outputCpg, inputProviders, schemaValidationMode).createAndApply()
+    new CodeToCpg(outputCpg, inputProviders, schemaValidationMode, inputPath).createAndApply()
     new ConfigFileCreationPass(outputCpg, requirementsTxt).createAndApply()
     new DependenciesFromRequirementsTxtPass(outputCpg).createAndApply()
   end buildCpg

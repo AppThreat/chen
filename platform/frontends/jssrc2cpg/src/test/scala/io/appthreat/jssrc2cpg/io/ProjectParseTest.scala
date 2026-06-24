@@ -83,6 +83,36 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
       cpg.fieldAccess.argument(2).code.l shouldBe List("debug")
     }
 
+    "reuse existing AST if astGenOutDir contains json files" in {
+      File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
+        val config1 = Config(tsTypes = false)
+          .withInputPath(projectWithSubfolders.toString)
+          .withAstGenOutDir(astGenOutDir.toString)
+
+        val astGenResult1 = new AstGenRunner(config1).execute(astGenOutDir)
+        astGenResult1.parsedFiles.nonEmpty shouldBe true
+
+        val config2 = Config(tsTypes = false)
+          .withInputPath(projectWithSubfolders.toString)
+          .withAstGenOutDir(astGenOutDir.toString)
+
+        val astGenResult2 = new AstGenRunner(config2).execute(astGenOutDir)
+        astGenResult2.parsedFiles.size shouldBe astGenResult1.parsedFiles.size
+      }
+    }
+
+    "not skip astgen if astGenOutDir is specified but empty" in {
+      File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
+        val config = Config(tsTypes = false)
+          .withInputPath(projectWithSubfolders.toString)
+          .withAstGenOutDir(astGenOutDir.toString)
+
+        // astGenOutDir is empty initially
+        val astGenResult = new AstGenRunner(config).execute(astGenOutDir)
+        astGenResult.parsedFiles.nonEmpty shouldBe true
+      }
+    }
+
   }
 
 }

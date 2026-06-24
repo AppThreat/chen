@@ -1465,4 +1465,22 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
             }
         }
     }
+
+    "generic collection type hint and index access recovery" should {
+        val cpg = code(
+            """
+              |x: list[int] = [1, 2, 3]
+              |y = x[0]
+              |
+              |d: dict[str, float] = {}
+              |z = d["key"]
+              |""".stripMargin)
+
+        "recover the types of the generic collections and their element index accesses" in {
+            cpg.identifier("x").typeFullName.headOption shouldBe Some("__builtin.list[__builtin.int]")
+            cpg.identifier("y").typeFullName.headOption shouldBe Some("__builtin.int")
+            cpg.identifier("d").typeFullName.headOption shouldBe Some("__builtin.dict[__builtin.str, __builtin.float]")
+            cpg.identifier("z").typeFullName.headOption shouldBe Some("__builtin.float")
+        }
+    }
 end TypeRecoveryPassTests

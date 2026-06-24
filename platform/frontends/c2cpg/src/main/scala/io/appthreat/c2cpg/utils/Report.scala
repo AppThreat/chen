@@ -15,7 +15,7 @@ object Report:
   private case class ReportEntry(loc: Int, parsed: Boolean, cpgGen: Boolean, duration: Long):
     def toSeq: Seq[String] =
       val lines     = loc.toString
-      val dur       = if duration == 0 then "-" else TimeUtils.pretty(duration)
+      val dur       = duration.toString
       val wasParsed = if parsed then "yes" else "no"
       val gotCpg    = if cpgGen then "yes" else "no"
       Seq(lines, wasParsed, gotCpg, dur)

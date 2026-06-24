@@ -47,6 +47,9 @@ import io.appthreat.pythonparser.ast.{
     RaiseP2,
     Return,
     TypeVar,
+    TypeAlias,
+    TypeVarTuple,
+    ParamSpec,
     TryStar,
     UnaryOp,
     While,
@@ -97,8 +100,30 @@ class MemoryOperationCalculator extends AstVisitor[Unit]:
   override def visit(module: Module): Unit =
       accept(module.stmts)
 
-  override def visit(stmt: istmt): Unit      = ???
-  override def visit(typeVar: TypeVar): Unit = ???
+  override def visit(stmt: istmt): Unit = ???
+  override def visit(typeVar: TypeVar): Unit =
+    push(Load)
+    accept(typeVar.bound)
+    accept(typeVar.default_value)
+    pop()
+
+  override def visit(typeAlias: TypeAlias): Unit =
+    push(Store)
+    accept(typeAlias.name)
+    pop()
+    push(Load)
+    accept(typeAlias.value)
+    pop()
+
+  override def visit(typeVarTuple: TypeVarTuple): Unit =
+    push(Load)
+    accept(typeVarTuple.default_value)
+    pop()
+
+  override def visit(paramSpec: ParamSpec): Unit =
+    push(Load)
+    accept(paramSpec.default_value)
+    pop()
   override def visit(functionDef: FunctionDef): Unit =
     push(Load)
     accept(functionDef.decorator_list)

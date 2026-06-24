@@ -10,6 +10,8 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.FieldAccess
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
+import scala.collection.mutable
+
 class JavaScriptTypeRecoveryPass(cpg: Cpg, config: XTypeRecoveryConfig = XTypeRecoveryConfig())
     extends XTypeRecoveryPass[File](cpg, config):
   override protected def generateRecoveryPass(state: XTypeRecoveryState): XTypeRecovery[File] =
@@ -20,6 +22,18 @@ private class JavaScriptTypeRecovery(cpg: Cpg, state: XTypeRecoveryState)
 
   override def compilationUnit: Iterator[File] = cpg.file.iterator
 
+  /** TYPE_DECL full names grouped by their (short) name, computed once per recovery iteration and
+    * shared by all per-file tasks. This replaces a `cpg.typeDecl.nameExact(...)` whole-graph scan
+    * that was previously performed once per symbol during symbol-table prepopulation - the dominant
+    * cost of JS type recovery on large projects.
+    */
+  private lazy val typeDeclFullNamesByName: Map[String, Set[String]] =
+    val acc = mutable.HashMap.empty[String, mutable.LinkedHashSet[String]]
+    cpg.typeDecl.foreach { td =>
+        acc.getOrElseUpdate(td.name, mutable.LinkedHashSet.empty) += td.fullName
+    }
+    acc.view.mapValues(_.toSet).toMap
+
   override def generateRecoveryForCompilationUnitTask(
     unit: File,
     builder: DiffGraphBuilder
@@ -27,13 +41,21 @@ private class JavaScriptTypeRecovery(cpg: Cpg, state: XTypeRecoveryState)
     val newConfig = state.config.copy(enabledDummyTypes =
         state.isFinalIteration && state.config.enabledDummyTypes
     )
-    new RecoverForJavaScriptFile(cpg, unit, builder, state.copy(config = newConfig))
+    new RecoverForJavaScriptFile(
+      cpg,
+      unit,
+      builder,
+      state.copy(config = newConfig),
+      typeDeclFullNamesByName
+    )
+end JavaScriptTypeRecovery
 
 private class RecoverForJavaScriptFile(
   cpg: Cpg,
   cu: File,
   builder: DiffGraphBuilder,
-  state: XTypeRecoveryState
+  state: XTypeRecoveryState,
+  typeDeclFullNamesByName: Map[String, Set[String]]
 ) extends RecoverForXCompilationUnit[File](cpg, cu, builder, state):
 
   private lazy val exportedIdentifiers = cu.method
@@ -63,7 +85,7 @@ private class RecoverForJavaScriptFile(
           PropertyNames.TYPE_FULL_NAME,
           Defines.Any
         ))) - typeFullName
-        lazy val cpgTypeFullName = cpg.typeDecl.nameExact(typeFullName).fullName.toSet
+        lazy val cpgTypeFullName = typeDeclFullNamesByName.getOrElse(typeFullName, Set.empty)
         val resolvedTypeHints =
             if typeHints.nonEmpty then symbolTable.put(x, typeHints)
             else if cpgTypeFullName.nonEmpty then symbolTable.put(x, cpgTypeFullName)

@@ -25,6 +25,22 @@ abstract class XImportResolverPass(cpg: Cpg) extends ConcurrentWriterCpgPass[Imp
   do
     optionalResolveImport(fileName, call, importedEntity, importedAs, builder)
 
+  /** Resolve a single import.
+    *
+    * '''`importedEntity` format contract.''' Implementations must cope with both shapes the
+    * frontends emit:
+    *   - the '''bare specifier''', produced by `require(...)`-style imports and by side-effect-only
+    *     ESM imports (e.g. `require('vue')` / `import 'vue'` → `"vue"`, `require('./bar')` →
+    *     `"./bar"`); and
+    *   - the '''`"<package>:<name>"`''' shape, produced by ESM imports with specifiers (e.g.
+    *     `import Vue from 'vue'` → `"vue:Vue"`, `import { useRoute } from 'vue-router'` →
+    *     `"vue-router:useRoute"`, `import * as Vue from 'vue'` → `"vue:Vue"`, scoped `import { ref
+    *     } from '@vue/composition-api'` → `"@vue/composition-api:ref"`).
+    *
+    * To recover just the package/module, strip the ESM name suffix with `takeWhile(_ != ':')` (or
+    * `split(':').head`); to recover the imported name, take the part after the last `':'`. Relative
+    * specifiers begin with `.` / `./`.
+    */
   protected def optionalResolveImport(
     fileName: String,
     importCall: Call,

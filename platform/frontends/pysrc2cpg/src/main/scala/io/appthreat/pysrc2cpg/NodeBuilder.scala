@@ -162,34 +162,49 @@ class NodeBuilder(diffGraph: DiffGraphBuilder):
     index.foreach(idx => methodParameterNode.index(idx))
     addNodeToDiff(methodParameterNode)
 
-  def extractTypesFromHint(typeHint: Option[ast.iexpr] = None): Option[String] =
-      typeHint match
-        case Some(hint) =>
-            val nameSequence = hint match
-              case n: ast.Name => Option(n.id)
-              // TODO: Definitely a place for follow up handling of generics - currently only take the polymorphic type
-              //  without type args. To see the type arguments, see ast.Subscript.slice
-              case attr: ast.Attribute =>
-                  extractTypesFromHint(Some(attr.value)).map { x => x + "." + attr.attr }
-              case n: ast.Subscript if n.value.isInstanceOf[ast.Name] =>
-                  val baseType = n.value.asInstanceOf[ast.Name].id
-                  // Simple slice types only for now
-                  // This could get complex with Subscript that include Union and BinOp
-                  val sliceType =
-                      if n.slice.isInstanceOf[ast.Name] && Option(n.slice.asInstanceOf[ast.Name].id).nonEmpty
-                      then
-                        s"[${n.slice.asInstanceOf[ast.Name].id}]"
-                      else ""
-                  Option(baseType + sliceType)
-              case n: ast.Constant if n.value.isInstanceOf[ast.StringConstant] =>
-                  Option(n.value.asInstanceOf[ast.StringConstant].value)
-              case _ => None
-            nameSequence.map { typeName =>
-                if allBuiltinClasses.contains(typeName) then s"$builtinPrefix$typeName"
-                else if typingClassesV3.contains(typeName) then s"$typingPrefix$typeName"
-                else typeName
-            }
+  private def typeNodeToString(node: ast.iexpr): Option[String] =
+      node match
+        case n: ast.Name =>
+            val id = n.id
+            val resolved =
+                if allBuiltinClasses.contains(id) then s"$builtinPrefix$id"
+                else if typingClassesV3.contains(id) then s"$typingPrefix$id"
+                else id
+            Option(resolved)
+        case attr: ast.Attribute =>
+            typeNodeToString(attr.value).map { x => x + "." + attr.attr }
+        case n: ast.Subscript =>
+            for
+              base  <- typeNodeToString(n.value)
+              slice <- typeNodeToString(n.slice)
+            yield s"$base[$slice]"
+        case n: ast.Tuple =>
+            val eltsStrs = n.elts.flatMap(typeNodeToString)
+            if eltsStrs.size == n.elts.size then Some(eltsStrs.mkString(", "))
+            else None
+        case n: ast.List =>
+            val eltsStrs = n.elts.flatMap(typeNodeToString)
+            if eltsStrs.size == n.elts.size then Some(s"[${eltsStrs.mkString(", ")}]")
+            else None
+        case n: ast.BinOp if n.op == ast.BitOr =>
+            for
+              left  <- typeNodeToString(n.left)
+              right <- typeNodeToString(n.right)
+            yield s"$left | $right"
+        case n: ast.Constant =>
+            n.value match
+              case c: ast.StringConstant       => Option(c.value)
+              case c: ast.JoinedStringConstant => Option(c.value)
+              case c: ast.BoolConstant         => Option(c.value.toString)
+              case c: ast.IntConstant          => Option(c.value)
+              case c: ast.FloatConstant        => Option(c.value)
+              case ast.NoneConstant            => Option("None")
+              case ast.EllipsisConstant        => Option("...")
+              case _                           => None
         case _ => None
+
+  def extractTypesFromHint(typeHint: Option[ast.iexpr] = None): Option[String] =
+      typeHint.flatMap(typeNodeToString)
 
   def methodReturnNode(
     staticTypeHint: Option[String],

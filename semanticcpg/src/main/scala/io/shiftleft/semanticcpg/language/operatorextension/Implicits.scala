@@ -4,6 +4,8 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, Expression}
 import io.shiftleft.semanticcpg.language.operatorextension.nodemethods.*
 
+import scala.language.implicitConversions
+
 trait Implicits:
   implicit def toNodeTypeStartersOperatorExtension(cpg: Cpg): NodeTypeStarters =
       new NodeTypeStarters(cpg)

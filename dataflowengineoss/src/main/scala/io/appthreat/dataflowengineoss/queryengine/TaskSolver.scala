@@ -53,7 +53,7 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
   private def resultToTableEntries(r: ReachableByResult): List[(TaskFingerprint, TableEntry)] =
       r.taskStack.indices.map { i =>
         val parentTask = r.taskStack(i)
-        val pathToSink = r.path.slice(0, r.path.map(_.node).indexOf(parentTask.sink))
+        val pathToSink = r.path.slice(0, r.path.indexWhere(_.node == parentTask.sink))
         val newPath    = pathToSink :+ PathElement(parentTask.sink, parentTask.callSiteStack)
         (parentTask, TableEntry(path = newPath))
       }.toList
@@ -166,13 +166,13 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
           TaskFingerprint(first.node.asInstanceOf[CfgNode], callSiteStack, callDepth)
         ).map { res =>
             res.map { r =>
-              val stopIndex = r.path.map(x => (x.node, x.callSiteStack)).indexOf((
-                first.node,
-                first.callSiteStack
-              ))
+              val stopIndex =
+                  r.path.indexWhere(x =>
+                      x.node == first.node && x.callSiteStack == first.callSiteStack
+                  )
               val pathToFirstNode = r.path.slice(0, stopIndex)
               val completePath    = pathToFirstNode ++ (first +: remainder)
-              r.copy(path = Vector(completePath.head) ++ completePath.tail)
+              r.copy(path = completePath)
             }
         }
 

@@ -200,8 +200,39 @@ private class RecoverForPythonFile(
                     )
                 }
     }
+    cu.ast.isIdentifier.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
+        .foreach { id => symbolTable.put(LocalVar(id.name), id.typeFullName) }
+    cu.ast.isLocal.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
+        .foreach { local => symbolTable.put(LocalVar(local.name), local.typeFullName) }
+    cu.ast.isParameter.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
+        .foreach { param => symbolTable.put(LocalVar(param.name), param.typeFullName) }
     super.prepopulateSymbolTable()
   end prepopulateSymbolTable
+
+  override protected def associateTypes(i: Identifier, types: Set[String]): Set[String] =
+    val existingTypes = symbolTable.get(i)
+    val filteredTypes = types.filter { t =>
+        if t == s"${PythonAstVisitor.builtinPrefix}list" && existingTypes.exists(
+            _.startsWith(s"${PythonAstVisitor.builtinPrefix}list[")
+          )
+        then false
+        else if t == s"${PythonAstVisitor.builtinPrefix}dict" && existingTypes.exists(
+            _.startsWith(s"${PythonAstVisitor.builtinPrefix}dict[")
+          )
+        then false
+        else if t == s"${PythonAstVisitor.builtinPrefix}set" && existingTypes.exists(
+            _.startsWith(s"${PythonAstVisitor.builtinPrefix}set[")
+          )
+        then false
+        else if t == s"${PythonAstVisitor.builtinPrefix}tuple" && existingTypes.exists(
+            _.startsWith(s"${PythonAstVisitor.builtinPrefix}tuple[")
+          )
+        then false
+        else true
+    }
+    if filteredTypes.isEmpty && existingTypes.nonEmpty then existingTypes
+    else super.associateTypes(i, filteredTypes)
+  end associateTypes
 
   override protected def postSetTypeInformation(): Unit =
       cu.typeDecl
@@ -233,11 +264,51 @@ private class RecoverForPythonFile(
           .headOption
           .getOrElse(super.visitIdentifierAssignedToTypeRef(i, t, rec))
 
+  private def splitGenericParts(s: String): List[String] =
+    val result  = scala.collection.mutable.ListBuffer[String]()
+    var current = new StringBuilder()
+    var depth   = 0
+    for c <- s do
+      if c == '[' then depth += 1
+      else if c == ']' then depth -= 1
+
+      if c == ',' && depth == 0 then
+        result += current.toString().trim
+        current = new StringBuilder()
+      else
+        current.append(c)
+    if current.nonEmpty then
+      result += current.toString().trim
+    result.toList
+
   override protected def getIndexAccessTypes(ia: Call): Set[String] =
+    val baseTypes = ia.argument.argumentIndex(1).headOption match
+      case Some(c: Call)        => getTypesFromCall(c)
+      case Some(id: Identifier) => symbolTable.get(id)
+      case _                    => Set.empty[String]
+    val resolvedTypes = baseTypes.flatMap {
+        case t if t.startsWith(s"${PythonAstVisitor.builtinPrefix}list[") && t.endsWith("]") =>
+            val element = t.stripPrefix(s"${PythonAstVisitor.builtinPrefix}list[").stripSuffix("]")
+            Set(element)
+        case t if t.startsWith(s"${PythonAstVisitor.builtinPrefix}dict[") && t.endsWith("]") =>
+            val inner = t.stripPrefix(s"${PythonAstVisitor.builtinPrefix}dict[").stripSuffix("]")
+            val parts = splitGenericParts(inner)
+            if parts.length == 2 then Set(parts(1)) else Set(Constants.ANY)
+        case t if t.startsWith(s"${PythonAstVisitor.builtinPrefix}tuple[") && t.endsWith("]") =>
+            val inner = t.stripPrefix(s"${PythonAstVisitor.builtinPrefix}tuple[").stripSuffix("]")
+            splitGenericParts(inner).toSet
+        case t if t.contains("[") && t.endsWith("]") =>
+            val inner = t.substring(t.indexOf('[') + 1, t.length - 1)
+            splitGenericParts(inner).toSet
+        case _ => Set.empty[String]
+    }
+    if resolvedTypes.nonEmpty then resolvedTypes
+    else
       ia.argument.argumentIndex(1).isCall.headOption match
         case Some(c) =>
             getTypesFromCall(c).map(x => s"$x$pathSep${XTypeRecovery.DummyIndexAccess}")
         case _ => super.getIndexAccessTypes(ia)
+  end getIndexAccessTypes
 
   override def getTypesFromCall(c: Call): Set[String] = c.name match
     case "<operator>.listLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}list")

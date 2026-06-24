@@ -4,7 +4,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-
+import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import scala.util.matching.Regex
 
 /** Creates tags on nodes based on common patterns and language-specific conventions */
@@ -30,9 +30,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     ".*get_value.*"
   )
 
+  // NB: get_object_* helpers are ORM reads, not response outputs - they are handled as `db-read`
+  // (G1), not framework-output, so they are intentionally absent here.
   private val PY_RESPONSE_PATTERNS = Array(
-    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*",
-    ".*(HttpResponse|render|get_object_|Response|jsonify|make_response|render_template|abort).*"
+    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*",
+    ".*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*"
   )
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
@@ -224,108 +226,259 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   end tagJavaScriptPatterns
 
   private def tagPythonPatterns(dstGraph: DiffGraphBuilder): Unit =
-    PY_REQUEST_PATTERNS.foreach(p =>
-        atom.method.fullName(p).parameter.newTagNode("framework-input").store()(using dstGraph)
-    )
+    val pyRequestRegexes  = PY_REQUEST_PATTERNS.map(_.r)
+    val pyResponseRegexes = PY_RESPONSE_PATTERNS.map(_.r)
+    val pyResponseCallRegex =
+        ".*(HttpResponse|render|Response|abort|jsonify|make_response|render_template).*".r
+    val pyResponseFileRegex = ".*(views|engine|core|api|base|http).py.*".r
+    val validationRegex     = "^is_[a-z].*$".r
+    val cliFilenameRegex    = ".*(cli|main|command).*".r
 
-    PY_RESPONSE_PATTERNS.foreach { p =>
-      atom.method.fullName(p).parameter.newTagNode("framework-output").store()(using dstGraph)
-      atom.call.code(p).newTagNode("framework-output").store()(using dstGraph)
+    val aiohttpRegex = ".*aiohttp.*".r
+    val socketRegex =
+        ".*socket\\.(socket|connect|send|recv|sendto|recvfrom|wrap_socket|getprotobyname).*".r
+    val sslRegex =
+        ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*".r
+    val netProtocolRegex =
+        ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*".r
+    val shutilRegex = ".*(shutil\\.copy|Path\\.open).*".r
+    // Safe (round-trippable) (de)serialisation: json/yaml-safe/csv. Kept distinct from the unsafe
+    // loaders below so an `appsec`-style profile can treat only the dangerous ones as sinks.
+    val serializationRegex = ".*(json\\.(loads|dumps)|yaml\\.(safe_load|dump)|csv\\.DictWriter).*".r
+    // Unsafe deserialisation: loaders that can instantiate arbitrary objects / execute code when fed
+    // attacker-controlled bytes. base64/json are intentionally excluded (encoding, not deser).
+    val deserializationRegex =
+        ".*(pickle\\.(load|loads)|cPickle\\.(load|loads)|_pickle\\.(load|loads)|yaml\\.(unsafe_load|full_load)|yaml\\.load|marshal\\.(load|loads)|jsonpickle\\.decode|dill\\.(load|loads)|shelve\\.open).*".r
+    // Django/SQLAlchemy ORM read accessors. Their return value is data already persisted in the
+    // datastore, a different trust level from live request input; tagged `db-read` so profiles can
+    // treat the accessor as a declassification barrier and prune object-identity over-tainting.
+    // Matched by call name (helpers) or accessor-name + an `objects`/`query` manager in the
+    // methodFullName, since the frontend lowers the receiver chain to a temporary.
+    val dbReadHelperNames =
+        Set("get_object_or_404", "get_list_or_404", "get_object", "get_queryset")
+    val ormAccessorNames =
+        Set("get", "filter", "first", "last", "all", "get_or_create", "earliest", "latest")
+    // G6+: well-known Django/DRF/stdlib neutralisers. A flow passing through one of these is
+    // considered sanitised for the relevant category (open-redirect guards, HTML/JS escapers,
+    // tag strippers). Tagged `sanitization` so the appsec profile drops the flow.
+    val sanitizerCallNames =
+        Set(
+          "url_has_allowed_host_and_scheme",
+          "is_safe_url",
+          "escape",
+          "conditional_escape",
+          "escapejs",
+          "strip_tags",
+          "format_html",
+          "urlize"
+        )
+    val regexLibRegex  = ".*re\\.(compile|findall|search|match).*".r
+    val importlibRegex = ".*importlib\\.import_module.*".r
+    val sqlRegex =
+        ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|query|add|commit|create_engine|sessionmaker).*".r
+    val sqlIdentifierRegex = ".*(sqlalchemy|apsw|sqlite3).*".r
+    val concurrentRegex    = ".*(multiprocess|multiprocessing|threading)\\.(Process|Thread).*".r
+    val cryptoLibs         = "(cryptography|Crypto|ecdsa|nacl|OpenSSL).*"
+    val cryptoLibsRegex    = cryptoLibs.r
+    val cryptoGenerateRegex =
+        s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem|load_certificate).*".r
+    val cryptoAlgorithmRegex = s"$cryptoLibs(primitives|serialization).*".r
+    val cryptoAlgoNameRegex  = "^[A-Z0-9]+$".r
+
+    val methodTags = scala.collection.mutable.LinkedHashMap.empty[
+      String,
+      scala.collection.mutable.LinkedHashSet[StoredNode]
+    ]
+    def addTag(tag: String, node: StoredNode): Unit =
+        methodTags.getOrElseUpdate(tag, scala.collection.mutable.LinkedHashSet.empty) += node
+
+    // 1. Methods & Parameters
+    atom.method.foreach { method =>
+      val fullName   = method.fullName
+      var matchedReq = false
+      var i          = 0
+      while i < pyRequestRegexes.length do
+        if pyRequestRegexes(i).matches(fullName) then matchedReq = true
+        i += 1
+      if matchedReq then
+        method.parameter.foreach(p => addTag("framework-input", p))
+
+      var matchedResp = false
+      i = 0
+      while i < pyResponseRegexes.length do
+        if pyResponseRegexes(i).matches(fullName) then matchedResp = true
+        i += 1
+      if matchedResp then
+        method.parameter.foreach(p => addTag("framework-output", p))
+
+      if !method.isExternal && validationRegex.matches(method.name) then
+        addTag("validation", method)
+
+      if cliFilenameRegex.matches(method.filename) then
+        method.parameter.foreach(p => addTag("cli-source", p))
     }
 
-    atom.call
-        .where(_.file.name(".*(views|engine|core|api|base|http).py.*"))
-        .code(
-          ".*(HttpResponse|render|get_object_|Response|abort|jsonify|make_response|render_template).*"
-        )
-        .newTagNode("framework-output")
-        .store()(using dstGraph)
+    // 2. Identifiers
+    atom.identifier.foreach { identifier =>
+      val name         = identifier.name
+      val typeFullName = identifier.typeFullName
+      if name == "flask_request" then
+        addTag("framework-input", identifier)
+      if aiohttpRegex.matches(typeFullName) then
+        addTag("http-client", identifier)
+      if sqlIdentifierRegex.matches(typeFullName) then
+        addTag("sql", identifier)
+      if cryptoLibsRegex.matches(typeFullName) then
+        addTag("crypto", identifier)
+    }
 
-    atom.method.internal.name("is_[a-z].*").newTagNode("validation").store()(using dstGraph)
+    // 3. Calls
+    atom.call.foreach { call =>
+      val name           = call.name
+      val methodFullName = call.methodFullName
+      val code           = call.code
 
-    // CLI source patterns
-    atom.call
+      // G3/G4: a render/redirect whose dynamic argument is a constant is not an
+      // attacker-influenced output (template name is a literal, redirect target is a
+      // url-name literal or `reverse(...)`). Skip framework-output for these benign sinks.
+      val benignOutput =
+          if name == "render" || name == "render_to_string" || name == "get_template" ||
+            name == "get_template_names" || name == "render_template"
+          then
+            // A template resolver (self.get_template()) is itself benign, and a render whose
+            // template comes from a literal, a resolver call or a member access (self.template)
+            // is not attacker-influenced. The template sits at positional arg 2 of render.
+            name == "get_template" || name == "get_template_names" ||
+            call.argument.isLiteral.exists(l =>
+                Seq(".html", ".txt", ".xml", ".json", ".htm").exists(l.code.contains)
+            ) ||
+            call.argument.isCall.name(
+              "get_template|get_template_names|get_template_name"
+            ).nonEmpty ||
+            call.argument.argumentIndex(2).exists(x => x.label == "CALL" || x.label == "LITERAL")
+          else if name == "redirect" || name == "HttpResponseRedirect" ||
+            name == "HttpResponsePermanentRedirect"
+          then
+            call.argument.isLiteral.nonEmpty || call.argument.isCall.name("reverse").nonEmpty
+          else false
+
+      var matchedResp = false
+      var i           = 0
+      while i < pyResponseRegexes.length do
+        if pyResponseRegexes(i).matches(code) then matchedResp = true
+        i += 1
+      if matchedResp && !benignOutput then
+        addTag("framework-output", call)
+
+      if !benignOutput && pyResponseCallRegex.matches(code) then
+        val filename = call.method.filename
+        if pyResponseFileRegex.matches(filename) then
+          addTag("framework-output", call)
+
+      // G1: ORM read accessor - return value is persisted data, a distinct trust level
+      // from live request input. Tagged so profiles can use it as a declassification barrier.
+      if dbReadHelperNames.contains(name) ||
+        name.matches("get_object_or_\\w+|get_list_or_\\w+") ||
+        (ormAccessorNames.contains(name) &&
+            (methodFullName.contains(".objects.") || methodFullName.contains(".query.")))
+      then
+        addTag("db-read", call)
+
+      // G6: DRF/serializer validation entrypoint.
+      if name == "is_valid" then
+        addTag("validation", call)
+
+      // G6+: Django/DRF/stdlib security neutralisers (open-redirect guards, HTML escapers, ...).
+      if sanitizerCallNames.contains(name) then
+        addTag("sanitization", call)
+
+      if name == "get_value" then
+        addTag("framework-input", call)
+
+      if aiohttpRegex.matches(methodFullName) then
+        addTag("http-client", call)
+
+      if socketRegex.matches(methodFullName) then
+        addTag("network", call)
+
+      if sslRegex.matches(methodFullName) then
+        addTag("network", call)
+
+      if netProtocolRegex.matches(methodFullName) then
+        addTag("network", call)
+
+      if name == "open" then
+        addTag("file-io", call)
+
+      if shutilRegex.matches(methodFullName) then
+        addTag("file-io", call)
+
+      if serializationRegex.matches(methodFullName) then
+        addTag("serialization", call)
+
+      // G5: unsafe deserialisation is a true code-exec-class sink, kept distinct from safe
+      // (de)serialisation above.
+      if deserializationRegex.matches(methodFullName) || deserializationRegex.matches(code) then
+        addTag("unsafe-deserialization", call)
+
+      if regexLibRegex.matches(methodFullName) then
+        addTag("regex", call)
+
+      if name == "eval" || name == "exec" then
+        addTag("code-execution", call)
+
+      if importlibRegex.matches(methodFullName) then
+        addTag("reflection", call)
+
+      // G2: getattr/setattr/delattr is only reflection-as-a-sink when the attribute name is
+      // dynamic. A string-literal attribute (e.g. getattr(user, "is_anonymous")) is an ordinary
+      // field access and must not be flagged.
+      if name == "getattr" || name == "delattr" || name == "setattr" then
+        val attrArg = call.argument.argumentIndex(2).headOption
+        // A literal attribute, or a member access on self/cls (self.target_name), is an
+        // effectively constant field name - not attacker-controlled reflection.
+        val constantAttr = attrArg.exists { a =>
+            a.label == "LITERAL" ||
+            (a.label == "CALL" && (a.code.startsWith("self.") || a.code.startsWith("cls.")))
+        }
+        if !constantAttr then
+          addTag("reflection", call)
+
+      if sqlRegex.matches(methodFullName) then
+        addTag("sql", call)
+
+      if concurrentRegex.matches(methodFullName) then
+        addTag("concurrent", call)
+
+      if cryptoLibsRegex.matches(methodFullName) then
+        addTag("crypto", call)
+
+      if cryptoGenerateRegex.matches(methodFullName) then
+        addTag("crypto-generate", call)
+
+      if name.nonEmpty && cryptoAlgoNameRegex.matches(name) then
+        if cryptoAlgorithmRegex.matches(methodFullName) && call.argument.nonEmpty then
+          addTag("crypto-algorithm", call)
+    }
+
+    // 4. CLI Source controlled calls & their callees
+    val cliSourceCalls = atom.call
         .methodFullName(Operators.equals)
         .code("""__name__ == ["']__main__["']""")
         .controls
         .isCall
         .filterNot(_.name.startsWith("<operator"))
-        .newTagNode("cli-source")
-        .store()(using dstGraph)
+        .l
 
-    atom.tag.name("cli-source")
-        .call
-        .callee(using NoResolve)
-        .newTagNode("cli-source")
-        .store()(using dstGraph)
+    cliSourceCalls.foreach { c =>
+      addTag("cli-source", c)
+      c.callee(using NoResolve).foreach(m => addTag("cli-source", m))
+    }
 
-    atom.method.filename(".*(cli|main|command).*")
-        .parameter
-        .newTagNode("cli-source")
-        .store()(using dstGraph)
-
-    atom.identifier.name("flask_request").newTagNode("framework-input").store()(using dstGraph)
-    atom.call.name("get_value").newTagNode("framework-input").store()(using dstGraph)
-
-    // HTTP / Network / Sockets
-    atom.call.methodFullName(".*aiohttp.*").newTagNode("http-client").store()(using dstGraph)
-    atom.identifier.typeFullName(".*aiohttp.*").newTagNode("http-client").store()(using dstGraph)
-    atom.call.methodFullName(
-      ".*socket\\.(socket|connect|send|recv|sendto|recvfrom|wrap_socket|getprotobyname).*"
-    ).newTagNode("network").store()(using dstGraph)
-    atom.call.methodFullName(
-      ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*"
-    ).newTagNode("network").store()(using dstGraph)
-    atom.call.methodFullName(
-      ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*"
-    ).newTagNode("network").store()(using dstGraph)
-
-    // File IO
-    atom.call.name("open").newTagNode("file-io").store()(using dstGraph)
-    atom.call.methodFullName(".*(shutil\\.copy|Path\\.open).*").newTagNode("file-io").store()(using
-    dstGraph)
-
-    // Serialization & Regex
-    atom.call.methodFullName(".*(json\\.(loads|dumps)|yaml\\.dump|csv\\.DictWriter).*").newTagNode(
-      "serialization"
-    ).store()(using dstGraph)
-    atom.call.methodFullName(".*re\\.(compile|findall|search|match).*").newTagNode("regex").store()(
-      using dstGraph
-    )
-
-    // Code Execution & Reflection
-    atom.call.name("(eval|exec)").newTagNode("code-execution").store()(using dstGraph)
-    atom.call.methodFullName(".*importlib\\.import_module.*").newTagNode("reflection").store()(using
-    dstGraph)
-    atom.call.name("getattr|delattr|setattr").newTagNode("reflection").store()(using dstGraph)
-
-    // SQL / Database
-    atom.call.methodFullName(
-      ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|query|add|commit|create_engine|sessionmaker).*"
-    ).newTagNode("sql").store()(using dstGraph)
-    atom.identifier.typeFullName(".*(sqlalchemy|apsw|sqlite3).*").newTagNode("sql").store()(using
-    dstGraph)
-
-    // Concurrency / Parallelism
-    atom.call.methodFullName(".*(multiprocess|multiprocessing|threading)\\.(Process|Thread).*")
-        .newTagNode("concurrent").store()(using dstGraph)
-
-    // Crypto
-    val cryptoLibs = "(cryptography|Crypto|ecdsa|nacl|OpenSSL).*"
-
-    atom.identifier.typeFullName(cryptoLibs).newTagNode("crypto").store()(using dstGraph)
-    atom.call.methodFullName(cryptoLibs).newTagNode("crypto").store()(using dstGraph)
-
-    atom.call.methodFullName(
-      s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem|load_certificate).*"
-    ).newTagNode("crypto-generate").store()(using dstGraph)
-
-    atom.call.name("[A-Z0-9]+")
-        .methodFullName(s"$cryptoLibs(primitives|serialization).*")
-        .argument
-        .inCall
-        .newTagNode("crypto-algorithm")
-        .store()(using dstGraph)
+    // Emit tags to dstGraph
+    methodTags.foreach { case (tag, nodes) =>
+        nodes.iterator.newTagNode(tag).store()(using dstGraph)
+    }
   end tagPythonPatterns
 
   private def tagCPatterns(dstGraph: DiffGraphBuilder): Unit =

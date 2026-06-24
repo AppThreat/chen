@@ -40,4 +40,19 @@ package object language:
     def passesNot(trav: Iterator[AstNode] => Iterator[?]): Iterator[Path] =
         traversal.filter(_.elements.forall(_.start.where(trav).isEmpty))
 
+    /** Keep only flows that pass through at least one node matching `predicate`. A node-level
+      * predicate is far easier to express than the traversal-function form of [[passes]], e.g.
+      * `flows.passesThrough(_.isCall)` or `flows.passesThrough(_.tag.name("sink").nonEmpty)`.
+      */
+    def passesThrough(predicate: AstNode => Boolean): Iterator[Path] =
+        traversal.filter(_.elements.exists(predicate))
+
+    /** Drop flows that pass through any node matching `predicate`, keeping the rest. This is the
+      * natural way to remove flows neutralised by a sanitiser or validator, e.g.
+      * `flows.doesNotPassThrough(n => sanitizerIds.contains(n.id))`.
+      */
+    def doesNotPassThrough(predicate: AstNode => Boolean): Iterator[Path] =
+        traversal.filterNot(_.elements.exists(predicate))
+  end PassesExt
+
 end language

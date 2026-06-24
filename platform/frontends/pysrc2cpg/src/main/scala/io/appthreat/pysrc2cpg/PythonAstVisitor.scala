@@ -212,9 +212,26 @@ class PythonAstVisitor(
         case node: ast.Continue         => convert(node)
         case node: ast.RaiseP2          => unhandled(node)
         case node: ast.ErrorStatement   => convert(node)
+        case node: ast.TypeAlias        => convert(node)
 
   def convertTypeVar(typeVar: ast.TypeVar): NewNode =
       createTypeRef(typeVar.name, calculateFullNameFromContext(typeVar.name), lineAndColOf(typeVar))
+
+  def convert(typeAlias: ast.TypeAlias): NewNode =
+    val aliasName     = typeAlias.name.id
+    val aliasFullName = calculateFullNameFromContext(aliasName)
+
+    val typeDeclNode = nodeBuilder.typeDeclNode(
+      aliasName,
+      aliasFullName,
+      relFileName,
+      Seq(Constants.ANY),
+      lineAndColOf(typeAlias)
+    )
+    edgeBuilder.astEdge(typeDeclNode, contextStack.astParent, contextStack.order.getAndInc)
+
+    val rhsNode = convert(typeAlias.value)
+    createAssignmentToIdentifier(aliasName, rhsNode, lineAndColOf(typeAlias))
   def convertTypeParam(typeParam: ast.TypeParam): String =
     val s = typeParam.toString
     if s.startsWith("TypeVar(") then
@@ -443,8 +460,6 @@ class PythonAstVisitor(
 
     methodParameter.positionalParams.foreach { parameterNode =>
       val porder = parameterOrder.getAndInc
-      if typeParamNames.nonEmpty && typeParamNames.length >= porder then
-        parameterNode.typeFullName(typeParamNames(porder - 1))
       contextStack.addParameter(parameterNode)
       edgeBuilder.astEdge(parameterNode, methodNode, porder)
     }
@@ -951,19 +966,23 @@ class PythonAstVisitor(
     else
       createBlock(loweredNodes, lineAndColOf(assign))
 
-  // TODO for now we ignore the annotation part and just emit the pure
-  // assignment.
   def convert(annotatedAssign: ast.AnnAssign): NewNode =
-    val targetNode = convert(annotatedAssign.target)
+    val targetNode  = convert(annotatedAssign.target)
+    val typeHintOpt = nodeBuilder.extractTypesFromHint(Some(annotatedAssign.annotation))
+    typeHintOpt.foreach { typeFullName =>
+        targetNode match
+          case id: NewIdentifier =>
+              id.typeFullName(typeFullName)
+          case call: NewCall =>
+              call.typeFullName(typeFullName)
+          case _ =>
+    }
 
     annotatedAssign.value match
       case Some(value) =>
           val valueNode = convert(value)
           createAssignment(targetNode, valueNode, lineAndColOf(annotatedAssign))
       case None =>
-          // If there is no value, this is just an expr: annotation and since
-          // we for now ignore the annotation we emit just the expr because
-          // it may have side effects.
           targetNode
 
   def convert(augAssign: ast.AugAssign): NewNode =

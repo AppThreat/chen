@@ -41,6 +41,17 @@ object AstCreatorHelper:
 trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
+  /** Type names registered while parsing this file. Tracked per-creator (in addition to the global
+    * table) so the contribution can be cached and replayed on a cache hit.
+    */
+  private val localUsedTypes: java.util.Set[String] =
+      java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+
+  /** The distinct type names this creator registered, for caching. */
+  def usedTypes: Seq[String] =
+    import scala.jdk.CollectionConverters.*
+    localUsedTypes.asScala.toSeq
+
   import AstCreatorHelper.*
 
   private val IncludeKeyword = "include"
@@ -179,6 +190,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   protected def registerType(typeName: String): String =
     val fixedTypeName = fixQualifiedName(StringUtils.normalizeSpace(typeName))
     CGlobal.usedTypes.putIfAbsent(fixedTypeName, true)
+    // also track locally so this file's contribution can be cached and re-registered on a cache hit
+    localUsedTypes.add(fixedTypeName)
     fixedTypeName
 
   protected def fixQualifiedName(name: String): String =
@@ -187,21 +200,33 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         "."
       )
 
+  /** Collapse whitespace adjacent to pointer (`*`), array (`[` `]`) and reference (`&`) punctuation
+    * while preserving the single spaces between the words of multi-token builtin types (e.g.
+    * `unsigned long int`, `long long`). So `unsigned int *` -> `unsigned int*` and `long long int
+    * [2]` -> `long long int[2]`, but `unsigned long int` is left intact.
+    */
+  private def tightenTypePunctuation(t: String): String =
+      t.replaceAll("""\s*([\[\]*&])\s*""", "$1")
+
   protected def cleanType(rawType: String, stripKeywords: Boolean = true): String =
     if rawType.contains("TypeOfDependentExpression") || rawType.contains("CPPTypedef") then
       return Defines.anyTypeName
     val tpe =
         if stripKeywords then
           reservedTypeKeywords.foldLeft(rawType) { (cur, repl) =>
-              if cur.contains(s"$repl ") then
-                dereferenceTypeFullName(cur.replace(s"$repl ", ""))
-              else
-                cur
+              // Strip the qualifier keyword only. Note: we must NOT also dereference here - doing so
+              // dropped legitimate pointer stars from qualified expression/field types
+              // (e.g. "const char *" -> "char" instead of "char*"). Pointer/array punctuation is
+              // either already part of the type or re-applied by `pointersAsString`.
+              if cur.contains(s"$repl ") then cur.replace(s"$repl ", "")
+              else cur
           }
         else
           rawType
     StringUtils.normalizeSpace(tpe) match
       case "" => Defines.anyTypeName
+      // A bare placeholder keyword that survived deduction is not a real type - never leak it.
+      case "auto" | "decltype(auto)" | "decltype" => Defines.anyTypeName
       case t if t.contains("org.eclipse.cdt.internal.core.dom.parser.ProblemType") =>
           Defines.anyTypeName
       case t if t.contains(" ->") && t.contains("}::") =>
@@ -219,9 +244,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           anonType.replace(" ", "")
       case t if t.startsWith("[") && t.endsWith("]")       => Defines.anyTypeName
       case t if t.contains(Defines.qualifiedNameSeparator) => fixQualifiedName(t)
-      case t if t.startsWith("unsigned ")          => "unsigned " + t.substring(9).replace(" ", "")
-      case t if t.contains("[") && t.contains("]") => t.replace(" ", "")
-      case t if t.contains("*")                    => t.replace(" ", "")
+      // Tighten spacing around pointer/array/reference punctuation only. A blanket
+      // `replace(" ", "")` here used to merge the words of multi-token builtin types, producing
+      // invalid names such as "unsigned long int" -> "unsigned longint" and "long long int*" ->
+      // "longlongint*" (observed en masse in real slices).
+      case t if t.startsWith("unsigned ")          => tightenTypePunctuation(t)
+      case t if t.contains("[") && t.contains("]") => tightenTypePunctuation(t)
+      case t if t.contains("*")                    => tightenTypePunctuation(t)
       case someType                                => someType
     end match
   end cleanType
@@ -233,7 +262,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       case f: CPPASTFieldReference =>
           safeGetEvaluation(f.getFieldOwner) match
             case Some(evaluation: EvalBinding) =>
-                cleanType(evaluation.getType.toString, stripKeywords)
+                cleanType(safeGetType(evaluation.getType), stripKeywords)
             case _ =>
                 val rawType = safeGetType(f.getFieldOwner.getExpressionType)
                 cleanType(rawType, stripKeywords)
@@ -254,7 +283,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       case s: CPPASTIdExpression =>
           safeGetEvaluation(s) match
             case Some(evaluation: EvalMemberAccess) =>
-                cleanType(evaluation.getOwnerType.toString, stripKeywords)
+                cleanType(safeGetType(evaluation.getOwnerType), stripKeywords)
             case Some(evalBinding: EvalBinding) =>
                 evalBinding.getBinding match
                   case m: CPPMethod =>
@@ -331,9 +360,15 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       name
     cleanedName.split(Defines.qualifiedNameSeparator).lastOption.getOrElse(cleanedName)
 
+  /** Converts an [[IFunctionType]] to a human-readable signature string using the CPG dot-separator
+    * convention for namespaces. Both the return type and every parameter type are normalised
+    * through [[cleanType]] so that raw CDT spellings (e.g. `::` separators, `const` qualifiers,
+    * unresolved `?` placeholders, CDT-internal template indices) are canonicalised consistently
+    * with all other type names in the graph.
+    */
   protected def functionTypeToSignature(typ: IFunctionType): String =
-    val returnType     = safeGetType(typ.getReturnType)
-    val parameterTypes = typ.getParameterTypes.map(safeGetType)
+    val returnType     = cleanType(safeGetType(typ.getReturnType))
+    val parameterTypes = typ.getParameterTypes.map(t => cleanType(safeGetType(t)))
     s"$returnType(${parameterTypes.mkString(",")})"
 
   protected def fullName(node: IASTNode): String =
@@ -500,9 +535,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       val name            = include.getName.toString
       val _dependencyNode = newDependencyNode(name, name, IncludeKeyword)
       val importNode      = newImportNode(nodeSignature(include), name, name, include)
-      if !config.onlyAstCache then
-        diffGraph.addNode(_dependencyNode)
-        diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+      diffGraph.addNode(_dependencyNode)
+      diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
       Ast(importNode)
     }
 
@@ -619,22 +653,64 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
            |  Line: ${line(node).getOrElse(-1)}
            |  """.stripMargin
 
+  /** `auto`, `decltype(auto)` and `decltype(expr)` carry no useful spelling on the declaration
+    * specifier itself - the real (deduced) type lives on the resolved variable binding. CDT
+    * performs the deduction for us, so we read the binding's `IType` and stringify it. The binding
+    * type already encodes pointers/references/const, so callers must not re-append pointer
+    * punctuation.
+    */
+  private def deducedTypeFromBinding(spec: IASTNode, parentDecl: IASTDeclarator): Option[String] =
+      spec match
+        case s: IASTSimpleDeclSpecifier
+            if s.getType == IASTSimpleDeclSpecifier.t_auto ||
+                s.getType == IASTSimpleDeclSpecifier.t_decltype_auto ||
+                s.getType == IASTSimpleDeclSpecifier.t_decltype =>
+            Try {
+                Option(parentDecl).flatMap { d =>
+                    d.getName.resolveBinding() match
+                      case v: IVariable if v.getType != null =>
+                          val raw = safeGetType(v.getType)
+                          // Match the codebase convention: references are modelled as the
+                          // underlying value type (drop trailing `&`/`&&`), and pointer spacing is
+                          // tightened. Pointers (`*`) are retained.
+                          val t =
+                              if raw == null then ""
+                              else tightenTypePunctuation(raw.replaceAll("""\s*&+\s*$""", ""))
+                          if t.isEmpty || t == "auto" ||
+                            t.contains("ProblemType") || t.contains("TypeOfDependentExpression") ||
+                            // Closure / anonymous brace types (e.g. a lambda's deduced type) carry
+                            // no useful spelling and, when fed through `cleanType`, mint an
+                            // anonymous "type" name that steals from the shared anonymous-name
+                            // counter (shifting lambda indices). Fall back instead.
+                            t.contains("{") || t.contains("}")
+                          then None
+                          else Option(t)
+                      case _ => None
+                }
+            }.toOption.flatten
+        case _ => None
+
   private def pointersAsString(
     spec: IASTDeclSpecifier,
     parentDecl: IASTDeclarator,
     stripKeywords: Boolean
   ): String =
-    val tpe      = typeFor(spec, stripKeywords)
-    val pointers = parentDecl.getPointerOperators
-    val arr = parentDecl match
-      case p: IASTArrayDeclarator =>
-          p.getArrayModifiers.toList.map(_.getRawSignature).mkString
-      case _ => ""
-    if pointers.isEmpty then s"$tpe$arr"
-    else
-      val refs =
-          "*" * (pointers.length - pointers.count(_.isInstanceOf[ICPPASTReferenceOperator]))
-      s"$tpe$arr$refs".strip()
+      deducedTypeFromBinding(spec, parentDecl) match
+        case Some(deduced) =>
+            // The deduced binding type is the complete type (incl. pointers/refs); return as-is.
+            deduced
+        case None =>
+            val tpe      = typeFor(spec, stripKeywords)
+            val pointers = parentDecl.getPointerOperators
+            val arr = parentDecl match
+              case p: IASTArrayDeclarator =>
+                  p.getArrayModifiers.toList.map(_.getRawSignature).mkString
+              case _ => ""
+            if pointers.isEmpty then s"$tpe$arr"
+            else
+              val refs =
+                  "*" * (pointers.length - pointers.count(_.isInstanceOf[ICPPASTReferenceOperator]))
+              s"$tpe$arr$refs".strip()
 
   private def astForDecltypeSpecifier(decl: ICPPASTDecltypeSpecifier): Ast =
     val op       = "<operator>.typeOf"

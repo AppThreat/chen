@@ -24,8 +24,8 @@ final case class Config(
   useProjectIndex: Boolean = false,
   parseInactiveCode: Boolean = false,
   includeTrivialExpressions: Boolean = false,
-  enableAstCache: Boolean = false,
-  cacheDir: String = System.getProperty("java.io.tmpdir"),
+  enableAstCache: Boolean = true,
+  cacheDir: String = "",
   onlyAstCache: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
@@ -126,13 +126,13 @@ private object Frontend:
       opt[String]("cpp-standard")
           .text("C++ standard version (e.g., c++17, c++20).")
           .action((s, c) => c.withCppStandard(s)),
-      opt[Unit]("enable-ast-cache")
-          .text(
-            "Enables AST caching to disk. If the file path and content haven't changed, the cached AST is used."
-          )
-          .action((_, c) => c.withAstCache(true)),
+      opt[Unit]("no-ast-cache")
+          .text("Disables AST caching to disk (enabled by default).")
+          .action((_, c) => c.withAstCache(false)),
       opt[String]("cache-dir")
-          .text("Directory to store cached AST files (defaults to system temp).")
+          .text(
+            "Directory to store cached AST files (defaults to a .chen directory in the project root)."
+          )
           .action((d, c) => c.withCacheDir(d)),
       opt[Unit]("only-ast-cache")
           .text("Generates AST cache only and skips CPG creation.")

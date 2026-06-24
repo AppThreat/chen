@@ -3,6 +3,7 @@ package io.appthreat.dataflowengineoss.queryengine
 import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.language.*
 import io.appthreat.dataflowengineoss.passes.reachingdef.EdgeValidator
+import io.appthreat.dataflowengineoss.queryengine.summaries.MethodFlowSummary
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Properties}
@@ -238,9 +239,10 @@ object Engine:
           .filter { e =>
               e.outNode() match
                 case srcNode: CfgNode =>
-                    !srcNode.isInstanceOf[Method] && !path
-                        .map(x => x.node)
-                        .contains(srcNode)
+                    // `path.exists(_.node == srcNode)` avoids materialising a fresh Vector of the
+                    // whole path on every incoming edge (this is one of the hottest loops in the
+                    // backward query).
+                    !srcNode.isInstanceOf[Method] && !path.exists(_.node == srcNode)
                 case _ => false
           }
           .toVector
@@ -298,7 +300,13 @@ case class EngineConfig(
   initialTable: Option[mutable.Map[TaskFingerprint, Vector[ReachableByResult]]] = None,
   shareCacheBetweenTasks: Boolean = true,
   maxArgsToAllow: Int = 100,
-  maxOutputArgsExpansion: Int = 100
+  maxOutputArgsExpansion: Int = 100,
+  // Opt-in (atom `--summaries`). When enabled and `summaries` is populated, the engine prunes
+  // cross-call tasks that a method flow summary proves cannot carry taint (for example an output
+  // argument the callee never writes). This only removes provably empty work, so results are
+  // unchanged; it is off by default.
+  var useSummaries: Boolean = false,
+  summaries: Map[String, MethodFlowSummary] = Map.empty
 )
 
 /** Tracks various performance characteristics of the query engine.

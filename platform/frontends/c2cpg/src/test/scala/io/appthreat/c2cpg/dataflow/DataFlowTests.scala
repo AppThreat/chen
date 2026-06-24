@@ -9,10 +9,10 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 import overflowdb.traversal.toNodeTraversal
 
-class DataFlowTests extends DataFlowCodeToCpgSuite {
+class DataFlowTests extends DataFlowCodeToCpgSuite:
 
   "DataFlowTest1" should {
-    val cpg = code("""
+      val cpg = code("""
         |struct node {
         |  int value;
         |  struct node *next;
@@ -36,83 +36,83 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
         |  return x;
         |}""".stripMargin)
 
-    "identify all calls to `free`" in {
-      cpg.call.name("free").code.toSetMutable shouldBe Set("free(p)")
-    }
+      "identify all calls to `free`" in {
+          cpg.call.name("free").code.toSetMutable shouldBe Set("free(p)")
+      }
 
-    "find flows to arguments of `free`" in {
-      implicit val callResolver: NoResolve.type = NoResolve
-      val source                                = cpg.identifier
-      val sink                                  = cpg.method.name("free").parameter.argument
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
-    }
+      "find flows to arguments of `free`" in {
+          implicit val callResolver: NoResolve.type = NoResolve
+          val source                                = cpg.identifier
+          val sink                                  = cpg.method.name("free").parameter.argument
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
+      }
 
-    "find flows to `free`" in {
-      val source = cpg.identifier
-      val sink   = cpg.call.name("free").argument(1)
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
-    }
+      "find flows to `free`" in {
+          val source = cpg.identifier
+          val sink   = cpg.call.name("free").argument(1)
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
+      }
 
-    "find flows from identifiers to return values of `flow`" in {
-      val source = cpg.identifier
-      val sink   = cpg.method.name("flow").methodReturn
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 11
-    }
+      "find flows from identifiers to return values of `flow`" in {
+          val source = cpg.identifier
+          val sink   = cpg.method.name("flow").methodReturn
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 11
+      }
 
-    "find flows from z to method returns of flow" in {
-      val source = cpg.identifier.name("z")
-      val sink   = cpg.method.name("flow").methodReturn
-      sink.reachableByFlows(source).size shouldBe 3
-    }
+      "find flows from z to method returns of flow" in {
+          val source = cpg.identifier.name("z")
+          val sink   = cpg.method.name("flow").methodReturn
+          sink.reachableByFlows(source).size shouldBe 3
+      }
   }
 
   "DataFlowTest2" should {
-    val cpg = code("""
+      val cpg = code("""
       |int main(int x) {
       |  return x;
       |}""".stripMargin)
 
-    "Test ParameterToReturn1" should {
-      "have a flow from input parameter to return" in {
-        val source = cpg.method.name("main").parameter.name("x")
-        val sink   = cpg.method.name("main").methodReturn
-        val flows  = sink.reachableByFlows(source)
+      "Test ParameterToReturn1" should {
+          "have a flow from input parameter to return" in {
+              val source = cpg.method.name("main").parameter.name("x")
+              val sink   = cpg.method.name("main").methodReturn
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(List(("main(int x)", 2), ("return x;", 3), ("RET", 2)))
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(List(("main(int x)", 2), ("return x;", 3), ("RET", 2)))
+          }
       }
-    }
 
   }
 
   "DataFlowTest3" should {
-    val cpg = code("""
+      val cpg = code("""
       |int main(int x) {
       |  int k = x + 1;
       |  int y = k + 2;
       |  return y + 3;
       |}""".stripMargin)
 
-    "Test ParameterToReturn2" should {
-      "have a flow from input parameter to return" in {
-        val source = cpg.method.name("main").parameter.name("x")
-        val sink   = cpg.method.name("main").methodReturn
-        val flows  = sink.reachableByFlows(source)
+      "Test ParameterToReturn2" should {
+          "have a flow from input parameter to return" in {
+              val source = cpg.method.name("main").parameter.name("x")
+              val sink   = cpg.method.name("main").methodReturn
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(
-            List(
-              ("main(int x)", 2),
-              ("k = x + 1", 3),
-              ("RET", 2)
-            )
-          )
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(
+                    List(
+                      ("main(int x)", 2),
+                      ("k = x + 1", 3),
+                      ("RET", 2)
+                    )
+                  )
+          }
       }
-    }
   }
 
   "DataFlowTest4" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct Point {
       |  int x;
       |  int y;
@@ -134,23 +134,22 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(point.x);
       |}""".stripMargin)
 
-    "Test StructDataFlow" should {
-      "have a flow from input parameter to return" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter.name("x")
-        val flows  = sink.reachableByFlows(source)
+      "Test StructDataFlow" should {
+          "have a flow from input parameter to return" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter.name("x")
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(
-
-          )
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(
+                  )
+          }
       }
-    }
 
   }
 
   "DataFlowTest5" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source() {
       |  return 2;
       |}
@@ -168,23 +167,22 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(par);
       |}""".stripMargin)
 
-    "Test Interprocedural" should {
-      "have a flow from input parameter to return" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter.name("x")
-        val flows  = sink.reachableByFlows(source)
+      "Test Interprocedural" should {
+          "have a flow from input parameter to return" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter.name("x")
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(
-
-          )
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(
+                  )
+          }
       }
-    }
 
   }
 
   "DataFlowTest6" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct Point {
       |  int x;
       |  int y;
@@ -204,23 +202,22 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(point.x);
       |}""".stripMargin)
 
-    "Test TaintedStruct" should {
-      "have a flow from input parameter to return" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter.name("x")
-        val flows  = sink.reachableByFlows(source)
+      "Test TaintedStruct" should {
+          "have a flow from input parameter to return" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter.name("x")
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(
-
-          )
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(
+                  )
+          }
       }
-    }
 
   }
 
   "DataFlowTest7" should {
-    val cpg = code("""
+      val cpg = code("""
       |typedef struct {
       |  int len;
       |  int* buf;
@@ -235,20 +232,20 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(c);
       |}""".stripMargin)
 
-    "Overtaint behind exclusion" should {
-      "not find any flows" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter
-        val flows  = sink.reachableByFlows(source)
+      "Overtaint behind exclusion" should {
+          "not find any flows" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter
+              val flows  = sink.reachableByFlows(source)
 
-        flows.size shouldBe 0
+              flows.size shouldBe 0
+          }
       }
-    }
 
   }
 
   "DataFlowTest8" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source();
       |void sink(int* cont);
       |
@@ -258,23 +255,23 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(c[1]);
       |}""".stripMargin)
 
-    "Exclusions behind over-taint" should {
-      "not kill flows" in {
-        cpg.method.name("sink").fullName.l shouldBe Seq("sink")
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter
-        val flows  = sink.reachableByFlows(source)
+      "Exclusions behind over-taint" should {
+          "not kill flows" in {
+              cpg.method.name("sink").fullName.l shouldBe Seq("sink")
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 2), ("source()", 6), ("sink(c[1])", 8), ("sink(int* cont)", 3))
-        )
+              flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+                List(("RET", 2), ("source()", 6), ("sink(c[1])", 8), ("sink(int* cont)", 3))
+              )
+          }
       }
-    }
 
   }
 
   "DataFlowTest9" should {
-    val cpg = code("""
+      val cpg = code("""
       |typedef struct {int field;} S;
       |int source();
       |void sink(int i);
@@ -284,22 +281,22 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink((*arg).field);
       |}""".stripMargin)
 
-    "Pointer-to-struct, arrow vs star-dot" should {
-      "actually find flows" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter
-        val flows  = sink.reachableByFlows(source)
+      "Pointer-to-struct, arrow vs star-dot" should {
+          "actually find flows" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 3), ("source()", 7), ("sink((*arg).field)", 8), ("sink(int i)", 4))
-        )
+              flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+                List(("RET", 3), ("source()", 7), ("sink((*arg).field)", 8), ("sink(int i)", 4))
+              )
+          }
       }
-    }
 
   }
 
   "DataFlowTest10" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source();
       |void sink(int i);
       |
@@ -308,22 +305,22 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(*arg);
       |}""".stripMargin)
 
-    "Pointer deref vs array access" should {
-      "actually find flows" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter
-        val flows  = sink.reachableByFlows(source)
+      "Pointer deref vs array access" should {
+          "actually find flows" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-          List(("RET", 2), ("source()", 6), ("sink(*arg)", 7), ("sink(int i)", 3))
-        )
+              flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+                List(("RET", 2), ("source()", 6), ("sink(*arg)", 7), ("sink(int i)", 3))
+              )
+          }
       }
-    }
 
   }
 
   "DataFlowTest11" should {
-    val cpg = code("""
+      val cpg = code("""
       |#include <stdio.h>
       |#include <stdlib.h>
       |#include <sys/types.h>
@@ -341,24 +338,23 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return a;
       |}""".stripMargin)
 
-    "PathUnfolding with allFlows" should {
-      // regression test for  https://github.com/ShiftLeftSecurity/product/issues/7017
-      "work as expected" in {
-        val source = cpg.call("getpid")
-        val sink   = cpg.ret
-        val flows  = sink.reachableByFlows(source)
+      "PathUnfolding with allFlows" should {
+          // regression test for  https://github.com/ShiftLeftSecurity/product/issues/7017
+          "work as expected" in {
+              val source = cpg.call("getpid")
+              val sink   = cpg.ret
+              val flows  = sink.reachableByFlows(source)
 
-        flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(
-
-          )
+              flows.map(flowToResultPairs).toSetMutable shouldBe
+                  Set(
+                  )
+          }
       }
-    }
 
   }
 
   "DataFlowTest12" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source();
       |void sink(int arg);
       |void nop(int x) {return;};
@@ -369,19 +365,19 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(c[1]);
       |}""".stripMargin)
 
-    "NOP on overtaint" should {
-      "not widen the search" in {
-        val source = cpg.method.name("source").methodReturn
-        val sink   = cpg.method.name("sink").parameter
-        val flows  = sink.reachableByFlows(source)
-        flows.size shouldBe 0
+      "NOP on overtaint" should {
+          "not widen the search" in {
+              val source = cpg.method.name("source").methodReturn
+              val sink   = cpg.method.name("sink").parameter
+              val flows  = sink.reachableByFlows(source)
+              flows.size shouldBe 0
+          }
       }
-    }
 
   }
 
   "DataFlowTest13" should {
-    val cpg = code("""
+      val cpg = code("""
       |void flows1(FILE *fd, int mode) {
       |  char buff[40];
       |  int sz = 0;
@@ -392,26 +388,26 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  read(fd, buff, sz);
       |}""".stripMargin)
 
-    "flow from function call read to multiple versions of the same variable" in {
-      def source = cpg.identifier.name("sz")
-      def sink   = cpg.call.name("read")
-      def flows  = sink.reachableByFlows(source)
+      "flow from function call read to multiple versions of the same variable" in {
+          def source = cpg.identifier.name("sz")
+          def sink   = cpg.call.name("read")
+          def flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(
-          List(("sz = 20", 5), ("read(fd, buff, sz)", 9)),
-          List(("sz = 0", 4), ("read(fd, buff, sz)", 9)),
-          List(("sz = 200", 6), ("read(fd, buff, sz)", 9)),
-          List(("read(fd, buff, sz)", 9)),
-          List(("sz = -5", 8), ("read(fd, buff, sz)", 9)),
-          List(("sz = 41", 7), ("read(fd, buff, sz)", 9))
-        )
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+                List(("sz = 20", 5), ("read(fd, buff, sz)", 9)),
+                List(("sz = 0", 4), ("read(fd, buff, sz)", 9)),
+                List(("sz = 200", 6), ("read(fd, buff, sz)", 9)),
+                List(("read(fd, buff, sz)", 9)),
+                List(("sz = -5", 8), ("read(fd, buff, sz)", 9)),
+                List(("sz = 41", 7), ("read(fd, buff, sz)", 9))
+              )
 
-    }
+      }
   }
 
   "DataFlowTest14" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct node {
       |  int value;
       |  struct node *next;
@@ -425,18 +421,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  }
       |}""".stripMargin)
 
-    "flow with pointers" in {
-      implicit val callResolver: NoResolve.type = NoResolve
+      "flow with pointers" in {
+          implicit val callResolver: NoResolve.type = NoResolve
 
-      val source = cpg.identifier
-      val sink   = cpg.method.name("free").parameter.argument
-      val flows  = sink.reachableByFlows(source).map(flowToResultPairs).l.distinct
-      flows.size shouldBe 6
-    }
+          val source = cpg.identifier
+          val sink   = cpg.method.name("free").parameter.argument
+          val flows  = sink.reachableByFlows(source).map(flowToResultPairs).l.distinct
+          flows.size shouldBe 6
+      }
   }
 
   "DataFlowTest15" should {
-    val cpg = code("""
+      val cpg = code("""
       |int method(int y){
       |  int a = 10;
       |  if (a < y){
@@ -444,20 +440,24 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  }
       |}""".stripMargin)
 
-    "flow from function call argument" in {
-      implicit val callResolver: NoResolve.type = NoResolve
+      "flow from function call argument" in {
+          implicit val callResolver: NoResolve.type = NoResolve
 
-      val source = cpg.identifier.name("a")
-      val sink   = cpg.method.name("foo").parameter.argument
-      val flows  = sink.reachableByFlows(source)
+          val source = cpg.identifier.name("a")
+          val sink   = cpg.method.name("foo").parameter.argument
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(List(("a = 10", 3), ("a < y", 4), ("foo(a)", 5)), List(("a < y", 4), ("foo(a)", 5)), List(("foo(a)", 5)))
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+                List(("a = 10", 3), ("a < y", 4), ("foo(a)", 5)),
+                List(("a < y", 4), ("foo(a)", 5)),
+                List(("foo(a)", 5))
+              )
+      }
   }
 
   "DataFlowTest16" should {
-    val cpg = code("""
+      val cpg = code("""
       |void flow(void) {
       |  int a = 0x37;
       |  int b=a;
@@ -468,38 +468,37 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  int x = z;
       |}""".stripMargin)
 
-    "flow chains from x to a" in {
-      val source = cpg.identifier.name("a")
-      val sink   = cpg.identifier.name("x")
-      val flows  = sink.reachableByFlows(source)
+      "flow chains from x to a" in {
+          val source = cpg.identifier.name("a")
+          val sink   = cpg.identifier.name("x")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(
-
-        )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+              )
+      }
   }
 
   "DataFlowTest17" should {
-    val cpg = code("""
+      val cpg = code("""
       |int flow(int a) {
       |  int z = a;
       |  int b = z;
       |  return b;
       |}""".stripMargin)
 
-    "flow from method return to a" in {
-      val source = cpg.identifier.name("a")
-      val sink   = cpg.method("flow").ast.isReturn
-      val flows  = sink.reachableByFlows(source)
+      "flow from method return to a" in {
+          val source = cpg.identifier.name("a")
+          val sink   = cpg.method("flow").ast.isReturn
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest18" should {
-    val cpg = code("""
+      val cpg = code("""
       |int nested(int a) {
       |  int x;
       |  int z = 0x37;
@@ -513,18 +512,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return x;
       |}""".stripMargin)
 
-    "flow with nested if-statements from method return to a" in {
-      val source = cpg.call.code("a < 10").argument.code("a")
-      val sink   = cpg.method("nested").ast.isReturn
-      val flows  = sink.reachableByFlows(source)
+      "flow with nested if-statements from method return to a" in {
+          val source = cpg.call.code("a < 10").argument.code("a")
+          val sink   = cpg.method("nested").ast.isReturn
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest19" should {
-    val cpg = code("""
+      val cpg = code("""
       |int nested(int a) {
       |  int x;
       |  int z = 0x37;
@@ -538,38 +537,42 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return x;
       |}""".stripMargin)
 
-    "flow with nested if-statements to `return x`" in {
-      val source = cpg.identifier.name("x")
-      val sink   = cpg.method("nested").ast.isReturn
-      val flows  = sink.reachableByFlows(source)
+      "flow with nested if-statements to `return x`" in {
+          val source = cpg.identifier.name("x")
+          val sink   = cpg.method("nested").ast.isReturn
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(List(("x = a", 8), ("return x;", 12)), List(("x = z", 11), ("return x;", 12)), List(("return x;", 12)))
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+                List(("x = a", 8), ("return x;", 12)),
+                List(("x = z", 11), ("return x;", 12)),
+                List(("return x;", 12))
+              )
+      }
   }
 
   "DataFlowTest20" should {
-    val cpg = code("""
+      val cpg = code("""
       |void param(int x) {
       |  int a = x;
       |  int b = a;
       |  int z = foo(b);
       |}""".stripMargin)
 
-    "flow chain from function argument of foo to a" in {
-      implicit val callResolver: NoResolve.type = NoResolve
-      val source                                = cpg.identifier.name("a")
-      val sink                                  = cpg.method.name("foo").parameter.argument
-      val flows                                 = sink.reachableByFlows(source)
+      "flow chain from function argument of foo to a" in {
+          implicit val callResolver: NoResolve.type = NoResolve
+          val source                                = cpg.identifier.name("a")
+          val sink                                  = cpg.method.name("foo").parameter.argument
+          val flows                                 = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
 
-    }
+      }
   }
 
   "DataFlowTest21" should {
-    val cpg = code("""
+      val cpg = code("""
       |void param(int x) {
       |  int a = x;
       |  int b = a;
@@ -577,18 +580,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |}
       """.stripMargin)
 
-    "flow from function foo to a" in {
-      val source = cpg.identifier.name("a")
-      val sink   = cpg.call.name("foo").argument(1)
-      val flows  = sink.reachableByFlows(source)
+      "flow from function foo to a" in {
+          val source = cpg.identifier.name("a")
+          val sink   = cpg.call.name("foo").argument(1)
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest22" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct node {
       |  int value1;
       |  int value2;
@@ -601,21 +604,21 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  n.value2 = n.value1;
       |}""".stripMargin)
 
-    "flow with member access in expression to identifier x" in {
-      val source = cpg.identifier.name("x")
-      val sink   = cpg.call.code("n.value2")
-      val flows  = sink.reachableByFlows(source)
+      "flow with member access in expression to identifier x" in {
+          val source = cpg.identifier.name("x")
+          val sink   = cpg.call.code("n.value2")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(
-          List(("x = 10", 8), ("n.value1 = x", 10), ("n.value2 = n.value1", 11)),
-          List(("n.value1 = x", 10), ("n.value2 = n.value1", 11))
-        )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+                List(("x = 10", 8), ("n.value1 = x", 10), ("n.value2 = n.value1", 11)),
+                List(("n.value1 = x", 10), ("n.value2 = n.value1", 11))
+              )
+      }
   }
 
   "DataFlowTest23" should {
-    val cpg = code("""
+      val cpg = code("""
       |void flow(void) {
       |  int a = 0x37;
       |  int b=a;
@@ -626,18 +629,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  int x = z;
       |}""".stripMargin)
 
-    "flow chain from x to literal 0x37" in {
-      val source = cpg.literal.code("0x37")
-      val sink   = cpg.identifier.name("x")
-      val flows  = sink.reachableByFlows(source)
+      "flow chain from x to literal 0x37" in {
+          val source = cpg.literal.code("0x37")
+          val sink   = cpg.identifier.name("x")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest24" should {
-    val cpg = code("""
+      val cpg = code("""
       |void flow(void) {
       |  int a = 0x37;
       |  int b = a;
@@ -645,18 +648,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  z+=a;
       |}""".stripMargin)
 
-    "flow with short hand assignment operator" in {
-      val source = cpg.call.code("a = 0x37").argument(2)
-      val sink   = cpg.call.code("z\\+=a").argument(1)
-      val flows  = sink.reachableByFlows(source)
+      "flow with short hand assignment operator" in {
+          val source = cpg.call.code("a = 0x37").argument(2)
+          val sink   = cpg.call.code("z\\+=a").argument(1)
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest25" should {
-    val cpg = code("""
+      val cpg = code("""
       |void flow(void) {
       |  int a = 0x37;
       |  int b = a;
@@ -665,18 +668,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  int w = z;
       |}""".stripMargin)
 
-    "flow after short hand assignment" in {
-      val source = cpg.call.code("a = 0x37").argument(1)
-      val sink   = cpg.identifier.name("w")
-      val flows  = sink.reachableByFlows(source)
+      "flow after short hand assignment" in {
+          val source = cpg.call.code("a = 0x37").argument(1)
+          val sink   = cpg.identifier.name("w")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set()
+      }
   }
 
   "DataFlowTest26" should {
-    val cpg = code("""
+      val cpg = code("""
       |int main(int argc, char** argv) {
       |  int x = argv[1];
       |  int y = x;
@@ -684,34 +687,34 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "flow from array method parameter to identifier" in {
-      val source = cpg.method.parameter
-      val sink   = cpg.identifier.name("y")
-      val flows  = sink.reachableByFlows(source)
+      "flow from array method parameter to identifier" in {
+          val source = cpg.method.parameter
+          val sink   = cpg.identifier.name("y")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe
-        Set(
-        )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe
+              Set(
+              )
+      }
   }
 
   "DataFlowTest27" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo(bool x, void* y) {
       |  void* z =  x ? f(y) : g(y);
       |  return;
       |}""".stripMargin)
 
-    "conditional expressions (joern issue #91)" in {
-      val source = cpg.method.parameter.name("y")
-      val sink   = cpg.identifier.name("z")
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 1
-    }
+      "conditional expressions (joern issue #91)" in {
+          val source = cpg.method.parameter.name("y")
+          val sink   = cpg.identifier.name("z")
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 1
+      }
   }
 
   "DataFlowTest28" should {
-    val cpg = code("""
+      val cpg = code("""
       |int bar() {
       | int x = source();
       | foo(x);
@@ -721,16 +724,16 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(y);
       |}""".stripMargin)
 
-    "find source in caller" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink").argument(1)
-      sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
-      )
-    }
+      "find source in caller" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink").argument(1)
+          sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
   }
 
   "DataFlowTest29" should {
-    val cpg = code("""
+      val cpg = code("""
       |int bar() {
       |  return source();
       |}
@@ -740,24 +743,23 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(y);
       |}""".stripMargin)
 
-    "find source in callee" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink").argument(1)
-      sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
-      )
-    }
+      "find source in callee" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink").argument(1)
+          sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
 
-    "allow using formal parameters as sink" in {
-      val source = cpg.call("source")
-      val sink   = cpg.method("sink").parameter.index(1)
-      sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
-
-      )
-    }
+      "allow using formal parameters as sink" in {
+          val source = cpg.call("source")
+          val sink   = cpg.method("sink").parameter.index(1)
+          sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
   }
 
   "DataFlowTest30" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct Point {
       |  int x;
       |  int y;
@@ -779,20 +781,19 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(point.x);
       |}""".stripMargin)
 
-    "struct data flow" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.method.name("sink").parameter.name("x")
-      val flows  = sink.reachableByFlows(source)
+      "struct data flow" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.method.name("sink").parameter.name("x")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
 
-      )
-
-    }
+      }
   }
 
   "DataFlowTest31" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct Point {
       |  int x;
       |  int y;
@@ -812,18 +813,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(point.x);
       |}""".stripMargin)
 
-    "tainted struct" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.method.name("sink").parameter.name("x")
-      val flows  = sink.reachableByFlows(source)
+      "tainted struct" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.method.name("sink").parameter.name("x")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-      )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
   }
 
   "DataFlowTest32" should {
-    val cpg = code("""
+      val cpg = code("""
       |typedef struct {
       |  int len;
       |  int* buf;
@@ -838,16 +839,16 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(c);
       |}""".stripMargin)
 
-    "not find any flows" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 0
-    }
+      "not find any flows" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 0
+      }
   }
 
   "DataFlowTest33" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source();
       |void sink(int* cont);
       |
@@ -857,17 +858,17 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(c[1]);
       |}""".stripMargin)
 
-    "find flow" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
+      "find flow" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
 
-      flows.size shouldBe 1
-    }
+          flows.size shouldBe 1
+      }
   }
 
   "DataFlowTest34" should {
-    val cpg = code("""
+      val cpg = code("""
       |typedef struct {int field;} S;
       |int source();
       |void sink(int i);
@@ -878,17 +879,17 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |}
       |""".stripMargin)
 
-    "find flows (pointer-to-struct/arrows vs star-dot)" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 1
-    }
+      "find flows (pointer-to-struct/arrows vs star-dot)" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 1
+      }
 
   }
 
   "DataFlowTest35" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source();
       |void sink(int i);
       |
@@ -897,157 +898,157 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(*arg);
       |}""".stripMargin)
 
-    "handle deref vs array access correctly" in {
-      val source = cpg.method.name("source").methodReturn
-      val sink   = cpg.call.codeExact("*arg")
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 1
-    }
+      "handle deref vs array access correctly" in {
+          val source = cpg.method.name("source").methodReturn
+          val sink   = cpg.call.codeExact("*arg")
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 1
+      }
 
   }
 
   "DataFlowTest36" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |  source(&a->c);
       |  sink(a->b);
       |}""".stripMargin)
 
-    "not report flow if access path differs" in {
-      val source = cpg.call.name("source").argument
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 0
-    }
+      "not report flow if access path differs" in {
+          val source = cpg.call.name("source").argument
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 0
+      }
   }
 
   "DataFlowTest37" should {
-    val cpg = code("""
+      val cpg = code("""
       |int bar() {
       |  source(&a->b);
       |  sink(a->b);
       |}""".stripMargin)
 
-    "report flow if address passed to source" in {
-      val source = cpg.call("source").argument
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
+      "report flow if address passed to source" in {
+          val source = cpg.call("source").argument
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-        List(("source(&a->b)", 3), ("sink(a->b)", 4), ("sink(p1)", -1))
-      )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+            List(("source(&a->b)", 3), ("sink(a->b)", 4), ("sink(p1)", -1))
+          )
+      }
   }
 
   "DataFlowTest38" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |  a->b = source();
       |  a->b = 10;
       |  sink(a->b);
       |}""".stripMargin)
 
-    "not report flow" in {
-      val source = cpg.call.name("source")
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
+      "not report flow" in {
+          val source = cpg.call.name("source")
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
 
-      flows.size shouldBe 0
+          flows.size shouldBe 0
 
-      val source2 = cpg.assignment.codeExact("a->b = 10").target
-      val sink2   = cpg.method.name("sink").parameter
+          val source2 = cpg.assignment.codeExact("a->b = 10").target
+          val sink2   = cpg.method.name("sink").parameter
 
-      sink2.reachableBy(source2).size shouldBe 1
-    }
+          sink2.reachableBy(source2).size shouldBe 1
+      }
   }
 
   "DataFlowTest40" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |  int y = 1;
       |  y = something_else;
       |  y = 10;
       |}""".stripMargin)
 
-    "find that there is a flow from `y = 1` to exit node" in {
-      // This one may be a bit surprising, but what's happening here
-      // is that the expression "y = 1" flows to the exit node, and
-      // since that is influenced by 1, there is in fact a flow from
-      // "1" to the exit node.
-      val source = cpg.literal("1")
-      val sink   = cpg.method("foo").methodReturn
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 1
-    }
+      "find that there is a flow from `y = 1` to exit node" in {
+          // This one may be a bit surprising, but what's happening here
+          // is that the expression "y = 1" flows to the exit node, and
+          // since that is influenced by 1, there is in fact a flow from
+          // "1" to the exit node.
+          val source = cpg.literal("1")
+          val sink   = cpg.method("foo").methodReturn
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 1
+      }
   }
 
   "DataFlowTest41" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |  char * y = malloc(10);
       |  free(y);
       |  y = 10;
       |}""".stripMargin)
 
-    "find that there is no flow from free(y) to exit node" in {
-      val source = cpg.call("free").argument(1)
-      val sink   = cpg.method("foo").methodReturn
-      val flows  = sink.reachableByFlows(source)
+      "find that there is no flow from free(y) to exit node" in {
+          val source = cpg.call("free").argument(1)
+          val sink   = cpg.method("foo").methodReturn
+          val flows  = sink.reachableByFlows(source)
 
-      flows.size shouldBe 0
-    }
+          flows.size shouldBe 0
+      }
   }
 
   "DataFlowTest42" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo(int b) {
       |  b = source();
       |  b = 10;
       |  sink(b);
       |}""".stripMargin)
 
-    "block flow even if variable decl cannot be found" in {
-      val source = cpg.call.name("source")
-      val sink   = cpg.method.name("sink").parameter
-      val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 0
+      "block flow even if variable decl cannot be found" in {
+          val source = cpg.call.name("source")
+          val sink   = cpg.method.name("sink").parameter
+          val flows  = sink.reachableByFlows(source)
+          flows.size shouldBe 0
 
-      val source2 = cpg.assignment.codeExact("b = 10").target
-      val sink2   = cpg.method.name("sink").parameter
+          val source2 = cpg.assignment.codeExact("b = 10").target
+          val sink2   = cpg.method.name("sink").parameter
 
-      sink2.reachableBy(source2).size shouldBe 1
-    }
+          sink2.reachableBy(source2).size shouldBe 1
+      }
   }
 
   "DataFlowTest43" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo() {
       |  return bar();
       |}""".stripMargin)
 
-    "not create edges from call to ret twice" in {
-      cpg
-        .call("bar")
-        .outE(EdgeTypes.REACHING_DEF)
-        .count(_.inNode() == cpg.ret.head) shouldBe 1
-    }
+      "not create edges from call to ret twice" in {
+          cpg
+              .call("bar")
+              .outE(EdgeTypes.REACHING_DEF)
+              .count(_.inNode() == cpg.ret.head) shouldBe 1
+      }
   }
 
   "DataFlowTest44" should {
-    val cpg = code("""
+      val cpg = code("""
       |void f(int x, int y) {
       |  g(x, y);
       |}""".stripMargin)
 
-    "find flow from outer params to inner params" in {
-      val source = cpg.method.name("f").parameter
-      val sink   = cpg.method.name("g").parameter
-      sink.reachableBy(source).size shouldBe 2
-    }
+      "find flow from outer params to inner params" in {
+          val source = cpg.method.name("f").parameter
+          val sink   = cpg.method.name("g").parameter
+          sink.reachableBy(source).size shouldBe 2
+      }
   }
 
   "DataFlowTest45" should {
-    val cpg = code("""
+      val cpg = code("""
       |int bar(int z) {
       |  int x = 10;
       |  int y = x + source()
@@ -1059,30 +1060,30 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(y);
       |}""".stripMargin)
 
-    "provide correct flow for source in sibling callee" in {
-      cpg.call("sink").argument(1).reachableByFlows(cpg.call("source")).size shouldBe 0
-    }
+      "provide correct flow for source in sibling callee" in {
+          cpg.call("sink").argument(1).reachableByFlows(cpg.call("source")).size shouldBe 0
+      }
 
   }
 
   "DataFlowTest46" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  int x = source();
       |  sink(x);
       |}""".stripMargin)
 
-    "find flow via assignment" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink")
-      val flows  = sink.reachableByFlows(source)
+      "find flow via assignment" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set()
+      }
   }
 
   "DataFlowTest47" should {
-    val cpg = code("""
+      val cpg = code("""
       |int sink(int arg){  return arg; };
       |int source(){ return 0; };
       |
@@ -1090,112 +1091,118 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(source());
       |}""".stripMargin)
 
-    "find flow of call in call" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink")
-      val flows  = sink.reachableByFlows(source)
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-        List(("source()", 6), ("sink(int arg)", 2), ("sink(source())", 6))
-      )
-    }
+      "find flow of call in call" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink")
+          val flows  = sink.reachableByFlows(source)
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+            List(("source()", 6), ("sink(int arg)", 2), ("sink(source())", 6))
+          )
+      }
   }
 
   "DataFlowTest49" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo(int x) {
       |  x = source();
       |  sink(x);
       |}""".stripMargin)
 
-    "find flow via assignment for global" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink")
-      val flows  = sink.reachableByFlows(source)
+      "find flow via assignment for global" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set()
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set()
+      }
   }
 
   "DataFlowTest50" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  int x = source();
       |  x = y;
       |  sink(x);
       |}""".stripMargin)
 
-    "find that flow is blocked by assignment" in {
-      val source     = cpg.call("source")
-      val assignment = cpg.assignment.codeExact("x = y")
-      val sink       = cpg.call("sink").l
+      "find that flow is blocked by assignment" in {
+          val source     = cpg.call("source")
+          val assignment = cpg.assignment.codeExact("x = y")
+          val sink       = cpg.call("sink").l
 
-      val flows = sink.reachableByFlows(source)
-      flows.size shouldBe 0
+          val flows = sink.reachableByFlows(source)
+          flows.size shouldBe 0
 
-      val flows2 = sink.reachableByFlows(assignment.target)
-      flows2.map(flowToResultPairs).toSetMutable shouldBe Set(List(("x = y", 4), ("sink(x)", 5)))
-    }
+          val flows2 = sink.reachableByFlows(assignment.target)
+          flows2.map(flowToResultPairs).toSetMutable shouldBe Set(List(
+            ("x = y", 4),
+            ("sink(x)", 5)
+          ))
+      }
   }
 
   "DataFlowTest51" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  x.y = source();
       |  sink(x.y);
       |}""".stripMargin)
 
-    "find via assignment with field access" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink")
-      val flows  = sink.reachableByFlows(source)
+      "find via assignment with field access" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-        List(("source()", 3), ("sink(x.y)", 4))
-      )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+            List(("source()", 3), ("sink(x.y)", 4))
+          )
+      }
   }
 
   "DataFlowTest52" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  x->y = source();
       |  sink(x->y);
       |}""".stripMargin)
 
-    "find flow via assignment with indirect field access" in {
-      val source = cpg.call("source")
-      val sink   = cpg.call("sink")
-      val flows  = sink.reachableByFlows(source)
+      "find flow via assignment with indirect field access" in {
+          val source = cpg.call("source")
+          val sink   = cpg.call("sink")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-        List(("source()", 3), ("sink(x->y)", 4))
-      )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+            List(("source()", 3), ("sink(x->y)", 4))
+          )
+      }
   }
 
   "DataFlowTest53" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  int x.y = source();
       |  x.y = z;
       |  sink(x);
       |}""".stripMargin)
 
-    "find that flow is blocked by assignment" in {
-      val source     = cpg.call("source")
-      def sink       = cpg.call("sink")
-      val assignment = cpg.assignment.codeExact("x.y = z")
-      val flows      = sink.reachableByFlows(source)
+      "find that flow is blocked by assignment" in {
+          val source     = cpg.call("source")
+          def sink       = cpg.call("sink")
+          val assignment = cpg.assignment.codeExact("x.y = z")
+          val flows      = sink.reachableByFlows(source)
 
-      flows.size shouldBe 0
+          flows.size shouldBe 0
 
-      val flows2 = sink.reachableByFlows(assignment.target)
-      flows2.map(flowToResultPairs).toSetMutable shouldBe Set(List(("x.y = z", 4), ("sink(x)", 5)))
-    }
+          val flows2 = sink.reachableByFlows(assignment.target)
+          flows2.map(flowToResultPairs).toSetMutable shouldBe Set(List(
+            ("x.y = z", 4),
+            ("sink(x)", 5)
+          ))
+      }
   }
 
   "DataFlowTest54" should {
-    val cpg = code("""
+      val cpg = code("""
       |void foo() {
       |  int data;
       |  fscanf(stdin, "%d", &data);
@@ -1203,19 +1210,18 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  printf("%d\n", result);
       |}""".stripMargin)
 
-    "find flow via fscanf" in {
-      val source = cpg.call("fscanf").argument
-      val sink   = cpg.identifier("result")
-      val flows  = sink.reachableByFlows(source)
+      "find flow via fscanf" in {
+          val source = cpg.call("fscanf").argument
+          val sink   = cpg.identifier("result")
+          val flows  = sink.reachableByFlows(source)
 
-      flows.map(flowToResultPairs).toSetMutable shouldBe Set(
-
-      )
-    }
+          flows.map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
   }
 
   "DataFlowTest55" should {
-    val cpg = code("""
+      val cpg = code("""
       |struct node {
       |  int value;
       |  struct node *next;
@@ -1239,39 +1245,39 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return x;
       |}""".stripMargin)
 
-    "identify all calls to `free`" in {
-      cpg.call.name("free").code.toSetMutable shouldBe Set("free(p)")
-    }
+      "identify all calls to `free`" in {
+          cpg.call.name("free").code.toSetMutable shouldBe Set("free(p)")
+      }
 
-    "find flows to arguments of `free`" in {
-      implicit val callResolver: NoResolve.type = NoResolve
-      val source                                = cpg.identifier
-      val sink                                  = cpg.method.name("free").parameter.argument
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
-    }
+      "find flows to arguments of `free`" in {
+          implicit val callResolver: NoResolve.type = NoResolve
+          val source                                = cpg.identifier
+          val sink                                  = cpg.method.name("free").parameter.argument
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
+      }
 
-    "find flows to `free`" in {
-      val source = cpg.identifier
-      val sink   = cpg.call.name("free").argument(1)
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
-    }
+      "find flows to `free`" in {
+          val source = cpg.identifier
+          val sink   = cpg.call.name("free").argument(1)
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
+      }
 
-    "find flows from identifiers to return values of `flow`" in {
-      val source = cpg.identifier
-      val sink   = cpg.method.name("flow").methodReturn
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 11
-    }
+      "find flows from identifiers to return values of `flow`" in {
+          val source = cpg.identifier
+          val sink   = cpg.method.name("flow").methodReturn
+          sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 11
+      }
 
-    "find flows from z to method returns of flow" in {
-      val source = cpg.identifier.name("z")
-      val sink   = cpg.method.name("flow").methodReturn
-      sink.reachableByFlows(source).l.size shouldBe 3
-    }
+      "find flows from z to method returns of flow" in {
+          val source = cpg.identifier.name("z")
+          val sink   = cpg.method.name("flow").methodReturn
+          sink.reachableByFlows(source).l.size shouldBe 3
+      }
 
   }
 
   "DataFlowTest56" should {
-    val cpg = code("""
+      val cpg = code("""
       |int test() {
       |  char inputBuffer[0x100] = "";
       |  int buffer[10] = {0};
@@ -1283,26 +1289,24 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "find flow from <operator>.indirectIndexAccess" in {
-      def source = cpg.call("fgets").argument(1)
-      val sink1  = cpg.call("strncpy").argument(3)
-      val sink2  = cpg.call("<operator>.indirectIndexAccess").argument(2)
-      val flows1 = sink1.reachableByFlows(source)
+      "find flow from <operator>.indirectIndexAccess" in {
+          def source = cpg.call("fgets").argument(1)
+          val sink1  = cpg.call("strncpy").argument(3)
+          val sink2  = cpg.call("<operator>.indirectIndexAccess").argument(2)
+          val flows1 = sink1.reachableByFlows(source)
 
-      flows1.map(flowToResultPairs).toSetMutable shouldBe Set(
+          flows1.map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
 
-      )
+          val flows2 = sink2.reachableByFlows(source)
 
-      val flows2 = sink2.reachableByFlows(source)
-
-      flows2.map(flowToResultPairs).toSetMutable shouldBe Set(
-
-      )
-    }
+          flows2.map(flowToResultPairs).toSetMutable shouldBe Set(
+          )
+      }
   }
 
   "DataFlowTest57" should {
-    val cpg = code("""
+      val cpg = code("""
       |void abc() {
       |  int a;
       |  a = foo();
@@ -1310,30 +1314,30 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(a);
       |}""".stripMargin)
 
-    "not find a flow from 'a' at 'foo' to 'sink'" in {
-      val src  = cpg.call("foo").inAssignment.target.head
-      val sink = cpg.method("sink").parameter
-      sink.reachableByFlows(src).size shouldBe 0
-    }
+      "not find a flow from 'a' at 'foo' to 'sink'" in {
+          val src  = cpg.call("foo").inAssignment.target.head
+          val sink = cpg.method("sink").parameter
+          sink.reachableByFlows(src).size shouldBe 0
+      }
   }
 
   "DataFlowTest58" should {
-    val cpg = code("""
+      val cpg = code("""
       |void abc(int a) {
       |  a = foo();
       |  a = bar(0x80);
       |  sink(a);
       |}""".stripMargin)
 
-    "not find a flow from parameter 'a' to 'sink'" in {
-      val src  = cpg.method("abc").parameter
-      val sink = cpg.method("sink").parameter
-      sink.reachableByFlows(src).size shouldBe 0
-    }
+      "not find a flow from parameter 'a' to 'sink'" in {
+          val src  = cpg.method("abc").parameter
+          val sink = cpg.method("sink").parameter
+          sink.reachableByFlows(src).size shouldBe 0
+      }
   }
 
   "DataFlowTest59" should {
-    val cpg = code("""
+      val cpg = code("""
       |typedef struct {
       | char *buf1;
       |} FooStruct;
@@ -1346,16 +1350,16 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "find flow from local to 'doFoo'" in {
-      val source = cpg.local.name("foo").referencingIdentifiers
-      val sink   = cpg.call.code("doFoo.*").argument
-      sink.reachableByFlows(source).size shouldBe 1
-    }
+      "find flow from local to 'doFoo'" in {
+          val source = cpg.local.name("foo").referencingIdentifiers
+          val sink   = cpg.call.code("doFoo.*").argument
+          sink.reachableByFlows(source).size shouldBe 1
+      }
 
   }
 
   "DataFlowTests60" should {
-    val cpg = code("""
+      val cpg = code("""
       |void outer(char* ptr){
       |  taint1(ptr);
       |  inner(ptr);
@@ -1368,16 +1372,16 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(ptr);
       |}""".stripMargin)
 
-    "not return flow" in {
-      val source = cpg.call("taint1").argument
-      val sink   = cpg.call("sink").argument
-      sink.reachableByFlows(source).size shouldBe 0
-    }
+      "not return flow" in {
+          val source = cpg.call("taint1").argument
+          val sink   = cpg.call("sink").argument
+          sink.reachableByFlows(source).size shouldBe 0
+      }
 
   }
 
   "DataFlowTests61" should {
-    val cpg = code("""
+      val cpg = code("""
       |void reassignThenFree(char * ptr) {
       |  ptr = malloc(0x80);
       |  free(ptr);
@@ -1397,25 +1401,25 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "find flow from `free` to `free`" in {
-      val sink   = cpg.call("free").argument(1)
-      val source = cpg.call("free").argument(1)
-      val List(flow: Path) = sink
-        .reachableByFlows(source)
-        .filter(path => path.elements.sizeIs > 1)
-        .l
+      "find flow from `free` to `free`" in {
+          val sink   = cpg.call("free").argument(1)
+          val source = cpg.call("free").argument(1)
+          val List(flow: Path) = sink
+              .reachableByFlows(source)
+              .filter(path => path.elements.sizeIs > 1)
+              .l
 
-      inside(flow.elements) { case List(i1: Identifier, i2: Identifier) =>
-        i1.name shouldBe "data"
-        i1.lineNumber shouldBe Option(16)
-        i2.name shouldBe "data"
-        i2.lineNumber shouldBe Option(17)
+          inside(flow.elements) { case List(i1: Identifier, i2: Identifier) =>
+              i1.name shouldBe "data"
+              i1.lineNumber shouldBe Option(16)
+              i2.name shouldBe "data"
+              i2.lineNumber shouldBe Option(17)
+          }
       }
-    }
   }
 
   "DataFlowTests62" should {
-    val cpg = code("""
+      val cpg = code("""
       |void reassignThenFree(char * ptr) {
       |  ptr = malloc(0x80);
       |  free(ptr);
@@ -1436,15 +1440,15 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "not report flow" in {
-      val sink   = cpg.call("free").argument(1)
-      val source = cpg.call("free").argument(1)
-      sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
-    }
+      "not report flow" in {
+          val sink   = cpg.call("free").argument(1)
+          val source = cpg.call("free").argument(1)
+          sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
+      }
   }
 
   "DataFlowTests63" should {
-    val cpg = code("""
+      val cpg = code("""
       |void reassignThenFree(char * ptr) {
       |  ptr = malloc(0x80);
       |  free(ptr);
@@ -1459,17 +1463,17 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "not report flow" in {
-      val sink   = cpg.call("free").argument(1)
-      val source = cpg.call("free").argument(1)
-      sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
-    }
+      "not report flow" in {
+          val sink   = cpg.call("free").argument(1)
+          val source = cpg.call("free").argument(1)
+          sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
+      }
   }
 
   "DataFlowTests64" should {
-    // This case is a double-free that we return, the reason being that modifying `ptr`
-    // does not modify `data` as arguments  are passed by value.
-    val cpg = code("""
+      // This case is a double-free that we return, the reason being that modifying `ptr`
+      // does not modify `data` as arguments  are passed by value.
+      val cpg = code("""
       |void reassign(char * ptr) {
       |  ptr = malloc(0x80);
       |  return;
@@ -1484,16 +1488,16 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "report flow" in {
-      val sink   = cpg.call("free").argument(1)
-      val source = cpg.call("free").argument(1)
-      sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 1
-    }
+      "report flow" in {
+          val sink   = cpg.call("free").argument(1)
+          val source = cpg.call("free").argument(1)
+          sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 1
+      }
 
   }
 
   "DataFlowTests65" should {
-    val cpg = code("""
+      val cpg = code("""
       |char * reassign(char * ptr) {
       |  ptr = malloc(0x80);
       |  return ptr;
@@ -1507,30 +1511,30 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  return 0;
       |}""".stripMargin)
 
-    "not report flow from free to free" in {
-      val sink   = cpg.call("free").argument(1)
-      val source = cpg.call("free").argument(1)
-      sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
-    }
+      "not report flow from free to free" in {
+          val sink   = cpg.call("free").argument(1)
+          val source = cpg.call("free").argument(1)
+          sink.reachableByFlows(source).count(path => path.elements.sizeIs > 1) shouldBe 0
+      }
 
   }
 
   "DataFlowTests66" should {
-    val cpg = code("""
+      val cpg = code("""
       |int foo(int x) {
       |  x = 10;
       |}""".stripMargin)
 
-    "report flow from method assignment to method parameter out" in {
-      val sink   = cpg.method("foo").parameter.asOutput
-      val source = cpg.method("foo").ast.isIdentifier.name("x")
-      sink.reachableByFlows(source).size shouldBe 1
-    }
+      "report flow from method assignment to method parameter out" in {
+          val sink   = cpg.method("foo").parameter.asOutput
+          val source = cpg.method("foo").ast.isIdentifier.name("x")
+          sink.reachableByFlows(source).size shouldBe 1
+      }
 
   }
 
   "DataFlowTests69" should {
-    val cpg = code("""
+      val cpg = code("""
      |char *foo() {
      |  return "abc" + "firstName";
      |}
@@ -1540,17 +1544,17 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
      |}
      |""".stripMargin)
 
-    "find a flow where the first element is a literal" in {
-      val source           = cpg.literal.code(".*firstName.*")
-      val sink             = cpg.call.methodFullName(".*log.*").l
-      val List(flow)       = sink.reachableByFlows(source).l
-      val literal: Literal = flow.elements.head.asInstanceOf[Literal]
-      literal.code shouldBe "\"firstName\""
-    }
+      "find a flow where the first element is a literal" in {
+          val source           = cpg.literal.code(".*firstName.*")
+          val sink             = cpg.call.methodFullName(".*log.*").l
+          val List(flow)       = sink.reachableByFlows(source).l
+          val literal: Literal = flow.elements.head.asInstanceOf[Literal]
+          literal.code shouldBe "\"firstName\""
+      }
   }
 
   "DataFlowTest70" should {
-    val cpg = code("""
+      val cpg = code("""
       |int source() {
       |  return 42;
       |}
@@ -1559,23 +1563,23 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       |  sink(source());
       |}""".stripMargin)
 
-    "Test Interprocedural" should {
-      "have a flow from argument(which itself is a call) to return" in {
-        val source = cpg.literal("42")
-        val sink   = cpg.call("sink").argument
-        sink.reachableByFlows(source).size shouldBe 1
+      "Test Interprocedural" should {
+          "have a flow from argument(which itself is a call) to return" in {
+              val source = cpg.literal("42")
+              val sink   = cpg.call("sink").argument
+              sink.reachableByFlows(source).size shouldBe 1
+          }
       }
-    }
   }
+end DataFlowTests
 
-}
+class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
 
-class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
-
-  override implicit val context: EngineContext = EngineContext(config = EngineConfig(maxCallDepth = -1))
+  override implicit val context: EngineContext =
+      EngineContext(config = EngineConfig(maxCallDepth = -1))
 
   "DataFlowTests67" should {
-    val cpg = code("""
+      val cpg = code("""
         |void CWE415_Double_Free__malloc_free_char_53b_badSink(char * data);
         |
         |void CWE415_Double_Free__malloc_free_char_53_bad() {
@@ -1667,15 +1671,15 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |    ; /* empty statement needed for some flow variants */
         |}""".stripMargin)
 
-    "find flow for maxCallDepth = -1" in {
-      def freeArg = cpg.call("free").argument(1)
+      "find flow for maxCallDepth = -1" in {
+          def freeArg = cpg.call("free").argument(1)
 
-      freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
-    }
+          freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
+      }
   }
 
   "DataFlowTests68" should {
-    val cpg = code("""
+      val cpg = code("""
         |void CWE415_Double_Free__malloc_free_char_54b_badSink(char * data);
         |
         |void CWE415_Double_Free__malloc_free_char_54_bad() {
@@ -1790,15 +1794,15 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |  ; /* empty statement needed for some flow variants */
         |}""".stripMargin)
 
-    "find flow for maxCallDepth = -1" in {
-      def freeArg = cpg.call("free").argument(1)
+      "find flow for maxCallDepth = -1" in {
+          def freeArg = cpg.call("free").argument(1)
 
-      freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
-    }
+          freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
+      }
   }
 
   "DataFlowTest69" should {
-    val cpg = code("""
+      val cpg = code("""
         |void sink(int);
         |
         |void foo() {
@@ -1813,15 +1817,15 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |	 sink(a);
         |}""".stripMargin)
 
-    "find flows" in {
-      val sink = cpg.method("sink").parameter.index(1).l
-      val src  = cpg.literal.l
-      sink.reachableBy(src).method.name.toSet shouldBe Set()
-    }
+      "find flows" in {
+          val sink = cpg.method("sink").parameter.index(1).l
+          val src  = cpg.literal.l
+          sink.reachableBy(src).method.name.toSet shouldBe Set()
+      }
   }
 
   "DataFlowTest70" should {
-    val cpg = code("""
+      val cpg = code("""
         |int foo() {
         |  int v1, v2 = 0;
         |  if((v1 = 1, v2 == 2) || v2 <= 3) return v2;
@@ -1829,27 +1833,27 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find flows" in {
-      val source = cpg.identifier("v2").l
-      val sink   = cpg.method("foo").methodReturn.l
-      sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
-        List(("return v2;", 4), ("RET", 2)),
-        List(
-          ("v2 == 2", 4),
-          ("RET", 2)
-        ),
-        List(
-          ("v2 = 0", 3),
-          ("v2 == 2", 4),
-          ("RET", 2)
-        ),
-        List(("v2 <= 3", 4), ("RET", 2))
-      )
-    }
+      "find flows" in {
+          val source = cpg.identifier("v2").l
+          val sink   = cpg.method("foo").methodReturn.l
+          sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
+            List(("return v2;", 4), ("RET", 2)),
+            List(
+              ("v2 == 2", 4),
+              ("RET", 2)
+            ),
+            List(
+              ("v2 = 0", 3),
+              ("v2 == 2", 4),
+              ("RET", 2)
+            ),
+            List(("v2 <= 3", 4), ("RET", 2))
+          )
+      }
   }
 
   "DataFlowTest71" should {
-    val cpg = code("""
+      val cpg = code("""
         |#define BAR(x) (x)
         |
         |void foo() {
@@ -1858,17 +1862,17 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find flows" in {
-      val source = cpg.identifier("v1").l
-      val sink   = cpg.method("foo").methodReturn.l
-      sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
-        List(("v1 = 0", 5), ("RET", 4)),
-        List(("v1 = 1", 6), ("RET", 4))
-      )
-    }
+      "find flows" in {
+          val source = cpg.identifier("v1").l
+          val sink   = cpg.method("foo").methodReturn.l
+          sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
+            List(("v1 = 0", 5), ("RET", 4)),
+            List(("v1 = 1", 6), ("RET", 4))
+          )
+      }
   }
   "DataFlowTest72" should {
-    val cpg = code("""
+      val cpg = code("""
         |struct struct_length {
         | unsigned int *plen;
         |};
@@ -1892,23 +1896,23 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find flows" in {
-      def source = cpg.method.name("source").parameter
+      "find flows" in {
+          def source = cpg.method.name("source").parameter
 
-      def sink = cpg.call.name("sink").argument.order(1)
+          def sink = cpg.call.name("sink").argument.order(1)
 
-      sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
-        List(
-          ("source(struct wraping_struct w_struct)", 20),
-          ("level1(w_struct->s_len)", 21),
-          ("level1(struct struct_length s_len)", 17),
-          ("level2(s_len->plen)", 18),
-          ("level2(unsigned int *plen2)", 14),
-          ("level3(plen2)", 15),
-          ("level3(unsigned int *plen3)", 11),
-          ("sink(plen3)", 12)
-        )
-      )
-    }
+          sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
+            List(
+              ("source(struct wraping_struct w_struct)", 20),
+              ("level1(w_struct->s_len)", 21),
+              ("level1(struct struct_length s_len)", 17),
+              ("level2(s_len->plen)", 18),
+              ("level2(unsigned int *plen2)", 14),
+              ("level3(plen2)", 15),
+              ("level3(unsigned int *plen3)", 11),
+              ("sink(plen3)", 12)
+            )
+          )
+      }
   }
-}
+end DataFlowTestsWithCallDepth

@@ -95,6 +95,90 @@ public class PythonParser {
     return stmt;
   }
 
+  private boolean isMatchStatement() {
+    if (getToken(1).kind != MATCH) {
+      return false;
+    }
+    int parenDepth = 0;
+    int squareDepth = 0;
+    int curlyDepth = 0;
+    for (int i = 2; ; i++) {
+      Token t = getToken(i);
+      if (t.kind == EOF || t.kind == NEWLINE || t.kind == SEMICOLON) {
+        return false;
+      }
+      if (t.kind == PAREN_OPEN) {
+        parenDepth++;
+      } else if (t.kind == PAREN_CLOSE) {
+        parenDepth--;
+      } else if (t.kind == SQUARE_OPEN) {
+        squareDepth++;
+      } else if (t.kind == SQUARE_CLOSE) {
+        squareDepth--;
+      } else if (t.kind == CURLY_OPEN) {
+        curlyDepth++;
+      } else if (t.kind == CURLY_CLOSE) {
+        curlyDepth--;
+      } else if (t.kind == COLON) {
+        if (parenDepth == 0 && squareDepth == 0 && curlyDepth == 0) {
+          return true;
+        }
+      }
+    }
+  }
+
+  private boolean isTypeStatement() {
+    if (getToken(1).kind != TYPE) {
+      return false;
+    }
+    int secondKind = getToken(2).kind;
+    if (secondKind != NAME && secondKind != MATCH && secondKind != CASE && secondKind != TYPE) {
+      return false;
+    }
+    int parenDepth = 0;
+    int squareDepth = 0;
+    int curlyDepth = 0;
+    for (int i = 2; ; i++) {
+      Token t = getToken(i);
+      if (t.kind == EOF || t.kind == NEWLINE || t.kind == SEMICOLON || t.kind == COLON) {
+        return false;
+      }
+      if (t.kind == PAREN_OPEN) {
+        parenDepth++;
+      } else if (t.kind == PAREN_CLOSE) {
+        parenDepth--;
+      } else if (t.kind == SQUARE_OPEN) {
+        squareDepth++;
+      } else if (t.kind == SQUARE_CLOSE) {
+        squareDepth--;
+      } else if (t.kind == CURLY_OPEN) {
+        curlyDepth++;
+      } else if (t.kind == CURLY_CLOSE) {
+        curlyDepth--;
+      } else if (t.kind == ASSIGN) {
+        if (parenDepth == 0 && squareDepth == 0 && curlyDepth == 0) {
+          return true;
+        }
+      }
+    }
+  }
+
+  private boolean isCompoundStatement() {
+    int kind = getToken(1).kind;
+    if (kind == DEF || kind == IF || kind == CLASS || kind == FOR ||
+        kind == WITH || kind == TRY || kind == WHILE || kind == ASYNC ||
+        kind == AT) {
+      return true;
+    }
+    if (kind == MATCH) {
+      return isMatchStatement();
+    }
+    if (kind == TYPE) {
+      return isTypeStatement();
+    }
+    return false;
+  }
+
   void setCurrentToken(Token setTo) {
     token = setTo;
     jj_ntk = -1;
@@ -1233,6 +1317,7 @@ ArrayList<istmt> statementsAndDedentOrEof(): {
 } {
   try {
     (
+      LOOKAHEAD({ isCompoundStatement() })
       stmt = compoundStatement() { allStmts.add(stmt); }
     | simpleStmts = simpleStatement() { allStmts.addAll(simpleStmts); }
     )+
@@ -1332,9 +1417,15 @@ ArrayList<istmt> simpleStatement(): {
 }
 
 Name name(): {
-
+  Token nameToken;
 } {
-  <NAME> { return new Name(token.image, attributes(token, token)); }
+  (
+    nameToken = <NAME>
+  | nameToken = <MATCH>
+  | nameToken = <CASE>
+  | nameToken = <TYPE>
+  )
+  { return new Name(nameToken.image, attributes(nameToken, nameToken)); }
 }
 
 // printName is the already parsed "print" Name expression.
@@ -1628,7 +1719,7 @@ ipattern captureOrWildcardOrValueOrClassPattern(): {
 iexpr nameOrAttr(): {
   iexpr expr;
 } {
-  <NAME> { expr = new Name(token.image, attributes(token, token)); }
+  expr = name()
   (
     <DOT> <NAME> { expr = new Attribute(expr, token.image, attributes(expr, token)); }
   )*
@@ -1654,7 +1745,7 @@ String patternArgument(String lastKeyword, ArrayList<ipattern> patterns, ArrayLi
   String keyword = lastKeyword;
 } {
   (LOOKAHEAD(2)
-    (<NAME> { keyword = token.image; } <ASSIGN>)
+    ((<NAME> | <MATCH> | <CASE> | <TYPE>) { keyword = token.image; } <ASSIGN>)
     | ({ if (keyword != null) throw new ParseException("No non keyword pattern allowed after keyword pattern.");})
   )
   pattern = pattern()
@@ -2054,8 +2145,8 @@ istmt compoundStatement(): {
   | stmt = withStatement(false, null)
   | stmt = tryStatement()
   | stmt = whileStatement()
-  | stmt = matchStatement()
-  | stmt = type_stmt()
+  | LOOKAHEAD({ isMatchStatement() }) stmt = matchStatement()
+  | LOOKAHEAD({ isTypeStatement() }) stmt = type_stmt()
   )
   { return stmt; }
 }
@@ -2700,11 +2791,15 @@ ExceptHandler exceptBlock(): {
 } {
   <EXCEPT> { startToken = token; }
   (
+    LOOKAHEAD(expressionsAsTuple() <AS>)
+    typeExpr = expressionsAsTuple()
+    <AS> <NAME> { name = token.image; }
+  |
+    LOOKAHEAD(expression() <COMMA> <NAME> <COLON>)
     typeExpr = expression()
-    (
-      // The COMMA is only valid in python2.
-      (<AS> | <COMMA>) <NAME> { name = token.image; }
-    )?
+    <COMMA> <NAME> { name = token.image; }
+  |
+    typeExpr = expressionsAsTuple()
   )?
   <COLON>
   blockStmts = block()
@@ -3413,7 +3508,7 @@ iexpr starredBitwiseOr(): {
 iexpr atom(): {
   iexpr expression;
 } {
-  <NAME> { return new Name(token.image, attributes(token, token)); }
+  expression = name() { return expression; }
 | <TRUE> { return new Constant(new BoolConstant(true), attributes(token, token)); }
 | <FALSE> { return new Constant(new BoolConstant(false), attributes(token, token)); }
 | <NONE> { return new Constant(NoneConstant$.MODULE$, attributes(token, token)); }

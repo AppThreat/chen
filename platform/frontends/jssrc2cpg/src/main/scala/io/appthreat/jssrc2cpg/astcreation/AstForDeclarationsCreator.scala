@@ -502,6 +502,15 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     assigmentCallAst
   end astForRequireCallFromImport
 
+  /** Creates IMPORT nodes for an ESM `import` declaration.
+    *
+    * The `importedEntity` is `"<package>:<name>"` for imports with specifiers (default, named and
+    * namespace alike, e.g. `import Vue from 'vue'` → `"vue:Vue"`, `import { useRoute } from
+    * 'vue-router'` → `"vue-router:useRoute"`, `import * as Vue from 'vue'` → `"vue:Vue"`), and the
+    * '''bare specifier''' for side-effect-only imports with no specifiers (`import 'vue'` →
+    * `"vue"`). `require(...)` imports (see `passes.ImportsPass`) always use the bare specifier;
+    * consumers must handle both shapes (see `XImportResolverPass.optionalResolveImport`).
+    */
   protected def astForImportDeclaration(impDecl: BabelNodeInfo): Ast =
     val source     = impDecl.json("source")("value").str
     val specifiers = impDecl.json("specifiers").arr

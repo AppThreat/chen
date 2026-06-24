@@ -7,14 +7,24 @@ import scopt.OParser
 
 /** Command line configuration parameters
   */
-final case class Config(phpIni: Option[String] = None, phpParserBin: Option[String] = None)
-    extends X2CpgConfig[Config]
+final case class Config(
+  phpIni: Option[String] = None,
+  phpParserBin: Option[String] = None,
+  enableAstCache: Boolean = true,
+  cacheDir: String = ""
+) extends X2CpgConfig[Config]
     with TypeRecoveryParserConfig[Config]:
   def withPhpIni(phpIni: String): Config =
       copy(phpIni = Some(phpIni)).withInheritedFields(this)
 
   def withPhpParserBin(phpParserBin: String): Config =
       copy(phpParserBin = Some(phpParserBin)).withInheritedFields(this)
+
+  def withAstCache(value: Boolean): Config =
+      copy(enableAstCache = value).withInheritedFields(this)
+
+  def withCacheDir(value: String): Config =
+      copy(cacheDir = value).withInheritedFields(this)
 
 object Frontend:
 
@@ -31,8 +41,18 @@ object Frontend:
       opt[String]("php-parser-bin")
           .action((x, c) => c.withPhpParserBin(x))
           .text("path to php-parser.phar binary."),
+      opt[Unit]("no-ast-cache")
+          .action((_, c) => c.withAstCache(false))
+          .text("Disables AST caching to disk (enabled by default)."),
+      opt[String]("cache-dir")
+          .action((x, c) => c.withCacheDir(x))
+          .text(
+            "Directory to store cached AST files (defaults to a .chen directory in the project root)."
+          ),
       XTypeRecovery.parserOptions
     )
+  end cmdLineParser
+end Frontend
 
 object Main extends X2CpgMain(cmdLineParser, new Php2Atom()):
   def run(config: Config, php2Cpg: Php2Atom): Unit =

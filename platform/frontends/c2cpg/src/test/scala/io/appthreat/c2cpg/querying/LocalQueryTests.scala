@@ -1,11 +1,11 @@
 package io.appthreat.c2cpg.querying
 
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 /** Language primitives for navigating local variables
   */
-class LocalQueryTests extends CCodeToCpgSuite {
+class LocalQueryTests extends CCodeToCpgSuite:
 
   private val cpg = code("""
     | struct node {
@@ -39,47 +39,46 @@ class LocalQueryTests extends CCodeToCpgSuite {
     | """.stripMargin)
 
   "should allow to query for all locals" in {
-    cpg.local.name.toSetMutable shouldBe Set("a", "b", "c", "e", "d", "z", "x", "q", "p", "foo")
+      cpg.local.name.toSetMutable shouldBe Set("a", "b", "c", "e", "d", "z", "x", "q", "p", "foo")
   }
 
   "should prove correct (name, type) pairs for locals" in {
-    inside(cpg.method.name("free_list").local.l) { case List(q, p) =>
-      q.name shouldBe "q"
-      q.typeFullName shouldBe "node*"
-      q.code shouldBe "struct node* q"
-      p.name shouldBe "p"
-      p.typeFullName shouldBe "node*"
-      p.code shouldBe "struct node* p"
-    }
+      inside(cpg.method.name("free_list").local.l) { case List(q, p) =>
+          q.name shouldBe "q"
+          q.typeFullName shouldBe "node*"
+          q.code shouldBe "struct node* q"
+          p.name shouldBe "p"
+          p.typeFullName shouldBe "node*"
+          p.code shouldBe "struct node* p"
+      }
   }
 
   "should prove correct (name, type, code) pairs for locals" in {
-    inside(cpg.method.name("test").local.l) { case List(a, b, c, foo, d, e) =>
-      a.name shouldBe "a"
-      a.typeFullName shouldBe "int"
-      a.code shouldBe "static int a"
-      b.name shouldBe "b"
-      b.typeFullName shouldBe "int"
-      b.code shouldBe "static int b"
-      c.name shouldBe "c"
-      c.typeFullName shouldBe "int"
-      c.code shouldBe "static int c"
-      foo.name shouldBe "foo"
-      foo.typeFullName shouldBe "wchar_t*"
-      foo.code shouldBe "wchar_t* foo"
-      d.name shouldBe "d"
-      d.typeFullName shouldBe "int[10]"
-      d.code shouldBe "int[10] d"
-      e.name shouldBe "e"
-      e.typeFullName shouldBe "int"
-      e.code shouldBe "int e"
-    }
+      inside(cpg.method.name("test").local.l) { case List(a, b, c, foo, d, e) =>
+          a.name shouldBe "a"
+          a.typeFullName shouldBe "int"
+          a.code shouldBe "static int a"
+          b.name shouldBe "b"
+          b.typeFullName shouldBe "int"
+          b.code shouldBe "static int b"
+          c.name shouldBe "c"
+          c.typeFullName shouldBe "int"
+          c.code shouldBe "static int c"
+          foo.name shouldBe "foo"
+          foo.typeFullName shouldBe "wchar_t*"
+          foo.code shouldBe "wchar_t* foo"
+          d.name shouldBe "d"
+          d.typeFullName shouldBe "int[10]"
+          d.code shouldBe "int[10] d"
+          e.name shouldBe "e"
+          e.typeFullName shouldBe "int"
+          e.code shouldBe "int e"
+      }
   }
 
   "should allow finding filenames by local regex" in {
-    val filename = cpg.local.name("a*").file.name.headOption
-    filename should not be empty
-    filename.head.endsWith(".c") shouldBe true
+      val filename = cpg.local.name("a*").file.name.headOption
+      filename should not be empty
+      filename.head.endsWith(".c") shouldBe true
   }
-
-}
+end LocalQueryTests
