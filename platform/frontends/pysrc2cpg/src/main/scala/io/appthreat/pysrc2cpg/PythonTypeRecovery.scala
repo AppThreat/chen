@@ -122,7 +122,29 @@ private class RecoverForPythonFile(
       if c.name.equals("import") then Set.empty
       // Stop custom annotation representation from hitting superclass
       else if c.name.isBlank then Set.empty
+      // For-loop element typing: `for x in coll` lowers to
+      //   tmp = coll.__iter__(); x = tmp.__next__()
+      // so the iterator's type encodes the collection (`coll[E].__iter__.<returnValue>`).
+      // Unwrap the element type `E` so `x.method()` resolves.
+      else if c.name.equals("__next__") then
+        val elemTypes = iterationElementTypes(c)
+        if elemTypes.nonEmpty then associateTypes(i, elemTypes)
+        else super.visitIdentifierAssignedToCall(i, c)
+      // `super().method()` lowers to `tmp = super(); tmp.method()`. Type `tmp` as the
+      // base class(es) of the enclosing method's class so the subsequent call on `tmp`
+      // resolves to the inherited method (via the hierarchy lookup in
+      // `createCallFromIdentifierTypeFullName`).
+      else if c.name.equals("super") then
+        val baseTypes = superBaseTypes(c)
+        if baseTypes.nonEmpty then associateTypes(i, baseTypes)
+        else super.visitIdentifierAssignedToCall(i, c)
       else super.visitIdentifierAssignedToCall(i, c)
+
+  /** The direct base-class full names of the class enclosing a `super()` call. */
+  private def superBaseTypes(c: Call): Set[String] =
+      c.method.typeDecl.inheritsFromTypeFullName.toSet
+          .filterNot(_.matches("(?i)(any|object)"))
+          .flatMap(resolveBareTypeName)
 
   override def visitIdentifierAssignedToFieldLoad(i: Identifier, fa: FieldAccess): Set[String] =
     val fieldParents = getFieldParents(fa)
@@ -176,30 +198,84 @@ private class RecoverForPythonFile(
       case t if t.matches(".*\\.<(member|returnValue|indexAccess)>(\\(.*\\))?") =>
           super.createCallFromIdentifierTypeFullName(typeFullName, callName)
       case t if isConstructor(tName) =>
-          Seq(t, callName).mkString(pathSep.toString)
+          // `t` is an instance of a (capitalised) class. Bind to the nearest class
+          // in the inheritance chain that actually defines `callName`, so
+          // `self.method()` resolves to an inherited method (e.g. `Child(Base)`
+          // calling a method defined on `Base`). Fall back to the direct
+          // `t.callName` when the method isn't found in the hierarchy.
+          resolveMethodInHierarchy(t, callName)
+              .getOrElse(Seq(t, callName).mkString(pathSep.toString))
       case _ => super.createCallFromIdentifierTypeFullName(typeFullName, callName)
+  end createCallFromIdentifierTypeFullName
+
+  /** Walk `typeFullName` and its (transitive) base classes, returning the fullName of the first
+    * type that declares a method named `callName`, suffixed with `callName`. Returns `None` when no
+    * class in the hierarchy declares it.
+    */
+  private def resolveMethodInHierarchy(
+    typeFullName: String,
+    callName: String
+  ): Option[String] =
+    val visited = scala.collection.mutable.HashSet.empty[String]
+    val queue   = scala.collection.mutable.Queue(typeFullName)
+    var result  = Option.empty[String]
+    while result.isEmpty && queue.nonEmpty do
+      val current = queue.dequeue()
+      if visited.add(current) then
+        // Look the method up by fullName rather than `typeDecl.method`: pysrc2cpg
+        // does not reliably reach a class's methods via the TypeDecl traversal.
+        val candidate = Seq(current, callName).mkString(pathSep.toString)
+        val typeDecls = cpg.typeDecl.fullNameExact(current).l
+        if cpg.method.fullNameExact(candidate).nonEmpty then
+          result = Some(candidate)
+        else
+          typeDecls.iterator
+              .flatMap(_.inheritsFromTypeFullName)
+              .filterNot(b => b.matches("(?i)(any|object)"))
+              .foreach(queue.enqueue)
+    result
+  end resolveMethodInHierarchy
 
   override protected def isConstructor(name: String): Boolean =
       name.nonEmpty && name.charAt(0).isUpper
 
   override def prepopulateSymbolTable(): Unit =
+    // Factory return-types are committed through a *separate* diff applied
+    // immediately, so `methodReturnValues` (which reads the live graph) sees them
+    // within this same iteration. Committing the framework's shared `builder`
+    // mid-pass would consume it before the framework applies it.
+    val factoryDiff = new DiffGraphBuilder
     cu.ast.isMethodRef.where(
       _.astSiblings.isIdentifier.nameExact("classmethod")
     ).referencedMethod.foreach {
         classMethod =>
-            classMethod.parameter
-                .nameExact("cls")
-                .foreach { cls =>
-                  val clsPath = classMethod.typeDecl.fullName.toSet
-                  symbolTable.put(LocalVar(cls.name), clsPath)
-                  if cls.typeFullName == "ANY" then
-                    builder.setNodeProperty(
-                      cls,
-                      PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME,
-                      clsPath.toSeq
-                    )
-                }
+          val clsPath = classMethod.typeDecl.fullName.toSet
+          classMethod.parameter
+              .nameExact("cls")
+              .foreach { cls =>
+                symbolTable.put(LocalVar(cls.name), clsPath)
+                if cls.typeFullName == "ANY" then
+                  builder.setNodeProperty(
+                    cls,
+                    PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME,
+                    clsPath.toSeq
+                  )
+              }
+          // Factory idiom: a classmethod that returns `cls(...)` produces an
+          // instance of the enclosing class. Seed its return type so callers
+          // (`x = Cls.create(...)`) recover `x`'s type and resolve `x.method()`.
+          val returnsClsInstance =
+              classMethod.ast.isReturn.code.exists(_.matches("""return\s+cls\(.*"""))
+          if returnsClsInstance && clsPath.nonEmpty
+            && classMethod.methodReturn.dynamicTypeHintFullName.isEmpty
+          then
+            factoryDiff.setNodeProperty(
+              classMethod.methodReturn,
+              PropertyNames.DYNAMIC_TYPE_HINT_FULL_NAME,
+              clsPath.toSeq
+            )
     }
+    overflowdb.BatchedUpdate.applyDiff(cpg.graph, factoryDiff)
     cu.ast.isIdentifier.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
         .foreach { id => symbolTable.put(LocalVar(id.name), id.typeFullName) }
     cu.ast.isLocal.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
@@ -264,6 +340,59 @@ private class RecoverForPythonFile(
           .headOption
           .getOrElse(super.visitIdentifierAssignedToTypeRef(i, t, rec))
 
+  /** Element types yielded by iterating the collection behind a `__next__` call. The receiver of
+    * `__next__` is the synthetic iterator whose type is `<collectionType>.__iter__.<returnValue>`;
+    * we strip that suffix, unwrap the collection's generic element, and resolve bare class names to
+    * their compilation-unit-qualified full names.
+    */
+  private def iterationElementTypes(nextCall: Call): Set[String] =
+    val iterSuffix = s"${pathSep}__iter__${pathSep}${XTypeRecovery.DummyReturnType}"
+    val recvTypes = nextCall.argument.argumentIndex(0).headOption match
+      case Some(id: Identifier) =>
+          symbolTable.get(id) ++ Option(id.typeFullName).filterNot(_ == Constants.ANY).toSet
+      case Some(call: Call) => symbolTable.get(call)
+      case _                => Set.empty[String]
+    recvTypes.collect { case t if t.endsWith(iterSuffix) => t.stripSuffix(iterSuffix) }
+        .flatMap(elementTypesOf)
+        .flatMap(resolveBareTypeName)
+
+  /** Unwrap the element type(s) from a generic collection type string such as `list[AppConfig]`,
+    * `typing.List[AppConfig]`, `dict[str, AppConfig]` (iteration yields keys) or `tuple[A, B]`.
+    * Returns empty when the type is not a recognised parametrised collection.
+    */
+  private def elementTypesOf(collType: String): Set[String] =
+      if !(collType.contains("[") && collType.endsWith("]")) then Set.empty
+      else
+        val container = collType.substring(0, collType.indexOf('['))
+        val inner     = collType.substring(collType.indexOf('[') + 1, collType.length - 1)
+        val parts     = splitGenericParts(inner)
+        container.split("[.:]").lastOption.map(_.toLowerCase) match
+          case Some("dict" | "mapping" | "defaultdict" | "ordereddict" | "counter") =>
+              parts.headOption.toSet
+          case Some(
+                "list" | "set" | "frozenset" | "sequence" | "iterable" | "iterator" |
+                "generator" | "deque" | "tuple"
+              ) =>
+              parts.toSet
+          case _ => parts.toSet
+  end elementTypesOf
+
+  /** Resolve a possibly-bare class name (e.g. `AppConfig`) to a qualified type full name by
+    * consulting the symbol table (import aliases) and then matching declared types by short name.
+    * Already-qualified names (and builtins/ANY) are returned as-is.
+    */
+  private def resolveBareTypeName(name: String): Set[String] =
+      if name.isEmpty || name == Constants.ANY then Set.empty
+      else if name.contains(":") || name.startsWith(PythonAstVisitor.builtinPrefix) then Set(name)
+      else
+        val viaSymbols = symbolTable.get(LocalVar(name)).filterNot(_ == Constants.ANY)
+        if viaSymbols.nonEmpty then viaSymbols
+        else
+          val short    = name.split("[.]").lastOption.getOrElse(name)
+          val declared = cpg.typeDecl.nameExact(short).fullName.toSet
+          if declared.nonEmpty then declared else Set(name)
+  end resolveBareTypeName
+
   private def splitGenericParts(s: String): List[String] =
     val result  = scala.collection.mutable.ListBuffer[String]()
     var current = new StringBuilder()
@@ -310,12 +439,39 @@ private class RecoverForPythonFile(
         case _ => super.getIndexAccessTypes(ia)
   end getIndexAccessTypes
 
-  override def getTypesFromCall(c: Call): Set[String] = c.name match
-    case "<operator>.listLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}list")
-    case "<operator>.tupleLiteral" => Set(s"${PythonAstVisitor.builtinPrefix}tuple")
-    case "<operator>.dictLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}dict")
-    case "<operator>.setLiteral"   => Set(s"${PythonAstVisitor.builtinPrefix}set")
-    case _                         => super.getTypesFromCall(c)
+  override def getTypesFromCall(c: Call): Set[String] =
+      c.name match
+        case "<operator>.listLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}list")
+        case "<operator>.tupleLiteral" => Set(s"${PythonAstVisitor.builtinPrefix}tuple")
+        case "<operator>.dictLiteral"  => Set(s"${PythonAstVisitor.builtinPrefix}dict")
+        case "<operator>.setLiteral"   => Set(s"${PythonAstVisitor.builtinPrefix}set")
+        case _ =>
+            val base = super.getTypesFromCall(c)
+            if base.nonEmpty then base
+            else returnTypeOfResolvedCall(c)
+
+  /** Fallback used by RHS type extraction (`getTypesFromCall`): when the symbol table holds no
+    * direct type for a call, resolve the callee and take its *return* type. This lets `self.attr =
+    * Factory.create()` propagate the factory return onto the member — the constructor case
+    * (`self.attr = Cls()`) already works. Mirrors `visitIdentifierAssignedToCallRetVal`: during
+    * recovery the resolved callee lives in the symbol table (the node's methodFullName is only set
+    * later by the linker), keyed either on the call or on its receiver + call name.
+    */
+  private def returnTypeOfResolvedCall(c: Call): Set[String] =
+    val calleeFullNames =
+        if symbolTable.contains(c) then symbolTable.get(c).toSeq
+        else
+          c.argument.find(_.argumentIndex == 0) match
+            case Some(recv: Identifier) if symbolTable.contains(LocalVar(recv.name)) =>
+                symbolTable.get(LocalVar(recv.name)).map(_.concat(s"$pathSep${c.name}")).toSeq
+            case Some(recv: Identifier) if symbolTable.contains(CallAlias(recv.name)) =>
+                symbolTable.get(CallAlias(recv.name)).map(_.concat(s"$pathSep${c.name}")).toSeq
+            case _ => Seq.empty
+    if calleeFullNames.isEmpty then Set.empty
+    else
+      methodReturnValues(calleeFullNames).filterNot(t =>
+          t == Constants.ANY || XTypeRecovery.isDummyType(t)
+      )
 
   /** Replaces the `this` prefix with the Pythonic `self` prefix for instance methods of functions
     * local to this compilation unit.

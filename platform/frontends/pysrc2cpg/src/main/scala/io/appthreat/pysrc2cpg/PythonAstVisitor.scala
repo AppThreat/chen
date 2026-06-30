@@ -458,6 +458,19 @@ class PythonAstVisitor(
     val methodParameter = parameterProvider()
     val parameterOrder  = new AutoIncIndex(methodParameter.posStartIndex)
 
+    // For instance/class methods the implicit receiver (`self`/`cls`) is the first
+    // positional parameter (posStartIndex == 0). Type it with the enclosing class so
+    // type recovery can resolve `self.method()` calls to `<class>.method` and emit
+    // real callgraph edges. Only fill in when the receiver is otherwise untyped, so an
+    // explicit annotation (e.g. `self: "Foo"`) is never overwritten.
+    if methodParameter.posStartIndex == 0 then
+      for
+        enclosingType <- contextStack.findEnclosingTypeDecl()
+        typeDecl      <- Option(enclosingType).collect { case td: nodes.NewTypeDecl => td }
+        receiver      <- methodParameter.positionalParams.headOption
+        if receiver.typeFullName == Constants.ANY
+      do receiver.typeFullName(typeDecl.fullName)
+
     methodParameter.positionalParams.foreach { parameterNode =>
       val porder = parameterOrder.getAndInc
       contextStack.addParameter(parameterNode)

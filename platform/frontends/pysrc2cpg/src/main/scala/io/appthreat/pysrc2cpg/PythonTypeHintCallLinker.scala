@@ -8,7 +8,9 @@ import io.shiftleft.semanticcpg.language.*
 
 class PythonTypeHintCallLinker(cpg: Cpg) extends XTypeHintCallLinker(cpg):
 
-  override def calls: Iterator[Call] = super.calls.nameNot("^(import).*")
+  // Exclude only the synthetic `import(...)` pseudo-call, not user methods whose name merely
+  // starts with "import" (e.g. `import_models`, `import_module`, common in Django).
+  override def calls: Iterator[Call] = super.calls.nameNot("import")
 
   override def calleeNames(c: Call): Seq[String] = super.calleeNames(c).map {
       // Python call from  a type
@@ -27,5 +29,11 @@ class PythonTypeHintCallLinker(cpg: Cpg) extends XTypeHintCallLinker(cpg):
             methodNames.filterNot(x =>
                 isDummyType(x) || x.startsWith(PythonAstVisitor.builtinPrefix + "None")
             )
-        super.setCallees(call, nonDummyMethodNames, builder)
+        // Type recovery can attach unresolvable pseudo-type hints alongside the real one
+        // (e.g. `tmp0.ready` next to `pkg.Cls.ready`, produced by a fallback in an early
+        // iteration before the receiver was typed). When at least one candidate resolves to a
+        // method actually present in the CPG, prefer those so a lone real callee still links.
+        val resolvable = nonDummyMethodNames.filter(n => cpg.method.fullNameExact(n).nonEmpty)
+        val chosen     = if resolvable.nonEmpty then resolvable.distinct else nonDummyMethodNames
+        super.setCallees(call, chosen, builder)
 end PythonTypeHintCallLinker
