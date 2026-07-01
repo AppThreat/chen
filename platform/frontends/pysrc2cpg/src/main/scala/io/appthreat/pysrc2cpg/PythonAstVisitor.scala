@@ -458,6 +458,19 @@ class PythonAstVisitor(
     val methodParameter = parameterProvider()
     val parameterOrder  = new AutoIncIndex(methodParameter.posStartIndex)
 
+    // For instance/class methods the implicit receiver (`self`/`cls`) is the first
+    // positional parameter (posStartIndex == 0). Type it with the enclosing class so
+    // type recovery can resolve `self.method()` calls to `<class>.method` and emit
+    // real callgraph edges. Only fill in when the receiver is otherwise untyped, so an
+    // explicit annotation (e.g. `self: "Foo"`) is never overwritten.
+    if methodParameter.posStartIndex == 0 then
+      for
+        enclosingType <- contextStack.findEnclosingTypeDecl()
+        typeDecl      <- Option(enclosingType).collect { case td: nodes.NewTypeDecl => td }
+        receiver      <- methodParameter.positionalParams.headOption
+        if receiver.typeFullName == Constants.ANY
+      do receiver.typeFullName(typeDecl.fullName)
+
     methodParameter.positionalParams.foreach { parameterNode =>
       val porder = parameterOrder.getAndInc
       contextStack.addParameter(parameterNode)
@@ -599,7 +612,7 @@ class PythonAstVisitor(
     // We do this to model the __init__ call in a visible way for the data flow tracker.
     // This is done because very often the __init__ call is hidden in a super().__new__ call
     // and we cant yet handle super().
-    val fakeNewMethod = createFakeNewMethod(initParameters)
+    val fakeNewMethod = createFakeNewMethod(initParameters, instanceTypeDeclFullName)
 
     val fakeNewMember = nodeBuilder.memberNode("<fakeNew>", fakeNewMethod.fullName)
     edgeBuilder.astEdge(fakeNewMember, metaTypeDeclNode, contextStack.order.getAndInc)
@@ -861,7 +874,10 @@ class PythonAstVisitor(
     * cls.__init__(__newIstance, p1) return __newInstance
     */
   // TODO handle kwArg
-  private def createFakeNewMethod(initParameters: ast.Arguments): nodes.NewMethod =
+  private def createFakeNewMethod(
+    initParameters: ast.Arguments,
+    instanceTypeDeclFullName: String
+  ): nodes.NewMethod =
     val newMethodName         = "<fakeNew>"
     val newMethodStubFullName = calculateFullNameFromContext(newMethodName)
 
@@ -874,16 +890,18 @@ class PythonAstVisitor(
       newMethodStubFullName,
       Some(newMethodName),
       parameterProvider = () =>
-          MethodParameters(
-            0,
-            nodeBuilder.methodParameterNode(
-              "cls",
-              isVariadic = false,
-              lineAndColumn,
-              Some(0)
-            ) :: Nil ++
-                convert(parametersWithoutSelf, 1)
-          ),
+        // Type `cls` with the instance type so `cls.__init__(__newInstance)` resolves to
+        // `<class>.__init__` during type recovery, linking every constructor call site to
+        // the class's __init__ in the callgraph.
+        val clsParam =
+            nodeBuilder.methodParameterNode("cls", isVariadic = false, lineAndColumn, Some(0))
+        clsParam.dynamicTypeHintFullName(Seq(instanceTypeDeclFullName))
+        MethodParameters(
+          0,
+          clsParam :: Nil ++
+              convert(parametersWithoutSelf, 1)
+        )
+      ,
       bodyProvider = () =>
         val allocatorCall =
             createNAryOperatorCall(
