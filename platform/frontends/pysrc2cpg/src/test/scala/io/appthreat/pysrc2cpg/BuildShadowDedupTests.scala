@@ -8,11 +8,11 @@ import java.nio.file.Path
 class BuildShadowDedupTests extends AnyWordSpec with Matchers:
 
   private val root = Path.of("/proj")
-  private def abs(rel: String): Path = root.resolve(rel)
+  private def abs(rel: String): Path = root.resolve(rel.replace('/', java.io.File.separatorChar))
   private def dedup(rels: String*): Set[String] =
       Py2CpgOnFileSystem
           .dropShadowedBuildCopies(rels.map(abs), root)
-          .map(p => root.relativize(p).toString)
+          .map(p => root.relativize(p).toString.replace('\\', '/'))
           .toSet
 
   "dropShadowedBuildCopies" should {
