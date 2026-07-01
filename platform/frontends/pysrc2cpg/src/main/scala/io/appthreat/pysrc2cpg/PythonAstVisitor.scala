@@ -612,7 +612,7 @@ class PythonAstVisitor(
     // We do this to model the __init__ call in a visible way for the data flow tracker.
     // This is done because very often the __init__ call is hidden in a super().__new__ call
     // and we cant yet handle super().
-    val fakeNewMethod = createFakeNewMethod(initParameters)
+    val fakeNewMethod = createFakeNewMethod(initParameters, instanceTypeDeclFullName)
 
     val fakeNewMember = nodeBuilder.memberNode("<fakeNew>", fakeNewMethod.fullName)
     edgeBuilder.astEdge(fakeNewMember, metaTypeDeclNode, contextStack.order.getAndInc)
@@ -874,7 +874,10 @@ class PythonAstVisitor(
     * cls.__init__(__newIstance, p1) return __newInstance
     */
   // TODO handle kwArg
-  private def createFakeNewMethod(initParameters: ast.Arguments): nodes.NewMethod =
+  private def createFakeNewMethod(
+    initParameters: ast.Arguments,
+    instanceTypeDeclFullName: String
+  ): nodes.NewMethod =
     val newMethodName         = "<fakeNew>"
     val newMethodStubFullName = calculateFullNameFromContext(newMethodName)
 
@@ -887,16 +890,18 @@ class PythonAstVisitor(
       newMethodStubFullName,
       Some(newMethodName),
       parameterProvider = () =>
-          MethodParameters(
-            0,
-            nodeBuilder.methodParameterNode(
-              "cls",
-              isVariadic = false,
-              lineAndColumn,
-              Some(0)
-            ) :: Nil ++
-                convert(parametersWithoutSelf, 1)
-          ),
+        // Type `cls` with the instance type so `cls.__init__(__newInstance)` resolves to
+        // `<class>.__init__` during type recovery, linking every constructor call site to
+        // the class's __init__ in the callgraph.
+        val clsParam =
+            nodeBuilder.methodParameterNode("cls", isVariadic = false, lineAndColumn, Some(0))
+        clsParam.dynamicTypeHintFullName(Seq(instanceTypeDeclFullName))
+        MethodParameters(
+          0,
+          clsParam :: Nil ++
+              convert(parametersWithoutSelf, 1)
+        )
+      ,
       bodyProvider = () =>
         val allocatorCall =
             createNAryOperatorCall(

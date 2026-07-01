@@ -236,6 +236,23 @@ private class RecoverForPythonFile(
     result
   end resolveMethodInHierarchy
 
+  override protected def setTypeForDynamicDispatchCall(call: Call, i: Identifier): Unit =
+      // `self`/`this` is a file-scoped symbol in the base symbol table, so it accumulates the
+      // type of *every* class defined in the file. The base then builds one `<Class>.method`
+      // candidate per class, and the call linker — faced with several — refuses to pick,
+      // leaving `self.method()` as `<unknownFullName>`. Scope `self` to the enclosing method's
+      // own class (and its hierarchy) so a single, correct callee survives.
+      if (i.name == "self" || i.name == "this") && symbolTable.get(call).isEmpty
+        && !call.name.startsWith("<operator>")
+      then
+        val enclosing =
+            call.method.typeDecl.fullName.toSet.filterNot(_.matches("(?i)(any|object)"))
+        val scoped = enclosing.map(t => createCallFromIdentifierTypeFullName(t, call.name))
+        persistType(i, symbolTable.get(i))
+        if scoped.nonEmpty then persistType(call, scoped)
+        else super.setTypeForDynamicDispatchCall(call, i)
+      else super.setTypeForDynamicDispatchCall(call, i)
+
   override protected def isConstructor(name: String): Boolean =
       name.nonEmpty && name.charAt(0).isUpper
 
