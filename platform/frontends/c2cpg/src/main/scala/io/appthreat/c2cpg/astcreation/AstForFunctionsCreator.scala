@@ -8,7 +8,7 @@ import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
-import org.eclipse.cdt.core.dom.ast.cpp.ICPPASTLambdaExpression
+import org.eclipse.cdt.core.dom.ast.cpp.{ICPPASTFunctionDeclarator, ICPPASTLambdaExpression}
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.{CASTFunctionDeclarator, CASTParameterDeclaration}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
@@ -149,7 +149,16 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         Defines.anyTypeName
       else candidate
     else
-      typeForDeclSpecifier(funcDef.getDeclSpecifier)
+      val fromSpec = typeForDeclSpecifier(funcDef.getDeclSpecifier)
+      // Trailing return type: `auto f(...) -> RealType`. The declaration specifier is `auto`
+      // (which resolves to the ANY type), so recover the real return type from the trailing
+      // return type on the declarator (matches the lambda handling in astForMethodRefForLambda).
+      if fromSpec == Defines.anyTypeName then
+        funcDef.getDeclarator match
+          case d: ICPPASTFunctionDeclarator if d.getTrailingReturnType != null =>
+              typeForDeclSpecifier(d.getTrailingReturnType.getDeclSpecifier)
+          case _ => fromSpec
+      else fromSpec
 
     val name           = shortName(funcDef)
     val fullname       = fullName(funcDef)
