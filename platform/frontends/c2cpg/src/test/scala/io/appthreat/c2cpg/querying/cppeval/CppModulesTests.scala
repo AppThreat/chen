@@ -86,12 +86,9 @@ class CppModulesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
           |}
           |""".stripMargin)
 
-      "recover the exported partition function" in {
+      "recover the exported partition function with a fully qualified return type" in {
           val m = cpg.method.nameExact("format_hello").head
-          // NOTE: the partition selector (`:format`) confuses CDT's name qualification, so the
-          // return type comes back unqualified ("string" rather than "std.string"). The important
-          // point for this suite is that the declaration body is recovered at all.
-          m.methodReturn.typeFullName.endsWith("string") shouldBe true
+          m.methodReturn.typeFullName shouldBe "std.string"
           m.parameter.nameExact("name").typeFullName.head shouldBe "std.string_view"
           m.ast.isReturn.l should not be empty
       }
