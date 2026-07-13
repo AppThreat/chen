@@ -109,6 +109,15 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
     else if !symbolMap.containsKey("__cplusplus") then
       symbolMap.put("__cplusplus", "201703L")
 
+    // CDT 9.3 has no C++20 module support: it parses an exported declaration
+    // (`export namespace {...}`, `export void f() {...}`, `export class ...`) as a single
+    // ProblemDeclaration and drops the entire declaration body. `export` only ever acts as a
+    // visibility marker in a module interface unit and carries no meaning for the CPG, so we
+    // erase it at the preprocessor stage (it operates on pp-tokens before keyword recognition),
+    // letting the underlying declaration parse normally. Only applied to the C++ scanner.
+    if !symbolMap.containsKey("export") then
+      symbolMap.put("export", "")
+
     new ExtendedScannerInfo(
       symbolMap,
       (includePaths ++ parserConfig.systemIncludePathsCPP).map(_.toString).toArray,
