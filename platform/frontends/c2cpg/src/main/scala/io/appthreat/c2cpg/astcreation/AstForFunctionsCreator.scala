@@ -135,10 +135,19 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
     val filename = fileName(funcDef)
     val returnType = if isCppConstructor(funcDef) then
+      // A constructor has no explicit return type. We approximate it with the type of the
+      // first base/member initializer (e.g. `FooT(...) : Bar::Foo(a, b) {}` yields `Bar.Foo`).
+      // typeFor can, however, return a method-signature-like string for some initializer
+      // expressions (e.g. a member initialized via a call), which must not leak into the
+      // constructor's return type / signature. Fall back to the ANY type in that case, which
+      // is also what the fullName's signature uses (see functionTypeToSignature).
       val cppFunc = funcDef.asInstanceOf[CPPASTFunctionDefinition]
-      cppFunc.getMemberInitializers.headOption
+      val candidate = cppFunc.getMemberInitializers.headOption
           .map(m => typeFor(m.getInitializer))
           .getOrElse(Defines.anyTypeName)
+      if candidate.isEmpty || candidate.contains("(") || candidate.contains(":") then
+        Defines.anyTypeName
+      else candidate
     else
       typeForDeclSpecifier(funcDef.getDeclSpecifier)
 
