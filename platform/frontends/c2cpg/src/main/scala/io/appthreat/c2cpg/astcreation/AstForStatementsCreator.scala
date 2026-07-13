@@ -34,6 +34,11 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astsForDeclarationStatement(decl: IASTDeclarationStatement): Seq[Ast] =
       decl.getDeclaration match
+        // Must precede the IASTSimpleDeclaration cases below: a structured binding declaration
+        // implements IASTSimpleDeclaration but has no declarators, so it would otherwise be
+        // swallowed (dropping the bound names and the initializer).
+        case sb: ICPPASTStructuredBindingDeclaration =>
+            Seq(astForStructuredBindingDeclaration(sb))
         case simplDecl: IASTSimpleDeclaration
             if simplDecl.getDeclarators.headOption.exists(
               _.isInstanceOf[IASTFunctionDeclarator]

@@ -195,13 +195,28 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForASMDeclaration(asm: IASTASMDeclaration): Ast =
       Ast(unknownNode(asm, nodeSignature(asm)))
 
-  private def astForStructuredBindingDeclaration(decl: ICPPASTStructuredBindingDeclaration): Ast =
+  protected def astForStructuredBindingDeclaration(decl: ICPPASTStructuredBindingDeclaration): Ast =
     val node = blockNode(decl, Defines.empty, Defines.voidTypeName)
     scope.pushNewScope(node)
-    val childAsts = decl.getNames.toList.map { name =>
-        astForNode(name)
+    // The bound names (e.g. `auto [a, b] = ...`) become locals in the binding's scope. Per-element
+    // types would require decomposing the initializer's type, so we conservatively use the ANY type
+    // rather than risk an incorrect type.
+    val localAsts = decl.getNames.toList.map { name =>
+        val localName = ASTStringUtil.getSimpleName(name)
+        val local     = localNode(name, localName, localName, Defines.anyTypeName)
+        scope.addToScope(localName, (local, Defines.anyTypeName))
+        Ast(local)
+    }
+    val nameAsts = decl.getNames.toList.map(astForNode)
+    // Visit the initializer (e.g. `std::make_tuple(1, 2)`) so its calls/identifiers are captured;
+    // previously it was dropped entirely. Unwrap the `= <clause>` wrapper so the underlying
+    // expression is reached.
+    val initAsts = Option(decl.getInitializer).toList.map {
+        case eq: IASTEqualsInitializer => astForNode(eq.getInitializerClause)
+        case other                     => astForNode(other)
     }
     scope.popScope()
+    val childAsts = localAsts ++ nameAsts ++ initAsts
     setArgumentIndices(childAsts)
     blockAst(node, childAsts)
 

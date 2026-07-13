@@ -677,9 +677,14 @@ class AstCreationPassTests extends AbstractPassTest:
               inside(forStmt.astChildren.order(1).l) { case List(ident) =>
                   ident.code shouldBe "foo"
               }
-              inside(forStmt.astChildren.order(2).astChildren.l) { case List(a, b) =>
-                  a.code shouldBe "a"
-                  b.code shouldBe "b"
+              // A structured binding now declares a LOCAL for each bound name (a, b) in addition
+              // to the referencing identifiers.
+              inside(forStmt.astChildren.order(2).astChildren.l) {
+                  case List(la: Local, lb: Local, a, b) =>
+                      la.name shouldBe "a"
+                      lb.name shouldBe "b"
+                      a.code shouldBe "a"
+                      b.code shouldBe "b"
               }
               inside(forStmt.astChildren.order(3).l) { case List(block) =>
                   block.code shouldBe "<empty>"
