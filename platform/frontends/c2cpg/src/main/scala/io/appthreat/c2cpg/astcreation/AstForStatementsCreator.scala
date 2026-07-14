@@ -41,8 +41,8 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
             Seq(astForStructuredBindingDeclaration(sb))
         case simplDecl: IASTSimpleDeclaration
             if simplDecl.getDeclarators.headOption.exists(d =>
-              d.isInstanceOf[IASTFunctionDeclarator] &&
-                  !isFunctionPointerLikeDeclarator(d.asInstanceOf[IASTFunctionDeclarator])
+                d.isInstanceOf[IASTFunctionDeclarator] &&
+                    !isFunctionPointerLikeDeclarator(d.asInstanceOf[IASTFunctionDeclarator])
             ) =>
             Seq(astForFunctionDeclarator(
               simplDecl.getDeclarators.head.asInstanceOf[IASTFunctionDeclarator]

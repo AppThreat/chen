@@ -72,14 +72,14 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         newNamespaceBlockNode(namespaceAlias, name, fullname, code, fileName(namespaceAlias))
     Ast(cpgNamespace)
 
-  /** The declared name of a declarator, unwrapping nested declarators. A function-pointer declarator
-    * (`int (*op)(int, int)`) carries an empty name on the outer declarator and the real name (`op`)
-    * on its nested declarator, so the plain `getName` would be empty.
+  /** The declared name of a declarator, unwrapping nested declarators. A function-pointer
+    * declarator (`int (*op)(int, int)`) carries an empty name on the outer declarator and the real
+    * name (`op`) on its nested declarator, so the plain `getName` would be empty.
     */
   @scala.annotation.tailrec
   protected final def effectiveDeclaratorName(declarator: IASTDeclarator): IASTName =
       if ASTStringUtil.getSimpleName(declarator.getName).isEmpty && declarator
-              .getNestedDeclarator != null
+            .getNestedDeclarator != null
       then effectiveDeclaratorName(declarator.getNestedDeclarator)
       else declarator.getName
 

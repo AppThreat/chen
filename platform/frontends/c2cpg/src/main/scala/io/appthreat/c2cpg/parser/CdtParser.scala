@@ -77,8 +77,8 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
       parserConfig.userIncludePaths.toSeq.sortBy(p => (p.getNameCount, p.toString))
   private val log = new CancelableLogService
 
-  /** Cooperatively cancels an in-flight parse on this parser (see `CancelableLogService`). Safe
-    * to call from another thread, e.g. a timeout watchdog.
+  /** Cooperatively cancels an in-flight parse on this parser (see `CancelableLogService`). Safe to
+    * call from another thread, e.g. a timeout watchdog.
     */
   def cancel(): Unit = log.setCanceled(true)
 

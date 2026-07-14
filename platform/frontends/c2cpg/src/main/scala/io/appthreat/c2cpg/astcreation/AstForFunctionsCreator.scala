@@ -65,15 +65,15 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   /** A function declarator does not always declare a function: `int (*op)(int, int)` is a
     * function-*pointer* variable whose name resolves to an `IVariable`, not an `IFunction`.
-    * `astForFunctionDeclarator` drops those (its `IVariable`/`IField` cases return an empty Ast), so
-    * the declarator dispatch must route them to the normal local/member path instead. Mirrors the
-    * binding cases `astForFunctionDeclarator` itself switches on.
+    * `astForFunctionDeclarator` drops those (its `IVariable`/`IField` cases return an empty Ast),
+    * so the declarator dispatch must route them to the normal local/member path instead. Mirrors
+    * the binding cases `astForFunctionDeclarator` itself switches on.
     */
   protected def isFunctionPointerLikeDeclarator(funcDecl: IASTFunctionDeclarator): Boolean =
       funcDecl.getName.resolveBinding() match
-          case _: IVariable => true
-          case _: IField    => true
-          case _            => false
+        case _: IVariable => true
+        case _: IField    => true
+        case _            => false
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
