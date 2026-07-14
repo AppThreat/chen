@@ -612,6 +612,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           val parentDecl =
               s.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclarators.toList(index)
           pointersAsString(s, parentDecl, stripKeywords)
+      case s: IASTNamedTypeSpecifier if s.getParent.isInstanceOf[IASTFunctionDefinition] =>
+          // Return type of a function definition (e.g. `std::string foo() {...}`). Without this
+          // case the named type falls through to getSimpleName below, which drops the namespace
+          // qualifier (`std::string` -> `string`). Mirror the parameter/declaration paths that
+          // qualify correctly via pointersAsString.
+          val parentDecl = s.getParent.asInstanceOf[IASTFunctionDefinition].getDeclarator
+          pointersAsString(s, parentDecl, stripKeywords)
       case s: IASTNamedTypeSpecifier => ASTStringUtil.getSimpleName(s.getName)
       case s: IASTCompositeTypeSpecifier if s.getParent.isInstanceOf[IASTSimpleDeclaration] =>
           val parentDecl =

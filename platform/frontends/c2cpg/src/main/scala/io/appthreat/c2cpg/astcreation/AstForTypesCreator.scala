@@ -72,12 +72,23 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         newNamespaceBlockNode(namespaceAlias, name, fullname, code, fileName(namespaceAlias))
     Ast(cpgNamespace)
 
+  /** The declared name of a declarator, unwrapping nested declarators. A function-pointer
+    * declarator (`int (*op)(int, int)`) carries an empty name on the outer declarator and the real
+    * name (`op`) on its nested declarator, so the plain `getName` would be empty.
+    */
+  @scala.annotation.tailrec
+  protected final def effectiveDeclaratorName(declarator: IASTDeclarator): IASTName =
+      if ASTStringUtil.getSimpleName(declarator.getName).isEmpty && declarator
+            .getNestedDeclarator != null
+      then effectiveDeclaratorName(declarator.getNestedDeclarator)
+      else declarator.getName
+
   protected def astForDeclarator(
     declaration: IASTSimpleDeclaration,
     declarator: IASTDeclarator,
     index: Int
   ): Ast =
-    val name = ASTStringUtil.getSimpleName(declarator.getName)
+    val name = ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
     declaration match
       case d if isTypeDef(d) && shortName(d.getDeclSpecifier).nonEmpty =>
           val filename = fileName(declaration)
@@ -121,7 +132,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       init match
         case i: IASTEqualsInitializer =>
             val operatorName = Operators.assignment
-            val left         = astForNode(declarator.getName)
+            val left         = astForNode(effectiveDeclaratorName(declarator))
             val right        = astForNode(i.getInitializerClause)
             val code         = i.getInitializerClause.getRawSignature
             val dispatchType =
@@ -138,13 +149,27 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                 )
             callAst(callNode_, List(left, right))
         case i: ICPPASTConstructorInitializer =>
-            val name = ASTStringUtil.getSimpleName(declarator.getName)
+            // `Point a(1, 2)` is a constructor call: the callee is the constructed type's
+            // constructor, not the variable being declared. Name it after the constructed
+            // type - consistent with astForConstructorExpression for `Point(...)` - rather
+            // than the variable name, and expose the constructed type as the call's type.
+            val typeFullName = declarator.getParent match
+              case decl: IASTSimpleDeclaration =>
+                  registerType(cleanType(typeForDeclSpecifier(decl.getDeclSpecifier)))
+              case _ => Defines.anyTypeName
+            val simpleTypeName = lastNameOfQualifiedName(typeFullName)
+            val name =
+                if simpleTypeName.nonEmpty && simpleTypeName != Defines.anyTypeName then
+                  simpleTypeName
+                else ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
             val callNode_ = callNode(
               declarator,
               nodeSignature(declarator),
               name,
               name,
-              DispatchTypes.STATIC_DISPATCH
+              DispatchTypes.STATIC_DISPATCH,
+              signature = None,
+              typeFullName = Some(typeFullName)
             )
             val args = i.getArguments.toList.map(x => astForNode(x))
             callAst(callNode_, args)
@@ -195,15 +220,31 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForASMDeclaration(asm: IASTASMDeclaration): Ast =
       Ast(unknownNode(asm, nodeSignature(asm)))
 
-  private def astForStructuredBindingDeclaration(decl: ICPPASTStructuredBindingDeclaration): Ast =
+  protected def astForStructuredBindingDeclaration(decl: ICPPASTStructuredBindingDeclaration): Ast =
     val node = blockNode(decl, Defines.empty, Defines.voidTypeName)
     scope.pushNewScope(node)
-    val childAsts = decl.getNames.toList.map { name =>
-        astForNode(name)
+    // The bound names (e.g. `auto [a, b] = ...`) become locals in the binding's scope. Per-element
+    // types would require decomposing the initializer's type, so we conservatively use the ANY type
+    // rather than risk an incorrect type.
+    val localAsts = decl.getNames.toList.map { name =>
+      val localName = ASTStringUtil.getSimpleName(name)
+      val local     = localNode(name, localName, localName, Defines.anyTypeName)
+      scope.addToScope(localName, (local, Defines.anyTypeName))
+      Ast(local)
+    }
+    val nameAsts = decl.getNames.toList.map(astForNode)
+    // Visit the initializer (e.g. `std::make_tuple(1, 2)`) so its calls/identifiers are captured;
+    // previously it was dropped entirely. Unwrap the `= <clause>` wrapper so the underlying
+    // expression is reached.
+    val initAsts = Option(decl.getInitializer).toList.map {
+        case eq: IASTEqualsInitializer => astForNode(eq.getInitializerClause)
+        case other                     => astForNode(other)
     }
     scope.popScope()
+    val childAsts = localAsts ++ nameAsts ++ initAsts
     setArgumentIndices(childAsts)
     blockAst(node, childAsts)
+  end astForStructuredBindingDeclaration
 
   protected def astsForDeclaration(decl: IASTDeclaration): Seq[Ast] =
     val declAsts = decl match
@@ -230,6 +271,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                 )))
             case _ if declaration.getDeclarators.nonEmpty =>
                 declaration.getDeclarators.toIndexedSeq.zipWithIndex.map {
+                    case (d: IASTFunctionDeclarator, i) if isFunctionPointerLikeDeclarator(d) =>
+                        astForDeclarator(declaration, d, i)
                     case (d: IASTFunctionDeclarator, _) =>
                         astForFunctionDeclarator(d)
                     case (d: IASTSimpleDeclaration, _) if d.getInitializer != null =>

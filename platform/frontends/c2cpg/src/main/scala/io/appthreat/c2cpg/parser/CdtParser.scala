@@ -41,8 +41,8 @@ object CdtParser:
 
   /** A parser log service that also exposes CDT's cooperative cancellation hook.
     *
-    * `AbstractCLikeLanguage.getASTTranslationUnit` registers an [[ICancelable]] on the log service
-    * when it implements [[ICanceler]] (CDT bug 226682). Calling [[setCanceled]] from another thread
+    * `AbstractCLikeLanguage.getASTTranslationUnit` registers an `ICancelable` on the log service
+    * when it implements `ICanceler` (CDT bug 226682). Calling `setCanceled` from another thread
     * therefore propagates to `scanner.cancel()` / `parser.cancel()`, which makes the parse abort at
     * the next cancellation check instead of running to completion. Without this, a timed-out parse
     * keeps a CPU-bound thread alive in the background since CDT does not poll `Thread.interrupt()`.
@@ -77,8 +77,8 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
       parserConfig.userIncludePaths.toSeq.sortBy(p => (p.getNameCount, p.toString))
   private val log = new CancelableLogService
 
-  /** Cooperatively cancels an in-flight parse on this parser (see [[CancelableLogService]]). Safe
-    * to call from another thread, e.g. a timeout watchdog.
+  /** Cooperatively cancels an in-flight parse on this parser (see `CancelableLogService`). Safe to
+    * call from another thread, e.g. a timeout watchdog.
     */
   def cancel(): Unit = log.setCanceled(true)
 
@@ -108,6 +108,15 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
       symbolMap.put("__cplusplus", stdVal)
     else if !symbolMap.containsKey("__cplusplus") then
       symbolMap.put("__cplusplus", "201703L")
+
+    // CDT 9.3 has no C++20 module support: it parses an exported declaration
+    // (`export namespace {...}`, `export void f() {...}`, `export class ...`) as a single
+    // ProblemDeclaration and drops the entire declaration body. `export` only ever acts as a
+    // visibility marker in a module interface unit and carries no meaning for the CPG, so we
+    // erase it at the preprocessor stage (it operates on pp-tokens before keyword recognition),
+    // letting the underlying declaration parse normally. Only applied to the C++ scanner.
+    if !symbolMap.containsKey("export") then
+      symbolMap.put("export", "")
 
     new ExtendedScannerInfo(
       symbolMap,

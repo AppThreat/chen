@@ -677,9 +677,14 @@ class AstCreationPassTests extends AbstractPassTest:
               inside(forStmt.astChildren.order(1).l) { case List(ident) =>
                   ident.code shouldBe "foo"
               }
-              inside(forStmt.astChildren.order(2).astChildren.l) { case List(a, b) =>
-                  a.code shouldBe "a"
-                  b.code shouldBe "b"
+              // A structured binding now declares a LOCAL for each bound name (a, b) in addition
+              // to the referencing identifiers.
+              inside(forStmt.astChildren.order(2).astChildren.l) {
+                  case List(la: Local, lb: Local, a, b) =>
+                      la.name shouldBe "a"
+                      lb.name shouldBe "b"
+                      a.code shouldBe "a"
+                      b.code shouldBe "b"
               }
               inside(forStmt.astChildren.order(3).l) { case List(block) =>
                   block.code shouldBe "<empty>"
@@ -1136,7 +1141,10 @@ class AstCreationPassTests extends AbstractPassTest:
             .l
             .size shouldBe 1
         inside(cpg.call.codeExact("f1(0)").l) { case List(call: Call) =>
-            call.name shouldBe "f1"
+            // The callee is the constructed type's constructor, not the declared variable.
+            call.name shouldBe "Foo"
+            call.methodFullName shouldBe "Foo"
+            call.typeFullName shouldBe "Foo"
             call.argument(1).code shouldBe "0"
         }
       }

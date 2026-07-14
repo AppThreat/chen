@@ -8,7 +8,7 @@ import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
-import org.eclipse.cdt.core.dom.ast.cpp.ICPPASTLambdaExpression
+import org.eclipse.cdt.core.dom.ast.cpp.{ICPPASTFunctionDeclarator, ICPPASTLambdaExpression}
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.{CASTFunctionDeclarator, CASTParameterDeclaration}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
@@ -62,6 +62,18 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
     Ast(methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName))
   end astForMethodRefForLambda
+
+  /** A function declarator does not always declare a function: `int (*op)(int, int)` is a
+    * function-*pointer* variable whose name resolves to an `IVariable`, not an `IFunction`.
+    * `astForFunctionDeclarator` drops those (its `IVariable` case returns an empty Ast), so the
+    * declarator dispatch must route them to the normal local/member path instead. `IField` (a
+    * function-pointer data member) extends `IVariable`, so the single case covers it too. Mirrors
+    * the binding cases `astForFunctionDeclarator` itself switches on.
+    */
+  protected def isFunctionPointerLikeDeclarator(funcDecl: IASTFunctionDeclarator): Boolean =
+      funcDecl.getName.resolveBinding() match
+        case _: IVariable => true
+        case _            => false
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
@@ -135,12 +147,30 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
     val filename = fileName(funcDef)
     val returnType = if isCppConstructor(funcDef) then
+      // A constructor has no explicit return type. We approximate it with the type of the
+      // first base/member initializer (e.g. `FooT(...) : Bar::Foo(a, b) {}` yields `Bar.Foo`).
+      // typeFor can, however, return a method-signature-like string for some initializer
+      // expressions (e.g. a member initialized via a call), which must not leak into the
+      // constructor's return type / signature. Fall back to the ANY type in that case, which
+      // is also what the fullName's signature uses (see functionTypeToSignature).
       val cppFunc = funcDef.asInstanceOf[CPPASTFunctionDefinition]
-      cppFunc.getMemberInitializers.headOption
+      val candidate = cppFunc.getMemberInitializers.headOption
           .map(m => typeFor(m.getInitializer))
           .getOrElse(Defines.anyTypeName)
+      if candidate.isEmpty || candidate.contains("(") || candidate.contains(":") then
+        Defines.anyTypeName
+      else candidate
     else
-      typeForDeclSpecifier(funcDef.getDeclSpecifier)
+      val fromSpec = typeForDeclSpecifier(funcDef.getDeclSpecifier)
+      // Trailing return type: `auto f(...) -> RealType`. The declaration specifier is `auto`
+      // (which resolves to the ANY type), so recover the real return type from the trailing
+      // return type on the declarator (matches the lambda handling in astForMethodRefForLambda).
+      if fromSpec == Defines.anyTypeName then
+        funcDef.getDeclarator match
+          case d: ICPPASTFunctionDeclarator if d.getTrailingReturnType != null =>
+              typeForDeclSpecifier(d.getTrailingReturnType.getDeclSpecifier)
+          case _ => fromSpec
+      else fromSpec
 
     val name           = shortName(funcDef)
     val fullname       = fullName(funcDef)
