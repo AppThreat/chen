@@ -154,9 +154,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             // type - consistent with astForConstructorExpression for `Point(...)` - rather
             // than the variable name, and expose the constructed type as the call's type.
             val typeFullName = declarator.getParent match
-                case decl: IASTSimpleDeclaration =>
-                    registerType(cleanType(typeForDeclSpecifier(decl.getDeclSpecifier)))
-                case _ => Defines.anyTypeName
+              case decl: IASTSimpleDeclaration =>
+                  registerType(cleanType(typeForDeclSpecifier(decl.getDeclSpecifier)))
+              case _ => Defines.anyTypeName
             val simpleTypeName = lastNameOfQualifiedName(typeFullName)
             val name =
                 if simpleTypeName.nonEmpty && simpleTypeName != Defines.anyTypeName then
