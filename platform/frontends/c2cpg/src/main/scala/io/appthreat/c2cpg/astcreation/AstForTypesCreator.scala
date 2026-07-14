@@ -72,12 +72,23 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         newNamespaceBlockNode(namespaceAlias, name, fullname, code, fileName(namespaceAlias))
     Ast(cpgNamespace)
 
+  /** The declared name of a declarator, unwrapping nested declarators. A function-pointer declarator
+    * (`int (*op)(int, int)`) carries an empty name on the outer declarator and the real name (`op`)
+    * on its nested declarator, so the plain `getName` would be empty.
+    */
+  @scala.annotation.tailrec
+  protected final def effectiveDeclaratorName(declarator: IASTDeclarator): IASTName =
+      if ASTStringUtil.getSimpleName(declarator.getName).isEmpty && declarator
+              .getNestedDeclarator != null
+      then effectiveDeclaratorName(declarator.getNestedDeclarator)
+      else declarator.getName
+
   protected def astForDeclarator(
     declaration: IASTSimpleDeclaration,
     declarator: IASTDeclarator,
     index: Int
   ): Ast =
-    val name = ASTStringUtil.getSimpleName(declarator.getName)
+    val name = ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
     declaration match
       case d if isTypeDef(d) && shortName(d.getDeclSpecifier).nonEmpty =>
           val filename = fileName(declaration)
@@ -121,7 +132,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       init match
         case i: IASTEqualsInitializer =>
             val operatorName = Operators.assignment
-            val left         = astForNode(declarator.getName)
+            val left         = astForNode(effectiveDeclaratorName(declarator))
             val right        = astForNode(i.getInitializerClause)
             val code         = i.getInitializerClause.getRawSignature
             val dispatchType =
@@ -246,6 +257,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                 )))
             case _ if declaration.getDeclarators.nonEmpty =>
                 declaration.getDeclarators.toIndexedSeq.zipWithIndex.map {
+                    case (d: IASTFunctionDeclarator, i) if isFunctionPointerLikeDeclarator(d) =>
+                        astForDeclarator(declaration, d, i)
                     case (d: IASTFunctionDeclarator, _) =>
                         astForFunctionDeclarator(d)
                     case (d: IASTSimpleDeclaration, _) if d.getInitializer != null =>
