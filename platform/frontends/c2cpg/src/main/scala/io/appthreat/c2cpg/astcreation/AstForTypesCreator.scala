@@ -149,13 +149,27 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                 )
             callAst(callNode_, List(left, right))
         case i: ICPPASTConstructorInitializer =>
-            val name = ASTStringUtil.getSimpleName(declarator.getName)
+            // `Point a(1, 2)` is a constructor call: the callee is the constructed type's
+            // constructor, not the variable being declared. Name it after the constructed
+            // type - consistent with astForConstructorExpression for `Point(...)` - rather
+            // than the variable name, and expose the constructed type as the call's type.
+            val typeFullName = declarator.getParent match
+                case decl: IASTSimpleDeclaration =>
+                    registerType(cleanType(typeForDeclSpecifier(decl.getDeclSpecifier)))
+                case _ => Defines.anyTypeName
+            val simpleTypeName = lastNameOfQualifiedName(typeFullName)
+            val name =
+                if simpleTypeName.nonEmpty && simpleTypeName != Defines.anyTypeName then
+                  simpleTypeName
+                else ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
             val callNode_ = callNode(
               declarator,
               nodeSignature(declarator),
               name,
               name,
-              DispatchTypes.STATIC_DISPATCH
+              DispatchTypes.STATIC_DISPATCH,
+              signature = None,
+              typeFullName = Some(typeFullName)
             )
             val args = i.getArguments.toList.map(x => astForNode(x))
             callAst(callNode_, args)
