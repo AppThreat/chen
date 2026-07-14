@@ -65,32 +65,34 @@ class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyV
     *   true if there is flow defined between the two nodes, false if otherwise.
     */
   def hasDefinedFlowTo(tgt: Expression)(implicit semantics: Semantics): Boolean =
-      if tgt.evalType(".*(?i)(int|float|double|boolean).*").nonEmpty then
-        false
-      else
-        val s = semanticsForCallByArg.l
-        s.isEmpty || s.exists { semantic =>
-            semantic.mappings.exists {
-                case FlowMapping(
-                      ParameterNode(_, Some(srcName)),
-                      ParameterNode(_, Some(dstName))
-                    )
-                    if node.argumentName.isDefined && tgt.argumentName.isDefined =>
-                    srcName == node.argumentName.get && dstName == tgt.argumentName.get
-                case FlowMapping(ParameterNode(_, Some(srcName)), ParameterNode(dstIndex, _))
-                    if node.argumentName.isDefined =>
-                    srcName == node.argumentName.get && dstIndex == tgt.argumentIndex
-                case FlowMapping(ParameterNode(srcIndex, _), ParameterNode(_, Some(dstName)))
-                    if tgt.argumentName.isDefined =>
-                    srcIndex == node.argumentIndex && dstName == tgt.argumentName.get
-                case FlowMapping(ParameterNode(srcIndex, _), ParameterNode(dstIndex, _)) =>
-                    srcIndex == node.argumentIndex && dstIndex == tgt.argumentIndex
-                case PassThroughMapping
-                    if tgt.argumentIndex == node.argumentIndex || tgt.argumentIndex == -1 =>
-                    true
-                case _ => false
-            }
-        }
+      // Whether a flow exists is decided purely by the semantic mappings of the call. We must NOT
+      // suppress the edge just because the target has a primitive (int/float/double/bool) type -
+      // doing so drops taint through the most common data flow of all, `int q = p;` (and every
+      // arithmetic/compound-assignment into a numeric variable), so `sink(q)` would not be
+      // reachable from `p`.
+      val s = semanticsForCallByArg.l
+      s.isEmpty || s.exists { semantic =>
+          semantic.mappings.exists {
+              case FlowMapping(
+                    ParameterNode(_, Some(srcName)),
+                    ParameterNode(_, Some(dstName))
+                  )
+                  if node.argumentName.isDefined && tgt.argumentName.isDefined =>
+                  srcName == node.argumentName.get && dstName == tgt.argumentName.get
+              case FlowMapping(ParameterNode(_, Some(srcName)), ParameterNode(dstIndex, _))
+                  if node.argumentName.isDefined =>
+                  srcName == node.argumentName.get && dstIndex == tgt.argumentIndex
+              case FlowMapping(ParameterNode(srcIndex, _), ParameterNode(_, Some(dstName)))
+                  if tgt.argumentName.isDefined =>
+                  srcIndex == node.argumentIndex && dstName == tgt.argumentName.get
+              case FlowMapping(ParameterNode(srcIndex, _), ParameterNode(dstIndex, _)) =>
+                  srcIndex == node.argumentIndex && dstIndex == tgt.argumentIndex
+              case PassThroughMapping
+                  if tgt.argumentIndex == node.argumentIndex || tgt.argumentIndex == -1 =>
+                  true
+              case _ => false
+          }
+      }
 
   /** Retrieve flow semantic for the call this argument is a part of.
     */
