@@ -41,8 +41,8 @@ object CdtParser:
 
   /** A parser log service that also exposes CDT's cooperative cancellation hook.
     *
-    * `AbstractCLikeLanguage.getASTTranslationUnit` registers an [[ICancelable]] on the log service
-    * when it implements [[ICanceler]] (CDT bug 226682). Calling [[setCanceled]] from another thread
+    * `AbstractCLikeLanguage.getASTTranslationUnit` registers an `ICancelable` on the log service
+    * when it implements `ICanceler` (CDT bug 226682). Calling `setCanceled` from another thread
     * therefore propagates to `scanner.cancel()` / `parser.cancel()`, which makes the parse abort at
     * the next cancellation check instead of running to completion. Without this, a timed-out parse
     * keeps a CPU-bound thread alive in the background since CDT does not poll `Thread.interrupt()`.
@@ -77,7 +77,7 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
       parserConfig.userIncludePaths.toSeq.sortBy(p => (p.getNameCount, p.toString))
   private val log = new CancelableLogService
 
-  /** Cooperatively cancels an in-flight parse on this parser (see [[CancelableLogService]]). Safe
+  /** Cooperatively cancels an in-flight parse on this parser (see `CancelableLogService`). Safe
     * to call from another thread, e.g. a timeout watchdog.
     */
   def cancel(): Unit = log.setCanceled(true)

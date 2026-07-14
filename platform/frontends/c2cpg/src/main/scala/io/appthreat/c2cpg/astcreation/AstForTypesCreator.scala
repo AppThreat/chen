@@ -202,10 +202,10 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     // types would require decomposing the initializer's type, so we conservatively use the ANY type
     // rather than risk an incorrect type.
     val localAsts = decl.getNames.toList.map { name =>
-        val localName = ASTStringUtil.getSimpleName(name)
-        val local     = localNode(name, localName, localName, Defines.anyTypeName)
-        scope.addToScope(localName, (local, Defines.anyTypeName))
-        Ast(local)
+      val localName = ASTStringUtil.getSimpleName(name)
+      val local     = localNode(name, localName, localName, Defines.anyTypeName)
+      scope.addToScope(localName, (local, Defines.anyTypeName))
+      Ast(local)
     }
     val nameAsts = decl.getNames.toList.map(astForNode)
     // Visit the initializer (e.g. `std::make_tuple(1, 2)`) so its calls/identifiers are captured;
@@ -219,6 +219,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val childAsts = localAsts ++ nameAsts ++ initAsts
     setArgumentIndices(childAsts)
     blockAst(node, childAsts)
+  end astForStructuredBindingDeclaration
 
   protected def astsForDeclaration(decl: IASTDeclaration): Seq[Ast] =
     val declAsts = decl match

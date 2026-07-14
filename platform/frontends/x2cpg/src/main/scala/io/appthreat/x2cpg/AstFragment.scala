@@ -22,7 +22,7 @@ import scala.util.Try
   * chen-specific `usedTypes` (the global-type-table names a frontend registered while parsing) are
   * not part of the graph, so they are stored as a small sidecar around the fragment bytes.
   *
-  * Like [[AstCache]], reconstruction is done into a [[DiffGraphBuilder]] (so a frontend keeps its
+  * Like [[AstCache]], reconstruction is done into a `DiffGraphBuilder` (so a frontend keeps its
   * existing streaming-pass apply model); the faster `applyFragment`-straight-into-the-graph path is
   * a separate, later optimization.
   */
