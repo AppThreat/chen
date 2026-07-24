@@ -1,0 +1,31 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XTypeRecovery.scala
+  s_19770e0ed92409::t_67e31e831b51b4 91,105-115
+  s_19770e0ed92409::t_ed91e579b05a8e 117
+  s_19770e0ed92409::t_bdde2628da8890 116,118
+platform/frontends/jimple2cpg/src/main/scala/io/appthreat/jimple2cpg/Main.scala
+  s_19770e0ed92409::t_24f11d928f0ddd 30
+build.sbt
+  s_19770e0ed92409::t_6c38e251604a44 3
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/X2CpgConfigTests.scala
+  s_19770e0ed92409::t_75c76620ba2cb2 1-64
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/X2Cpg.scala
+  s_19770e0ed92409::t_f31d19070633b0 66
+platform/frontends/jimple2cpg/src/test/scala/io/appthreat/jimple2cpg/config/ConfigTests.scala
+  s_19770e0ed92409::t_c5c3c2db523230 40-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bf7d8d3ec7cbc7b24a0aefce6f38692908cd4b94",
+  "prompts": {},
+  "sessions": {
+    "s_19770e0ed92409": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06e8541feffe9QXcjX0yggQ6rH",
+        "model": "moonshotai/kimi-k3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
