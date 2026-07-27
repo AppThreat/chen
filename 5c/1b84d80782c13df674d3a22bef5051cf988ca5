@@ -1,0 +1,21 @@
+platform/frontends/jimple2cpg/src/main/scala/io/appthreat/jimple2cpg/Main.scala
+  s_37922b17f5486b::t_f89de27eab2a9a 30
+build.sbt
+  s_37922b17f5486b::t_3ef5775bc36190 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5c1b84d80782c13df674d3a22bef5051cf988ca5",
+  "prompts": {},
+  "sessions": {
+    "s_37922b17f5486b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05c08753dffe9KKyb3i2ET3TU5",
+        "model": "glm-5.2"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
