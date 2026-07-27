@@ -27,7 +27,7 @@ final case class Config(
   def withFullResolver(value: Boolean): Config =
       copy(fullResolver = value).withInheritedFields(this)
   def withRecurse(value: Boolean): Config =
-      copy(recurse = value)
+      copy(recurse = value).withInheritedFields(this)
   def withDepth(value: Int): Config =
       copy(depth = value).withInheritedFields(this)
   def withOnlyClasses(value: Boolean): Config =
