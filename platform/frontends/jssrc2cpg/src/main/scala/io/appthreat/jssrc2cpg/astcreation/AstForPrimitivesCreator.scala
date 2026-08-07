@@ -125,11 +125,18 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
 
   protected def astForTSInstantiationExpression(instantiationExpr: BabelNodeInfo): Ast =
     val exprAst = astForNodeWithFunctionReference(instantiationExpr.json("expression"))
-    if hasKey(instantiationExpr.json, "typeParameters") then
-      val typeParams = instantiationExpr.json("typeParameters")
+    // Babel 8 renames call-site type parameters to `typeArguments`
+    // (Babel 7 used `typeParameters`).
+    val typeArgsKey =
+      if hasKey(instantiationExpr.json, "typeArguments") then Some("typeArguments")
+      else if hasKey(instantiationExpr.json, "typeParameters") then Some("typeParameters")
+      else None
+    typeArgsKey.foreach { key =>
+      val typeParams = instantiationExpr.json(key)
       if hasKey(typeParams, "params") then
         typeParams("params").arr.foreach { param =>
             typeFor(createBabelNodeInfo(param))
         }
+    }
     exprAst
 end AstForPrimitivesCreator
