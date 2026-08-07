@@ -569,7 +569,6 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       astForQualifiedModule(tsModuleDecl, idParts, isOutermost = true)
     else
       astForSingleModule(tsModuleDecl, None, None)
-  end astForModule
 
   /** Flattens a (possibly nested) `TSQualifiedName` id into its identifier segments, left to right,
     * e.g. `A.B.C` -> `List(A, B, C)`. A plain identifier id yields a single-element list.
@@ -585,7 +584,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     isOutermost: Boolean
   ): Ast =
       parts match
-        case Nil => Ast()
+        case Nil           => Ast()
         case idNode :: Nil =>
             // Innermost segment carries the actual module body.
             astForSingleModule(
@@ -639,6 +638,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     scope.popScope()
 
     Ast(namespaceNode).withChild(child)
+  end namespaceBlockWithChild
 
   private def astForSingleModule(
     tsModuleDecl: BabelNodeInfo,
