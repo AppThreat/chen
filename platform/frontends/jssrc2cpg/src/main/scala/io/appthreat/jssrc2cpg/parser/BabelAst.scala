@@ -195,6 +195,7 @@ object BabelAst:
   object TSConstructorType               extends TSType
   object TSDeclareFunction               extends BabelNode
   object TSDeclareMethod                 extends BabelNode
+  object TSEnumBody                      extends BabelNode
   object TSEnumDeclaration               extends BabelNode
   object TSEnumMember                    extends BabelNode
   object TSExportAssignment              extends BabelNode
@@ -233,6 +234,7 @@ object BabelAst:
   object TSSatisfiesExpression           extends Expression
   object TSStringKeyword                 extends TSType
   object TSSymbolKeyword                 extends TSType
+  object TSTemplateLiteralType           extends TSType
   object TSThisType                      extends TSType
   object TSTupleType                     extends TSType
   object TSTypeAliasDeclaration          extends BabelNode

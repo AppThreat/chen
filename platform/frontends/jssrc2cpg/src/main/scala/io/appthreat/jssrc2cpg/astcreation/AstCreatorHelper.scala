@@ -99,6 +99,14 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val endIndex   = Math.min(end(node).getOrElse(0), parserResult.fileContent.length)
     parserResult.fileContent.substring(startIndex, endIndex).trim
 
+  /** Source text spanning from the start of `fromNode` to the end of `toNode`. Used to reconstruct
+    * the code of a synthesized node (e.g. one segment of a `namespace A.B.C {}` qualified path).
+    */
+  protected def codeFromTo(fromNode: Value, toNode: Value): String =
+    val startIndex = start(fromNode).getOrElse(0)
+    val endIndex   = Math.min(end(toNode).getOrElse(0), parserResult.fileContent.length)
+    parserResult.fileContent.substring(startIndex, endIndex).trim
+
   private def shortenCode(code: String, length: Int = MaxCodeLength): String =
       StringUtils.abbreviate(code, math.max(MinCodeLength, length))
 
