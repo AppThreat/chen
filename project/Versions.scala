@@ -7,7 +7,7 @@ object Versions {
     val cats          = "3.6.3"
     val json4s        = "4.0.7"
     val gradleTooling = "8.10.1"
-    val circe         = "0.14.15"
+    val circe         = "0.14.16"
     val requests      = "0.9.3"
     val upickle       = "4.4.3"
     val commonsCompress = "1.27.1"
