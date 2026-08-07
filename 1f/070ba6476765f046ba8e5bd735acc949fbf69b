@@ -1,0 +1,22 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreatorHelper.scala
+  s_41bee48ebfde57::t_262b5cbf2ab05d 102-109
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTypesCreator.scala
+  s_41bee48ebfde57::t_9d6887b84fe1a5 560-596,600-648,653,679
+  s_41bee48ebfde57::t_6670dbd36c642e 597-599
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1f070ba6476765f046ba8e5bd735acc949fbf69b",
+  "prompts": {},
+  "sessions": {
+    "s_41bee48ebfde57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46ab4db8-b1f2-4444-bb7f-de59e23a1e7b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
