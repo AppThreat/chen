@@ -557,12 +557,100 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
               )
 
   protected def astForModule(tsModuleDecl: BabelNodeInfo): Ast =
-    val (nameRaw, fullNameRaw) = calcTypeNameAndFullName(tsModuleDecl)
+    // A namespace/module declared with a qualified path (`namespace A.B.C {}`) is emitted by the
+    // Babel 8 astgen as a single TSModuleDeclaration whose `id` is a nested TSQualifiedName. Older
+    // astgen produced nested TSModuleDeclarations. Rebuild the nesting so each path segment becomes
+    // its own NamespaceBlock (A -> B -> C), with the module body attached to the innermost one.
+    val idParts =
+        if hasKey(tsModuleDecl.json, "id") && !tsModuleDecl.json("id").isNull then
+          flattenQualifiedName(tsModuleDecl.json("id"))
+        else Nil
+    if idParts.sizeIs > 1 then
+      astForQualifiedModule(tsModuleDecl, idParts, isOutermost = true)
+    else
+      astForSingleModule(tsModuleDecl, None, None)
+  end astForModule
+
+  /** Flattens a (possibly nested) `TSQualifiedName` id into its identifier segments, left to right,
+    * e.g. `A.B.C` -> `List(A, B, C)`. A plain identifier id yields a single-element list.
+    */
+  private def flattenQualifiedName(idJson: Value): List[Value] =
+      createBabelNodeInfo(idJson).node match
+        case TSQualifiedName => flattenQualifiedName(idJson("left")) :+ idJson("right")
+        case _               => List(idJson)
+
+  private def astForQualifiedModule(
+    tsModuleDecl: BabelNodeInfo,
+    parts: List[Value],
+    isOutermost: Boolean
+  ): Ast =
+      parts match
+        case Nil => Ast()
+        case idNode :: Nil =>
+            // Innermost segment carries the actual module body.
+            astForSingleModule(
+              tsModuleDecl,
+              Option(stripQuotes(code(idNode))),
+              Option(codeForSegment(tsModuleDecl, idNode, isOutermost))
+            )
+        case idNode :: rest =>
+            val name        = stripQuotes(code(idNode))
+            val segmentCode = codeForSegment(tsModuleDecl, idNode, isOutermost)
+            namespaceBlockWithChild(tsModuleDecl, idNode, name, segmentCode) {
+                astForQualifiedModule(tsModuleDecl, rest, isOutermost = false)
+            }
+
+  /** The outermost segment keeps the whole declaration's code (so it starts with `namespace A`);
+    * inner segments span from their own identifier to the end of the declaration (`B.C {...}`).
+    */
+  private def codeForSegment(
+    tsModuleDecl: BabelNodeInfo,
+    idNode: Value,
+    isOutermost: Boolean
+  ): String =
+      if isOutermost then tsModuleDecl.code else codeFromTo(idNode, tsModuleDecl.json)
+
+  /** Creates a NamespaceBlock for one path segment whose child is provided by `childAst` (evaluated
+    * within the pushed namespace scope).
+    */
+  private def namespaceBlockWithChild(
+    tsModuleDecl: BabelNodeInfo,
+    idNode: Value,
+    name: String,
+    code: String
+  )(childAst: => Ast): Ast =
+    val (_, fullName) = calcTypeNameAndFullName(tsModuleDecl, Option(name))
+    val namespaceNode = NewNamespaceBlock()
+        .code(code)
+        .lineNumber(line(idNode))
+        .columnNumber(column(idNode))
+        .filename(parserResult.filename)
+        .name(name)
+        .fullName(fullName)
+
+    methodAstParentStack.push(namespaceNode)
+    dynamicInstanceTypeStack.push(fullName)
+    scope.pushNewMethodScope(fullName, name, namespaceNode, None)
+
+    val child = childAst
+
+    methodAstParentStack.pop()
+    dynamicInstanceTypeStack.pop()
+    scope.popScope()
+
+    Ast(namespaceNode).withChild(child)
+
+  private def astForSingleModule(
+    tsModuleDecl: BabelNodeInfo,
+    nameOverride: Option[String],
+    codeOverride: Option[String]
+  ): Ast =
+    val (nameRaw, fullNameRaw) = calcTypeNameAndFullName(tsModuleDecl, nameOverride)
     val name                   = stripQuotes(nameRaw)
     val fullName               = fullNameRaw.replace(nameRaw, name)
 
     val namespaceNode = NewNamespaceBlock()
-        .code(tsModuleDecl.code)
+        .code(codeOverride.getOrElse(tsModuleDecl.code))
         .lineNumber(tsModuleDecl.lineNumber)
         .columnNumber(tsModuleDecl.columnNumber)
         .filename(parserResult.filename)
@@ -588,7 +676,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     scope.popScope()
 
     Ast(namespaceNode).withChild(blockAst)
-  end astForModule
+  end astForSingleModule
 
   protected def astForInterface(tsInterface: BabelNodeInfo): Ast =
     val (typeName, typeFullName) = calcTypeNameAndFullName(tsInterface)
