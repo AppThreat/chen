@@ -1,0 +1,37 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/RealWorldTsAstCreationPassTest.scala
+  s_41bee48ebfde57::t_c1f8bbedba1fd9 1-70
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-namespace/performance.ts
+  s_41bee48ebfde57::t_7b81d0f0418a98 1-146
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-namespace/performance.ts.json
+  s_41bee48ebfde57::t_817b0349a7ccdc 1
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-namespace/README.md
+  s_41bee48ebfde57::t_6a2ee5e8ebd210 1-21
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-decorators/cats.controller.ts.json
+  s_41bee48ebfde57::t_7b81d0f0418a98 1
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-decorators/cats.controller.ts.typemap
+  s_41bee48ebfde57::t_7b81d0f0418a98 1
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-decorators/cats.controller.ts
+  s_41bee48ebfde57::t_7b81d0f0418a98 1-33
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-namespace/performance.ts.typemap
+  s_41bee48ebfde57::t_817b0349a7ccdc 1
+platform/frontends/jssrc2cpg/src/test/resources/babel8-ts-decorators/README.md
+  s_41bee48ebfde57::t_33e1e727267ff7 1-20
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTypesCreator.scala
+  s_41bee48ebfde57::t_04a7d25401c748 587,641
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c71dc56ce8347081abc6847f2a9fc057731f7865",
+  "prompts": {},
+  "sessions": {
+    "s_41bee48ebfde57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46ab4db8-b1f2-4444-bb7f-de59e23a1e7b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
