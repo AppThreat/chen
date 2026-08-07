@@ -337,10 +337,10 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     // Babel 8 wraps enum members in a TSEnumBody node (tsEnum.body.members);
     // Babel 7 kept them directly on the declaration (tsEnum.members).
     val enumMembersJson =
-      if hasKey(tsEnum.json, "body") && hasKey(tsEnum.json("body"), "members") then
-        tsEnum.json("body")("members").arr
-      else if hasKey(tsEnum.json, "members") then tsEnum.json("members").arr
-      else ujson.Arr().arr
+        if hasKey(tsEnum.json, "body") && hasKey(tsEnum.json("body"), "members") then
+          tsEnum.json("body")("members").arr
+        else if hasKey(tsEnum.json, "members") then tsEnum.json("members").arr
+        else ujson.Arr().arr
     val memberAsts = enumMembersJson.toList.flatMap(m =>
         astsForEnumMember(createBabelNodeInfo(m))
     )

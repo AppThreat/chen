@@ -50,6 +50,32 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside {
           file.delete()
   }
 
+  /** Builds a CPG from a pre-generated astgen output committed under
+    * `src/test/resources/<resourceDir>` (the source file plus its `.json` and
+    * optional `.typemap`). astgen is NOT invoked: the committed `.json` is reused
+    * via `astGenOutDir`, which lets us pin a real (e.g. Babel 8) AST shape
+    * independent of whichever astgen happens to be on PATH.
+    */
+  protected object AstJsonFixture extends Fixture {
+    def apply(resourceDir: String, tsTypes: Boolean = true)(f: Cpg => Unit): Unit = {
+      val fixtureRoot = File(getClass.getResource(s"/$resourceDir").toURI)
+      File.usingTemporaryDirectory("jssrc2cpgAstJson") { dir =>
+        fixtureRoot.children.foreach(_.copyToDirectory(dir))
+        val cpg = newEmptyCpg()
+        val config = Config(tsTypes = tsTypes)
+            .withInputPath(dir.toString)
+            .withOutputPath(dir.toString)
+            .withAstGenOutDir(dir.toString)
+        val astGenResult    = new AstGenRunner(config).execute(dir)
+        val astCreationPass = new AstCreationPass(cpg, astGenResult, config)
+        astCreationPass.createAndApply()
+        new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
+        new BuiltinTypesPass(cpg).createAndApply()
+        f(cpg)
+      }
+    }
+  }
+
   protected object TsAstFixture extends Fixture {
     def apply(code: String, filename: String = "code.ts", tsTypes: Boolean = false)(f: Cpg => Unit): Unit = {
       File.usingTemporaryDirectory("jssrc2cpgTests") { dir =>

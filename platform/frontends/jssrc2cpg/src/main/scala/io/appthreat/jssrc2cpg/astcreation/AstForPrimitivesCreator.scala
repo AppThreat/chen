@@ -128,9 +128,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     // Babel 8 renames call-site type parameters to `typeArguments`
     // (Babel 7 used `typeParameters`).
     val typeArgsKey =
-      if hasKey(instantiationExpr.json, "typeArguments") then Some("typeArguments")
-      else if hasKey(instantiationExpr.json, "typeParameters") then Some("typeParameters")
-      else None
+        if hasKey(instantiationExpr.json, "typeArguments") then Some("typeArguments")
+        else if hasKey(instantiationExpr.json, "typeParameters") then Some("typeParameters")
+        else None
     typeArgsKey.foreach { key =>
       val typeParams = instantiationExpr.json(key)
       if hasKey(typeParams, "params") then
