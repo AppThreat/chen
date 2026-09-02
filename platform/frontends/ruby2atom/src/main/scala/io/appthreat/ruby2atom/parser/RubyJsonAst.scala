@@ -31,6 +31,7 @@ object ParserKeys:
   val Guard            = "guard"
   val CallOperator     = "call_operator"
   val HasParentheses   = "has_parentheses"
+  val HasSig           = "has_sig"
   val Heredoc          = "heredoc"
   val PercentArray     = "percent_array"
   val Key              = "key"

@@ -57,11 +57,19 @@ object RubyProgramSummaryBuilder:
       val bodyStmts = decl.body match
         case stmtList: StatementList => stmtList.statements
         case expr                    => List(expr)
+      // Sorbet types when the method carries a sig (ruby_ast_gen marks the attachment, the JSON
+      // creator resolves the block), the untyped defaults otherwise.
+      def summaryMethod(name: String, sig: Option[Sig]): RubyMethod =
+          RubyMethod(
+            name,
+            sig.fold(List.empty[(String, String)])(_.parameterTypes),
+            sig.fold(Defines.Any)(_.returnType),
+            Option(typeName)
+          )
+
       val methods = bodyStmts.collect {
-          case m: MethodDeclaration =>
-              RubyMethod(m.methodName, List.empty, Defines.Any, Option(typeName))
-          case m: SingletonMethodDeclaration =>
-              RubyMethod(m.methodName, List.empty, Defines.Any, Option(typeName))
+          case m: MethodDeclaration          => summaryMethod(m.methodName, m.sig)
+          case m: SingletonMethodDeclaration => summaryMethod(m.methodName, m.sig)
       }
       val fields = bodyStmts.flatMap {
           case SingleAssignment(lhs: RubyFieldIdentifier, _, _) =>

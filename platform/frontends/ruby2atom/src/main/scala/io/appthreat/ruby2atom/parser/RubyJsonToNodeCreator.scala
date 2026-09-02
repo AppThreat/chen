@@ -300,7 +300,139 @@ class RubyJsonToNodeCreator(
   private def visitBackRef(obj: Obj): RubyExpression = SimpleIdentifier()(obj.toTextSpan)
 
   private def visitBegin(obj: Obj): RubyExpression =
-      StatementList(obj.visitArray(ParserKeys.Body))(obj.toTextSpan)
+      lowerBodyList(obj, ParserKeys.Body, obj.toTextSpan)
+
+  /** Lowers a raw statement array into a `StatementList`, attaching Sorbet signatures on the way
+    * (see [[attachSigTypes]]). `visitArray` maps the raw values one-to-one, so the raw statements
+    * and the lowered ones stay positionally aligned.
+    */
+  private def lowerBodyList(container: Obj, bodyKey: String, span: TextSpan): StatementList =
+    val lowered = container.visitArray(bodyKey)
+    StatementList(attachSigTypes(container(bodyKey).arr.toList, lowered))(span)
+
+  /** Sorbet `sig` blocks: the generator (ruby_ast_gen 2.x) marks the def/defs immediately
+    * preceded by one in the same statement list with `has_sig`, and the marked def's preceding
+    * sibling is the `sig` block whose body carries the types. The fact is read with `booleanFact` -
+    * never `getOrElse(<heuristic>)` - so for current JSON absence decides every negative case and
+    * no adjacency heuristic ever runs; JSON from an older generator has no marked defs and keeps
+    * `Any` types.
+    */
+  private def attachSigTypes(
+    rawStatements: List[ujson.Value],
+    lowered: List[RubyExpression]
+  ): List[RubyExpression] =
+      if rawStatements.sizeCompare(lowered) != 0 then lowered
+      else
+        rawStatements
+            .zip(lowered)
+            .zipWithIndex
+            .map { case ((raw, statement), index) =>
+                val marked = raw match
+                  case rawObj: ujson.Obj => booleanFact(rawObj, ParserKeys.HasSig, fallback = false)
+                  case _                 => false
+                if !marked then statement
+                else
+                  statement match
+                    case declaration: MethodDeclaration =>
+                        precedingSig(lowered, index).fold(declaration) { sig =>
+                            MethodDeclaration(
+                              declaration.methodName,
+                              declaration.parameters,
+                              declaration.body
+                            )(declaration.span, Option(sig))
+                        }
+                    case declaration: SingletonMethodDeclaration =>
+                        precedingSig(lowered, index).fold(declaration) { sig =>
+                            SingletonMethodDeclaration(
+                              declaration.target,
+                              declaration.methodName,
+                              declaration.parameters,
+                              declaration.body
+                            )(declaration.span, Option(sig))
+                        }
+                    case other => other
+                end if
+            }
+            .toList
+  end attachSigTypes
+
+  /** The preceding statement must actually *be* the `sig` block for the fact to be usable; if it
+    * lowered to something unexpected, the def keeps no signature rather than guessing. Every form
+    * the generator marks is recognised here, matched structurally rather than on the span text:
+    * `sig { ... }`, `sig { ... }.checked(:never)` (the block is the receiver of a trailing send
+    * chain) and `T::Sig::WithoutRuntime.sig { ... }` (the call has a constant receiver).
+    */
+  private def precedingSig(lowered: List[RubyExpression], index: Int): Option[Sig] =
+      if index == 0 then None else sigBlockBody(lowered(index - 1)).flatMap(sigTypesFrom)
+
+  private def sigBlockBody(statement: RubyExpression): Option[RubyExpression] =
+      statement match
+        case call: SimpleCallWithBlock if call.target.text == "sig" => Option(call.block.body)
+        case call: MemberCallWithBlock if call.methodName == "sig"  => Option(call.block.body)
+        // `.checked(:never)`, `.on_failure(...)`: unwrap the chain to reach the block.
+        case call: MemberCall => sigBlockBody(call.target)
+        case _                => None
+
+  /** Reads the types out of a `sig` block body. The chain shape is Sorbet's: `params(x: X,
+    * ...).returns(Y)` is one expression where `returns` hangs off the `params` call,
+    * `abstract.void` is a member-access chain, and a bare `sig { void }` is an identifier.
+    */
+  private def sigTypesFrom(body: RubyExpression): Option[Sig] =
+    val statements = body match
+      case list: StatementList => list.statements
+      case expression          => expression :: Nil
+
+    var parameterTypes: List[(String, String)] = List.empty
+    var returnType: String                     = Defines.Any
+    var recognized                             = false
+
+    statements.foreach {
+        case MemberCall(target, _, "returns", returnArgs) =>
+            recognized = true
+            returnType = returnArgs.headOption.fold(Defines.Any)(sigTypeText)
+            target match
+              case SimpleCall(_, parameterArgs) => parameterTypes = sigParameterTypes(parameterArgs)
+              case _                            =>
+        case SimpleCall(target, parameterArgs) =>
+            recognized = true
+            target.text match
+              case "params"  => parameterTypes = sigParameterTypes(parameterArgs)
+              case "returns" => returnType = parameterArgs.headOption.fold(Defines.Any)(sigTypeText)
+              case "void"    => returnType = Defines.Void
+              case _         =>
+        case MemberAccess(target, _, "void") =>
+            recognized = true
+            returnType = Defines.Void
+            // `params(label: String).void` ends the chain in void: the parameters hang off the
+            // member access's target.
+            target match
+              case SimpleCall(_, parameterArgs) => parameterTypes = sigParameterTypes(parameterArgs)
+              case _                            =>
+        case identifier: SimpleIdentifier if identifier.text == "void" =>
+            recognized = true
+            returnType = Defines.Void
+        case _ =>
+    }
+    if recognized then Option(Sig(parameterTypes, returnType)) else None
+  end sigTypesFrom
+
+  /** `params(x: X, y: Y)` argument associations, the names stripped of their symbol colon. */
+  private def sigParameterTypes(args: List[RubyExpression]): List[(String, String)] =
+      args.collect { case Association(key: StaticLiteral, value) =>
+          (key.innerText.stripPrefix(":"), sigTypeText(value))
+      }
+
+  /** A single Sorbet type expression as the summary's type text. `T.nilable(X)` collapses to `X`;
+    * `T.untyped`/`T.anything`/`T.any(...)` map to the summary's unknown, and generic applications
+    * such as `T::Array[X]` degrade to `ANY` too - a follow-up once the summary can express them.
+    */
+  private def sigTypeText(expression: RubyExpression): String =
+      expression match
+        case MemberCall(_, _, "nilable", inner :: _)             => sigTypeText(inner)
+        case MemberAccess(_, _, "untyped" | "anything")          => Defines.Any
+        case MemberCall(_, _, "untyped" | "anything" | "any", _) => Defines.Any
+        case _: IndexAccess                                      => Defines.Any
+        case other                                               => other.text
 
   private def visitGroupedParameter(arrayParam: ArrayLiteral): RubyExpression =
     val freshTmpVar       = variableNameGen.fresh
@@ -725,7 +857,8 @@ class RubyJsonToNodeCreator(
   private def visitKwBegin(obj: Obj): RubyExpression =
     val stmts = obj(ParserKeys.Body) match
       case o: Obj => visit(o) :: Nil
-      case _: Arr => obj.visitArray(ParserKeys.Body)
+      case _: Arr =>
+          attachSigTypes(obj(ParserKeys.Body).arr.toList, obj.visitArray(ParserKeys.Body))
       case _ =>
           val span = obj.toTextSpan
           logger.warn(s"Unhandled JSON body type for `KwBegin`: ${span.text}")
@@ -1281,7 +1414,8 @@ class RubyJsonToNodeCreator(
                           )
                       val singletonBlockMethod =
                           SingletonObjectMethodDeclaration(methodName, parameters, body, name)(
-                            method.span
+                            method.span,
+                            method.sig
                           )
                       SingleAssignment(memberAccess, "=", singletonBlockMethod)(
                         method.span.spanStart(s"${memberAccess.span.text} = ${method.span.text}")

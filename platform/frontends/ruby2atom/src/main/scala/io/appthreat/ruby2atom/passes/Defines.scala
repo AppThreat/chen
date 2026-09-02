@@ -3,6 +3,7 @@ package io.appthreat.ruby2atom.passes
 object Defines:
 
   val Any: String          = "ANY"
+  val Void: String         = "void"
   val Defined: String      = "defined"
   val Undefined: String    = "Undefined"
   val Object: String       = "Object"

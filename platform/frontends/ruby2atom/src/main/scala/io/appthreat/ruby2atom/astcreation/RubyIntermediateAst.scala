@@ -141,34 +141,53 @@ object RubyIntermediateAst:
     def parameters: List[RubyExpression]
     def body: RubyExpression
 
+    /** Sorbet signature resolved from the `sig` block the generator marks with `has_sig`
+      * (ruby_ast_gen 2.x); `None` for an untyped method.
+      */
+    def sig: Option[Sig]
+
+  /** The types of a Sorbet `sig` block: `params(x: X, ...)` names mapped to their type text
+    * (`T.nilable(X)` already reduced to `X`, `T.untyped`/`T.any(...)` to `ANY`) and the
+    * `.returns(X)` / `.void` answer.
+    */
+  final case class Sig(parameterTypes: List[(String, String)], returnType: String)
+
   final case class MethodDeclaration(
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression
   )(
-    span: TextSpan
+    span: TextSpan,
+    signature: Option[Sig] = None
   ) extends RubyExpression(span)
       with ProcedureDeclaration
-      with AllowedTypeDeclarationChild
+      with AllowedTypeDeclarationChild:
+    def sig: Option[Sig] = signature
 
   final case class SingletonMethodDeclaration(
     target: RubyExpression,
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression
-  )(span: TextSpan)
-      extends RubyExpression(span)
+  )(
+    span: TextSpan,
+    signature: Option[Sig] = None
+  ) extends RubyExpression(span)
       with ProcedureDeclaration
-      with AllowedTypeDeclarationChild
+      with AllowedTypeDeclarationChild:
+    def sig: Option[Sig] = signature
 
   final case class SingletonObjectMethodDeclaration(
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression,
     baseClass: RubyExpression
-  )(span: TextSpan)
-      extends RubyExpression(span)
-      with ProcedureDeclaration
+  )(
+    span: TextSpan,
+    signature: Option[Sig] = None
+  ) extends RubyExpression(span)
+      with ProcedureDeclaration:
+    def sig: Option[Sig] = signature
 
   sealed trait MethodParameter:
     def name: String
