@@ -22,7 +22,33 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try, Using}
 
+object RubyAstGenRunner:
+
+  /** Default generator binary, resolved through `PATH`. */
+  val DefaultProgram: String = "rbastgen"
+
+  /** System property and environment variable that override the generator binary. */
+  val ProgramProperty: String = "rbastgen.path"
+  val ProgramEnvVar: String   = "RBASTGEN_PATH"
+
+  /** Chooses the generator binary. A custom build is selected without touching `PATH`, which is
+    * what makes it usable when ruby2atom runs inside another process (e.g. atom): the property can
+    * be set with `-Drbastgen.path=...` or `System.setProperty`, the environment variable by the
+    * caller's shell. Blank values are ignored so that `RBASTGEN_PATH=` behaves like unset.
+    */
+  def resolveProgram(
+    property: Option[String] = Option(System.getProperty(ProgramProperty)),
+    environment: Option[String] = sys.env.get(ProgramEnvVar)
+  ): String =
+      property.orElse(environment).map(_.trim).filter(_.nonEmpty).getOrElse(DefaultProgram)
+end RubyAstGenRunner
+
 class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
+
+  /** Quoted for the shell `ExternalCommand` runs the generator through; a bare program name still
+    * resolves through `PATH` when quoted.
+    */
+  private def rbastgen: String = s"\"${RubyAstGenRunner.resolveProgram()}\""
 
   override def fileFilter(file: String, out: File): Boolean =
       file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match
@@ -36,7 +62,7 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
   override def runAstGenNative(in: String, out: File, exclude: String, include: String)(implicit
     metaData: AstGenProgramMetaData
   ): AstGenRunnerResult =
-    val command     = s"rbastgen -i $in -o ${out.pathAsString}"
+    val command     = s"$rbastgen -i $in -o ${out.pathAsString}"
     val excludeArgs = if exclude.isEmpty then "" else s" -e '$exclude'"
     ExternalCommand.run(s"$command$excludeArgs", in, true) match
       case Success(result) =>
@@ -61,7 +87,7 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
     */
   private lazy val astGenVersion: String =
       ExternalCommand
-          .run("rbastgen --version", config.inputPath)
+          .run(s"$rbastgen --version", config.inputPath)
           .toOption
           .flatMap(_.headOption)
           .map(_.trim)

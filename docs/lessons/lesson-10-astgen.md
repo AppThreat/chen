@@ -50,6 +50,11 @@ generator. `executableName` picks a platform-specific suffix at runtime:
 `PATH` it uses the bare name; otherwise it falls back to the bundled binary under
 `<executableDir>/astgen/`.
 
+`RubyAstGenRunner` overrides that resolution: it invokes the binary named by the
+`rbastgen.path` system property, else `RBASTGEN_PATH`, else `rbastgen` from `PATH`. That is the
+supported way to test a generator build (see Lesson 6), including when a frontend is embedded in
+another process such as atom.
+
 ## The `ExternalCommand` API (real signatures)
 
 [`io.appthreat.x2cpg.utils.ExternalCommand`](https://github.com/AppThreat/chen/blob/main/platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/ExternalCommand.scala):

@@ -19,6 +19,7 @@ object Defines:
   val Hash: String         = "Hash"
   val Encoding: String     = "Encoding"
   val Regexp: String       = "Regexp"
+  val Complex: String      = "Complex"
   val Lambda: String       = "lambda"
   val Proc: String         = "proc"
   val Loop: String         = "loop"

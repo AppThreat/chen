@@ -345,7 +345,8 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
                 matchSplatExpression,
                 returnLastNode(thenClause, transform)
               )(x.span)
-          case InClause(pattern, body) => InClause(pattern, returnLastNode(body, transform))(x.span)
+          case InClause(pattern, guard, body) =>
+              InClause(pattern, guard, returnLastNode(body, transform))(x.span)
 
     x match
       case StatementList(statements) =>

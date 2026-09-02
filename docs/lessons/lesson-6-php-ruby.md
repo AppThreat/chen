@@ -12,8 +12,10 @@ into a CPG: how PHP relies on an external `php-parser` and a local PHP runtime, 
 - SBT 1.10+
 - **PHP 7.1+** (8.3+ recommended), available on `PATH`, with the zip/xml extensions — required by
   `php2atom`.
-- **Ruby** with the `ruby_ast_gen` tool (shipped via `@appthreat/atom-parsetools` as `rbastgen`)
-  — required by `ruby2atom`.
+- **Ruby** 3.4.x or 4.0.x plus `@appthreat/atom-parsetools`, which provides `rbastgen` — required
+  by `ruby2atom`. A generator that cannot parse still exits 0, so an unusable `rbastgen` yields an
+  _empty_ graph rather than an error: check `rbastgen --version` first if Ruby results come back
+  empty.
 - Local clone of [chen](https://github.com/AppThreat/chen): `sbt compile`
 
 ## Conceptual Background
@@ -75,18 +77,44 @@ final case class Config(
     with AstGenConfig[Config]
 ```
 
-Through the `AstGenConfig` mix-in the program name is `ruby_ast_gen` (invoked as `rbastgen`),
-the config prefix is `ruby2atom`, and a default ignore regex skips `spec/`, `test(s)/`,
-`vendor/`, and DB migration files.
+Through the `AstGenConfig` mix-in the program name is `rbastgen`, the config prefix is
+`ruby2atom`, and a default ignore regex skips `spec/`, `test(s)/`, `vendor/`, and DB migration
+files.
+
+`rbastgen` is itself a Node wrapper (`atom-parsetools/rbastgen.js`): it runs a bundled copy of the
+`ruby_ast_gen` Ruby script through an interpreter, choosing the script with `RUBY_ASTGEN_BIN` and
+the interpreter with `RUBY_CMD` / `ATOM_RUBY_HOME`. Testing a generator branch therefore usually
+means repointing the wrapper (`RUBY_ASTGEN_BIN=/path/to/ruby_ast_gen/exe/ruby_ast_gen`) rather than
+replacing `rbastgen`.
+
+When the executable itself has to change, `RubyAstGenRunner` resolves it in this order, so no
+`PATH` juggling is needed — which matters because ruby2atom usually runs inside another process
+(atom loads it as a library and it inherits that process's environment):
+
+1. the `rbastgen.path` system property (`-Drbastgen.path=/path/to/rbastgen`);
+2. the `RBASTGEN_PATH` environment variable;
+3. `rbastgen` from `PATH`.
+
+The resolved binary is also what the parse cache fingerprints, via `rbastgen --version`, so
+switching generators invalidates cached ASTs instead of silently reusing them.
 
 ### Pass Pipeline (`Ruby2Atom.createCpg`)
 
 1. **MetaDataPass** (language = `RUBYSRC`)
 2. **ConfigFileCreationPass** — `Gemfile`, `*.gemspec`, etc.
 3. `RubyAstGenRunner(config).execute(tmpDir)` — runs `rbastgen` to produce JSON ASTs.
-4. **AstCreationPass** — parses the JSON in parallel (`RubyJsonParser` →
-   `RubyJsonToNodeCreator` → `AstCreator`) and builds the graph.
-5. **TypeNodePass.withTypesFromCpg** — materialises `TYPE` nodes.
+4. **Parse phase** — every file is read in parallel (`RubyJsonParser` → `RubyJsonToNodeCreator`)
+   into an intermediate AST. Node types this frontend does not know are counted per type and
+   reported once per run rather than logged per node.
+5. **`RubyProgramSummaryBuilder.build`** — a program-wide inventory (classes, modules, methods,
+   fields, `Data.define`/`Struct.new`) keyed by require-style path, built before any AST creation
+   so that `require` handling and scope resolution can consult it.
+6. **AstCreationPass** — builds the graph from the intermediate ASTs, each `AstCreator` receiving
+   that summary.
+7. **ImportsPass** and **ImplicitRequirePass** — materialise explicit imports and, for
+   zeitwerk-style autoloading, the requires a file relies on but does not write.
+8. **TypeNodePass.withTypesFromCpg** — materialises `TYPE` nodes (last, so it sees the nodes the
+   import passes added).
 
 `createCpgWithOverlays` then runs the default overlays. The ruby2atom `postProcessingPasses`
 (under `x2cpg.frontendspecific.ruby2atom`) add import/type-recovery and call-linking passes

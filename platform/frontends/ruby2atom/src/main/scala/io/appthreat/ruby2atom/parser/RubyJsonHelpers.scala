@@ -61,6 +61,25 @@ object RubyJsonHelpers:
     ): List[RubyExpression] =
         o(key).arr.map(visit).toList
 
+    /** The raw JSON object stored under `key`, if it is present and is an object. Unlike
+      * `o(key).asInstanceOf[ujson.Obj]`, a missing or non-object value yields `None` instead of
+      * throwing and costing the whole file. (Not named `objOpt`: ujson.Value already defines a
+      * nullary `objOpt` and `obj.objOpt(key)` would silently degrade to `LinkedHashMap.apply`.)
+      */
+    def getAsObj(key: String): Option[ujson.Obj] = o.obj.get(key) match
+      case Some(x: ujson.Obj) => Some(x)
+      case _                  => None
+
+    /** The string stored under `key`, if it is present and is a string. */
+    def getAsString(key: String): Option[String] = o.obj.get(key) match
+      case Some(ujson.Str(x)) => Some(x)
+      case _                  => None
+
+    /** The boolean stored under `key`, if it is present and is a boolean. */
+    def getAsBool(key: String): Option[Boolean] = o.obj.get(key) match
+      case Some(ujson.Bool(x)) => Some(x)
+      case _                   => None
+
     def contains(key: String): Boolean = o.obj.get(key).exists(x => x != null && x != ujson.Null)
   end JsonObjHelper
 
