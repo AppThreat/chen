@@ -310,12 +310,12 @@ class RubyJsonToNodeCreator(
     val lowered = container.visitArray(bodyKey)
     StatementList(attachSigTypes(container(bodyKey).arr.toList, lowered))(span)
 
-  /** Sorbet `sig` blocks: the generator (ruby_ast_gen 2.x) marks the def/defs immediately
-    * preceded by one in the same statement list with `has_sig`, and the marked def's preceding
-    * sibling is the `sig` block whose body carries the types. The fact is read with `booleanFact` -
-    * never `getOrElse(<heuristic>)` - so for current JSON absence decides every negative case and
-    * no adjacency heuristic ever runs; JSON from an older generator has no marked defs and keeps
-    * `Any` types.
+  /** Sorbet `sig` blocks: the generator (ruby_ast_gen 2.x) marks the def/defs immediately preceded
+    * by one in the same statement list with `has_sig`, and the marked def's preceding sibling is
+    * the `sig` block whose body carries the types. The fact is read with `booleanFact` - never
+    * `getOrElse(<heuristic>)` - so for current JSON absence decides every negative case and no
+    * adjacency heuristic ever runs; JSON from an older generator has no marked defs and keeps `Any`
+    * types.
     */
   private def attachSigTypes(
     rawStatements: List[ujson.Value],
