@@ -19,7 +19,7 @@ final case class Config(downloadDependencies: Boolean = false, useTypeStubs: Boo
     with TypeStubConfig[Config]
     with AstGenConfig[Config]:
 
-  override val astGenProgramName: String        = "ruby_ast_gen"
+  override val astGenProgramName: String        = "rbastgen"
   override val astGenConfigPrefix: String       = "ruby2atom"
   override val multiArchitectureBuilds: Boolean = true
 

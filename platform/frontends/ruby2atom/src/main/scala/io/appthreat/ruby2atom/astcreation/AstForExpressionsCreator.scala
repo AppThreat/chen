@@ -56,6 +56,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     case node: ProcOrLambdaExpr                 => astForProcOrLambdaExpr(node)
     case node: SingletonObjectMethodDeclaration => astForSingletonObjectMethodDeclaration(node)
     case node: RubyCallWithBlock[?]             => astForCallWithBlock(node)
+    case node: RightwardMatch                   => astForRightwardMatch(node)
     case node: SelfIdentifier                   => astForSelfIdentifier(node)
     case node: StatementList                    => astForStatementList(node)
     case node: MultipleAssignment => blockAst(blockNode(node), astsForStatement(node).toList)
@@ -591,8 +592,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 matchSplatExpression,
                 reassign(lhs, op, thenClause, transform)
               )(x.span)
-          case InClause(pattern, body) =>
-              InClause(pattern, reassign(lhs, op, body, transform))(x.span)
+          case InClause(pattern, guard, body) =>
+              InClause(pattern, guard, reassign(lhs, op, body, transform))(x.span)
 
     rhs match
       case StatementList(statements) =>

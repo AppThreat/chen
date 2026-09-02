@@ -2,21 +2,36 @@ package io.appthreat.ruby2atom.astcreation
 
 import io.appthreat.ruby2atom.astcreation.RubyIntermediateAst.{
     ArrayPattern,
+    Association,
     BinaryExpression,
     BreakExpression,
     CaseExpression,
+    ConstPattern,
     ControlFlowStatement,
     DoWhileExpression,
     ElseClause,
+    FindPattern,
     ForExpression,
+    GuardClause,
+    HashPattern,
     IfExpression,
     InClause,
+    MatchAlt,
+    MatchAs,
+    MatchNilPattern,
+    DefaultMultipleAssignment,
+    IndexAccess,
+    StaticLiteral,
+    MatchRest,
     MatchVariable,
     MemberCall,
     NextExpression,
     OperatorAssignment,
+    Pin,
     RescueExpression,
+    TextSpan,
     ReturnExpression,
+    RightwardMatch,
     RubyExpression,
     SimpleCall,
     SimpleIdentifier,
@@ -309,35 +324,19 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
       else
         inClauses.foldRight[Option[RubyExpression]](elseThenClause) {
             (inClause: InClause, restClause: Option[RubyExpression]) =>
-              val (condition, body) = inClause.pattern match
-                case x: ArrayPattern =>
-                    val condition = expr.map(e => BinaryExpression(x, "===", e)(x.span)).getOrElse(
-                      inClause.pattern
-                    )
-                    val body = inClause.body
-
-                    val variables = x.children.collect { case x: MatchVariable =>
-                        x
-                    }
-
-                    val conditionBody = if variables.nonEmpty then
-                      StatementList(variables.map { x =>
-                        val lhs = SimpleIdentifier()(x.span)
-                        SingleAssignment(lhs, "=", x)(
-                          inClause.span
-                              .spanStart(
-                                s"${lhs.span.text} = ${RubyOperators.arrayPatternMatch}(${lhs.span.text})"
-                              )
-                        )
-                      } :+ body)(body.span)
-                    else
-                      body
-
-                    (condition, conditionBody)
-                case x => (x, inClause.body)
+              val target            = expr.getOrElse(inClause.pattern)
+              val (conds, bindings) = destructureMatchPattern(inClause.pattern, target)
+              val patternCondition  = conjunction(conds, inClause.span)
+              val guardedCondition  = applyGuard(patternCondition, inClause.guard)
+              val body =
+                  if bindings.nonEmpty then
+                    StatementList(
+                      bindings ++ inClause.body.asStatementList.statements
+                    )(inClause.body.span)
+                  else inClause.body
 
               val conditional = IfExpression(
-                condition,
+                guardedCondition,
                 body,
                 List.empty,
                 restClause.map { els => ElseClause(els.asStatementList)(els.span) }
@@ -362,4 +361,152 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
   private def astForOperatorAssignmentExpression(node: OperatorAssignment): Ast =
     val loweredAssignment = lowerAssignmentOperator(node.lhs, node.rhs, node.op, node.span)
     astForControlStructureExpression(loweredAssignment)
+
+  private def nilPatternLiteral(span: TextSpan): RubyExpression =
+      StaticLiteral(Defines.getBuiltInType(Defines.NilClass))(span.spanStart("nil"))
+
+  private def trueLiteral(span: TextSpan): RubyExpression =
+      StaticLiteral(Defines.getBuiltInType(Defines.TrueClass))(span.spanStart("true"))
+
+  /** Folds the (possibly empty) condition list of a pattern into a single RubyExpression. */
+  protected def conjunction(conds: List[RubyExpression], span: TextSpan): RubyExpression =
+      conds.foldRight(trueLiteral(span): RubyExpression) { (cond, acc) =>
+          BinaryExpression(cond, "&&", acc)(span)
+      }
+
+  private def applyGuard(condition: RubyExpression, guard: Option[RubyExpression]): RubyExpression =
+      guard match
+        case Some(GuardClause(guardCondition, isUnless)) =>
+            val guarded =
+                if isUnless then
+                  UnaryExpression("!", guardCondition)(guardCondition.span)
+                else guardCondition
+            BinaryExpression(condition, "&&", guarded)(condition.span)
+        case _ => condition
+
+  private def matchVariableAssignment(
+    matchVariable: MatchVariable,
+    rhs: RubyExpression
+  ): SingleAssignment =
+    // `{ name: }` shorthand arrives with the trailing colon in the node's code.
+    val name = matchVariable.span.text.stripSuffix(":")
+    val lhs  = SimpleIdentifier()(matchVariable.span.spanStart(name))
+    SingleAssignment(lhs, "=", rhs)(
+      matchVariable.span.spanStart(s"${lhs.span.text} = ${rhs.span.text}")
+    )
+
+  /** Lowered bindings of a pattern position.
+    *
+    * @param pattern
+    *   the (sub-)pattern being destructured.
+    * @param target
+    *   the expression whose value the pattern is matched against.
+    * @return
+    *   the conditions that must hold for the pattern to match, and the assignments binding the
+    *   pattern's match variables to the corresponding parts of the target.
+    */
+  protected def destructureMatchPattern(
+    pattern: RubyExpression,
+    target: RubyExpression
+  ): (List[RubyExpression], List[SingleAssignment]) =
+    val equalMatch: List[RubyExpression] =
+        BinaryExpression(pattern, "===", target)(pattern.span) :: Nil
+
+    def indexedTarget(index: Int): RubyExpression =
+        IndexAccess(
+          target,
+          StaticLiteral(Defines.getBuiltInType(Defines.Integer))(
+            target.span.spanStart(index.toString)
+          ) :: Nil
+        )(target.span.spanStart(s"${target.span.text}[$index]"))
+
+    pattern match
+      case mv: MatchVariable => (Nil, matchVariableAssignment(mv, target) :: Nil)
+
+      case ArrayPattern(children) =>
+          val (conds, binds) = children.zipWithIndex
+              .map { case (child, idx) => destructureMatchPattern(child, indexedTarget(idx)) }
+              .unzip
+          (equalMatch ++ conds.flatten, binds.flatten)
+
+      case HashPattern(children) =>
+          val (conds, binds) = children
+              .map {
+                  case assoc: Association =>
+                      // `{ key: pattern }` matches `target[key]`; symbol keys keep their symbol form.
+                      val subTarget = IndexAccess(target, assoc.key :: Nil)(
+                        target.span.spanStart(s"${target.span.text}[${assoc.key.span.text}]")
+                      )
+                      destructureMatchPattern(assoc.value, subTarget)
+                  case mv: MatchVariable =>
+                      // `{ name: }` shorthand binds `target[:name]`.
+                      val key = StaticLiteral(Defines.getBuiltInType(Defines.Symbol))(
+                        mv.span.spanStart(s":${mv.span.text.stripSuffix(":")}")
+                      )
+                      val subTarget = IndexAccess(target, key :: Nil)(
+                        target.span.spanStart(s"${target.span.text}[${key.span.text}]")
+                      )
+                      (Nil, matchVariableAssignment(mv, subTarget) :: Nil)
+                  case rest: MatchRest => destructureMatchPattern(rest, target)
+                  case other           => destructureMatchPattern(other, target)
+              }
+              .unzip
+          (equalMatch ++ conds.flatten, binds.flatten)
+
+      case FindPattern(children) =>
+          // Element positions are not statically known, so variables bind to the whole target.
+          val (conds, binds) = children.map(child => destructureMatchPattern(child, target)).unzip
+          (equalMatch ++ conds.flatten, binds.flatten)
+
+      case ConstPattern(const, inner) =>
+          val (conds, binds) = destructureMatchPattern(inner, target)
+          (BinaryExpression(const, "===", target)(const.span) :: conds, binds)
+
+      case MatchAs(value, as) =>
+          val (conds, binds) = destructureMatchPattern(value, target)
+          as match
+            case mv: MatchVariable => (conds, binds :+ matchVariableAssignment(mv, target))
+            case _                 => (conds, binds)
+
+      case MatchAlt(left, right) =>
+          val (lConds, lBinds) = destructureMatchPattern(left, target)
+          val (rConds, rBinds) = destructureMatchPattern(right, target)
+          val altCondition =
+              BinaryExpression(
+                conjunction(lConds, pattern.span),
+                "||",
+                conjunction(rConds, pattern.span)
+              )(
+                pattern.span
+              ) :: Nil
+          // Both alternatives' bindings are emitted even though only the matching side binds at
+          // runtime - approximating that would need runtime knowledge chen does not have.
+          (altCondition, lBinds ++ rBinds)
+
+      case _: MatchNilPattern =>
+          (BinaryExpression(target, "==", nilPatternLiteral(target.span))(pattern.span) :: Nil, Nil)
+
+      case Pin(value) =>
+          (BinaryExpression(target, "==", value)(pattern.span) :: Nil, Nil)
+
+      case MatchRest(optTarget) =>
+          optTarget match
+            case Some(mv: MatchVariable) =>
+                (Nil, matchVariableAssignment(mv, target) :: Nil)
+            case _ => (Nil, Nil) // anonymous `*` binds nothing
+
+      case _ => (equalMatch, Nil) // literal/regexp/const patterns match via ===
+    end match
+  end destructureMatchPattern
+
+  /** `expr => pattern` and `expr in pattern`. */
+  protected def astForRightwardMatch(node: RightwardMatch): Ast =
+    val (conds, bindings) = destructureMatchPattern(node.pattern, node.value)
+    val lowered: RubyExpression =
+        if node.raisesOnNoMatch then
+          // The NoMatchingPatternError raise is control flow chen does not model; the assignment
+          // side of the match is what matters for data flow.
+          DefaultMultipleAssignment(bindings)(node.span)
+        else StatementList(bindings :+ conjunction(conds, node.span))(node.span)
+    astsForStatement(lowered).headOption.getOrElse(astForUnknown(node))
 end AstForControlStructuresCreator

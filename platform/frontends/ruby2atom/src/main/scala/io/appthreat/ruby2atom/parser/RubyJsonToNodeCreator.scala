@@ -11,6 +11,8 @@ import io.appthreat.x2cpg.frontendspecific.ruby2atom.ImportsPass.ImportCallNames
 import org.slf4j.LoggerFactory
 import ujson.*
 
+import scala.collection.mutable
+
 class RubyJsonToNodeCreator(
   variableNameGen: FreshNameGenerator[String] = FreshNameGenerator(id => s"<tmp-$id>"),
   procParamGen: FreshNameGenerator[Left[String, Nothing]] =
@@ -20,6 +22,29 @@ class RubyJsonToNodeCreator(
 
   private val logger       = LoggerFactory.getLogger(getClass)
   private val classNameGen = FreshNameGenerator(id => s"<anon-class-$id>")
+
+  /** Counts node types that could not be lowered (unknown to `AstType`, or depth-truncated by the
+    * generator), aggregated over this file instead of one warn log per node. `Ruby2Atom` folds the
+    * reports of all files into a single per-run summary.
+    */
+  private val unknownTypeCounts = mutable.LinkedHashMap.empty[String, Int]
+
+  /** Number of nodes per offending type, e.g. `unknown:kwargs -> 1`, `truncated:array -> 2`. */
+  def unknownTypeReport: Map[String, Int] = unknownTypeCounts.toMap
+
+  /** True when the file's `generator_version` is new enough that the syntax facts are complete,
+    * i.e. an absent fact key means the fact does not hold rather than "unknown".
+    */
+  private var syntaxFactsAuthoritative: Boolean = false
+
+  /** Reads a boolean syntax fact, using `fallback` only for JSON older than the facts. */
+  private def booleanFact(obj: Obj, key: String, fallback: => Boolean): Boolean =
+      obj.getAsBool(key) match
+        case Some(value) => value
+        case None        => !syntaxFactsAuthoritative && fallback
+
+  private def countUnknownNode(kind: String): Unit =
+      unknownTypeCounts.updateWith(kind)((old) => Some(old.getOrElse(0) + 1))
 
   private implicit val implVisit: ujson.Value => RubyExpression = (x: ujson.Value) => visit(x)
 
@@ -38,15 +63,24 @@ class RubyJsonToNodeCreator(
         case ujson.Null     => StatementList(Nil)(defaultTextSpan())
         case ujson.Str(x)   => StaticLiteral(getBuiltInType(Defines.String))(defaultTextSpan(x))
         case x =>
-            logger.warn(s"Unhandled ujson type ${x.getClass}")
+            countUnknownNode(s"json:${x.getClass.getSimpleName}")
             defaultResult()
 
   /** Main entrypoint of JSON deserialization.
     */
   def visitProgram(obj: ujson.Value): StatementList =
-      visit(obj.obj) match
-        case x: StatementList => x
-        case x                => StatementList(x :: Nil)(x.span)
+    // The syntax facts (has_parentheses, heredoc, ...) are emitted only when they hold, so an
+    // absent key means "false" - but only for a generator that emits them at all. Deciding that
+    // once per file from generator_version is what makes the text fallbacks below actually
+    // unreachable for current JSON; keying off the individual absent key would leave the old
+    // heuristic deciding every negative case (it misread multiline strings as heredocs).
+    syntaxFactsAuthoritative = obj.obj.get(ParserKeys.GeneratorVersion)
+        .flatMap(v => v.strOpt)
+        .flatMap(v => v.takeWhile(_.isDigit).toIntOption)
+        .exists(_ >= 2)
+    visit(obj.obj) match
+      case x: StatementList => x
+      case x                => StatementList(x :: Nil)(x.span)
 
   private def visit(obj: ujson.Obj): RubyExpression =
 
@@ -56,16 +90,21 @@ class RubyJsonToNodeCreator(
           case AstType.And                          => visitAnd(obj)
           case AstType.AndAssign                    => visitAndAssign(obj)
           case AstType.Arg                          => visitArg(obj)
+          case AstType.ArgExpression                => visitValueExpression(obj)
           case AstType.Args                         => visitArgs(obj)
           case AstType.Array                        => visitArray(obj)
           case AstType.ArrayPattern                 => visitArrayPattern(obj)
           case AstType.ArrayPatternWithTail         => visitArrayPatternWithTail(obj)
+          case AstType.ConstPattern                 => visitConstPattern(obj)
           case AstType.BackRef                      => visitBackRef(obj)
           case AstType.Begin                        => visitBegin(obj)
           case AstType.Block                        => visitBlock(obj)
           case AstType.BlockArg                     => visitBlockArg(obj)
+          case AstType.BlockArgExpression           => visitValueExpression(obj)
+          case AstType.BlockNilArg                  => visitBlockNilArg(obj)
           case AstType.BlockPass                    => visitBlockPass(obj)
           case AstType.BlockWithNumberedParams      => visitBlockWithNumberedParams(obj)
+          case AstType.ItBlock                      => visitItBlock(obj)
           case AstType.Break                        => visitBreak(obj)
           case AstType.CaseExpression               => visitCaseExpression(obj)
           case AstType.CaseMatchStatement           => visitCaseMatchStatement(obj)
@@ -73,15 +112,19 @@ class RubyJsonToNodeCreator(
           case AstType.ClassVariable                => visitClassVariable(obj)
           case AstType.ClassVariableAssign          => visitSingleAssignment(obj)
           case AstType.ConstVariableAssign          => visitSingleAssignment(obj)
+          case AstType.Complex                      => visitComplex(obj)
           case AstType.ConditionalSend              => visitSend(obj, isConditional = true)
           case AstType.Defined                      => visitDefined(obj)
           case AstType.DynamicString                => visitDynamicString(obj)
           case AstType.DynamicSymbol                => visitDynamicSymbol(obj)
+          case AstType.EmptyElse                    => visitEmptyElse(obj)
+          case AstType.EncodingLiteral              => visitEncodingLiteral(obj)
           case AstType.Ensure                       => visitEnsure(obj)
           case AstType.ExclusiveFlipFlop            => visitExclusiveFlipFlop(obj)
           case AstType.ExclusiveRange               => visitExclusiveRange(obj)
           case AstType.ExecutableString             => visitExecutableString(obj)
           case AstType.False                        => visitFalse(obj)
+          case AstType.FileLiteral                  => visitFileLiteral(obj)
           case AstType.FindPattern                  => visitFindPattern(obj)
           case AstType.Float                        => visitFloat(obj)
           case AstType.ForStatement                 => visitForStatement(obj)
@@ -89,6 +132,8 @@ class RubyJsonToNodeCreator(
           case AstType.ForwardArg                   => visitForwardArg(obj)
           case AstType.ForwardArgs                  => visitForwardArgs(obj)
           case AstType.ForwardedArgs                => visitForwardedArgs(obj)
+          case AstType.ForwardedKwRestArg           => visitForwardedKwRestArg(obj)
+          case AstType.ForwardedRestArg             => visitForwardedRestArg(obj)
           case AstType.GlobalVariable               => visitGlobalVariable(obj)
           case AstType.GlobalVariableAssign         => visitGlobalVariableAssign(obj)
           case AstType.Hash                         => visitHash(obj)
@@ -96,40 +141,56 @@ class RubyJsonToNodeCreator(
           case AstType.Identifier                   => visitIdentifier(obj)
           case AstType.IfGuard                      => visitIfGuard(obj)
           case AstType.IfStatement                  => visitIfStatement(obj)
+          case AstType.Index                        => visitIndexAccessAsSend(obj)
+          case AstType.IndexAssignment              => visitIndexAssignment(obj)
           case AstType.InclusiveFlipFlop            => visitInclusiveFlipFlop(obj)
           case AstType.InclusiveRange               => visitInclusiveRange(obj)
+          case AstType.InMatch                      => visitMatchPatternP(obj)
           case AstType.InPattern                    => visitInPattern(obj)
           case AstType.Int                          => visitInt(obj)
           case AstType.InstanceVariable             => visitInstanceVariable(obj)
           case AstType.InstanceVariableAssign       => visitSingleAssignment(obj)
+          case AstType.ItArg                        => visitItArg(obj)
           case AstType.KwArg                        => visitKwArg(obj)
           case AstType.KwBegin                      => visitKwBegin(obj)
+          case AstType.Kwargs                       => visitKwargs(obj)
           case AstType.KwNilArg                     => visitKwNilArg(obj)
           case AstType.KwOptArg                     => visitKwOptArg(obj)
           case AstType.KwRestArg                    => visitKwRestArg(obj)
           case AstType.KwSplat                      => visitKwSplat(obj)
           case AstType.LocalVariable                => visitLocalVariable(obj)
           case AstType.LocalVariableAssign          => visitSingleAssignment(obj)
+          case AstType.Lambda                       => visitLambda(obj)
+          case AstType.LineLiteral                  => visitLineLiteral(obj)
           case AstType.MatchAlt                     => visitMatchAlt(obj)
           case AstType.MatchAs                      => visitMatchAs(obj)
+          case AstType.MatchCurrentLine             => visitMatchCurrentLine(obj)
           case AstType.MatchNilPattern              => visitMatchNilPattern(obj)
           case AstType.MatchPattern                 => visitMatchPattern(obj)
           case AstType.MatchPatternP                => visitMatchPatternP(obj)
           case AstType.MatchRest                    => visitMatchRest(obj)
           case AstType.MatchVariable                => visitMatchVariable(obj)
           case AstType.MatchWithLocalVariableAssign => visitMatchWithLocalVariableAssign(obj)
+          case AstType.MatchWithTrailingComma       => visitValueExpression(obj)
+          case AstType.MatchWrite                   => visitMatchPattern(obj)
           case AstType.MethodDefinition             => visitMethodDefinition(obj)
           case AstType.ModuleDefinition             => visitModuleDefinition(obj)
           case AstType.MultipleAssignment           => visitMultipleAssignment(obj)
           case AstType.MultipleLeftHandSide         => visitMultipleLeftHandSide(obj)
           case AstType.Next                         => visitNext(obj)
           case AstType.Nil                          => visitNil(obj)
+          case AstType.Not                          => visitNot(obj)
+          case AstType.NumArgs                      => visitNumArgs(obj)
           case AstType.NthRef                       => visitNthRef(obj)
           case AstType.OperatorAssign               => visitOperatorAssign(obj)
+          case AstType.ObjCKwArg                    => visitObjCKwArg(obj)
+          case AstType.ObjCRestArg                  => visitNumArgs(obj)
+          case AstType.ObjCVarArgs                  => visitNumArgs(obj)
           case AstType.OptionalArgument             => visitOptionalArgument(obj)
           case AstType.Or                           => visitOr(obj)
           case AstType.OrAssign                     => visitOrAssign(obj)
           case AstType.Pair                         => visitPair(obj)
+          case AstType.Pin                          => visitPin(obj)
           case AstType.PostExpression               => visitPostExpression(obj)
           case AstType.PreExpression                => visitPreExpression(obj)
           case AstType.ProcArgument                 => visitProcArgument(obj)
@@ -141,6 +202,7 @@ class RubyJsonToNodeCreator(
           case AstType.RegexOption                  => visitRegexOption(obj)
           case AstType.ResBody                      => visitResBody(obj)
           case AstType.RestArg                      => visitRestArg(obj)
+          case AstType.RestArgExpression            => visitValueExpression(obj)
           case AstType.RescueStatement              => visitRescueStatement(obj)
           case AstType.ScopedConstant               => visitScopedConstant(obj)
           case AstType.Self                         => visitSelf(obj)
@@ -166,11 +228,18 @@ class RubyJsonToNodeCreator(
           case AstType.Yield                        => visitYield(obj)
 
     val astTypeStr = obj(ParserKeys.Type).str
-    AstType.fromString(astTypeStr) match
-      case Some(typ) => visitAstType(typ)
-      case _ =>
-          logger.warn(s"Unhandled `parser` type '$astTypeStr'")
-          defaultResult()
+    // Depth-truncated nodes arrive as {type, meta_data, nested: true, truncated: true} with no
+    // per-type keys, so they must not be dispatched into the regular visitors (whose mandatory
+    // key reads would throw and cost the whole file). One truncated node degrades to one node.
+    if obj.contains(ParserKeys.Truncated) then
+      countUnknownNode(s"truncated:$astTypeStr")
+      Unknown()(obj.toTextSpan)
+    else
+      AstType.fromString(astTypeStr) match
+        case Some(typ) => visitAstType(typ)
+        case _ =>
+            countUnknownNode(s"unknown:$astTypeStr")
+            defaultResult(Option(obj.toTextSpan))
   end visit
 
   private def visitAccessModifier(obj: Obj): RubyExpression =
@@ -203,6 +272,9 @@ class RubyJsonToNodeCreator(
   private def visitArg(obj: Obj): RubyExpression =
       MandatoryParameter(obj(ParserKeys.Value).str)(obj.toTextSpan)
 
+  /** `args` nodes are wrappers; their children are consumed contextually (method/block parameter
+    * lists read them directly), so a placeholder is correct here.
+    */
   private def visitArgs(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
 
   private def visitArray(obj: Obj): RubyExpression =
@@ -211,19 +283,156 @@ class RubyJsonToNodeCreator(
         case x                  => x :: Nil
     }
 
-    ArrayLiteral(children)(obj.toTextSpan)
+    ArrayLiteral(children, obj.getAsString(ParserKeys.PercentArray))(obj.toTextSpan)
 
   private def visitArrayPattern(obj: Obj): RubyExpression =
     val children = obj.visitArray(ParserKeys.Children)
     ArrayPattern(children)(obj.toTextSpan)
 
   private def visitArrayPatternWithTail(obj: Obj): RubyExpression =
-      defaultResult(Option(obj.toTextSpan))
+      // `in [a,]` - same destructuring semantics as array_pattern.
+      ArrayPattern(obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
+
+  /** `Constant(pattern)` - live under `case ... in Foo(x)`. */
+  private def visitConstPattern(obj: Obj): RubyExpression =
+      ConstPattern(visit(obj(ParserKeys.Const)), visit(obj(ParserKeys.Pattern)))(obj.toTextSpan)
 
   private def visitBackRef(obj: Obj): RubyExpression = SimpleIdentifier()(obj.toTextSpan)
 
   private def visitBegin(obj: Obj): RubyExpression =
-      StatementList(obj.visitArray(ParserKeys.Body))(obj.toTextSpan)
+      lowerBodyList(obj, ParserKeys.Body, obj.toTextSpan)
+
+  /** Lowers a raw statement array into a `StatementList`, attaching Sorbet signatures on the way
+    * (see [[attachSigTypes]]). `visitArray` maps the raw values one-to-one, so the raw statements
+    * and the lowered ones stay positionally aligned.
+    */
+  private def lowerBodyList(container: Obj, bodyKey: String, span: TextSpan): StatementList =
+    val lowered = container.visitArray(bodyKey)
+    StatementList(attachSigTypes(container(bodyKey).arr.toList, lowered))(span)
+
+  /** Sorbet `sig` blocks: the generator (ruby_ast_gen 2.x) marks the def/defs immediately
+    * preceded by one in the same statement list with `has_sig`, and the marked def's preceding
+    * sibling is the `sig` block whose body carries the types. The fact is read with `booleanFact` -
+    * never `getOrElse(<heuristic>)` - so for current JSON absence decides every negative case and
+    * no adjacency heuristic ever runs; JSON from an older generator has no marked defs and keeps
+    * `Any` types.
+    */
+  private def attachSigTypes(
+    rawStatements: List[ujson.Value],
+    lowered: List[RubyExpression]
+  ): List[RubyExpression] =
+      if rawStatements.sizeCompare(lowered) != 0 then lowered
+      else
+        rawStatements
+            .zip(lowered)
+            .zipWithIndex
+            .map { case ((raw, statement), index) =>
+                val marked = raw match
+                  case rawObj: ujson.Obj => booleanFact(rawObj, ParserKeys.HasSig, fallback = false)
+                  case _                 => false
+                if !marked then statement
+                else
+                  statement match
+                    case declaration: MethodDeclaration =>
+                        precedingSig(lowered, index).fold(declaration) { sig =>
+                            MethodDeclaration(
+                              declaration.methodName,
+                              declaration.parameters,
+                              declaration.body
+                            )(declaration.span, Option(sig))
+                        }
+                    case declaration: SingletonMethodDeclaration =>
+                        precedingSig(lowered, index).fold(declaration) { sig =>
+                            SingletonMethodDeclaration(
+                              declaration.target,
+                              declaration.methodName,
+                              declaration.parameters,
+                              declaration.body
+                            )(declaration.span, Option(sig))
+                        }
+                    case other => other
+                end if
+            }
+            .toList
+  end attachSigTypes
+
+  /** The preceding statement must actually *be* the `sig` block for the fact to be usable; if it
+    * lowered to something unexpected, the def keeps no signature rather than guessing. Every form
+    * the generator marks is recognised here, matched structurally rather than on the span text:
+    * `sig { ... }`, `sig { ... }.checked(:never)` (the block is the receiver of a trailing send
+    * chain) and `T::Sig::WithoutRuntime.sig { ... }` (the call has a constant receiver).
+    */
+  private def precedingSig(lowered: List[RubyExpression], index: Int): Option[Sig] =
+      if index == 0 then None else sigBlockBody(lowered(index - 1)).flatMap(sigTypesFrom)
+
+  private def sigBlockBody(statement: RubyExpression): Option[RubyExpression] =
+      statement match
+        case call: SimpleCallWithBlock if call.target.text == "sig" => Option(call.block.body)
+        case call: MemberCallWithBlock if call.methodName == "sig"  => Option(call.block.body)
+        // `.checked(:never)`, `.on_failure(...)`: unwrap the chain to reach the block.
+        case call: MemberCall => sigBlockBody(call.target)
+        case _                => None
+
+  /** Reads the types out of a `sig` block body. The chain shape is Sorbet's: `params(x: X,
+    * ...).returns(Y)` is one expression where `returns` hangs off the `params` call,
+    * `abstract.void` is a member-access chain, and a bare `sig { void }` is an identifier.
+    */
+  private def sigTypesFrom(body: RubyExpression): Option[Sig] =
+    val statements = body match
+      case list: StatementList => list.statements
+      case expression          => expression :: Nil
+
+    var parameterTypes: List[(String, String)] = List.empty
+    var returnType: String                     = Defines.Any
+    var recognized                             = false
+
+    statements.foreach {
+        case MemberCall(target, _, "returns", returnArgs) =>
+            recognized = true
+            returnType = returnArgs.headOption.fold(Defines.Any)(sigTypeText)
+            target match
+              case SimpleCall(_, parameterArgs) => parameterTypes = sigParameterTypes(parameterArgs)
+              case _                            =>
+        case SimpleCall(target, parameterArgs) =>
+            recognized = true
+            target.text match
+              case "params"  => parameterTypes = sigParameterTypes(parameterArgs)
+              case "returns" => returnType = parameterArgs.headOption.fold(Defines.Any)(sigTypeText)
+              case "void"    => returnType = Defines.Void
+              case _         =>
+        case MemberAccess(target, _, "void") =>
+            recognized = true
+            returnType = Defines.Void
+            // `params(label: String).void` ends the chain in void: the parameters hang off the
+            // member access's target.
+            target match
+              case SimpleCall(_, parameterArgs) => parameterTypes = sigParameterTypes(parameterArgs)
+              case _                            =>
+        case identifier: SimpleIdentifier if identifier.text == "void" =>
+            recognized = true
+            returnType = Defines.Void
+        case _ =>
+    }
+    if recognized then Option(Sig(parameterTypes, returnType)) else None
+  end sigTypesFrom
+
+  /** `params(x: X, y: Y)` argument associations, the names stripped of their symbol colon. */
+  private def sigParameterTypes(args: List[RubyExpression]): List[(String, String)] =
+      args.collect { case Association(key: StaticLiteral, value) =>
+          (key.innerText.stripPrefix(":"), sigTypeText(value))
+      }
+
+  /** A single Sorbet type expression as the summary's type text. `T.nilable(X)` collapses to `X`;
+    * `T.untyped`/`T.anything`/`T.any(...)` map to the summary's unknown, and generic applications
+    * such as `T::Array[X]` degrade to `ANY` too - a follow-up once the summary can express them.
+    */
+  private def sigTypeText(expression: RubyExpression): String =
+      expression match
+        case MemberCall(_, _, "nilable", inner :: _)             => sigTypeText(inner)
+        case MemberAccess(_, _, "untyped" | "anything")          => Defines.Any
+        case MemberCall(_, _, "untyped" | "anything" | "any", _) => Defines.Any
+        case _: IndexAccess                                      => Defines.Any
+        case other                                               => other.text
 
   private def visitGroupedParameter(arrayParam: ArrayLiteral): RubyExpression =
     val freshTmpVar       = variableNameGen.fresh
@@ -260,11 +469,13 @@ class RubyJsonToNodeCreator(
   end visitGroupedParameter
 
   private def visitBlock(obj: Obj): RubyExpression =
-    val parameters =
-        obj(ParserKeys.Arguments).asInstanceOf[ujson.Obj].visitArray(ParserKeys.Children).map {
-            case x: ArrayLiteral => visitGroupedParameter(x)
-            case x               => x
-        }
+    val parameters = obj.getAsObj(ParserKeys.Arguments) match
+      case Some(argsObj) =>
+          argsObj.visitArray(ParserKeys.Children).map {
+              case x: ArrayLiteral => visitGroupedParameter(x)
+              case x               => x
+          }
+      case None => Nil
 
     val assignments = parameters.collect { case x: GroupedParameter =>
         x.multipleAssignment
@@ -275,32 +486,75 @@ class RubyJsonToNodeCreator(
       case Some(expr)                => StatementList(expr +: assignments)(expr.span)
       case None                      => StatementList(Nil)(obj.toTextSpan)
 
-    val block = Block(parameters, body)(body.span.spanStart(obj.toTextSpan.text))
-    visit(obj(ParserKeys.CallName)) match
+    attachBodyToCall(obj(ParserKeys.CallName), parameters, body, obj.toTextSpan)
+  end visitBlock
+
+  /** Builds the `Block` node and attaches it to the (visited) call it belongs to. Shared by
+    * `block`, `numblock` and `itblock`, which carry the same call/param/body shape.
+    */
+  private def attachBodyToCall(
+    callJson: ujson.Value,
+    parameters: List[RubyExpression],
+    body: RubyExpression,
+    span: TextSpan
+  ): RubyExpression =
+    val block = Block(parameters, body)(body.span.spanStart(span.text))
+    visit(callJson) match
       case classNew: ObjectInstantiation if classNew.span.text == "Class.new" =>
-          AnonymousClassDeclaration(freshClassName(obj.toTextSpan), None, block.toStatementList)(
-            obj.toTextSpan
-          )
+          AnonymousClassDeclaration(freshClassName(span), None, block.toStatementList)(span)
       case objNew: ObjectInstantiation => objNew.withBlock(block)
       case lambda: SimpleIdentifier if lambda.text == "lambda" =>
-          ProcOrLambdaExpr(block)(obj.toTextSpan)
+          ProcOrLambdaExpr(block)(span)
       case ident: SimpleIdentifier if ident.span.text == "loop" =>
           val trueLiteral =
               StaticLiteral(Defines.getBuiltInType(Defines.TrueClass))(ident.span.spanStart("true"))
           DoWhileExpression(trueLiteral, body)(ident.span)
       case simpleIdentifier: SimpleIdentifier =>
-          SimpleCall(simpleIdentifier, Nil)(obj.toTextSpan).withBlock(block)
+          SimpleCall(simpleIdentifier, Nil)(span).withBlock(block)
       case simpleCall: RubyCall => simpleCall.withBlock(block)
       case memberAccess @ MemberAccess(target, op, memberName) =>
           val memberCall = MemberCall(target, op, memberName, List.empty)(memberAccess.span)
           memberCall.withBlock(block)
       case x: ProtectedModifier =>
-          SimpleCall(x.toSimpleIdentifier, Nil)(obj.toTextSpan).withBlock(block)
+          SimpleCall(x.toSimpleIdentifier, Nil)(span).withBlock(block)
       case x =>
           logger.warn(s"Unexpected call type used for block ${x.getClass}, ignoring block")
           x
     end match
-  end visitBlock
+  end attachBodyToCall
+
+  /** `x.each { _1 + _2 }` - the block carries numbered parameters; chen synthesizes the
+    * conventional `_1.._n` parameter names (plan 04 §3).
+    */
+  private def visitBlockWithNumberedParams(obj: Obj): RubyExpression =
+    val paramIdx = obj(ParserKeys.ParamIdx) match
+      case ujson.Num(n) => n.toInt
+      case ujson.Str(s) => s.toIntOption.getOrElse(0)
+      case _            => 0
+    val parameters =
+        (1 to paramIdx)
+            .map { i => MandatoryParameter(s"_$i")(obj.toTextSpan.spanStart(s"_$i")) }
+            .toList
+    val body = obj.visitOption(ParserKeys.Body) match
+      case Some(stmt: StatementList) => stmt
+      case Some(expr)                => StatementList(expr :: Nil)(expr.span)
+      case None                      => StatementList(Nil)(obj.toTextSpan)
+    attachBodyToCall(obj(ParserKeys.Call), parameters, body, obj.toTextSpan)
+
+  /** Ruby 3.4 `it` block (`items.select { it.even? }`): lowers to a block with one synthetic `it`
+    * parameter. Body references arrive as `lvar it` under the prism backend, which become regular
+    * identifier references to that parameter (plan 04 §3, plan 01 §1).
+    *
+    * Note the parser-gem backend has no `itblock` at all - there, bare `it` parses as a plain
+    * `send(nil, :it)`, i.e. a method call, and is left as one (README fact #7).
+    */
+  private def visitItBlock(obj: Obj): RubyExpression =
+    val parameters = MandatoryParameter("it")(obj.toTextSpan.spanStart("it")) :: Nil
+    val body = obj.visitOption(ParserKeys.Body) match
+      case Some(stmt: StatementList) => stmt
+      case Some(expr)                => StatementList(expr :: Nil)(expr.span)
+      case None                      => StatementList(Nil)(obj.toTextSpan)
+    attachBodyToCall(obj(ParserKeys.Call), parameters, body, obj.toTextSpan)
 
   private def visitBlockArg(obj: Obj): RubyExpression =
     val span = obj.toTextSpan
@@ -310,9 +564,6 @@ class RubyJsonToNodeCreator(
   private def visitBlockPass(obj: Obj): RubyExpression =
     lazy val default = SimpleIdentifier()(obj.toTextSpan.spanStart(procParamGen.current.value))
     obj.visitOption(ParserKeys.Value).getOrElse(default)
-
-  private def visitBlockWithNumberedParams(obj: Obj): RubyExpression =
-      SimpleIdentifier()(obj.toTextSpan)
 
   private def visitBracketAssignmentAsSend(obj: Obj): RubyExpression =
     val lhsBase = visit(obj(ParserKeys.Receiver))
@@ -432,8 +683,9 @@ class RubyJsonToNodeCreator(
       case x =>
           RescueExpression(x, List.empty, Option.empty, Some(ensureClause))(obj.toTextSpan)
 
+  /** Flip-flop `...` condition (stateful; the state machine is not modelled). */
   private def visitExclusiveFlipFlop(obj: Obj): RubyExpression =
-      defaultResult(Option(obj.toTextSpan))
+      visitFlipFlop(obj, "...")
 
   private def visitExclusiveRange(obj: Obj): RubyExpression =
     val start = visit(obj(ParserKeys.Start))
@@ -457,7 +709,8 @@ class RubyJsonToNodeCreator(
     val accessType = obj(ParserKeys.Name).str
     FieldsDeclaration(arguments, accessType)(obj.toTextSpan)
 
-  private def visitFindPattern(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitFindPattern(obj: Obj): RubyExpression =
+      FindPattern(obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
 
   private def visitFieldAssignmentSend(obj: Obj, fieldName: String): RubyExpression =
     val span     = obj.toTextSpan
@@ -483,9 +736,11 @@ class RubyJsonToNodeCreator(
 
     ForExpression(forVariable, iterableVariable, doBlock)(obj.toTextSpan)
 
+  /** Never emitted by the generator (`emit_forward_arg=false`, README fact #10); kept
+    * forward-compatible with `forward_args`.
+    */
   private def visitForwardArg(obj: Obj): RubyExpression =
-    logger.warn("Forward arg unhandled")
-    defaultResult(Option(obj.toTextSpan))
+      MandatoryParameter("...")(obj.toTextSpan)
 
   // Note: Forward args should probably be handled more explicitly, but this should preserve flows if the same
   // identifier is used in latter forwarding
@@ -513,6 +768,8 @@ class RubyJsonToNodeCreator(
     SingleAssignment(lhs, op, rhs)(obj.toTextSpan)
 
   private def visitHash(obj: Obj): RubyExpression =
+    // The generator emits no syntax fact distinguishing a `{ ... }` literal from a bare
+    // association list (e.g. inside `case`/`when`), so the code prefix stays the discriminator.
     val isHashLiteral = obj.toTextSpan.text.stripMargin.startsWith("{")
 
     obj.visitArray(ParserKeys.Children) match
@@ -523,11 +780,13 @@ class RubyJsonToNodeCreator(
           if isHashLiteral then HashLiteral(children)(obj.toTextSpan)
           else AssociationList(children)(obj.toTextSpan)
 
-  private def visitHashPattern(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitHashPattern(obj: Obj): RubyExpression =
+      HashPattern(obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
 
   private def visitIdentifier(obj: Obj): RubyExpression = SimpleIdentifier()(obj.toTextSpan)
 
-  private def visitIfGuard(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitIfGuard(obj: Obj): RubyExpression =
+      GuardClause(visit(obj(ParserKeys.Condition)), isUnless = false)(obj.toTextSpan)
 
   private def visitIfStatement(obj: Obj): RubyExpression =
     val condition = visit(obj(ParserKeys.Condition))
@@ -555,8 +814,9 @@ class RubyJsonToNodeCreator(
 
     IncludeCall(target, argument)(obj.toTextSpan)
 
+  /** Flip-flop `..` condition (stateful; the state machine is not modelled). */
   private def visitInclusiveFlipFlop(obj: Obj): RubyExpression =
-      defaultResult(Option(obj.toTextSpan))
+      visitFlipFlop(obj, "..")
 
   private def visitInclusiveRange(obj: Obj): RubyExpression =
     val start = obj.visitOption(ParserKeys.Start) match
@@ -576,8 +836,9 @@ class RubyJsonToNodeCreator(
   private def visitInPattern(obj: Obj): RubyExpression =
     val patternType = visit(obj(ParserKeys.Pattern))
     val patternBody = visit(obj(ParserKeys.Body))
+    val guard       = obj.visitOption(ParserKeys.Guard)
 
-    InClause(patternType, patternBody)(obj.toTextSpan)
+    InClause(patternType, guard, patternBody)(obj.toTextSpan)
 
   private def visitInt(obj: Obj): RubyExpression =
     val typeFullName = getBuiltInType(Defines.Integer)
@@ -596,14 +857,20 @@ class RubyJsonToNodeCreator(
   private def visitKwBegin(obj: Obj): RubyExpression =
     val stmts = obj(ParserKeys.Body) match
       case o: Obj => visit(o) :: Nil
-      case _: Arr => obj.visitArray(ParserKeys.Body)
+      case _: Arr =>
+          attachSigTypes(obj(ParserKeys.Body).arr.toList, obj.visitArray(ParserKeys.Body))
       case _ =>
           val span = obj.toTextSpan
           logger.warn(s"Unhandled JSON body type for `KwBegin`: ${span.text}")
           defaultResult(Option(span)) :: Nil
     StatementList(stmts)(obj.toTextSpan)
 
-  private def visitKwNilArg(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** `def foo(**nil)` - declares that the method accepts no keyword arguments. The generator emits
+    * `{key: null, value: null}` for it (README fact #11); lower it to a hash parameter with the
+    * syntactic name so the parameter list keeps its shape.
+    */
+  private def visitKwNilArg(obj: Obj): RubyExpression =
+      HashParameter("**nil")(obj.toTextSpan)
 
   private def visitKwOptArg(obj: Obj): RubyExpression = visitKwArg(obj)
 
@@ -620,17 +887,39 @@ class RubyJsonToNodeCreator(
 
   private def visitLocalVariable(obj: Obj): RubyExpression = SimpleIdentifier()(obj.toTextSpan)
 
-  private def visitMatchAlt(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitMatchAlt(obj: Obj): RubyExpression =
+      MatchAlt(visit(obj(ParserKeys.Left)), visit(obj(ParserKeys.Right)))(obj.toTextSpan)
 
-  private def visitMatchAs(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitMatchAs(obj: Obj): RubyExpression =
+      MatchAs(visit(obj(ParserKeys.Value)), visit(obj(ParserKeys.As)))(obj.toTextSpan)
 
-  private def visitMatchNilPattern(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitMatchNilPattern(obj: Obj): RubyExpression =
+      MatchNilPattern()(obj.toTextSpan)
 
-  private def visitMatchPattern(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** `expr => pattern` - rightward assignment; raises `NoMatchingPatternError` on failure. */
+  private def visitMatchPattern(obj: Obj): RubyExpression =
+      RightwardMatch(
+        visit(obj(ParserKeys.Lhs)),
+        visit(obj(ParserKeys.Rhs)),
+        raisesOnNoMatch = true
+      )(
+        obj.toTextSpan
+      )
 
-  private def visitMatchPatternP(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** `expr in pattern` - one-line pattern match evaluating to the match result. Also used for
+    * `in_match`, the ruby27-grammar spelling of the same construct (README fact #14).
+    */
+  private def visitMatchPatternP(obj: Obj): RubyExpression =
+      RightwardMatch(
+        visit(obj(ParserKeys.Lhs)),
+        visit(obj(ParserKeys.Rhs)),
+        raisesOnNoMatch = false
+      )(
+        obj.toTextSpan
+      )
 
-  private def visitMatchRest(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitMatchRest(obj: Obj): RubyExpression =
+      MatchRest(obj.visitOption(ParserKeys.Value))(obj.toTextSpan)
 
   private def visitMatchVariable(obj: Obj): RubyExpression = MatchVariable()(obj.toTextSpan)
 
@@ -654,8 +943,10 @@ class RubyJsonToNodeCreator(
           defaultResult(Option(obj.toTextSpan))
 
   private def visitMethodDefinition(obj: Obj): RubyExpression =
-    val name       = obj(ParserKeys.Name).str
-    val parameters = visitMethodParameters(obj(ParserKeys.Arguments).asInstanceOf[ujson.Obj])
+    val name = obj(ParserKeys.Name).str
+    val parameters = obj.getAsObj(ParserKeys.Arguments) match
+      case Some(argsObj) => visitMethodParameters(argsObj)
+      case None          => Nil
     val body = obj
         .visitOption(ParserKeys.Body)
         .map {
@@ -684,11 +975,11 @@ class RubyJsonToNodeCreator(
 
   private def visitMultipleAssignment(obj: Obj): RubyExpression =
     val lhs = visit(obj(ParserKeys.Lhs)) match
-      case _ @ArrayLiteral(elements) => elements
-      case expr                      => expr :: Nil
+      case _ @ArrayLiteral(elements, _) => elements
+      case expr                         => expr :: Nil
     val rhs = visit(obj(ParserKeys.Rhs)) match
-      case _ @ArrayLiteral(elements) => elements
-      case expr                      => expr :: Nil
+      case _ @ArrayLiteral(elements, _) => elements
+      case expr                         => expr :: Nil
     lowerMultipleAssignment(
       obj,
       lhs,
@@ -708,6 +999,114 @@ class RubyJsonToNodeCreator(
 
   private def visitNil(obj: Obj): RubyExpression =
       StaticLiteral(getBuiltInType(Defines.NilClass))(obj.toTextSpan)
+
+  /** Shared lowering for the `{value: <node>}` expr-arg family (`arg_expr`, `blockarg_expr`,
+    * `restarg_expr`). None of these are emitted by the generator today (they belong to grammars or
+    * builder settings chen does not receive yet), so this is a forward-compatible case.
+    */
+  private def visitValueExpression(obj: Obj): RubyExpression =
+      visit(obj(ParserKeys.Value))
+
+  /** `complex` literal, e.g. `1i` (live: emitted by both backends).
+    */
+  private def visitComplex(obj: Obj): RubyExpression =
+      StaticLiteral(getBuiltInType(Defines.Complex))(obj.toTextSpan)
+
+  /** `case ... else end` with an empty else body evaluates to `nil`. (Live.) */
+  private def visitEmptyElse(obj: Obj): RubyExpression =
+      StatementList(Nil)(obj.toTextSpan)
+
+  /** `__ENCODING__` evaluates to the file's encoding. Latent today: the parser normalizes it to a
+    * `str`/`const` node in the grammars chen receives.
+    */
+  private def visitEncodingLiteral(obj: Obj): RubyExpression =
+      StaticLiteral(getBuiltInType(Defines.Encoding))(obj.toTextSpan)
+
+  /** `__FILE__` evaluates to the file name; the generator carries it in `value`. Latent today for
+    * the same reason as `__ENCODING__`.
+    */
+  private def visitFileLiteral(obj: Obj): RubyExpression =
+    val text = obj.getAsString(ParserKeys.Value).getOrElse(obj.toTextSpan.text)
+    StaticLiteral(getBuiltInType(Defines.String))(obj.toTextSpan.spanStart(text))
+
+  /** `__LINE__` evaluates to the line number. Latent today, like `__FILE__`. */
+  private def visitLineLiteral(obj: Obj): RubyExpression =
+    val text = obj(ParserKeys.Value) match
+      case ujson.Num(n) => n.toInt.toString
+      case ujson.Str(s) => s
+      case _            => obj.toTextSpan.text
+    StaticLiteral(getBuiltInType(Defines.Integer))(obj.toTextSpan.spanStart(text))
+
+  /** `index`/`indexasgn` are only emitted when the parser's `emit_index` builder flag is on, which
+    * is off on every backend chen supports (README fact #10): `a[1]` arrives as a `send` of `[]`.
+    * These visitors exist for forward compatibility.
+    */
+  private def visitIndexAssignment(obj: Obj): RubyExpression =
+    val lhsBase = visit(obj(ParserKeys.Receiver))
+    val indices = obj.visitArray(ParserKeys.Arguments)
+    val lhs = IndexAccess(lhsBase, indices)(
+      obj.toTextSpan.spanStart(s"${lhsBase.span.text}[${indices.map(_.span.text).mkString(", ")}]")
+    )
+    val rhs = obj.visitOption(ParserKeys.Value).getOrElse(
+      StaticLiteral(getBuiltInType(Defines.NilClass))(obj.toTextSpan.spanStart("nil"))
+    )
+    SingleAssignment(lhs, "=", rhs)(obj.toTextSpan)
+
+  /** `itarg` is the 3.4 `it` parameter marker; the prism translation emits a bare `:it` symbol as
+    * the `itblock` param instead (plan 01 §1), so this is forward compatibility.
+    */
+  private def visitItArg(obj: Obj): RubyExpression =
+      MandatoryParameter(obj.getAsString(ParserKeys.Value).getOrElse("it"))(obj.toTextSpan)
+
+  /** `blocknilarg` is the 4.1 `def foo(&nil)` marker. No available grammar parses it yet, so this
+    * is forward compatibility. `&nil` binds no parameter; approximating it with the usual anonymous
+    * proc parameter keeps the args list shape stable.
+    */
+  private def visitBlockNilArg(obj: Obj): RubyExpression =
+      ProcParameter(obj.getAsString(ParserKeys.Value).filterNot(_ == "&").getOrElse(
+        procParamGen.fresh.value
+      ))(obj.toTextSpan)
+
+  /** `kwargs` is the keyword-arguments wrapper node, only emitted with `emit_kwargs` on (off today,
+    * README fact #10). Lowering to an association list lets `visitSend` treat it like any other
+    * named-argument hash.
+    */
+  private def visitKwargs(obj: Obj): RubyExpression =
+      HashLiteral(obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
+
+  /** Standalone `lambda` node, only emitted with `emit_lambda` on (off today). With the flag off,
+    * `->(x) {}` arrives as a `block` on `send(nil, :lambda)`, which `visitBlock` already lowers to
+    * `ProcOrLambdaExpr`.
+    */
+  private def visitLambda(obj: Obj): RubyExpression =
+    val emptyBlock = Block(Nil, StatementList(Nil)(obj.toTextSpan))(obj.toTextSpan)
+    ProcOrLambdaExpr(emptyBlock)(obj.toTextSpan)
+
+  /** `if /re/ then ...` - an implicit regexp match against the last read line, `$_`. (Live.)
+    */
+  private def visitMatchCurrentLine(obj: Obj): RubyExpression =
+    val dollarUnderscore = MemberAccess(
+      SelfIdentifier()(obj.toTextSpan.spanStart("self")),
+      ".",
+      "$_"
+    )(obj.toTextSpan.spanStart("self.$_"))
+    BinaryExpression(dollarUnderscore, RubyOperators.regexpMatch, visit(obj(ParserKeys.Value)))(
+      obj.toTextSpan
+    )
+
+  /** Anonymous `*` argument marker (`numargs`/`objc_restarg`/`objc_varargs`; the objc variants
+    * belong to the macRuby grammars chen never receives).
+    */
+  private def visitNumArgs(obj: Obj): RubyExpression =
+      ArrayParameter(obj.getAsString(ParserKeys.Value).getOrElse("*"))(obj.toTextSpan)
+
+  /** `objc_kwarg` is the macRuby keyword argument; shaped like `pair`/`optarg`. */
+  private def visitObjCKwArg(obj: Obj): RubyExpression =
+    val name = obj.getAsString(ParserKeys.Key).getOrElse(obj.toTextSpan.text)
+    val default = obj.visitOption(ParserKeys.Value).getOrElse(
+      StaticLiteral(getBuiltInType(Defines.NilClass))(obj.toTextSpan.spanStart("nil"))
+    )
+    OptionalParameter(name, default)(obj.toTextSpan)
 
   private def visitNthRef(obj: Obj): RubyExpression =
     val span     = obj.toTextSpan
@@ -747,6 +1146,23 @@ class RubyJsonToNodeCreator(
     val rhs = visit(obj(ParserKeys.Rhs))
     OperatorAssignment(lhs, "||=", rhs)(obj.toTextSpan)
 
+  /** `^value` in a pattern - equality against an already-bound value; binds nothing. (Live.) */
+  private def visitPin(obj: Obj): RubyExpression =
+      Pin(visit(obj(ParserKeys.Value)))(obj.toTextSpan)
+
+  /** `not x` - normalized to `!x`. Latent today: the grammars chen receives normalize `not` to a
+    * `send` of `!`, so this is forward compatibility.
+    */
+  private def visitNot(obj: Obj): RubyExpression =
+      UnaryExpression("!", visit(obj(ParserKeys.Arguments).arr.head))(obj.toTextSpan)
+
+  /** Anonymous `*` / `**` inside a forwarded-args parameter list. Latent (README fact #10). */
+  private def visitForwardedRestArg(obj: Obj): RubyExpression =
+      ArrayParameter("*")(obj.toTextSpan)
+
+  private def visitForwardedKwRestArg(obj: Obj): RubyExpression =
+      HashParameter("**")(obj.toTextSpan)
+
   private def visitPair(obj: Obj): RubyExpression =
     val key   = visit(obj(ParserKeys.Key))
     val value = visit(obj(ParserKeys.Value))
@@ -765,11 +1181,21 @@ class RubyJsonToNodeCreator(
             )
             defaultResult(Option(paramsNode.toTextSpan)) :: Nil
 
-  private def visitPostExpression(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** `END { ... }` - the phase timing is control flow chen does not model; the body's statements
+    * are preserved (plan 04 §4).
+    */
+  private def visitPostExpression(obj: Obj): RubyExpression =
+      visitBodyStatements(obj)
 
-  private def visitPreExpression(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** `BEGIN { ... }` - see `visitPostExpression`. */
+  private def visitPreExpression(obj: Obj): RubyExpression =
+      visitBodyStatements(obj)
 
-  private def visitProcArgument(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** Latent today (`emit_procarg0=false`, README fact #10): the whole `|x, y|` list as one node.
+    * Lowered with the existing grouped-parameter machinery.
+    */
+  private def visitProcArgument(obj: Obj): RubyExpression =
+      visitGroupedParameter(ArrayLiteral(obj.visitArray(ParserKeys.Children))(obj.toTextSpan))
 
   private def visitRaise(obj: Obj): RubyExpression =
     val callName = obj(ParserKeys.Name).str
@@ -790,6 +1216,14 @@ class RubyJsonToNodeCreator(
           RaiseCall(target, List(argument))(obj.toTextSpan)
       case arguments =>
           RaiseCall(target, arguments)(obj.toTextSpan)
+
+  private def visitBodyStatements(obj: Obj): RubyExpression =
+      StatementList(visit(obj(ParserKeys.Body)) :: Nil)(obj.toTextSpan)
+
+  private def visitFlipFlop(obj: Obj, op: String): RubyExpression =
+    val lhs = visit(obj(ParserKeys.Start))
+    val rhs = visit(obj(ParserKeys.End))
+    BinaryExpression(lhs, op, rhs)(obj.toTextSpan)
 
   private def visitRational(obj: Obj): RubyExpression =
       StaticLiteral(getBuiltInType(Defines.Rational))(obj.toTextSpan)
@@ -837,8 +1271,10 @@ class RubyJsonToNodeCreator(
             defaultResult(Option(obj.toTextSpan))
 
   private def visitRescueStatement(obj: Obj): RubyExpression =
-    val stmt          = visit(obj(ParserKeys.Statement))
-    val rescueClauses = obj.visitArray(ParserKeys.Bodies).asInstanceOf[List[RescueClause]]
+    val stmt = visit(obj(ParserKeys.Statement))
+    // A non-clause body here used to be an unchecked cast that cost the whole file; drop the
+    // stray node instead.
+    val rescueClauses = obj.visitArray(ParserKeys.Bodies).collect { case x: RescueClause => x }
     val elseClause = obj.visitOption(ParserKeys.ElseClause) match
       case Some(body) => Option(ElseClause(body)(body.span))
       case None       => Option.empty
@@ -860,8 +1296,10 @@ class RubyJsonToNodeCreator(
     val identifier = obj(ParserKeys.Name).str
     if obj.contains(ParserKeys.Base) then
       val target = visit(obj(ParserKeys.Base))
-      val op     = if obj.toTextSpan.text.contains("::") then "::" else "."
-      MemberAccess(target, op, identifier)(obj.toTextSpan)
+      // A `const` node with a base is always written `Base::Name` in Ruby source (`A.B` parses
+      // as a send), so the operator is not derived from the code text. The generator emits no
+      // call_operator fact for const nodes.
+      MemberAccess(target, "::", identifier)(obj.toTextSpan)
     else
       SimpleIdentifier()(obj.toTextSpan)
 
@@ -898,15 +1336,20 @@ class RubyJsonToNodeCreator(
               case assocList: AssociationList => assocList.elements // same as above
               case x                          => x :: Nil
           }
-          val objSpan         = obj.toTextSpan
-          val hasArguments    = arguments.nonEmpty
-          val usesParenthesis = objSpan.text.endsWith(")")
+          val objSpan      = obj.toTextSpan
+          val hasArguments = arguments.nonEmpty
+          // The generator records whether the call was written with parentheses and which
+          // operator it used (call_operator/has_parentheses, plan 02 §4). The text checks are
+          // only a fallback for JSON emitted by generators older than 2.0.
+          val usesParenthesis =
+              booleanFact(obj, ParserKeys.HasParentheses, objSpan.text.endsWith(")"))
           if obj.contains(ParserKeys.Receiver) then
             val base         = visit(obj(ParserKeys.Receiver))
             val isMemberCall = usesParenthesis || callName == "<<" || hasArguments
-            val op =
-              val dot = if objSpan.text.stripPrefix(base.text).startsWith("::") then "::" else "."
-              if isConditional then s"&$dot" else dot
+            val op = obj.getAsString(ParserKeys.CallOperator).getOrElse {
+                val dot = if objSpan.text.stripPrefix(base.text).startsWith("::") then "::" else "."
+                if isConditional then s"&$dot" else dot
+            }
             if isMemberCall then MemberCall(base, op, callName, arguments)(obj.toTextSpan)
             else MemberAccess(base, op, callName)(obj.toTextSpan)
           else if hasArguments || usesParenthesis then
@@ -918,12 +1361,20 @@ class RubyJsonToNodeCreator(
     end match
   end visitSend
 
-  private def visitShadowArg(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  /** Block-local variable declaration (`proc { |x; y| }`); it is a real binding, so it becomes a
+    * parameter-like node instead of being dropped (plan 04 §4).
+    */
+  private def visitShadowArg(obj: Obj): RubyExpression =
+      MandatoryParameter(obj.getAsString(ParserKeys.Value).getOrElse(obj.toTextSpan.text))(
+        obj.toTextSpan
+      )
 
   private def visitSingletonMethodDefinition(obj: Obj): RubyExpression =
-    val base       = visit(obj(ParserKeys.Base))
-    val name       = obj(ParserKeys.Name).str
-    val parameters = visitMethodParameters(obj(ParserKeys.Arguments).asInstanceOf[ujson.Obj])
+    val base = visit(obj(ParserKeys.Base))
+    val name = obj(ParserKeys.Name).str
+    val parameters = obj.getAsObj(ParserKeys.Arguments) match
+      case Some(argsObj) => visitMethodParameters(argsObj)
+      case None          => Nil
     val body =
         obj.visitOption(ParserKeys.Body).getOrElse(
           StatementList(Nil)(obj.toTextSpan.spanStart("<empty>"))
@@ -963,7 +1414,8 @@ class RubyJsonToNodeCreator(
                           )
                       val singletonBlockMethod =
                           SingletonObjectMethodDeclaration(methodName, parameters, body, name)(
-                            method.span
+                            method.span,
+                            method.sig
                           )
                       SingleAssignment(memberAccess, "=", singletonBlockMethod)(
                         method.span.spanStart(s"${memberAccess.span.text} = ${method.span.text}")
@@ -1010,15 +1462,22 @@ class RubyJsonToNodeCreator(
     val typeFullName = getBuiltInType(Defines.String)
     val originalSpan = obj.toTextSpan
     val value        = obj(ParserKeys.Value).str
-    // In general, we want the quotations, unless it is a HEREDOC string, then we'd prefer the value
+    // A heredoc string's code/offsets cover only the `<<~SQL` marker, so its span text becomes
+    // the node's value (the body). The generator flags heredocs explicitly; the containment
+    // check is the fallback for older generators, where it also caught multiline strings.
     val span =
-        if !originalSpan.text.contains(value) then originalSpan.spanStart(value) else originalSpan
+        booleanFact(obj, ParserKeys.Heredoc, !originalSpan.text.contains(value)) match
+          case true  => originalSpan.spanStart(value)
+          case false => originalSpan
     StaticLiteral(typeFullName)(span)
 
   private def visitStaticSymbol(obj: Obj): RubyExpression =
     val typeFullName = getBuiltInType(Defines.Symbol)
     val objTextSpan  = obj.toTextSpan
 
+    // Symbols have no syntax fact in the generator contract, and hash-key symbols
+    // (`{ "status": ... }`) legitimately arrive without the leading colon, so the prefix
+    // normalization stays.
     if objTextSpan.text.startsWith(":") then StaticLiteral(typeFullName)(obj.toTextSpan)
     else StaticLiteral(typeFullName)(objTextSpan.spanStart(s":${objTextSpan.text}"))
 
@@ -1045,13 +1504,16 @@ class RubyJsonToNodeCreator(
   private def visitTrue(obj: Obj): RubyExpression =
       StaticLiteral(getBuiltInType(Defines.TrueClass))(obj.toTextSpan)
 
+  /** `undef sym, ...` - lowered to a call so the undefined names stay reachable. */
   private def visitUnDefine(obj: Obj): RubyExpression =
-      defaultResult(Option(obj.toTextSpan))
+    val target = SimpleIdentifier()(obj.toTextSpan.spanStart("undef"))
+    SimpleCall(target, obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
 
   private def visitUnlessExpression(obj: Obj): RubyExpression =
       defaultResult(Option(obj.toTextSpan))
 
-  private def visitUnlessGuard(obj: Obj): RubyExpression = defaultResult(Option(obj.toTextSpan))
+  private def visitUnlessGuard(obj: Obj): RubyExpression =
+      GuardClause(visit(obj(ParserKeys.Condition)), isUnless = true)(obj.toTextSpan)
 
   private def visitUntilExpression(obj: Obj): RubyExpression =
     val condition = visit(obj(ParserKeys.Condition))

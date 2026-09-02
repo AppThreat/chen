@@ -1,0 +1,5 @@
+names = %w[alice bob carol]
+flags = %i[on off]
+interp = %I[#{name} x]
+dyn = %W[#{name} y]
+plain = [1, 2]

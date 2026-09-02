@@ -104,17 +104,29 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
                     case x: TypeRef    => Option(getFieldBaseFromString(x.code))
                     case x: Identifier => Option(x.name)
                     case x: Call if x.name == Operators.fieldAccess =>
-                        Option(fieldAccessBase(x.asInstanceOf[FieldAccess]))
+                        Option(fieldAccessBase(new FieldAccess(x)))
                     case _ => None
                 }.iterator
             case x if x.methodFullName == Operators.fieldAccess =>
-                fieldAccessBase(x.asInstanceOf[FieldAccess]) :: Nil
+                fieldAccessBase(new FieldAccess(x)) :: Nil
             case _ =>
                 Iterator.empty
         }
         .filterNot(_.isBlank)
 
     possiblyImportedSymbols.appendAll(symbolsGatheredFromCalls)
+
+    // Paths this file already requires. `generateParts`' filter cannot see them: a module
+    // method's calls hang off its block, not off the method, so `astChildren.isCall` never
+    // matches and every explicit `require` used to be duplicated by a synthetic one once this
+    // pass was actually scheduled.
+    val alreadyRequired = moduleMethod.ast.isCall
+        .nameExact(Require)
+        .argument
+        .collectAll[Literal]
+        .code
+        .map(_.stripPrefix("'").stripPrefix("\"").stripSuffix("'").stripSuffix("\""))
+        .toSet
 
     var currOrder = moduleMethod.block.astChildren.size
     possiblyImportedSymbols.distinct
@@ -131,6 +143,7 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
                 }
         }
         .distinct
+        .filterNot(alreadyRequired.contains)
         .foreach { importPath =>
           val requireCall = createRequireCall(builder, importPath)
           requireCall.order(currOrder)
@@ -163,15 +176,15 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
   private def fieldAccessParts(fa: FieldAccess): Seq[String] =
       fa.argument(1) match
         case subFa: Call if subFa.name == Operators.fieldAccess =>
-            fieldAccessParts(subFa.asInstanceOf[FieldAccess])
+            fieldAccessParts(new FieldAccess(subFa))
         case self: Identifier if self.name == Self => fa.fieldIdentifier.map(_.canonicalName).toSeq
         case assignCall: Call if assignCall.name == Operators.assignment =>
-            val assign = assignCall.asInstanceOf[Assignment]
+            val assign = new Assignment(assignCall)
             // Handle the tmp var assign of qualified names
             (assign.target, assign.source) match
               case (lhs: Identifier, rhs: Call)
                   if lhs.name.startsWith("<tmp-") && rhs.name == Operators.fieldAccess =>
-                  fieldAccessParts(rhs.asInstanceOf[FieldAccess])
+                  fieldAccessParts(new FieldAccess(rhs))
               case _ => Seq.empty
         case _ => Seq.empty
 end ImplicitRequirePass

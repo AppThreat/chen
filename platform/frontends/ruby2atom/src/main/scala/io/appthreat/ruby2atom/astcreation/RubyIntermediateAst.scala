@@ -141,34 +141,53 @@ object RubyIntermediateAst:
     def parameters: List[RubyExpression]
     def body: RubyExpression
 
+    /** Sorbet signature resolved from the `sig` block the generator marks with `has_sig`
+      * (ruby_ast_gen 2.x); `None` for an untyped method.
+      */
+    def sig: Option[Sig]
+
+  /** The types of a Sorbet `sig` block: `params(x: X, ...)` names mapped to their type text
+    * (`T.nilable(X)` already reduced to `X`, `T.untyped`/`T.any(...)` to `ANY`) and the
+    * `.returns(X)` / `.void` answer.
+    */
+  final case class Sig(parameterTypes: List[(String, String)], returnType: String)
+
   final case class MethodDeclaration(
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression
   )(
-    span: TextSpan
+    span: TextSpan,
+    signature: Option[Sig] = None
   ) extends RubyExpression(span)
       with ProcedureDeclaration
-      with AllowedTypeDeclarationChild
+      with AllowedTypeDeclarationChild:
+    def sig: Option[Sig] = signature
 
   final case class SingletonMethodDeclaration(
     target: RubyExpression,
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression
-  )(span: TextSpan)
-      extends RubyExpression(span)
+  )(
+    span: TextSpan,
+    signature: Option[Sig] = None
+  ) extends RubyExpression(span)
       with ProcedureDeclaration
-      with AllowedTypeDeclarationChild
+      with AllowedTypeDeclarationChild:
+    def sig: Option[Sig] = signature
 
   final case class SingletonObjectMethodDeclaration(
     methodName: String,
     parameters: List[RubyExpression],
     body: RubyExpression,
     baseClass: RubyExpression
-  )(span: TextSpan)
-      extends RubyExpression(span)
-      with ProcedureDeclaration
+  )(
+    span: TextSpan,
+    signature: Option[Sig] = None
+  ) extends RubyExpression(span)
+      with ProcedureDeclaration:
+    def sig: Option[Sig] = signature
 
   sealed trait MethodParameter:
     def name: String
@@ -342,14 +361,64 @@ object RubyIntermediateAst:
       extends RubyExpression(span)
       with ControlFlowClause
 
-  final case class InClause(pattern: RubyExpression, body: RubyExpression)(span: TextSpan)
+  final case class InClause(
+    pattern: RubyExpression,
+    guard: Option[RubyExpression],
+    body: RubyExpression
+  )(span: TextSpan)
       extends RubyExpression(span)
       with ControlFlowClause
 
   final case class ArrayPattern(children: List[RubyExpression])(span: TextSpan)
       extends RubyExpression(span)
 
+  /** `{ key: pattern, ... }` - children are `Association`s, `MatchRest`s or bare `MatchVariable`s
+    * (the `{ name: }` shorthand).
+    */
+  final case class HashPattern(children: List[RubyExpression])(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** `[ *prefix, element, *suffix ]` - element positions are not statically known. */
+  final case class FindPattern(children: List[RubyExpression])(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** `Constant(pattern)` - matches values of the given class and destructures the inner pattern. */
+  final case class ConstPattern(const: RubyExpression, pattern: RubyExpression)(span: TextSpan)
+      extends RubyExpression(span)
+
   final case class MatchVariable()(span: TextSpan) extends RubyExpression(span)
+
+  /** `left | right` - matches either alternative. */
+  final case class MatchAlt(left: RubyExpression, right: RubyExpression)(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** `value pattern => name` - binds the matched value. */
+  final case class MatchAs(value: RubyExpression, as: RubyExpression)(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** `nil` pattern - matches only nil. */
+  final case class MatchNilPattern()(span: TextSpan) extends RubyExpression(span)
+
+  /** `*rest` (or anonymous `*`) - binds the remainder of the matched collection. */
+  final case class MatchRest(target: Option[RubyExpression])(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** `^value` - equality with an already-bound value; binds nothing. */
+  final case class Pin(value: RubyExpression)(span: TextSpan) extends RubyExpression(span)
+
+  /** `if condition` / `unless condition` attached to an `in` clause. */
+  final case class GuardClause(condition: RubyExpression, isUnless: Boolean)(span: TextSpan)
+      extends RubyExpression(span)
+
+  /** Rightward pattern assignment: `expr => pattern` (raises on no match) and `expr in pattern`
+    * (evaluates to the match result). Both may bind pattern variables.
+    */
+  final case class RightwardMatch(
+    value: RubyExpression,
+    pattern: RubyExpression,
+    raisesOnNoMatch: Boolean
+  )(span: TextSpan)
+      extends RubyExpression(span)
 
   final case class NextExpression()(span: TextSpan) extends RubyExpression(span)
       with ControlFlowStatement
@@ -400,7 +469,9 @@ object RubyIntermediateAst:
     def isString: Boolean = text.startsWith("\"") || text.startsWith("'")
 
     def innerText: String =
-      val strRegex = "['\"]([./:]{0,3}[\\w\\d_-]+)(?:\\.rb)?['\"]".r
+      // Path separators are allowed inside the value so that `require "models/user"` strips its
+      // quotes like `require "foo"` always has.
+      val strRegex = "['\"]([./:]{0,3}[\\w\\d_/.-]+)(?:\\.rb)?['\"]".r
       text match
         case s":'$content'"                       => content
         case s":$symbol"                          => symbol
@@ -421,18 +492,32 @@ object RubyIntermediateAst:
 
   final case class RangeOperator(exclusive: Boolean)(span: TextSpan) extends RubyExpression(span)
 
-  final case class ArrayLiteral(elements: List[RubyExpression])(span: TextSpan)
-      extends RubyExpression(span)
+  final case class ArrayLiteral(
+    elements: List[RubyExpression],
+    percentArray: Option[String] = None
+  )(
+    span: TextSpan
+  ) extends RubyExpression(span)
       with LiteralExpr:
-    def isSymbolArray: Boolean = text.take(2).toLowerCase.startsWith("%i")
 
-    def isStringArray: Boolean = text.take(2).toLowerCase.startsWith("%w")
+    /** The generator records the notation ("%w" | "%i" | "%W" | "%I") as the `percent_array` fact;
+      * the text checks only serve JSON from generators older than 2.0.
+      */
+    private def percentArrayOrText: Option[String] = percentArray match
+      case Some(p) if p.nonEmpty     => Some(p)
+      case _ if text.startsWith("%") => Some(text.take(2))
+      case _                         => None
 
-    def isDynamic: Boolean = text.take(2).startsWith("%I") || text.take(2).startsWith("%W")
+    def isSymbolArray: Boolean = percentArrayOrText.exists(_.equalsIgnoreCase("%i"))
+
+    def isStringArray: Boolean = percentArrayOrText.exists(_.equalsIgnoreCase("%w"))
+
+    def isDynamic: Boolean = percentArrayOrText.exists(p => p.endsWith("I") || p.endsWith("W"))
 
     def isStatic: Boolean = !isDynamic
 
     def typeFullName: String = Defines.getBuiltInType(Defines.Array)
+  end ArrayLiteral
 
   sealed trait HashLike extends RubyExpression with LiteralExpr:
     def elements: List[RubyExpression]
