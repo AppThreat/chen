@@ -68,7 +68,7 @@ class CppTemplatesLambdasTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
   "AST: template function" should {
       "create the print_vector method with its template parameter and default argument" in {
           val m = cpg.method.nameExact("print_vector").head
-          m.parameter.name.l should contain allOf ("data", "info_text")
+          (m.parameter.name.l should contain).allOf("data", "info_text")
           m.parameter.nameExact("info_text").index.head shouldBe 2
       }
 
@@ -80,9 +80,9 @@ class CppTemplatesLambdasTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
   "AST: free comparison functions" should {
       "create both comparators with two contact parameters returning bool" in {
           List("compare_by_first_name", "compare_by_last_name").foreach { name =>
-              val m = cpg.method.nameExact(name).head
-              m.methodReturn.typeFullName shouldBe "bool"
-              m.parameter.size shouldBe 2
+            val m = cpg.method.nameExact(name).head
+            m.methodReturn.typeFullName shouldBe "bool"
+            m.parameter.size shouldBe 2
           }
       }
   }
@@ -100,7 +100,9 @@ class CppTemplatesLambdasTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
       }
 
       "capture the body call std::cout << contact inside a lambda" in {
-          cpg.method.internal.name(".*lambda.*").ast.isCall.name(io.shiftleft.codepropertygraph.generated.Operators.shiftLeft).l should not be empty
+          cpg.method.internal.name(".*lambda.*").ast.isCall.name(
+            io.shiftleft.codepropertygraph.generated.Operators.shiftLeft
+          ).l should not be empty
       }
   }
 
@@ -125,7 +127,7 @@ class CppTemplatesLambdasTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
   "AST: using-aliases resolve to underlying containers" should {
       "type the demo_contacts / people_with_l locals" in {
           val locals = cpg.method("main").local.map(l => l.name -> l.typeFullName).toMap
-          locals.keys should contain allOf ("demo_contacts", "people_with_l")
+          (locals.keys should contain).allOf("demo_contacts", "people_with_l")
       }
   }
 end CppTemplatesLambdasTests

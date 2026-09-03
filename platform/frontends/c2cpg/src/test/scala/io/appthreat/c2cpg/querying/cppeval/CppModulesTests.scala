@@ -5,8 +5,8 @@ import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
-/** Evaluates AST creation for C++20 module units: module interface / implementation units,
-  * module partitions, exported namespaces and declarations, and a module consumer.
+/** Evaluates AST creation for C++20 module units: module interface / implementation units, module
+  * partitions, exported namespaces and declarations, and a module consumer.
   *
   * The underlying Eclipse CDT parser (9.3) has no C++20 module support and represents an exported
   * declaration (`export namespace {...}`, `export void f() {...}`) as a single ProblemDeclaration,

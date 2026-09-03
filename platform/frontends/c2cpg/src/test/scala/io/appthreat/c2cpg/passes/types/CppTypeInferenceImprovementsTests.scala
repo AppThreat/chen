@@ -8,10 +8,10 @@ import io.shiftleft.semanticcpg.language.*
   * mirror the AWS SDK Core (and similar real-world SDK codebases).
   *
   * Each section targets one specific fix:
-  *   1. Smart-pointer member-call resolution via [[CDereference]] unwrapping
-  *   2. Namespace separator normalisation (`::` → `.`) in function signatures and fullNames
-  *   3. Return-type propagation into method fullNames (no more `?` placeholders)
-  *   4. Fully-qualified `inheritsFromTypeFullName` for C++ class hierarchies
+  *   1. Smart-pointer member-call resolution via [[CDereference]] unwrapping 2. Namespace separator
+  *      normalisation (`::` → `.`) in function signatures and fullNames 3. Return-type propagation
+  *      into method fullNames (no more `?` placeholders) 4. Fully-qualified
+  *      `inheritsFromTypeFullName` for C++ class hierarchies
   */
 class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
@@ -47,7 +47,7 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
 
       "record methodFullName using dot-separator for pointer-receiver calls" in {
           cpg.call.nameExact("GetMethod").methodFullName.l.foreach { m =>
-              m should not include "::"
+              (m should not).include("::")
           }
       }
 
@@ -56,7 +56,7 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
           fullNames should not be empty
           // When CDT resolves the binding the fullName should reference the class.
           fullNames.foreach { m =>
-              m should (include("GetMethod") and not include "::").or(
+              m should (include("GetMethod").and(not).include("::")).or(
                 include("<unresolvedNamespace>")
               )
           }
@@ -84,19 +84,19 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
 
       "use dot-separator in method signatures, not ::" in {
           cpg.method.fullName.l.foreach { fn =>
-              fn should not include "::"
+              (fn should not).include("::")
           }
       }
 
       "use dot-separator in parameter typeFullName, not ::" in {
           cpg.parameter.typeFullName.l.foreach { t =>
-              t should not include "::"
+              (t should not).include("::")
           }
       }
 
       "use dot-separator in local typeFullName, not ::" in {
           cpg.local.typeFullName.l.foreach { t =>
-              t should not include "::"
+              (t should not).include("::")
           }
       }
   }
@@ -124,17 +124,17 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
 
       "not contain ? as a return-type placeholder in fullName" in {
           cpg.method.fullName.l.foreach { fn =>
-              // A `?` inside the signature portion of a fullName (after the colon) indicates
-              // that CDT failed to resolve the return type and the placeholder leaked through.
-              val signaturePart = fn.dropWhile(_ != ':').drop(1)
-              signaturePart should not startWith "?"
+            // A `?` inside the signature portion of a fullName (after the colon) indicates
+            // that CDT failed to resolve the return type and the placeholder leaked through.
+            val signaturePart = fn.dropWhile(_ != ':').drop(1)
+            (signaturePart should not).startWith("?")
           }
       }
 
       "emit ANY instead of ? for unresolved return types" in {
           // When CDT cannot resolve a return type the normalised form is ANY, never a bare `?`.
           cpg.method.fullName.filter(_.contains(":")).l.foreach { fn =>
-              fn should not include ":?"
+              (fn should not).include(":?")
           }
       }
   }
@@ -173,7 +173,7 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
               cpg.typeDecl.nameExact("DefaultHttpClientFactory").inheritsFromTypeFullName.l
           inherits should not be empty
           // Must contain the qualified form, not just the bare short name.
-          inherits.head should (be("Aws.Http.HttpClientFactory") or be("HttpClientFactory"))
+          inherits.head should (be("Aws.Http.HttpClientFactory").or(be("HttpClientFactory")))
           inherits.head should not be empty
       }
 
@@ -234,9 +234,12 @@ class CppTypeInferenceImprovementsTests extends CCodeToCpgSuite(fileSuffix = Fil
               cpg.typeDecl.nameExact("AwsDefaultMemorySystem").inheritsFromTypeFullName.l
           // Fully qualified form is preferred; bare short name is acceptable as fallback.
           inherits.head should (
-            be("Aws.Memory.MemorySystemInterface") or
-              be("Memory.MemorySystemInterface") or
+            be("Aws.Memory.MemorySystemInterface").or(
+              be("Memory.MemorySystemInterface")
+            ).or(
               be("MemorySystemInterface")
+            )
           )
       }
   }
+end CppTypeInferenceImprovementsTests

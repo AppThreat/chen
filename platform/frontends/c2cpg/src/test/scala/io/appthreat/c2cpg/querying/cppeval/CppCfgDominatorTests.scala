@@ -33,12 +33,13 @@ class CppCfgDominatorTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
   "the dominator tree" should {
       "have the return dominated by the branch condition and the pre-branch assignment" in {
           val doms = cpg.method.nameExact("f").methodReturn.dominatedBy.isCall.code.toSetMutable
-          doms should contain allOf ("y = x + 1", "y > 10")
+          (doms should contain).allOf("y = x + 1", "y > 10")
       }
 
       "have the branch condition dominate both branch bodies and the return" in {
-          val dominated = cpg.method.nameExact("f").controlStructure.condition.dominates.code.toSetMutable
-          dominated should contain allOf ("y = y - 5", "y = y + 5", "return y;")
+          val dominated =
+              cpg.method.nameExact("f").controlStructure.condition.dominates.code.toSetMutable
+          (dominated should contain).allOf("y = y - 5", "y = y + 5", "return y;")
       }
 
       "not have either branch body dominate the other (they are mutually exclusive)" in {

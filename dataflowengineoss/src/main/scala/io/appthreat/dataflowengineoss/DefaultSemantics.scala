@@ -1,7 +1,8 @@
 package io.appthreat.dataflowengineoss
 
+import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, PassThroughMapping, Semantics}
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 
 import scala.annotation.unused
 
@@ -9,10 +10,28 @@ object DefaultSemantics:
 
   /** @return
     *   a default set of common external procedure calls for all languages.
+    *
+    * This list is LANGUAGE NEUTRAL on purpose. `FlowSemantic.from` matches on the exact
+    * `methodFullName` with no language scoping, so a language-specific summary for a bare name
+    * (PHP's `e`, `esc_html`, `htmlspecialchars`) would silently clear taint for an unrelated
+    * function of the same name in a C/Java/JS graph. Language-specific flows are added per graph by
+    * [[flowsForLanguage]], which `OssDataFlow` applies using the CPG's own `metaData.language`.
     */
   def apply(): Semantics =
     val list = operatorFlows ++ cFlows ++ javaFlows
     Semantics.fromList(list)
+
+  /** Flow semantics that must only be applied to graphs of the given language.
+    *
+    * @param language
+    *   a `MetaData.language` value (see `io.shiftleft.codepropertygraph.generated.Languages`).
+    * @return
+    *   the extra flows for that language, or an empty list when there are none.
+    */
+  def flowsForLanguage(language: String): List[FlowSemantic] =
+      language match
+        case Languages.PHP => phpFlows
+        case _             => List.empty
 
   private def F = (x: String, y: List[(Int, Int)]) => FlowSemantic.from(x, y)
 
@@ -174,9 +193,43 @@ object DefaultSemantics:
     )
   )
 
+  /** Semantic summaries for PHP framework sanitizers (Laravel, Symfony, WordPress).
+    *
+    * These entries model the taint-clearing behaviour of common framework sanitizers. A sanitizer
+    * is declared with an EMPTY mapping list: because a declared semantic is authoritative, only the
+    * mappings listed propagate taint. With no mapping, the argument does NOT flow to the return, so
+    * a value that is passed through the sanitizer before reaching a sink breaks the tainted flow
+    * (see MethodFlowSummary: an undeclared parameter is treated as sanitized).
+    *
+    * The `methodFullName` values match how php2atom names free-function calls: a builtin or bare
+    * function call `foo(...)` is named `foo` (its own name is used as the fullName). The names come
+    * from [[PhpFrameworkSemantics.allSanitizerNames]], which is the single home of the PHP
+    * framework taint vocabulary (php-support-upgrade design §2.7):
+    *   - Laravel: `e()` (HTML entity encode)
+    *   - WordPress: `esc_html()`, `sanitize_text_field()`, ...
+    *   - PHP: `htmlspecialchars()`, `htmlentities()`
+    *
+    * Symfony has no single canonical string-sanitizer function in the design (escaping is done by
+    * the templating layer / parameter binding), so it contributes no sanitizer entry; the Symfony
+    * unsanitized source->sink flow is still enforced by the tests.
+    *
+    * These are deliberately NOT part of [[apply]]: the names are bare, so applying them to a
+    * non-PHP graph would clear taint for any same-named function (a C/JS `e()` helper). They are
+    * added per graph by [[flowsForLanguage]].
+    */
+  def phpFlows: List[FlowSemantic] =
+      PhpFrameworkSemantics.allSanitizerNames.toList.sorted.map(F(_, List.empty[(Int, Int)]))
+
   /** @return
     *   procedure semantics for operators and common external Java calls only.
     */
   @unused
   def javaSemantics(): Semantics = Semantics.fromList(operatorFlows ++ javaFlows)
+
+  /** @return
+    *   the semantics a PHP graph should be analysed with: the language-neutral defaults plus the
+    *   PHP framework sanitizers.
+    */
+  def phpSemantics(): Semantics =
+      Semantics.fromList(operatorFlows ++ cFlows ++ javaFlows ++ phpFlows)
 end DefaultSemantics

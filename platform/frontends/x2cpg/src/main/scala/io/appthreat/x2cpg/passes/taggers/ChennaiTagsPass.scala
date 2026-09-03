@@ -214,16 +214,69 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         .store()(using dstGraph)
   end tagPythonRoutes
 
+  // Attribute-route matcher for PHP 8+ controllers (Symfony/Laravel modern routing). The
+  // php2atom AstCreator emits each `#[Attr(...)]` as a CPG annotation whose name is the attribute
+  // name rendered by Domain.readName: a simple name (e.g. "Route") or a `\`-joined fully-qualified
+  // name (e.g. "Symfony\Component\Routing\Annotation\Route"). This matcher is FQN-tolerant - it
+  // matches on the LAST `\`-segment - and case-insensitive. It accepts the generic `Route`
+  // attribute plus Symfony 6.x method-specific route attributes (Get/Post/Put/Delete/Patch/Head/
+  // Options), the `Any`/`Route`-suffixed variants, and anything whose simple name ends in "Route"
+  // (e.g. a custom `ApiRoute`). It deliberately does NOT match non-routing attributes such as
+  // `Deprecated`, `Override`, or `Sensitive`, so annotated-but-unrouted methods are not tagged.
+  private val PHP_ROUTE_ATTRIBUTE_REGEX =
+      "(?i)^(.*\\\\)?(route|get|post|put|delete|patch|head|options|any|.*route)$"
+
+  // WordPress hook registrations. `add_action`/`add_filter` register a callable (2nd argument) as
+  // the handler for a named hook; that callable is the reported entrypoint.
+  private val WORDPRESS_HOOK_REGEX = "(add_action|add_filter)"
+
   private def tagPhpRoutes(dstGraph: DiffGraphBuilder): Unit =
-      PHP_ROUTES_METHODS_REGEXES.foreach { pattern =>
-        atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
-        atom.call
-            .where(_.methodFullName(pattern))
-            .argument
-            .isLiteral
-            .newTagNode(FRAMEWORK_ROUTE)
-            .store()(using dstGraph)
+    PHP_ROUTES_METHODS_REGEXES.foreach { pattern =>
+      atom.method.fullName(pattern).parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+      atom.call
+          .where(_.methodFullName(pattern))
+          .argument
+          .isLiteral
+          .newTagNode(FRAMEWORK_ROUTE)
+          .store()(using dstGraph)
+    }
+
+    // 1) Attribute routes: `#[Route(...)]`, `#[Get(...)]`, etc. on controller methods. The routed
+    //    method surfaces as an entrypoint (framework-route) and its parameters as web-facing input
+    //    (framework-input). Requirement 6.5 / design Decision 3.
+    val routedMethods =
+        atom.method.where(_.annotation.name(PHP_ROUTE_ATTRIBUTE_REGEX)).l
+    routedMethods.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    routedMethods.iterator
+        .parameter
+        .filterNot(_.name == "this")
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+
+    // 2) WordPress hooks: `add_action('hook', callable)` / `add_filter('hook', callable)`. The
+    //    registered callable (2nd argument) is the reported entrypoint. Where that callable is a
+    //    string literal naming a function/method that exists in the graph, its parameters are also
+    //    marked framework-input so the handler's inputs are treated as web-facing. (EasyTagsPass
+    //    already tags add_action/add_filter method *parameters*; here we add the missing mapping of
+    //    the registration/callable itself to a framework-route entrypoint.) Requirement 6.5.
+    val hookCalls = atom.call.name(WORDPRESS_HOOK_REGEX).l
+    hookCalls.foreach { call =>
+      val callableArgs = call.argument.argumentIndex(2).l
+      callableArgs.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+      // Resolve string-literal callables (e.g. 'my_handler') to a method by name and tag its params.
+      callableArgs.iterator.isLiteral.foreach { lit =>
+        val handlerName = lit.code.trim.stripPrefix("'").stripSuffix("'").stripPrefix("\"")
+            .stripSuffix("\"").trim
+        if handlerName.nonEmpty then
+          atom.method
+              .nameExact(handlerName)
+              .parameter
+              .filterNot(_.name == "this")
+              .newTagNode(FRAMEWORK_INPUT)
+              .store()(using dstGraph)
       }
+    }
+  end tagPhpRoutes
 
   private def tagRubyRoutes(dstGraph: DiffGraphBuilder): Unit =
     // Rails routes

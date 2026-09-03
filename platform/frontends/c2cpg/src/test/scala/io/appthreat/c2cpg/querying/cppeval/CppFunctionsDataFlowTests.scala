@@ -48,7 +48,8 @@ class CppFunctionsDataFlowTests extends CppDataFlowCodeToCpgSuite:
       }
 
       "return the local random_int" in {
-          cpg.method.nameExact("roll_dice").methodReturn.toReturn.astChildren.isIdentifier.name.l should contain(
+          cpg.method.nameExact("roll_dice").methodReturn.toReturn.astChildren.isIdentifier.name
+              .l should contain(
             "random_int"
           )
       }
@@ -97,14 +98,17 @@ class CppFunctionsDataFlowTests extends CppDataFlowCodeToCpgSuite:
       }
 
       "flow from the roll_dice-assigned random_int into the printf argument" in {
-          val src  = cpg.method("main").local.nameExact("random_int").referencingIdentifiers
-          val sink = cpg.method("main").call.nameExact("printf").argument.isIdentifier.nameExact("random_int")
+          val src = cpg.method("main").local.nameExact("random_int").referencingIdentifiers
+          val sink = cpg.method("main").call.nameExact("printf").argument.isIdentifier.nameExact(
+            "random_int"
+          )
           sink.reachableByFlows(src).size should be > 0
       }
 
       "flow from sum into average via `sum / 10`" in {
-          val src  = cpg.method("main").local.nameExact("sum").referencingIdentifiers
-          val sink = cpg.method("main").call.nameExact("<operator>.assignment").code("average = .*").argument(2)
+          val src = cpg.method("main").local.nameExact("sum").referencingIdentifiers
+          val sink = cpg.method("main").call.nameExact("<operator>.assignment").code("average = .*")
+              .argument(2)
           sink.reachableBy(src).size should be > 0
       }
   }

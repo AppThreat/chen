@@ -5,10 +5,10 @@ import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
 
-/** Regression coverage for constructor calls made through an object declaration
-  * (`Point a(1, 2);`). These used to be modelled as a call to the declared *variable* name (`a`),
-  * masking the constructor invocation. They are now named after the constructed type, consistent
-  * with the explicit constructor-expression form `Point(...)`.
+/** Regression coverage for constructor calls made through an object declaration (`Point a(1, 2);`).
+  * These used to be modelled as a call to the declared *variable* name (`a`), masking the
+  * constructor invocation. They are now named after the constructed type, consistent with the
+  * explicit constructor-expression form `Point(...)`.
   */
 class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
@@ -69,8 +69,9 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           |""".stripMargin)
 
       "name both declaration constructor calls after the type (regression)" in {
-          cpg.method.nameExact("main").call.name("Point").code.toSetMutable should contain allOf (
-            "a(1, 2)", "b(2, 3)"
+          (cpg.method.nameExact("main").call.name("Point").code.toSetMutable should contain).allOf(
+            "a(1, 2)",
+            "b(2, 3)"
           )
       }
 

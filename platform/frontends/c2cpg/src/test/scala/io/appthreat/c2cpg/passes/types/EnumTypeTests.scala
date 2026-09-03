@@ -208,8 +208,8 @@ class EnumTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
           val members = cpg.typeDecl.nameExact("color").member.l
           members should not be empty
           members.foreach { m =>
-              m.typeFullName should not be "ANY"
-              m.typeFullName shouldBe "color"
+            m.typeFullName should not be "ANY"
+            m.typeFullName shouldBe "color"
           }
       }
 

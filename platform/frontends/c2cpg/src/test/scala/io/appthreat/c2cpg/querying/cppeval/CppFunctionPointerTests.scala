@@ -5,8 +5,8 @@ import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
 
-/** Regression coverage for function-pointer variable declarations. A declarator such as
-  * `int (*op)(int, int)` is an `IASTFunctionDeclarator` whose name binds to an `IVariable`, not an
+/** Regression coverage for function-pointer variable declarations. A declarator such as `int
+  * (*op)(int, int)` is an `IASTFunctionDeclarator` whose name binds to an `IVariable`, not an
   * `IFunction`. It used to be routed to the function-prototype path, whose `IVariable` branch
   * returned an empty Ast, so the whole declaration (LOCAL and initializer) was silently dropped.
   */
@@ -24,7 +24,7 @@ class CppFunctionPointerTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           |""".stripMargin)
 
       "create a LOCAL for the function-pointer variable (regression: was dropped)" in {
-          cpg.method.nameExact("useFp").local.name.toSetMutable should contain allOf ("op", "op2")
+          (cpg.method.nameExact("useFp").local.name.toSetMutable should contain).allOf("op", "op2")
       }
 
       "create the initializer assignment (regression: was dropped)" in {

@@ -19,12 +19,18 @@ class CppModernFeaturesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.C
           |""".stripMargin)
 
       "create TypeDecls for both enums" in {
-          cpg.typeDecl.internal.name.toSetMutable should contain allOf ("Color", "Status")
+          (cpg.typeDecl.internal.name.toSetMutable should contain).allOf("Color", "Status")
       }
 
       "type the scoped enum's members with its explicit underlying type" in {
-          cpg.typeDecl.nameExact("Color").member.name.toSetMutable shouldBe Set("black", "white", "red")
-          cpg.typeDecl.nameExact("Color").member.typeFullName.toSetMutable shouldBe Set("std.uint8_t")
+          cpg.typeDecl.nameExact("Color").member.name.toSetMutable shouldBe Set(
+            "black",
+            "white",
+            "red"
+          )
+          cpg.typeDecl.nameExact("Color").member.typeFullName.toSetMutable shouldBe Set(
+            "std.uint8_t"
+          )
       }
 
       "type a variable of the scoped enum" in {

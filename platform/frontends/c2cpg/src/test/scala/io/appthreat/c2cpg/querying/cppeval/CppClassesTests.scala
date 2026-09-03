@@ -69,27 +69,32 @@ class CppClassesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
   "AST: type declarations" should {
       "create TypeDecl nodes for the struct and both classes" in {
           val internal = cpg.typeDecl.internal.name.toSetMutable
-          internal should contain allOf ("player", "number_generator", "game")
+          (internal should contain).allOf("player", "number_generator", "game")
       }
 
       "capture the members of `player` with their types" in {
-          val members = cpg.typeDecl.nameExact("player").member.map(m => m.name -> m.typeFullName).toMap
+          val members =
+              cpg.typeDecl.nameExact("player").member.map(m => m.name -> m.typeFullName).toMap
           members("name") shouldBe "std.string"
           members("total_money") shouldBe "int"
       }
 
       "capture the members of `game`" in {
-          val members = cpg.typeDecl.nameExact("game").member.map(m => m.name -> m.typeFullName).toMap
+          val members =
+              cpg.typeDecl.nameExact("game").member.map(m => m.name -> m.typeFullName).toMap
           members("player_") shouldBe "player"
           members("number_generator_") shouldBe "number_generator"
       }
 
       "bind the methods to their owning type declarations" in {
-          cpg.typeDecl.nameExact("game").method.name.toSetMutable should contain allOf (
-            "game", "play_round", "game_over"
+          (cpg.typeDecl.nameExact("game").method.name.toSetMutable should contain).allOf(
+            "game",
+            "play_round",
+            "game_over"
           )
-          cpg.typeDecl.nameExact("number_generator").method.name.toSetMutable should contain allOf (
-            "number_generator", "generate_random_number"
+          (cpg.typeDecl.nameExact("number_generator").method.name.toSetMutable should contain).allOf(
+            "number_generator",
+            "generate_random_number"
           )
       }
   }
@@ -104,7 +109,7 @@ class CppClassesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
       "not leak the method fullName into a constructor's return type (regression)" in {
           val ctor = cpg.method.nameExact("number_generator").head
           ctor.methodReturn.typeFullName shouldBe "ANY"
-          ctor.signature should not include ctor.fullName
+          (ctor.signature should not).include(ctor.fullName)
           ctor.signature shouldBe "ANY (int,int)"
       }
 
@@ -126,7 +131,9 @@ class CppClassesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
       }
 
       "link play_round as the caller of generate_random_number" in {
-          cpg.method.nameExact("generate_random_number").caller.name.toSetMutable should contain("play_round")
+          cpg.method.nameExact("generate_random_number").caller.name.toSetMutable should contain(
+            "play_round"
+          )
       }
 
       "list generate_random_number among the callees of play_round" in {

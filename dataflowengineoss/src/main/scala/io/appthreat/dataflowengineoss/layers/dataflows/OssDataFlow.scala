@@ -3,7 +3,9 @@ package io.appthreat.dataflowengineoss.layers.dataflows
 import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.passes.reachingdef.{FluxReachingDefPass, ReachingDefPass}
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
+import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.CpgPassBase
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext, LayerCreatorOptions}
 
 object OssDataFlow:
@@ -33,11 +35,32 @@ class OssDataFlow(opts: OssDataFlowOptions)(implicit
 
   override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit =
     val cpg = context.cpg
+    // `DefaultSemantics()` is language neutral: a summary keyed on a bare name (PHP's `e`,
+    // `esc_html`, ...) would otherwise clear taint for a same-named function in a C/Java/JS graph,
+    // since FlowSemantic matching is by exact methodFullName with no language scoping. The
+    // language-specific flows are therefore added here, where the graph - and hence its language -
+    // is known. Adding them is purely additive, so an explicitly supplied `Semantics` is honoured.
+    val effectiveSemantics: Semantics = languageAwareSemantics(cpg)
+
     val reachingDefPass: CpgPassBase =
         if opts.useFluxEngine then
-          new FluxReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)
-        else new ReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)
+          new FluxReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)(using
+            effectiveSemantics
+          )
+        else
+          new ReachingDefPass(cpg, opts.maxNumberOfDefinitions, opts.maxNumberOfCfgNodes)(using
+            effectiveSemantics
+          )
     val enhancementExecList = Iterator(reachingDefPass)
     enhancementExecList.zipWithIndex.foreach { case (pass, index) =>
         runPass(pass, context, storeUndoInfo, index)
     }
+  end create
+
+  /** The configured semantics plus any flows that only apply to this graph's language. */
+  private def languageAwareSemantics(cpg: Cpg): Semantics =
+    val extra = cpg.metaData.language.headOption
+        .map(DefaultSemantics.flowsForLanguage)
+        .getOrElse(List.empty)
+    if extra.isEmpty then s else Semantics.fromList(s.elements ++ extra)
+end OssDataFlow

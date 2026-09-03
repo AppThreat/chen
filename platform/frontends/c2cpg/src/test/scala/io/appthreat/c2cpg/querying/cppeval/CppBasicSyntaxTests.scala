@@ -121,14 +121,17 @@ class CppBasicSyntaxTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_
 
   "AST: literals and operators" should {
       "create literal nodes for the initializers" in {
-          cpg.literal.code.l should contain allOf ("1.23f", "32000", "0", "false", "\"hello\"")
+          (cpg.literal.code.l should contain).allOf("1.23f", "32000", "0", "false", "\"hello\"")
       }
 
       "represent assignments, comparisons and increments as operator calls" in {
-          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.assignment).size should be > 0
+          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.assignment)
+              .size should be > 0
           cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.lessThan).size should be >= 2
-          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.postIncrement).size should be >= 2
-          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.logicalNot).size should be >= 1
+          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.postIncrement)
+              .size should be >= 2
+          cpg.call.name(io.shiftleft.codepropertygraph.generated.Operators.logicalNot)
+              .size should be >= 1
       }
   }
 
@@ -152,7 +155,8 @@ class CppBasicSyntaxTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_
       }
 
       "attach conditions to the control structures" in {
-          cpg.controlStructure.controlStructureType(ControlStructureTypes.WHILE).condition.code.l should contain(
+          cpg.controlStructure.controlStructureType(ControlStructureTypes.WHILE).condition.code
+              .l should contain(
             "while_count < 10"
           )
       }

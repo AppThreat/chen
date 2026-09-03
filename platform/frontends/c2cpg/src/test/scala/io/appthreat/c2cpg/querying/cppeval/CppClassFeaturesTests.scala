@@ -30,8 +30,9 @@ class CppClassFeaturesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CP
       "create all declared members with correct return types" in {
           cpg.method.nameExact("doWork").methodReturn.typeFullName.toSetMutable shouldBe Set("void")
           cpg.method.nameExact("getId").methodReturn.typeFullName.head shouldBe "int"
-          cpg.typeDecl.nameExact("Base").method.name.toSetMutable should contain allOf (
-            "doWork", "getId"
+          (cpg.typeDecl.nameExact("Base").method.name.toSetMutable should contain).allOf(
+            "doWork",
+            "getId"
           )
       }
 
@@ -55,7 +56,7 @@ class CppClassFeaturesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CP
 
       "declare a local for each bound name (regression: names were not locals)" in {
           val locals = cpg.method.nameExact("main").ast.isLocal.name.toSetMutable
-          locals should contain allOf ("a", "b")
+          (locals should contain).allOf("a", "b")
       }
 
       "capture the initializer call (regression: initializer was dropped)" in {
@@ -63,8 +64,10 @@ class CppClassFeaturesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CP
       }
 
       "reference the bound names in the return expression" in {
-          cpg.method.nameExact("main").methodReturn.toReturn.ast.isIdentifier.name.toSetMutable should contain allOf (
-            "a", "b"
+          (cpg.method.nameExact("main").methodReturn.toReturn.ast.isIdentifier.name
+              .toSetMutable should contain).allOf(
+            "a",
+            "b"
           )
       }
   }

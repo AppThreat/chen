@@ -4,8 +4,8 @@ import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
-/** Stress / evaluation suite for C++ type inference (`cleanType`, `typeFor`,
-  * `typeForDeclSpecifier` in `AstCreatorHelper`, and the downstream type passes).
+/** Stress / evaluation suite for C++ type inference (`cleanType`, `typeFor`, `typeForDeclSpecifier`
+  * in `AstCreatorHelper`, and the downstream type passes).
   *
   * The goal is to exercise the corners that show up as low-quality `ANY` / malformed type names in
   * real-world slices (evaluated against abseil-cpp). Each block documents the *expected* behaviour.
@@ -265,7 +265,7 @@ class TypeInferenceStressTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
           |}
           |""".stripMargin)
           val t = cpg.local.name("s").typeFullName.head
-          t should not include "::"
+          (t should not).include("::")
           t should include("outer")
           t should include("inner")
           t should include("S")
@@ -281,9 +281,9 @@ class TypeInferenceStressTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
           |}
           |""".stripMargin)
           val t = cpg.local.name("l").typeFullName.head
-          t should not include "::"
-          t should not include ".."
-          t should not include "::::"
+          (t should not).include("::")
+          (t should not).include("..")
+          (t should not).include("::::")
       }
   }
 
@@ -338,10 +338,10 @@ class TypeInferenceStressTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
           |""".stripMargin)
           val allTypes = cpg.local.typeFullName.toSet ++ cpg.parameter.typeFullName.toSet
           allTypes.foreach { t =>
-              t should not include "ProblemType"
-              t should not include "TypeOfDependentExpression"
-              t should not include "longint"
-              t should not include "longlong "
+            (t should not).include("ProblemType")
+            (t should not).include("TypeOfDependentExpression")
+            (t should not).include("longint")
+            (t should not).include("longlong ")
           }
       }
   }
