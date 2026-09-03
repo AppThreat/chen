@@ -87,7 +87,7 @@ class CppCallResolutionTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.C
   "the call graph" should {
       "link caller to every resolved callee" in {
           val callees = cpg.method.nameExact("caller").callee.fullName.toSetMutable
-          callees should contain allOf (
+          (callees should contain).allOf(
             "freeTop:int(int)",
             "ns.freeFn:int(int)",
             "ns.S.mem:int(int)",
@@ -98,8 +98,9 @@ class CppCallResolutionTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.C
       }
       "make the recursive method its own caller and callee" in {
           cpg.method.nameExact("recurse").callee.fullName.l should contain("recurse:int(int)")
-          cpg.method.nameExact("recurse").caller.name.toSetMutable should contain allOf (
-            "caller", "recurse"
+          (cpg.method.nameExact("recurse").caller.name.toSetMutable should contain).allOf(
+            "caller",
+            "recurse"
           )
       }
   }

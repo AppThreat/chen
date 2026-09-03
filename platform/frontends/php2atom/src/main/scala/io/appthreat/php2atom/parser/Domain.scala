@@ -109,6 +109,16 @@ object Domain:
     private val AccessModifiers: Set[String] =
         Set(ModifierTypes.PUBLIC, ModifierTypes.PROTECTED, ModifierTypes.PRIVATE)
 
+    // PHP 8.4 asymmetric visibility: nikic 5.8 encodes the set-visibility of a property/promoted
+    // param in additional high bits of the same `flags` bitmask (Modifiers::*_SET). Highest bit
+    // wins so a single keyword is reported. Kept separate from the get-visibility modifier set
+    // above so the two never collide.
+    private val SetVisibilityMasks: List[(Int, String)] = List(
+      (128, "public(set)"),    // Modifiers::PUBLIC_SET
+      (256, "protected(set)"), // Modifiers::PROTECTED_SET
+      (512, "private(set)")    // Modifiers::PRIVATE_SET
+    )
+
     def containsAccessModifier(modifiers: List[String]): Boolean =
         modifiers.toSet.intersect(AccessModifiers).nonEmpty
 
@@ -117,12 +127,76 @@ object Domain:
       ModifierMasks.collect {
           case (mask, typ) if (flags & mask) != 0 => typ
       }
+
+    /** Extract the PHP 8.4 asymmetric set-visibility keyword from a `flags` bitmask, or None when
+      * no set-visibility bit is present. Resilient by contract: a missing/absent `flags` yields
+      * None (Requirement 4.1/5.5).
+      */
+    def getSetVisibility(json: Value, modifierString: String = "flags"): Option[String] =
+      val flags = json.objOpt.flatMap(_.get(modifierString)).map(_.num.toInt).getOrElse(0)
+      SetVisibilityMasks.collectFirst {
+          case (mask, keyword) if (flags & mask) != 0 => keyword
+      }
   end PhpModifiers
 
   sealed trait PhpNode:
     def attributes: PhpAttributes
 
-  final case class PhpFile(children: List[PhpStmt]) extends PhpNode:
+  // Additive provenance the generator (`phpastgen`) attaches to each per-file AST wrapper object
+  // (design §2.5/2.6, Data Models). Every key is OPTIONAL by contract (Requirement 4.1/4.5/5.5):
+  // a bare-array AST from an older generator, or a wrapper missing a given key, decodes with the
+  // corresponding field left unset/empty. Modelled as a small carrier so callers (AstCreator, the
+  // capability probe, atom's version gate) can read provenance without recomputing it, while older
+  // callers that ignore it are unaffected.
+  final case class PhpProvenance(
+    parserBackend: Option[String] = None,
+    generatorVersion: Option[String] = None,
+    phpVersion: Option[String] = None,
+    targetVersion: Option[String] = None,
+    relFilePath: Option[String] = None,
+    encodingScrubbed: Boolean = false,
+    truncatedNodes: Option[Int] = None
+  )
+  object PhpProvenance:
+    val Empty: PhpProvenance = PhpProvenance()
+
+    /** Read the optional provenance keys from a generator wrapper object. Every key is optional: an
+      * absent key yields an unset/empty value rather than failing decode (Requirement 5.5/4.5).
+      * `target_version` may be JSON `null` (unset) — treated as `None`. Unknown sibling keys (e.g.
+      * `ast`) are simply ignored, keeping the contract additive.
+      */
+    def fromWrapper(json: Value): PhpProvenance =
+      def optStr(key: String): Option[String] =
+          json.objOpt.flatMap(_.get(key)).flatMap {
+              case Str(s) => Some(s)
+              case other  => if other.isNull then None else Some(other.toString)
+          }
+      def optBool(key: String): Boolean =
+          json.objOpt.flatMap(_.get(key)).exists {
+              case ujson.Bool(b) => b
+              case _             => false
+          }
+      def optInt(key: String): Option[Int] =
+          json.objOpt.flatMap(_.get(key)).flatMap {
+              case ujson.Num(n) => Some(n.toInt)
+              case _            => None
+          }
+      PhpProvenance(
+        parserBackend = optStr("parser_backend"),
+        generatorVersion = optStr("generator_version"),
+        phpVersion = optStr("php_version"),
+        targetVersion = optStr("target_version"),
+        relFilePath = optStr("rel_file_path"),
+        encodingScrubbed = optBool("encoding_scrubbed"),
+        truncatedNodes = optInt("truncated_nodes")
+      )
+    end fromWrapper
+  end PhpProvenance
+
+  final case class PhpFile(
+    children: List[PhpStmt],
+    provenance: PhpProvenance = PhpProvenance.Empty
+  ) extends PhpNode:
     override val attributes: PhpAttributes = PhpAttributes.Empty
 
   final case class PhpParam(
@@ -133,7 +207,7 @@ object Domain:
     default: Option[PhpExpr],
     // TODO type
     flags: Int,
-    // TODO attributeGroups: Seq[PhpAttributeGroup],
+    attributeGroups: List[PhpAttributeGroup] = Nil,
     attributes: PhpAttributes
   ) extends PhpNode
 
@@ -155,6 +229,34 @@ object Domain:
           attributes = expr.attributes
         )
   final case class PhpVariadicPlaceholder(attributes: Domain.PhpAttributes) extends PhpArgument
+  // PHP 8.0+ attributes: `#[Attr(args)]` on classes, methods, functions, properties, params, and
+  // enum cases. nikic emits an `attrGroups` array on declaration nodes; each element is an
+  // `AttributeGroup` containing one or more `Attribute` nodes. Modelled explicitly so they no
+  // longer degrade to `Nop`. Additive: absent/empty `attrGroups` yields an empty list.
+  final case class PhpAttribute(
+    name: PhpNameExpr,
+    args: List[PhpArgument],
+    attributes: PhpAttributes
+  ) extends PhpNode
+  final case class PhpAttributeGroup(attrs: List[PhpAttribute], attributes: PhpAttributes)
+      extends PhpNode
+
+  // PHP 8.4 property hooks: a property (or constructor-promoted param) may declare `get`/`set`
+  // hook bodies, e.g. `public string $name { get => $this->_name; set => strtoupper($value); }`.
+  // nikic emits a `hooks` array on `Stmt_Property` (and on promoted params); each element is a
+  // `PropertyHook` node with a `name` ("get"/"set"), optional `params`, a `byRef` flag, `flags`
+  // (modifier bitmask, e.g. `final`), and a `body` that is null (abstract/interface hook), a single
+  // expression (arrow form `get => expr`), or a list of statements (block form `get { ... }`).
+  // Modelled explicitly so hooked properties no longer route to the `Nop` catch-all. Additive: an
+  // absent/empty `hooks` array yields `Nil`.
+  final case class PhpPropertyHook(
+    name: String,
+    params: List[PhpParam],
+    body: Option[List[PhpStmt]],
+    byRef: Boolean,
+    attributeGroups: List[PhpAttributeGroup] = Nil,
+    attributes: PhpAttributes
+  ) extends PhpNode
 
   sealed trait PhpStmt extends PhpNode
   sealed trait PhpStmtWithBody extends PhpStmt:
@@ -221,7 +323,7 @@ object Domain:
     returnType: Option[PhpNameExpr],
     stmts: List[PhpStmt],
     returnByRef: Boolean,
-    // TODO attributeGroups: Seq[PhpAttributeGroup],
+    attributeGroups: List[PhpAttributeGroup] = Nil,
     namespacedName: Option[PhpNameExpr],
     isClassMethod: Boolean,
     attributes: PhpAttributes
@@ -237,6 +339,7 @@ object Domain:
     // Optionally used for enums with values
     scalarType: Option[PhpNameExpr],
     hasConstructor: Boolean,
+    attributeGroups: List[PhpAttributeGroup] = Nil,
     attributes: PhpAttributes
   ) extends PhpStmtWithBody
   object ClassLikeTypes:
@@ -248,6 +351,7 @@ object Domain:
   final case class PhpEnumCaseStmt(
     name: PhpNameExpr,
     expr: Option[PhpExpr],
+    attributeGroups: List[PhpAttributeGroup] = Nil,
     attributes: PhpAttributes
   ) extends PhpStmt
 
@@ -255,6 +359,12 @@ object Domain:
     modifiers: List[String],
     variables: List[PhpPropertyValue],
     typeName: Option[PhpNameExpr],
+    attributeGroups: List[PhpAttributeGroup] = Nil,
+    // PHP 8.4 property hooks declared on the property (empty when none).
+    hooks: List[PhpPropertyHook] = Nil,
+    // PHP 8.4 asymmetric visibility: the set-visibility keyword when it differs from the get
+    // visibility (e.g. `"private(set)"` for `public private(set) string $x`); None otherwise.
+    asymmetricVisibility: Option[String] = None,
     attributes: PhpAttributes
   ) extends PhpStmt
 
@@ -614,19 +724,47 @@ object Domain:
           .replace("\f", "\\f")
           .replace("\"", "\\\"")
 
-  private def readFile(json: Value): PhpFile =
+  private def readStmts(json: Value): List[PhpStmt] =
       json match
         case arr: Arr =>
-            val children = arr.value.map(readStmt).toList
-            PhpFile(children)
+            arr.value.map(readStmt).toList
         case unhandled =>
             logger.debug(
-              s"Found unhandled type in readFile: ${unhandled.getClass} with value $unhandled"
+              s"Found unhandled type in readStmts: ${unhandled.getClass} with value $unhandled"
             )
-            ???
+            Nil
+
+  // Decode the top-level AST. Two shapes are accepted (backward + forward compatible with the
+  // cross-repo contract, Requirement 4.1/4.2): the new generator emits a wrapper OBJECT
+  // `{ ast: [<stmts>], parser_backend, generator_version, ... }`; an older generator emits a bare
+  // ARRAY of statements. The shape is detected by the presence of an `ast` array key. Provenance is
+  // read from the wrapper when present and left empty for the bare-array form. Unknown sibling keys
+  // (including per-node `framework_facts`) are ignored, never breaking decode.
+  private def readFile(json: Value): PhpFile =
+      json.objOpt.flatMap(_.get("ast")) match
+        case Some(astArr: Arr) =>
+            PhpFile(readStmts(astArr), PhpProvenance.fromWrapper(json))
+        case _ =>
+            json match
+              case arr: Arr =>
+                  PhpFile(readStmts(arr))
+              case unhandled =>
+                  logger.debug(
+                    s"Found unhandled type in readFile: ${unhandled.getClass} with value $unhandled"
+                  )
+                  PhpFile(Nil)
+
+  // Read the `nodeType` discriminator tolerantly: an object without a string `nodeType` (e.g. a
+  // future/unknown wrapper key that leaks into a statement position) yields the empty string, which
+  // falls through to the graceful `NopStmt` catch-all rather than throwing (Requirement 4.2/3.10).
+  private def nodeTypeOf(json: Value): String =
+      json.objOpt.flatMap(_.get("nodeType")).flatMap {
+          case Str(s) => Some(s)
+          case _      => None
+      }.getOrElse("")
 
   private def readStmt(json: Value): PhpStmt =
-      json("nodeType").str match
+      nodeTypeOf(json) match
         case "Stmt_Echo" =>
             val values = json("exprs").arr.map(readExpr).toSeq
             PhpEchoStmt(values, PhpAttributes(json))
@@ -666,7 +804,13 @@ object Domain:
         case "Stmt_Foreach"      => readForeach(json)
         case "Stmt_TraitUse"     => readTraitUse(json)
         case "Stmt_Block"        => NopStmt(PhpAttributes(json))
-        case unhandled           => NopStmt(PhpAttributes(json))
+        // Unmapped/newer `nodeType` the decoder does not model: degrade gracefully to `NopStmt`
+        // (never crash or abort the file), retaining `startLine`/`startFilePos`/`kind` via
+        // `PhpAttributes(json)`, and emit a diagnostic naming the unmapped `kind` (Requirement
+        // 3.10/4.2, design §2.6 / Error Handling).
+        case unhandled =>
+            logger.debug(s"Unmapped statement nodeType degraded to Nop: '$unhandled'")
+            NopStmt(PhpAttributes(json))
 
   private def readString(json: Value): PhpString =
       PhpString.withQuotes(json("value").str, PhpAttributes(json))
@@ -952,6 +1096,7 @@ object Domain:
       classLikeType,
       scalarType,
       hasConstructor,
+      readAttributeGroups(json),
       attributes
     )
   end readClassLike
@@ -960,7 +1105,7 @@ object Domain:
     val name = readName(json("name"))
     val expr = Option.unless(json("expr").isNull)(readExpr(json("expr")))
 
-    PhpEnumCaseStmt(name, expr, PhpAttributes(json))
+    PhpEnumCaseStmt(name, expr, readAttributeGroups(json), PhpAttributes(json))
 
   private def readCatch(json: Value): PhpCatchStmt =
     val types    = json("types").arr.map(readName).toList
@@ -1010,7 +1155,7 @@ object Domain:
     PhpConstFetchExpr(PhpNameExpr(name, attributes), attributes)
 
   private def readExpr(json: Value): PhpExpr =
-      json("nodeType").str match
+      nodeTypeOf(json) match
         case "Scalar_String"             => readString(json)
         case "Scalar_DNumber"            => PhpFloat(json("value").toString, PhpAttributes(json))
         case "Scalar_Float"              => PhpFloat(json("value").toString, PhpAttributes(json))
@@ -1064,9 +1209,15 @@ object Domain:
         case typ if isAssignType(typ)   => readAssign(json)
         case typ if isCastType(typ)     => readCast(json)
 
+        // Unmapped/newer expression `nodeType`: degrade gracefully to a name-expr placeholder
+        // instead of throwing, so an unknown node never crashes or aborts the file (Requirement
+        // 3.10/4.2, design §2.6 / Error Handling). `PhpNameExpr` is the minimal `PhpExpr` fallback
+        // (`NopStmt` is a statement, not an expression); the placeholder retains
+        // `startLine`/`startFilePos`/`kind` via `PhpAttributes(json)` and names the unmapped `kind`
+        // in the diagnostic.
         case unhandled =>
-            logger.debug(s"Found unhandled expr type: $unhandled")
-            ???
+            logger.debug(s"Unmapped expression nodeType degraded to placeholder: '$unhandled'")
+            PhpNameExpr(if unhandled.nonEmpty then unhandled else "unknown", PhpAttributes(json))
 
   private def readClone(json: Value): PhpCloneExpr =
     val expr = readExpr(json("expr"))
@@ -1156,6 +1307,7 @@ object Domain:
       returnType,
       stmts,
       returnByRef,
+      readAttributeGroups(json),
       namespacedName,
       isClassMethod,
       PhpAttributes(json)
@@ -1184,6 +1336,7 @@ object Domain:
       returnType,
       stmts,
       returnByRef,
+      readAttributeGroups(json),
       namespacedName,
       isClassMethod,
       PhpAttributes(json)
@@ -1195,7 +1348,40 @@ object Domain:
     val variables = json("props").arr.map(readPropertyValue).toList
     val typeName  = Option.unless(json("type").isNull)(readType(json("type")))
 
-    PhpPropertyStmt(modifiers, variables, typeName, PhpAttributes(json))
+    PhpPropertyStmt(
+      modifiers,
+      variables,
+      typeName,
+      readAttributeGroups(json),
+      readPropertyHooks(json),
+      PhpModifiers.getSetVisibility(json),
+      PhpAttributes(json)
+    )
+
+  /** Decode the PHP 8.4 `hooks` array (get/set hooks) nikic emits on `Stmt_Property` and on
+    * constructor-promoted params. Resilient by contract (Requirement 4.1/5.5): a missing, null, or
+    * empty `hooks` yields `Nil`, and a malformed individual hook is skipped rather than failing the
+    * whole property.
+    */
+  private def readPropertyHooks(json: Value): List[PhpPropertyHook] =
+      json.objOpt
+          .flatMap(_.get("hooks"))
+          .flatMap(_.arrOpt)
+          .map(_.iterator.flatMap(hook => Try(readPropertyHook(hook)).toOption).toList)
+          .getOrElse(Nil)
+
+  private def readPropertyHook(json: Value): PhpPropertyHook =
+    val name = readName(json("name")).name
+    val params =
+        json.obj.get("params").flatMap(_.arrOpt).map(_.map(readParam).toList).getOrElse(Nil)
+    val byRef = json.obj.get("byRef").flatMap(_.boolOpt).getOrElse(false)
+    // `body` is null (abstract hook), a single expression (arrow form `get => expr`), or a
+    // statement list (block form `get { ... }`). Normalise all shapes to an optional stmt list.
+    val body = json.obj.get("body").filterNot(_.isNull).map {
+        case arr: Arr => arr.arr.map(readStmt).toList
+        case expr     => List(readExpr(expr))
+    }
+    PhpPropertyHook(name, params, body, byRef, readAttributeGroups(json), PhpAttributes(json))
 
   private def readPropertyValue(json: Value): PhpPropertyValue =
     val name         = readName(json("name"))
@@ -1345,6 +1531,7 @@ object Domain:
       isVariadic = json("variadic").bool,
       default = json.obj.get("default").filterNot(_.isNull).map(readExpr),
       flags = json("flags").num.toInt,
+      attributeGroups = readAttributeGroups(json),
       attributes = PhpAttributes(json)
     )
 
@@ -1380,23 +1567,46 @@ object Domain:
             logger.debug(s"Found unhandled name type $unhandled: $json")
             ??? // TODO: other matches are possible?
 
-  /** One of Identifier, Name, or Complex Type (Nullable, Intersection, or Union)
+  /** One of Identifier, Name, or Complex Type (Nullable, Intersection, Union, or DNF).
+    *
+    * Complex types (PHP 8.1 intersection `A&B`, 8.2 Disjunctive Normal Form `(A&B)|C`, union `A|B`,
+    * and nullable `?T`) are decoded into a single [[PhpNameExpr]] whose `.name` is a
+    * precedence-preserving canonical rendering that retains every constituent type distinctly.
+    *
+    * DNF discipline: an intersection nested inside a union is parenthesised (`(A&B)|C`) so the
+    * union `|` and intersection `&` binders are never flattened into an ambiguous `A&B|C`. This
+    * satisfies the contract that every constituent of a DNF/union/intersection is retained rather
+    * than mangled into a single collapsed type.
     */
   private def readType(json: Value): PhpNameExpr =
+      PhpNameExpr(renderTypeName(json, nestedInUnion = false), PhpAttributes(json))
+
+  /** Render a (possibly complex) type node into a canonical, precedence-preserving name.
+    *
+    * @param nestedInUnion
+    *   true when this node appears as a member of a union; controls whether an intersection member
+    *   must be parenthesised to preserve DNF precedence.
+    */
+  private def renderTypeName(json: Value, nestedInUnion: Boolean): String =
       json match
         case Obj(value) if value.get("nodeType").map(_.str).contains("NullableType") =>
-            val containedName = readType(value("type")).name
-            PhpNameExpr(s"?$containedName", attributes = PhpAttributes(json))
+            val containedName = renderTypeName(value("type"), nestedInUnion = false)
+            s"?$containedName"
 
         case Obj(value) if value.get("nodeType").map(_.str).contains("IntersectionType") =>
-            val names = value("types").arr.map(readName).map(_.name)
-            PhpNameExpr(names.mkString("&"), PhpAttributes(json))
+            // Recurse so nested nullable/name members are rendered distinctly, then join with `&`.
+            val names    = value("types").arr.map(renderTypeName(_, nestedInUnion = false))
+            val rendered = names.mkString("&")
+            // Inside a union (DNF), an intersection group must be parenthesised: `(A&B)|C`.
+            if nestedInUnion then s"($rendered)" else rendered
 
         case Obj(value) if value.get("nodeType").map(_.str).contains("UnionType") =>
-            val names = value("types").arr.map(readType).map(_.name)
-            PhpNameExpr(names.mkString("|"), PhpAttributes(json))
+            // Members of a union are rendered with union context so intersection members become
+            // parenthesised DNF groups; the union itself joins its members with `|`.
+            val names = value("types").arr.map(renderTypeName(_, nestedInUnion = true))
+            names.mkString("|")
 
-        case other => readName(other)
+        case other => readName(other).name
 
   private def readUnaryOp(json: Value): PhpUnaryOp =
     val opType = UnaryOpTypeMap(json("nodeType").str)
@@ -1438,6 +1648,26 @@ object Domain:
 
     PhpCast(typ, expr, PhpAttributes(json))
 
+  /** Decode the `attrGroups` array (PHP 8.0+ `#[Attr(...)]`) that nikic emits on declaration nodes.
+    * Resilient by contract (Requirement 4.1/5.5): a missing, null, or empty `attrGroups` yields an
+    * empty list rather than a failure, and any unmodelled/extra keys on the declaration (e.g. an
+    * additive `framework_facts`) are ignored.
+    */
+  private def readAttributeGroups(json: Value): List[PhpAttributeGroup] =
+      json.objOpt
+          .flatMap(_.get("attrGroups"))
+          .flatMap(_.arrOpt)
+          .map(_.iterator.flatMap(group => Try(readAttributeGroup(group)).toOption).toList)
+          .getOrElse(Nil)
+  private def readAttributeGroup(json: Value): PhpAttributeGroup =
+    val attrs = json.obj.get("attrs").flatMap(_.arrOpt).map(_.map(readAttribute).toList).getOrElse(
+      Nil
+    )
+    PhpAttributeGroup(attrs, PhpAttributes(json))
+  private def readAttribute(json: Value): PhpAttribute =
+    val name = readName(json("name"))
+    val args = json.obj.get("args").flatMap(_.arrOpt).map(_.map(readCallArg).toList).getOrElse(Nil)
+    PhpAttribute(name, args, PhpAttributes(json))
   private def readCallArg(json: Value): PhpArgument =
       json("nodeType").str match
         case "Arg" =>

@@ -35,7 +35,7 @@ Because it follows data rather than matching on names and patterns, chen disting
 - Android APK and split bundles (`.apkm`, `.apks`, `.xapk`), which require the Android SDK via `ANDROID_HOME` or the container image
 - JavaScript, TypeScript, and Flow
 - Python, from 3.x through 3.14
-- PHP, from 7.0 through 8.4 with limited 5.x support, 7.4 and newer recommended
+- PHP, from 7.0 through 8.5 with limited 5.x support, 7.4 and newer recommended
 - Ruby, supporting 1.8 through 4.0.x syntax
 
 ## Requirements

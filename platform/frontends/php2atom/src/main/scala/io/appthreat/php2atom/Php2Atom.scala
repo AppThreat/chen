@@ -50,6 +50,12 @@ class Php2Atom extends X2CpgFrontend[Config]:
         TypeNodePass.withTypesFromCpg(cpg).createAndApply()
         LocalCreationPass.allLocalCreationPasses(cpg).foreach(_.createAndApply())
         new ClosureRefPass(cpg).createAndApply()
+        // Framework taint SOURCE/SINK tagging (Laravel/Symfony/WordPress). Registered here - in the
+        // frontend pass chain - rather than in `postProcessingPasses` on purpose: `createCpg` is the
+        // one point every real run goes through (atom calls `createCpgWithOverlays`, which calls
+        // `createCpg`; atom does not call `Php2Atom.postProcessingPasses`), so the tags ship with any
+        // PHP graph without test-only glue. The pass only needs the AST, so it is safe here.
+        new PhpFrameworkTagsPass(cpg).createAndApply()
       }
     else
       val errorOutput = (

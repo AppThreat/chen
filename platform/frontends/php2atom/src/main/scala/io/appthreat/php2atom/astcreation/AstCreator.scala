@@ -227,7 +227,18 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     val methodBody = blockAst(blockNode(decl), methodBodyStmts)
 
     scope.popScope()
-    methodAstWithAnnotations(method, parameters, methodBody, methodReturn, modifiers)
+    // PHP 8.0+ attribute groups on the method (e.g. `#[Route("/users")]`) map to CPG annotations
+    // so routed controller methods surface as entrypoints downstream (design §2.6; Requirement
+    // 3.2). Additive: a method with no attribute groups yields no annotations.
+    val annotationAsts = astsForAttributeGroups(decl.attributeGroups)
+    methodAstWithAnnotations(
+      method,
+      parameters,
+      methodBody,
+      methodReturn,
+      modifiers,
+      annotationAsts
+    )
   end astForMethodDecl
 
   private def stmtBodyBlockAst(stmt: PhpStmtWithBody): Ast =
@@ -258,8 +269,34 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
     scope.addToScope(param.name, paramNode)
 
-    Ast(paramNode)
+    val annotationAsts = astsForAttributeGroups(param.attributeGroups)
+    Ast(paramNode).withChildren(annotationAsts)
   end astForParam
+
+  /** Build CPG annotation ASTs for PHP 8.0+ attribute groups (`#[Attr(args)]`), flattening every
+    * group's attributes into a single sequence. Mirrors the javasrc2cpg annotation convention: one
+    * NewAnnotation per attribute with its argument ASTs parented as annotation-assignment children.
+    * Additive: an empty `attributeGroups` list yields no annotations, so previously-annotated-free
+    * declarations are unaffected. (design §2.6 "add explicit handlers ... so they stop degrading to
+    * Nop"; Requirement 3.2)
+    */
+  private def astsForAttributeGroups(groups: List[PhpAttributeGroup]): List[Ast] =
+      groups.flatMap(_.attrs).map(astForAttribute)
+
+  private def astForAttribute(attr: PhpAttribute): Ast =
+    val name     = attr.name.name
+    val fullName = attr.name.name
+    val argsCode = attr.args.collect { case arg: PhpArg => arg }
+        .map(arg => astForExpr(arg.expr).rootCodeOrEmpty)
+        .mkString(",")
+    val code = if attr.args.isEmpty then s"#[$name]" else s"#[$name($argsCode)]"
+    val node = annotationNode(attr, code, name, fullName)
+    val assignmentAsts = attr.args.zipWithIndex.collect { case (arg: PhpArg, idx) =>
+        val valueAst  = astForExpr(arg.expr)
+        val paramName = arg.parameterName.getOrElse(idx.toString)
+        annotationAssignmentAst(paramName, valueAst.rootCodeOrEmpty, valueAst)
+    }
+    annotationAst(node, assignmentAsts)
 
   private def astForExpr(expr: PhpExpr): Ast =
       expr match
@@ -797,7 +834,11 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     val modifiers = stmt.modifiers.map(newModifierNode).map(Ast(_))
     scope.popScope()
 
-    Ast(typeDecl).withChildren(modifiers).withChildren(bodyStmts)
+    val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
+    Ast(typeDecl)
+        .withChildren(modifiers)
+        .withChildren(annotationAsts)
+        .withChildren(bodyStmts)
   end astForNamedClass
 
   private def astForStaticAndConstInits: Option[Ast] =
@@ -962,6 +1003,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     val name = stmt.name.name
     val code = s"case $name"
 
+    val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
     astForConstOrFieldValue(
       stmt,
       name,
@@ -971,22 +1013,48 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       isField = false
     )
         .withChild(finalModifier)
+        .withChildren(annotationAsts)
 
   private def astsForPropertyStmt(stmt: PhpPropertyStmt): List[Ast] =
-      stmt.variables.map { varDecl =>
-        val modifierAsts = stmt.modifiers.map(newModifierNode).map(Ast(_))
+    // PHP 8.0+ attribute groups map to CPG annotations; PHP 8.4 asymmetric visibility (e.g.
+    // `private(set)`) maps to an extra modifier so it is not dropped; PHP 8.4 property hooks
+    // (get/set) have their bodies emitted as child ASTs so hook logic survives downstream
+    // (design §2.6; Requirements 3.2, 3.3).
+    val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
+    val asymVisModifier =
+        stmt.asymmetricVisibility.map(vis => Ast(newModifierNode(vis))).toList
+    val hookAsts = stmt.hooks.flatMap(astsForPropertyHook)
+    stmt.variables.map { varDecl =>
+      val modifierAsts = stmt.modifiers.map(newModifierNode).map(Ast(_))
 
-        val name = varDecl.name.name
-        astForConstOrFieldValue(
-          stmt,
-          name,
-          s"$$$name",
-          varDecl.defaultValue,
-          scope.addFieldInitToScope,
-          isField = true
-        )
-            .withChildren(modifierAsts)
-      }
+      val name = varDecl.name.name
+      astForConstOrFieldValue(
+        stmt,
+        name,
+        s"$$$name",
+        varDecl.defaultValue,
+        scope.addFieldInitToScope,
+        isField = true
+      )
+          .withChildren(modifierAsts)
+          .withChildren(asymVisModifier)
+          .withChildren(annotationAsts)
+          .withChildren(hookAsts)
+    }
+  end astsForPropertyStmt
+
+  /** Emit PHP 8.4 property-hook (`get`/`set`) bodies so their statements are not dropped. A hook
+    * with a statement body contributes those statements (wrapped in a block); an abstract/interface
+    * hook (no body) contributes nothing. The hook's own attribute groups map to annotations. Kept
+    * intentionally lightweight per design §2.6 (do not over-build). (Requirement 3.3)
+    */
+  private def astsForPropertyHook(hook: PhpPropertyHook): List[Ast] =
+    val annotationAsts = astsForAttributeGroups(hook.attributeGroups)
+    val bodyAst = hook.body.map { stmts =>
+      val hookBlock = blockNode(hook)
+      Ast(hookBlock).withChildren(stmts.flatMap(astsForStmt))
+    }
+    annotationAsts ++ bodyAst.toList
 
   private def astForConstOrFieldValue(
     originNode: PhpNode,
@@ -1621,7 +1689,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       closureExpr.returnByRef,
       namespacedName = None,
       isClassMethod = closureExpr.isStatic,
-      closureExpr.attributes
+      attributes = closureExpr.attributes
     )
     val methodAst = astForMethodDecl(methodDecl, localsForUses.map(Ast(_)), Option(methodName))
 
