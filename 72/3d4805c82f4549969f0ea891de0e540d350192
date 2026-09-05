@@ -1,0 +1,38 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskCreator.scala
+  s_6b8fe346c7989b::t_c98c6b81a769d9 178
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_6b8fe346c7989b::t_a119e725770e68 314,386,394,399,405
+  s_6b8fe346c7989b::t_0625f843fbf263 305-311
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonDependencyStubs.scala
+  s_6b8fe346c7989b::t_e8461496b05458 362-370
+  s_6b8fe346c7989b::t_d9d8056d64da0a 1385-1386
+  s_6b8fe346c7989b::t_aedb56c35a3813 1399-1404,1406,1409
+  s_6b8fe346c7989b::t_fccb97371548d1 535
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/PythonDepsMode.scala
+  s_6b8fe346c7989b::t_d9d8056d64da0a 10-13
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyFullTests.scala
+  s_6b8fe346c7989b::t_0951cfd7f76b46 263-267
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/EasyTagsPassTests.scala
+  s_6b8fe346c7989b::t_2bfeb230bba313 126-134,138-141,147-148,153,157-160,166-167
+  s_6b8fe346c7989b::t_d9d8056d64da0a 135-137,142-146,149-152,154-156,161-165,168-171
+semanticcpg/src/main/scala/io/shiftleft/semanticcpg/language/MethodExplorability.scala
+  s_6b8fe346c7989b::t_c4053386a342c4 34
+  s_6b8fe346c7989b::t_5534e35724059c 3
+  s_6b8fe346c7989b::t_61eb666306c678 43-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "723d4805c82f4549969f0ea891de0e540d350192",
+  "prompts": {},
+  "sessions": {
+    "s_6b8fe346c7989b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11f11498-3459-4644-b80a-948e68d5323c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
