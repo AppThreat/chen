@@ -4,109 +4,111 @@ import io.appthreat.jssrc2cpg.passes.{AbstractPassTest, Defines}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators, ModifierTypes}
 import io.shiftleft.semanticcpg.language.*
 
-class NewNodesAstCreationPassTest extends AbstractPassTest {
+class NewNodesAstCreationPassTest extends AbstractPassTest:
 
-    "AST generation for Dynamic Imports" should {
+  "AST generation for Dynamic Imports" should {
 
-        "have correct structure for simple import()" in AstFixture("import('foo')") { cpg =>
-            val List(call) = cpg.call("import").l
-            call.code shouldBe "import(\"foo\")"
-            call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+      "have correct structure for simple import()" in AstFixture("import('foo')") { cpg =>
+        val List(call) = cpg.call("import").l
+        call.code shouldBe "import(\"foo\")"
+        call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
 
-            val List(arg) = call.argument.isLiteral.l
-            arg.code shouldBe "\"foo\""
-            arg.order shouldBe 1
-        }
+        val List(arg) = call.argument.isLiteral.l
+        arg.code shouldBe "\"foo\""
+        arg.order shouldBe 1
+      }
 
-        "have correct structure for import() with options" in AstFixture("import('foo', { with: { type: 'json' } })") { cpg =>
-            val List(call) = cpg.call("import").l
-            call.code shouldBe "import(\"foo\", { with: { type: 'json' } })"
-            call.argument.size shouldBe 2
+      "have correct structure for import() with options" in AstFixture(
+        "import('foo', { with: { type: 'json' } })"
+      ) { cpg =>
+        val List(call) = cpg.call("import").l
+        call.code shouldBe "import(\"foo\", { with: { type: 'json' } })"
+        call.argument.size shouldBe 2
 
-            val List(arg1) = call.argument.isLiteral.l
-            arg1.code shouldBe "\"foo\""
-        }
-    }
+        val List(arg1) = call.argument.isLiteral.l
+        arg1.code shouldBe "\"foo\""
+      }
+  }
 
-    "AST generation for TS Instantiation Expressions" should {
+  "AST generation for TS Instantiation Expressions" should {
 
-        "handle generic function calls correctly" in TsAstFixture("""
+      "handle generic function calls correctly" in TsAstFixture("""
                                                                     |function foo<T>(x: T) { return x; }
                                                                     |foo<string>("test");
                                                                     |""".stripMargin) { cpg =>
-            val List(call) = cpg.call.name("foo").l
-            call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
-            val List(arg) = call.argument.isLiteral.l
-            arg.code shouldBe "\"test\""
-        }
+        val List(call) = cpg.call.name("foo").l
+        call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+        val List(arg) = call.argument.isLiteral.l
+        arg.code shouldBe "\"test\""
+      }
 
-        "handle generic calls in assignment" in TsAstFixture("""
+      "handle generic calls in assignment" in TsAstFixture("""
                                                                |const x = foo<number>(1);
                                                                |""".stripMargin) { cpg =>
-            val List(assignment) = cpg.assignment.l
-            val List(rhs)        = assignment.argument.isCall.l
-            rhs.name shouldBe "foo"
-            val List(arg) = rhs.argument.isLiteral.l
-            arg.code shouldBe "1"
-        }
-    }
+        val List(assignment) = cpg.assignment.l
+        val List(rhs)        = assignment.argument.isCall.l
+        rhs.name shouldBe "foo"
+        val List(arg) = rhs.argument.isLiteral.l
+        arg.code shouldBe "1"
+      }
+  }
 
-    "AST generation for Flow Declarations" should {
+  "AST generation for Flow Declarations" should {
 
-        "handle declare interface" in AstFixture("""
+      "handle declare interface" in AstFixture("""
                                                    |// @flow
                                                    |declare interface FlowInterface {
                                                    |  prop: string;
                                                    |}
                                                    |""".stripMargin) { cpg =>
-            val List(typeDecl) = cpg.typeDecl.name("FlowInterface").l
-            typeDecl.fullName should endWith(":program:FlowInterface")
-            typeDecl.isExternal shouldBe false
+        val List(typeDecl) = cpg.typeDecl.name("FlowInterface").l
+        typeDecl.fullName should endWith(":program:FlowInterface")
+        typeDecl.isExternal shouldBe false
 
-            val List(member) = typeDecl.member.l
-            member.name shouldBe "prop"
-            member.typeFullName shouldBe Defines.String
-        }
+        val List(member) = typeDecl.member.l
+        member.name shouldBe "prop"
+        member.typeFullName shouldBe Defines.String
+      }
 
-        "handle declare class with static members" in AstFixture("""
+      "handle declare class with static members" in AstFixture("""
                                                                    |// @flow
                                                                    |declare class MyFlowClass {
                                                                    |  static prop: number;
                                                                    |  method(): void;
                                                                    |}
                                                                    |""".stripMargin) { cpg =>
-            val List(typeDecl) = cpg.typeDecl.name("MyFlowClass").l
-            typeDecl.fullName should endWith(":program:MyFlowClass")
+        val List(typeDecl) = cpg.typeDecl.name("MyFlowClass").l
+        typeDecl.fullName should endWith(":program:MyFlowClass")
 
-            val List(prop) = typeDecl.member.name("prop").l
-            prop.typeFullName shouldBe Defines.Number
-            prop.modifier.modifierType.l should contain(ModifierTypes.STATIC)
-        }
+        val List(prop) = typeDecl.member.name("prop").l
+        prop.typeFullName shouldBe Defines.Number
+        prop.modifier.modifierType.l should contain(ModifierTypes.STATIC)
+      }
 
-        "handle standard interface syntax in flow" in AstFixture("""
+      "handle standard interface syntax in flow" in AstFixture("""
                                                                    |// @flow
                                                                    |interface IBase {
                                                                    |  id: string;
                                                                    |}
                                                                    |""".stripMargin) { cpg =>
-            val List(typeDecl) = cpg.typeDecl.name("IBase").l
-            typeDecl.fullName should endWith(":program:IBase")
-            val List(member) = typeDecl.member.l
-            member.name shouldBe "id"
-            member.typeFullName shouldBe Defines.String
-        }
+        val List(typeDecl) = cpg.typeDecl.name("IBase").l
+        typeDecl.fullName should endWith(":program:IBase")
+        val List(member) = typeDecl.member.l
+        member.name shouldBe "id"
+        member.typeFullName shouldBe Defines.String
+      }
 
-        "handle class implementing interface" in AstFixture("""
+      "handle class implementing interface" in AstFixture("""
                                                               |// @flow
                                                               |interface I { method(): void; }
                                                               |class C implements I {
                                                               |  method() {}
                                                               |}
                                                               |""".stripMargin) { cpg =>
-            val List(cDecl) = cpg.typeDecl.name("C").l
-            cDecl.inheritsFromTypeFullName.l should contain only "I"
-        }
-        "AST generation for Flow Type Casting" should {
+        val List(cDecl) = cpg.typeDecl.name("C").l
+        cDecl.inheritsFromTypeFullName.l should contain only "I"
+      }
+      "AST generation for Flow Type Casting" should {
 
           "handle standard flow type casting (x: type)" in AstFixture("""
                                                                           |// @flow
@@ -131,7 +133,7 @@ class NewNodesAstCreationPassTest extends AbstractPassTest {
           }
       }
 
-          "AST generation for Flow Type Definitions" should {
+      "AST generation for Flow Type Definitions" should {
 
           "handle type aliases" in AstFixture("""
                                                   |// @flow
@@ -166,7 +168,7 @@ class NewNodesAstCreationPassTest extends AbstractPassTest {
           }
       }
 
-          "AST generation for Ambient Declarations" should {
+      "AST generation for Ambient Declarations" should {
 
           "handle declare variable" in AstFixture("""
                                                       |// @flow
@@ -195,10 +197,10 @@ class NewNodesAstCreationPassTest extends AbstractPassTest {
                                                     |  declare function init(): void;
                                                     |}
                                                     |""".stripMargin) { cpg =>
-            val List(ns) = cpg.namespaceBlock.name("my-lib").l
+            val List(ns)     = cpg.namespaceBlock.name("my-lib").l
             val List(method) = cpg.method.name("init").l
             method.fullName should include("my-lib")
           }
       }
-    }
-}
+  }
+end NewNodesAstCreationPassTest

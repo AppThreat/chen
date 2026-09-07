@@ -11,17 +11,17 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.jdk.CollectionConverters.*
 
-/** Validates the [[AstFragment]] codec (the GraphFragmentCodec-backed successor to [[AstCache]]):
-  * a frontend diff + `usedTypes` round-trips losslessly, reconstruction into a diff graph matches a
+/** Validates the [[AstFragment]] codec (the GraphFragmentCodec-backed successor to [[AstCache]]): a
+  * frontend diff + `usedTypes` round-trips losslessly, reconstruction into a diff graph matches a
   * direct apply (DiffTool), and corrupt/incompatible bytes are rejected so the caller recomputes.
   */
 class AstFragmentTests extends AnyWordSpec with Matchers:
 
   private def unit(): DiffGraphBuilder =
-    val diff = new DiffGraphBuilder
+    val diff  = new DiffGraphBuilder
     val m     = NewMethod().name("foo").fullName("foo").signature("sig").order(1)
     val block = NewBlock().typeFullName("ANY").order(1)
-    val call  = NewCall().name("bar").methodFullName("bar").signature("s")
+    val call = NewCall().name("bar").methodFullName("bar").signature("s")
         .dispatchType(DispatchTypes.STATIC_DISPATCH).code("bar(x)").order(2)
     // a long > 2^53 exercises the lossless typed value codec
     val lit = NewLiteral().code("9007199254740993").typeFullName("long").order(1)
@@ -31,7 +31,6 @@ class AstFragmentTests extends AnyWordSpec with Matchers:
     diff.addEdge(call, lit, EdgeTypes.AST)
     diff.addEdge(call, lit, EdgeTypes.ARGUMENT)
     diff
-  end unit
 
   "AstFragment" should:
 

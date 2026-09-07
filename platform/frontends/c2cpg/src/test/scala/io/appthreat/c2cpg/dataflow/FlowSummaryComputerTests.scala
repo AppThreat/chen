@@ -33,10 +33,21 @@ class FlowSummaryComputerTests extends DataFlowCodeToCpgSuite:
       |int ping(int n) { return pong(n - 1); }
       |""".stripMargin)
 
-  /** Ground truth from the classic engine: parameter indices whose value reaches the return. */
+  /** Ground truth from the classic engine: parameter indices whose value reaches a RETURN statement
+    * of the method.
+    *
+    * The sink is the `return` statements, not METHOD_RETURN. Asking the engine to reach
+    * METHOD_RETURN asks a different question - "is this parameter's definition still live at the
+    * method exit" - which is true of every parameter, including the ones the body never reads. That
+    * made the oracle claim `q0` reaches the return of `int flow(int p0, int q0) { return b; }`,
+    * contradicting this file's own inline comments, and it is not the fact a summary is used for:
+    * the caller wants to know whether taint in an argument comes back out of the call. The query
+    * engine draws the same line when it descends into a callee, collecting exactly the `Return`
+    * predecessors of METHOD_RETURN.
+    */
   private def paramsReachingReturn(name: String): Set[Int] =
       cpg.method.name(name).parameter.l.filter { p =>
-          cpg.method.name(name).methodReturn.reachableByFlows(Iterator(p)).nonEmpty
+          cpg.method.name(name).ast.isReturn.reachableByFlows(Iterator(p)).nonEmpty
       }.map(_.index).toSet
 
   "FlowSummaryComputer" should:

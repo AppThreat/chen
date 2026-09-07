@@ -175,6 +175,24 @@ object XTypeRecovery:
     */
   def isDummyType(typ: String): Boolean = DummyTokens.exists(typ.contains)
 
+  /** The recovery config a frontend config asks for.
+    *
+    * The two knobs of [[TypeRecoveryParserConfig]] are what `--no-dummy-types` and
+    * `--type-prop-iterations` set, and they only take effect if the recovery pass is actually
+    * constructed from them. Restating the config as a literal at the call site is how both knobs
+    * came to be silently ignored on more than one pipeline, so derive it here and let every caller
+    * share the one translation.
+    *
+    * Note what `enabledDummyTypes` does *not* mean. Every frontend rewrites it per iteration as
+    * `isFinalIteration && enabledDummyTypes`, so inside the recovery it reads as "may emit
+    * placeholders during this iteration" - and intermediate iterations legitimately need the
+    * placeholders they already wrote to the graph in order to keep chaining through them.
+    * Suppressing placeholders is therefore not something the recovery can do to itself; it is a
+    * property of the *finished* graph, enforced afterwards by a sanitizer pass.
+    */
+  def configFor[R <: X2CpgConfig[R] & TypeRecoveryParserConfig[R]](config: R): XTypeRecoveryConfig =
+      XTypeRecoveryConfig(config.typePropagationIterations, !config.disableDummyTypes)
+
   /** Parser options for languages implementing this pass.
     */
   def parserOptions[R <: X2CpgConfig[R] & TypeRecoveryParserConfig[R]]: OParser[?, R] =

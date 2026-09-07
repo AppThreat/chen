@@ -12,8 +12,10 @@ import io.shiftleft.semanticcpg.language.NoResolve
 import overflowdb.Edge
 
 import java.util.concurrent.*
+import org.slf4j.LoggerFactory
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
 /** The data flow engine allows determining paths to a set of sinks from a set of sources. To this
@@ -25,6 +27,8 @@ import scala.util.{Failure, Success, Try}
 class Engine(context: EngineContext):
 
   import Engine.*
+
+  private val logger: org.slf4j.Logger = LoggerFactory.getLogger(getClass)
 
   private val executorService: ExecutorService =
       Executors.newVirtualThreadPerTaskExecutor()
@@ -94,8 +98,16 @@ class Engine(context: EngineContext):
             case Success(resultsOfTask) =>
                 numberOfTasksRunning -= 1
                 handleSummary(resultsOfTask)
-            case Failure(_) =>
+            case Failure(exception) =>
                 numberOfTasksRunning -= 1
+                // A task that fails twice has still failed: its results are lost, which is why
+                // this is logged rather than swallowed. Historically this branch was silent, and
+                // transient adjacency-read races under the virtual-thread pool were quietly
+                // dropping a different handful of tasks per run - a measured 2888-2937
+                // reachables spread on one fixture from task loss alone (task 12 part B).
+                logger.warn(
+                  s"Data flow task failed (its results are not in the analysis): $exception"
+                )
 
     submitTasks(tasks.toVector, sources)
     runUntilAllTasksAreSolved()
@@ -111,8 +123,41 @@ class Engine(context: EngineContext):
           else
             started.add(task.fingerprint)
             numberOfTasksRunning += 1
-            completionService.submit(new TaskSolver(task, context, sources))
+            completionService.submit(new RetryingTaskSolver(task, context, sources))
       }
+
+  /** A [[TaskSolver]] with one built-in retry. Task solving only READS the graph, and the pool
+    * solves on virtual threads, so a task can transiently lose a race against another thread's lazy
+    * deserialization of the same adjacency (a ClassCastException or an NPE out of overflowdb's
+    * adjacent-node access). Rerunning the identical task is safe and idempotent, and without the
+    * retry those transient races silently removed a different set of results on every run. A task
+    * that fails the second attempt propagates the failure to the engine, which logs it - a
+    * persistent failure loses the same results every run, which is at least deterministic, and
+    * visible.
+    *
+    * Only NON-FATAL failures are retried. `Throwable` would also catch the three that must never be
+    * retried: an `InterruptedException` (retrying defeats the cancellation that raised it), an
+    * `OutOfMemoryError` (a second attempt asks a starved heap for the same allocation), and a
+    * `StackOverflowError` (deterministic in a deep traversal - retrying only pays the cost twice
+    * before failing identically). Those propagate on the first attempt, as they should.
+    */
+  private class RetryingTaskSolver(
+    task: ReachableByTask,
+    context: EngineContext,
+    sources: Set[CfgNode]
+  ) extends Callable[TaskSummary]:
+    override def call(): TaskSummary =
+        try new TaskSolver(task, context, sources).call()
+        catch
+          case NonFatal(first) =>
+              // Logged at debug, not warn: a retry that then SUCCEEDS costs nothing and is
+              // expected on a cold graph, but "how often does this fire" is the first question
+              // asked when residual nondeterminism is being chased, and it must be answerable
+              // without a rebuild.
+              logger.debug(
+                s"Data flow task failed; retrying once synchronously: $first"
+              )
+              new TaskSolver(task, context, sources).call()
 
   private def extractResultsFromTable(sinks: List[CfgNode]): List[TableEntry] =
       sinks.flatMap { sink =>
@@ -120,39 +165,6 @@ class Engine(context: EngineContext):
             case Some(results) => results
             case _             => Vector()
       }
-
-  private def deduplicateFinal(list: List[TableEntry]): List[TableEntry] =
-      list
-          .groupBy { result =>
-            val head = result.path.head.node
-            val last = result.path.last.node
-            (head, last)
-          }
-          .map { case (_, list) =>
-              val lenIdPathPairs = list.map(x => (x.path.length, x))
-              val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match
-                case Nil    => Nil
-                case h :: t => h :: t.takeWhile(y => y._1 == h._1)
-              ).map(_._2)
-
-              if withMaxLength.length == 1 then
-                withMaxLength.head
-              else
-                withMaxLength.minBy { x =>
-                    x.path
-                        .map(x =>
-                            (
-                              x.node.id,
-                              x.callSiteStack.map(_.id),
-                              x.visible,
-                              x.isOutputArg,
-                              x.outEdgeLabel
-                            ).toString
-                        )
-                        .mkString("-")
-                }
-          }
-          .toList
 
   /** This must be called when one is done using the engine.
     */
@@ -195,8 +207,12 @@ object Engine:
                 val sameCallSite   = parentNode.inCall.l == childNode.start.inCall.l
                 val visible = if sameCallSite then
                   val semanticExists = parentNode.semanticsForCallByArg.nonEmpty
+                  // Methods the walk treats as a descendable callee (internal, or external
+                  // with a body): the call site is a boundary the walk reports at, rather than
+                  // an opaque call whose permissive in-edges are followed.
                   val internalMethodsForCall =
-                      parentNodeCall.flatMap(methodsForCall).internal
+                      parentNodeCall.flatMap(methodsForCall)
+                          .filter(MethodExplorability.stopsWalkAtCallSite)
                   (semanticExists && parentNode.isDefined) || internalMethodsForCall.isEmpty
                 else
                   parentNode.isDefined
@@ -217,10 +233,18 @@ object Engine:
     end match
   end elemForEdge
 
+  /** The argument is (an implicit `this`/receiver aside) an argument of a call to a method whose
+    * body the engine explores: the sibling-argument taint that the reaching-def pass manufactures
+    * for every opaque call must not stand, because the callee's real statements decide what reaches
+    * what. Explorability, not internality: an external method parsed with its body
+    * (`python-deps=full`) is explored just the same.
+    */
   def isOutputArgOfInternalMethod(arg: Expression)(implicit semantics: Semantics): Boolean =
       arg.inCall.l match
         case List(call) =>
-            methodsForCall(call).internal.isNotStub.nonEmpty && semanticsForCall(call).isEmpty
+            methodsForCall(call)
+                .filter(MethodExplorability.isExplorable)
+                .nonEmpty && semanticsForCall(call).isEmpty
         case _ =>
             false
 
@@ -260,8 +284,12 @@ object Engine:
   def methodsForCall(call: Call): List[Method] =
       NoResolve.getCalledMethods(call).toList
 
+  /** True when the call resolves to a callee the walk treats as a boundary it reports at (see
+    * [[MethodExplorability.stopsWalkAtCallSite]]): internal code, or external code that arrived
+    * with a body. An opaque external callee keeps the permissive walk.
+    */
   def isCallToInternalMethod(call: Call): Boolean =
-      methodsForCall(call).internal.nonEmpty
+      methodsForCall(call).exists(MethodExplorability.stopsWalkAtCallSite)
   def isCallToInternalMethodWithoutSemantic(call: Call)(implicit semantics: Semantics): Boolean =
       isCallToInternalMethod(call) && semanticsForCall(call).isEmpty
 

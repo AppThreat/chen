@@ -16,7 +16,8 @@ class ConfigFileCreationPass(cpg: Cpg, requirementsTxt: String = "requirements.t
     extensionFilter(".yaml"),
     extensionFilter(".lock"),
     pathEndFilter("bom.json"),
-    pathEndFilter(".cdx.json"),
+    // also covers `.cdx.json`; matches CdxPass's `.*(bom|cdx).json`
+    pathEndFilter("cdx.json"),
     pathEndFilter("chennai.json"),
     pathEndFilter("setup.cfg"),
     // Requirements.txt

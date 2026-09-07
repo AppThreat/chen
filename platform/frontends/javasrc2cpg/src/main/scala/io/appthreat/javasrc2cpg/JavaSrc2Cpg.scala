@@ -9,7 +9,12 @@ import io.appthreat.javasrc2cpg.passes.{
     TypeInferencePass
 }
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
-import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass, XTypeRecoveryConfig}
+import io.appthreat.x2cpg.passes.frontend.{
+    MetaDataPass,
+    TypeNodePass,
+    XTypeRecovery,
+    XTypeRecoveryConfig
+}
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
@@ -53,9 +58,11 @@ object JavaSrc2Cpg:
 
   def typeRecoveryPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
       List(
+        // `configFor` also carries `typePropagationIterations`, which this call site used to
+        // drop on the floor - Java always ran the default iteration count.
         new JavaTypeRecoveryPass(
           cpg,
-          XTypeRecoveryConfig(enabledDummyTypes = !config.exists(_.disableDummyTypes))
+          config.map(XTypeRecovery.configFor).getOrElse(XTypeRecoveryConfig())
         ),
         new JavaTypeHintCallLinker(cpg)
       )

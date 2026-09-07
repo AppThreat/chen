@@ -8,11 +8,11 @@ import io.shiftleft.semanticcpg.language.*
   * because an unresolvable fallback hint (`tmp.method`) sat alongside the real one. The call linker
   * now prefers candidates that resolve to a defined method.
   */
-class SelfAttrMethodTests extends PySrc2CpgFixture(withOssDataflow = false) {
+class SelfAttrMethodTests extends PySrc2CpgFixture(withOssDataflow = false):
 
   "self.attr assigned a constructor in __init__" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class Config:
         |    def ready(self):
         |        pass
@@ -22,20 +22,20 @@ class SelfAttrMethodTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    def run(self):
         |        self.config.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve self.config.ready()" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.Config.ready")
-    }
-    "link run -> ready in the callgraph" in {
-      cpg.method.name("ready").caller.name.toSet should contain("run")
-    }
+        "t.py"
+      )
+      "resolve self.config.ready()" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.Config.ready")
+      }
+      "link run -> ready in the callgraph" in {
+          cpg.method.name("ready").caller.name.toSet should contain("run")
+      }
   }
 
   "self.attr assigned from a factory in __init__" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class Config:
         |    @classmethod
         |    def create(cls):
@@ -48,17 +48,17 @@ class SelfAttrMethodTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    def run(self):
         |        self.config.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve self.config.ready() through the factory return type" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.Config.ready")
-    }
+        "t.py"
+      )
+      "resolve self.config.ready() through the factory return type" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.Config.ready")
+      }
   }
 
   "self.attr typed on a base class, used by a subclass" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class Config:
         |    def ready(self):
         |        pass
@@ -69,11 +69,11 @@ class SelfAttrMethodTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    def run(self):
         |        self.config.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve self.config.ready() via the inherited member type" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.Config.ready")
-    }
+        "t.py"
+      )
+      "resolve self.config.ready() via the inherited member type" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.Config.ready")
+      }
   }
-}
+end SelfAttrMethodTests

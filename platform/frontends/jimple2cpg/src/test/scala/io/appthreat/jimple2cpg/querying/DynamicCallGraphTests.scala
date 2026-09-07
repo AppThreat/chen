@@ -1,15 +1,15 @@
 package io.appthreat.jimple2cpg.querying
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.semanticcpg.language.{_}
+import io.shiftleft.semanticcpg.language.{*}
 import io.shiftleft.semanticcpg.language.NoResolve
 
-class DynamicCallGraphTests extends JimpleCode2CpgFixture {
+class DynamicCallGraphTests extends JimpleCode2CpgFixture:
 
   implicit val resolver: NoResolve.type = NoResolve
 
   "call from a nested super-class" should {
-    val cpg = code("""
+      val cpg = code("""
         |class Foo {
         |
         |      public static void main(String[] args){
@@ -54,23 +54,23 @@ class DynamicCallGraphTests extends JimpleCode2CpgFixture {
         |}
         |""".stripMargin).cpg
 
-    "find that add is called by main" in {
-      cpg.method.name("print").caller.name.toSetMutable shouldBe Set("main")
-    }
+      "find that add is called by main" in {
+          cpg.method.name("print").caller.name.toSetMutable shouldBe Set("main")
+      }
 
-    "account for print calls from all subclasses due to using CHA" in {
-      cpg.call.name("print").callee.definingTypeDecl.fullName.toSetMutable shouldBe Set(
-        "Foo$D",
-        "Foo$B",
-        "Foo$C",
-        "Foo$A"
-      )
-    }
+      "account for print calls from all subclasses due to using CHA" in {
+          cpg.call.name("print").callee.definingTypeDecl.fullName.toSetMutable shouldBe Set(
+            "Foo$D",
+            "Foo$B",
+            "Foo$C",
+            "Foo$A"
+          )
+      }
   }
 
   "call from a method not overridden in a child class" should {
-    implicit val resolver: NoResolve.type = NoResolve
-    val cpg = code("""
+      implicit val resolver: NoResolve.type = NoResolve
+      val cpg = code("""
         |class Foo {
         |
         |  private int x = 0;
@@ -90,18 +90,17 @@ class DynamicCallGraphTests extends JimpleCode2CpgFixture {
         |}
         |""".stripMargin).cpg
 
-    "find that foo is still called with the derived full name" in {
-      cpg.call.name("foo").methodFullName.toSetMutable shouldBe Set("Bar.foo:int(int)")
-    }
+      "find that foo is still called with the derived full name" in {
+          cpg.call.name("foo").methodFullName.toSetMutable shouldBe Set("Bar.foo:int(int)")
+      }
 
-    "find that foo is not defined and thus point to the superclass implementation" in {
-      cpg.method.name("foo").caller.name.toSetMutable shouldBe Set("bar")
-    }
+      "find that foo is not defined and thus point to the superclass implementation" in {
+          cpg.method.name("foo").caller.name.toSetMutable shouldBe Set("bar")
+      }
 
-    "account for call to inherited superclass" in {
-      cpg.call.name("foo").callee.definingTypeDecl.fullName.toSetMutable shouldBe Set("Foo")
-    }
+      "account for call to inherited superclass" in {
+          cpg.call.name("foo").callee.definingTypeDecl.fullName.toSetMutable shouldBe Set("Foo")
+      }
 
   }
-
-}
+end DynamicCallGraphTests

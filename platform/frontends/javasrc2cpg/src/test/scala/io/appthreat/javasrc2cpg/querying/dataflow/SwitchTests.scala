@@ -1,14 +1,14 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 
-class SwitchTests extends JavaDataflowFixture {
+class SwitchTests extends JavaDataflowFixture:
 
   behavior of "Dataflow through `SWITCH`"
 
   override val code: String =
-    """
+      """
       |public class Foo {
       |    public void test1(int input) {
       |        String s;
@@ -42,12 +42,12 @@ class SwitchTests extends JavaDataflowFixture {
       |""".stripMargin
 
   it should "find a path if the source is in a switch" in {
-    val (source, sink) = getConstSourceSink("test1")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test1")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if the sink is in a switch" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 1
   }
-}
+end SwitchTests

@@ -1,10 +1,10 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.shiftleft.semanticcpg.language._
-import io.appthreat.dataflowengineoss.language._
+import io.shiftleft.semanticcpg.language.*
+import io.appthreat.dataflowengineoss.language.*
 
-class MethodReturnTests extends JavaDataflowFixture {
+class MethodReturnTests extends JavaDataflowFixture:
 
   behavior of "Dataflow to method return"
 
@@ -28,27 +28,26 @@ class MethodReturnTests extends JavaDataflowFixture {
       |""".stripMargin
 
   it should "find flow from x to METHOD_RETURN (exit node)" in {
-    val src = cpg.identifier.name("x")
-    val snk = cpg.method("foo").methodReturn
-    snk.reachableBy(src).size shouldBe 1
+      val src = cpg.identifier.name("x")
+      val snk = cpg.method("foo").methodReturn
+      snk.reachableBy(src).size shouldBe 1
   }
 
   it should "not find a flow from x to bar's argument" in {
-    val src = cpg.identifier("x")
-    val snk = cpg.method("bar").parameter.index(1)
-    snk.reachableBy(src).size shouldBe 0
+      val src = cpg.identifier("x")
+      val snk = cpg.method("bar").parameter.index(1)
+      snk.reachableBy(src).size shouldBe 0
   }
 
   it should "not find a flow from y to bar's argument" in {
-    val src = cpg.parameter("y")
-    val snk = cpg.method("bar").parameter.index(1)
-    snk.reachableBy(src).size shouldBe 0
+      val src = cpg.parameter("y")
+      val snk = cpg.method("bar").parameter.index(1)
+      snk.reachableBy(src).size shouldBe 0
   }
 
   it should "find a flow passed an external method with semantic" in {
-    val src = cpg.literal.code("\"20\"")
-    val snk = cpg.method("sink").parameter.index(1)
-    snk.reachableBy(src).size shouldBe 1
+      val src = cpg.literal.code("\"20\"")
+      val snk = cpg.method("sink").parameter.index(1)
+      snk.reachableBy(src).size shouldBe 1
   }
-
-}
+end MethodReturnTests

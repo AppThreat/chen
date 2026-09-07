@@ -8,7 +8,7 @@ import io.shiftleft.semanticcpg.language.{DefaultNodeExtensionFinder, NodeExtens
 
 import java.util.regex.Pattern
 
-class CodeDumperTest extends JsSrc2CpgSuite {
+class CodeDumperTest extends JsSrc2CpgSuite:
 
   implicit val finder: NodeExtensionFinder = DefaultNodeExtensionFinder
 
@@ -23,48 +23,47 @@ class CodeDumperTest extends JsSrc2CpgSuite {
 
   private val path = File(cpg.metaData.root.head) / "index.js"
 
-  override def beforeAll(): Unit = {
+  override def beforeAll(): Unit =
     super.beforeAll()
     // we have to restore the input file because CPG creation in JsSrc2CpgSuite
     // deletes it right after the CPG is ready.
     path.createFileIfNotExists(createParents = true)
     path.writeText(codeString)
-  }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     super.afterAll()
     path.delete(swallowIOExceptions = true)
-  }
 
   "dumping code" should {
 
-    "return empty string for empty traversal" in {
-      cpg.method.name("notinthere").dump shouldBe empty
-    }
+      "return empty string for empty traversal" in {
+          cpg.method.name("notinthere").dump shouldBe empty
+      }
 
-    "be able to dump complete function" in {
-      val code = cpg.method.name("my_func").dumpRaw.mkString("\n")
-      code should (
-        startWith("function my_func")
-          and include("foo(param1)")
-          and endWith("}")
-      )
-    }
+      "be able to dump complete function" in {
+          val code = cpg.method.name("my_func").dumpRaw.mkString("\n")
+          code should (
+            startWith("function my_func")
+                .and(include("foo(param1)"))
+                .and(endWith("}"))
+          )
+      }
 
-    "dump method with arrow for expression (a call)" in {
-      val code = cpg.call.name("foo").dumpRaw.mkString("\n")
-      code should (
-        startWith("function")
-          and include regex s".*var x = foo.*${Pattern.quote(CodeDumper.arrow(Option("index.js::program:my_func")).toString)}.*"
-          and endWith("}")
-      )
-    }
+      "dump method with arrow for expression (a call)" in {
+          val code = cpg.call.name("foo").dumpRaw.mkString("\n")
+          code should (
+            startWith("function")
+                .and(include).regex(
+                  s".*var x = foo.*${Pattern.quote(CodeDumper.arrow(Option("index.js::program:my_func")).toString)}.*"
+                )
+                .and(endWith("}"))
+          )
+      }
 
-    "allow dumping via .dump" in {
-      val code = cpg.method.name("my_func").dumpRaw.mkString("\n")
-      code should startWith("function my_func")
-    }
+      "allow dumping via .dump" in {
+          val code = cpg.method.name("my_func").dumpRaw.mkString("\n")
+          code should startWith("function my_func")
+      }
 
   }
-
-}
+end CodeDumperTest

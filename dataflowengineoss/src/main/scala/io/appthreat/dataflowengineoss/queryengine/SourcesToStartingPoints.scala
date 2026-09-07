@@ -44,11 +44,25 @@ class SourceTravsToStartingPointsTask[NodeType](sourceTravs: IterableOnce[NodeTy
         .sortBy(_.id)
     val tasks = sources.map(src => (src, new SourceToStartingPoints(src).fork()))
     tasks.flatMap { case (src, t: ForkJoinTask[List[CfgNode]]) =>
-        Try(t.get()) match
+        Try(t.get()).orElse(Try(new SourceToStartingPoints(src).compute())) match
+          // One synchronous retry: these tasks only read the graph, and a transient loss of
+          // the race against another thread's lazy deserialization of the same adjacency used
+          // to drop the source's starting points - and with them every flow rooted at that
+          // source - silently, a different handful per run (task 12 part B). A source that
+          // fails twice is still dropped, but logged, and identically on every run.
           case Failure(e) =>
-              log.error("Unable to complete 'SourceToStartingPoints' task", e); List()
-          case Success(sources) => sources.map(s => StartingPointWithSource(s, src))
+              // Twice, now - the message says so, because "unable to complete" read as a
+              // first-attempt hiccup and this is a source whose every flow is absent from the
+              // analysis.
+              log.error(
+                s"'SourceToStartingPoints' failed twice for source ${src.label} (id ${src.id()}); " +
+                    "no flow rooted at it is in the analysis",
+                e
+              )
+              List()
+          case Success(startingPoints) => startingPoints.map(s => StartingPointWithSource(s, src))
     }
+  end compute
 end SourceTravsToStartingPointsTask
 
 /** The code below deals with member variables, and specifically with the situation where literals

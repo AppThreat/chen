@@ -127,6 +127,18 @@ public class PythonParser {
     }
   }
 
+  /** Python 3.15 contextual `lazy` keyword: a NAME token with image "lazy" immediately
+    * followed by `import` or `from`. Checked with two tokens of lookahead only, so `lazy = 1`
+    * and bare `lazy` still parse as ordinary expressions.
+    */
+  private boolean isLazyImportStatement() {
+    if (getToken(1).kind != NAME || !getToken(1).image.equals("lazy")) {
+      return false;
+    }
+    int secondKind = getToken(2).kind;
+    return secondKind == IMPORT || secondKind == FROM;
+  }
+
   private boolean isTypeStatement() {
     if (getToken(1).kind != TYPE) {
       return false;
@@ -173,9 +185,9 @@ public class PythonParser {
     if (kind == MATCH) {
       return isMatchStatement();
     }
-    if (kind == TYPE) {
-      return isTypeStatement();
-    }
+    // NB: `type` is deliberately NOT claimed here. A type alias is a simple
+    // statement routed through smallStatement() (see type_stmt), so it reaches
+    // the path that consumes the trailing NEWLINE.
     return false;
   }
 
@@ -1003,6 +1015,22 @@ TOKEN: {
     matchedToken.image = adjustTokenAndBackupInput(matchedToken, 2);
     matchedToken.kind = FORMAT_STRING_PREFIX;
   } : FORMAT_STRING_LEX
+// PEP 750 (Python 3.14) t-strings. The interior grammar is identical to an f-string's
+// (interpolation fields with conversions, format specs and the "=" debug form), so the
+// same FORMAT_STRING_LEX state lexes both; the parser keeps the tokens distinct so a
+// t-string can build TemplateStr/Interpolation instead of JoinedString/FormattedValue.
+// t does not combine with b (bt is a SyntaxError in CPython; it stays one here too).
+| <TEMPLATE_STRING_PREFIX:
+  ("t" | "T")
+  ("\"" | "'" | "\"\"\"" | "'''")> {
+    matchedToken.image = adjustTokenAndBackupInput(matchedToken, 1);
+  } : FORMAT_STRING_LEX
+| <TEMPLATE_STRING_PREFIX2:
+  ("rt" | "rT" | "Rt" | "RT" | "tr" | "tR" | "Tr" | "TR")
+  ("\"" | "'" | "\"\"\"" | "'''")> {
+    matchedToken.image = adjustTokenAndBackupInput(matchedToken, 2);
+    matchedToken.kind = TEMPLATE_STRING_PREFIX;
+  } : FORMAT_STRING_LEX
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1428,6 +1456,18 @@ Name name(): {
   { return new Name(nameToken.image, attributes(nameToken, nameToken)); }
 }
 
+// match/case/type are SOFT keywords in Python: reserved only in the statement
+// and pattern positions guarded by isMatchStatement()/isTypeStatement(), and
+// ordinary identifiers everywhere else. Every identifier position outside those
+// guards must go through softName()/softNameToken() instead of the raw <NAME>
+// token, so `re.match(...)`, `obj.type`, `def match(self)`, `def f(case)` and
+// friends parse like the real-world code they appear in.
+String softName(): {}
+{ ( <NAME> | <MATCH> | <CASE> | <TYPE> ) { return token.image; } }
+
+Token softNameToken(): {}
+{ ( <NAME> | <MATCH> | <CASE> | <TYPE> ) { return token; } }
+
 // printName is the already parsed "print" Name expression.
 // Since this rule is only expected to be called in error
 // recovery, it needs to consume trailing semicolons and
@@ -1721,7 +1761,7 @@ iexpr nameOrAttr(): {
 } {
   expr = name()
   (
-    <DOT> <NAME> { expr = new Attribute(expr, token.image, attributes(expr, token)); }
+    <DOT> softName() { expr = new Attribute(expr, token.image, attributes(expr, token)); }
   )*
   { return expr; }
 }
@@ -1831,7 +1871,7 @@ ipattern maybeStarPattern(): {
 MatchStar starPattern(): {
 
 } {
-  <STAR> <NAME> {
+  <STAR> softName() {
     String target = token.image;
     if (!target.equals("_")) {
       // Capture pattern
@@ -1846,7 +1886,7 @@ MatchStar starPattern(): {
 String patternCaptureTarget(): {
 
 } {
-  <NAME>
+  softName()
   {
     if (token.image.equals("_")) throw new ParseException("Invalid capture pattern.");
     return token.image;
@@ -1902,7 +1942,18 @@ istmt smallStatement(): {
   istmt stmt;
 } {
   (
-  stmt = assignmentOrExpr() { stmt = printStatmentToPython2StyleRewrite(stmt); }
+  // A `type` alias (PEP 695) is a SIMPLE statement: it must be parsed via the
+  // path that consumes the statement terminator. Its lookahead guard comes
+  // first so `type` used as a plain name (`type = 3`, `type(x)`) still falls
+  // through to assignmentOrExpr.
+  LOOKAHEAD({ isTypeStatement() })
+  stmt = type_stmt()
+| // Python 3.15 `lazy import`/`lazy from` must be claimed before the expression arm,
+  // or `lazy` parses as a name and the trailing `import` errors out (same shape as the
+  // `type` statement guard above).
+  LOOKAHEAD({ isLazyImportStatement() })
+  stmt = importStatement()
+| stmt = assignmentOrExpr() { stmt = printStatmentToPython2StyleRewrite(stmt); }
 | stmt = returnStatement()
 | stmt = importStatement()
 | stmt = raiseStatement()
@@ -1938,10 +1989,27 @@ istmt importStatement(): {
   istmt stmt;
 } {
   (
+    // Python 3.15 `lazy import` / `lazy from ... import ...` (contextual keyword, PEP 810
+    // line in CPython's 3.15 Grammar/python.gram: lazy="lazy"? 'import' ...). The flag only
+    // defers module loading at runtime; the imported names are the same, so the AST keeps
+    // the ordinary Import/ImportFrom and the flag is dropped. LOOKAHEAD guards the arm: a
+    // name token literally "lazy" immediately followed by import/from is never a valid
+    // expression statement anyway (`lazy import` as two names is a SyntaxError in CPython).
+    LOOKAHEAD(<NAME> (<IMPORT> | <FROM>))
+    softLazyPrefix() ( stmt = importName() | stmt = importFrom() )
+  |
     stmt = importName()
   | stmt = importFrom()
   )
   { return stmt; }
+}
+
+void softLazyPrefix(): {} {
+  <NAME> {
+    if (!token.image.equals("lazy")) {
+      throw new ParseException("expected 'lazy'");
+    }
+  }
 }
 
 Import importName(): {
@@ -1965,15 +2033,15 @@ Alias dottedAsName(): {
   String dottedName;
   String asName = null;
 } {
-  dottedName = dottedName() (<AS> <NAME>{ asName = token.image; })?
+  dottedName = dottedName() (<AS> softName(){ asName = token.image; })?
   { return new Alias(dottedName, asName); }
 }
 
 String dottedName(): {
   String dottedName;
 } {
-  <NAME> { dottedName = token.image; }
-  (<DOT> <NAME> { dottedName = dottedName + "." + token.image; })*
+  softName() { dottedName = token.image; }
+  (<DOT> softName() { dottedName = dottedName + "." + token.image; })*
   { return dottedName; }
 }
 
@@ -2028,7 +2096,7 @@ Alias importFromAsName(): {
   String name;
   String asName = null;
 } {
-  <NAME> { name = token.image; } (<AS> <NAME> { asName = token.image; })?
+  softName() { name = token.image; } (<AS> softName() { asName = token.image; })?
   { return new Alias(name, asName); }
 }
 
@@ -2117,8 +2185,8 @@ Global globalStatement(): {
   ArrayList<String> names = new ArrayList<String>();
 } {
   <GLOBAL> { startToken = token; }
-  <NAME> { names.add(token.image); }
-  (<COMMA> <NAME> { names.add(token.image); })*
+  softName() { names.add(token.image); }
+  (<COMMA> softName() { names.add(token.image); })*
   { return new Global(names, attributes(startToken, token)); }
 }
 
@@ -2127,8 +2195,8 @@ Nonlocal nonlocalStatement(): {
   ArrayList<String> names = new ArrayList<String>();
 } {
   <NONLOCAL> { startToken = token; }
-  <NAME> { names.add(token.image); }
-  (<COMMA> <NAME> { names.add(token.image); })*
+  softName() { names.add(token.image); }
+  (<COMMA> softName() { names.add(token.image); })*
   { return new Nonlocal(names, attributes(startToken, token)); }
 }
 
@@ -2146,7 +2214,6 @@ istmt compoundStatement(): {
   | stmt = tryStatement()
   | stmt = whileStatement()
   | LOOKAHEAD({ isMatchStatement() }) stmt = matchStatement()
-  | LOOKAHEAD({ isTypeStatement() }) stmt = type_stmt()
   )
   { return stmt; }
 }
@@ -2187,7 +2254,7 @@ istmt functionDef(ArrayList<iexpr> decorators, boolean isAsync, Token asyncToken
   ArrayList<istmt> blockStmts;
 } {
   <DEF>{ if (!isAsync) {startToken = token;} }
-  <NAME> { name = token.image; }
+  softName() { name = token.image; }
   ( typeParams = type_params() )?
   <PAREN_OPEN>
   parameters = parameters()
@@ -2377,7 +2444,7 @@ Arg typedFunctionParameterDef(): {
   String name;
   iexpr defaultExpr = null;
 } {
-  <NAME> { startToken = token; name = token.image; }
+  softName() { startToken = token; name = token.image; }
   (<COLON> defaultExpr = expression())?
   { return new Arg(name, defaultExpr, null, attributes(startToken, token)); }
 }
@@ -2544,7 +2611,7 @@ Arg lambdaFunctionParameterDef(): {
   Token startToken;
   String name;
 } {
-  <NAME> { startToken = token; name = token.image; }
+  softName() { startToken = token; name = token.image; }
   { return new Arg(name, null, (String)null, attributes(startToken, token)); }
 }
 
@@ -2616,17 +2683,17 @@ TypeParam type_param():
     (
         // ParamSpec: ** NAME (= expression)?
         LOOKAHEAD(2) // Need lookahead for "** NAME"
-        <DOUBLE_STAR> nameToken = <NAME>
+        <DOUBLE_STAR> nameToken = softNameToken()
         ( <ASSIGN> defaultValue = expression() )?
         { return new ParamSpec(nameToken.image, defaultValue, attributes(nameToken, token)); }
     |
         // TypeVarTuple: * NAME (= expression)?
-        <STAR> nameToken = <NAME>
+        <STAR> nameToken = softNameToken()
         ( <ASSIGN> defaultValue = expression() )?
         { return new TypeVarTuple(nameToken.image, defaultValue, attributes(nameToken, token)); }
     |
         // TypeVar: NAME (':' expression)? ('=' expression)?
-        nameToken = <NAME>
+        nameToken = softNameToken()
         ( <COLON> bound = expression() )?
         ( <ASSIGN> defaultValue = expression() )?
         { return new TypeVar(nameToken.image, bound, defaultValue, attributes(nameToken, token)); }
@@ -2657,7 +2724,7 @@ ClassDef classDef(ArrayList<iexpr> decorators): {
   ArrayList<Keyword> keywords = new ArrayList<Keyword>();
   ArrayList<istmt> blockStmts;
 } {
-  <CLASS> { startToken = token; } <NAME> { name = token.image; }
+  <CLASS> { startToken = token; } softName() { name = token.image; }
   ( typeParams = type_params() )?
   (<PAREN_OPEN> arguments(bases, keywords) <PAREN_CLOSE>)?
   <COLON>
@@ -2793,12 +2860,14 @@ ExceptHandler exceptBlock(): {
   (
     LOOKAHEAD(expressionsAsTuple() <AS>)
     typeExpr = expressionsAsTuple()
-    <AS> <NAME> { name = token.image; }
+    <AS> softName() { name = token.image; }
   |
-    LOOKAHEAD(expression() <COMMA> <NAME> <COLON>)
-    typeExpr = expression()
-    <COMMA> <NAME> { name = token.image; }
-  |
+    // PEP 758 (Python 3.14): `except A, B:` / `except A, B, C:` / trailing comma are a
+    // TUPLE of exception types. The arm that used to sit here was the Python 2 form
+    // `except E, name:` - it bound name and silently mis-typed every unparenthesised
+    // multiple-type handler; real 3.x has rejected that spelling since 3.0. The plain
+    // tuple arm below already parses `A, B` (and, in CPython 3.15, `A, B as e` parses
+    // through the AS arm above), so removing the legacy arm is the whole change.
     typeExpr = expressionsAsTuple()
   )?
   <COLON>
@@ -2814,9 +2883,11 @@ ExceptStarHandler exceptStarBlock(): {
 } {
   <EXCEPT_STAR> { startToken = token; }
   (
-    typeExpr = expression()
+    // PEP 758 applies to except* as well: `except* A, B:` is legal in 3.14 (while
+    // `except* A, B as e:` is not, exactly as for plain except).
+    typeExpr = expressionsAsTuple()
     (
-      <AS> <NAME> { name = token.image; }
+      <AS> softName() { name = token.image; }
     )?
   )?
   <COLON>
@@ -3382,7 +3453,7 @@ iexpr primary(): {
       { expression = new Subscript(expression, sliceExpression, attributes(expression, token)); }
     )
   | (
-      <DOT> <NAME> { expression = new Attribute(expression, token.image, attributes(expression, token)); }
+      <DOT> softName() { expression = new Attribute(expression, token.image, attributes(expression, token)); }
     )
   )*
   { return expression; }
@@ -3607,6 +3678,42 @@ iexpr string(): {
   )
   {
     return new JoinedString(values, quote, prefix, attributes(formatStartToken, token));
+  }
+| (
+    (<TEMPLATE_STRING_PREFIX> )
+    { prefix = token.image; formatStartToken = token; values = new ArrayList<iexpr>(); }
+    <FORMAT_STRING_QUOTE_OPEN> { quote = token.image; }
+    <FORMAT_STRING_CONTENT> {
+      if (!token.image.equals("")) {
+        Constant constant = new Constant(new JoinedStringConstant(token.image), attributes(token, token));
+        values.add(constant);
+      }
+    }
+    (
+      formattedValue = replacementField()
+      {
+        // The interior grammar is the f-string's; the node is not. PEP 750 keeps the
+        // interpolations unevaluated in the Template object, so this arm wraps each
+        // replacement field as an Interpolation rather than a FormattedValue and the
+        // whole literal becomes a TemplateStr rather than a JoinedString.
+        values.add(new Interpolation(
+            formattedValue.value(),
+            formattedValue.conversion(),
+            formattedValue.format_spec(),
+            formattedValue.equalSign(),
+            formattedValue.attributeProvider()));
+      }
+      <FORMAT_STRING_CONTENT> {
+        if (!token.image.equals("")) {
+          Constant constant = new Constant(new JoinedStringConstant(token.image), attributes(token, token));
+          values.add(constant);
+        }
+      }
+    )*
+    <FORMAT_STRING_QUOTE_CLOSE>
+  )
+  {
+    return new TemplateStr(values, quote, prefix, attributes(formatStartToken, token));
   }
 }
 

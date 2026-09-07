@@ -1,14 +1,14 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 
-class TryTests extends JavaDataflowFixture {
+class TryTests extends JavaDataflowFixture:
 
   behavior of "Dataflow through TRY/CATCH"
 
   override val code: String =
-    """
+      """
       |public class Foo {
       |    public static void foo() {
       |        throw new Exception();
@@ -141,53 +141,53 @@ class TryTests extends JavaDataflowFixture {
       |""".stripMargin
 
   it should "find a path if the sink is in a `TRY`" in {
-    val (source, sink) = getConstSourceSink("test1")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test1")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if the sink is in a `CATCH`" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if the sink is in a `FINALLY`" in {
-    val (source, sink) = getConstSourceSink("test3")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test3")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   // TODO: This is a very optimistic test. We expect the path to be missing for now.
   it should "find a path if `MALICIOUS` is contained in thrown string with sink in catch" in {
-    val (source, sink) = getConstSourceSink("test4")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test4")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "find a path if `MALICIOUS` is assigned in `TRY`" in {
-    val (source, sink) = getConstSourceSink("test5")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test5")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is assigned in `CATCH`" in {
-    val (source, sink) = getConstSourceSink("test6")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test6")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is assigned in `FINALLY`" in {
-    val (source, sink) = getConstSourceSink("test7")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test7")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path if `MALICIOUS` is reassigned in both TRY/CATCH" in {
-    val (source, sink) = getConstSourceSink("test8")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test8")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "not find a path if `MALICIOUS` is reassigned in FINALLY" in {
-    val (source, sink) = getConstSourceSink("test9")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test9")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "find a path if `MALICIOUS` is given to a call in CATCH" in {
-    val (source, sink) = getMultiFnSourceSink("test10", "tryWithExplicitReturn")
-    sink.reachableBy(source).size shouldBe 2
+      val (source, sink) = getMultiFnSourceSink("test10", "tryWithExplicitReturn")
+      sink.reachableBy(source).size shouldBe 2
   }
-}
+end TryTests

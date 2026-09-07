@@ -30,10 +30,10 @@ class FragmentStitchTests extends AnyWordSpec with Matchers:
     * intra-fragment.
     */
   private def selfContainedUnit(): DiffGraphBuilder =
-    val diff = new DiffGraphBuilder
+    val diff  = new DiffGraphBuilder
     val m     = NewMethod().name("foo").fullName("foo").signature("sig").order(1)
     val block = NewBlock().typeFullName("ANY").order(1)
-    val call  = NewCall().name("bar").methodFullName("bar").signature("s")
+    val call = NewCall().name("bar").methodFullName("bar").signature("s")
         .dispatchType(DispatchTypes.STATIC_DISPATCH).code("bar(x)").order(1)
     val arg = NewIdentifier().name("x").code("x").argumentIndex(1).order(1)
     diff.addNode(m); diff.addNode(block); diff.addNode(call); diff.addNode(arg)
@@ -42,7 +42,6 @@ class FragmentStitchTests extends AnyWordSpec with Matchers:
     diff.addEdge(call, arg, EdgeTypes.AST)
     diff.addEdge(call, arg, EdgeTypes.ARGUMENT)
     diff
-  end selfContainedUnit
 
   "the fragment foundation" should:
 
@@ -54,7 +53,13 @@ class FragmentStitchTests extends AnyWordSpec with Matchers:
       BatchedUpdate.applyDiff(direct.graph, selfContainedUnit())
 
       val viaFragment = Cpg.emptyCpg
-      BatchedUpdate.applyFragment(viaFragment.graph, bytes.get, schemaHash, NoBoundaryResolver, null)
+      BatchedUpdate.applyFragment(
+        viaFragment.graph,
+        bytes.get,
+        schemaHash,
+        NoBoundaryResolver,
+        null
+      )
 
       val diff = DiffTool.compare(direct.graph, viaFragment.graph).asScala.toList
       withClue(diff.mkString("\n")) { diff shouldBe empty }

@@ -34,7 +34,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   // Language-specific route patterns
   private val PYTHON_ROUTES_CALL_REGEXES = Array(
-    s"django$EscapedFileSeparator(conf$EscapedFileSeparator)?urls.py:<module>.(path|re_path|url).*".r,
+    s"django\\.(conf\\.)?urls\\.(path|re_path|url).*".r,
     ".*(route|web\\.|add_resource).*".r
   )
 
@@ -56,7 +56,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
   private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
 
-  private val HTTP_METHODS_REGEX  = ".*(request|session)\\.(args|get|post|put|form).*"
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
@@ -177,13 +176,12 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           ._refOut
           .collectAll[Method]
 
-      decoratedMethods.call.assignment
-          .code(HTTP_METHODS_REGEX)
-          .argument
-          .isIdentifier
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(using dstGraph)
-
+      // NB: the request-access expression itself is tagged framework-input by
+      // EasyTagsPass (step 3b). This pass used to tag the LHS identifier of an
+      // assignment whose RHS was a request access, which covered only
+      // `v = request.args[...]` and missed `sink(request.args[...])` entirely.
+      // Tagging both would report a single source twice, so only the expression
+      // tagging remains.
       decoratedMethods.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
       decoratedMethods.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
     }

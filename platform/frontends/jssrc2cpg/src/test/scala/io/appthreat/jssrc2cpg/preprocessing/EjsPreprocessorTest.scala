@@ -3,12 +3,12 @@ package io.appthreat.jssrc2cpg.preprocessing
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class EjsPreprocessorTest extends AnyWordSpec with Matchers {
+class EjsPreprocessorTest extends AnyWordSpec with Matchers:
 
   "EjsPreprocessor" should {
-    "replace correctly with script block" in {
-      val code =
-        """
+      "replace correctly with script block" in {
+          val code =
+              """
           |<!DOCTYPE html>
           |<html lang="en">
           |<head>
@@ -47,8 +47,8 @@ class EjsPreprocessorTest extends AnyWordSpec with Matchers {
           |</html>
           |""".stripMargin
 
-      val expectedCode =
-        """
+          val expectedCode =
+              """
           |               
           |                
           |      
@@ -86,12 +86,12 @@ class EjsPreprocessorTest extends AnyWordSpec with Matchers {
           |             
           |       
           |""".stripMargin
-      new EjsPreprocessor().preprocess(code) shouldBe expectedCode
-    }
+          new EjsPreprocessor().preprocess(code) shouldBe expectedCode
+      }
 
-    "replace correctly" in {
-      val code =
-        """
+      "replace correctly" in {
+          val code =
+              """
           |<body>
           |
           |<h1>Welcome <%= user.name %></h1>
@@ -119,8 +119,8 @@ class EjsPreprocessorTest extends AnyWordSpec with Matchers {
           |</body>
           |""".stripMargin
 
-      val expectedCode =
-        """
+          val expectedCode =
+              """
           |      
           |
           |                user.name ;      
@@ -147,8 +147,7 @@ class EjsPreprocessorTest extends AnyWordSpec with Matchers {
           |
           |       
           |""".stripMargin
-      new EjsPreprocessor().preprocess(code) shouldBe expectedCode
-    }
+          new EjsPreprocessor().preprocess(code) shouldBe expectedCode
+      }
   }
-
-}
+end EjsPreprocessorTest

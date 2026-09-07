@@ -4,6 +4,7 @@ import better.files.File
 import io.appthreat.x2cpg.ValidationMode
 import io.appthreat.x2cpg.X2Cpg.{applyDefaultOverlays, withErrorsToConsole}
 import io.appthreat.x2cpg.layers.{Base, CallGraph, ControlFlow, TypeRelations}
+import io.appthreat.x2cpg.perf.PerfReporter
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
 import org.slf4j.LoggerFactory
@@ -128,9 +129,12 @@ trait X2CpgFrontend[T <: X2CpgConfig[?]]:
   /** Create a CPG with default overlays according to given configuration
     */
   def createCpgWithOverlays(config: T): Try[Cpg] =
-    val maybeCpg = createCpg(config)
+    val frontendLabel = getClass.getSimpleName
+    val maybeCpg = PerfReporter.stage(s"$frontendLabel.createCpg", "analysis")(
+      createCpg(config)
+    )
     maybeCpg.map { cpg =>
-      applyDefaultOverlays(cpg)
+      PerfReporter.stage(s"$frontendLabel.defaultOverlays", "analysis")(applyDefaultOverlays(cpg))
       cpg
     }
 
@@ -277,7 +281,9 @@ object X2Cpg:
   def applyDefaultOverlays(cpg: Cpg): Unit =
     val context = new LayerCreatorContext(cpg)
     defaultOverlayCreators().foreach { creator =>
-        creator.run(context)
+        PerfReporter.stage(s"overlays.${creator.getClass.getSimpleName}", "analysis")(
+          creator.run(context)
+        )
     }
 
   /** This should be the only place where we define the list of default overlays.

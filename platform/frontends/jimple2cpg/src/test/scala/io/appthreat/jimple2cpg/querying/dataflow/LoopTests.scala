@@ -4,11 +4,11 @@ import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.Cpg
 
-class LoopTests extends JimpleDataFlowCodeToCpgSuite {
+class LoopTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through loop structures" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Foo {
         |    public void test1(boolean b) {
         |        String s = "MALICIOUS";
@@ -95,54 +95,54 @@ class LoopTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find a path if `MALICIOUS` is possibly reassigned in a `WHILE" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is possibly reassigned in a `WHILE" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is possibly assigned in a `WHILE`" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is possibly assigned in a `WHILE`" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is added in `FOR` update" in {
-      val (source, sink) = getConstSourceSink("test3", sourceCode = ".*MALICIOUS.*")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is added in `FOR` update" in {
+          val (source, sink) = getConstSourceSink("test3", sourceCode = ".*MALICIOUS.*")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is always reassigned before sink in loop" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is always reassigned before sink in loop" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path if `MALICIOUS` is assigned in `FOR` init" in {
-      val (source, sink) = getConstSourceSink("test5")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in `FOR` init" in {
+          val (source, sink) = getConstSourceSink("test5")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if sink is in a `DO` loop" in {
-      val (source, sink) = getConstSourceSink("test6")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if sink is in a `DO` loop" in {
+          val (source, sink) = getConstSourceSink("test6")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if sink is in `FOREACH` loop" in {
-      val (source, sink) = getConstSourceSink("test7")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if sink is in `FOREACH` loop" in {
+          val (source, sink) = getConstSourceSink("test7")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is possibly appended in `FOR`" in {
-      val (source, sink) = getConstSourceSink("test10", sourceCode = ".*MALICIOUS.*")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is possibly appended in `FOR`" in {
+          val (source, sink) = getConstSourceSink("test10", sourceCode = ".*MALICIOUS.*")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is appended to prefix in `FOREACH`" in {
-      val (source, sink) = getConstSourceSink("test11")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is appended to prefix in `FOREACH`" in {
+          val (source, sink) = getConstSourceSink("test11")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is reassigned before sink in `DO`" in {
-      val (source, sink) = getConstSourceSink("test12")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is reassigned before sink in `DO`" in {
+          val (source, sink) = getConstSourceSink("test12")
+          sink.reachableBy(source).size shouldBe 0
+      }
   }
-}
+end LoopTests

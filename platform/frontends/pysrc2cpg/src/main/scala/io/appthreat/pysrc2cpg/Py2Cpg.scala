@@ -29,7 +29,9 @@ class Py2Cpg(
   outputCpg: Cpg,
   inputPath: String,
   requirementsTxt: String = "requirements.txt",
-  schemaValidationMode: ValidationMode
+  schemaValidationMode: ValidationMode,
+  strictParse: Boolean = false,
+  moduleNames: Map[String, String] = Map.empty
 ):
   private val diffGraph   = new DiffGraphBuilder()
   private val nodeBuilder = new NodeBuilder(diffGraph)
@@ -55,7 +57,25 @@ class Py2Cpg(
     )
     edgeBuilder.astEdge(anyTypeDecl, globalNamespaceBlock, 0)
     BatchedUpdate.applyDiff(outputCpg.graph, diffGraph)
-    new CodeToCpg(outputCpg, inputProviders, schemaValidationMode, inputPath).createAndApply()
+    val codeToCpg = new CodeToCpg(
+      outputCpg,
+      inputProviders,
+      schemaValidationMode,
+      inputPath,
+      strictParse = strictParse,
+      moduleNames = moduleNames
+    )
+    codeToCpg.createAndApply()
+    val parseErrors = codeToCpg.getParseErrors
+    if parseErrors.nonEmpty then
+      // A parse failure used to be silent (an inline ErrorStatement node, exit 0),
+      // which is how whole-statement loss across a CPython release went unnoticed.
+      // Always summarize; strict-parse additionally fails the run.
+      println(CodeToCpg.summarize(parseErrors))
+      if strictParse then
+        throw new IllegalStateException(
+          s"strict-parse: ${parseErrors.size} statements failed to parse; failing as requested"
+        )
     new ConfigFileCreationPass(outputCpg, requirementsTxt).createAndApply()
     new DependenciesFromRequirementsTxtPass(outputCpg).createAndApply()
   end buildCpg

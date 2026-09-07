@@ -7,11 +7,11 @@ import io.shiftleft.semanticcpg.language.NoResolve
 
 import java.io.File
 
-class RequirePassTests extends DataFlowCodeToCpgSuite {
+class RequirePassTests extends DataFlowCodeToCpgSuite:
 
   "methods imported via `require` should be resolved correctly" in {
-    val cpg = code(
-      """
+      val cpg = code(
+        """
          |const externalfunc = require('./sampleone');
          |function testone() {
          |  var name = "foo";
@@ -21,36 +21,36 @@ class RequirePassTests extends DataFlowCodeToCpgSuite {
          |
          |testone();
       """.stripMargin,
-      "sample.js"
-    ).moreCode(
-      """
+        "sample.js"
+      ).moreCode(
+        """
         |module.exports = function (nameparam) {
         |  console.log( "external func" + nameparam);
         |}
         |""".stripMargin,
-      "sampleone.js"
-    )
+        "sampleone.js"
+      )
 
-    cpg.call("externalfunc").methodFullName.l shouldBe List("sampleone.js::program:anonymous")
-    implicit val callResolver: NoResolve.type = NoResolve
-    cpg.call("externalfunc").callee.fullName.l shouldBe List("sampleone.js::program:anonymous")
+      cpg.call("externalfunc").methodFullName.l shouldBe List("sampleone.js::program:anonymous")
+      implicit val callResolver: NoResolve.type = NoResolve
+      cpg.call("externalfunc").callee.fullName.l shouldBe List("sampleone.js::program:anonymous")
 
-    val sink   = cpg.call("log").argument(1)
-    val source = cpg.literal.codeExact("\"foo\"")
-    sink.reachableByFlows(source).size shouldBe 2
+      val sink   = cpg.call("log").argument(1)
+      val source = cpg.literal.codeExact("\"foo\"")
+      sink.reachableByFlows(source).size shouldBe 2
   }
 
   "methods imported via `import` should be resolved correctly" in {
-    val cpg = code(
-      """
+      val cpg = code(
+        """
          |import {foo, bar} from './sampleone.mjs';
          |var x = "literal";
          |foo(x);
          |bar(x);
       """.stripMargin,
-      "sample.js"
-    ).moreCode(
-      """
+        "sample.js"
+      ).moreCode(
+        """
         |export function foo(x) {
         |  console.log(x);
         |}
@@ -59,47 +59,46 @@ class RequirePassTests extends DataFlowCodeToCpgSuite {
         |  console.log(x);
         |}
         |""".stripMargin,
-      "sampleone.mjs"
-    )
+        "sampleone.mjs"
+      )
 
-    implicit val callResolver: NoResolve.type = NoResolve
-    cpg.call("foo").methodFullName.l shouldBe List("sampleone.mjs::program:foo")
-    cpg.call("foo").callee.fullName.l shouldBe List("sampleone.mjs::program:foo")
-    cpg.call("bar").methodFullName.l shouldBe List("sampleone.mjs::program:bar")
-    cpg.call("bar").callee.fullName.l shouldBe List("sampleone.mjs::program:bar")
+      implicit val callResolver: NoResolve.type = NoResolve
+      cpg.call("foo").methodFullName.l shouldBe List("sampleone.mjs::program:foo")
+      cpg.call("foo").callee.fullName.l shouldBe List("sampleone.mjs::program:foo")
+      cpg.call("bar").methodFullName.l shouldBe List("sampleone.mjs::program:bar")
+      cpg.call("bar").callee.fullName.l shouldBe List("sampleone.mjs::program:bar")
 
-    val sink   = cpg.call("log").argument(1)
-    val source = cpg.literal.codeExact("\"literal\"")
-    sink.reachableByFlows(source).size shouldBe 2
+      val sink   = cpg.call("log").argument(1)
+      val source = cpg.literal.codeExact("\"literal\"")
+      sink.reachableByFlows(source).size shouldBe 2
   }
 
   "methods imported in TypeScript via relative importing" in {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |export function foo() {}
         |""".stripMargin,
-      "foo.ts"
-    ).moreCode(
-      """
+        "foo.ts"
+      ).moreCode(
+        """
         |import { foo } from "../../foo.ts";
         |
         |foo();
         |export function bar() {}
         |""".stripMargin,
-      Seq("d1", "d2", "bar.ts").mkString(File.separator)
-    ).moreCode(
-      """
+        Seq("d1", "d2", "bar.ts").mkString(File.separator)
+      ).moreCode(
+        """
         |import { bar } from "./d2/bar.ts";
         |
         |bar();
         |""".stripMargin,
-      Seq("d1", "baz.ts").mkString(File.separator)
-    )
+        Seq("d1", "baz.ts").mkString(File.separator)
+      )
 
-    cpg.call("bar").methodFullName.headOption shouldBe Some(
-      Seq("d1", "d2", "bar.ts::program:bar").mkString(File.separator)
-    )
-    cpg.call("foo").methodFullName.headOption shouldBe Some("foo.ts::program:foo")
+      cpg.call("bar").methodFullName.headOption shouldBe Some(
+        Seq("d1", "d2", "bar.ts::program:bar").mkString(File.separator)
+      )
+      cpg.call("foo").methodFullName.headOption shouldBe Some("foo.ts::program:foo")
   }
-
-}
+end RequirePassTests

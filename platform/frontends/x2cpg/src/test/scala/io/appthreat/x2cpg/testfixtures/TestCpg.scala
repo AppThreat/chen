@@ -13,7 +13,7 @@ import scala.collection.mutable
 // Lazily populated test CPG which is created upon first access to the underlying graph.
 // The trait LanguageFrontend is mixed in and not property/field of this class in order
 // to allow the configuration of language frontend specific properties on the CPG object.
-abstract class TestCpg extends Cpg() with LanguageFrontend {
+abstract class TestCpg extends Cpg() with LanguageFrontend:
   private var _graph            = Option.empty[Graph]
   private val codeFileNamePairs = mutable.ArrayBuffer.empty[(String, Path)]
   private var fileNameCounter   = 0
@@ -23,64 +23,52 @@ abstract class TestCpg extends Cpg() with LanguageFrontend {
 
   protected def applyPasses(): Unit
 
-  def moreCode(code: String): this.type = {
+  def moreCode(code: String): this.type =
     moreCode(code, s"Test$fileNameCounter$fileSuffix")
     fileNameCounter += 1
     this
-  }
 
-  def moreCode(code: String, fileName: String): this.type = {
+  def moreCode(code: String, fileName: String): this.type =
     checkGraphEmpty()
     codeFileNamePairs.append((code, Paths.get(fileName)))
     this
-  }
 
-  def withConfig(config: X2CpgConfig[?]): this.type = {
+  def withConfig(config: X2CpgConfig[?]): this.type =
     setConfig(config)
     this
-  }
 
-  private def checkGraphEmpty(): Unit = {
-    if (_graph.isDefined) {
-      throw new RuntimeException("Modifying test data is not allowed after accessing graph.")
-    }
-  }
+  private def checkGraphEmpty(): Unit =
+      if _graph.isDefined then
+        throw new RuntimeException("Modifying test data is not allowed after accessing graph.")
 
-  private def codeToFileSystem(): Path = {
+  private def codeToFileSystem(): Path =
     val tmpDir = Files.createTempDirectory("x2cpgTestTmpDir")
     codeFileNamePairs.foreach { case (code, fileName) =>
-      if (fileName.getParent != null) {
-        Files.createDirectories(tmpDir.resolve(fileName.getParent))
-      }
-      val codeAsBytes = code.getBytes(StandardCharsets.UTF_8)
-      val codeFile    = tmpDir.resolve(Paths.get(fileName.toString))
-      Files.write(codeFile, codeAsBytes)
-      codeFilePreProcessing(codeFile)
+        if fileName.getParent != null then
+          Files.createDirectories(tmpDir.resolve(fileName.getParent))
+        val codeAsBytes = code.getBytes(StandardCharsets.UTF_8)
+        val codeFile    = tmpDir.resolve(Paths.get(fileName.toString))
+        Files.write(codeFile, codeAsBytes)
+        codeFilePreProcessing(codeFile)
     }
     tmpDir
-  }
 
-  private def deleteDir(dir: Path): Unit = {
-    Files
-      .walk(dir)
-      .sorted(Comparator.reverseOrder[Path]())
-      .forEach(Files.delete(_))
-  }
+  private def deleteDir(dir: Path): Unit =
+      Files
+          .walk(dir)
+          .sorted(Comparator.reverseOrder[Path]())
+          .forEach(Files.delete(_))
 
-  override def graph: Graph = {
-    if (_graph.isEmpty) {
+  override def graph: Graph =
+    if _graph.isEmpty then
       val codeDir = codeToFileSystem()
-      try {
+      try
         _graph = Option(execute(codeDir.toFile).graph)
         applyPasses()
-      } finally {
+      finally
         deleteDir(codeDir)
-      }
-    }
     _graph.get
-  }
 
-  override def close(): Unit = {
-    _graph.foreach(_.close())
-  }
-}
+  override def close(): Unit =
+      _graph.foreach(_.close())
+end TestCpg

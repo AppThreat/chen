@@ -65,7 +65,14 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
           else
             val visiblePathElements =
                 result.path.filter(x => startingPoints.contains(x.node) || x.visible)
-            Some(Path(removeConsecutiveDuplicates(visiblePathElements.map(_.node))))
+            val elements = removeConsecutiveDuplicates(visiblePathElements.map(_.node))
+            // A single-element path is zero-information - it says only "this node is both
+            // source and sink" - and is dropped here rather than by consumers, which would
+            // otherwise count it as a finding. Paths that merely start and end at the same
+            // node are NOT dropped: with intermediates they describe a round trip through a
+            // callee, which is a real flow for callers of this general-purpose API.
+            if elements.size < 2 then None
+            else Some(Path(elements))
         }
         .filter(_.isDefined)
         .dedup

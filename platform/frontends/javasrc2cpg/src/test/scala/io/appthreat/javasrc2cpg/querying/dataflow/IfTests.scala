@@ -1,9 +1,9 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 
-class IfTests extends JavaDataflowFixture {
+class IfTests extends JavaDataflowFixture:
   behavior of "Dataflow through IF structures"
 
   override val code: String = """
@@ -66,27 +66,27 @@ class IfTests extends JavaDataflowFixture {
     |""".stripMargin
 
   it should "find a path if `MALICIOUS` is reassigned to `SAFE` in only one path of an if" in {
-    val (source, sink) = getConstSourceSink("test1")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test1")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `SAFE` is reassigned to `MALICIOUS` in at least one path of an if" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is assigned in at least one path of an if" in {
-    val (source, sink) = getConstSourceSink("test3")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test3")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is assigned in a chained if" in {
-    val (source, sink) = getConstSourceSink("test4")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test4")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path if `MALICIOUS` is reassigned in all paths of an if" in {
-    val (source, sink) = getConstSourceSink("test5")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test5")
+      sink.reachableBy(source).size shouldBe 0
   }
-}
+end IfTests

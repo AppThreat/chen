@@ -21,6 +21,6 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     // Gemfiles
     validGemfilePaths.contains,
     pathEndFilter("bom.json"),
-    pathEndFilter(".cdx.json"),
+    pathEndFilter("cdx.json"),
     pathEndFilter("chennai.json")
   )

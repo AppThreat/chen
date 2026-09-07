@@ -4,11 +4,11 @@ import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.Cpg
 
-class ObjectTests extends JimpleDataFlowCodeToCpgSuite {
+class ObjectTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through objects" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Bar {
         |    public String s;
         |    public String t = "SAFE";
@@ -130,74 +130,74 @@ class ObjectTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find a path through the constructor and field of an object" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path through the constructor and field of an object" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if a safe field is accessed (approximation)" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if a safe field is accessed (approximation)" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if a field is directly reassigned to `MALICIOUS`" in {
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if a field is directly reassigned to `MALICIOUS`" in {
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path for malicious input via a getter" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path for malicious input via a getter" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path when accessing a safe field via a getter" in {
-      val (source, sink) = getConstSourceSink("test5")
-      // TODO: This should not find a path, but does due to over-tainting.
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "not find a path when accessing a safe field via a getter" in {
+          val (source, sink) = getConstSourceSink("test5")
+          // TODO: This should not find a path, but does due to over-tainting.
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path to a void printer via a field" in {
-      val (source, sink) = getMultiFnSourceSink("test6", "printS")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path to a void printer via a field" in {
+          val (source, sink) = getMultiFnSourceSink("test6", "printS")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path to a void printer via a safe field" in {
-      val (source, sink) = getMultiFnSourceSink("test7", "printT")
-      // TODO: The data flow appears to be object-field insensitive and taints the whole object instance
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "not find a path to a void printer via a safe field" in {
+          val (source, sink) = getMultiFnSourceSink("test7", "printT")
+          // TODO: The data flow appears to be object-field insensitive and taints the whole object instance
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is overwritten via a setter" in {
-      val (source, sink) = getConstSourceSink("test8")
-      // TODO: The data flow appears to be object-field insensitive and taints the whole object instance
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "not find a path if `MALICIOUS` is overwritten via a setter" in {
+          val (source, sink) = getConstSourceSink("test8")
+          // TODO: The data flow appears to be object-field insensitive and taints the whole object instance
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path via an alias" in {
-      val (source, sink) = getConstSourceSink("test9")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path via an alias" in {
+          val (source, sink) = getConstSourceSink("test9")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if a field is reassigned to `MALICIOUS` via an alias" in {
-      val (source, sink) = getConstSourceSink("test10")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if a field is reassigned to `MALICIOUS` via an alias" in {
+          val (source, sink) = getConstSourceSink("test10")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    // TODO this isn't supported yet
-    //  "find a inter-procedural path from object variable" in {
-    //    def source = cpg.method.name("test11").literal.code("\"MALICIOUS\"")
-    //    def sink   = cpg.method.name("sink").call.name("println").argument
-    //    // This matches two since both the variable holding System.out and MALICIOUS are considered tainted at this point
-    //    sink.reachableBy(source).size shouldBe 2
-    //    sink.reachableByFlows(source).size shouldBe 2
-    //  }
-    //
-    //  "find a inter-procedural path from object instantiation in call argument" in {
-    //    def source = cpg.method.name("test12").literal.code("\"MALICIOUS\"")
-    //    def sink   = cpg.method.name("sink").call.name("println").argument
-    //    // This matches two since both the variable holding System.out and MALICIOUS are considered tainted at this point
-    //    sink.reachableBy(source).size shouldBe 2
-    //    sink.reachableByFlows(source).size shouldBe 2
-    //  }
+      // TODO this isn't supported yet
+      //  "find a inter-procedural path from object variable" in {
+      //    def source = cpg.method.name("test11").literal.code("\"MALICIOUS\"")
+      //    def sink   = cpg.method.name("sink").call.name("println").argument
+      //    // This matches two since both the variable holding System.out and MALICIOUS are considered tainted at this point
+      //    sink.reachableBy(source).size shouldBe 2
+      //    sink.reachableByFlows(source).size shouldBe 2
+      //  }
+      //
+      //  "find a inter-procedural path from object instantiation in call argument" in {
+      //    def source = cpg.method.name("test12").literal.code("\"MALICIOUS\"")
+      //    def sink   = cpg.method.name("sink").call.name("println").argument
+      //    // This matches two since both the variable holding System.out and MALICIOUS are considered tainted at this point
+      //    sink.reachableBy(source).size shouldBe 2
+      //    sink.reachableByFlows(source).size shouldBe 2
+      //  }
   }
-}
+end ObjectTests

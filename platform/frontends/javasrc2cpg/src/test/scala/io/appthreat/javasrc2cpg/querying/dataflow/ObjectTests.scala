@@ -1,15 +1,15 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
-import io.shiftleft.semanticcpg.language._
+import io.appthreat.dataflowengineoss.language.*
+import io.shiftleft.semanticcpg.language.*
 
-class ObjectTests extends JavaDataflowFixture {
+class ObjectTests extends JavaDataflowFixture:
 
   behavior of "Dataflow through objects"
 
   override val code: String =
-    """
+      """
       |class Bar {
       |    public String s;
       |    public String t = "SAFE";
@@ -132,57 +132,57 @@ class ObjectTests extends JavaDataflowFixture {
       |""".stripMargin
 
   it should "find a path through the constructor and field of an object" in {
-    val source = cpg.method("test1").literal
-    val sink   = cpg.method("test1").ast.isCall.name("println").argument(1).l
-    sink.reachableBy(source).size shouldBe 1
+      val source = cpg.method("test1").literal
+      val sink   = cpg.method("test1").ast.isCall.name("println").argument(1).l
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if a safe field is accessed (approximation)" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 2
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 2
   }
 
   it should "find a path if a field is directly reassigned to `MALICIOUS`" in {
-    val (source, sink) = getConstSourceSink("test3")
-    sink.reachableBy(source).size shouldBe 2
+      val (source, sink) = getConstSourceSink("test3")
+      sink.reachableBy(source).size shouldBe 2
   }
 
   it should "find a path for malicious input via a getter" in {
-    val (source, sink) = getConstSourceSink("test4")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test4")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path when accessing a safe field via a getter" in {
-    val (source, sink) = getConstSourceSink("test5")
-    // TODO: This should not find a path, but does due to over-tainting.
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test5")
+      // TODO: This should not find a path, but does due to over-tainting.
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path to a void printer via a field" in {
-    val (source, sink) = getMultiFnSourceSink("test6", "printS")
-    sink.reachableBy(source).size shouldBe 2
+      val (source, sink) = getMultiFnSourceSink("test6", "printS")
+      sink.reachableBy(source).size shouldBe 2
   }
 
   it should "not find a path to a void printer via a safe field" in {
-    val (source, sink) = getMultiFnSourceSink("test7", "printT")
-    // TODO: This should not find a path, but does due to over-tainting.
-    sink.reachableBy(source).size shouldBe 2
+      val (source, sink) = getMultiFnSourceSink("test7", "printT")
+      // TODO: This should not find a path, but does due to over-tainting.
+      sink.reachableBy(source).size shouldBe 2
   }
 
   it should "not find a path if `MALICIOUS` is overwritten via a setter" in {
-    val (source, sink) = getConstSourceSink("test8")
-    pendingUntilFixed(sink.reachableBy(source).size shouldBe 0)
+      val (source, sink) = getConstSourceSink("test8")
+      pendingUntilFixed(sink.reachableBy(source).size shouldBe 0)
   }
 
   it should "find a path via an alias" in {
-    val (source, sink) = getConstSourceSink("test9")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test9")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if a field is reassigned to `MALICIOUS` via an alias" in {
-    val (source, sink) = getConstSourceSink("test10")
-    // TODO: This should find a path, but the current result is on par with c2cpg.
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test10")
+      // TODO: This should find a path, but the current result is on par with c2cpg.
+      sink.reachableBy(source).size shouldBe 0
   }
 
   // TODO this isn't supported yet
@@ -195,7 +195,7 @@ class ObjectTests extends JavaDataflowFixture {
 //  }
 
   it should "not create Baz method with ANY type in signature" in {
-    cpg.method.fullNameExact("Baz.sink:void(ANY)").size shouldBe 0
+      cpg.method.fullNameExact("Baz.sink:void(ANY)").size shouldBe 0
   }
 
   // TODO this isn't supported yet
@@ -206,4 +206,4 @@ class ObjectTests extends JavaDataflowFixture {
 //    sink.reachableBy(source).size shouldBe 2
 //    sink.reachableByFlows(source).size shouldBe 2
 //  }
-}
+end ObjectTests

@@ -2,10 +2,10 @@ package io.appthreat.jimple2cpg.querying
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language.{_}
+import io.shiftleft.semanticcpg.language.{*}
 import io.shiftleft.semanticcpg.language.NoResolve
 
-class StaticCallGraphTests extends JimpleCode2CpgFixture {
+class StaticCallGraphTests extends JimpleCode2CpgFixture:
 
   implicit val resolver: NoResolve.type = NoResolve
 
@@ -22,38 +22,40 @@ class StaticCallGraphTests extends JimpleCode2CpgFixture {
     """).cpg
 
   "should find that add is called by main" in {
-    cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
+      cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
   }
 
   "should find that main calls add and others" in {
-    cpg.method.name("main").callee.name.filterNot(_.startsWith("<operator>")).toSetMutable shouldBe Set(
-      "add",
-      "println"
-    )
+      cpg.method.name("main").callee.name.filterNot(_.startsWith("<operator>"))
+          .toSetMutable shouldBe Set(
+        "add",
+        "println"
+      )
   }
 
   "should find a set of outgoing calls for main" in {
-    val calls = cpg.method.name("main").call.code.toSetMutable
-    calls.contains("add(3, 3)") shouldBe true
-    calls.contains("java.lang.System.out") shouldBe true
-    calls.exists(_.contains("java.lang.System.out")) shouldBe true
-    calls.exists(code => code.contains("println") && (code.contains("add") || code.contains("argc"))) shouldBe true
+      val calls = cpg.method.name("main").call.code.toSetMutable
+      calls.contains("add(3, 3)") shouldBe true
+      calls.contains("java.lang.System.out") shouldBe true
+      calls.exists(_.contains("java.lang.System.out")) shouldBe true
+      calls.exists(code =>
+          code.contains("println") && (code.contains("add") || code.contains("argc"))
+      ) shouldBe true
   }
 
   "should find one callsite for add" in {
-    cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("add(3, 3)")
+      cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("add(3, 3)")
   }
 
   "should find that argument '1+2' is passed to parameter 'x'" in {
-    cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("3")
+      cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("3")
   }
 
   "should allow traversing from argument to formal parameter" in {
-    cpg.argument.parameter.name.toSetMutable should not be empty
+      cpg.argument.parameter.name.toSetMutable should not be empty
   }
 
   "should allow traversing from argument to call" in {
-    cpg.method.name("add").callIn.argument.inCall.name.toSetMutable shouldBe Set("add")
+      cpg.method.name("add").callIn.argument.inCall.name.toSetMutable shouldBe Set("add")
   }
-
-}
+end StaticCallGraphTests

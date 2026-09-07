@@ -55,6 +55,7 @@ import io.appthreat.pythonparser.ast.{
     ImportFrom,
     In,
     IntConstant,
+    Interpolation,
     Invert,
     Is,
     IsNot,
@@ -101,6 +102,7 @@ import io.appthreat.pythonparser.ast.{
     StringExpList,
     Sub,
     Subscript,
+    TemplateStr,
     TryStar,
     Tuple,
     TypeVar,
@@ -181,6 +183,8 @@ trait AstVisitor[T]:
   def visit(call: Call): T
   def visit(formattedValue: FormattedValue): T
   def visit(joinedString: JoinedString): T
+  def visit(interpolation: Interpolation): T
+  def visit(templateStr: TemplateStr): T
   def visit(constant: Constant): T
   def visit(attribute: Attribute): T
   def visit(subscript: Subscript): T

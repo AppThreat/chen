@@ -31,7 +31,7 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     pathEndFilter("AndroidManifest.xml"),
     // Bom
     pathEndFilter("bom.json"),
-    pathEndFilter(".cdx.json"),
+    pathEndFilter("cdx.json"),
     // Custom
     pathEndFilter("chennai.json"),
     pathEndFilter("semantics.slices.json")

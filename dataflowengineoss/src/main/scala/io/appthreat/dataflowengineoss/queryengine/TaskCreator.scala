@@ -129,7 +129,12 @@ class TaskCreator(context: EngineContext):
                     val method = methodReturn.method
                     val returnStatements =
                         methodReturn._reachingDefIn.toList.collect { case r: Return => r }
-                    if method.isExternal || method.start.isStub.nonEmpty then
+                    // Explorability, not externality: a callee the engine can descend into
+                    // (internal with a body, or an external method parsed with its body by
+                    // `python-deps=full`) is descended into via its return statements. Only an
+                    // opaque callee - external and bodyless, or a stub - gets the permissive
+                    // default in which every argument and the receiver taint the call result.
+                    if !MethodExplorability.isExplorable(method) then
                       val newPath = path
                       (call.receiver.l ++ call.argument.l).map { arg =>
                         val taskStack = result.taskStack :+ TaskFingerprint(
@@ -167,7 +172,10 @@ class TaskCreator(context: EngineContext):
                 else
                   argToOutputParams(arg).l
                 outParams
-                    .filterNot(_.method.isExternal)
+                    // Only callees the engine can explore have output parameters worth
+                    // expanding into; a bodyless external method's "out parameter" is the
+                    // permissive default's fiction, not a place taint can pass through.
+                    .filter(p => MethodExplorability.stopsWalkAtCallSite(p.method))
                     .filterNot(summaryProvesUntaintableOutParam)
                     .map { p =>
                       val newStack =

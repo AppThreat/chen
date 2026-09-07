@@ -1,37 +1,37 @@
 package io.appthreat.jssrc2cpg.passes.ast
 
 import io.appthreat.jssrc2cpg.passes.AbstractDomPassTest
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
+class VueJsDomAstCreationPassTest extends AbstractDomPassTest:
 
   "AST generation for vue.js DOM" should {
 
-    "have correct structure vor simple vue.js template" in AstFixture(
-      """
+      "have correct structure vor simple vue.js template" in AstFixture(
+        """
         |<template>
         |<img v-for="image in images" :src="image.url" :attr="image.name" v-bind:alt="image.description" />
         |</template>""".stripMargin,
-      "foo.vue"
-    ) { cpg =>
-      cpg.file.name.l shouldBe List("foo.vue")
-      cpg.templateDom.nameExact("JSXAttribute").code.l shouldBe List(
-        "v-for=\"image in images\"",
-        ":src=\"image.url\"",
-        ":attr=\"image.name\"",
-        "v-bind:alt=\"image.description\""
-      )
-      templateDomName(cpg) shouldBe Set(
-        "JSXElement",
-        "JSXOpeningElement",
-        "JSXAttribute",
-        "JSXClosingElement",
-        "JSXText"
-      )
-    }
+        "foo.vue"
+      ) { cpg =>
+        cpg.file.name.l shouldBe List("foo.vue")
+        cpg.templateDom.nameExact("JSXAttribute").code.l shouldBe List(
+          "v-for=\"image in images\"",
+          ":src=\"image.url\"",
+          ":attr=\"image.name\"",
+          "v-bind:alt=\"image.description\""
+        )
+        templateDomName(cpg) shouldBe Set(
+          "JSXElement",
+          "JSXOpeningElement",
+          "JSXAttribute",
+          "JSXClosingElement",
+          "JSXText"
+        )
+      }
 
-    "have correct structure for simple vue.js Single-File Component" in AstFixture(
-      """
+      "have correct structure for simple vue.js Single-File Component" in AstFixture(
+        """
         |<template>
         |  <div id="app">
         |    <div id="nav">
@@ -67,55 +67,55 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
         |</style>
         |
         |""".stripMargin,
-      "foo.vue"
-    ) { cpg =>
-      cpg.file.name.l shouldBe List("foo.vue")
-      cpg.call.size shouldBe 0
-      cpg.identifier.size shouldBe 0
-      templateDomName(cpg) shouldBe Set(
-        "JSXElement",
-        "JSXOpeningElement",
-        "JSXAttribute",
-        "JSXClosingElement",
-        "JSXText"
-      )
-      templateDomCode(cpg) shouldBe List(
-        """<template> <div id="app"> <div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div> <router-view/> </div> </template>""",
-        "<template>",
-        "",
-        """<div id="app"> <div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div> <router-view/> </div>""",
-        """<div id="app">""",
-        """id="app"""",
-        "",
-        """<div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div>""",
-        """<div id="nav">""",
-        """id="nav"""",
-        "",
-        """<router-link to="/">Home</router-link>""",
-        """<router-link to="/">""",
-        """to="/"""",
-        "Home",
-        "</router-link>",
-        "|",
-        """<router-link to="/about">About</router-link>""",
-        """<router-link to="/about">""",
-        """to="/about"""",
-        "About",
-        "</router-link>",
-        "",
-        "</div>",
-        "",
-        "<router-view/>",
-        "<router-view/>",
-        "",
-        "</div>",
-        "",
-        "</template>"
-      )
-    }
+        "foo.vue"
+      ) { cpg =>
+        cpg.file.name.l shouldBe List("foo.vue")
+        cpg.call.size shouldBe 0
+        cpg.identifier.size shouldBe 0
+        templateDomName(cpg) shouldBe Set(
+          "JSXElement",
+          "JSXOpeningElement",
+          "JSXAttribute",
+          "JSXClosingElement",
+          "JSXText"
+        )
+        templateDomCode(cpg) shouldBe List(
+          """<template> <div id="app"> <div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div> <router-view/> </div> </template>""",
+          "<template>",
+          "",
+          """<div id="app"> <div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div> <router-view/> </div>""",
+          """<div id="app">""",
+          """id="app"""",
+          "",
+          """<div id="nav"> <router-link to="/">Home</router-link> | <router-link to="/about">About</router-link> </div>""",
+          """<div id="nav">""",
+          """id="nav"""",
+          "",
+          """<router-link to="/">Home</router-link>""",
+          """<router-link to="/">""",
+          """to="/"""",
+          "Home",
+          "</router-link>",
+          "|",
+          """<router-link to="/about">About</router-link>""",
+          """<router-link to="/about">""",
+          """to="/about"""",
+          "About",
+          "</router-link>",
+          "",
+          "</div>",
+          "",
+          "<router-view/>",
+          "<router-view/>",
+          "",
+          "</div>",
+          "",
+          "</template>"
+        )
+      }
 
-    "have correct structure for full vue.js Single-File Component" in AstFixture(
-      """
+      "have correct structure for full vue.js Single-File Component" in AstFixture(
+        """
         |<template>
         |  <div class="hello">
         |    <h1>{{ msg }}</h1>
@@ -165,73 +165,73 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
         |</style>
         |
         |""".stripMargin,
-      "foo.vue"
-    ) { cpg =>
-      cpg.file.name.l shouldBe List("foo.vue")
-      cpg.assignment.code.l shouldBe List(
-        "var Component = require(\"vue-property-decorator\").Component",
-        "var Prop = require(\"vue-property-decorator\").Prop",
-        "var Vue = require(\"vue-property-decorator\").Vue",
-        "HelloWorld = foo.vue::program:HelloWorld:<init>",
-        "exports[\"default\"] = HelloWorld"
-      )
-      cpg.local.code.l shouldBe List("Component", "Prop", "Vue", "HelloWorld", "msg")
+        "foo.vue"
+      ) { cpg =>
+        cpg.file.name.l shouldBe List("foo.vue")
+        cpg.assignment.code.l shouldBe List(
+          "var Component = require(\"vue-property-decorator\").Component",
+          "var Prop = require(\"vue-property-decorator\").Prop",
+          "var Vue = require(\"vue-property-decorator\").Vue",
+          "HelloWorld = foo.vue::program:HelloWorld:<init>",
+          "exports[\"default\"] = HelloWorld"
+        )
+        cpg.local.code.l shouldBe List("Component", "Prop", "Vue", "HelloWorld", "msg")
 
-      inside(cpg.identifier.nameNot("this", "require").l) {
-        case List(comp, prop, vue, msg, helloWorld1, exports, helloWorld2) =>
-          comp.name shouldBe "Component"
-          comp.code shouldBe "Component"
-          prop.name shouldBe "Prop"
-          prop.code shouldBe "Prop"
-          vue.name shouldBe "Vue"
-          vue.code shouldBe "Vue"
+        inside(cpg.identifier.nameNot("this", "require").l) {
+            case List(comp, prop, vue, msg, helloWorld1, exports, helloWorld2) =>
+                comp.name shouldBe "Component"
+                comp.code shouldBe "Component"
+                prop.name shouldBe "Prop"
+                prop.code shouldBe "Prop"
+                vue.name shouldBe "Vue"
+                vue.code shouldBe "Vue"
 
-          exports.name shouldBe "exports"
-          exports.code shouldBe "exports"
-          msg.name shouldBe "msg"
-          msg.code shouldBe "msg"
-          parentTemplateDom(msg).name shouldBe "JSXExpressionContainer"
-          parentTemplateDom(msg).code shouldBe "{{ msg }}"
-          parentTemplateDom(parentTemplateDom(msg)).name shouldBe "JSXElement"
-          parentTemplateDom(parentTemplateDom(msg)).code shouldBe "<h1>{{ msg }}</h1>"
+                exports.name shouldBe "exports"
+                exports.code shouldBe "exports"
+                msg.name shouldBe "msg"
+                msg.code shouldBe "msg"
+                parentTemplateDom(msg).name shouldBe "JSXExpressionContainer"
+                parentTemplateDom(msg).code shouldBe "{{ msg }}"
+                parentTemplateDom(parentTemplateDom(msg)).name shouldBe "JSXElement"
+                parentTemplateDom(parentTemplateDom(msg)).code shouldBe "<h1>{{ msg }}</h1>"
 
-          // from implicit identifier for the class definition
-          helloWorld1.name shouldBe "HelloWorld"
-          helloWorld1.code shouldBe "HelloWorld"
-          // from the export
-          helloWorld2.name shouldBe "HelloWorld"
-          helloWorld2.code shouldBe "HelloWorld"
+                // from implicit identifier for the class definition
+                helloWorld1.name shouldBe "HelloWorld"
+                helloWorld1.code shouldBe "HelloWorld"
+                // from the export
+                helloWorld2.name shouldBe "HelloWorld"
+                helloWorld2.code shouldBe "HelloWorld"
+        }
+
+        inside(cpg.imports.l) { case List(component, prop, vue) =>
+            component.importedAs shouldBe Option("Component")
+            component.importedEntity shouldBe Option("vue-property-decorator:Component")
+            component.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
+            prop.importedAs shouldBe Option("Prop")
+            prop.importedEntity shouldBe Option("vue-property-decorator:Prop")
+            prop.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
+            vue.importedAs shouldBe Option("Vue")
+            vue.importedEntity shouldBe Option("vue-property-decorator:Vue")
+            vue.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
+        }
+        inside(cpg.typeDecl("HelloWorld").l) { case List(helloWorld) =>
+            helloWorld.code shouldBe "class HelloWorld"
+            helloWorld.inheritsFromTypeFullName shouldBe Seq("Vue")
+            helloWorld.member.name.l shouldBe List("msg")
+            helloWorld.member.code.l shouldBe List("@Prop() private msg!: string;")
+        }
+        templateDomName(cpg) shouldBe Set(
+          "JSXElement",
+          "JSXExpressionContainer",
+          "JSXOpeningElement",
+          "JSXAttribute",
+          "JSXClosingElement",
+          "JSXText"
+        )
       }
-
-      inside(cpg.imports.l) { case List(component, prop, vue) =>
-        component.importedAs shouldBe Option("Component")
-        component.importedEntity shouldBe Option("vue-property-decorator:Component")
-        component.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
-        prop.importedAs shouldBe Option("Prop")
-        prop.importedEntity shouldBe Option("vue-property-decorator:Prop")
-        prop.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
-        vue.importedAs shouldBe Option("Vue")
-        vue.importedEntity shouldBe Option("vue-property-decorator:Vue")
-        vue.code shouldBe "import { Component, Prop, Vue } from 'vue-property-decorator'"
-      }
-      inside(cpg.typeDecl("HelloWorld").l) { case List(helloWorld) =>
-        helloWorld.code shouldBe "class HelloWorld"
-        helloWorld.inheritsFromTypeFullName shouldBe Seq("Vue")
-        helloWorld.member.name.l shouldBe List("msg")
-        helloWorld.member.code.l shouldBe List("@Prop() private msg!: string;")
-      }
-      templateDomName(cpg) shouldBe Set(
-        "JSXElement",
-        "JSXExpressionContainer",
-        "JSXOpeningElement",
-        "JSXAttribute",
-        "JSXClosingElement",
-        "JSXText"
-      )
-    }
 
       "handle Vue 3 Composition API with script setup" in AstFixture(
-          """
+        """
             |<template>
             |  <div>
             |    <h1>{{ title }}</h1>
@@ -281,42 +281,42 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
             |const emit = defineEmits(['update'])
             |</script>
             |""".stripMargin,
-          "CompositionAPI.vue"
+        "CompositionAPI.vue"
       ) { cpg =>
-          cpg.file.name.l shouldBe List("CompositionAPI.vue")
+        cpg.file.name.l shouldBe List("CompositionAPI.vue")
 
-          // Test imports
-          cpg.imports.size shouldBe 4
-          cpg.imports.importedEntity.l should contain("vue:ref")
-          cpg.imports.importedEntity.l should contain("vue:computed")
-          cpg.imports.importedEntity.l should contain("./MyComponent.vue:MyComponent")
+        // Test imports
+        cpg.imports.size shouldBe 4
+        cpg.imports.importedEntity.l should contain("vue:ref")
+        cpg.imports.importedEntity.l should contain("vue:computed")
+        cpg.imports.importedEntity.l should contain("./MyComponent.vue:MyComponent")
 
-          // Test reactive variables
-          cpg.local.name.l should contain allOf ("count", "title", "inputValue", "state")
+        // Test reactive variables
+        (cpg.local.name.l should contain).allOf("count", "title", "inputValue", "state")
 
-          // Test template structure
-          templateDomName(cpg) shouldBe Set(
-              "JSXElement",
-              "JSXExpressionContainer",
-              "JSXOpeningElement",
-              "JSXAttribute",
-              "JSXClosingElement",
-              "JSXText"
-          )
+        // Test template structure
+        templateDomName(cpg) shouldBe Set(
+          "JSXElement",
+          "JSXExpressionContainer",
+          "JSXOpeningElement",
+          "JSXAttribute",
+          "JSXClosingElement",
+          "JSXText"
+        )
 
-          // Test Vue directives
-          cpg.templateDom.nameExact("JSXAttribute").code.l should contain allOf (
-              "click=\"increment\"",
-              "v-model=\"inputValue\"",
-              ":placeholder=\"placeholderText\"",
-              "v-if=\"isVisible\"",
-              "v-for=\"item in items\"",
-              ":key=\"item.id\""
-          )
+        // Test Vue directives
+        (cpg.templateDom.nameExact("JSXAttribute").code.l should contain).allOf(
+          "click=\"increment\"",
+          "v-model=\"inputValue\"",
+          ":placeholder=\"placeholderText\"",
+          "v-if=\"isVisible\"",
+          "v-for=\"item in items\"",
+          ":key=\"item.id\""
+        )
       }
 
       "handle complex nested templates with conditional rendering" in AstFixture(
-          """
+        """
             |<template>
             |  <div>
             |    <div v-if="user">
@@ -356,20 +356,19 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest {
             |}
             |</script>
             |""".stripMargin,
-          "ConditionalRendering.vue"
+        "ConditionalRendering.vue"
       ) { cpg =>
-          cpg.file.name.l shouldBe List("ConditionalRendering.vue")
+        cpg.file.name.l shouldBe List("ConditionalRendering.vue")
 
-          // Test nested conditional rendering
-          cpg.templateDom.nameExact("JSXAttribute").code.l should contain allOf (
-              "v-if=\"user\"",
-              "v-if=\"user.isAdmin\"",
-              "v-else-if=\"user.isModerator\"",
-              "v-else",
-              "v-else-if=\"loading\"",
-              "click=\"login\""
-          )
+        // Test nested conditional rendering
+        (cpg.templateDom.nameExact("JSXAttribute").code.l should contain).allOf(
+          "v-if=\"user\"",
+          "v-if=\"user.isAdmin\"",
+          "v-else-if=\"user.isModerator\"",
+          "v-else",
+          "v-else-if=\"loading\"",
+          "click=\"login\""
+        )
       }
   }
-
-}
+end VueJsDomAstCreationPassTest

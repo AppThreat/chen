@@ -11,25 +11,26 @@ import io.shiftleft.semanticcpg.language.*
 class LiveNodeLoweringTests extends RubyCode2CpgFixture:
 
   "a complex literal lowers to a builtin Complex literal" in {
-    val cpg = fixtureWithoutUnknowns("misc_live")
-    inside(cpg.literal.code("1i").l) { case List(imag) =>
-        imag.typeFullName should endWith("Complex")
-        imag.typeFullName should startWith("__core")
-    }
+      val cpg = fixtureWithoutUnknowns("misc_live")
+      inside(cpg.literal.code("1i").l) { case List(imag) =>
+          imag.typeFullName should endWith("Complex")
+          imag.typeFullName should startWith("__core")
+      }
   }
 
   "match_current_line lowers to a regexp match against the last read line" in {
-    val cpg = fixtureWithoutUnknowns("misc_live")
-    // `if /re/ then ...` is an implicit `$_ =~ /re/`, lowered through the usual tmp-variable
-    // assignment of the LHS.
-    val matchCalls = cpg.call.nameExact(RubyOperators.regexpMatch).l
-    matchCalls should have size 1
-    matchCalls.head.code shouldBe "(<tmp-0> = self.$_).=~(/re/)"
-    matchCalls.head.argument.isIdentifier.name.l should contain("<tmp-0>")
+      val cpg = fixtureWithoutUnknowns("misc_live")
+      // `if /re/ then ...` is an implicit `$_ =~ /re/`, lowered through the usual tmp-variable
+      // assignment of the LHS.
+      val matchCalls = cpg.call.nameExact(RubyOperators.regexpMatch).l
+      matchCalls should have size 1
+      matchCalls.head.code shouldBe "(<tmp-0> = self.$_).=~(/re/)"
+      matchCalls.head.argument.isIdentifier.name.l should contain("<tmp-0>")
   }
 
   "an empty else body is preserved as an empty block (no data loss)" in {
-    val cpg = fixtureWithoutUnknowns("misc_live")
-    // The `case` with an empty `else` must still lower its `when` clause.
-    cpg.controlStructure.controlStructureType.l should not be empty
+      val cpg = fixtureWithoutUnknowns("misc_live")
+      // The `case` with an empty `else` must still lower its `when` clause.
+      cpg.controlStructure.controlStructureType.l should not be empty
   }
+end LiveNodeLoweringTests

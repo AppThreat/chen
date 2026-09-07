@@ -7,11 +7,11 @@ import io.shiftleft.semanticcpg.language.*
   * "import" (e.g. `import_models`, `import_module` — pervasive in Django). Only the synthetic
   * `import(...)` pseudo-call should be excluded.
   */
-class ImportPrefixMethodTests extends PySrc2CpgFixture(withOssDataflow = false) {
+class ImportPrefixMethodTests extends PySrc2CpgFixture(withOssDataflow = false):
 
   "a method named import_models on a constructed instance" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class AppConfig:
         |    def import_models(self):
         |        pass
@@ -19,26 +19,26 @@ class ImportPrefixMethodTests extends PySrc2CpgFixture(withOssDataflow = false) 
         |    cfg = AppConfig()
         |    cfg.import_models()
         |""".stripMargin,
-      "t.py"
-    )
-    "be linked in the callgraph" in {
-      cpg.call.name("import_models").methodFullName.toSet should
-          contain("t.py:<module>.AppConfig.import_models")
-      cpg.method.name("import_models").caller.name.toSet should contain("f")
-    }
+        "t.py"
+      )
+      "be linked in the callgraph" in {
+          cpg.call.name("import_models").methodFullName.toSet should
+              contain("t.AppConfig.import_models")
+          cpg.method.name("import_models").caller.name.toSet should contain("f")
+      }
   }
 
   "the synthetic import pseudo-call is still excluded" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |import os
         |""".stripMargin,
-      "t.py"
-    )
-    "not be linked to a user method" in {
-      cpg.call.name("import").methodFullName.toSet.foreach { mfn =>
-        mfn should not startWith "t.py:"
+        "t.py"
+      )
+      "not be linked to a user method" in {
+          cpg.call.name("import").methodFullName.toSet.foreach { mfn =>
+              (mfn should not).startWith("t.py:")
+          }
       }
-    }
   }
-}
+end ImportPrefixMethodTests

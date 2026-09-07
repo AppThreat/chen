@@ -64,6 +64,13 @@ class ExpressionTraversal[NodeType <: Expression](val traversal: Iterator[NodeTy
           .flatMap {
               case x: Method   => x.start
               case x: TypeDecl => x.astParent
+              // `collectAll[Method]` below already states the intent: keep the enclosing
+              // methods and drop everything else. Leaving the match partial made that
+              // "drop" a `MatchError` instead - a CONTAINS in-neighbour that is neither a
+              // METHOD nor a TYPE_DECL (a FIELD_IDENTIFIER, in the case that surfaced this)
+              // killed the whole run. Since the result is filtered to METHOD regardless,
+              // yielding nothing here is exactly what the caller already expects.
+              case _ => Iterator.empty
           }
           .collectAll[Method]
 

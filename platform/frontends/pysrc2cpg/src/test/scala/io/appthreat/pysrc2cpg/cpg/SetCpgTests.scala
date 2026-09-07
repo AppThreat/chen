@@ -6,15 +6,14 @@ import io.shiftleft.semanticcpg.language.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class SetCpgTests extends AnyWordSpec with Matchers {
+class SetCpgTests extends AnyWordSpec with Matchers:
 
-    "set" should {
-        lazy val cpg = Py2CpgTestContext.buildCpg("""{1}""".stripMargin)
+  "set" should {
+      lazy val cpg = Py2CpgTestContext.buildCpg("""{1}""".stripMargin)
 
-        "be represented as `setLiteral`" in {
-            val callOption = cpg.call.methodFullName("<operator>.setLiteral").nextOption()
-            callOption.isDefined shouldBe true
-            callOption.get.code shouldBe "{1}"
-        }
-    }
-}
+      "be represented as `setLiteral`" in {
+          val callOption = cpg.call.methodFullName("<operator>.setLiteral").nextOption()
+          callOption.isDefined shouldBe true
+          callOption.get.code shouldBe "{1}"
+      }
+  }

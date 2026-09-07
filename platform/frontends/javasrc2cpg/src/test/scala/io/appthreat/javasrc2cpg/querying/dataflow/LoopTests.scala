@@ -1,14 +1,14 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 
-class LoopTests extends JavaDataflowFixture {
+class LoopTests extends JavaDataflowFixture:
 
   behavior of "Dataflow through loop structures"
 
   override val code: String =
-    """
+      """
       |public class Foo {
       |    public void test1(boolean b) {
       |        String s = "MALICIOUS";
@@ -112,62 +112,62 @@ class LoopTests extends JavaDataflowFixture {
       |""".stripMargin
 
   it should "find a path if `MALICIOUS` is possibly reassigned in a `WHILE" in {
-    val (source, sink) = getConstSourceSink("test1")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test1")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is possibly assigned in a `WHILE`" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is added in `FOR` update" in {
-    val (source, sink) = getConstSourceSink("test3")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test3")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path if `MALICIOUS` is always reassigned before sink in loop" in {
-    val (source, sink) = getConstSourceSink("test4")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test4")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "find a path if `MALICIOUS` is assigned in `FOR` init" in {
-    val (source, sink) = getConstSourceSink("test5")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test5")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if sink is in a `DO` loop" in {
-    val (source, sink) = getConstSourceSink("test6")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test6")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if sink is in `FOREACH` loop" in {
-    val (source, sink) = getConstSourceSink("test7")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test7")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path if sink in loop is unreachable due to `BREAK`" in {
-    val (source, sink) = getConstSourceSink("test8")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test8")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "not find a path if sink in loop is unreachable due to `CONTINUE`" in {
-    val (source, sink) = getConstSourceSink("test9")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test9")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "find a path if `MALICIOUS` is possibly appended in `FOR`" in {
-    val (source, sink) = getConstSourceSink("test10")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test10")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path if `MALICIOUS` is appended to prefix in `FOREACH`" in {
-    val (source, sink) = getConstSourceSink("test11")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test11")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "not find a path if `MALICIOUS` is reassigned before sink in `DO`" in {
-    val (source, sink) = getConstSourceSink("test12")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test12")
+      sink.reachableBy(source).size shouldBe 0
   }
-}
+end LoopTests

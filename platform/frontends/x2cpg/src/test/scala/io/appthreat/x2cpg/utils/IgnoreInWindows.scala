@@ -3,8 +3,8 @@ package io.appthreat.x2cpg.utils
 import org.scalatest.{Ignore, Tag}
 
 object IgnoreInWindows
-    extends Tag(if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+    extends Tag(if System.getProperty("os.name").toLowerCase().contains("windows") then
       classOf[Ignore].getName
-    } else {
+    else
       ""
-    })
+    )

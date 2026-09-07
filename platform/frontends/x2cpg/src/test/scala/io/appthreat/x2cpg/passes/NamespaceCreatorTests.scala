@@ -2,14 +2,14 @@ package io.appthreat.x2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{NodeTypes, Properties}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.appthreat.x2cpg.passes.base.NamespaceCreator
 import io.appthreat.x2cpg.testfixtures.EmptyGraphFixture
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import overflowdb._
+import overflowdb.*
 
-class NamespaceCreatorTests extends AnyWordSpec with Matchers {
+class NamespaceCreatorTests extends AnyWordSpec with Matchers:
   "NamespaceCreateor test " in EmptyGraphFixture { graph =>
     val cpg    = new Cpg(graph)
     val block1 = graph + (NodeTypes.NAMESPACE_BLOCK, Properties.NAME -> "namespace1")
@@ -26,4 +26,3 @@ class NamespaceCreatorTests extends AnyWordSpec with Matchers {
     val namspaceBlocks = cpg.namespace.flatMap(_._namespaceBlockViaRefIn).toSet
     namspaceBlocks shouldBe Set(block1, block2, block3)
   }
-}

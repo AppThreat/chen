@@ -204,7 +204,14 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
       // this isn't the start node => return partial result and stop traversing
       case call: Call
           if isCallToInternalMethodWithoutSemantic(call)
-              && !isArgOrRetOfMethodWeCameFrom(call, path) =>
+              && !isArgOrRetOfMethodWeCameFrom(call, path)
+              // The start exception the comment always described, implemented for the case
+              // that needs it: when the walk BEGAN at a call into ingested dependency code
+              // (`python-deps=full`), the call is the finding's location and its arguments
+              // are the evidence - stopping here would report nothing at all. Internal
+              // callees keep today's behaviour (stop at the start node too), so no other
+              // configuration changes.
+              && !(path.sizeIs <= 1 && isExplorableExternalCall(call)) =>
           createPartialResultForOutputArgOrRet()
 
       // Case 4: we have reached an argument to an internal method without semantic (output argument) and
@@ -212,6 +219,11 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
       case arg: Expression
           if path.size > 1
               && arg.inCall.toList.exists(c => isCallToInternalMethodWithoutSemantic(c))
+              // ...and an argument of the walk's own starting call into dependency code
+              // keeps expanding for the same reason as case 3.
+              && !arg.inCall.headOption.exists(c =>
+                  isExplorableExternalCall(c) && path.headOption.exists(_.node == c)
+              )
               && !arg.inCall.headOption.exists(x => isArgOrRetOfMethodWeCameFrom(x, path)) =>
           createPartialResultForOutputArgOrRet()
 
@@ -235,4 +247,14 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
         case Vector(_, PathElement(x: MethodParameterIn, _, _, _, _), _*) =>
             methodsForCall(call).contains(x.method)
         case _ => false
+
+  /** True when the call resolves, and resolves ONLY to external methods that arrived with their
+    * bodies (`python-deps=full` dependency code). Distinct from a call into internal code, whose
+    * call-site stops (cases 3/4 above) are long-standing behaviour this solver must not change.
+    */
+  private def isExplorableExternalCall(call: Call): Boolean =
+    val callees = methodsForCall(call)
+    callees.nonEmpty && callees.forall(m =>
+        m.isExternal && MethodExplorability.stopsWalkAtCallSite(m)
+    )
 end TaskSolver

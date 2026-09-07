@@ -11,7 +11,8 @@ import io.shiftleft.semanticcpg.language.{ICallResolver, NoResolve}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class JavaDataflowFixture(extraFlows: List[FlowSemantic] = List.empty) extends AnyFlatSpec with Matchers {
+class JavaDataflowFixture(extraFlows: List[FlowSemantic] = List.empty) extends AnyFlatSpec
+    with Matchers:
 
   implicit val resolver: ICallResolver           = NoResolve
   implicit lazy val engineContext: EngineContext = EngineContext()
@@ -23,31 +24,27 @@ class JavaDataflowFixture(extraFlows: List[FlowSemantic] = List.empty) extends A
     methodName: String,
     sourceCode: String = "\"MALICIOUS\"",
     sinkPattern: String = ".*println.*"
-  ): (Iterator[Literal], Iterator[Expression]) = {
-    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern)
-  }
+  ): (Iterator[Literal], Iterator[Expression]) =
+      getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern)
 
   def getMultiFnSourceSink(
     sourceMethodName: String,
     sinkMethodName: String,
     sourceCode: String = "\"MALICIOUS\"",
     sinkPattern: String = ".*println.*"
-  ): (Iterator[Literal], Iterator[Expression]) = {
+  ): (Iterator[Literal], Iterator[Expression]) =
     val sourceMethod = cpg.method(s".*$sourceMethodName.*").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName.*").head
     def source       = sourceMethod.literal.code(sourceCode)
     def sink         = sinkMethod.call.name(sinkPattern).argument(1).ast.collectAll[Expression]
 
     // If either of these fail, then the testcase was written incorrectly or the AST was created incorrectly.
-    if (source.size <= 0) {
+    if source.size <= 0 then
       fail(s"Could not find source $sourceCode in method $sourceMethodName")
-    }
-    if (sink.size <= 0) {
+    if sink.size <= 0 then
       fail(s"Could not find sink $sinkPattern for method $sinkMethodName")
-    }
 
     (source, sink)
-  }
 
   protected def flowToResultPairs(path: Path): List[(String, Option[Integer])] = path.resultPairs()
-}
+end JavaDataflowFixture

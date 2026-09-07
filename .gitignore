@@ -60,3 +60,10 @@ conda-out/
 notebooks/.ipynb_checkpoints/
 *.slices.json
 
+
+# Local planning docs (never committed)
+plans/
+
+# Gradle scratch dirs created by javasrc2cpg config tests
+platform/frontends/javasrc2cpg/src/test/resources/config_tests/.gradle/
+scratchpad/

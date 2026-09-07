@@ -41,6 +41,19 @@ private class RecoverForPythonFile(
   override val symbolTable: SymbolTable[LocalKey] =
       new SymbolTable[LocalKey](fromNodeToLocalPythonKey)
 
+  /** Types the author declared via PEP 484/526 annotations, keyed by variable name. Annotations are
+    * declarations: they must win over naming-convention heuristics (but never over real dataflow).
+    * Populated from nodes that carry a frontend-derived type before recovery starts.
+    */
+  private val declaredTypes = scala.collection.mutable.HashMap.empty[String, Set[String]]
+
+  private def recordDeclaredType(name: String, types: Set[String]): Unit =
+      if name.nonEmpty && types.nonEmpty then
+        declaredTypes.updateWith(name) {
+            case Some(ts) => Some(ts ++ types)
+            case None     => Some(types)
+        }
+
   override def visitImport(i: Import): Unit =
       if i.importedAs.isDefined && i.importedEntity.isDefined then
         import io.appthreat.x2cpg.passes.frontend.ImportsPass.*
@@ -114,8 +127,15 @@ private class RecoverForPythonFile(
         case _ => super.visitIdentifierAssignedToOperator(i, c, operation)
 
   override def visitIdentifierAssignedToConstructor(i: Identifier, c: Call): Set[String] =
-    val constructorPaths = symbolTable.get(c).map(_.stripSuffix(s"${pathSep}__init__"))
-    associateTypes(i, constructorPaths)
+    // The camel-case constructor guess must never override an author declaration:
+    // `x: str = Foo()` keeps `str`. Declared types only win over this heuristic,
+    // never over real dataflow.
+    val existing = symbolTable.get(i)
+    val declared = declaredTypes.getOrElse(i.name, Set.empty)
+    if existing.nonEmpty && declared.exists(existing.contains) then existing
+    else
+      val constructorPaths = symbolTable.get(c).map(_.stripSuffix(s"${pathSep}__init__"))
+      associateTypes(i, constructorPaths)
 
   override def visitIdentifierAssignedToCall(i: Identifier, c: Call): Set[String] =
       // Ignore legacy import representation
@@ -154,12 +174,89 @@ private class RecoverForPythonFile(
           val referencedFields = cpg.typeDecl.fullNameExact(
             fieldParents.toSeq*
           ).member.nameExact(fi.canonicalName)
-          val globalTypes =
+          val directTypes =
               referencedFields.flatMap(m =>
                   m.typeFullName +: m.dynamicTypeHintFullName
               ).filterNot(_ == Constants.ANY).toSet
+          val globalTypes =
+              if directTypes.nonEmpty then directTypes
+              else fieldParents.flatMap(memberTypesInHierarchy(_, fi.canonicalName))
           associateTypes(i, globalTypes)
       case _ => super.visitIdentifierAssignedToFieldLoad(i, fa)
+
+  /** Field loads through a receiver whose member lives on an inherited dependency base resolve
+    * through the hierarchy walk; everything else keeps the base behaviour.
+    */
+  override protected def getFieldBaseType(baseName: String, fieldName: String): Set[String] =
+    val direct = super.getFieldBaseType(baseName, fieldName)
+    if direct.nonEmpty then direct
+    else
+      symbolTable
+          .get(LocalVar(baseName))
+          .flatMap(memberTypesInHierarchy(_, fieldName))
+          .toSet
+
+  /** Member types for `memberName` as visible on `typeFullName` or inherited from a base class
+    * whose TYPE_DECL is an ingested dependency (`isExternal`): `flask.Request`'s `args` lives on
+    * werkzeug's `Request`, so a direct-member lookup alone cannot type a field load through a
+    * dependency's class hierarchy. Members are read only from external type decls, and a graph
+    * without ingested dependencies has none - so there the walk is a no-op and the base lookup
+    * behaviour is untouched.
+    *
+    * A member that is a `@property` of an external class is a computed value: the field load
+    * `request.args` reads the getter's declared return type, not the member stub. Ordinary methods
+    * are left alone - `request.url_for` is a bound method, not `url_for`'s return.
+    */
+  private def memberTypesInHierarchy(typeFullName: String, memberName: String): Set[String] =
+    val visited = scala.collection.mutable.HashSet.empty[String]
+    val queue   = scala.collection.mutable.Queue(typeFullName)
+    var types   = Set.empty[String]
+    while queue.nonEmpty && types.isEmpty do
+      val current = queue.dequeue()
+      if visited.add(current) then
+        val decls   = cpg.typeDecl.fullNameExact(current).toList
+        val members = decls.iterator.filter(_.isExternal).member.nameExact(memberName).l
+        types =
+            if members.isEmpty then Set.empty
+            else
+              // A `@property` member is a computed value, so the getter's declared return is
+              // the field's type; the member stub itself carries nothing useful.
+              propertyReturnTypes(current, memberName).getOrElse {
+                  members
+                      .flatMap(m => m.typeFullName +: m.dynamicTypeHintFullName)
+                      .filterNot(isValueTypeName)
+                      .toSet
+              }
+        queue.enqueueAll(
+          decls.iterator
+              .flatMap(_.inheritsFromTypeFullName)
+              .filterNot(isValueTypeName)
+              .toSeq
+        )
+      end if
+    end while
+    types
+  end memberTypesInHierarchy
+
+  /** Names that carry no information: the placeholder, an invented dummy type, and the two
+    * universal Python bases every hierarchy walk would otherwise terminate on.
+    */
+  private def isValueTypeName(t: String): Boolean =
+      t.equalsIgnoreCase(Constants.ANY) || t.equalsIgnoreCase("object") ||
+          XTypeRecovery.isDummyType(t)
+
+  /** The declared return types of a `@property` getter `memberName` on the external class
+    * `typeFullName`, when such a getter exists and its return is declared. Only declared,
+    * non-placeholder returns count: a property the dependency never types stays untyped here.
+    */
+  private def propertyReturnTypes(typeFullName: String, memberName: String): Option[Set[String]] =
+      cpg.method.fullNameExact(s"$typeFullName.$memberName").find { getter =>
+          getter.annotation.name.exists(_.equalsIgnoreCase("property"))
+      }.map { getter =>
+        val mr = getter.methodReturn
+        (mr.typeFullName +: mr.dynamicTypeHintFullName).filterNot(isValueTypeName).toSet
+      }.filter(_.nonEmpty)
+  end propertyReturnTypes
 
   override def getFieldParents(fa: FieldAccess): Set[String] =
       if fa.method.name == "<module>" then
@@ -294,57 +391,79 @@ private class RecoverForPythonFile(
     }
     overflowdb.BatchedUpdate.applyDiff(cpg.graph, factoryDiff)
     cu.ast.isIdentifier.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
-        .foreach { id => symbolTable.put(LocalVar(id.name), id.typeFullName) }
+        .foreach { id =>
+          symbolTable.put(LocalVar(id.name), id.typeFullName)
+          recordDeclaredType(id.name, Set(id.typeFullName) ++ id.dynamicTypeHintFullName)
+        }
     cu.ast.isLocal.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
-        .foreach { local => symbolTable.put(LocalVar(local.name), local.typeFullName) }
+        .foreach { local =>
+          symbolTable.put(LocalVar(local.name), local.typeFullName)
+          recordDeclaredType(local.name, Set(local.typeFullName) ++ local.dynamicTypeHintFullName)
+        }
     cu.ast.isParameter.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
-        .foreach { param => symbolTable.put(LocalVar(param.name), param.typeFullName) }
+        .foreach { param =>
+          symbolTable.put(LocalVar(param.name), param.typeFullName)
+          recordDeclaredType(param.name, Set(param.typeFullName) ++ param.dynamicTypeHintFullName)
+        }
     super.prepopulateSymbolTable()
   end prepopulateSymbolTable
 
+  /** A bare container type: `__builtin.list` / `typing.List` without type arguments. */
+  private def isBareContainer(t: String): Boolean =
+      !t.contains("[") && PythonAstVisitor.containerTypes.contains(
+        t.split("[.:]").lastOption.getOrElse(t).toLowerCase
+      )
+
+  /** A parametrised generic type: `list[str]`, `typing.Dict[str, Item]`, ... */
+  private def isParametrised(t: String): Boolean = t.contains("[") && t.endsWith("]")
+
   override protected def associateTypes(i: Identifier, types: Set[String]): Set[String] =
     val existingTypes = symbolTable.get(i)
+    // A parametrised type the variable already carries (annotation-derived or inferred
+    // from a typed RHS) is strictly more precise than a bare container guess from a
+    // literal (`x = {}`); the literal must not dilute or replace it.
     val filteredTypes = types.filter { t =>
-        if t == s"${PythonAstVisitor.builtinPrefix}list" && existingTypes.exists(
-            _.startsWith(s"${PythonAstVisitor.builtinPrefix}list[")
-          )
-        then false
-        else if t == s"${PythonAstVisitor.builtinPrefix}dict" && existingTypes.exists(
-            _.startsWith(s"${PythonAstVisitor.builtinPrefix}dict[")
-          )
-        then false
-        else if t == s"${PythonAstVisitor.builtinPrefix}set" && existingTypes.exists(
-            _.startsWith(s"${PythonAstVisitor.builtinPrefix}set[")
-          )
-        then false
-        else if t == s"${PythonAstVisitor.builtinPrefix}tuple" && existingTypes.exists(
-            _.startsWith(s"${PythonAstVisitor.builtinPrefix}tuple[")
-          )
+        if isBareContainer(t) && existingTypes.exists(isParametrised) then false
+        else if isBareContainer(t) && declaredTypes.get(i.name).exists(_.exists(isParametrised))
         then false
         else true
     }
     if filteredTypes.isEmpty && existingTypes.nonEmpty then existingTypes
     else super.associateTypes(i, filteredTypes)
-  end associateTypes
 
   override protected def postSetTypeInformation(): Unit =
-      cu.typeDecl
-          .map(t =>
-              t -> t.inheritsFromTypeFullName.partition(itf =>
-                  symbolTable.contains(LocalVar(itf))
+    cu.typeDecl
+        .map(t =>
+            t -> t.inheritsFromTypeFullName.partition(itf =>
+                symbolTable.contains(LocalVar(itf))
+            )
+        )
+        .foreach { case (t, (identifierTypes, otherTypes)) =>
+            val existingTypes = (identifierTypes ++ otherTypes).distinct
+            val resolvedTypes = identifierTypes.map(LocalVar.apply).flatMap(symbolTable.get)
+            if existingTypes != resolvedTypes && resolvedTypes.nonEmpty then
+              state.changesWereMade.compareAndExchange(false, true)
+              builder.setNodeProperty(
+                t,
+                PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
+                resolvedTypes
               )
-          )
-          .foreach { case (t, (identifierTypes, otherTypes)) =>
-              val existingTypes = (identifierTypes ++ otherTypes).distinct
-              val resolvedTypes = identifierTypes.map(LocalVar.apply).flatMap(symbolTable.get)
-              if existingTypes != resolvedTypes && resolvedTypes.nonEmpty then
-                state.changesWereMade.compareAndExchange(false, true)
-                builder.setNodeProperty(
-                  t,
-                  PropertyNames.INHERITS_FROM_TYPE_FULL_NAME,
-                  resolvedTypes
-                )
-          }
+        }
+    // Final flush: the recovery only persists types along assignment/receiver shapes, so
+    // read-only occurrences (returns, bare reads, loop conditions) of variables the symbol
+    // table already types stay ANY on the node. Write the symbol table's knowledge onto
+    // those nodes; persistType keeps dummy and operator pseudo types out.
+    cu.ast.isIdentifier.foreach { id =>
+        if id.typeFullName == Constants.ANY && symbolTable.contains(id) then
+          val ts = symbolTable.get(id)
+          if ts.nonEmpty then persistType(id, ts)
+    }
+    cu.ast.isLocal.foreach { local =>
+        if local.typeFullName == Constants.ANY && symbolTable.contains(local) then
+          val ts = symbolTable.get(local)
+          if ts.nonEmpty then persistType(local, ts)
+    }
+  end postSetTypeInformation
 
   override protected def visitIdentifierAssignedToTypeRef(
     i: Identifier,

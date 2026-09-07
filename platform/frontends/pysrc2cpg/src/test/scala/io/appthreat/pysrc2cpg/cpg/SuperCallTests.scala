@@ -3,11 +3,11 @@ package io.appthreat.pysrc2cpg.cpg
 import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
-class SuperCallTests extends PySrc2CpgFixture(withOssDataflow = false) {
+class SuperCallTests extends PySrc2CpgFixture(withOssDataflow = false):
 
   "super().method() and super().__init__()" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class Base:
         |    def __init__(self):
         |        self.x = 1
@@ -19,24 +19,24 @@ class SuperCallTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    def run(self):
         |        super().ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve super().ready() to the base class" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.Base.ready")
-    }
-    "resolve super().__init__() to the base class" in {
-      cpg.call.name("__init__").methodFullName.toSet should
-          contain("t.py:<module>.Base.__init__")
-    }
-    "link run -> ready in the callgraph" in {
-      cpg.method.name("ready").caller.name.toSet should contain("run")
-    }
+        "t.py"
+      )
+      "resolve super().ready() to the base class" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.Base.ready")
+      }
+      "resolve super().__init__() to the base class" in {
+          cpg.call.name("__init__").methodFullName.toSet should
+              contain("t.Base.__init__")
+      }
+      "link run -> ready in the callgraph" in {
+          cpg.method.name("ready").caller.name.toSet should contain("run")
+      }
   }
 
   "super().method() resolving two levels up the MRO" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class Base:
         |    def ready(self):
         |        pass
@@ -46,11 +46,11 @@ class SuperCallTests extends PySrc2CpgFixture(withOssDataflow = false) {
         |    def run(self):
         |        super().ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve super().ready() to the grandparent class via MRO" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.Base.ready")
-    }
+        "t.py"
+      )
+      "resolve super().ready() to the grandparent class via MRO" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.Base.ready")
+      }
   }
-}
+end SuperCallTests

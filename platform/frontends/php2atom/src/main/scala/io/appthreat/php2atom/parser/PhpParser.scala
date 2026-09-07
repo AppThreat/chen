@@ -19,7 +19,7 @@ import scala.util.{Failure, Success, Try}
   *   provenance key it is resolved against the batch input directory; otherwise the AST json path
   *   is used as a best-effort fallback.
   * @param phpFile
-  *   the successfully decoded [[PhpFile]].
+  *   the successfully decoded [[Domain.PhpFile]].
   */
 case class BatchParsedFile(sourcePath: String, phpFile: PhpFile)
 
@@ -68,7 +68,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     *   - the probe not returning within 5 seconds (timeout).
     *
     * The timeout is enforced by running the (blocking) command on a `Future` and `Await`-ing it for
-    * at most 5 seconds; a [[TimeoutException]] (or any other throwable) is caught and mapped to
+    * at most 5 seconds; a `TimeoutException` (or any other throwable) is caught and mapped to
     * `false` so a hung generator can never wedge ingestion.
     */
   def supportsBatch: Boolean =

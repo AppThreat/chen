@@ -68,11 +68,29 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension:
       current.astChildren.foreach(child => stack.push((child, accDepth)))
     maxDepth
 
+  /** The single AST parent of this node. The historic fallback here cast the parent ITERATOR to
+    * `AstNode` when the first-element lookup threw - a value that can only fail again at the use
+    * site as a ClassCastException (and under concurrent readers, a transiently failing adjacency
+    * read turned into a task-level failure). The honest contract is: first AST parent, or a
+    * meaningful exception a caller can catch. Callers for which "no parent" is an ordinary answer
+    * rather than a broken graph want [[astParentOption]].
+    */
   def astParent: AstNode =
-      try
-        node._astIn.onlyChecked.asInstanceOf[AstNode]
-      catch
-        case _: Throwable => node._astIn.asInstanceOf[AstNode]
+      astParentOption.getOrElse(
+        throw new java.util.NoSuchElementException(
+          s"${node.label} (id ${node.id()}) has no AST parent"
+        )
+      )
+
+  /** The AST parent, or `None` for a root. For callers that ask "the enclosing node, if any" rather
+    * than assert one exists - the broken fallback [[astParent]] replaced happened to DEGRADE
+    * gracefully at such a site (the garbage value matched no `case`, so the node was skipped), and
+    * turning that into a throw would fail a whole tagging or generation pass over one parentless
+    * node. Those sites ask this instead, and say so.
+    */
+  def astParentOption: Option[AstNode] =
+    val parents = node._astIn
+    if parents.hasNext then Some(parents.next().asInstanceOf[AstNode]) else None
 
   /** Direct children of node in the AST. Siblings are ordered by their `order` fields
     */

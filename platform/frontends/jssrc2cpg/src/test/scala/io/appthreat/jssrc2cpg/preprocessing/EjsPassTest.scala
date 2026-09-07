@@ -1,27 +1,27 @@
 package io.appthreat.jssrc2cpg.preprocessing
 
 import io.appthreat.jssrc2cpg.passes.AbstractPassTest
-import io.shiftleft.semanticcpg.language._
-import org.scalatest._
+import io.shiftleft.semanticcpg.language.*
+import org.scalatest.*
 
-class EjsPassTest extends AbstractPassTest {
+class EjsPassTest extends AbstractPassTest:
 
   "ejs files" should {
 
-    "be renamed correctly " in AstFixture(
-      """
+      "be renamed correctly " in AstFixture(
+        """
         |<body>
         |<h1>Welcome <%= user.name %></h1>
         |</body>
         |""".stripMargin,
-      "index.js.ejs"
-    ) { cpg =>
-      cpg.file.name.l shouldBe List("index.js.ejs")
-      cpg.call.code.l.sorted shouldBe List("user.name")
-    }
+        "index.js.ejs"
+      ) { cpg =>
+        cpg.file.name.l shouldBe List("index.js.ejs")
+        cpg.call.code.l.sorted shouldBe List("user.name")
+      }
 
-    "be handled correctly" in AstFixture(
-      """
+      "be handled correctly" in AstFixture(
+        """
         |<body>
         |
         |<h1>Welcome <%= user.name %></h1>
@@ -48,29 +48,28 @@ class EjsPassTest extends AbstractPassTest {
         |
         |</body>
         |""".stripMargin,
-      "index.ejs"
-    ) { cpg =>
-      cpg.file.name.l shouldBe List("index.ejs")
-      cpg.call.code.l.sorted shouldBe
-        List(
-          "console.log",
-          "console.log(user)",
-          "exampleWrite = 'some value'",
-          "foo.callUnescaped",
-          "foo.callUnescaped()",
-          "foo.callWithWhitespaces",
-          "foo.callWithWhitespaces()",
-          "friend.name",
-          "friend.name",
-          "friend.name === selected",
-          "friend.name === selected ? \"selected\" : \"\"",
-          "friends.forEach",
-          "friends.forEach(function(friend, index) { %>\n        <li class=\"<%= index === 0 ? \"first\" : \"\" %> <%= friend.name === selected ? \"selected\" : \"\" %>\"><%= friend.name %></li>\n    <% })",
-          "index === 0",
-          "index === 0 ? \"first\" : \"\"",
-          "user.name"
-        )
-    }
+        "index.ejs"
+      ) { cpg =>
+        cpg.file.name.l shouldBe List("index.ejs")
+        cpg.call.code.l.sorted shouldBe
+            List(
+              "console.log",
+              "console.log(user)",
+              "exampleWrite = 'some value'",
+              "foo.callUnescaped",
+              "foo.callUnescaped()",
+              "foo.callWithWhitespaces",
+              "foo.callWithWhitespaces()",
+              "friend.name",
+              "friend.name",
+              "friend.name === selected",
+              "friend.name === selected ? \"selected\" : \"\"",
+              "friends.forEach",
+              "friends.forEach(function(friend, index) { %>\n        <li class=\"<%= index === 0 ? \"first\" : \"\" %> <%= friend.name === selected ? \"selected\" : \"\" %>\"><%= friend.name %></li>\n    <% })",
+              "index === 0",
+              "index === 0 ? \"first\" : \"\"",
+              "user.name"
+            )
+      }
   }
-
-}
+end EjsPassTest

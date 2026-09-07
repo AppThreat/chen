@@ -4,82 +4,86 @@ import io.appthreat.jssrc2cpg.passes.AbstractPassTest
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
 
-/** Regression coverage for AST-shape changes introduced by Babel 8
-  * (@babel/parser 8.x), which astgen now emits. Snippets are drawn from / modeled
-  * on the real cdxgen (v13) codebase so the frontend keeps building a correct CPG
-  * regardless of whether the astgen on PATH emits Babel 7 or Babel 8 node shapes.
+/** Regression coverage for AST-shape changes introduced by Babel 8 (@babel/parser 8.x), which
+  * astgen now emits. Snippets are drawn from / modeled on the real cdxgen (v13) codebase so the
+  * frontend keeps building a correct CPG regardless of whether the astgen on PATH emits Babel 7 or
+  * Babel 8 node shapes.
   *
   * Babel 8 changes exercised here:
-  *   - dynamic import() -> ImportExpression (source/options) instead of a
-  *     CallExpression whose callee is an `Import` node
+  *   - dynamic import() -> ImportExpression (source/options) instead of a CallExpression whose
+  *     callee is an `Import` node
   *   - TSEnumDeclaration members are wrapped in a TSEnumBody node (body.members)
   *   - template literal types -> TSTemplateLiteralType
   *   - TSInstantiationExpression uses `typeArguments` (was `typeParameters`)
   */
-class Babel8ShapeAstCreationPassTest extends AbstractPassTest {
+class Babel8ShapeAstCreationPassTest extends AbstractPassTest:
 
   "AST generation for Babel 8 dynamic imports (real cdxgen usage)" should {
 
-    // lib/core/parallel.js: `const { Worker } = await import("node:worker_threads");`
-    "build a dynamic import call for a destructured await import()" in AstFixture(
-      """const { Worker } = await import("node:worker_threads");"""
-    ) { cpg =>
-      val List(call) = cpg.call("import").l
-      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
-      call.argument.isLiteral.code.l shouldBe List("\"node:worker_threads\"")
-    }
+      // lib/core/parallel.js: `const { Worker } = await import("node:worker_threads");`
+      "build a dynamic import call for a destructured await import()" in AstFixture(
+        """const { Worker } = await import("node:worker_threads");"""
+      ) { cpg =>
+        val List(call) = cpg.call("import").l
+        call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+        call.argument.isLiteral.code.l shouldBe List("\"node:worker_threads\"")
+      }
 
-    // lib/validator/precompiled-parity.poku.js:
-    //   `const mod = await import(`./generated/validate-${specVersion}.mjs`);`
-    "build a dynamic import call for a templated specifier" in AstFixture(
-      """const specVersion = "1.6";
+      // lib/validator/precompiled-parity.poku.js:
+      //   `const mod = await import(`./generated/validate-${specVersion}.mjs`);`
+      "build a dynamic import call for a templated specifier" in AstFixture(
+        """const specVersion = "1.6";
         |const mod = await import(`./generated/validate-${specVersion}.mjs`);
         |""".stripMargin
-    ) { cpg =>
-      val List(call) = cpg.call("import").l
-      call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
-      call.argument.size shouldBe 1
-    }
+      ) { cpg =>
+        val List(call) = cpg.call("import").l
+        call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+        call.argument.size shouldBe 1
+      }
   }
 
   "AST generation for Babel 8 TypeScript node shapes" should {
 
-    // Babel 8 nests enum members in a TSEnumBody node (body.members); the
-    // members must still surface as TYPE_DECL members.
-    "expose enum members that Babel 8 wraps in TSEnumBody" in TsAstFixture(
-      """export enum HashAlgorithm {
+      // Babel 8 nests enum members in a TSEnumBody node (body.members); the
+      // members must still surface as TYPE_DECL members.
+      "expose enum members that Babel 8 wraps in TSEnumBody" in TsAstFixture(
+        """export enum HashAlgorithm {
         |  SHA256 = "sha256",
         |  SHA512 = "sha512",
         |  BLAKE2b = "blake2b"
         |}
         |""".stripMargin
-    ) { cpg =>
-      cpg.typeDecl("HashAlgorithm").member.name.l.toSet shouldBe Set("SHA256", "SHA512", "BLAKE2b")
-    }
+      ) { cpg =>
+          cpg.typeDecl("HashAlgorithm").member.name.l.toSet shouldBe Set(
+            "SHA256",
+            "SHA512",
+            "BLAKE2b"
+          )
+      }
 
-    // Template literal types become a dedicated TSTemplateLiteralType node in
-    // Babel 8; the frontend must parse the file without falling over.
-    "handle template literal types without breaking the file" in TsAstFixture(
-      """type SemVer = `${number}.${number}.${number}`;
+      // Template literal types become a dedicated TSTemplateLiteralType node in
+      // Babel 8; the frontend must parse the file without falling over.
+      "handle template literal types without breaking the file" in TsAstFixture(
+        """type SemVer = `${number}.${number}.${number}`;
         |const version: SemVer = "1.6.0";
         |console.log(version);
         |""".stripMargin
-    ) { cpg =>
-      cpg.identifier.name("version").size should be >= 1
-      cpg.call.name("log").size shouldBe 1
-    }
+      ) { cpg =>
+        cpg.identifier.name("version").size should be >= 1
+        cpg.call.name("log").size shouldBe 1
+      }
 
-    // TSInstantiationExpression uses `typeArguments` in Babel 8 (was
-    // `typeParameters`); the underlying expression must still be created.
-    "handle a TS instantiation expression (typeArguments)" in TsAstFixture(
-      """function identity<T>(x: T): T { return x; }
+      // TSInstantiationExpression uses `typeArguments` in Babel 8 (was
+      // `typeParameters`); the underlying expression must still be created.
+      "handle a TS instantiation expression (typeArguments)" in TsAstFixture(
+        """function identity<T>(x: T): T { return x; }
         |const makeString = identity<string>;
         |makeString("ok");
         |""".stripMargin
-    ) { cpg =>
-      cpg.identifier.name("makeString").size should be >= 1
-      cpg.call.name("makeString").size shouldBe 1
-    }
+      ) { cpg =>
+        cpg.identifier.name("makeString").size should be >= 1
+        cpg.call.name("makeString").size shouldBe 1
+      }
   }
 
   // Committed real cdxgen v13 AST JSON fixture:
@@ -88,19 +92,20 @@ class Babel8ShapeAstCreationPassTest extends AbstractPassTest {
   // frontend is exercised without needing astgen on PATH.
   "AST generation from a real cdxgen Babel 8 AST JSON fixture" should {
 
-    "build the expected CPG for lib/inventory/protobomLoader.js" in AstJsonFixture("babel8") { cpg =>
-      // exported functions become methods
-      cpg.method.name("isProtoBomPath").size shouldBe 1
-      cpg.method.name("importProtobomModule").size shouldBe 1
+      "build the expected CPG for lib/inventory/protobomLoader.js" in AstJsonFixture("babel8") {
+          cpg =>
+            // exported functions become methods
+            cpg.method.name("isProtoBomPath").size shouldBe 1
+            cpg.method.name("importProtobomModule").size shouldBe 1
 
-      // `await import("./protobom.js")` -> Babel 8 ImportExpression -> dynamic import call
-      val List(dynamicImport) = cpg.call("import").l
-      dynamicImport.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
-      dynamicImport.argument.isLiteral.code.l shouldBe List("\"./protobom.js\"")
+            // `await import("./protobom.js")` -> Babel 8 ImportExpression -> dynamic import call
+            val List(dynamicImport) = cpg.call("import").l
+            dynamicImport.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+            dynamicImport.argument.isLiteral.code.l shouldBe List("\"./protobom.js\"")
 
-      // template literals (e.g. `${filePath || ""}`) -> formatString calls
-      cpg.call.name(Operators.formatString).size should be >= 1
-    }
+            // template literals (e.g. `${filePath || ""}`) -> formatString calls
+            cpg.call.name(Operators.formatString).size should be >= 1
+      }
   }
 
   // Committed real TypeScript AST JSON fixture from sindresorhus/ky
@@ -110,20 +115,22 @@ class Babel8ShapeAstCreationPassTest extends AbstractPassTest {
   // typed members, `as const` -> TSAsExpression, template literals) on real code.
   "AST generation from a real TypeScript Babel 8 AST JSON fixture" should {
 
-    "build the expected CPG for ky errors/HTTPError.ts" in AstJsonFixture("babel8-ts") { cpg =>
-      // generic class `HTTPError<T = unknown> extends KyError`
-      cpg.typeDecl.nameExact("HTTPError").size shouldBe 1
-      cpg.typeDecl("HTTPError").inheritsFromTypeFullName.l.exists(_.contains("KyError")) shouldBe true
+      "build the expected CPG for ky errors/HTTPError.ts" in AstJsonFixture("babel8-ts") { cpg =>
+        // generic class `HTTPError<T = unknown> extends KyError`
+        cpg.typeDecl.nameExact("HTTPError").size shouldBe 1
+        cpg.typeDecl("HTTPError").inheritsFromTypeFullName.l.exists(
+          _.contains("KyError")
+        ) shouldBe true
 
-      // typed class members survive the Babel 8 shape
-      cpg.typeDecl("HTTPError").member.name.l.toSet should contain allElementsOf
-        Set("response", "request", "options", "data")
+        // typed class members survive the Babel 8 shape
+        cpg.typeDecl("HTTPError").member.name.l.toSet should contain allElementsOf
+            Set("response", "request", "options", "data")
 
-      // constructor with typed parameters
-      cpg.typeDecl("HTTPError").method.isConstructor.parameter.name.l should contain("response")
+        // constructor with typed parameters
+        cpg.typeDecl("HTTPError").method.isConstructor.parameter.name.l should contain("response")
 
-      // template literals (e.g. `${code} ${title}`) -> formatString calls
-      cpg.call.name(Operators.formatString).size should be >= 1
-    }
+        // template literals (e.g. `${code} ${title}`) -> formatString calls
+        cpg.call.name(Operators.formatString).size should be >= 1
+      }
   }
-}
+end Babel8ShapeAstCreationPassTest

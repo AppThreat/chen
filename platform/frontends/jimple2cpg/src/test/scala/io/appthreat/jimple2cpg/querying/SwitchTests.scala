@@ -3,9 +3,9 @@ package io.appthreat.jimple2cpg.querying
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.JumpTarget
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class SwitchTests extends JimpleCode2CpgFixture {
+class SwitchTests extends JimpleCode2CpgFixture:
 
   val cpg: Cpg = code("""
       |class Foo {
@@ -34,55 +34,54 @@ class SwitchTests extends JimpleCode2CpgFixture {
       |""".stripMargin).cpg
 
   "should identify switch roots" in {
-    val switchCodes = cpg.method.name("main").switchBlock.code.toSetMutable
-    switchCodes.exists(_.startsWith("tableswitch(")) shouldBe true
-    switchCodes.exists(_.startsWith("lookupswitch(")) shouldBe true
+      val switchCodes = cpg.method.name("main").switchBlock.code.toSetMutable
+      switchCodes.exists(_.startsWith("tableswitch(")) shouldBe true
+      switchCodes.exists(_.startsWith("lookupswitch(")) shouldBe true
   }
 
   "should have 3 ordinary cases and a default under the table switch" in {
-    cpg.jumpTarget.filter(_.astParent.code == "tableswitch(l4)").name.toSetMutable shouldBe Set(
-      "default",
-      "case 0",
-      "case 1",
-      "case 2"
-    )
+      cpg.jumpTarget.filter(_.astParent.code == "tableswitch(l4)").name.toSetMutable shouldBe Set(
+        "default",
+        "case 0",
+        "case 1",
+        "case 2"
+      )
   }
 
   "should have 3 cases holding string hashcodes and a default under the lookup switch" in {
-    cpg.jumpTarget.filter(_.astParent.code.startsWith("lookupswitch(")).name.toSetMutable shouldBe Set(
-      "case 79820959",
-      "default",
-      "case 67868",
-      "case 66486"
-    )
+      cpg.jumpTarget.filter(_.astParent.code.startsWith("lookupswitch(")).name.toSetMutable shouldBe Set(
+        "case 79820959",
+        "default",
+        "case 67868",
+        "case 66486"
+      )
   }
 
   "should flow jump targets from switches" in {
-    cpg.switchBlock
-      .filter(_.code == "tableswitch(l4)")
-      .astChildren
-      .collect { case a: JumpTarget => a }
-      .code
-      .toSetMutable shouldBe Set("case 1:", "case 2:", "case 0:", "default:")
-    cpg.switchBlock
-      .filter(_.code.startsWith("lookupswitch("))
-      .astChildren
-      .collect { case a: JumpTarget => a }
-      .code
-      .toSetMutable shouldBe Set("case 66486:", "case 79820959:", "case 67868:", "default:")
+      cpg.switchBlock
+          .filter(_.code == "tableswitch(l4)")
+          .astChildren
+          .collect { case a: JumpTarget => a }
+          .code
+          .toSetMutable shouldBe Set("case 1:", "case 2:", "case 0:", "default:")
+      cpg.switchBlock
+          .filter(_.code.startsWith("lookupswitch("))
+          .astChildren
+          .collect { case a: JumpTarget => a }
+          .code
+          .toSetMutable shouldBe Set("case 66486:", "case 79820959:", "case 67868:", "default:")
   }
 
   "should flow jump conditionals from switches" in {
-    cpg.switchBlock
-      .filter(_.code == "tableswitch(l4)")
-      .condition
-      .code
-      .toSetMutable shouldBe Set("l4")
-    cpg.switchBlock
-      .filter(_.code.startsWith("lookupswitch("))
-      .condition
-      .code
-      .toSetMutable.size shouldBe 1
+      cpg.switchBlock
+          .filter(_.code == "tableswitch(l4)")
+          .condition
+          .code
+          .toSetMutable shouldBe Set("l4")
+      cpg.switchBlock
+          .filter(_.code.startsWith("lookupswitch("))
+          .condition
+          .code
+          .toSetMutable.size shouldBe 1
   }
-
-}
+end SwitchTests

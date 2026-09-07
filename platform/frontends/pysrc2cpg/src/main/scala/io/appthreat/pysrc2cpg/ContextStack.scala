@@ -41,7 +41,10 @@ class ContextStack:
     val globalVariables: mutable.Set[String] = mutable.Set.empty,
     val nonLocalVariables: mutable.Set[String] = mutable.Set.empty,
     var lambdaCounter: Int = 0
-  ) extends Context {}
+  ) extends Context:
+    // Set by the visitor once the METHOD_RETURN node of this method exists;
+    // used to wire `yield` values out of generator methods.
+    var methodReturnNode: Option[nodes.NewMethodReturn] = None
 
   private class ClassContext(
     val scopeName: Option[String],
@@ -388,6 +391,20 @@ class ContextStack:
 
   def addNonLocalVariable(name: String): Unit =
       findEnclosingMethodContext(stack).nonLocalVariables.add(name)
+
+  /** Record the METHOD_RETURN node of the method whose context is on top of the stack, so `yield`
+    * lowering can wire values to the generator's exit.
+    */
+  def setCurrentMethodReturnNode(methodReturnNode: nodes.NewMethodReturn): Unit =
+      stack.head match
+        case methodContext: MethodContext =>
+            methodContext.methodReturnNode = Some(methodReturnNode)
+        case _ =>
+
+  def currentMethodReturnNode: Option[nodes.NewMethodReturn] =
+      stack.collectFirst { case methodContext: MethodContext =>
+          methodContext.methodReturnNode
+      }.flatten
 
   // Together with the file name this is used to compute full names.
   def qualName: String =
