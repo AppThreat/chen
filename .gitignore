@@ -61,7 +61,6 @@ notebooks/.ipynb_checkpoints/
 *.slices.json
 
 
-# Local planning docs (never committed)
 plans/
 
 # Gradle scratch dirs created by javasrc2cpg config tests
