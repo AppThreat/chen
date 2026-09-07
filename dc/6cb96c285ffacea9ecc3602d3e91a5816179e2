@@ -1,0 +1,29 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/ImportResolverPass.scala
+  s_6b8fe346c7989b::t_e2d301823eda87 19-24,28-33
+  s_6b8fe346c7989b::t_716138e04e0456 25-27
+  s_6b8fe346c7989b::t_55a3c644ed1d8d 200
+  s_6b8fe346c7989b::t_3ec8f5fdf4038e 76-77,79
+  s_6b8fe346c7989b::t_d880459eda206e 11
+  s_6b8fe346c7989b::t_39dda2b3414624 60-62
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonRealArchiveIngestionTests.scala
+  s_6b8fe346c7989b::t_e6bcdeaa6ede99 56-57
+  s_6b8fe346c7989b::t_716138e04e0456 29-30,59-71,73-85,87-95,97-108
+  s_6b8fe346c7989b::t_f6719bc2ea114a 12-16,18-20
+  s_6b8fe346c7989b::t_3a6f2ae9018356 27-28,31-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dc6cb96c285ffacea9ecc3602d3e91a5816179e2",
+  "prompts": {},
+  "sessions": {
+    "s_6b8fe346c7989b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11f11498-3459-4644-b80a-948e68d5323c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
