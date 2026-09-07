@@ -6,7 +6,7 @@ exact bytes chen receives from the generator.
 
 Provenance of the committed JSON:
 
-- Repo: `ruby_ast_gen` branch `feat/ruby41`, commit `35469ac`, version **2.0.0**
+- Repo: `ruby_ast_gen` branch `main`, commit `a68aaf1`, version **2.1.0**
   (`bundle exec ruby exe/ruby_ast_gen --version` if in doubt).
 - Command: `bundle exec ruby exe/ruby_ast_gen -i <resources dir> -o <out dir> -e ZZZNOMATCH`
   (`-e ZZZNOMATCH` matches nothing, i.e. disables exclusion).

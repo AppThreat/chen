@@ -65,7 +65,7 @@ class AstGenProgramTests extends AnyWordSpec with Matchers:
             ),
             "file_path"         -> source.toAbsolutePath.toString,
             "rel_file_path"     -> "one.rb",
-            "generator_version" -> "2.0.0"
+            "generator_version" -> "2.1.0"
           )
           Files.writeString(out.resolve("one.rb.json"), ujson.write(astJson))
           Files.writeString(

@@ -21,7 +21,7 @@ import scala.util.Using
 
 /** Builds real CPGs for ruby2atom tests from committed fixture pairs under
   * `src/test/resources/ruby`: each fixture is a Ruby source file plus the JSON emitted for it by
-  * `rbastgen` (ruby_ast_gen v2.0.0, branch `feat/ruby41`, see `resources/ruby/README.md`).
+  * `rbastgen` (ruby_ast_gen v2.1.0, see `resources/ruby/README.md`).
   *
   * The harness is modelled on php2atom's `PhpCode2CpgFixture` — php2atom is the frontend sharing
   * ruby2atom's architecture (a generator binary writes astgen JSON, the frontend rebuilds an
