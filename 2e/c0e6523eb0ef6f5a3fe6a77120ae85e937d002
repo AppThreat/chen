@@ -1,0 +1,27 @@
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonArchiveHandlerTests.scala
+  s_6b8fe346c7989b::t_34122d7311ebfe 176-188
+  s_6b8fe346c7989b::t_23fb3896343685 233-238
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonArchiveIngestionTests.scala
+  s_6b8fe346c7989b::t_79076b1a96400e 89,92-93
+  s_6b8fe346c7989b::t_4697f872847c4e 80-88,90-91,94-95
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2CpgOnFileSystem.scala
+  s_6b8fe346c7989b::t_72a6f9939028a9 341-352
+  s_6b8fe346c7989b::t_b30ccb46cd8fc1 303
+  s_6b8fe346c7989b::t_ca04db80416d5f 318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2ec0e6523eb0ef6f5a3fe6a77120ae85e937d002",
+  "prompts": {},
+  "sessions": {
+    "s_6b8fe346c7989b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11f11498-3459-4644-b80a-948e68d5323c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
