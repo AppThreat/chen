@@ -173,14 +173,19 @@ class PythonArchiveHandlerTests extends AnyWordSpec with Matchers:
                 "pkg/__init__.py" -> "ok\n"
               )
             )
-            val tmp    = tempDir("chen-extract-")
-            val parent = File(tmp.path.getParent)
-            val before = parent.listRecursively.map(_.pathAsString).toSet
-            an[RuntimeException] should be thrownBy extractOk(dir.path, tmp)
-            val after = parent.listRecursively.map(_.pathAsString).toSet
-            // Nothing outside the temp root was created by the failed extraction.
-            (after -- before).forall(_.startsWith(tmp.pathAsString)) shouldBe true
-            tmp.delete(swallowIOExceptions = true)
+            // The escape target is a directory this test OWNS: the extraction root is nested
+            // one level inside `outer`, so `../evil.txt` resolves into `outer` and nowhere
+            // else. Asserting on an owned directory rather than the shared system temp is what
+            // makes the check both precise and stable - the enclosing temp directory is
+            // concurrently written by every other suite, and on CI is not even fully readable.
+            File.usingTemporaryDirectory("chen-arch-outer-") { outer =>
+              val tmp = (outer / "extract").createDirectories()
+              an[RuntimeException] should be thrownBy extractOk(dir.path, tmp)
+              // Nothing landed beside the extraction root, and specifically not the entry the
+              // archive aimed there.
+              (outer / "evil.txt").exists shouldBe false
+              outer.children.map(_.name).toSet shouldBe Set("extract")
+            }
           }
       }
 
@@ -225,13 +230,12 @@ class PythonArchiveHandlerTests extends AnyWordSpec with Matchers:
               )
             ))
             write(dir / "evil.tar.gz", tgz)
-            val tmp    = tempDir("chen-extract-")
-            val parent = File(tmp.path.getParent)
-            val before = parent.listRecursively.map(_.pathAsString).toSet
-            an[RuntimeException] should be thrownBy extractOk(dir.path, tmp)
-            val after = parent.listRecursively.map(_.pathAsString).toSet
-            (after -- before).forall(_.startsWith(tmp.pathAsString)) shouldBe true
-            tmp.delete(swallowIOExceptions = true)
+            // As above: assert on a directory this test owns, not the shared system temp.
+            File.usingTemporaryDirectory("chen-arch-outer-") { outer =>
+              val tmp = (outer / "extract").createDirectories()
+              an[RuntimeException] should be thrownBy extractOk(dir.path, tmp)
+              outer.children.map(_.name).toSet shouldBe Set("extract")
+            }
           }
       }
 

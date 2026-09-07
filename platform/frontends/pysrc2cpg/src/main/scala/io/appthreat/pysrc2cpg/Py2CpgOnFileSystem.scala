@@ -300,7 +300,7 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
             ignoredFilesPath = Option(config.ignoredFiles)
           )
           .map(x => Path.of(x))
-          .map(abs => IngestedFile(abs, root.relativize(abs).toString, root, isDependency))
+          .map(abs => ingested(abs, root, isDependency))
           .filter { f =>
               // Judged on the path segments BELOW the owning root, never the absolute one:
               // `__pycache__`/`__pypackages__` inside an unpacked tree must be dropped the
@@ -315,7 +315,7 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
       // kept (the unzipped-sdist case the function has always covered).
       Py2CpgOnFileSystem
           .dropShadowedBuildCopies(inputFiles.map(_.abs), root)
-          .map(abs => IngestedFile(abs, root.relativize(abs).toString, root, isDependency))
+          .map(abs => ingested(abs, root, isDependency))
     end filesOf
 
     val projectFiles = (inputPath +: projectRoots.filter(_ != inputPath))
@@ -337,6 +337,18 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
       )
     byRel.values.toSeq.sortBy(_.rel)
   end ingestFiles
+
+  /** An [[IngestedFile]] for `abs` under `root`, with its package-relative name normalised to
+    * forward slashes.
+    *
+    * Forward slashes are the frontend's one spelling for a relative name: FILE node names, the
+    * dotted module names [[PythonModuleName]] derives by splitting on `/`, the ignore-directory
+    * check, the purl-mapping top segment and the cross-root collision key are all built from it.
+    * `Path.relativize.toString` yields the platform separator, so on Windows an unnormalised name
+    * splits into nothing and every one of those readers silently gets a single opaque segment.
+    */
+  private def ingested(abs: Path, root: Path, isDependency: Boolean): IngestedFile =
+      IngestedFile(abs, root.relativize(abs).toString.replace('\\', '/'), root, isDependency)
 
   /** Delegated so the import name a file contributes is computed by ONE rule, shared with the side
     * that derives `importNames` from an archive's layout. Two local copies would drift, and the

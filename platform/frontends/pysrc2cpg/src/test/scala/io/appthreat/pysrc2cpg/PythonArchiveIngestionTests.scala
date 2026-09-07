@@ -77,6 +77,22 @@ class PythonArchiveIngestionTests extends PySrc2CpgFixture(withOssDataflow = tru
           cpg.file.name("flask/app.py").l should not be empty
       }
 
+      "name every ingested file with forward slashes, on every platform" in {
+          // The frontend's relative names have exactly one spelling: FILE node names, the dotted
+          // module names PythonModuleName derives by splitting on `/`, the ignore-directory
+          // check and the purl top-segment mapping all read it. `Path.relativize.toString`
+          // yields the platform separator, so without normalisation a Windows run gives every
+          // reader one opaque segment - dotted names, externality and attribution all degrade
+          // at once, and silently. This assertion is the platform-independent statement of that
+          // invariant; it is the Windows legs that can fail it.
+          val cpg   = code(appUsingFlask, "app.py").withProjectSetup(writeArchives)
+          val names = cpg.file.name.l.filterNot(_ == "N/A")
+          names should not be empty
+          names.filter(_.contains('\\')) shouldBe empty
+          // A nested name, since a single segment cannot show a separator at all.
+          names should contain("flask/__init__.py")
+      }
+
       "attribute the wheel's code as external dependency code, and only it" in {
           val cpg = code(appUsingFlask, "app.py").withProjectSetup(writeArchives)
           cpg.method.fullNameExact("flask.app.Flask.run").head.isExternal shouldBe true
