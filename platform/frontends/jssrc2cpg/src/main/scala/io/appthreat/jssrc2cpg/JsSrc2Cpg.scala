@@ -21,7 +21,7 @@ import io.appthreat.jssrc2cpg.passes.{
 import io.appthreat.jssrc2cpg.passes.*
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
-import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
+import io.appthreat.x2cpg.passes.frontend.{XTypeRecovery, XTypeRecoveryConfig}
 import io.appthreat.x2cpg.utils.{HashUtil, Report}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.CpgPassBase
@@ -77,9 +77,8 @@ end JsSrc2Cpg
 object JsSrc2Cpg:
 
   def postProcessingPasses(cpg: Cpg, config: Option[Config] = None): List[CpgPassBase] =
-    val typeRecoveryConfig = config
-        .map(c => XTypeRecoveryConfig(c.typePropagationIterations, !c.disableDummyTypes))
-        .getOrElse(XTypeRecoveryConfig())
+    val typeRecoveryConfig =
+        config.map(XTypeRecovery.configFor).getOrElse(XTypeRecoveryConfig())
     List(
       new JavaScriptInheritanceNamePass(cpg),
       new ConstClosurePass(cpg),

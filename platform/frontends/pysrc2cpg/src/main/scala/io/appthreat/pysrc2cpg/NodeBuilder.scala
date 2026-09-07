@@ -39,6 +39,20 @@ class NodeBuilder(diffGraph: DiffGraphBuilder):
         .typeDeclFullName(fullName)
     addNodeToDiff(typeNode)
 
+  def jumpTargetNode(
+    name: String,
+    code: String,
+    lineAndColumn: LineAndColumn
+  ): nodes.NewJumpTarget =
+    val jumpTargetNode = nodes
+        .NewJumpTarget()
+        .name(name)
+        .code(code)
+        .argumentIndex(1)
+        .lineNumber(lineAndColumn.line)
+        .columnNumber(lineAndColumn.column)
+    addNodeToDiff(jumpTargetNode)
+
   def typeDeclNode(
     name: String,
     fullName: String,

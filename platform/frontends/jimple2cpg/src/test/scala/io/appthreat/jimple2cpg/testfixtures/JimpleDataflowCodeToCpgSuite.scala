@@ -10,22 +10,19 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.{ICallResolver, NoResolve}
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 
-class JimpleDataflowTestCpg(val extraFlows: List[FlowSemantic] = List.empty) extends JimpleTestCpg {
+class JimpleDataflowTestCpg(val extraFlows: List[FlowSemantic] = List.empty) extends JimpleTestCpg:
 
   implicit val resolver: ICallResolver           = NoResolve
   implicit lazy val engineContext: EngineContext = EngineContext()
 
-  override def applyPasses(): Unit = {
+  override def applyPasses(): Unit =
     super.applyPasses()
     val context = new LayerCreatorContext(this)
     val options = new OssDataFlowOptions(extraFlows = extraFlows)
     new OssDataFlow(options).run(context)
-  }
-
-}
 
 class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.empty)
-    extends Code2CpgFixture(() => new JimpleDataflowTestCpg(extraFlows)) {
+    extends Code2CpgFixture(() => new JimpleDataflowTestCpg(extraFlows)):
 
   implicit var context: EngineContext = EngineContext()
 
@@ -36,9 +33,8 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
     requireSourceMatch: Boolean = false
   )(
     implicit cpg: Cpg
-  ): (Iterator[Literal], Iterator[Expression]) = {
-    getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern, requireSourceMatch)
-  }
+  ): (Iterator[Literal], Iterator[Expression]) =
+      getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern, requireSourceMatch)
 
   def getMultiFnSourceSink(
     sourceMethodName: String,
@@ -46,42 +42,38 @@ class JimpleDataFlowCodeToCpgSuite(val extraFlows: List[FlowSemantic] = List.emp
     sourceCode: String = "\"MALICIOUS\"",
     sinkPattern: String = ".*println.*",
     requireSourceMatch: Boolean = false
-  )(implicit cpg: Cpg): (Iterator[Literal], Iterator[Expression]) = {
+  )(implicit cpg: Cpg): (Iterator[Literal], Iterator[Expression]) =
     val sourceMethod = cpg.method(s".*$sourceMethodName").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName").head
 
     def normalizeLiteralCode(code: String): String =
-      code.stripPrefix("\"").stripSuffix("\"")
+        code.stripPrefix("\"").stripSuffix("\"")
 
-    def source = {
+    def source =
       val allLiterals = sourceMethod.literal.l
       val isRegexLike = sourceCode.exists(ch => "*+?[](){}|.^$\\".contains(ch))
 
       val matched =
-        if (isRegexLike) {
-          val sourceRegex = sourceCode.r
-          allLiterals.filter(l => sourceRegex.findFirstIn(l.code).nonEmpty)
-        } else {
-          val normalizedSource = normalizeLiteralCode(sourceCode)
-          allLiterals.filter { lit =>
-            lit.code == sourceCode || normalizeLiteralCode(lit.code) == normalizedSource
-          }
-        }
+          if isRegexLike then
+            val sourceRegex = sourceCode.r
+            allLiterals.filter(l => sourceRegex.findFirstIn(l.code).nonEmpty)
+          else
+            val normalizedSource = normalizeLiteralCode(sourceCode)
+            allLiterals.filter { lit =>
+                lit.code == sourceCode || normalizeLiteralCode(lit.code) == normalizedSource
+            }
 
-      if (requireSourceMatch && matched.isEmpty) {
+      if requireSourceMatch && matched.isEmpty then
         fail(s"Could not find source literal $sourceCode for method $sourceMethodName")
-      }
 
       matched.iterator
-    }
 
     def sink = sinkMethod.call.name(sinkPattern).argument(1).ast.collectAll[Expression]
 
     // If either of these fail, then the testcase was written incorrectly or the AST was created incorrectly.
-    if (sink.size <= 0) {
+    if sink.size <= 0 then
       fail(s"Could not find sink $sinkPattern for method $sinkMethodName")
-    }
 
     (source, sink)
-  }
-}
+  end getMultiFnSourceSink
+end JimpleDataFlowCodeToCpgSuite

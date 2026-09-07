@@ -1,9 +1,9 @@
 package io.appthreat.javasrc2cpg.querying
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class GenericsTests extends JavaSrcCode2CpgFixture {
+class GenericsTests extends JavaSrcCode2CpgFixture:
 
   val cpg = code("""
       |import java.util.function.Function;
@@ -74,126 +74,113 @@ class GenericsTests extends JavaSrcCode2CpgFixture {
       |""".stripMargin)
 
   "it should create the correct generic typeDecl name" in {
-    cpg.typeDecl.nameExact("Box").l match {
-      case decl :: Nil => decl.fullName shouldBe "Box"
+      cpg.typeDecl.nameExact("Box").l match
+        case decl :: Nil => decl.fullName shouldBe "Box"
 
-      case res => fail(s"Expected typeDecl Box but got $res")
-    }
+        case res => fail(s"Expected typeDecl Box but got $res")
   }
 
   "it should default to Object for a simple generic type" in {
-    cpg.method.name("getItem").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.getItem:java.lang.Object()"
-        method.signature shouldBe "java.lang.Object()"
+      cpg.method.name("getItem").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.getItem:java.lang.Object()"
+            method.signature shouldBe "java.lang.Object()"
 
-      case res => fail(s"Expected method getItem but got $res")
-    }
+        case res => fail(s"Expected method getItem but got $res")
   }
 
   "it should default to Object for simple generic parameters" in {
-    cpg.method.name("setItem").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.setItem:void(java.lang.Object)"
-        method.signature shouldBe "void(java.lang.Object)"
+      cpg.method.name("setItem").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.setItem:void(java.lang.Object)"
+            method.signature shouldBe "void(java.lang.Object)"
 
-      case res => fail(s"Expected method setItem but got $res")
-    }
+        case res => fail(s"Expected method setItem but got $res")
 
-    cpg.method.name("setItem").parameter.name("item").l match {
-      case node :: Nil =>
-        node.typeFullName shouldBe "java.lang.Object"
+      cpg.method.name("setItem").parameter.name("item").l match
+        case node :: Nil =>
+            node.typeFullName shouldBe "java.lang.Object"
 
-      case res => fail(s"Expected param item but got $res")
-    }
+        case res => fail(s"Expected param item but got $res")
   }
 
   "it should erase generic types in parameters" in {
-    val List(method) = cpg.method.name("map").l
-    method.fullName shouldBe "Box.map:Box(java.util.function.Function)"
-    method.signature shouldBe "Box(java.util.function.Function)"
+      val List(method) = cpg.method.name("map").l
+      method.fullName shouldBe "Box.map:Box(java.util.function.Function)"
+      method.signature shouldBe "Box(java.util.function.Function)"
 
-    val List(param) = cpg.method.name("map").parameter.name("f").l
-    param.typeFullName shouldBe "java.util.function.Function"
+      val List(param) = cpg.method.name("map").parameter.name("f").l
+      param.typeFullName shouldBe "java.util.function.Function"
   }
 
   "it should create correct constructor calls" in {
-    cpg.method.name("map").call.nameExact(io.appthreat.x2cpg.Defines.ConstructorMethodName).l match {
-      case const :: Nil =>
-        const.methodFullName shouldBe s"Box.${io.appthreat.x2cpg.Defines.ConstructorMethodName}:void()"
-        const.signature shouldBe "void()"
+      cpg.method.name("map").call.nameExact(io.appthreat.x2cpg.Defines.ConstructorMethodName).l match
+        case const :: Nil =>
+            const.methodFullName shouldBe s"Box.${io.appthreat.x2cpg.Defines.ConstructorMethodName}:void()"
+            const.signature shouldBe "void()"
 
-      case res => fail(s"Expected call to <init> but got $res")
-    }
+        case res => fail(s"Expected call to <init> but got $res")
   }
 
   "it should correctly handle generic return types" in {
-    cpg.method.name("withValue").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.withValue:Box(java.lang.Object)"
-        method.signature shouldBe "Box(java.lang.Object)"
+      cpg.method.name("withValue").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.withValue:Box(java.lang.Object)"
+            method.signature shouldBe "Box(java.lang.Object)"
 
-      case res => fail(s"Expected method withValue but got $res")
-    }
+        case res => fail(s"Expected method withValue but got $res")
   }
 
   "it should handle generics with upper bounds" in {
-    cpg.method.name("idK").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.idK:java.lang.Number(java.lang.Number)"
-        method.signature shouldBe "java.lang.Number(java.lang.Number)"
+      cpg.method.name("idK").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.idK:java.lang.Number(java.lang.Number)"
+            method.signature shouldBe "java.lang.Number(java.lang.Number)"
 
-      case res => fail(s"Expected method idK but found $res")
-    }
+        case res => fail(s"Expected method idK but found $res")
   }
 
   "it should handle generics with compound upper bounds" in {
-    cpg.method.name("idKC").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.idKC:java.lang.Number(java.lang.Number)"
-        method.signature shouldBe "java.lang.Number(java.lang.Number)"
+      cpg.method.name("idKC").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.idKC:java.lang.Number(java.lang.Number)"
+            method.signature shouldBe "java.lang.Number(java.lang.Number)"
 
-      case res => fail(s"Expected method idKC but found $res")
-    }
+        case res => fail(s"Expected method idKC but found $res")
   }
 
   "it should handle generics with an interface upper bound" in {
-    cpg.method.name("idC").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.idC:java.lang.Comparable(java.lang.Comparable)"
-        method.signature shouldBe "java.lang.Comparable(java.lang.Comparable)"
+      cpg.method.name("idC").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.idC:java.lang.Comparable(java.lang.Comparable)"
+            method.signature shouldBe "java.lang.Comparable(java.lang.Comparable)"
 
-      case res => fail(s"Expected method idC but found $res")
-    }
+        case res => fail(s"Expected method idC but found $res")
   }
 
   "it should handle wildcard subclass generics" in {
-    cpg.method.name("testWildCard").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.testWildCard:void(Box)"
-        method.signature shouldBe "void(Box)"
+      cpg.method.name("testWildCard").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.testWildCard:void(Box)"
+            method.signature shouldBe "void(Box)"
 
-      case res => fail(s"Expected method testWildCard but found $res")
-    }
+        case res => fail(s"Expected method testWildCard but found $res")
   }
 
   "it should handle wildcard superclass generics" in {
-    cpg.method.name("testWildCardLower").l match {
-      case method :: Nil =>
-        method.fullName shouldBe "Box.testWildCardLower:void(Box)"
-        method.signature shouldBe "void(Box)"
+      cpg.method.name("testWildCardLower").l match
+        case method :: Nil =>
+            method.fullName shouldBe "Box.testWildCardLower:void(Box)"
+            method.signature shouldBe "void(Box)"
 
-      case res => fail(s"Expected method testWildCardLower but found $res")
-    }
+        case res => fail(s"Expected method testWildCardLower but found $res")
   }
 
   "it should handle generic inheritance" in {
-    cpg.typeDecl.name("Test").l match {
-      case decl :: Nil =>
-        decl.inheritsFromTypeFullName.head shouldBe "Box"
+      cpg.typeDecl.name("Test").l match
+        case decl :: Nil =>
+            decl.inheritsFromTypeFullName.head shouldBe "Box"
 
-      case res => fail(s"Expected typeDecl Test but found $res")
-    }
+        case res => fail(s"Expected typeDecl Test but found $res")
   }
-
-}
+end GenericsTests

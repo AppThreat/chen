@@ -26,7 +26,7 @@ jobs:
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # 2.37.2
         with:
           coverage: "none"
-          php-version: "8.4"
+          php-version: "8.5"
           tools: composer:v2
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0

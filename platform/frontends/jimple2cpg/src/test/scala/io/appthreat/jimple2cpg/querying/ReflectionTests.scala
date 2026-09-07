@@ -4,9 +4,9 @@ import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, Literal, Identifier}
 import io.shiftleft.proto.cpg.Cpg.DispatchTypes
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class ReflectionTests extends JimpleCode2CpgFixture {
+class ReflectionTests extends JimpleCode2CpgFixture:
 
   val cpg: Cpg = code("""
       |class Foo {
@@ -21,32 +21,32 @@ class ReflectionTests extends JimpleCode2CpgFixture {
       |}
       |""".stripMargin).cpg
 
-    "should assign the class and method variables correctly" in {
-        val identifiers = cpg.method("foo").ast.isIdentifier.name("fooClazz").l
-        identifiers.exists(_.name == "fooClazz") shouldBe true
-        val identifierMap = identifiers.groupBy(_.name).view.mapValues(_.head).toMap
-        val fooClazz = identifierMap.getOrElse("fooClazz", fail("Identifier 'fooClazz' not found"))
-        fooClazz shouldBe a[Identifier]
-        fooClazz.typeFullName shouldBe "java.lang.Class"
-        fooClazz.parentExpression match {
-            case Some(assignmentCall: Call) if assignmentCall.name == "<operator>.assignment" =>
-                val rhsLiteralOpt = assignmentCall.ast.isLiteral.headOption
-                rhsLiteralOpt match {
-                    case Some(classLiteral: Literal) =>
-                        classLiteral.code shouldBe "Foo.class"
-                        classLiteral.typeFullName shouldBe "java.lang.Class"
-                    case None => fail("RHS of fooClazz assignment should contain a class literal 'Foo.class'")
-                }
-            case _ => fail("fooClazz identifier should be the LHS (child) of an <operator>.assignment call")
-        }
+  "should assign the class and method variables correctly" in {
+      val identifiers = cpg.method("foo").ast.isIdentifier.name("fooClazz").l
+      identifiers.exists(_.name == "fooClazz") shouldBe true
+      val identifierMap = identifiers.groupBy(_.name).view.mapValues(_.head).toMap
+      val fooClazz = identifierMap.getOrElse("fooClazz", fail("Identifier 'fooClazz' not found"))
+      fooClazz shouldBe a[Identifier]
+      fooClazz.typeFullName shouldBe "java.lang.Class"
+      fooClazz.parentExpression match
+        case Some(assignmentCall: Call) if assignmentCall.name == "<operator>.assignment" =>
+            val rhsLiteralOpt = assignmentCall.ast.isLiteral.headOption
+            rhsLiteralOpt match
+              case Some(classLiteral: Literal) =>
+                  classLiteral.code shouldBe "Foo.class"
+                  classLiteral.typeFullName shouldBe "java.lang.Class"
+              case None =>
+                  fail("RHS of fooClazz assignment should contain a class literal 'Foo.class'")
+        case _ =>
+            fail("fooClazz identifier should be the LHS (child) of an <operator>.assignment call")
 
-        val getMethodCalls = cpg.method("foo").call.name("getMethod").l
-        getMethodCalls.size shouldBe 1
-        getMethodCalls.head.typeFullName shouldBe "java.lang.reflect.Method"
-    }
+      val getMethodCalls = cpg.method("foo").call.name("getMethod").l
+      getMethodCalls.size shouldBe 1
+      getMethodCalls.head.typeFullName shouldBe "java.lang.reflect.Method"
+  }
 
-    "should handle chained reflection calls like Class.forName().getMethod().invoke()" in {
-        val cpg: Cpg = code("""
+  "should handle chained reflection calls like Class.forName().getMethod().invoke()" in {
+      val cpg: Cpg = code("""
                                    |class Greeter {
                                    |    public static String greet(String who) {
                                    |        return "Hello, " + who;
@@ -60,37 +60,39 @@ class ReflectionTests extends JimpleCode2CpgFixture {
                                    |    }
                                    |}
                                    |""".stripMargin).cpg
-        val mainMethod = cpg.method.name("main").head
-        val resultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
-            .where(_.argument(1).isIdentifier.name("result"))
-            .head
+      val mainMethod = cpg.method.name("main").head
+      val resultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+          .where(_.argument(1).isIdentifier.name("result"))
+          .head
 
-        val invokeCall = resultAssignment.argument(2).asInstanceOf[Call]
-        invokeCall.name shouldBe "invoke"
-        invokeCall.methodFullName shouldBe "java.lang.reflect.Method.invoke:java.lang.Object(java.lang.Object,java.lang.Object[])"
-        invokeCall.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH.toString
-        val getMethodCalls = mainMethod.call.name("getMethod").l
-        getMethodCalls should not be empty
-        val getMethodCall = getMethodCalls.head
-        getMethodCall.name shouldBe "getMethod"
-        getMethodCall.typeFullName shouldBe "java.lang.reflect.Method" // Bug
-        val forNameCalls = mainMethod.call.name("forName").l
-        forNameCalls should not be empty
-        val forNameCall = forNameCalls.head
-        forNameCall.name shouldBe "forName"
-        forNameCall.methodFullName should include("java.lang.Class.forName:")
-        val getMethodArgs = getMethodCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
-        getMethodArgs.size shouldBe 2
-        getMethodArgs(0).code shouldBe "\"greet\""
-        val invokeArgs = invokeCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
-        invokeArgs.size shouldBe 2
-        invokeArgs(0).code shouldBe "null"
-        val whoIdentifierOpt = invokeArgs.find(_.isInstanceOf[Identifier]).map(_.asInstanceOf[Identifier])
-        whoIdentifierOpt shouldBe defined
-    }
+      val invokeCall = resultAssignment.argument(2).asInstanceOf[Call]
+      invokeCall.name shouldBe "invoke"
+      invokeCall.methodFullName shouldBe "java.lang.reflect.Method.invoke:java.lang.Object(java.lang.Object,java.lang.Object[])"
+      invokeCall.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH.toString
+      val getMethodCalls = mainMethod.call.name("getMethod").l
+      getMethodCalls should not be empty
+      val getMethodCall = getMethodCalls.head
+      getMethodCall.name shouldBe "getMethod"
+      getMethodCall.typeFullName shouldBe "java.lang.reflect.Method" // Bug
+      val forNameCalls = mainMethod.call.name("forName").l
+      forNameCalls should not be empty
+      val forNameCall = forNameCalls.head
+      forNameCall.name shouldBe "forName"
+      forNameCall.methodFullName should include("java.lang.Class.forName:")
+      val getMethodArgs =
+          getMethodCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
+      getMethodArgs.size shouldBe 2
+      getMethodArgs(0).code shouldBe "\"greet\""
+      val invokeArgs = invokeCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
+      invokeArgs.size shouldBe 2
+      invokeArgs(0).code shouldBe "null"
+      val whoIdentifierOpt =
+          invokeArgs.find(_.isInstanceOf[Identifier]).map(_.asInstanceOf[Identifier])
+      whoIdentifierOpt shouldBe defined
+  }
 
-    "should handle chained reflection with custom object return type" in {
-        val cpg: Cpg = code("""
+  "should handle chained reflection with custom object return type" in {
+      val cpg: Cpg = code("""
                                         |// Custom class to be instantiated reflectively
                                         |class Person {
                                         |    private String name;
@@ -120,35 +122,36 @@ class ReflectionTests extends JimpleCode2CpgFixture {
                                         |}
                                         |""".stripMargin).cpg
 
-        val mainMethod = cpg.method.name("main").head
-        val personInstanceAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
-            .where(_.argument(1).isIdentifier.name("personInstance"))
-            .head
-        val newInstanceCall = personInstanceAssignment.argument(2).asInstanceOf[Call]
-        newInstanceCall.name shouldBe "newInstance"
-        val personInstanceIdentifier = mainMethod.ast.isIdentifier.name("personInstance").head
-        personInstanceIdentifier.typeFullName shouldBe "java.lang.Object"
-        newInstanceCall.typeFullName shouldBe "java.lang.Object"
-        val nameResultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
-            .where(_.argument(1).isIdentifier.name("nameResult"))
-            .head
-        val invokeCall = nameResultAssignment.argument(2).asInstanceOf[Call]
-        invokeCall.name shouldBe "invoke"
-        invokeCall.typeFullName shouldBe "java.lang.Object"
-        val nameResultIdentifier = mainMethod.ast.isIdentifier.name("nameResult").head
-        nameResultIdentifier.typeFullName shouldBe "java.lang.Object"
+      val mainMethod = cpg.method.name("main").head
+      val personInstanceAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+          .where(_.argument(1).isIdentifier.name("personInstance"))
+          .head
+      val newInstanceCall = personInstanceAssignment.argument(2).asInstanceOf[Call]
+      newInstanceCall.name shouldBe "newInstance"
+      val personInstanceIdentifier = mainMethod.ast.isIdentifier.name("personInstance").head
+      personInstanceIdentifier.typeFullName shouldBe "java.lang.Object"
+      newInstanceCall.typeFullName shouldBe "java.lang.Object"
+      val nameResultAssignment = mainMethod.ast.isCall.name("<operator>.assignment")
+          .where(_.argument(1).isIdentifier.name("nameResult"))
+          .head
+      val invokeCall = nameResultAssignment.argument(2).asInstanceOf[Call]
+      invokeCall.name shouldBe "invoke"
+      invokeCall.typeFullName shouldBe "java.lang.Object"
+      val nameResultIdentifier = mainMethod.ast.isIdentifier.name("nameResult").head
+      nameResultIdentifier.typeFullName shouldBe "java.lang.Object"
 
-        val getConstructorCalls = mainMethod.call.name("getConstructor").l
-        getConstructorCalls should not be empty
-        val getConstructorCall = getConstructorCalls.head
-        getConstructorCall.typeFullName shouldBe "java.lang.reflect.Constructor"
-        val getMethodCalls = mainMethod.call.name("getMethod").l
-        getMethodCalls should not be empty
-        val getMethodCall = getMethodCalls.head
-        getMethodCall.typeFullName shouldBe "java.lang.reflect.Method" // Bug
-        val newInstanceArgs = newInstanceCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
-        newInstanceArgs.size shouldBe 1
-        val invokeArgs = invokeCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
-        invokeArgs.size shouldBe 2
-    }
-}
+      val getConstructorCalls = mainMethod.call.name("getConstructor").l
+      getConstructorCalls should not be empty
+      val getConstructorCall = getConstructorCalls.head
+      getConstructorCall.typeFullName shouldBe "java.lang.reflect.Constructor"
+      val getMethodCalls = mainMethod.call.name("getMethod").l
+      getMethodCalls should not be empty
+      val getMethodCall = getMethodCalls.head
+      getMethodCall.typeFullName shouldBe "java.lang.reflect.Method" // Bug
+      val newInstanceArgs =
+          newInstanceCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
+      newInstanceArgs.size shouldBe 1
+      val invokeArgs = invokeCall.argument.l.filter(_.argumentIndex > 0).sortBy(_.argumentIndex)
+      invokeArgs.size shouldBe 2
+  }
+end ReflectionTests

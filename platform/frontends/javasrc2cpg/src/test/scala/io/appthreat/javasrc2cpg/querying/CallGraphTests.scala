@@ -2,9 +2,9 @@ package io.appthreat.javasrc2cpg.querying
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class CallGraphTests extends JavaSrcCode2CpgFixture {
+class CallGraphTests extends JavaSrcCode2CpgFixture:
 
   lazy val cpg = code("""
        |class Foo {
@@ -18,41 +18,40 @@ class CallGraphTests extends JavaSrcCode2CpgFixture {
     """.stripMargin)
 
   "should find that add is called by main" in {
-    cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
+      cpg.method.name("add").caller.name.toSetMutable shouldBe Set("main")
   }
 
   "should find that main calls add and others" in {
-    cpg.method.name("main").callee.name.toSetMutable shouldBe Set(
-      "add",
-      "println",
-      Operators.fieldAccess,
-      Operators.addition
-    )
+      cpg.method.name("main").callee.name.toSetMutable shouldBe Set(
+        "add",
+        "println",
+        Operators.fieldAccess,
+        Operators.addition
+      )
   }
 
   "should find three outgoing calls for main" in {
-    cpg.method.name("main").call.code.toSetMutable shouldBe Set(
-      "System.out.println(add(1+2, 3))",
-      "System.out",
-      "this.add(1+2, 3)",
-      "1+2"
-    )
+      cpg.method.name("main").call.code.toSetMutable shouldBe Set(
+        "System.out.println(add(1+2, 3))",
+        "System.out",
+        "this.add(1+2, 3)",
+        "1+2"
+      )
   }
 
   "should find one callsite for add" in {
-    cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("this.add(1+2, 3)")
+      cpg.method.name("add").callIn.code.toSetMutable shouldBe Set("this.add(1+2, 3)")
   }
 
   "should find that argument '1+2' is passed to parameter 'x'" in {
-    cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1+2")
+      cpg.parameter.name("x").argument.code.toSetMutable shouldBe Set("1+2")
   }
 
   "should allow traversing from argument to formal parameter" in {
-    cpg.argument.parameter.name.toSetMutable should not be empty
+      cpg.argument.parameter.name.toSetMutable should not be empty
   }
 
   "should allow traversing from argument to call" in {
-    cpg.method.name("println").callIn.argument.inCall.name.toSetMutable shouldBe Set("println")
+      cpg.method.name("println").callIn.argument.inCall.name.toSetMutable shouldBe Set("println")
   }
-
-}
+end CallGraphTests

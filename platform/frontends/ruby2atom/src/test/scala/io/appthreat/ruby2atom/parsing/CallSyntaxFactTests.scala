@@ -20,38 +20,38 @@ import io.shiftleft.semanticcpg.language.*
 class CallSyntaxFactTests extends RubyCode2CpgFixture:
 
   "a no-paren command call over a parenthesized inner call keeps both calls" in {
-    val cpg = fixtureWithoutUnknowns("no_paren_call")
+      val cpg = fixtureWithoutUnknowns("no_paren_call")
 
-    // `log foo(bar)` - no-paren command call over a parenthesized inner call.
-    cpg.call.nameExact("log").l should not be empty
-    cpg.call.nameExact("foo").l should not be empty
-    // `puts "literal)"` - a string ending in a paren must not change the call shape.
-    cpg.call.nameExact("puts").l should not be empty
+      // `log foo(bar)` - no-paren command call over a parenthesized inner call.
+      cpg.call.nameExact("log").l should not be empty
+      cpg.call.nameExact("foo").l should not be empty
+      // `puts "literal)"` - a string ending in a paren must not change the call shape.
+      cpg.call.nameExact("puts").l should not be empty
   }
 
   "safe navigation keeps the &. operator" in {
-    val cpg = fixtureWithoutUnknowns("safe_navigation")
-    // `user&.address&.street` - the generator emits call_operator "&." on both csend nodes.
-    cpg.fieldAccess.code.l should contain("user&.address")
+      val cpg = fixtureWithoutUnknowns("safe_navigation")
+      // `user&.address&.street` - the generator emits call_operator "&." on both csend nodes.
+      cpg.fieldAccess.code.l should contain("user&.address")
   }
 
   "scoped constants keep their :: operator" in {
-    val cpg = fixtureWithoutUnknowns("scoped_const")
-    cpg.fieldAccess.code.l should contain("Outer::Inner")
-    // Chained scopes get split through a tmp variable; the :: operator is preserved.
-    cpg.fieldAccess.code.l.exists(_.contains("::MAX")) shouldBe true
-    cpg.method.name.l should contain("ping")
+      val cpg = fixtureWithoutUnknowns("scoped_const")
+      cpg.fieldAccess.code.l should contain("Outer::Inner")
+      // Chained scopes get split through a tmp variable; the :: operator is preserved.
+      cpg.fieldAccess.code.l.exists(_.contains("::MAX")) shouldBe true
+      cpg.method.name.l should contain("ping")
   }
 
   "percent arrays keep their element types" in {
-    val cpg = fixtureWithoutUnknowns("percent_array")
-    cpg.literal.code.l should contain("alice") // %w -> strings
-    cpg.literal.code.l should contain(":on")   // %i -> symbols
+      val cpg = fixtureWithoutUnknowns("percent_array")
+      cpg.literal.code.l should contain("alice") // %w -> strings
+      cpg.literal.code.l should contain(":on")   // %i -> symbols
   }
 
   "heredoc content is taken from the node value" in {
-    val cpg = fixtureWithoutUnknowns("heredoc")
-    cpg.literal.code.l.exists(_.contains("select * from users")) shouldBe true
+      val cpg = fixtureWithoutUnknowns("heredoc")
+      cpg.literal.code.l.exists(_.contains("select * from users")) shouldBe true
   }
 
   /** The one case where the fact and the heuristic it replaced disagree. A multiline plain string
@@ -61,12 +61,12 @@ class CallSyntaxFactTests extends RubyCode2CpgFixture:
     * literal keeps its source text; the real heredoc in the same fixture still yields its body.
     */
   "a multiline plain string is not mistaken for a heredoc" in {
-    val cpg = fixtureWithoutUnknowns("multiline_string")
+      val cpg = fixtureWithoutUnknowns("multiline_string")
 
-    val literals = cpg.literal.code.l
-    literals should contain("line one")
-    literals should not contain "line one\n"
-    // The heredoc in the same file still reaches the CPG through its value.
-    literals.exists(_.contains("select * from users")) shouldBe true
+      val literals = cpg.literal.code.l
+      literals should contain("line one")
+      literals should not contain "line one\n"
+      // The heredoc in the same file still reaches the CPG through its value.
+      literals.exists(_.contains("select * from users")) shouldBe true
   }
 end CallSyntaxFactTests

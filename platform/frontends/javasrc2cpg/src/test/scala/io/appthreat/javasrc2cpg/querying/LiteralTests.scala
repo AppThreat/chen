@@ -3,9 +3,9 @@ package io.appthreat.javasrc2cpg.querying
 import com.github.javaparser.ast.expr.LiteralExpr
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.{Identifier, Literal}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class LiteralTests extends JavaSrcCode2CpgFixture {
+class LiteralTests extends JavaSrcCode2CpgFixture:
 
   val cpg = code("""
       |class Test {
@@ -50,17 +50,17 @@ class LiteralTests extends JavaSrcCode2CpgFixture {
   )
 
   "should correctly parse literals of all types" in {
-    val valueMap = cpg.assignment.map { a =>
-      val List(identifier: Identifier, value: Literal) = a.argument.l: @unchecked
-      identifier.name -> (identifier, value)
-    }.toMap
+      val valueMap = cpg.assignment.map { a =>
+        val List(identifier: Identifier, value: Literal) = a.argument.l: @unchecked
+        identifier.name -> (identifier, value)
+      }.toMap
 
-    expectedOutput.foreach { case (identifier, value, typ) =>
-      withClue(s"$identifier should have value $value") {
-        val (actualIdentifier: Identifier, actualValue: Literal) = valueMap(identifier)
-        actualValue.code shouldBe value
-        actualIdentifier.typeFullName shouldBe typ
+      expectedOutput.foreach { case (identifier, value, typ) =>
+          withClue(s"$identifier should have value $value") {
+              val (actualIdentifier: Identifier, actualValue: Literal) = valueMap(identifier)
+              actualValue.code shouldBe value
+              actualIdentifier.typeFullName shouldBe typ
+          }
       }
-    }
   }
-}
+end LiteralTests

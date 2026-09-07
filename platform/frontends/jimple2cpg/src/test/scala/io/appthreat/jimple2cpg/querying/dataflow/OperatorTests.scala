@@ -4,11 +4,11 @@ import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.Cpg
 
-class OperatorTests extends JimpleDataFlowCodeToCpgSuite {
+class OperatorTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through operators" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Foo {
         |
         |  private String safe = "";
@@ -73,50 +73,50 @@ class OperatorTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "track dataflow through direct assignment" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through direct assignment" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "track dataflow through multiple assignments" in {
-      val (source, sink) = getConstSourceSink("test2", sourceCode = "42")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through multiple assignments" in {
+          val (source, sink) = getConstSourceSink("test2", sourceCode = "42")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "track dataflow through a binary operation" in {
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through a binary operation" in {
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "track dataflow through a conditional expression" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through a conditional expression" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "track dataflow through nested operations" in {
-      val (source, sink) = getConstSourceSink("test5", sourceCode = "42")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through nested operations" in {
+          val (source, sink) = getConstSourceSink("test5", sourceCode = "42")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not track dataflow through a reassignment" in {
-      val (source, sink) = getConstSourceSink("test6")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not track dataflow through a reassignment" in {
+          val (source, sink) = getConstSourceSink("test6")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "track dataflow through += where malicious input is added" in {
-      // Due to String concats being handled by Soot dummy methods we need to add wildcards to the source
-      val (source, sink) = getConstSourceSink("test7", ".*MALICIOUS.*")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through += where malicious input is added" in {
+          // Due to String concats being handled by Soot dummy methods we need to add wildcards to the source
+          val (source, sink) = getConstSourceSink("test7", ".*MALICIOUS.*")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "track dataflow through += where safe input is added" in {
-      val (source, sink) = getConstSourceSink("test8")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "track dataflow through += where safe input is added" in {
+          val (source, sink) = getConstSourceSink("test8")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if safe is reassigned to malicious" in {
-      val (source, sink) = getConstSourceSink("test9")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if safe is reassigned to malicious" in {
+          val (source, sink) = getConstSourceSink("test9")
+          sink.reachableBy(source).size shouldBe 1
+      }
   }
-}
+end OperatorTests

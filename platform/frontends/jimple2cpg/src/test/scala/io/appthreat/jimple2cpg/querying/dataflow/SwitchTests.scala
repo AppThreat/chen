@@ -1,14 +1,14 @@
 package io.appthreat.jimple2cpg.querying.dataflow
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 import io.shiftleft.codepropertygraph.Cpg
 
-class SwitchTests extends JimpleDataFlowCodeToCpgSuite {
+class SwitchTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through `SWITCH`" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Foo {
         |    public void test1(int input) {
         |        String s;
@@ -41,14 +41,14 @@ class SwitchTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find a path if the source is in a switch" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if the source is in a switch" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if the sink is in a switch" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if the sink is in a switch" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 1
+      }
   }
-}
+end SwitchTests

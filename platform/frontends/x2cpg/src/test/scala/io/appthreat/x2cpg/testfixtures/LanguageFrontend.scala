@@ -7,19 +7,18 @@ import io.appthreat.x2cpg.X2CpgConfig
 
 /** LanguageFrontend encapsulates the logic that translates the source code directory into CPGs
   */
-trait LanguageFrontend {
+trait LanguageFrontend:
   private var config: Option[X2CpgConfig[?]] = None
 
-  def setConfig(config: X2CpgConfig[?]): Unit = {
-    if (this.config.isDefined) {
+  def setConfig(config: X2CpgConfig[?]): Unit =
+    if this.config.isDefined then
       throw new RuntimeException("Frontend config may only be set once per test")
-    }
     this.config = Some(config)
-  }
 
   def getConfig(): Option[X2CpgConfig[?]] = config
 
-  /** A standard file extension for the source code files of the given language. E.g. `.c` for C language
+  /** A standard file extension for the source code files of the given language. E.g. `.c` for C
+    * language
     */
   val fileSuffix: String
 
@@ -30,4 +29,4 @@ trait LanguageFrontend {
     *   CPG representation stored in a file
     */
   def execute(sourceCodeFile: File): Cpg
-}
+end LanguageFrontend

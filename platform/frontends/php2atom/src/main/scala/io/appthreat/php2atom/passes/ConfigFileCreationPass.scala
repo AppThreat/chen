@@ -16,6 +16,6 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     extensionFilter(".lock"),
     pathEndFilter("composer.json"),
     pathEndFilter("bom.json"),
-    pathEndFilter(".cdx.json"),
+    pathEndFilter("cdx.json"),
     pathEndFilter("chennai.json")
   )

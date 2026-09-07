@@ -685,6 +685,51 @@ case class JoinedString(
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
+/** PEP 750 (Python 3.14) t-string interpolation. Mirrors [[FormattedValue]] - CPython's
+  * `Interpolation` carries the same parts - but is a distinct node so the CPG can keep the
+  * t-string's "interpolations held unevaluated" semantics apart from f-string concatenation.
+  * `format_spec` stays a plain String for the same reason as in FormattedValue.
+  */
+case class Interpolation(
+  value: iexpr,
+  conversion: Int,
+  format_spec: Option[String],
+  equalSign: Boolean,
+  attributeProvider: AttributeProvider
+) extends iexpr:
+  def this(
+    value: iexpr,
+    conversion: Int,
+    format_spec: String,
+    equalSign: Boolean,
+    attributeProvider: AttributeProvider
+  ) =
+      this(value, conversion, Option(format_spec), equalSign, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T =
+      visitor.visit(this)
+
+/** PEP 750 (Python 3.14) template string: `t"select {col} from t"`. Same shape as [[JoinedString]]
+  * (static string parts as [[JoinedStringConstant]] values, dynamic parts as [[Interpolation]]),
+  * same extra quote/prefix fields, but a distinct node: a t-string is NOT a concatenation. Nothing
+  * is substituted until a consumer renders the template, which is the entire security distinction
+  * the lowering has to carry.
+  */
+case class TemplateStr(
+  values: CollType[iexpr],
+  quote: String,
+  prefix: String,
+  attributeProvider: AttributeProvider
+) extends iexpr:
+  def this(
+    values: util.List[iexpr],
+    quote: String,
+    prefix: String,
+    attributeProvider: AttributeProvider
+  ) =
+      this(values.asScala, quote, prefix, attributeProvider)
+  override def accept[T](visitor: AstVisitor[T]): T =
+      visitor.visit(this)
+
 case class Constant(value: iconstant, attributeProvider: AttributeProvider) extends iexpr:
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)

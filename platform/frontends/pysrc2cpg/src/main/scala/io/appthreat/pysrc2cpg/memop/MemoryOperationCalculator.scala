@@ -19,7 +19,6 @@ import io.appthreat.pythonparser.ast.{
     ErrorStatement,
     Expr,
     For,
-    FormattedValue,
     FunctionDef,
     Global,
     If,
@@ -61,6 +60,7 @@ import io.appthreat.pythonparser.ast.{
 }
 import io.appthreat.pythonparser.ast.{
     FormattedValue,
+    Interpolation,
     JoinedString,
     JoinedStringConstant,
     MatchAs,
@@ -71,7 +71,8 @@ import io.appthreat.pythonparser.ast.{
     MatchSequence,
     MatchSingleton,
     MatchStar,
-    MatchValue
+    MatchValue,
+    TemplateStr
 }
 
 import scala.collection.mutable
@@ -353,9 +354,19 @@ class MemoryOperationCalculator extends AstVisitor[Unit]:
     assert(stack.head == Load)
     accept(formattedValue.value)
 
+  // PEP 750 t-strings: the value expressions are evaluated (Load context), exactly like an
+  // f-string's; only the substitution into a string is deferred.
+  override def visit(interpolation: Interpolation): Unit =
+    assert(stack.head == Load)
+    accept(interpolation.value)
+
   override def visit(joinedString: JoinedString): Unit =
     assert(stack.head == Load)
     accept(joinedString.values)
+
+  override def visit(templateStr: TemplateStr): Unit =
+    assert(stack.head == Load)
+    accept(templateStr.values)
 
   override def visit(constant: ast.Constant): Unit = {}
 

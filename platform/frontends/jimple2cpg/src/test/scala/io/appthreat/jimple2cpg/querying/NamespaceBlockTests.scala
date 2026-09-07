@@ -2,9 +2,9 @@ package io.appthreat.jimple2cpg.querying
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class NamespaceBlockTests extends JimpleCode2CpgFixture {
+class NamespaceBlockTests extends JimpleCode2CpgFixture:
 
   val cpg: Cpg = code("""
       |package foo.bar;
@@ -14,30 +14,29 @@ class NamespaceBlockTests extends JimpleCode2CpgFixture {
       |""".stripMargin).cpg
 
   "should contain two namespace blocks in total (<default>, foo.bar)" in {
-    cpg.namespaceBlock.size shouldBe 2
+      cpg.namespaceBlock.size shouldBe 2
   }
 
   "should contain correct namespace block for known file" in {
-    val List(x) = cpg.namespaceBlock.filename(".*.class").l
-    x.name shouldBe "bar"
-    x.filename should not be ""
-    x.fullName shouldBe s"foo.bar"
-    x.order shouldBe 1
+      val List(x) = cpg.namespaceBlock.filename(".*.class").l
+      x.name shouldBe "bar"
+      x.filename should not be ""
+      x.fullName shouldBe s"foo.bar"
+      x.order shouldBe 1
   }
 
   "should allow traversing from namespace block to method" in {
-    cpg.namespaceBlock.filename(".*.class").typeDecl.method.name.toSetMutable shouldBe Set(
-      "foo",
-      io.appthreat.x2cpg.Defines.ConstructorMethodName
-    )
+      cpg.namespaceBlock.filename(".*.class").typeDecl.method.name.toSetMutable shouldBe Set(
+        "foo",
+        io.appthreat.x2cpg.Defines.ConstructorMethodName
+      )
   }
 
   "should allow traversing from namespace block to type declaration" in {
-    cpg.namespaceBlock.filename(".*.class").typeDecl.name.l shouldBe List("A")
+      cpg.namespaceBlock.filename(".*.class").typeDecl.name.l shouldBe List("A")
   }
 
   "should allow traversing from namespace block to namespace" in {
-    cpg.namespaceBlock.filename(".*.class").namespace.name.l shouldBe List("bar")
+      cpg.namespaceBlock.filename(".*.class").namespace.name.l shouldBe List("bar")
   }
-
-}
+end NamespaceBlockTests

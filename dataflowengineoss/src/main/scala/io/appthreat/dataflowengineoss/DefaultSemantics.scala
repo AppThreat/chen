@@ -77,6 +77,16 @@ object DefaultSemantics:
     F(Operators.preDecrement, List((1, 1), (1, -1))),
     F(Operators.preIncrement, List((1, 1), (1, -1))),
     F(Operators.sizeOf, List.empty[(Int, Int)]),
+    // PEP 750 t-strings (Python 3.14): a t-string is not a concatenation. The interpolations
+    // are held unevaluated in the Template object, so no argument may flow into the literal's
+    // result - that boundary is the entire point of the PEP (libraries escape/parameterise
+    // values instead of receiving an already-substituted string). The value expressions ARE
+    // evaluated, which `<operator>.interpolation` (unlisted, so permissive) keeps intact; only
+    // the step from an interpolation to the template object is closed here. A renderer that
+    // consumes a literal template (`str(t"...")`) re-exposes the interpolations: that half is
+    // carried by pysrc2cpg's PythonTemplateRenderPass bridge edges (task 12 D.1), not by a
+    // semantic - a semantic cannot express "flow only when rendered".
+    F("<operator>.templateString", List.empty[(Int, Int)]),
 
     //  some of those operators have duplicate mappings due to a typo
     //  - see https://github.com/ShiftLeftSecurity/codepropertygraph/pull/1630

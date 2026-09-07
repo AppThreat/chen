@@ -1,13 +1,13 @@
 package io.appthreat.jimple2cpg.querying.dataflow
 
 import io.appthreat.jimple2cpg.testfixtures.{JimpleDataFlowCodeToCpgSuite, JimpleDataflowTestCpg}
-import io.appthreat.dataflowengineoss.language._
-import io.shiftleft.semanticcpg.language._
+import io.appthreat.dataflowengineoss.language.*
+import io.shiftleft.semanticcpg.language.*
 
-class ArrayTests extends JimpleDataFlowCodeToCpgSuite {
+class ArrayTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through arrays" should {
-    lazy implicit val cpg: JimpleDataflowTestCpg = code("""
+      lazy implicit val cpg: JimpleDataflowTestCpg = code("""
         |class Foo {
         |    public void test1() {
         |        String[] vals = {"SAFE", "SAFE", "MALICIOUS", "SAFE"};
@@ -94,76 +94,76 @@ class ArrayTests extends JimpleDataFlowCodeToCpgSuite {
         |   }
         |""".stripMargin)
 
-    "find a path if the `MALICIOUS` array entry is printed" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if the `MALICIOUS` array entry is printed" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if an entry in the `MALICIOUS` array is printed (approximation)" in {
-      // In Soot 4.7.1 this case no longer materializes an alias from `vals` to another array local.
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 0
+      "find a path if an entry in the `MALICIOUS` array is printed (approximation)" in {
+          // In Soot 4.7.1 this case no longer materializes an alias from `vals` to another array local.
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 0
 
-      val test2 = cpg.method("test2")
-      val directAliasAssignments = test2.assignment.where(_.argument(2).isIdentifier.name("vals"))
-      directAliasAssignments.size shouldBe(0)
-    }
+          val test2 = cpg.method("test2")
+          val directAliasAssignments =
+              test2.assignment.where(_.argument(2).isIdentifier.name("vals"))
+          directAliasAssignments.size shouldBe (0)
+      }
 
-    "find a path for alternative array initializer syntax" in {
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path for alternative array initializer syntax" in {
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if an unrelated array element not assigned to `MALICIOUS` reaches the sink" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if an unrelated array element not assigned to `MALICIOUS` reaches the sink" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path if array element is assigned to `MALICIOUS`" in {
-      val (source, sink) = getConstSourceSink("test5")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if array element is assigned to `MALICIOUS`" in {
+          val (source, sink) = getConstSourceSink("test5")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if a different array element is overwritten" in {
-      val (source, sink) = getConstSourceSink("test6")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if a different array element is overwritten" in {
+          val (source, sink) = getConstSourceSink("test6")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if the `MALICIOUS` array element is overwritten (approximation)" in {
-      // Similarly to test2, this false positive occurs because Jimple makes an alias
-      val (source, sink) = getConstSourceSink("test7")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "find a path if the `MALICIOUS` array element is overwritten (approximation)" in {
+          // Similarly to test2, this false positive occurs because Jimple makes an alias
+          val (source, sink) = getConstSourceSink("test7")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path if sink is in a `FOR` loop" in {
-      val (source, sink) = getConstSourceSink("test8")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if sink is in a `FOR` loop" in {
+          val (source, sink) = getConstSourceSink("test8")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if sink is in a `FOREACH` loop over `MALICIOUS` array" in {
-      val (source, sink) = getConstSourceSink("test9")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if sink is in a `FOREACH` loop over `MALICIOUS` array" in {
+          val (source, sink) = getConstSourceSink("test9")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is added to an accumulator in a loop" in {
-      val (source, sink) = getConstSourceSink("test10")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is added to an accumulator in a loop" in {
+          val (source, sink) = getConstSourceSink("test10")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned to safe array and printed" in {
-      val (source, sink) = getConstSourceSink("test11")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned to safe array and printed" in {
+          val (source, sink) = getConstSourceSink("test11")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is assigned to safe array and not printed" in {
-      val (source, sink) = getConstSourceSink("test12")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is assigned to safe array and not printed" in {
+          val (source, sink) = getConstSourceSink("test12")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path through an array alias" in {
-      val (source, sink) = getConstSourceSink("test13")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path through an array alias" in {
+          val (source, sink) = getConstSourceSink("test13")
+          sink.reachableBy(source).size shouldBe 1
+      }
   }
-
-}
+end ArrayTests

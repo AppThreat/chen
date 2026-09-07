@@ -28,20 +28,24 @@ class AstCacheStoreFragmentTests extends AnyWordSpec with Matchers:
     diff.addEdge(m, block, EdgeTypes.AST)
     diff.addEdge(block, lit, EdgeTypes.AST)
     diff
-  end buildUnit
 
   "AstCacheStore in fragment mode" should:
     "reuse the on-disk fragment on a warm run (no reparse) and reconstruct an identical graph" in:
       val dir = Files.createTempDirectory("astfragcache").toString
       val store =
-          new AstCacheStore(enableAstCacheParam = true, dir, onlyAstCache = false, useFragmentCache = true)
+          new AstCacheStore(
+            enableAstCacheParam = true,
+            dir,
+            onlyAstCache = false,
+            useFragmentCache = true
+          )
       val key       = CacheKey("file1", "content-v1".getBytes("UTF-8"))
       val usedTypes = Seq("int", "com.example.T")
 
       var parses = 0
       def parse(): Option[ParsedUnit] =
-          parses += 1
-          Some(ParsedUnit(buildUnit(), usedTypes))
+        parses += 1
+        Some(ParsedUnit(buildUnit(), usedTypes))
 
       var coldTypes = Seq.empty[String]
       val cold      = new DiffGraphBuilder

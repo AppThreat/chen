@@ -305,6 +305,36 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
         catch
           case _: Exception => Map.empty[String, List[Call]].withDefaultValue(List.empty[Call])
 
+    // Field-access calls keyed by the identifier they dereference, computed once per method.
+    // killsForGens needs, for every identifier definition, the field accesses on that same
+    // identifier; doing that as written - scanning every call and walking its AST children per
+    // identifier definition - is O(identifiers x calls) work for a fact that is a property of
+    // the call, not of the identifier. The index makes the per-identifier cost one lookup.
+    // Same predicate as the scan it replaces: name == fieldAccess with an identifier ANYWHERE in
+    // the call's AST subtree carrying that name (`call.ast` is transitive, which is what the
+    // `nameExact` scan asked too). allCalls only contains calls with non-null code, so calls
+    // whose code is null stay excluded exactly as before. The per-call name set is deduplicated
+    // because the scan yielded each matching call once - `a.b if a else a.c` would otherwise
+    // enter the list for `a` more than once.
+    val fieldAccessesByBase: Map[String, List[Call]] =
+        try
+          val results = mutable.LinkedHashMap.empty[String, List[Call]]
+          allCalls.valuesIterator.flatten.foreach { call =>
+              try
+                if call != null && call.name == Operators.fieldAccess && call.ast != null then
+                  val identifiers = call.ast.isIdentifier
+                  if identifiers != null then
+                    identifiers.name.toSet.foreach { name =>
+                        results.put(name, call :: results.getOrElse(name, Nil))
+                    }
+              catch
+                case _: Exception => ()
+          }
+          results.toMap.withDefaultValue(Nil)
+        catch
+          case _: Exception => Map.empty[String, List[Call]].withDefaultValue(Nil)
+    end fieldAccessesByBase
+
     // We filter out field accesses to ensure that they propagate
     // taint unharmed.
 
@@ -317,7 +347,7 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
         }
         .map { call =>
             try
-              call -> killsForGens(gen(call), allIdentifiers, allCalls)
+              call -> killsForGens(gen(call), allIdentifiers, allCalls, fieldAccessesByBase)
             catch
               case _: Exception =>
                   // If we can't process this call, return empty kill set
@@ -333,7 +363,8 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
   private def killsForGens(
     genOfCall: mutable.BitSet,
     allIdentifiers: Map[String, List[CfgNode]],
-    allCalls: Map[String, List[Call]]
+    allCalls: Map[String, List[Call]],
+    fieldAccessesByBase: Map[String, List[Call]]
   ): mutable.BitSet =
 
     def definitionsOfSameVariable(definition: Definition): Iterator[Definition] =
@@ -347,20 +378,12 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
 
             /** Killing an identifier should also kill field accesses on that identifier. For
               * example, a reassignment `x = new Box()` should kill any previous calls to `x.value`,
-              * `x.length()`, etc.
+              * `x.length()`, etc. Indexed once per method in `initKill` - the scan it replaces
+              * visited every call and walked its AST children per identifier definition.
               */
             val sameObjects: Iterator[Call] =
                 try
-                  allCalls.valuesIterator.flatten
-                      .filter { call =>
-                          try
-                            call != null && call.name == Operators.fieldAccess &&
-                                call.ast != null &&
-                                call.ast.isIdentifier != null &&
-                                call.ast.isIdentifier.nameExact(identifier.name).nonEmpty
-                          catch
-                            case _: Exception => false
-                      }
+                  fieldAccessesByBase(identifier.name).iterator
                 catch
                   case _: Exception => Iterator.empty
 

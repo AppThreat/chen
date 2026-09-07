@@ -1,10 +1,10 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 import io.appthreat.dataflowengineoss.queryengine.{EngineContext, EngineConfig}
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.semanticsloader.FlowSemantic
@@ -12,17 +12,20 @@ import io.appthreat.x2cpg.Defines
 
 class SemanticTests
     extends JavaDataflowFixture(extraFlows =
-      List(
-        FlowSemantic.from("Test.sanitize:java.lang.String(java.lang.String)", List((0, 0), (1, 1))),
-        FlowSemantic.from(s"ext.Library.killParam:${Defines.UnresolvedSignature}(1)", List.empty),
-        FlowSemantic.from("^ext\\.Library\\.taintNone:.*", List((0, 0), (1, 1)), regex = true),
-        FlowSemantic.from("^ext\\.Library\\.taint1to2:.*", List((1, 2)), regex = true)
-      )
-    ) {
+        List(
+          FlowSemantic.from(
+            "Test.sanitize:java.lang.String(java.lang.String)",
+            List((0, 0), (1, 1))
+          ),
+          FlowSemantic.from(s"ext.Library.killParam:${Defines.UnresolvedSignature}(1)", List.empty),
+          FlowSemantic.from("^ext\\.Library\\.taintNone:.*", List((0, 0), (1, 1)), regex = true),
+          FlowSemantic.from("^ext\\.Library\\.taint1to2:.*", List((1, 2)), regex = true)
+        )
+    ):
   behavior of "Dataflow through custom semantics"
 
   override val code: String =
-    """
+      """
       |import ext.Library;
       |
       |public class Test {
@@ -80,32 +83,32 @@ class SemanticTests
       |}""".stripMargin
 
   it should "find a path" in {
-    val (source, sink) = getConstSourceSink("test1")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test1")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "be kill in sanitizer" in {
-    val (source, sink) = getConstSourceSink("test2")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test2")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "taints return for unresolved method by default" in {
-    val (source, sink) = getConstSourceSink("test3")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test3")
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "be killed if semantic does not specify that it taints itself" in {
-    val (source, sink) = getConstSourceSink("test4")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test4")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "be killed in custom semantic" in {
-    val (source, sink) = getConstSourceSink("test5")
-    sink.reachableBy(source).size shouldBe 0
+      val (source, sink) = getConstSourceSink("test5")
+      sink.reachableBy(source).size shouldBe 0
   }
 
   it should "taint param2" in {
-    val (source, sink) = getConstSourceSink("test6")
-    sink.reachableBy(source).size shouldBe 1
+      val (source, sink) = getConstSourceSink("test6")
+      sink.reachableBy(source).size shouldBe 1
   }
-}
+end SemanticTests

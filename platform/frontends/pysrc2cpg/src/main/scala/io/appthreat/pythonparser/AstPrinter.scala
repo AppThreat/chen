@@ -53,6 +53,7 @@ import io.appthreat.pythonparser.ast.{
     ImportFrom,
     In,
     IntConstant,
+    Interpolation,
     Invert,
     Is,
     IsNot,
@@ -99,6 +100,7 @@ import io.appthreat.pythonparser.ast.{
     StringExpList,
     Sub,
     Subscript,
+    TemplateStr,
     TryStar,
     Tuple,
     TypeIgnore,
@@ -452,6 +454,28 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
   override def visit(joinedString: JoinedString): String =
       joinedString.prefix + joinedString.quote +
           joinedString.values.map(print).mkString("") + joinedString.quote
+
+  override def visit(interpolation: Interpolation): String =
+    val equalSignStr = if interpolation.equalSign then "=" else ""
+    val conversionStr = interpolation.conversion match
+      case -1  => ""
+      case 115 => "!s"
+      case 114 => "!r"
+      case 97  => "!a"
+
+    val formatSpecStr = interpolation.format_spec match
+      case Some(formatSpec) => ":" + formatSpec
+      case None             => ""
+
+    "{" + print(interpolation.value) +
+        equalSignStr +
+        conversionStr +
+        formatSpecStr +
+        "}"
+
+  override def visit(templateStr: TemplateStr): String =
+      templateStr.prefix + templateStr.quote +
+          templateStr.values.map(print).mkString("") + templateStr.quote
 
   override def visit(constant: Constant): String =
       print(constant.value)

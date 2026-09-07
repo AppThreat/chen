@@ -2,9 +2,9 @@ package io.appthreat.javasrc2cpg.querying
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class FieldAccessTests extends JavaSrcCode2CpgFixture {
+class FieldAccessTests extends JavaSrcCode2CpgFixture:
 
   val cpg = code("""
       |class Foo {
@@ -44,26 +44,29 @@ class FieldAccessTests extends JavaSrcCode2CpgFixture {
       |""".stripMargin)
 
   "should handle static member accesses" in {
-    val List(access: Call)                                             = cpg.method(".*foo.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
-    identifier.name shouldBe "Foo"
-    identifier.typeFullName shouldBe "Foo"
-    fieldIdentifier.canonicalName shouldBe "MAX_VALUE"
+      val List(access: Call) = cpg.method(".*foo.*").call(".*fieldAccess").l
+      val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) =
+          access.argument.l: @unchecked
+      identifier.name shouldBe "Foo"
+      identifier.typeFullName shouldBe "Foo"
+      fieldIdentifier.canonicalName shouldBe "MAX_VALUE"
   }
 
   "should handle object field accesses on RHS of assignments" in {
-    val List(access: Call)                                             = cpg.method(".*bar.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
-    identifier.name shouldBe "f"
-    identifier.typeFullName shouldBe "Foo"
-    fieldIdentifier.canonicalName shouldBe "value"
+      val List(access: Call) = cpg.method(".*bar.*").call(".*fieldAccess").l
+      val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) =
+          access.argument.l: @unchecked
+      identifier.name shouldBe "f"
+      identifier.typeFullName shouldBe "Foo"
+      fieldIdentifier.canonicalName shouldBe "value"
   }
 
   "should handle object field accesses on LHS of assignments" in {
-    val List(access: Call)                                             = cpg.method(".*baz.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
-    identifier.name shouldBe "g"
-    identifier.typeFullName shouldBe "Foo"
-    fieldIdentifier.canonicalName shouldBe "value"
+      val List(access: Call) = cpg.method(".*baz.*").call(".*fieldAccess").l
+      val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) =
+          access.argument.l: @unchecked
+      identifier.name shouldBe "g"
+      identifier.typeFullName shouldBe "Foo"
+      fieldIdentifier.canonicalName shouldBe "value"
   }
-}
+end FieldAccessTests

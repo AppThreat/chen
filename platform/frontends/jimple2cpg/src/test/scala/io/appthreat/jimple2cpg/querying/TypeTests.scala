@@ -2,9 +2,9 @@ package io.appthreat.jimple2cpg.querying
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class TypeTests extends JimpleCode2CpgFixture {
+class TypeTests extends JimpleCode2CpgFixture:
 
   lazy val cpg: Cpg = code("""
       | package foo;
@@ -20,24 +20,24 @@ class TypeTests extends JimpleCode2CpgFixture {
       |""".stripMargin)
 
   "should create TYPE node with correct fields for class member" in {
-    val List(x) = cpg.typ.name("Long").l
-    x.name shouldBe "Long"
-    x.fullName shouldBe "java.lang.Long"
-    x.typeDeclFullName shouldBe "java.lang.Long"
+      val List(x) = cpg.typ.name("Long").l
+      x.name shouldBe "Long"
+      x.fullName shouldBe "java.lang.Long"
+      x.typeDeclFullName shouldBe "java.lang.Long"
   }
 
   "should create TYPE node with correct fields for return type" in {
-    val List(x) = cpg.typ.name("Integer").l
-    x.name shouldBe "Integer"
-    x.fullName shouldBe "java.lang.Integer"
-    x.typeDeclFullName shouldBe "java.lang.Integer"
+      val List(x) = cpg.typ.name("Integer").l
+      x.name shouldBe "Integer"
+      x.fullName shouldBe "java.lang.Integer"
+      x.typeDeclFullName shouldBe "java.lang.Integer"
   }
 
   "should create TYPE node with correct fields for parameter type" in {
-    val List(x) = cpg.typ.name("Object").l
-    x.name shouldBe "Object"
-    x.fullName shouldBe "java.lang.Object"
-    x.typeDeclFullName shouldBe "java.lang.Object"
+      val List(x) = cpg.typ.name("Object").l
+      x.name shouldBe "Object"
+      x.fullName shouldBe "java.lang.Object"
+      x.typeDeclFullName shouldBe "java.lang.Object"
   }
 
 //  "should create TYPE node with correct fields for local type" in {
@@ -48,23 +48,22 @@ class TypeTests extends JimpleCode2CpgFixture {
 //  }
 
   "should allow traversing from member's TYPE to member" in {
-    val List(x) = cpg.typ("Long").memberOfType.l
-    x.name shouldBe "x"
+      val List(x) = cpg.typ("Long").memberOfType.l
+      x.name shouldBe "x"
   }
 
   "should allow traversing from return params TYPE to return param" in {
-    val List(x) = cpg.typ.fullName("java.lang.Integer").methodReturnOfType.l
-    x.typeFullName shouldBe "java.lang.Integer"
+      val List(x) = cpg.typ.fullName("java.lang.Integer").methodReturnOfType.l
+      x.typeFullName shouldBe "java.lang.Integer"
   }
 
   "should allow traversing from params TYPE to param" in {
-    val List(x) = cpg.typ("Object").parameterOfType.l
-    x.name shouldBe "param"
+      val List(x) = cpg.typ("Object").parameterOfType.l
+      x.name shouldBe "param"
   }
 
 //  "should allow traversing from local's TYPE to local" in {
 //    val List(x) = cpg.typ("java.lang.Double").localOfType.l
 //    x.name shouldBe "y"
 //  }
-
-}
+end TypeTests

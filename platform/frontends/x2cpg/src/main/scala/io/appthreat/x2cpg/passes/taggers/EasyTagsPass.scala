@@ -4,13 +4,27 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, StoredNode}
 import scala.util.matching.Regex
 
 /** Creates tags on nodes based on common patterns and language-specific conventions */
 class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   private val RE_CHARS = "[](){}*+&|?.,\\$"
+
+  /** A precompiled regex plus the literal substrings every match must contain (P.2 prefilter, the
+    * template ChennaiTagsPass established for the juice-shop hot spot). The per-call loop below
+    * tests ~20 of these against every CALL node - 1.3M on the django wheel - and the regex engine
+    * is only entered when at least one literal of every group occurs in the string. A group is an
+    * OR over its literals; multiple groups are ANDed. A prefilter that is subtly narrower than its
+    * regex is a silent detection loss, so every wrapped pattern keeps its literals inside this file
+    * next to the pattern and EasyTagsPassTests proves, for each regex's representative matches,
+    * that the literals do not reject them.
+    */
+  private class PrefilteredRegex(pattern: String, requiredLiterals: Seq[String]*):
+    private val re = pattern.r
+    def matches(s: String): Boolean =
+        requiredLiterals.forall(group => group.exists(s.contains)) && re.matches(s)
 
   // Language-specific patterns
   private val JS_REQUEST_PATTERNS = Array(
@@ -24,16 +38,17 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
-  private val PY_REQUEST_PATTERNS = Array(
-    ".*(views|engine|api|base|http).py:<module>.*",
-    ".*(flask_request|request\\.(form|remote_addr|host|method|full_path|user_agent|headers|args|cookies|data|json)).*",
-    ".*get_value.*"
-  )
+  // NB(py-upgrade P1.4): the filename-keyed PY_REQUEST_PATTERNS heuristic
+  // (".*(views|engine|api|base|http).py:<module>.*") was removed once the Task-4 framework
+  // recognizers landed (see passes/taggers/python/): they tag handler parameters and request
+  // accesses structurally (decorators, inheritance, parameter names/types), which covers Django
+  // views and Flask apps regardless of the file they live in. The request-ACCESS expression
+  // tagging below (step 3b) remains: it is framework-agnostic and keyed on the expression.
 
   // NB: get_object_* helpers are ORM reads, not response outputs - they are handled as `db-read`
   // (G1), not framework-output, so they are intentionally absent here.
   private val PY_RESPONSE_PATTERNS = Array(
-    ".*(views|engine|api|base|http).py:.*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*",
+    ".*\\.(views|engine|api|base|http)\\..*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*",
     ".*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*"
   )
 
@@ -226,7 +241,6 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   end tagJavaScriptPatterns
 
   private def tagPythonPatterns(dstGraph: DiffGraphBuilder): Unit =
-    val pyRequestRegexes  = PY_REQUEST_PATTERNS.map(_.r)
     val pyResponseRegexes = PY_RESPONSE_PATTERNS.map(_.r)
     val pyResponseCallRegex =
         ".*(HttpResponse|render|Response|abort|jsonify|make_response|render_template).*".r
@@ -234,21 +248,36 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     val validationRegex     = "^is_[a-z].*$".r
     val cliFilenameRegex    = ".*(cli|main|command).*".r
 
-    val aiohttpRegex = ".*aiohttp.*".r
-    val socketRegex =
-        ".*socket\\.(socket|connect|send|recv|sendto|recvfrom|wrap_socket|getprotobyname).*".r
-    val sslRegex =
-        ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*".r
-    val netProtocolRegex =
-        ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*".r
-    val shutilRegex = ".*(shutil\\.copy|Path\\.open).*".r
+    // Identifiers and calls are both per-node loops over the whole graph; every PrefilteredRegex
+    // below declares the literals its pattern cannot match without, so the regex engine is
+    // skipped for the vast majority of nodes.
+    val aiohttpRegex = PrefilteredRegex(".*aiohttp.*", Seq("aiohttp"))
+    val socketRegex = PrefilteredRegex(
+      ".*socket\\.(socket|connect|send|recv|sendto|recvfrom|wrap_socket|getprotobyname).*",
+      Seq("socket.")
+    )
+    val sslRegex = PrefilteredRegex(
+      ".*ssl\\.(wrap_socket|SSLContext|create_default_context|get_server_certificate).*",
+      Seq("ssl.")
+    )
+    val netProtocolRegex = PrefilteredRegex(
+      ".*(ftplib\\.FTP|poplib\\.POP3|impacket\\.smbconnection|telnetlib\\.Telnet).*",
+      Seq("ftplib.", "poplib.", "impacket.", "telnetlib.")
+    )
+    val shutilRegex =
+        PrefilteredRegex(".*(shutil\\.copy|Path\\.open).*", Seq("shutil.", "Path."))
     // Safe (round-trippable) (de)serialisation: json/yaml-safe/csv. Kept distinct from the unsafe
     // loaders below so an `appsec`-style profile can treat only the dangerous ones as sinks.
-    val serializationRegex = ".*(json\\.(loads|dumps)|yaml\\.(safe_load|dump)|csv\\.DictWriter).*".r
+    val serializationRegex = PrefilteredRegex(
+      ".*(json\\.(loads|dumps)|yaml\\.(safe_load|dump)|csv\\.DictWriter).*",
+      Seq("json.", "yaml.", "csv.")
+    )
     // Unsafe deserialisation: loaders that can instantiate arbitrary objects / execute code when fed
     // attacker-controlled bytes. base64/json are intentionally excluded (encoding, not deser).
-    val deserializationRegex =
-        ".*(pickle\\.(load|loads)|cPickle\\.(load|loads)|_pickle\\.(load|loads)|yaml\\.(unsafe_load|full_load)|yaml\\.load|marshal\\.(load|loads)|jsonpickle\\.decode|dill\\.(load|loads)|shelve\\.open).*".r
+    val deserializationRegex = PrefilteredRegex(
+      ".*(pickle\\.(load|loads)|cPickle\\.(load|loads)|_pickle\\.(load|loads)|yaml\\.(unsafe_load|full_load)|yaml\\.load|marshal\\.(load|loads)|jsonpickle\\.decode|dill\\.(load|loads)|shelve\\.open).*",
+      Seq("pickle.", "cPickle.", "_pickle.", "yaml.", "marshal.", "jsonpickle.", "dill.", "shelve.")
+    )
     // Django/SQLAlchemy ORM read accessors. Their return value is data already persisted in the
     // datastore, a different trust level from live request input; tagged `db-read` so profiles can
     // treat the accessor as a declassification barrier and prune object-identity over-tainting.
@@ -272,18 +301,206 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           "format_html",
           "urlize"
         )
-    val regexLibRegex  = ".*re\\.(compile|findall|search|match).*".r
-    val importlibRegex = ".*importlib\\.import_module.*".r
-    val sqlRegex =
-        ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|query|add|commit|create_engine|sessionmaker).*".r
-    val sqlIdentifierRegex = ".*(sqlalchemy|apsw|sqlite3).*".r
-    val concurrentRegex    = ".*(multiprocess|multiprocessing|threading)\\.(Process|Thread).*".r
-    val cryptoLibs         = "(cryptography|Crypto|ecdsa|nacl|OpenSSL).*"
-    val cryptoLibsRegex    = cryptoLibs.r
-    val cryptoGenerateRegex =
-        s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem|load_certificate).*".r
-    val cryptoAlgorithmRegex = s"$cryptoLibs(primitives|serialization).*".r
-    val cryptoAlgoNameRegex  = "^[A-Z0-9]+$".r
+    val regexLibRegex  = PrefilteredRegex(".*re\\.(compile|findall|search|match).*", Seq("re."))
+    val importlibRegex = PrefilteredRegex(".*importlib\\.import_module.*", Seq("importlib."))
+    val sqlRegex = PrefilteredRegex(
+      ".*(sqlalchemy|apsw|cursor|conn|session|sqlite3)\\.(execute|executemany|executescript|raw|extra|query|add|commit|create_engine|sessionmaker).*",
+      Seq("sqlalchemy", "apsw", "cursor", "conn", "session", "sqlite3")
+    )
+    val sqlIdentifierRegex = PrefilteredRegex(
+      ".*(sqlalchemy|apsw|sqlite3).*",
+      Seq("sqlalchemy", "apsw", "sqlite3")
+    )
+    val concurrentRegex = PrefilteredRegex(
+      ".*(multiprocess|multiprocessing|threading)\\.(Process|Thread).*",
+      Seq("multiprocess", "threading")
+    )
+    val cryptoLibs        = "(cryptography|Crypto|ecdsa|nacl|OpenSSL).*"
+    val cryptoLibLiterals = Seq("cryptography", "Crypto", "ecdsa", "nacl", "OpenSSL")
+    val cryptoLibsRegex   = PrefilteredRegex(cryptoLibs, cryptoLibLiterals)
+    // Two groups, ANDed: a match must contain a crypto library name AND one of the operation
+    // names. `++` here would flatten them into a single OR - still correct, since a wider
+    // prefilter can only pass more, but it would let every `cryptography.*` node through to the
+    // regex and give back most of what the prefilter is for.
+    val cryptoGenerateRegex = PrefilteredRegex(
+      s"$cryptoLibs(generate|encrypt|decrypt|derive|sign|public_bytes|private_bytes|exchange|new|update|export_key|import_key|from_string|from_pem|to_pem|load_certificate).*",
+      cryptoLibLiterals,
+      Seq(
+        "generate",
+        "encrypt",
+        "decrypt",
+        "derive",
+        "sign",
+        "public_bytes",
+        "private_bytes",
+        "exchange",
+        "new",
+        "update",
+        "export_key",
+        "import_key",
+        "from_string",
+        "from_pem",
+        "to_pem",
+        "load_certificate"
+      )
+    )
+    val cryptoAlgorithmRegex = PrefilteredRegex(
+      s"$cryptoLibs(primitives|serialization).*",
+      cryptoLibLiterals,
+      Seq("primitives", "serialization")
+    )
+    val cryptoAlgoNameRegex = "^[A-Z0-9]+$".r
+
+    // P1.1: code-execution sinks. Only `eval`/`exec` were covered before, which killed
+    // most realistic Python taint results. Matched on methodFullName first (cross-module
+    // call resolution is good: `subprocess.getoutput` resolves to `subprocess.getoutput`), with
+    // a `code` fallback for unresolved calls.
+    //
+    // The module must END at the alternation and START at a module boundary. The lookbehind
+    // supplies the second half - it rejects both `myos.system` (a longer name merely ending in
+    // a sink module) and `venv.subprocess.run`, where a leading dot means a DIFFERENT outer
+    // module that happens to vendor one. `(\\.\\w+)*` supplies the first half, admitting modules
+    // INSIDE the package: once `python-deps=full` puts real dependency bodies in the graph a
+    // resolved call carries `subprocess.compat.run`, and a pattern that only knew
+    // `subprocess.run` would go deaf exactly when the callee is real. `subprocessing.utils.run`
+    // matches nothing either way - that near-miss is what keeps the widening from being a
+    // wildcard, and EasyTagsPassTests pins both halves.
+    val moduleSep = "(\\.\\w+)*\\."
+    val codeExecutionSinks = Seq(
+      "subprocess" -> Seq(
+        "run",
+        "call",
+        "check_call",
+        "check_output",
+        "getoutput",
+        "getstatusoutput",
+        "Popen"
+      ),
+      "os" -> Seq(
+        "system",
+        "popen",
+        "execv",
+        "execve",
+        "execl",
+        "execlp",
+        "execvp",
+        "spawnl",
+        "spawnv",
+        "posix_spawn"
+      ),
+      "commands" -> Seq("getoutput", "getstatusoutput"),
+      "pty"      -> Seq("spawn"),
+      "asyncio"  -> Seq("create_subprocess_shell", "create_subprocess_exec")
+    )
+    // Every match contains its module literal followed by a dot - `moduleSep` always ends in one,
+    // whether or not it took the package-internal hop - so the prefilter can demand `subprocess.`
+    // rather than the looser `subprocess`. The module alternatives form ONE or-group: a match
+    // contains exactly one of them. Derived from the sink list itself, never from a neighbouring
+    // one, so adding a module to a family cannot leave its prefilter behind - that would be a
+    // prefilter narrower than its regex, which is a silent detection loss.
+    def modulePrefilter(sinks: Seq[(String, Seq[String])]): Seq[String] = sinks.map(_._1 + ".")
+    val codeExecutionModulePrefilter: Seq[Seq[String]] = Seq(modulePrefilter(codeExecutionSinks))
+    val codeExecutionFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])(" + codeExecutionSinks
+          .map { case (mod, fns) => s"""$mod$moduleSep(${fns.mkString("|")})""" }
+          .mkString("|") + ")$",
+      codeExecutionModulePrefilter*
+    )
+    val codeExecutionCallPrefilter: Seq[Seq[String]] =
+        Seq(modulePrefilter(codeExecutionSinks), Seq("("))
+    val codeExecutionCodeRegex = PrefilteredRegex(
+      ".*(" + codeExecutionSinks
+          .map { case (mod, fns) => s"""\\b$mod\\.(${fns.mkString("|")})\\s*\\(""" }
+          .mkString("|") + ")",
+      codeExecutionCallPrefilter*
+    )
+
+    // P1.2: the subset of code-execution sinks that runs the command through a shell.
+    // `subprocess.run(["ls", x])` and `subprocess.run("ls " + x, shell=True)` are not
+    // the same risk and must not rank the same. The argv-list APIs (os.exec*, spawn*,
+    // posix_spawn) are excluded: they never invoke a shell.
+    val shellCapableSinks = Seq(
+      "subprocess" -> Seq(
+        "run",
+        "call",
+        "check_call",
+        "check_output",
+        "getoutput",
+        "getstatusoutput",
+        "Popen"
+      ),
+      "os"       -> Seq("system", "popen"),
+      "commands" -> Seq("getoutput", "getstatusoutput"),
+      "pty"      -> Seq("spawn"),
+      "asyncio"  -> Seq("create_subprocess_shell")
+    )
+    val shellTrueCodeRegex =
+        PrefilteredRegex(".*shell\\s*=\\s*True.*", Seq("shell"))
+    val shellCapableFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])(" + shellCapableSinks
+          .map { case (mod, fns) => s"""$mod$moduleSep(${fns.mkString("|")})""" }
+          .mkString("|") + ")$",
+      modulePrefilter(shellCapableSinks)
+    )
+    val shellCapableCallPrefilter: Seq[Seq[String]] =
+        Seq(modulePrefilter(shellCapableSinks), Seq("("))
+    val shellCapableCodeRegex = PrefilteredRegex(
+      ".*(" + shellCapableSinks
+          .map { case (mod, fns) => s"""\\b$mod\\.(${fns.mkString("|")})\\s*\\(""" }
+          .mkString("|") + ")",
+      shellCapableCallPrefilter*
+    )
+
+    // P1.3: sink families completed for Python parity with the Java tagger.
+    val ssrfFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])(requests|httpx|urllib|aiohttp|httplib)(\\.\\w+)*\\.(get|post|put|patch|delete|head|options|request|urlopen|open)$",
+      Seq("requests.", "httpx.", "urllib.", "aiohttp.", "httplib.")
+    )
+    val ssrfCodeRegex = PrefilteredRegex(
+      ".*\\b(requests|httpx|urllib\\.request|aiohttp)\\.(get|post|put|patch|delete|head|options|request|urlopen)\\s*\\(",
+      Seq("requests.", "httpx.", "urllib.", "aiohttp."),
+      Seq("(")
+    )
+    val pathTraversalFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])(posixpath|ntpath|pathlib|glob)(\\.\\w+)*\\.(join|Path|glob|iglob)$",
+      Seq("posixpath.", "ntpath.", "pathlib.", "glob.")
+    )
+    val templateInjectionFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])jinja2(\\.\\w+)*\\.(Template|Environment)$",
+      Seq("jinja2.")
+    )
+    val ldapFullNameRegex = PrefilteredRegex(
+      ".*(?<![\\w.])ldap(\\.\\w+)*\\.(initialize|open|search_s|search_st|search_ext_s|modify_s|modify_ext_s|add_s|delete_s|bind_s|simple_bind_s|unbind_ext_s)$",
+      Seq("ldap.")
+    )
+    val ldapCodeRegex = PrefilteredRegex(
+      ".*\\bldap\\.(initialize|search_s|search_st|search_ext_s|modify_s|modify_ext_s|add_s|delete_s|bind_s|simple_bind_s|unbind_ext_s)\\s*\\(",
+      Seq("ldap."),
+      Seq("(")
+    )
+    val xxeFullNameRegex = PrefilteredRegex(
+      ".*(lxml|xml\\.etree|ElementTree).*\\.(fromstring|parse|XMLParser|XML|iterparse)$",
+      Seq("lxml", "xml.etree", "ElementTree"),
+      Seq(".fromstring", ".parse", ".XMLParser", ".XML", ".iterparse")
+    )
+    val xxeCodeRegex = PrefilteredRegex(
+      ".*\\b(etree|ElementTree)\\.(fromstring|parse|XMLParser|XML|iterparse)\\s*\\(",
+      Seq("etree.", "ElementTree."),
+      Seq("(")
+    )
+
+    // Precompiled: this is tested against every call node's name, and String.matches would
+    // recompile the pattern per node (the juice-shop lesson, ChennaiTagsPass:66).
+    val dbReadHelperRegex = "get_object_or_\\w+|get_list_or_\\w+".r
+
+    def hasDynamicArgument(call: Call): Boolean =
+        call.argument.exists(a => a.label == "IDENTIFIER" || a.label == "CALL")
+
+    // Receiver accesses (`conn.execute`, `render_template_string`) are lowered to
+    // `<operator>.fieldAccess` CALL nodes with the same name as the invocation. They are
+    // not sinks themselves; tagging them double-counts every sink site.
+    def isOperatorCall(call: Call): Boolean =
+        call.methodFullName.startsWith("<operator") || call.name.startsWith("<operator")
 
     val methodTags = scala.collection.mutable.LinkedHashMap.empty[
       String,
@@ -294,17 +511,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
     // 1. Methods & Parameters
     atom.method.foreach { method =>
-      val fullName   = method.fullName
-      var matchedReq = false
-      var i          = 0
-      while i < pyRequestRegexes.length do
-        if pyRequestRegexes(i).matches(fullName) then matchedReq = true
-        i += 1
-      if matchedReq then
-        method.parameter.foreach(p => addTag("framework-input", p))
+      val fullName = method.fullName
 
       var matchedResp = false
-      i = 0
+      var i           = 0
       while i < pyResponseRegexes.length do
         if pyResponseRegexes(i).matches(fullName) then matchedResp = true
         i += 1
@@ -378,7 +588,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       // G1: ORM read accessor - return value is persisted data, a distinct trust level
       // from live request input. Tagged so profiles can use it as a declassification barrier.
       if dbReadHelperNames.contains(name) ||
-        name.matches("get_object_or_\\w+|get_list_or_\\w+") ||
+        dbReadHelperRegex.matches(name) ||
         (ormAccessorNames.contains(name) &&
             (methodFullName.contains(".objects.") || methodFullName.contains(".query.")))
       then
@@ -424,9 +634,6 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if regexLibRegex.matches(methodFullName) then
         addTag("regex", call)
 
-      if name == "eval" || name == "exec" then
-        addTag("code-execution", call)
-
       if importlibRegex.matches(methodFullName) then
         addTag("reflection", call)
 
@@ -447,6 +654,69 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if sqlRegex.matches(methodFullName) then
         addTag("sql", call)
 
+      // P1.1: the code-execution sink family (previously only eval/exec).
+      if name == "eval" || name == "exec" ||
+        codeExecutionFullNameRegex.matches(methodFullName) ||
+        codeExecutionCodeRegex.matches(code)
+      then
+        addTag("code-execution", call)
+        // P1.2: shell-execution risk rank. shell=True, or a single string command
+        // rather than an argv list, means the command line reaches a shell.
+        val argvListArg = call.argument.argumentIndex(1).exists { a =>
+            a.code.startsWith("[") || a.code.startsWith("(")
+        }
+        if shellTrueCodeRegex.matches(code) ||
+          (shellCapableFullNameRegex.matches(methodFullName) ||
+              shellCapableCodeRegex.matches(code)) && !argvListArg
+        then
+          addTag("shell-exec", call)
+
+      // P1.3: sql sinks beyond the receiver-keyed sqlRegex above. `.execute` on any
+      // receiver is a SQL entrypoint (Django `cursor.execute(...)` resolves through a
+      // temporary and carries no receiver hint), and `.raw()`/`.extra()` are true SQLi
+      // sinks. `text()` is constrained to SQLAlchemy to avoid colliding with other
+      // `text` methods.
+      if !isOperatorCall(call) &&
+        (name == "execute" || name == "executemany" || name == "executescript" ||
+            name == "raw" || name == "extra" ||
+            (name == "text" && (methodFullName.contains("sqlalchemy") || code.contains(
+              "sqlalchemy"
+            ))))
+      then
+        addTag("sql", call)
+
+      // P1.3: ssrf - HTTP client calls whose URL is not a literal.
+      if ssrfFullNameRegex.matches(methodFullName) || ssrfCodeRegex.matches(code) then
+        if hasDynamicArgument(call) then
+          addTag("ssrf", call)
+        else
+          addTag("http-client", call)
+
+      // P1.3: path traversal - open/os.path.join/pathlib.Path/glob with a dynamic
+      // (non-literal) path component.
+      if !isOperatorCall(call) &&
+        ((name == "open" && hasDynamicArgument(call)) ||
+            (pathTraversalFullNameRegex.matches(methodFullName) && hasDynamicArgument(call)))
+      then
+        addTag("path-traversal", call)
+
+      // P1.3: template injection.
+      if !isOperatorCall(call) &&
+        (name == "render_template_string" || templateInjectionFullNameRegex.matches(
+          methodFullName
+        ))
+      then
+        addTag("template-injection", call)
+
+      // P1.3: ldap injection.
+      if ldapFullNameRegex.matches(methodFullName) || ldapCodeRegex.matches(code) then
+        addTag("ldap", call)
+
+      // P1.3: xxe - XML parsers of the lxml/ElementTree families. lxml resolves
+      // entities by default, so the parse entrypoints themselves carry the risk.
+      if xxeFullNameRegex.matches(methodFullName) || xxeCodeRegex.matches(code) then
+        addTag("xxe", call)
+
       if concurrentRegex.matches(methodFullName) then
         addTag("concurrent", call)
 
@@ -460,6 +730,71 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         if cryptoAlgorithmRegex.matches(methodFullName) && call.argument.nonEmpty then
           addTag("crypto-algorithm", call)
     }
+
+    // PEP 750 t-strings: tag the template and each of its interpolations `template-literal` so
+    // profiles can treat them as interpolation boundaries rather than string sinks. NOT a
+    // sanitiser: the taint sits in the interpolations, and a consumer that renders the template
+    // (str(), a sql driver) receives it - the tag marks the deferral, not a declassification.
+    atom.call.name("<operator>.templateString").newTagNode("template-literal").store()(using
+    dstGraph)
+    atom.call.name("<operator>.interpolation").newTagNode("template-literal").store()(using
+    dstGraph)
+
+    // 3b. Request-access EXPRESSIONS as framework-input.
+    //
+    // Previously a request source was only tagged when it was assigned to a local
+    // (ChennaiTagsPass tagged the assignment's LHS identifier), so an inline use --
+    // `sink(request.args["v"])` -- had no tagged source at all and produced no flow.
+    // That looked like "reachables only finds intra-method flows"; it was really a
+    // missing source. Tag the access expression itself and both forms work.
+    //
+    // Framework-agnostic on purpose: matched on the expression, not on the file name,
+    // so Flask in app.py is covered as well as Django in views.py. Task 3's framework
+    // recognizers will subsume this with proper proxy/parameter typing.
+    // ANCHORED at the head of the expression on purpose. Matching `request.args` as a
+    // substring anywhere would also match every *enclosing* expression -- the code of
+    // `sink(request.args["v"])` contains it too -- and the outermost-wins rule below
+    // would then tag the sink call as the source. An optional dotted qualifier admits
+    // `self.request.args` (Django CBVs) and `flask.request.args` while still excluding
+    // anything with a `(` before the accessor.
+    //
+    // The `session` arm preserves the coverage of ChennaiTagsPass's now-removed
+    // HTTP_METHODS_REGEX (`(request|session)\.(args|get|post|put|form)`): Flask's
+    // session is client-supplied signed-cookie data.
+    // `query`/`query_params`/`match_info` were added by Task 4 (B3): aiohttp/Starlette-style
+    // request-proxy accessors, tagged the same way as the Flask/Django ones.
+    val requestAccessRegex =
+        ("""(?s)(\w+\.)*(request\.(form|args|values|json|data|files|headers|cookies|""" +
+            """query_string|query_params|query|match_info|remote_addr|host|method|full_path|url|""" +
+            """path|user_agent|GET|POST|COOKIES|META|body|get_json|get_data|getlist)""" +
+            """|session\.(args|get|post|put|form))\b.*""").r
+
+    val requestAccessCalls = atom.call
+        // Cheap substring prefilter before the regex. This runs over every call node in the
+        // graph - 1.3M of them on the django wheel - and the pattern can only match code
+        // containing one of these literals, so the regex engine is skipped for the vast
+        // majority. Same technique as the Vue `$route` prefilter in ChennaiTagsPass, which
+        // was added after `Pattern.compile` dominated the juice-shop tagging phase.
+        .filter(c => c.code.contains("request.") || c.code.contains("session."))
+        // The RHS is the source; tagging the assignment as well would double-report it.
+        .filterNot(c => c.name == Operators.assignment)
+        .filter(c => requestAccessRegex.matches(c.code))
+        .l
+    val requestAccessIds = requestAccessCalls.map(_.id()).toSet
+
+    // `request.args["v"]` yields nested matching calls (fieldAccess `request.args`
+    // inside indexAccess `request.args["v"]`). Keep only the outermost, otherwise one
+    // source is reported once per nesting level.
+    requestAccessCalls
+        .filterNot { c =>
+            // `astParentOption`: "is my parent one of these calls" is a question with a
+            // legitimate "there is no parent" answer, and a tagging pass must not die on a
+            // parentless node - which the asserting `astParent` would now make it do.
+            c.astParentOption match
+              case Some(p: Call) => requestAccessIds.contains(p.id())
+              case _             => false
+        }
+        .foreach(c => addTag("framework-input", c))
 
     // 4. CLI Source controlled calls & their callees
     val cliSourceCalls = atom.call

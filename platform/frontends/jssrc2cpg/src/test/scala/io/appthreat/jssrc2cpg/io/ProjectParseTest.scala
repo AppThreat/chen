@@ -11,11 +11,11 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.semanticcpg.language.*
 import org.scalatest.BeforeAndAfterAll
 
-class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
+class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll:
 
   private implicit val schemaValidationMode: ValidationMode = ValidationMode.Enabled
 
-  private val projectWithSubfolders: File = {
+  private val projectWithSubfolders: File =
     val dir = File.newTemporaryDirectory("jssrc2cpgTestsSubfolders")
     List("sub/c.js", "sub/d.js", "a.js", "b.js").foreach { testFile =>
       val file = dir / testFile
@@ -23,9 +23,8 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
       file.write(s"""console.log("${file.canonicalPath}");""")
     }
     dir
-  }
 
-  private val projectWithBrokenFile: File = {
+  private val projectWithBrokenFile: File =
     val dir      = File.newTemporaryDirectory("jssrc2cpgTestsBroken")
     val goodFile = dir / "good.js"
     goodFile.createIfNotExists(createParents = true)
@@ -34,9 +33,8 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
     brokenFile.createIfNotExists(createParents = true)
     brokenFile.write(s"""console.log("broken""")
     dir
-  }
 
-  private val projectWithUtf8: File = {
+  private val projectWithUtf8: File =
     val dir  = File.newTemporaryDirectory("jssrc2cpgTestsUtf8")
     val file = dir / "utf8.js"
     file.createIfNotExists(createParents = true)
@@ -45,74 +43,71 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll {
         |logger.debug()
         |""".stripMargin)
     dir
-  }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     projectWithSubfolders.delete(swallowIOExceptions = true)
     projectWithBrokenFile.delete(swallowIOExceptions = true)
-  }
 
-  private object ProjectParseTestsFixture {
-    def apply(projectDir: File)(f: Cpg => Unit): Unit = {
-      File.usingTemporaryDirectory("jssrc2cpgTests") { tmpDir =>
-        val cpg          = newEmptyCpg()
-        val config       = Config(tsTypes = false).withInputPath(projectDir.toString).withOutputPath(tmpDir.toString)
-        val astGenResult = new AstGenRunner(config).execute(tmpDir)
-        new AstCreationPass(cpg, astGenResult, config).createAndApply()
-        f(cpg)
-      }
-    }
-  }
+  private object ProjectParseTestsFixture:
+    def apply(projectDir: File)(f: Cpg => Unit): Unit =
+        File.usingTemporaryDirectory("jssrc2cpgTests") { tmpDir =>
+          val cpg = newEmptyCpg()
+          val config = Config(tsTypes = false).withInputPath(projectDir.toString).withOutputPath(
+            tmpDir.toString
+          )
+          val astGenResult = new AstGenRunner(config).execute(tmpDir)
+          new AstCreationPass(cpg, astGenResult, config).createAndApply()
+          f(cpg)
+        }
 
   "Parsing a project" should {
 
-    "generate correct filenames" in ProjectParseTestsFixture(projectWithSubfolders) { cpg =>
-      cpg.file.name.l should contain allElementsOf List(
-        "a.js",
-        "b.js",
-        s"sub${java.io.File.separator}c.js",
-        s"sub${java.io.File.separator}d.js"
-      )
-    }
-
-    "recover from broken input file" in ProjectParseTestsFixture(projectWithBrokenFile) { cpg =>
-      cpg.file.name.l should (contain("good.js") and not contain "broken.js")
-    }
-
-    "handle utf8 correctly" in ProjectParseTestsFixture(projectWithUtf8) { cpg =>
-      cpg.fieldAccess.argument(2).code.l shouldBe List("debug")
-    }
-
-    "reuse existing AST if astGenOutDir contains json files" in {
-      File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
-        val config1 = Config(tsTypes = false)
-          .withInputPath(projectWithSubfolders.toString)
-          .withAstGenOutDir(astGenOutDir.toString)
-
-        val astGenResult1 = new AstGenRunner(config1).execute(astGenOutDir)
-        astGenResult1.parsedFiles.nonEmpty shouldBe true
-
-        val config2 = Config(tsTypes = false)
-          .withInputPath(projectWithSubfolders.toString)
-          .withAstGenOutDir(astGenOutDir.toString)
-
-        val astGenResult2 = new AstGenRunner(config2).execute(astGenOutDir)
-        astGenResult2.parsedFiles.size shouldBe astGenResult1.parsedFiles.size
+      "generate correct filenames" in ProjectParseTestsFixture(projectWithSubfolders) { cpg =>
+          cpg.file.name.l should contain allElementsOf List(
+            "a.js",
+            "b.js",
+            s"sub${java.io.File.separator}c.js",
+            s"sub${java.io.File.separator}d.js"
+          )
       }
-    }
 
-    "not skip astgen if astGenOutDir is specified but empty" in {
-      File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
-        val config = Config(tsTypes = false)
-          .withInputPath(projectWithSubfolders.toString)
-          .withAstGenOutDir(astGenOutDir.toString)
-
-        // astGenOutDir is empty initially
-        val astGenResult = new AstGenRunner(config).execute(astGenOutDir)
-        astGenResult.parsedFiles.nonEmpty shouldBe true
+      "recover from broken input file" in ProjectParseTestsFixture(projectWithBrokenFile) { cpg =>
+          cpg.file.name.l should (contain("good.js").and(not) contain "broken.js")
       }
-    }
+
+      "handle utf8 correctly" in ProjectParseTestsFixture(projectWithUtf8) { cpg =>
+          cpg.fieldAccess.argument(2).code.l shouldBe List("debug")
+      }
+
+      "reuse existing AST if astGenOutDir contains json files" in {
+          File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
+            val config1 = Config(tsTypes = false)
+                .withInputPath(projectWithSubfolders.toString)
+                .withAstGenOutDir(astGenOutDir.toString)
+
+            val astGenResult1 = new AstGenRunner(config1).execute(astGenOutDir)
+            astGenResult1.parsedFiles.nonEmpty shouldBe true
+
+            val config2 = Config(tsTypes = false)
+                .withInputPath(projectWithSubfolders.toString)
+                .withAstGenOutDir(astGenOutDir.toString)
+
+            val astGenResult2 = new AstGenRunner(config2).execute(astGenOutDir)
+            astGenResult2.parsedFiles.size shouldBe astGenResult1.parsedFiles.size
+          }
+      }
+
+      "not skip astgen if astGenOutDir is specified but empty" in {
+          File.usingTemporaryDirectory("jssrc2cpgTestsOut") { astGenOutDir =>
+            val config = Config(tsTypes = false)
+                .withInputPath(projectWithSubfolders.toString)
+                .withAstGenOutDir(astGenOutDir.toString)
+
+            // astGenOutDir is empty initially
+            val astGenResult = new AstGenRunner(config).execute(astGenOutDir)
+            astGenResult.parsedFiles.nonEmpty shouldBe true
+          }
+      }
 
   }
-
-}
+end ProjectParseTest

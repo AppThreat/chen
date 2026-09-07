@@ -4,10 +4,10 @@ import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.Cpg
 
-class IfTests extends JimpleDataFlowCodeToCpgSuite {
+class IfTests extends JimpleDataFlowCodeToCpgSuite:
   "dataflow through IF structures" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
     |class Foo {
     |    public void test1(boolean b) {
     |        String s = "MALICIOUS";
@@ -66,29 +66,29 @@ class IfTests extends JimpleDataFlowCodeToCpgSuite {
     |}
     |""".stripMargin)
 
-    "find a path if `MALICIOUS` is reassigned to `SAFE` in only one path of an if" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is reassigned to `SAFE` in only one path of an if" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `SAFE` is reassigned to `MALICIOUS` in at least one path of an if" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `SAFE` is reassigned to `MALICIOUS` in at least one path of an if" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned in at least one path of an if" in {
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in at least one path of an if" in {
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned in a chained if" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in a chained if" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is reassigned in all paths of an if" in {
-      val (source, sink) = getConstSourceSink("test5")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is reassigned in all paths of an if" in {
+          val (source, sink) = getConstSourceSink("test5")
+          sink.reachableBy(source).size shouldBe 0
+      }
   }
-}
+end IfTests

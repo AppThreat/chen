@@ -32,7 +32,7 @@ class StitchPassTests extends AnyWordSpec with Matchers:
     val diff = new DiffGraphBuilder
 
     def method(name: String, file: String): (NewMethod, NewBlock) =
-      val m     = NewMethod().name(name).fullName(name).signature(s"sig_$name").filename(file).order(1)
+      val m = NewMethod().name(name).fullName(name).signature(s"sig_$name").filename(file).order(1)
       val block = NewBlock().typeFullName("ANY").order(1)
       val file0 = NewFile().name(file)
       diff.addNode(m); diff.addNode(block); diff.addNode(file0)
@@ -55,10 +55,10 @@ class StitchPassTests extends AnyWordSpec with Matchers:
       diff.addEdge(fooBlock, call, EdgeTypes.AST)
       diff.addEdge(foo, call, EdgeTypes.CONTAINS)
       (1 to argCount).foreach { i =>
-          val arg = NewIdentifier().name(s"a$i").code(s"a$i").argumentIndex(i).order(i)
-          diff.addNode(arg)
-          diff.addEdge(call, arg, EdgeTypes.AST)
-          diff.addEdge(call, arg, EdgeTypes.ARGUMENT)
+        val arg = NewIdentifier().name(s"a$i").code(s"a$i").argumentIndex(i).order(i)
+        diff.addNode(arg)
+        diff.addEdge(call, arg, EdgeTypes.AST)
+        diff.addEdge(call, arg, EdgeTypes.ARGUMENT)
       }
       call
 

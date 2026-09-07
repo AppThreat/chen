@@ -1,14 +1,14 @@
 package io.appthreat.jimple2cpg.querying.dataflow
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 import io.shiftleft.codepropertygraph.Cpg
 
-class TryTests extends JimpleDataFlowCodeToCpgSuite {
+class TryTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through TRY/CATCH" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Foo {
         |    public static void foo() throws Exception {
         |        throw new Exception();
@@ -123,52 +123,52 @@ class TryTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find a path if the sink is in a `TRY`" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if the sink is in a `TRY`" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if the sink is in a `CATCH`" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if the sink is in a `CATCH`" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if the sink is in a `FINALLY`" in {
-      // Jimple's flat AST evaluates multiple paths that will end at the FINALLY sink but it is a conservative result
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 3
-    }
+      "find a path if the sink is in a `FINALLY`" in {
+          // Jimple's flat AST evaluates multiple paths that will end at the FINALLY sink but it is a conservative result
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 3
+      }
 
-    // TODO: This is a very optimistic test. We expect the path to be missing for now.
-    "find a path if `MALICIOUS` is contained in thrown string with sink in catch" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      // TODO: This is a very optimistic test. We expect the path to be missing for now.
+      "find a path if `MALICIOUS` is contained in thrown string with sink in catch" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned in `TRY`" in {
-      val (source, sink) = getConstSourceSink("test5")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in `TRY`" in {
+          val (source, sink) = getConstSourceSink("test5")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned in `CATCH`" in {
-      val (source, sink) = getConstSourceSink("test6")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in `CATCH`" in {
+          val (source, sink) = getConstSourceSink("test6")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path if `MALICIOUS` is assigned in `FINALLY`" in {
-      // Soot 4.7.1 collapses equivalent FINALLY paths in this case.
-      val (source, sink) = getConstSourceSink("test7")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path if `MALICIOUS` is assigned in `FINALLY`" in {
+          // Soot 4.7.1 collapses equivalent FINALLY paths in this case.
+          val (source, sink) = getConstSourceSink("test7")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path if `MALICIOUS` is reassigned in both TRY/CATCH" in {
-      val (source, sink) = getConstSourceSink("test8")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is reassigned in both TRY/CATCH" in {
+          val (source, sink) = getConstSourceSink("test8")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "not find a path if `MALICIOUS` is reassigned in FINALLY" in {
-      val (source, sink) = getConstSourceSink("test9")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path if `MALICIOUS` is reassigned in FINALLY" in {
+          val (source, sink) = getConstSourceSink("test9")
+          sink.reachableBy(source).size shouldBe 0
+      }
   }
-}
+end TryTests

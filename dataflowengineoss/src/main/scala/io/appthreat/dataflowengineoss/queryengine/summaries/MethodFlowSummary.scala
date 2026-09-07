@@ -157,6 +157,31 @@ object MethodFlowSummary:
   /** The destination index used by a flow semantic to denote the method's return value. */
   private val ReturnIndex = -1
 
+  /** The inverse of [[fromSemantic]]: express the summary's facts as a declared flow semantic.
+    *
+    * This is what lets a summary computed from a dependency's real source act on a call into that
+    * dependency. Without a semantic the engine's default for an unknown callee is *permissive* -
+    * `x` taints `foo(x)` and every other argument of the same call - so a bodyless external method
+    * already passes taint through. What it cannot do is stop: a library function that provably does
+    * not carry its argument to its result taints the result anyway. Turning the summary into a
+    * semantic supplies exactly that missing half, with the library's own code as the evidence.
+    *
+    * The conversion is deliberately total, including the empty summary, because the empty summary
+    * is the interesting one: `mappings = Nil` is how "this call does not propagate taint" is
+    * spelled. That also makes it unsound in the one direction summaries are unsound - a library
+    * whose real behaviour is dynamic (a registry lookup, `__getattr__`, a C extension) summarises
+    * as inert and will now sanitize rather than over-approximate - which is why the caller decides
+    * which methods are eligible and why the whole mode is opt-in.
+    */
+  def toSemantic(summary: MethodFlowSummary): FlowSemantic =
+    val toReturn = summary.paramToReturn.toSeq.sorted.map(src =>
+        FlowMapping(ParameterNode(src), ParameterNode(ReturnIndex))
+    )
+    val toOut = summary.paramToParamOut.toSeq.sortBy(_._1).flatMap { case (src, outs) =>
+        outs.toSeq.sorted.map(dst => FlowMapping(ParameterNode(src), ParameterNode(dst)))
+    }
+    FlowSemantic(summary.methodFullName, (toReturn ++ toOut).toList)
+
   /** Compute an intra-procedural-only summary, treating every call as opaque. */
   def of(method: Method): MethodFlowSummary = of(method, _ => None, Semantics.empty)
 
@@ -176,7 +201,17 @@ object MethodFlowSummary:
     */
   def of(method: Method, lookup: SummaryLookup, semantics: Semantics): MethodFlowSummary =
     val methodReturn = method.methodReturn
-    val returnId     = methodReturn.id
+
+    // The return boundary is the set of RETURN statements feeding METHOD_RETURN, not
+    // METHOD_RETURN itself. A parameter that is never read still has its definition live at the
+    // method exit, so METHOD_RETURN has an incoming REACHING_DEF edge from every parameter -
+    // including the ones the body ignores. Treating that as "the parameter reaches the return"
+    // made `def f(x): return "constant"` summarise as a pass-through, which is the difference
+    // between a summary that can sanitize and one that can only ever agree with the permissive
+    // default. The query engine already draws the line here: it collects exactly the `Return`
+    // predecessors of METHOD_RETURN when it descends into a callee.
+    val returnBoundaryIds: Set[Long] =
+        methodReturn.in(EdgeTypes.REACHING_DEF).asScala.collect { case r: Return => r.id }.toSet
 
     // Output-parameter boundary nodes, indexed by their parameter index.
     val paramOutIdToIndex: Map[Long, Int] =
@@ -194,7 +229,7 @@ object MethodFlowSummary:
     params.foreach { param =>
       val reached = forwardReach(param, lookup, semantics)
       unionParamReach ++= reached
-      if reached.contains(returnId) then toReturn += param.index
+      if reached.exists(returnBoundaryIds.contains) then toReturn += param.index
       reached.foreach { rid =>
           paramOutIdToIndex.get(rid).foreach { outIdx =>
               toParamOutAcc.getOrElseUpdate(param.index, mutable.SortedSet.empty) += outIdx

@@ -33,7 +33,8 @@ object PythonV2AndV3 extends PythonVersion
 class PythonAstVisitor(
   relFileName: String,
   protected val nodeToCode: NodeToCode,
-  version: PythonVersion
+  version: PythonVersion,
+  dottedModuleName: Option[String] = None
 )(implicit withSchemaValidation: ValidationMode) extends PythonAstVisitorHelpers:
 
   private val diffGraph     = new DiffGraphBuilder()
@@ -297,21 +298,23 @@ class PythonAstVisitor(
           )
       )
 
-  /** For each decorator on a function definition, emit a CPG `Annotation` node and attach it as an
-    * AST child of the given method node. This mirrors how javasrc2cpg surfaces Java method
+  /** For each decorator on a function or class definition, emit a CPG `Annotation` node and attach
+    * it as an AST child of the given node. This mirrors how javasrc2cpg surfaces Java method
     * annotations (`@RequestMapping`, `@GetMapping`, etc.) so downstream consumers can query
-    * `Method.annotation` uniformly across languages.
+    * `Method.annotation` / `TypeDecl.annotation` uniformly across languages.
     *
     * The annotation's `code` field carries the full decorator source text (e.g.
     * `@app.route("/users", methods=["GET"])`), which is what slice consumers use to recover URL
-    * paths and HTTP verbs for OpenAPI generation.
+    * paths and HTTP verbs for OpenAPI generation. Decorator arguments additionally become
+    * `ANNOTATION_PARAMETER_ASSIGN` children (keyword name in an `AnnotationParameter` child where
+    * present, constant values as literal children) — the shape the framework recognizers consume.
     *
     * Note: this is additive — `wrapMethodRefWithDecorators` still produces the runtime-semantics
     * call lowering. The Annotation nodes added here are pure static metadata that consumers that
     * don't care about them simply ignore.
     */
   private def addDecoratorAnnotations(
-    methodNode: nodes.NewMethod,
+    methodNode: nodes.NewNode,
     decoratorList: Iterable[ast.iexpr]
   ): Unit =
       decoratorList.foreach { decorator =>
@@ -327,7 +330,81 @@ class PythonAstVisitor(
             .columnNumber(pos.column)
         diffGraph.addNode(annotationNode)
         diffGraph.addEdge(methodNode, annotationNode, EdgeTypes.AST)
+
+        decorator match
+          case call: ast.Call =>
+              var paramIndex = 1
+              call.args.foreach { arg =>
+                addAnnotationParameterAssign(
+                  annotationNode,
+                  keywordName = None,
+                  valueExpr = arg,
+                  order = paramIndex,
+                  pos
+                )
+                paramIndex += 1
+              }
+              call.keywords.foreach { keyword =>
+                  keyword.arg.foreach { kwName =>
+                    addAnnotationParameterAssign(
+                      annotationNode,
+                      keywordName = Some(kwName),
+                      valueExpr = keyword.value,
+                      order = paramIndex,
+                      pos
+                    )
+                    paramIndex += 1
+                  }
+              }
+          case _ =>
+        end match
       }
+
+  /** One decorator argument as an `ANNOTATION_PARAMETER_ASSIGN` child. Constant arguments also get
+    * a literal child carrying their value (the route-path case); other expressions are represented
+    * by their source text in `code` only, since the runtime lowering already carries their
+    * dataflow.
+    */
+  private def addAnnotationParameterAssign(
+    annotationNode: nodes.NewAnnotation,
+    keywordName: Option[String],
+    valueExpr: ast.iexpr,
+    order: Int,
+    pos: LineAndColumn
+  ): Unit =
+    // for literals prefer the lowered node's code: the raw source slice
+    // drops a string's closing quote (the parser's end offset predates it)
+    val literalValueNode = valueExpr match
+      case constant: ast.Constant => Some(convert(constant))
+      case list: ast.List         => Some(convert(list))
+      case tuple: ast.Tuple       => Some(convert(tuple))
+      case _                      => None
+    val valueCode  = literalValueNode.map(codeOf).getOrElse(nodeToCode.getCode(valueExpr))
+    val assignCode = keywordName.map(k => s"$k = $valueCode").getOrElse(valueCode)
+    val parameterAssignNode = nodes
+        .NewAnnotationParameterAssign()
+        .code(assignCode)
+        .lineNumber(pos.line)
+        .columnNumber(pos.column)
+        .order(order)
+    diffGraph.addNode(parameterAssignNode)
+    diffGraph.addEdge(annotationNode, parameterAssignNode, EdgeTypes.AST)
+
+    keywordName.foreach { kwName =>
+      val parameterNode = nodes
+          .NewAnnotationParameter()
+          .code(kwName)
+          .lineNumber(pos.line)
+          .columnNumber(pos.column)
+          .order(1)
+      diffGraph.addNode(parameterNode)
+      diffGraph.addEdge(parameterAssignNode, parameterNode, EdgeTypes.AST)
+    }
+
+    literalValueNode.foreach { valueNode =>
+        diffGraph.addEdge(parameterAssignNode, valueNode, EdgeTypes.AST)
+    }
+  end addAnnotationParameterAssign
 
   /** Best-effort extraction of a stable short name for a decorator expression, matching what
     * javasrc2cpg puts in `Annotation.name`.
@@ -484,6 +561,7 @@ class PythonAstVisitor(
           lineAndColumn
         )
     edgeBuilder.astEdge(methodReturnNode, methodNode, 2)
+    contextStack.setCurrentMethodReturnNode(methodReturnNode)
 
     val bodyOrder = new AutoIncIndex(1)
     bodyProvider().foreach { bodyStmt =>
@@ -560,6 +638,10 @@ class PythonAstVisitor(
           lineAndColOf(classDef)
         )
     edgeBuilder.astEdge(instanceTypeDecl, contextStack.astParent, contextStack.order.getAndInc)
+
+    // decorators of a class surface on the instance type decl, so
+    // `typeDecl.annotation` works the same way as `method.annotation`
+    addDecoratorAnnotations(instanceTypeDecl, classDef.decorator_list)
 
     // Create <body> function which contains the code defining the class
     contextStack.pushClass(Some(classDef.name), instanceTypeDecl)
@@ -1065,27 +1147,21 @@ class PythonAstVisitor(
 
   // Lowering of for x in y: <statements>:
   // {
-  //   iterator = y.__iter__()
-  //   while (UNKNOWN condition):
-  //     <loweringOf>(x = iterator.__next__())
-  //     <statements>
+  //   for (
+  //     init       = iterator = y.__iter__()
+  //     condition  = <operator>.iteratorNonEmpty(iterator)
+  //     body       = { <loweringOf>(x = iterator.__next__()); <statements> }
+  //   )
   // }
+  // The __iter__/__next__ desugaring is kept (per the additive lowering
+  // decision), but the loop is now a real CONTROL_STRUCTURE(FOR) with its AST
+  // children in the conventional positions (init order 1, condition order 2,
+  // no loop expression, body order 4) so `controlStructure.isFor` and
+  // cross-language queries work and the shared CFG pass builds correct
+  // loop/back/exit edges for it.
   // If one "if" is present the lowering of for x in y if z:
-  // {
-  //   iterator = y.__iter__()
-  //   while (UNKNOWN condition):
-  //     if (!z): continue
-  //     <loweringOf>(x = iterator.__next__())
-  //     <statements>
-  // }
-  // If multiple "ifs" are present the lowering of for x in y if z if a: ..,:
-  // {
-  //   iterator = y.__iter__()
-  //   while (UNKNOWN condition):
-  //     if (!(z and a)): continue
-  //     <loweringOf>(x = iterator.__next__())
-  //     <statements>
-  // }
+  //   body = { if (!z): continue; <loweringOf>(x = iterator.__next__()); <statements> }
+  // If multiple "ifs" are present the condition becomes !(z and a) etc.
   protected def createForLowering(
     target: ast.iexpr,
     iter: ast.iexpr,
@@ -1109,15 +1185,7 @@ class PythonAstVisitor(
         createAssignmentToIdentifier(iterVariableName, iterExprIterCallNode, lineAndColumn)
 
     val conditionNode =
-        nodeBuilder.unknownNode("iteratorNonEmptyOrException", "", lineAndColumn)
-
-    val controlStructureNode =
-        nodeBuilder.controlStructureNode(
-          "while ... : ...",
-          ControlStructureTypes.WHILE,
-          lineAndColumn
-        )
-    edgeBuilder.conditionEdge(conditionNode, controlStructureNode)
+        createIteratorNonEmptyCall(iterVariableName, lineAndColumn)
 
     val iterNextCallNode =
         createXDotYCall(
@@ -1160,13 +1228,26 @@ class PythonAstVisitor(
     bodyNodes.foreach(blockStmtNodes.append)
 
     val bodyBlockNode = createBlock(blockStmtNodes, lineAndColumn)
-    addAstChildNodes(controlStructureNode, 1, conditionNode, bodyBlockNode)
+
+    val forCode = (if isAsync then "async for ... : ..." else "for ... : ...")
+    val controlStructureNode =
+        nodeBuilder.controlStructureNode(forCode, ControlStructureTypes.FOR, lineAndColumn)
+
+    edgeBuilder.conditionEdge(conditionNode, controlStructureNode)
+    addAstChildNodes(controlStructureNode, 1, iterAssignNode)
+    addAstChildNodes(controlStructureNode, 2, conditionNode)
+    // order 3 (the C-style loop expression) is intentionally left unused; a
+    // Python for has no iterator-update expression.
+    addAstChildNodes(controlStructureNode, 4, bodyBlockNode)
 
     if orelseNodes.nonEmpty then
       val elseBlockNode = createBlock(orelseNodes, lineAndColumn)
-      addAstChildNodes(controlStructureNode, 3, elseBlockNode)
+      // for-else is kept as AST metadata at order 5: the shared FOR CFG
+      // creator only consumes orders 1-4, and wiring the else block at the
+      // loop-expression position would execute it once per iteration.
+      addAstChildNodes(controlStructureNode, 5, elseBlockNode)
 
-    createBlock(iterAssignNode :: controlStructureNode :: Nil, lineAndColumn)
+    controlStructureNode
   end createForLowering
 
   def convert(astWhile: ast.While): nodes.NewNode =
@@ -1368,7 +1449,19 @@ class PythonAstVisitor(
     createBlock(blockStmts, lineAndCol)
   end convertWithItem
 
-  // TODO add case pattern and guard statements to cpg
+  /** `match subject: case P1: ... case P2: ...` lowers to a C-style SWITCH:
+    *
+    * matchTmp = <subject> switch (matchTmp) { case: <captures(P1)> [if guard: body1] default:
+    * <captures(P2)> [body2] // `case _:` arms become "default" }
+    *
+    *   - One body block (order 2) with a JUMP_TARGET per arm, because the shared SWITCH CFG creator
+    *     only wires a single `whenTrue` child; N sibling blocks left arms 2..N unreachable (returns
+    *     inside them never reached METHOD_RETURN).
+    *   - Pattern captures (`case Point(x=x1)`, `case [*objs]`, `case {**rest}`, `... as dir`)
+    *     become real definitions fed from the subject, so a tainted subject propagates into the arm
+    *     bodies.
+    *   - Guards lower to an IF wrapping the arm body (guard true-branch).
+    */
   def convert(matchStmt: ast.Match): NewNode =
     val controlStructureNode =
         nodeBuilder.controlStructureNode(
@@ -1377,19 +1470,105 @@ class PythonAstVisitor(
           lineAndColOf(matchStmt)
         )
 
-    val matchSubject = convert(matchStmt.subject)
+    val matchTmpName = getUnusedName("matchSubject")
+    val subjectAssignNode =
+        createAssignmentToIdentifier(
+          matchTmpName,
+          convert(matchStmt.subject),
+          lineAndColOf(matchStmt.subject)
+        )
+    val conditionNode = createIdentifierNode(matchTmpName, Load, lineAndColOf(matchStmt))
+    edgeBuilder.conditionEdge(conditionNode, controlStructureNode)
+    addAstChildNodes(controlStructureNode, 1, conditionNode)
 
-    val caseBlocks = matchStmt.cases.map { caseStmt =>
-      val bodyNodes = caseStmt.body.map(convert)
-      createBlock(bodyNodes, lineAndColOf(caseStmt.pattern))
+    contextStack.pushSpecialContext()
+    val specialTargetLocals = mutable.ArrayBuffer.empty[nodes.NewLocal]
+
+    val bodyNodes = mutable.ArrayBuffer.empty[nodes.NewNode]
+    matchStmt.cases.foreach { caseStmt =>
+      val patternLineCol = lineAndColOf(caseStmt.pattern)
+      val jumpTargetNode = nodeBuilder.jumpTargetNode(
+        if isWildcardPattern(caseStmt.pattern) then "default" else "case",
+        "case " + nodeToCode.getCode(caseStmt.pattern) + ":",
+        patternLineCol
+      )
+      bodyNodes.append(jumpTargetNode)
+
+      // pattern captures -> definitions fed by the match subject, each at
+      // the position of the capturing sub-pattern (`... as x`, `*x`, `**x`)
+      collectPatternCaptures(caseStmt.pattern).foreach { case (captureName, capturePos) =>
+          val localNode = nodeBuilder.localNode(captureName, None)
+          specialTargetLocals.append(localNode)
+          contextStack.addSpecialVariable(localNode)
+          bodyNodes.append(
+            createAssignmentToIdentifier(
+              captureName,
+              createIdentifierNode(matchTmpName, Load, capturePos),
+              capturePos
+            )
+          )
+      }
+
+      val armBodyNodes = caseStmt.body.map(convert)
+      caseStmt.guard match
+        case Some(guard) =>
+            val guardNode    = convert(guard)
+            val guardLineCol = lineAndColOf(guard)
+            val ifNode = nodeBuilder.controlStructureNode(
+              "if ... : ...",
+              ControlStructureTypes.IF,
+              guardLineCol
+            )
+            edgeBuilder.conditionEdge(guardNode, ifNode)
+            addAstChildNodes(
+              ifNode,
+              1,
+              guardNode,
+              createBlock(armBodyNodes, guardLineCol)
+            )
+            bodyNodes.append(ifNode)
+        case None =>
+            bodyNodes.appendAll(armBodyNodes)
     }
 
-    edgeBuilder.conditionEdge(matchSubject, controlStructureNode)
-    addAstChildNodes(controlStructureNode, 1, matchSubject)
-    addAstChildNodes(controlStructureNode, 2, caseBlocks)
+    val bodyBlockNode = createBlock(bodyNodes, lineAndColOf(matchStmt))
+    addAstChildNodes(bodyBlockNode, 1, specialTargetLocals)
+    addAstChildNodes(controlStructureNode, 2, bodyBlockNode)
 
-    controlStructureNode
+    contextStack.pop()
+
+    createBlock(subjectAssignNode :: controlStructureNode :: Nil, lineAndColOf(matchStmt))
   end convert
+
+  /** `case _:` (also `case _ as nothing`-less forms) behaves like a switch default. */
+  private def isWildcardPattern(pattern: ast.ipattern): Boolean =
+      pattern match
+        case m: ast.MatchAs => m.name.isEmpty && m.pattern.forall(isWildcardPattern)
+        case _              => false
+
+  /** Names bound by a pattern: `... as x` captures, `*rest` star captures, `**rest` mapping rests,
+    * and the same nested inside sequence/mapping/class/or patterns. Each capture carries the
+    * position of the binding site.
+    */
+  private def collectPatternCaptures(pattern: ast.ipattern): Iterable[(String, LineAndColumn)] =
+      pattern match
+        case m: ast.MatchAs =>
+            m.name.map(name => (name, lineAndColOf(m))) ++
+                m.pattern.toList.flatMap(collectPatternCaptures)
+        case m: ast.MatchStar =>
+            m.name.map(name => (name, lineAndColOf(m)))
+        case m: ast.MatchMapping =>
+            m.rest.map(name => (name, lineAndColOf(m))) ++
+                m.patterns.toList.flatMap(collectPatternCaptures)
+        case m: ast.MatchSequence =>
+            m.patterns.toList.flatMap(collectPatternCaptures)
+        case m: ast.MatchOr =>
+            m.patterns.toList.flatMap(collectPatternCaptures)
+        case m: ast.MatchClass =>
+            m.patterns.toList.flatMap(collectPatternCaptures) ++
+                m.kwd_patterns.toList.flatMap(collectPatternCaptures)
+        case _: ast.MatchValue | _: ast.MatchSingleton =>
+            Nil
 
   def convert(raise: ast.Raise): NewNode =
     val excNodeOption   = raise.exc.map(convert)
@@ -1471,15 +1650,38 @@ class PythonAstVisitor(
 
     createTransformedImport(moduleName, importFrom.names, lineAndColOf(importFrom))
 
+  // `global x, y` / `nonlocal x, y` are scope declarations: the names are
+  // registered with the context stack (which drives identifier REF/CLOSURE
+  // linking), and the statement itself lowers to a real operator call carrying
+  // the names as literal arguments instead of an UNKNOWN node.
   def convert(global: ast.Global): NewNode =
     global.names.foreach(contextStack.addGlobalVariable)
-    val code = global.names.mkString("global ", ", ", "")
-    nodeBuilder.unknownNode(code, global.getClass.getName, lineAndColOf(global))
+    createScopeDeclarationCall("global", "<operator>.global", global.names, lineAndColOf(global))
 
   def convert(nonLocal: ast.Nonlocal): NewNode =
     nonLocal.names.foreach(contextStack.addNonLocalVariable)
-    val code = nonLocal.names.mkString("nonlocal ", ", ", "")
-    nodeBuilder.unknownNode(code, nonLocal.getClass.getName, lineAndColOf(nonLocal))
+    createScopeDeclarationCall(
+      "nonlocal",
+      "<operator>.nonlocal",
+      nonLocal.names,
+      lineAndColOf(nonLocal)
+    )
+
+  private def createScopeDeclarationCall(
+    keyword: String,
+    operatorName: String,
+    names: Iterable[String],
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+    val nameNodes = names.map(name => nodeBuilder.stringLiteralNode(name, lineAndColumn))
+    val callNode = nodeBuilder.callNode(
+      names.mkString(keyword + " ", ", ", ""),
+      operatorName,
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColumn
+    )
+    addAstChildrenAsArguments(callNode, 1, nameNodes)
+    callNode
 
   def convert(expr: ast.Expr): nodes.NewNode =
       convert(expr.value)
@@ -1530,12 +1732,14 @@ class PythonAstVisitor(
         case node: ast.DictComp       => convert(node)
         case node: ast.GeneratorExp   => convert(node)
         case node: ast.Await          => convert(node)
-        case node: ast.Yield          => unhandled(node)
-        case node: ast.YieldFrom      => unhandled(node)
+        case node: ast.Yield          => convert(node)
+        case node: ast.YieldFrom      => convert(node)
         case node: ast.Compare        => convert(node)
         case node: ast.Call           => convert(node)
         case node: ast.FormattedValue => convert(node)
         case node: ast.JoinedString   => convert(node)
+        case node: ast.Interpolation  => convert(node)
+        case node: ast.TemplateStr    => convert(node)
         case node: ast.Constant       => convert(node)
         case node: ast.Attribute      => convert(node)
         case node: ast.Subscript      => convert(node)
@@ -1543,7 +1747,7 @@ class PythonAstVisitor(
         case node: ast.Name           => convert(node)
         case node: ast.List           => convert(node)
         case node: ast.Tuple          => convert(node)
-        case node: ast.Slice          => unhandled(node)
+        case node: ast.Slice          => convert(node)
         case node: ast.StringExpList  => convert(node)
 
   def convert(boolOp: ast.BoolOp): nodes.NewNode =
@@ -1553,10 +1757,17 @@ class PythonAstVisitor(
           case ast.Or  => ("or", Operators.logicalOr)
 
     val operandNodes = boolOp.values.map(convert)
-    createNAryOperatorCall(
-      boolOpToCodeAndFullName(boolOp.op),
-      operandNodes,
-      lineAndColOf(boolOp)
+    // `a or b or c` lowers to nested BINARY operator calls ((a or b) or c)
+    // rather than one n-ary call: the shared CFG creator's or/and expression
+    // handling wires two-argument logical calls only, so the 3rd+ operands of
+    // an n-ary call would end up CFG-disconnected (their taint paths die).
+    operandNodes.reduceLeft((lhsNode, rhsNode) =>
+        createBinaryOperatorCall(
+          lhsNode,
+          boolOpToCodeAndFullName(boolOp.op),
+          rhsNode,
+          lineAndColOf(boolOp)
+        )
     )
 
   // TODO test
@@ -1889,9 +2100,52 @@ class PythonAstVisitor(
       // we for now treat it as non existing.
       convert(await.value)
 
-  def convert(yieldExpr: ast.Yield): NewNode = ???
+  /** `m[1:2]` lowers to `indexAccess(m, slice(1, 2))`: the slice is a real operator call whose
+    * bound arguments carry taint (a tainted step/bound used to die at an UNKNOWN node), and the
+    * indexAccess keeps the "element access on m" shape queries rely on. Slices with multiple
+    * dimensions (`m[1:2, ::2]`) compose because the enclosing tuple literal lowers each element.
+    */
+  def convert(slice: ast.Slice): NewNode =
+      createSliceCall(
+        slice.lower.map(v => convert(v)),
+        slice.upper.map(v => convert(v)),
+        slice.step.map(v => convert(v)),
+        lineAndColOf(slice)
+      )
 
-  def convert(yieldFrom: ast.YieldFrom): NewNode = ???
+  def convert(yieldExpr: ast.Yield): NewNode =
+    val valueNode = yieldExpr.value.map(convert)
+    val code      = "yield" + valueNode.map(v => " " + codeOf(v)).getOrElse("")
+    val callNode = nodeBuilder.callNode(
+      code,
+      "<operator>.yield",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColOf(yieldExpr)
+    )
+    valueNode.foreach(v => addAstChildrenAsArguments(callNode, 1, Iterable.single(v)))
+    linkYieldToMethodReturn(callNode)
+    callNode
+
+  def convert(yieldFrom: ast.YieldFrom): NewNode =
+    val valueNode = convert(yieldFrom.value)
+    val callNode = nodeBuilder.callNode(
+      "yield from " + codeOf(valueNode),
+      "<operator>.yieldFrom",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColOf(yieldFrom)
+    )
+    addAstChildrenAsArguments(callNode, 1, Iterable.single(valueNode))
+    linkYieldToMethodReturn(callNode)
+    callNode
+
+  /** A `yield` is a return point of a generator: wire the call to the enclosing method's
+    * METHOD_RETURN with a CFG edge (the same edge RETURN nodes get from the CFG pass) so taint
+    * escapes through iteration instead of dying inside the generator body.
+    */
+  private def linkYieldToMethodReturn(yieldCallNode: NewNode): Unit =
+      contextStack.currentMethodReturnNode.foreach { methodReturnNode =>
+          diffGraph.addEdge(yieldCallNode, methodReturnNode, EdgeTypes.CFG)
+      }
 
   // In case of a single compare operation there is no lowering applied.
   // So e.g. x < y stay untouched.
@@ -2075,6 +2329,65 @@ class PythonAstVisitor(
 
     callNode
 
+  /** PEP 750 t-string interpolation. Lowered like a FormattedValue (an `<operator>.interpolation`
+    * call around the value expression) but under a distinct name: the value IS evaluated at
+    * runtime, it just never becomes part of a string until something renders the template.
+    */
+  def convert(interpolation: ast.Interpolation): nodes.NewNode =
+    val valueNode = convert(interpolation.value)
+
+    val equalSignStr = if interpolation.equalSign then "=" else ""
+    val conversionStr = interpolation.conversion match
+      case -1  => ""
+      case 115 => "!s"
+      case 114 => "!r"
+      case 97  => "!a"
+
+    val formatSpecStr = interpolation.format_spec match
+      case Some(formatSpec) => ":" + formatSpec
+      case None             => ""
+
+    val code = "{" + codeOf(valueNode) + equalSignStr + conversionStr + formatSpecStr + "}"
+
+    val callNode = nodeBuilder.callNode(
+      code,
+      "<operator>.interpolation",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColOf(interpolation)
+    )
+
+    addAstChildrenAsArguments(callNode, 1, valueNode)
+
+    callNode
+  end convert
+
+  /** PEP 750 t-string. Structurally a sibling of `<operator>.formatString`, but the semantics
+    * differ in exactly one way that matters to taint: an f-string IS the concatenation of its
+    * parts, so everything that flows into an interpolation flows out of the result; a t-string
+    * holds its interpolations unevaluated and nothing flows out of the result until a consumer
+    * renders it. The engine side of that boundary is the no-flow semantic DefaultSemantics declares
+    * for `<operator>.templateString` - without it, the permissive call-site default would treat the
+    * template object as tainted whenever any interpolation argument is.
+    */
+  def convert(templateStr: ast.TemplateStr): nodes.NewNode =
+    val argumentNodes = templateStr.values.map(convert)
+
+    val code = templateStr.prefix + templateStr.quote + argumentNodes
+        .map(codeOf)
+        .mkString("") + templateStr.quote
+
+    val callNode =
+        nodeBuilder.callNode(
+          code,
+          "<operator>.templateString",
+          DispatchTypes.STATIC_DISPATCH,
+          lineAndColOf(templateStr)
+        )
+
+    addAstChildrenAsArguments(callNode, 1, argumentNodes)
+
+    callNode
+
   def convert(constant: ast.Constant): nodes.NewNode =
       constant.value match
         case stringConstant: ast.StringConstant =>
@@ -2198,8 +2511,6 @@ class PythonAstVisitor(
     callNode
   end convert
 
-  def convert(slice: ast.Slice): NewNode = ???
-
   def convert(stringExpList: ast.StringExpList): NewNode =
     val stringNodes = stringExpList.elts.map(convert)
     val code        = stringNodes.map(codeOf).mkString(" ")
@@ -2266,14 +2577,27 @@ class PythonAstVisitor(
         arg.arg,
         isVariadic = true,
         lineAndColOf(arg),
-        Option(index.getAndInc)
+        Option(index.getAndInc),
+        arg.annotation
       )
 
   def convertKeywordOnlyArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(arg.arg, isVariadic = false, lineAndColOf(arg))
+      nodeBuilder.methodParameterNode(
+        arg.arg,
+        isVariadic = false,
+        lineAndColOf(arg),
+        None,
+        arg.annotation
+      )
 
   def convertKwArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(arg.arg, isVariadic = false, lineAndColOf(arg))
+      nodeBuilder.methodParameterNode(
+        arg.arg,
+        isVariadic = false,
+        lineAndColOf(arg),
+        None,
+        arg.annotation
+      )
 
   def convert(keyword: ast.Keyword): NewNode = ???
 
@@ -2283,16 +2607,41 @@ class PythonAstVisitor(
 
   private def calculateFullNameFromContext(name: String): String =
     val contextQualName = contextStack.qualName
-    if contextQualName != "" then
-      relFileName + ":" + contextQualName + "." + name
-    else
-      relFileName + ":" + name
+    val qualName        = if contextQualName == "" then name else s"$contextQualName.$name"
+    dottedModuleName match
+      case Some(module) =>
+          val segments = qualName.split('.').toSeq.dropWhile(_ == "<module>")
+          if segments.isEmpty then module else s"$module.${segments.mkString(".")}"
+      case None =>
+          if contextQualName == "" then s"$relFileName:$name"
+          else s"$relFileName:$contextQualName.$name"
 end PythonAstVisitor
 
 object PythonAstVisitor:
   val builtinPrefix   = "__builtin."
   val typingPrefix    = "typing."
   val metaClassSuffix = "<meta>"
+
+  /** Container type names whose bare form is a weaker fact than any parametrised generic (`list` vs
+    * `list[str]`); used by type recovery to keep annotations and inferred generics ahead of
+    * literal-derived guesses.
+    */
+  val containerTypes: Set[String] = Set(
+    "list",
+    "dict",
+    "set",
+    "tuple",
+    "frozenset",
+    "deque",
+    "sequence",
+    "mapping",
+    "iterable",
+    "iterator",
+    "generator",
+    "counter",
+    "ordereddict",
+    "defaultdict"
+  )
 
   // This list contains all functions from https://docs.python.org/3/library/functions.html#built-in-funcs
   // Updated for Python 3.13

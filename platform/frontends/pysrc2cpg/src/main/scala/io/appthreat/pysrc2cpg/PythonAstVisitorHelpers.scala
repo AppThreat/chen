@@ -127,7 +127,11 @@ trait PythonAstVisitorHelpers:
 
   // Used for assign statements, for loop target assignment and
   // for comprehension target assignment.
-  // TODO handle Starred target
+  // Starred targets (`x, *rest = v`) bind the tail: the element is lowered as
+  //   rest = <operator>.starredUnpack(tmp[i:])
+  // so the tail carries taint instead of dying at an UNKNOWN node. The
+  // trailing elements after the starred one keep their positional indices
+  // (exact starred-unpack bounds are not modelled).
   protected def createValueToTargetsDecomposition(
     targets: Iterable[ast.iexpr],
     valueNode: NewNode,
@@ -167,23 +171,51 @@ trait PythonAstVisitorHelpers:
 
         targets.foreach { target =>
           val targetWithAccessChains = getTargetsWithAccessChains(target)
-          targetWithAccessChains.foreach { case (trgt, accessChain) =>
+          targetWithAccessChains.foreach { case (trgt, accessChain, starredLineCol) =>
               val targetNode = convert(trgt)
-              val tmpIdentifierNode =
-                  createIdentifierNode(tmpVariableName, Load, lineAndColumn)
-              val indexTmpIdentifierNode =
-                  createIndexAccessChain(tmpIdentifierNode, accessChain, lineAndColumn)
+              val valueForTarget = starredLineCol match
+                case Some(starredPos) =>
+                    // starred element: bind the tail tmp[i:]
+                    val tailNode = accessChain match
+                      case index :: rest =>
+                          createIndexAccess(
+                            createIndexAccessChain(
+                              createIdentifierNode(tmpVariableName, Load, lineAndColumn),
+                              rest,
+                              lineAndColumn
+                            ),
+                            createSliceCall(
+                              Some(nodeBuilder.numberLiteralNode(index, starredPos)),
+                              None,
+                              None,
+                              starredPos
+                            ),
+                            starredPos
+                          )
+                      case Nil =>
+                          createSliceCall(None, None, None, starredPos)
+                    createStarredUnpackOperatorCall(tailNode, starredPos)
+                case None =>
+                    createIndexAccessChain(
+                      createIdentifierNode(tmpVariableName, Load, lineAndColumn),
+                      accessChain,
+                      lineAndColumn
+                    )
 
               val targetAssignNode =
-                  createAssignment(targetNode, indexTmpIdentifierNode, lineAndColumn)
+                  createAssignment(targetNode, valueForTarget, lineAndColumn)
               loweredAssignNodes.append(targetAssignNode)
           }
         }
         loweredAssignNodes
 
-  protected def getTargetsWithAccessChains(target: ast.iexpr): Iterable[(ast.iexpr, List[Int])] =
-    val result = mutable.ArrayBuffer.empty[(ast.iexpr, List[Int])]
-    getTargetsInternal(target, Nil)
+  /** One flattened assignment target: the target expression, the positional access chain leading to
+    * it, and — for starred elements — the position of the `*` (None for plain targets).
+    */
+  protected def getTargetsWithAccessChains(
+    target: ast.iexpr
+  ): Iterable[(ast.iexpr, List[Int], Option[LineAndColumn])] =
+    val result = mutable.ArrayBuffer.empty[(ast.iexpr, List[Int], Option[LineAndColumn])]
 
     def getTargetsInternal(target: ast.iexpr, indexChain: List[Int]): Unit =
         target match
@@ -199,9 +231,12 @@ trait PythonAstVisitorHelpers:
                 getTargetsInternal(element, index :: indexChain)
                 index += 1
               }
+          case starred: ast.Starred =>
+              result.append((starred.value, indexChain, Some(lineAndColOf(starred))))
           case _ =>
-              result.append((target, indexChain))
+              result.append((target, indexChain, None))
 
+    getTargetsInternal(target, Nil)
     result
   end getTargetsWithAccessChains
 
@@ -489,6 +524,46 @@ trait PythonAstVisitorHelpers:
     )
 
     addAstChildrenAsArguments(callNode, 1, unpackOperand)
+    callNode
+
+  /** The loop condition of the for-lowering: "iterator has a next element (or raises)". Used to be
+    * an UNKNOWN node; a real operator call keeps the iterator variable in the dataflow.
+    */
+  protected def createIteratorNonEmptyCall(
+    iteratorVariableName: String,
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+    val iteratorNode = createIdentifierNode(iteratorVariableName, Load, lineAndColumn)
+    createStaticCall(
+      "<operator>.iteratorNonEmpty",
+      "<operator>.iteratorNonEmpty",
+      lineAndColumn,
+      iteratorNode :: Nil,
+      Nil
+    )
+
+  /** `<operator>.slice(lower?, upper?, step?)` — the slice specifier used as the index operand of
+    * an indexAccess (`m[1:2]` -> `indexAccess(m, slice(1, 2))`) or of a starred-unpack tail. Absent
+    * bounds contribute no argument, mirroring Python's own slice semantics.
+    */
+  protected def createSliceCall(
+    lower: Option[NewNode],
+    upper: Option[NewNode],
+    step: Option[NewNode],
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+    val argNodes                              = lower.toList ++ upper.toList ++ step.toList
+    def codeOfOpt(n: Option[NewNode]): String = n.map(codeOf).getOrElse("")
+    val code = codeOfOpt(lower) + ":" + codeOfOpt(upper) +
+        (if step.isDefined then ":" + codeOfOpt(step) else "")
+    val callNode = nodeBuilder.callNode(
+      code,
+      "<operator>.slice",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColumn
+    )
+
+    addAstChildrenAsArguments(callNode, 1, argNodes)
     callNode
 
   protected def createAssignment(

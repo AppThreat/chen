@@ -25,7 +25,7 @@ class FragmentSpliceStitchTests extends AnyWordSpec with Matchers:
     val diff  = new DiffGraphBuilder
     val m     = NewMethod().name("foo").fullName("foo").signature("sig").filename("a.c").order(1)
     val block = NewBlock().typeFullName("ANY").order(1)
-    val call  = NewCall().name("bar").methodFullName("bar").signature("s")
+    val call = NewCall().name("bar").methodFullName("bar").signature("s")
         .dispatchType(DispatchTypes.STATIC_DISPATCH).code("bar(x)").order(1)
     val arg = NewIdentifier().name("x").code("x").argumentIndex(1).order(1)
     diff.addNode(m); diff.addNode(block); diff.addNode(call); diff.addNode(arg)
@@ -34,7 +34,6 @@ class FragmentSpliceStitchTests extends AnyWordSpec with Matchers:
     diff.addEdge(call, arg, EdgeTypes.AST)
     diff.addEdge(call, arg, EdgeTypes.ARGUMENT)
     diff
-  end unitFoo
 
   /** Unit b.c: declares `bar`. */
   private def unitBar(): DiffGraphBuilder =
@@ -44,7 +43,6 @@ class FragmentSpliceStitchTests extends AnyWordSpec with Matchers:
     diff.addNode(m); diff.addNode(block)
     diff.addEdge(m, block, EdgeTypes.AST)
     diff
-  end unitBar
 
   "FragmentSplicePass + StitchPass" should:
     "restore units from fragments by direct splice and link them across units" in:

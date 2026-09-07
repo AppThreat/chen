@@ -1,23 +1,30 @@
 package io.appthreat.jimple2cpg.querying.dataflow
 
 import io.appthreat.jimple2cpg.testfixtures.{JimpleDataFlowCodeToCpgSuite, JimpleDataflowTestCpg}
-import io.appthreat.dataflowengineoss.language._
+import io.appthreat.dataflowengineoss.language.*
 import io.appthreat.dataflowengineoss.semanticsloader.FlowSemantic
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.nodes.Call
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class SemanticTests
     extends JimpleDataFlowCodeToCpgSuite(extraFlows =
-      List(
-        FlowSemantic.from("Test.sanitize:java.lang.String(java.lang.String)", List((0, 0), (1, 1))),
-        FlowSemantic.from("java.nio.file.Paths.get:.*\\(java.lang.String,.*\\)", List.empty, regex = true)
-      )
-    ) {
+        List(
+          FlowSemantic.from(
+            "Test.sanitize:java.lang.String(java.lang.String)",
+            List((0, 0), (1, 1))
+          ),
+          FlowSemantic.from(
+            "java.nio.file.Paths.get:.*\\(java.lang.String,.*\\)",
+            List.empty,
+            regex = true
+          )
+        )
+    ):
 
   "Dataflow through custom semantics" should {
-    lazy implicit val cpg: JimpleDataflowTestCpg = code(
-      """
+      lazy implicit val cpg: JimpleDataflowTestCpg = code(
+        """
       |import java.nio.file.Paths;
       |import java.net.URI;
       |
@@ -66,37 +73,37 @@ class SemanticTests
       |     return s;
       | }
       |}""".stripMargin,
-      "Test.java"
-    )
+        "Test.java"
+      )
 
-    "find a path" in {
-      val (source, sink) = getConstSourceSink("test1")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path" in {
+          val (source, sink) = getConstSourceSink("test1")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "be kill in sanitizer" in {
-      val (source, sink) = getConstSourceSink("test2")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "be kill in sanitizer" in {
+          val (source, sink) = getConstSourceSink("test2")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "taints return" in {
-      val (source, sink) = getConstSourceSink("test3")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "taints return" in {
+          val (source, sink) = getConstSourceSink("test3")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "be killed" in {
-      val (source, sink) = getConstSourceSink("test4")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "be killed" in {
+          val (source, sink) = getConstSourceSink("test4")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "follow taint rules" in {
-      val (source, sink) = getConstSourceSink("test5")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "follow taint rules" in {
+          val (source, sink) = getConstSourceSink("test5")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
   }
 
-    "Reflection Type Inference" should {
+  "Reflection Type Inference" should {
 
       lazy implicit val cpg: JimpleDataflowTestCpg = code(
         """
@@ -189,4 +196,4 @@ class SemanticTests
           chainedResultSink.reachableBy(chainedResultSource).size should be > 0
       }
   }
-}
+end SemanticTests

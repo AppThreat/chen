@@ -3,13 +3,13 @@ package io.appthreat.jimple2cpg.querying.dataflow
 import io.appthreat.jimple2cpg.testfixtures.JimpleDataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class FunctionCallTests extends JimpleDataFlowCodeToCpgSuite {
+class FunctionCallTests extends JimpleDataFlowCodeToCpgSuite:
 
   "dataflow through function calls" should {
 
-    lazy implicit val cpg: Cpg = code("""
+      lazy implicit val cpg: Cpg = code("""
         |class Foo {
         |    public static void printSimpleString(String s) {
         |        System.out.println(s);
@@ -146,93 +146,93 @@ class FunctionCallTests extends JimpleDataFlowCodeToCpgSuite {
         |}
         |""".stripMargin)
 
-    "find a path directly via a function argument" in {
-      val (source, sink) = getMultiFnSourceSink("test1", "printSimpleString")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path directly via a function argument" in {
+          val (source, sink) = getMultiFnSourceSink("test1", "printSimpleString")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path via a variable and function argument" in {
-      val (source, sink) = getMultiFnSourceSink("test2", "printSimpleString")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path via a variable and function argument" in {
+          val (source, sink) = getMultiFnSourceSink("test2", "printSimpleString")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path with an operation as an argument" in {
-      val (source, sink) = getMultiFnSourceSink("test3", "printSimpleString")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path with an operation as an argument" in {
+          val (source, sink) = getMultiFnSourceSink("test3", "printSimpleString")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path when the parameter is reassigned" in {
-      val (source, sink) = getMultiFnSourceSink("test4", "printStringReassign")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path when the parameter is reassigned" in {
+          val (source, sink) = getMultiFnSourceSink("test4", "printStringReassign")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path when a prefix is prepended to the parameter" in {
-      val (source, sink) = getMultiFnSourceSink("test5", "printStringPrefix")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path when a prefix is prepended to the parameter" in {
+          val (source, sink) = getMultiFnSourceSink("test5", "printStringPrefix")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path of depth 3" in {
-      val (source, sink) = getMultiFnSourceSink("test6", "printSimpleString")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path of depth 3" in {
+          val (source, sink) = getMultiFnSourceSink("test6", "printSimpleString")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where a `MALICIOUS` second parameter is cat'd with a `SAFE` first" in {
-      val (source, sink) = getMultiFnSourceSink("test7", "cat")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where a `MALICIOUS` second parameter is cat'd with a `SAFE` first" in {
+          val (source, sink) = getMultiFnSourceSink("test7", "cat")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where a `MALICIOUS` first parameter is cat'd with a `SAFE` second" in {
-      val (source, sink) = getMultiFnSourceSink("test8", "cat")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where a `MALICIOUS` first parameter is cat'd with a `SAFE` second" in {
+          val (source, sink) = getMultiFnSourceSink("test8", "cat")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where the `MALICIOUS` first parameter is printed" in {
-      val (source, sink) = getMultiFnSourceSink("test9", "first")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where the `MALICIOUS` first parameter is printed" in {
+          val (source, sink) = getMultiFnSourceSink("test9", "first")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where the `MALICIOUS` second parameter is not printed" in {
-      val (source, sink) = getMultiFnSourceSink("test10", "first")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "find a path where the `MALICIOUS` second parameter is not printed" in {
+          val (source, sink) = getMultiFnSourceSink("test10", "first")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path where the `MALICIOUS` first parameter is not printed" in {
-      val (source, sink) = getMultiFnSourceSink("test11", "second")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "find a path where the `MALICIOUS` first parameter is not printed" in {
+          val (source, sink) = getMultiFnSourceSink("test11", "second")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path where the `MALICIOUS` second parameter is printed" in {
-      val (source, sink) = getMultiFnSourceSink("test12", "second")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where the `MALICIOUS` second parameter is printed" in {
+          val (source, sink) = getMultiFnSourceSink("test12", "second")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where `MALICIOUS` is returned directly from a called function" in {
-      val (source, sink) = getMultiFnSourceSink("getMalicious", "test13")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where `MALICIOUS` is returned directly from a called function" in {
+          val (source, sink) = getMultiFnSourceSink("getMalicious", "test13")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "find a path where `MALICIOUS` is added to safe input via a called function" in {
-      val (source, sink) = getConstSourceSink("test14")
-      sink.reachableBy(source).size shouldBe 1
-    }
+      "find a path where `MALICIOUS` is added to safe input via a called function" in {
+          val (source, sink) = getConstSourceSink("test14")
+          sink.reachableBy(source).size shouldBe 1
+      }
 
-    "not find a path where the `MALICIOUS` arg is overwritten before the sink" in {
-      val (source, sink) = getMultiFnSourceSink("test15", "overwrite")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      "not find a path where the `MALICIOUS` arg is overwritten before the sink" in {
+          val (source, sink) = getMultiFnSourceSink("test15", "overwrite")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    // TODO: One path is found. This isn't exactly the expected behaviour, but is on par with c2cpg.
-    "not find a path where `MALICIOUS` arg is not included in return" in {
-      val (source, sink) = getConstSourceSink("test16")
-      sink.reachableBy(source).size shouldBe 0
-    }
+      // TODO: One path is found. This isn't exactly the expected behaviour, but is on par with c2cpg.
+      "not find a path where `MALICIOUS` arg is not included in return" in {
+          val (source, sink) = getConstSourceSink("test16")
+          sink.reachableBy(source).size shouldBe 0
+      }
 
-    "find a path through a cast expression" in {
-      def source = cpg.method.name("test17").parameter.index(1)
+      "find a path through a cast expression" in {
+          def source = cpg.method.name("test17").parameter.index(1)
 
-      def sink = cpg.method.name("test17").methodReturn
+          def sink = cpg.method.name("test17").methodReturn
 
-      sink.reachableBy(source).size shouldBe 1
-    }
+          sink.reachableBy(source).size shouldBe 1
+      }
   }
-}
+end FunctionCallTests

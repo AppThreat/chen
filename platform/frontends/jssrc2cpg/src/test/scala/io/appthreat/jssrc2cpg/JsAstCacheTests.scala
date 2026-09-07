@@ -9,8 +9,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /** The jssrc2cpg per-file AST cache under Flux (CHEN3_PLAN §3/§4). With fragment caching enabled
   * and a fixed astgen output directory (so JSON paths are stable, as with CHEN_ASTGEN_OUT), a cold
-  * `createCpg` parses and writes per-file `.frag` mini-graphs, and a warm `createCpg` reconstructs a
-  * structurally identical CPG from the cache (skipping Babel parsing + AST creation).
+  * `createCpg` parses and writes per-file `.frag` mini-graphs, and a warm `createCpg` reconstructs
+  * a structurally identical CPG from the cache (skipping Babel parsing + AST creation).
   *
   * JS per-file diffs reference BINDING/LOCAL nodes only via edges; the fragment codec now treats
   * such edge-endpoint detached nodes as fragment-local (mirroring applyDiff), so these diffs are
@@ -32,9 +32,9 @@ class JsAstCacheTests extends AnyWordSpec with Matchers:
           out.deleteOnExit()
           new JsSrc2Cpg().createCpg(
             Config()
-              .withInputPath(src.pathAsString)
-              .withOutputPath(out.pathAsString)
-              .withAstGenOutDir(astgenOut.pathAsString)
+                .withInputPath(src.pathAsString)
+                .withOutputPath(out.pathAsString)
+                .withAstGenOutDir(astgenOut.pathAsString)
           ).get
 
         val cold       = build()
@@ -62,4 +62,5 @@ class JsAstCacheTests extends AnyWordSpec with Matchers:
         CacheControl.disableFragments()
         src.delete(swallowIOExceptions = true)
         astgenOut.delete(swallowIOExceptions = true)
+      end try
 end JsAstCacheTests

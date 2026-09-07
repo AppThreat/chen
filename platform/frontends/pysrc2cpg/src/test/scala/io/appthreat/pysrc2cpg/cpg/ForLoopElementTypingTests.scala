@@ -3,15 +3,15 @@ package io.appthreat.pysrc2cpg.cpg
 import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
-/** For-loop element typing: `for x in coll` lowers to
-  * `tmp = coll.__iter__(); x = tmp.__next__()`, so the loop variable's type must be recovered by
-  * unwrapping the iterated collection's generic element type.
+/** For-loop element typing: `for x in coll` lowers to `tmp = coll.__iter__(); x = tmp.__next__()`,
+  * so the loop variable's type must be recovered by unwrapping the iterated collection's generic
+  * element type.
   */
-class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false) {
+class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false):
 
   "iterating a builtin-generic list parameter" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class AppConfig:
         |    def ready(self):
         |        pass
@@ -19,20 +19,20 @@ class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false
         |    for c in configs:
         |        c.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve c.ready() to the element method" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.AppConfig.ready")
-    }
-    "link the call into the callgraph" in {
-      cpg.method.name("ready").caller.name.toSet should contain("f")
-    }
+        "t.py"
+      )
+      "resolve c.ready() to the element method" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.AppConfig.ready")
+      }
+      "link the call into the callgraph" in {
+          cpg.method.name("ready").caller.name.toSet should contain("f")
+      }
   }
 
   "iterating a typing.List parameter" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |from typing import List
         |class AppConfig:
         |    def ready(self):
@@ -41,17 +41,17 @@ class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false
         |    for c in configs:
         |        c.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve c.ready() to the element method" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.AppConfig.ready")
-    }
+        "t.py"
+      )
+      "resolve c.ready() to the element method" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.AppConfig.ready")
+      }
   }
 
   "iterating a set parameter" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class AppConfig:
         |    def ready(self):
         |        pass
@@ -59,17 +59,17 @@ class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false
         |    for c in configs:
         |        c.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve c.ready() to the element method" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.AppConfig.ready")
-    }
+        "t.py"
+      )
+      "resolve c.ready() to the element method" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.AppConfig.ready")
+      }
   }
 
   "iterating a dict parameter yields keys" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class AppLabel:
         |    def upper(self):
         |        pass
@@ -79,17 +79,17 @@ class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false
         |    for label in configs:
         |        label.upper()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve the loop var to the key type" in {
-      cpg.call.name("upper").methodFullName.toSet should
-          contain("t.py:<module>.AppLabel.upper")
-    }
+        "t.py"
+      )
+      "resolve the loop var to the key type" in {
+          cpg.call.name("upper").methodFullName.toSet should
+              contain("t.AppLabel.upper")
+      }
   }
 
   "iterating a tuple parameter" should {
-    lazy val cpg = code(
-      """
+      lazy val cpg = code(
+        """
         |class AppConfig:
         |    def ready(self):
         |        pass
@@ -97,11 +97,11 @@ class ForLoopElementTypingTests extends PySrc2CpgFixture(withOssDataflow = false
         |    for c in configs:
         |        c.ready()
         |""".stripMargin,
-      "t.py"
-    )
-    "resolve c.ready() to the element method" in {
-      cpg.call.name("ready").methodFullName.toSet should
-          contain("t.py:<module>.AppConfig.ready")
-    }
+        "t.py"
+      )
+      "resolve c.ready() to the element method" in {
+          cpg.call.name("ready").methodFullName.toSet should
+              contain("t.AppConfig.ready")
+      }
   }
-}
+end ForLoopElementTypingTests

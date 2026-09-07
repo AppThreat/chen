@@ -18,22 +18,19 @@ class Code2CpgFixture[T <: TestCpg](testCpgFactory: () => T)
     with Matchers
     with BeforeAndAfterAll
     with BeforeAndAfterEach
-    with Inside {
+    with Inside:
   private val cpgs = mutable.ArrayBuffer.empty[TestCpg]
 
-  def code(code: String): T = {
+  def code(code: String): T =
     val newCpg = testCpgFactory().moreCode(code)
     cpgs.append(newCpg)
     newCpg
-  }
 
-  def code(code: String, fileName: String): T = {
+  def code(code: String, fileName: String): T =
     val newCpg = testCpgFactory().moreCode(code, fileName)
     cpgs.append(newCpg)
     newCpg
-  }
 
-  override def afterAll(): Unit = {
-    cpgs.foreach(_.close())
-  }
-}
+  override def afterAll(): Unit =
+      cpgs.foreach(_.close())
+end Code2CpgFixture

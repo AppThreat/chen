@@ -7,36 +7,42 @@ import org.scalatest.wordspec.AnyWordSpec
 import better.files.File
 import scala.annotation.nowarn
 
-class DependencyResolverTests extends AnyWordSpec with Matchers {
+class DependencyResolverTests extends AnyWordSpec with Matchers:
 
-  private class Fixture(content: String, fileName: String, runningOnWindowsGitHubAction: Boolean = false) {
+  private class Fixture(
+    content: String,
+    fileName: String,
+    runningOnWindowsGitHubAction: Boolean = false
+  ):
     def test(
       testFunc: Option[collection.Seq[String]] => Unit,
       params: DependencyResolverParams = new DependencyResolverParams
-    ): Unit = {
-      if (runningOnWindowsGitHubAction) {
-        info("tests were cancelled because github actions windows doesn't support them for some unknown reason...")
-      } else {
-        File.usingTemporaryDirectory("DependencyResolverTests") { tmpDir =>
-          val outFile = tmpDir / fileName
-          outFile.createIfNotExists(createParents = true)
-          outFile.write(content)
-          val dependenciesResult = DependencyResolver.getDependencies(tmpDir.path, params)
-          testFunc(dependenciesResult)
-        }
-      }
-    }
-  }
+    ): Unit =
+        if runningOnWindowsGitHubAction then
+          info(
+            "tests were cancelled because github actions windows doesn't support them for some unknown reason..."
+          )
+        else
+          File.usingTemporaryDirectory("DependencyResolverTests") { tmpDir =>
+            val outFile = tmpDir / fileName
+            outFile.createIfNotExists(createParents = true)
+            outFile.write(content)
+            val dependenciesResult = DependencyResolver.getDependencies(tmpDir.path, params)
+            testFunc(dependenciesResult)
+          }
+  end Fixture
 
   "test maven dependency resolution" ignore {
-    // check that `mvn` is available - otherwise test will fail with only some logged warnings...
-    withClue("`mvn` must be installed in order for this test to work...") {
-      ExternalCommand.run("mvn --version", ".").get.exists(_.contains("Apache Maven")) shouldBe true
-    }
+      // check that `mvn` is available - otherwise test will fail with only some logged warnings...
+      withClue("`mvn` must be installed in order for this test to work...") {
+          ExternalCommand.run("mvn --version", ".").get.exists(
+            _.contains("Apache Maven")
+          ) shouldBe true
+      }
 
-    @nowarn // otherwise scalac warns that this might be an interpolated expression
-    val fixture = new Fixture(
-      """
+      @nowarn // otherwise scalac warns that this might be an interpolated expression
+      val fixture = new Fixture(
+        """
         |<project xmlns="http://maven.apache.org/POM/4.0.0"
         |         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         |         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -77,13 +83,13 @@ class DependencyResolverTests extends AnyWordSpec with Matchers {
         |    </dependencies>
         |</project>
         |""".stripMargin,
-      "subdir/pom.xml"
-    )
+        "subdir/pom.xml"
+      )
 
-    fixture.test { dependenciesResult =>
-      dependenciesResult should not be empty
-      val dependencyFiles = dependenciesResult.getOrElse(Seq())
-      dependencyFiles.find(_.endsWith("slf4j-api-1.7.36.jar")) should not be empty
-    }
+      fixture.test { dependenciesResult =>
+        dependenciesResult should not be empty
+        val dependencyFiles = dependenciesResult.getOrElse(Seq())
+        dependencyFiles.find(_.endsWith("slf4j-api-1.7.36.jar")) should not be empty
+      }
   }
-}
+end DependencyResolverTests

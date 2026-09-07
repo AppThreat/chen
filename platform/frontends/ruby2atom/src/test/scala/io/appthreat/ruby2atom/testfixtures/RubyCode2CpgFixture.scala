@@ -21,14 +21,14 @@ import scala.util.Using
 
 /** Builds real CPGs for ruby2atom tests from committed fixture pairs under
   * `src/test/resources/ruby`: each fixture is a Ruby source file plus the JSON emitted for it by
-  * `rbastgen` (ruby_ast_gen v2.0.0, branch `feat/ruby41`, see `resources/ruby/README.md`).
+  * `rbastgen` (ruby_ast_gen v2.1.0, see `resources/ruby/README.md`).
   *
   * The harness is modelled on php2atom's `PhpCode2CpgFixture` — php2atom is the frontend sharing
   * ruby2atom's architecture (a generator binary writes astgen JSON, the frontend rebuilds an
   * intermediate AST from it). It differs in one deliberate way: instead of shelling out to
-  * `rbastgen` at test time, it ingests the committed JSON. The released `rbastgen` on a
-  * developer's PATH may lag the generator branch these fixtures were generated with, and the
-  * committed JSON pins the exact bytes the tests were written against. Regenerate with
+  * `rbastgen` at test time, it ingests the committed JSON. The released `rbastgen` on a developer's
+  * PATH may lag the generator branch these fixtures were generated with, and the committed JSON
+  * pins the exact bytes the tests were written against. Regenerate with
   * `resources/ruby/regenerate_fixtures.sh`.
   */
 object Ruby2AtomFixture:
@@ -53,14 +53,14 @@ object Ruby2AtomFixture:
       new ConfigFileCreationPass(cpg).createAndApply()
       // Phase 1: parse every fixture, aggregating the unknown-type reports.
       val parsed = fixtureNames.toList.map { fixtureName =>
-          val jsonPath     = materializeFixture(fixtureName, tmpDir)
-          val parserResult = RubyJsonParser.readFile(jsonPath)
-          val creator      = new RubyJsonToNodeCreator(fileName = parserResult.fullPath)
-          val program      = creator.visitProgram(parserResult.json)
-          creator.unknownTypeReport.foreach { case (k, n) =>
-              allUnknowns.updateWith(k)((old) => Some(old.getOrElse(0) + n))
-          }
-          (parserResult.filename, parserResult.fullPath, program)
+        val jsonPath     = materializeFixture(fixtureName, tmpDir)
+        val parserResult = RubyJsonParser.readFile(jsonPath)
+        val creator      = new RubyJsonToNodeCreator(fileName = parserResult.fullPath)
+        val program      = creator.visitProgram(parserResult.json)
+        creator.unknownTypeReport.foreach { case (k, n) =>
+            allUnknowns.updateWith(k)((old) => Some(old.getOrElse(0) + n))
+        }
+        (parserResult.filename, parserResult.fullPath, program)
       }
       // Phase 2: the program summary feeds scope resolution during AST creation, mirroring
       // Ruby2Atom.createCpgAction.
@@ -68,14 +68,14 @@ object Ruby2AtomFixture:
         parsed.map((relPath, _, program) => relPath -> program)
       )
       parsed.foreach { (_, fullPath, program) =>
-          val astCreator = new AstCreator(
-            fileName = fullPath,
-            projectRoot = Option(tmpDir.toString),
-            programSummary = programSummary,
-            enableFileContents = false,
-            rootNode = program
-          )(using ValidationMode.Enabled)
-          BatchedUpdate.applyDiff(cpg.graph, astCreator.createAst())
+        val astCreator = new AstCreator(
+          fileName = fullPath,
+          projectRoot = Option(tmpDir.toString),
+          programSummary = programSummary,
+          enableFileContents = false,
+          rootNode = program
+        )(using ValidationMode.Enabled)
+        BatchedUpdate.applyDiff(cpg.graph, astCreator.createAst())
       }
       // Pass order mirrors Ruby2Atom.createCpgAction: the import passes add nodes whose types
       // TypeNodePass then materializes, so TypeNodePass runs last.
@@ -90,6 +90,7 @@ object Ruby2AtomFixture:
           throw t
     finally
       deleteRecursively(tmpDir)
+    end try
   end build
 
   /** Copies `<name>.rb` and its generated `<name>.rb.json` from the test resources into `tmpDir`,
@@ -97,9 +98,9 @@ object Ruby2AtomFixture:
     * source from that absolute path, exactly as a real ingest does.
     */
   private def materializeFixture(fixtureName: String, tmpDir: Path): Path =
-    val sourceResource  = s"/ruby/$fixtureName.rb"
-    val resourceStream  = Option(getClass.getResourceAsStream(s"/ruby/$fixtureName.rb.json"))
-    val sourceStream    = Option(getClass.getResourceAsStream(sourceResource))
+    val sourceResource = s"/ruby/$fixtureName.rb"
+    val resourceStream = Option(getClass.getResourceAsStream(s"/ruby/$fixtureName.rb.json"))
+    val sourceStream   = Option(getClass.getResourceAsStream(sourceResource))
     require(resourceStream.isDefined, s"missing test resource $fixtureName.rb.json")
     require(sourceStream.isDefined, s"missing test resource $fixtureName.rb")
 
@@ -108,32 +109,30 @@ object Ruby2AtomFixture:
     Using.resource(sourceStream.get)(Files.copy(_, targetSource))
     val targetJson = tmpDir.resolve(s"$fixtureName.rb.json")
     Using.resource(resourceStream.get) { jsonStream =>
-        val json       = ujson.read(new String(jsonStream.readAllBytes(), "UTF-8"))
-        json(ParserKeys.FilePath) = targetSource.toAbsolutePath.toString
-        Files.write(targetJson, ujson.write(json).getBytes("UTF-8"))
+      val json = ujson.read(new String(jsonStream.readAllBytes(), "UTF-8"))
+      json(ParserKeys.FilePath) = targetSource.toAbsolutePath.toString
+      Files.write(targetJson, ujson.write(json).getBytes("UTF-8"))
     }
     targetJson
-  end materializeFixture
 
   private def deleteRecursively(dir: Path): Unit =
-    if Files.exists(dir) then
-      Files.walk(dir).sorted(java.util.Comparator.reverseOrder[Path]()).forEach(Files.delete(_))
+      if Files.exists(dir) then
+        Files.walk(dir).sorted(java.util.Comparator.reverseOrder[Path]()).forEach(Files.delete(_))
 
-  /** Parses fixtures without building a CPG, as (require-style relative path, program) pairs -
-    * the input shape of `RubyProgramSummaryBuilder.build`.
+  /** Parses fixtures without building a CPG, as (require-style relative path, program) pairs - the
+    * input shape of `RubyProgramSummaryBuilder.build`.
     */
   def parse(fixtureNames: String*): List[(String, RubyIntermediateAst.StatementList)] =
     val tmpDir = Files.createTempDirectory("ruby2atomParse")
     try
-      fixtureNames.toList.map { fixtureName =>
-          val jsonPath      = materializeFixture(fixtureName, tmpDir)
-          val parserResult  = RubyJsonParser.readFile(jsonPath)
-          val program       = new RubyJsonToNodeCreator(fileName = parserResult.fullPath)
+        fixtureNames.toList.map { fixtureName =>
+          val jsonPath     = materializeFixture(fixtureName, tmpDir)
+          val parserResult = RubyJsonParser.readFile(jsonPath)
+          val program = new RubyJsonToNodeCreator(fileName = parserResult.fullPath)
               .visitProgram(parserResult.json)
           parserResult.filename.stripSuffix(".rb") -> program
-      }
+        }
     finally deleteRecursively(tmpDir)
-  end parse
 end Ruby2AtomFixture
 
 /** Base class for ruby2atom specs: tests call `fixture("it_block")` to obtain a CPG built from
@@ -168,7 +167,6 @@ class RubyCode2CpgFixture
     val built = Ruby2AtomFixture.build(fixtureNames*)
     builtCpgs.append(built.cpg)
     (built.cpg, built.unknownTypes)
-  end fixtureWithReport
 
   override def afterAll(): Unit =
     builtCpgs.foreach(_.close())

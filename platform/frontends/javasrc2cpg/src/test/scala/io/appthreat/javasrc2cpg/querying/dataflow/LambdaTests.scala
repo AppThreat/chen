@@ -1,13 +1,13 @@
 package io.appthreat.javasrc2cpg.querying.dataflow
 
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.appthreat.dataflowengineoss.language._
-import io.shiftleft.semanticcpg.language._
+import io.appthreat.dataflowengineoss.language.*
+import io.shiftleft.semanticcpg.language.*
 
-class LambdaTests extends JavaSrcCode2CpgFixture(withOssDataflow = true) {
+class LambdaTests extends JavaSrcCode2CpgFixture(withOssDataflow = true):
 
   "dataflow through a simple lambda call should be found" in {
-    val cpg = code("""
+      val cpg = code("""
         |import java.util.function.Consumer;
         |
         |public class Foo {
@@ -25,16 +25,16 @@ class LambdaTests extends JavaSrcCode2CpgFixture(withOssDataflow = true) {
         |}
         |""".stripMargin)
 
-    def source = cpg.method.name("test").parameter.name("input")
-    def sink   = cpg.method.name("sink").parameter.name("s")
+      def source = cpg.method.name("test").parameter.name("input")
+      def sink   = cpg.method.name("sink").parameter.name("s")
 
-    pendingUntilFixed {
-      sink.reachableBy(source).isEmpty shouldBe false
-    }
+      pendingUntilFixed {
+          sink.reachableBy(source).isEmpty shouldBe false
+      }
   }
 
   "dataflow around lambda in map" should {
-    val cpg = code("""
+      val cpg = code("""
         |import java.util.ArrayList;
         |import java.util.List;
         |
@@ -54,33 +54,33 @@ class LambdaTests extends JavaSrcCode2CpgFixture(withOssDataflow = true) {
         |}
         |""".stripMargin)
 
-    "be found for case 1" in {
-      def source = cpg.identifier("item")
+      "be found for case 1" in {
+          def source = cpg.identifier("item")
 
-      def sink = cpg.call("sink1")
+          def sink = cpg.call("sink1")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
 
-    "be found for case 2" in {
-      def source = cpg.identifier("myValue").head
+      "be found for case 2" in {
+          def source = cpg.identifier("myValue").head
 
-      def sink = cpg.call("sink2")
+          def sink = cpg.call("sink2")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
 
-    "be found for case 3" in {
-      def source = cpg.identifier("userPayload").head
+      "be found for case 3" in {
+          def source = cpg.identifier("userPayload").head
 
-      def sink = cpg.call("sink3")
+          def sink = cpg.call("sink3")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
   }
 
   "dataflow around lambda in foreach" should {
-    val cpg = code("""
+      val cpg = code("""
         |import java.util.ArrayList;
         |import java.util.List;
         |
@@ -102,37 +102,36 @@ class LambdaTests extends JavaSrcCode2CpgFixture(withOssDataflow = true) {
         |}
         |""".stripMargin)
 
-    "be found for case 1" in {
-      def source = cpg.identifier("item")
+      "be found for case 1" in {
+          def source = cpg.identifier("item")
 
-      def sink = cpg.call("sink1")
+          def sink = cpg.call("sink1")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
 
-    "be found for case 2" in {
-      def source = cpg.identifier("myValue").head
+      "be found for case 2" in {
+          def source = cpg.identifier("myValue").head
 
-      def sink = cpg.call("sink2")
+          def sink = cpg.call("sink2")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
 
-    "be found for case 3" in {
-      def source = cpg.identifier("userNamesList").head
+      "be found for case 3" in {
+          def source = cpg.identifier("userNamesList").head
 
-      def sink = cpg.call("sink3")
+          def sink = cpg.call("sink3")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
 
-    "be found for case 4" in {
-      def source = cpg.identifier("userPayload").head
+      "be found for case 4" in {
+          def source = cpg.identifier("userPayload").head
 
-      def sink = cpg.call("sink4")
+          def sink = cpg.call("sink4")
 
-      sink.reachableByFlows(source).isEmpty shouldBe false
-    }
+          sink.reachableByFlows(source).isEmpty shouldBe false
+      }
   }
-
-}
+end LambdaTests

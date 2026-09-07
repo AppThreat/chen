@@ -12,7 +12,8 @@ import java.util.regex.Pattern
 import scala.collection.mutable
 
 /** Tags PHP framework taint SOURCES and SINKS on the CPG from the vocabulary declared in
-  * [[PhpFrameworkSemantics]] (php-support-upgrade design §2.7, Requirements 6.2/6.3/6.4).
+  * [[io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics]] (php-support-upgrade design
+  * §2.7, Requirements 6.2/6.3/6.4).
   *
   * Until this pass existed the source/sink half of the framework taint model was a set of unused
   * constants: only the sanitizer half (`DefaultSemantics.phpFlows`) and route/entrypoint tagging
@@ -36,10 +37,9 @@ import scala.collection.mutable
   *   1. qualified `methodFullName` matches (`Request::input`, `DB::raw`) are accepted outright, and
   *      also accepted when namespace qualified (`\App\Http\Request::input`); 2. bare call names are
   *      accepted only when the call's RECEIVER looks like the right kind of object - a request
-  *      object for sources ([[Sources.requestReceiverRegex]]), a database handle or query builder
-  *      for sinks ([[Sinks.databaseReceiverRegex]]); 3. names distinctive enough to stand alone
-  *      (`echo`, `print`, `createQuery`, `createNativeQuery`) are accepted without a receiver
-  *      check.
+  *      object for sources (`Sources.requestReceiverRegex`), a database handle or query builder for
+  *      sinks (`Sinks.databaseReceiverRegex`); 3. names distinctive enough to stand alone (`echo`,
+  *      `print`, `createQuery`, `createNativeQuery`) are accepted without a receiver check.
   *
   * php2atom names an instance call `$request->input(...)` with `methodFullName`
   * `<unresolvedNamespace>\$request->input` and gives it a receiver whose `code` is

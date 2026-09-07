@@ -1,28 +1,28 @@
 package io.appthreat.x2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated._
+import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn
 import io.appthreat.x2cpg.passes.base.MethodDecoratorPass
 import io.appthreat.x2cpg.testfixtures.EmptyGraphFixture
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import overflowdb._
+import overflowdb.*
 
-class MethodDecoratorPassTests extends AnyWordSpec with Matchers {
+class MethodDecoratorPassTests extends AnyWordSpec with Matchers:
   "MethodDecoratorTest" in EmptyGraphFixture { graph =>
     val method = graph + NodeTypes.METHOD
     val parameterIn = graph
-      .+(
-        NodeTypes.METHOD_PARAMETER_IN,
-        Properties.CODE                -> "p1",
-        Properties.ORDER               -> 1,
-        Properties.NAME                -> "p1",
-        Properties.EVALUATION_STRATEGY -> EvaluationStrategies.BY_REFERENCE,
-        Properties.TYPE_FULL_NAME      -> "some.Type",
-        Properties.LINE_NUMBER         -> 10
-      )
-      .asInstanceOf[MethodParameterIn]
+        .+(
+          NodeTypes.METHOD_PARAMETER_IN,
+          Properties.CODE                -> "p1",
+          Properties.ORDER               -> 1,
+          Properties.NAME                -> "p1",
+          Properties.EVALUATION_STRATEGY -> EvaluationStrategies.BY_REFERENCE,
+          Properties.TYPE_FULL_NAME      -> "some.Type",
+          Properties.LINE_NUMBER         -> 10
+        )
+        .asInstanceOf[MethodParameterIn]
 
     method --- EdgeTypes.AST --> parameterIn
 
@@ -39,5 +39,4 @@ class MethodDecoratorPassTests extends AnyWordSpec with Matchers {
 
     parameterOut.method shouldBe method
   }
-
-}
+end MethodDecoratorPassTests

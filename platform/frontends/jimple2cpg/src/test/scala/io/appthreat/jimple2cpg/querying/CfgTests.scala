@@ -2,9 +2,9 @@ package io.appthreat.jimple2cpg.querying
 
 import io.appthreat.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class CfgTests extends JimpleCode2CpgFixture {
+class CfgTests extends JimpleCode2CpgFixture:
 
   lazy val cpg: Cpg = code("""
       |class Foo {
@@ -26,9 +26,9 @@ class CfgTests extends JimpleCode2CpgFixture {
     """.stripMargin).cpg
 
   "should find that sink is control dependent on condition" in {
-    val controllers = cpg.call("sink").controlledBy.isCall.toSetMutable
-    controllers.map(_.code) should contain("y >= 10")
-    controllers.map(_.code) should contain("x >= 5")
+      val controllers = cpg.call("sink").controlledBy.isCall.toSetMutable
+      controllers.map(_.code) should contain("y >= 10")
+      controllers.map(_.code) should contain("x >= 5")
   }
 
   // No control structure node on flat ast
@@ -41,7 +41,7 @@ class CfgTests extends JimpleCode2CpgFixture {
   //  }
 
   "should find sink(x) is dominated by `x < 5` and `y < 10`" in {
-    cpg.call("sink").dominatedBy.isCall.code.toSetMutable shouldBe Set("x >= 5", "y >= 10")
+      cpg.call("sink").dominatedBy.isCall.code.toSetMutable shouldBe Set("x >= 5", "y >= 10")
   }
 
   //  "should find that println post dominates correct nodes" in {
@@ -51,5 +51,4 @@ class CfgTests extends JimpleCode2CpgFixture {
   //  "should find that method does not post dominate anything" in {
   //    cpg.method("foo").postDominates.l.size shouldBe 0
   //  }
-
-}
+end CfgTests
