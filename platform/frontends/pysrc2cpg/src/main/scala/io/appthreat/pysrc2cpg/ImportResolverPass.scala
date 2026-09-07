@@ -8,13 +8,28 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
 import java.io.File as JFile
-import java.util.regex.{Matcher, Pattern}
+import java.util.regex.Pattern
 
 import scala.collection.mutable
 
 class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
 
   private lazy val root = cpg.metaData.root.headOption.getOrElse("").stripSuffix(JFile.separator)
+
+  /** The separator of every path this pass reasons about. FILE names in the graph are
+    * forward-slashed on every platform (see `Py2CpgOnFileSystem.ingested`), and so is anything
+    * derived from one: a module's package, an `__init__.py` candidate, a relative-import anchor.
+    *
+    * `java.io.File.separator` is NOT interchangeable with it. On Windows a test for the platform
+    * separator in `controller/urls.py` finds none, which reads as "this file sits at the input
+    * root" - so a relative `from . import views` anchors at the empty package and silently resolves
+    * to nothing. A real filesystem path entering this pass is normalised to this separator first,
+    * by [[toCpgPath]].
+    */
+  private val CpgSep = '/'
+
+  /** A real filesystem path, as a graph-space relative name. */
+  private def toCpgPath(path: String): String = path.replace(JFile.separatorChar, CpgSep)
 
   /** All `import(...)` calls of the graph, grouped by file name - the same reduction
     * [[PythonDependencyStubs.importsOf]] performs, but ONCE per pass instead of once per re-export
@@ -42,7 +57,9 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
         case x if x.isDirectory => x
         case x                  => x.parent
 
-      val relCurrDir = currDir.pathAsString.stripPrefix(root).stripPrefix(JFile.separator)
+      // `currDir` is a real filesystem path; the namespace it becomes is a graph-space name.
+      val relCurrDir =
+          toCpgPath(currDir.pathAsString.stripPrefix(root).stripPrefix(JFile.separator))
 
       (relCurrDir, importedEntity)
 
@@ -54,16 +71,12 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
   private def relativizeNamespace(path: String, fileName: String): String =
       if path.startsWith(".") then
         // TODO: pysrc2cpg does not link files to the correct namespace nodes
-        val sep = Matcher.quoteReplacement(JFile.separator)
         // The below gives us the full path of the relative "."
         val relativeNamespace =
-            if fileName.contains(JFile.separator) then
-              fileName.substring(0, fileName.lastIndexOf(JFile.separator)).replaceAll(
-                sep,
-                "."
-              )
+            if fileName.contains(CpgSep) then
+              fileName.substring(0, fileName.lastIndexOf(CpgSep)).replace(CpgSep, '.')
             else ""
-        (if path.length > 1 then relativeNamespace + path.replaceAll(sep, ".")
+        (if path.length > 1 then relativeNamespace + path.replace(CpgSep, '.')
          else relativeNamespace).stripPrefix(".")
       else path
 
@@ -184,7 +197,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
 
     implicit class CalleeAsInitExt(val name: String):
       def asInit: String = if name.contains("__init__.py") then name
-      else name.replace(".py", s"${JFile.separator}__init__.py")
+      else name.replace(".py", s"${CpgSep}__init__.py")
 
       def withInit: Seq[String] = Seq(name, name.asInit)
 
