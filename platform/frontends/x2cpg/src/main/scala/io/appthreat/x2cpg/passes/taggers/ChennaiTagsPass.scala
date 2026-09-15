@@ -359,13 +359,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * could be keyed on instead.
     *
     * Precision comes from three independent controls, because a bad route is not merely a noisy tag
-    * - it surfaces in user-visible slice output as an application route:
-    *   - a router-package import is required at all (a `{ path, children }` file tree or a `{ path,
-    *     loader }` webpack config in a router-less project is never looked at);
-    *   - a strong sibling key (something to render or somewhere to go) admits any path, while a
-    *     weak-only record (`children`/`loader`/`action`, which also describe trees and menus) must
-    *     additionally have a route-shaped path;
-    *   - a relative filesystem path value (`./`, `../`) is never a route.
+    *   - it surfaces in user-visible slice output as an application route:
+    *     - a router-package import is required at all (a `{ path, children }` file tree or a `{
+    *       path, loader }` webpack config in a router-less project is never looked at);
+    *     - a strong sibling key (something to render or somewhere to go) admits any path, while a
+    *       weak-only record (`children`/`loader`/`action`, which also describe trees and menus)
+    *       must additionally have a route-shaped path;
+    *     - a relative filesystem path value (`./`, `../`) is never a route.
     *
     * The conservative edge of the middle control: an Angular parent route written with a bare
     * relative path and no component - `{ path: 'admin', children: [...] }` - is not recognised,
