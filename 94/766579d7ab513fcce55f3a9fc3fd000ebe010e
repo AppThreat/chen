@@ -1,0 +1,61 @@
+platform/frontends/jssrc2cpg/src/test/resources/svelte5/README.md
+  h_6a4cc5cdf68def 1-26
+platform/frontends/jssrc2cpg/src/test/resources/svelte5/Counter.svelte.typemap
+  h_6a4cc5cdf68def 1
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ImportResolverPass.scala
+  h_6a4cc5cdf68def 18-38,55-58,62-67
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForExpressionsCreator.scala
+  h_6a4cc5cdf68def 81-93,100,105,121,135
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteKitRouteTagsTest.scala
+  h_6a4cc5cdf68def 1-212
+build.sbt
+  h_6a4cc5cdf68def 3
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 7-8,60-91,164,167-248
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteDomAstCreationPassTest.scala
+  h_6a4cc5cdf68def 1-183
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTemplateDomCreator.scala
+  h_6a4cc5cdf68def 6-7,10-16,20-38,125,134-168
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/dataflow/DataflowTest.scala
+  h_6a4cc5cdf68def 707-779
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/Svelte5ShapeAstCreationPassTest.scala
+  h_6a4cc5cdf68def 1-57
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 25-26,152-206,208-248,258-260
+  h_6a4cc5cdf68def 207
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 7,117-174,184-185
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ConfigPass.scala
+  h_6a4cc5cdf68def 18-22,24
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ConstClosurePassTests.scala
+  h_6a4cc5cdf68def 60-86
+README.md
+  h_6a4cc5cdf68def 36
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/SvelteKitAliasImportTests.scala
+  h_6a4cc5cdf68def 1-67
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ConfigPassTest.scala
+  h_6a4cc5cdf68def 34-55
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/RawHtmlTemplateSinkTagsTest.scala
+  h_6a4cc5cdf68def 1-150
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/AbstractDomPassTest.scala
+  h_6a4cc5cdf68def 17-23,25
+platform/frontends/jssrc2cpg/src/test/resources/svelte5/Counter.svelte.json
+  h_6a4cc5cdf68def 1
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ConstClosurePass.scala
+  h_6a4cc5cdf68def 12-18,21-22,29,43-59
+docs/lessons/lesson-10-astgen.md
+  h_6a4cc5cdf68def 25,139-147
+platform/frontends/jssrc2cpg/src/test/resources/svelte5/Counter.svelte
+  h_6a4cc5cdf68def 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94766579d7ab513fcce55f3a9fc3fd000ebe010e",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
