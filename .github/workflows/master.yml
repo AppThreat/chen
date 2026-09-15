@@ -75,7 +75,7 @@ jobs:
         if: runner.os == 'Windows'
       - name: Generate SBOM with cdxgen
         run: |
-          npm install -g @cyclonedx/cdxgen
+          npm install -g @cdxgen/cdxgen
           cdxgen -t sbt -o bom.json . -p --no-recurse
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
