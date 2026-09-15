@@ -1026,8 +1026,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       "java.net.http.HttpClient.*send.*",
       "java.net.http.HttpRequest.*newBuilder.*",
       "org.apache.http.client.*(execute|wrap).*",
-      "okhttp3.*newCall.*",
-      "software.amazon.awssdk.*"
+      "okhttp3.*newCall.*"
     )
     ssrfPatterns.foreach { pattern =>
       val calls = atom.call.methodFullName(pattern).l

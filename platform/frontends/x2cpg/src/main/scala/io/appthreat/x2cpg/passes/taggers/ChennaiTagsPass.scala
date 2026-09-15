@@ -2,7 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.circe.*
 import io.circe.parser.*
-import io.appthreat.x2cpg.passes.taggers.java.JavaFrameworks
+import io.appthreat.x2cpg.passes.taggers.JavaFrameworks
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.codepropertygraph.generated.Operators
@@ -38,7 +38,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // neutralised for the categories the sanitiser covers.
   private val SANITIZER            = "sanitizer"
   private val SANITIZER_TAG_PREFIX = "sanitizer-"
-  private val EscapedFileSeparator = Pattern.quote(_root_.java.io.File.separator)
+  private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
   private val RE_CHARS             = "[](){}*+&|?.,\\$"
 
   // Language-specific route patterns
@@ -793,9 +793,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * assignment; the tag goes to the LITERAL, which every literal-based consumer can reach. An
     * array member (`@RequestMapping({"/a", "/b"})`) contributes one literal per element.
     */
-  private def javaRouteLiterals(method: Method, annotationNames: Seq[String])(
-    using dstGraph: DiffGraphBuilder
-  ): Iterator[Literal] =
+  private def javaRouteLiterals(method: Method, annotationNames: Seq[String]): Iterator[Literal] =
       method.annotation
           .name(annotationNames.mkString("|"))
           .ast
@@ -818,8 +816,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * cloud/serverless handlers, native (JNI/FFM) interop, and message listeners.
     */
   private def tagJavaRoutes(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
-    val http               = JavaFrameworks.Http
+    val http = JavaFrameworks.Http
 
     // ---- Spring MVC/WebFlux --------------------------------------------------------------
     // @GetMapping("/users/{id}") String getUser(@RequestParam String id): the mapping
@@ -1042,8 +1039,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * SQL statements of a Spring or MyBatis project land in the same bucket as raw JDBC.
     */
   private def tagJavaDatabaseCalls(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
-    val db                 = JavaFrameworks.Database
+    val db = JavaFrameworks.Database
 
     // JDBC: by name, excluding operator calls; `executeQuery`/`prepareStatement` are
     // distinctive enough, and unresolved receivers keep the bare name.
@@ -1053,24 +1049,41 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       dstGraph
     )
 
-    // Spring JdbcTemplate family, import-gated: query*/update/batchUpdate/execute are everyday
-    // method names outside the template.
+    // Spring JdbcTemplate family, import-gated AND receiver-gated: query*/update/execute are
+    // everyday method names outside the template, so a resolved call must name a Template type.
+    // Unresolved calls in such a project fall back to the JDBC names above.
     if JavaFrameworks.usesImports(atom, "org.springframework.jdbc", "org.springframework.data")
     then
       storeTag(
-        atom.call.name(
-          "query|queryForObject|queryForList|queryForMap|update|batchUpdate|execute|executeSql"
-        ).filterNot(_.name.startsWith("<operator")),
+        atom.call
+            .name(
+              "query|queryForObject|queryForList|queryForMap|update|batchUpdate|execute|executeSql"
+            )
+            .filterNot(_.name.startsWith("<operator"))
+            .filter(_.methodFullName.contains("Template")),
         "sql",
         dstGraph
       )
 
-    // JPA EntityManager / Hibernate Session operations.
+    // JPA EntityManager / Hibernate Session query builders.
     storeTag(
-      atom.call.name(db.jpaCallNames.mkString("|")).filterNot(_.name.startsWith("<operator")),
+      atom.call
+          .name(db.jpaQueryCallNames.mkString("|"))
+          .filterNot(_.name.startsWith("<operator")),
       "sql",
       dstGraph
     )
+
+    // Entity operations (`persist`/`merge`/`remove`) are everyday collection and cache method
+    // names; only in a project that imports a persistence API are they database writes.
+    if JavaFrameworks.usesImports(atom, db.jpaImportRoots*) then
+      storeTag(
+        atom.call
+            .name(db.jpaEntityCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator")),
+        "sql",
+        dstGraph
+      )
 
     // @Query/@Select/... - the annotation's string member IS the statement.
     atom.method
@@ -1101,7 +1114,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * builder. Bare call names, so the whole family is import-gated.
     */
   private def tagJavaAiCalls(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
     if !JavaFrameworks.usesImports(atom, JavaFrameworks.AiLlm.importRoots*) then return
 
     val invocations = atom.call
@@ -1123,7 +1135,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * (McpServerFeatures) carries the live session.
     */
   private def tagJavaMcpTools(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
     if !JavaFrameworks.usesImports(atom, JavaFrameworks.Mcp.importRoots*) then return
 
     val toolMethods = atom.method
@@ -1151,8 +1162,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * `handleRequest` is event-facing: its input parameter is the function's payload.
     */
   private def tagJavaCloudHandlers(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
-    val cloud              = JavaFrameworks.Cloud
+    val cloud = JavaFrameworks.Cloud
 
     // Resolved calls carry the package in methodFullName; unresolved ones are covered by the
     // import gate plus the call name.
@@ -1197,8 +1207,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * where data crosses into native code.
     */
   private def tagJavaNativeCalls(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
-    val nat                = JavaFrameworks.Native
+    val nat = JavaFrameworks.Native
 
     storeTag(
       atom.call.name(nat.libraryLoadCallNames.mkString("|")),
@@ -1210,6 +1219,10 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       "native-library",
       dstGraph
     )
+    nat.libraryLoadFullNames.foreach { pattern =>
+      storeTag(atom.call.methodFullName(pattern).l.iterator, "native", dstGraph)
+      storeTag(atom.call.methodFullName(pattern).l.iterator, "native-library", dstGraph)
+    }
 
     // `native` methods are declared with the NATIVE modifier.
     storeTag(
@@ -1223,11 +1236,16 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       "native",
       dstGraph
     )
-    storeTag(
-      atom.call.name(nat.foreignCallNames.mkString("|")).filterNot(_.name.startsWith("<operator")),
-      "native",
-      dstGraph
-    )
+    // The bare-name arm is import-gated: after dropping the unambiguous fullName prefix above,
+    // an ungated name match would tag every `downcallHandle`-shaped helper in a plain project.
+    if JavaFrameworks.usesImports(atom, nat.foreignPackageRoots*) then
+      storeTag(
+        atom.call
+            .name(nat.foreignCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator")),
+        "native",
+        dstGraph
+      )
     // The invocation of a downcall handle is the actual native call.
     if JavaFrameworks.usesImports(atom, nat.foreignPackageRoots*) then
       storeTag(
@@ -1242,8 +1260,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * method and its message parameter are framework-input.
     */
   private def tagJavaSdkBoundaries(dstGraph: DiffGraphBuilder): Unit =
-    given DiffGraphBuilder = dstGraph
-    val sdk                = JavaFrameworks.Sdk
+    val sdk = JavaFrameworks.Sdk
 
     val listenerMethods = atom.method
         .where(_.annotation.name(sdk.listenerAnnotations.mkString("|")))

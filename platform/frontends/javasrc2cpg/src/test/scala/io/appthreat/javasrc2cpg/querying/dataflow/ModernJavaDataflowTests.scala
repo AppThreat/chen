@@ -178,6 +178,27 @@ class ModernJavaDataflowTests extends JavaDataflowFixture:
       ) shouldBe 1
   }
 
+  it should "carry taint through a plain (re)assignment of a switch expression" in {
+      flowCount(
+        """
+          |class Flows {
+          |  void sink(String s) {}
+          |
+          |  void assignSwitch(int code) {
+          |    String tainted = "MALICIOUS";
+          |    String value = "safe";
+          |    value = switch (code) {
+          |      case 1 -> tainted;
+          |      default -> value;
+          |    };
+          |    sink(value);
+          |  }
+          |}
+          |""".stripMargin,
+        "assignSwitch"
+      ) shouldBe 1
+  }
+
   it should "carry a parameter through a switch expression with pattern arms to a sink" in {
       paramFlowCount(
         """

@@ -1184,14 +1184,11 @@ class AstCreator(
         scope.addParameter(node)
     }
 
-    val bodyAst = methodDeclaration.getBody.toScala.map(astForBlockStatement(_)).getOrElse(Ast(
-      NewBlock()
-    ))
-    // Pattern-binding locals synthesized while lowering the body (type patterns in `instanceof`
-    // and pattern `case` labels) attach here - see [[Scope.registerPatternLocalAst]].
-    val patternLocals = scope.takePatternLocalAsts
-    val bodyAstWithPatternLocals =
-        if patternLocals.isEmpty then bodyAst else bodyAst.withChildren(patternLocals)
+    // Pattern-binding locals of the body statements are attached by astForBlockStatement
+    // itself (per-block drain), so nothing extra to do here.
+    val bodyAst = methodDeclaration.getBody.toScala.map(astForBlockStatement(_)).getOrElse(
+      Ast(NewBlock())
+    )
     val methodReturn = newMethodReturnNode(
       returnTypeFullName.getOrElse(TypeConstants.Any),
       None,
@@ -1209,7 +1206,7 @@ class AstCreator(
     methodAstWithAnnotations(
       methodNode,
       thisAst ++ parameterAsts,
-      bodyAstWithPatternLocals,
+      bodyAst,
       methodReturn,
       modifiers,
       annotationAsts
@@ -1370,9 +1367,9 @@ class AstCreator(
             .columnNumber(column(stmt))
             .code(s"if (${stmt.getCondition.toString})")
 
-    // A condition with type patterns (`o instanceof String s`) lowers to several ASTs - the
-    // boolean test first, then the pattern bindings. All of them belong before the branches;
-    // only the boolean test gets the CONDITION edge.
+    // A switch-expression condition (`if (switch (x) {...})`) lowers to leading statements plus
+    // the value expression; all of them belong before the branches, and only the VALUE - the
+    // last AST - is the condition.
     val conditionAsts = astsForExpression(stmt.getCondition, ExpectedType.Boolean).toList
 
     val thenAsts = astsForStatement(stmt.getThenStmt)
@@ -1383,22 +1380,19 @@ class AstCreator(
         .withChildren(thenAsts)
         .withChildren(elseAst)
 
-    conditionAsts.headOption.flatMap(_.root) match
+    conditionAsts.lastOption.flatMap(_.root) match
       case Some(r) =>
           ast.withConditionEdge(ifNode, r)
       case None =>
           ast
   end astForIf
 
-  /** All condition ASTs, with the boolean test (the first) singled out for the CONDITION edge.
-    * Mirrors [[astForIf]]: a pattern-carrying condition contributes binding ASTs after the test.
-    *
-    * Loop conditions keep only the boolean test: a pattern bound in a `while`/`do` condition has no
-    * definite assignment that outlives the test (`JLS 6.3` scopes it to the condition itself when
-    * the loop is not unrolled), so lowering its binding would fabricate a taint step.
+  /** The VALUE AST of a loop condition, for the CONDITION edge. A switch-expression condition
+    * (`while (switch (x) {...})`) lowers to leading statements plus the value; only the value is
+    * the condition, and the leading statements ride along under the control structure.
     */
   private def conditionAstsFor(condition: Expression): Option[Ast] =
-      astsForExpression(condition, ExpectedType.Boolean).headOption
+      astsForExpression(condition, ExpectedType.Boolean).lastOption
 
   def astForWhile(stmt: WhileStmt): Ast =
     val conditionAst = conditionAstsFor(stmt.getCondition)
@@ -1910,9 +1904,7 @@ class AstCreator(
     val selectorAsts = astsForExpression(stmt.getSelector, ExpectedType.empty)
     val selectorNode = selectorAsts.head.root.get
 
-    val entryAsts = stmt.getEntries.asScala.flatMap(entry =>
-        astsForSwitchEntry(entry, selectorAsts, asExpressionValue = false)
-    )
+    val entryAsts = stmt.getEntries.asScala.flatMap(astsForSwitchEntry(_, selectorAsts))
 
     val switchBodyAst = Ast(NewBlock()).withChildren(entryAsts)
 
@@ -2229,11 +2221,7 @@ class AstCreator(
   /** One switch entry of a STATEMENT-form switch: labels (with pattern bindings), then the `when`
     * guard condition, then the entry statements.
     */
-  private def astsForSwitchEntry(
-    entry: SwitchEntry,
-    selectorAsts: Seq[Ast],
-    asExpressionValue: Boolean
-  ): Seq[Ast] =
+  private def astsForSwitchEntry(entry: SwitchEntry, selectorAsts: Seq[Ast]): Seq[Ast] =
     val labelAsts = astsForSwitchCases(entry, selectorAsts)
 
     val guardAsts = entry.getGuard.toScala.toList.flatMap { guard =>
@@ -2271,9 +2259,17 @@ class AstCreator(
 
     val stmtAsts = stmt.getStatements.asScala.flatMap(astsForStatement)
 
+    // Pattern-binding locals synthesized while lowering this block's statements (type patterns
+    // in `instanceof`, pattern `case` labels) attach HERE - see
+    // [[Scope.registerPatternLocalAst]]. Draining per block keeps ownership lexically correct:
+    // the innermost block drains first, so a lambda's block body owns its own bindings and a
+    // binding in this block cannot be stolen by a nested body built later in the same lowering.
+    val patternLocals = scope.takePatternLocalAsts
+
     scope.popScope()
     Ast(block)
         .withChildren(prefixAsts)
+        .withChildren(patternLocals)
         .withChildren(stmtAsts)
   end astForBlockStatement
 
@@ -2512,7 +2508,13 @@ class AstCreator(
         }
         .getOrElse(expectedExprType) // resolved target type should be more accurate
     val targetAst = astsForExpression(expr.getTarget, expectedType)
-    val argsAsts  = astsForExpression(expr.getValue, expectedType)
+    // A switch-expression RHS with pattern/block arms carries leading statements; they belong
+    // before the assignment in statement position, and the assignment's type comes from the
+    // VALUE (the last AST), not from a leading binding.
+    val (leadingAsts, argsAsts) = hoistExpressionAsts(astsForExpression(
+      expr.getValue,
+      expectedType
+    ))
     val valueType = argsAsts.headOption.flatMap(_.rootType)
 
     val typeFullName =
@@ -2530,7 +2532,7 @@ class AstCreator(
 
     if partialConstructorQueue.isEmpty then
       val assignAst = callAst(callNode, targetAst ++ argsAsts)
-      Seq(assignAst)
+      leadingAsts ++ Seq(assignAst)
     else
       val partialConstructor = partialConstructorQueue.head
       partialConstructorQueue.clear()
@@ -2541,7 +2543,7 @@ class AstCreator(
             // e.g. Foo f = new Foo();
             val initAst =
                 completeInitForConstructor(partialConstructor, Ast(identifier.copy))
-            Seq(callAst(callNode, targetAst ++ argsAsts), initAst)
+            leadingAsts ++ Seq(callAst(callNode, targetAst ++ argsAsts), initAst)
 
         case _ =>
             // In this case the left hand side is more complex than an identifier, so
@@ -3556,10 +3558,9 @@ class AstCreator(
               val returnArgs = astsForStatement(stmt)
               Seq(returnAst(returnNode, returnArgs))
 
-            // A lambda body lowering type patterns (`x instanceof String s` inside the lambda)
-            // registers its pattern locals on the scope; drain them into this body block so they
-            // are direct children of a BLOCK like any other local - see
-            // [[Scope.registerPatternLocalAst]].
+            // This branch builds the lambda's block directly (not via astForBlockStatement),
+            // so it drains the pattern-local channel itself; a lambda whose body IS a block
+            // goes through astForBlockStatement and drains there.
             val patternLocals = scope.takePatternLocalAsts
 
             blockAst

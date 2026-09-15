@@ -85,7 +85,7 @@ Java graphs get the same boundary vocabulary the other frontends have:
 
 - **`ChennaiTagsPass.tagJavaRoutes`** (x2cpg) tags `framework-route` / `framework-input` /
   `framework-output` plus family tags. The shapes and collision gates live in
-  `x2cpg/passes/taggers/java/JavaFrameworks.scala`:
+  `x2cpg/passes/taggers/JavaFrameworks.scala`:
   - HTTP: Spring mapping annotations (`@GetMapping`/`@PostMapping`/... and their request-data
     parameter annotations), JAX-RS/Jakarta (import-gated `@GET`/`@Path`/`@QueryParam`/...),
     Micronaut, servlet overrides (recognised by the servlet parameter TYPES, which keeps a user

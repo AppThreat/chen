@@ -1,4 +1,4 @@
-package io.appthreat.x2cpg.passes.taggers.java
+package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.semanticcpg.language.*
@@ -191,16 +191,18 @@ object JavaFrameworks:
     /** Spring JdbcTemplate / NamedParameterJdbcTemplate data methods; import-gated. */
     val jdbcTemplateImportRoots: Seq[String] = Seq("org.springframework.jdbc")
 
-    /** EntityManager / Session data methods - Hibernate, EclipseLink, Spring Data JPA. */
-    val jpaCallNames: Seq[String] =
-        Seq(
-          "createQuery",
-          "createNativeQuery",
-          "createStoredProcedureQuery",
-          "persist",
-          "merge",
-          "remove"
-        )
+    /** EntityManager / Session query builders - Hibernate, EclipseLink, Spring Data JPA.
+      * Distinctive enough to accept without a gate.
+      */
+    val jpaQueryCallNames: Seq[String] =
+        Seq("createQuery", "createNativeQuery", "createStoredProcedureQuery")
+
+    /** EntityManager entity operations - `persist`/`merge`/`remove` are everyday collection and
+      * cache method names, so they are only accepted in a project that imports a persistence API.
+      */
+    val jpaEntityCallNames: Seq[String] = Seq("persist", "merge", "remove")
+    val jpaImportRoots: Seq[String] =
+        Seq("jakarta.persistence", "javax.persistence", "org.hibernate", "org.springframework.orm")
 
     /** Annotations whose string member IS a database statement. */
     val queryAnnotations: Seq[String] =
@@ -263,9 +265,12 @@ object JavaFrameworks:
           "generateImage"
         )
 
-    /** Prompt-construction call names (the fluent Spring AI/LangChain4j builders). */
+    /** Prompt-construction call names (the fluent Spring AI/LangChain4j builders). Only distinctive
+      * names: `system`/`user`/`parameters` are everyday method names and would fabricate prompt
+      * sinks on unrelated helpers even inside an AI project.
+      */
     val promptCallNames: Seq[String] =
-        Seq("prompt", "system", "user", "parameters", "messages", "template")
+        Seq("prompt", "systemMessage", "userMessage", "aiMessage", "messages", "template")
   end AiLlm
 
   // ---------------------------------------------------------------------------------------------
@@ -310,13 +315,20 @@ object JavaFrameworks:
   // ---------------------------------------------------------------------------------------------
 
   object Native:
-    /** Library-loading calls - the JNI boundary setup. */
-    val libraryLoadCallNames: Seq[String] = Seq("loadLibrary", "load")
+    /** Library-loading calls - the JNI boundary setup. Only `loadLibrary` is accepted as a bare
+      * name: `load` is an everyday method name and `System.load` is matched through
+      * `methodFullName` instead, where the declaring class is unambiguous.
+      */
+    val libraryLoadCallNames: Seq[String] = Seq("loadLibrary")
+    val libraryLoadFullNames: Seq[String] = Seq("java.lang.System.load.*")
 
-    /** The FFM API package, and its characteristic entry calls. */
+    /** The FFM API package, and its characteristic entry calls. `allocate` is deliberately absent:
+      * it is an everyday buffer-builder name, and resolved FFM calls are covered by the
+      * `java.lang.foreign.*` methodFullName prefix.
+      */
     val foreignPackageRoots: Seq[String] = Seq("java.lang.foreign")
     val foreignCallNames: Seq[String] =
-        Seq("nativeLinker", "downcallHandle", "upcallStub", "allocate", "getUtf8String")
+        Seq("nativeLinker", "downcallHandle", "upcallStub", "getUtf8String")
 
     /** MethodHandle invocation - the actual native call of a downcall handle. */
     val methodHandleCallNames: Seq[String] = Seq("invokeExact", "invoke", "invokeWithArguments")
