@@ -4,7 +4,9 @@
 
 Understand how `javasrc2cpg` uses the JavaParser library to build a CPG from Java source, how
 Lombok annotations are handled via the Delombok preprocessor, how type inference is driven by
-external JAR classpath entries, and how to control each of these behaviours through `Config`.
+external JAR classpath entries, how modern Java (8 through 26) constructs are lowered into CPG
+nodes, how the framework taggers recognise web/rpc/database/AI/native boundaries, and how to
+control each of these behaviours through `Config`.
 
 ## Pre-requisites
 
@@ -41,6 +43,81 @@ The `atom` CLI defaults to `types-only` (configurable via `CHEN_DELOMBOK_MODE`).
 
 Source:
 [platform/frontends/javasrc2cpg](https://github.com/AppThreat/chen/tree/main/platform/frontends/javasrc2cpg)
+
+## Modern Java Lowering (Java 8 through 26)
+
+The bundled JavaParser parses every construct through Java 26 syntax, so a missing construct is
+always an AST-lowering gap, never a parser gap. The lowerings that matter for dataflow:
+
+| Construct (version)                                          | Lowering                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Switch expression, arrow arms (14)                           | Nested `<operator>.conditional` calls: `conditional(equals(sel, A), v1, conditional(..., default))`. The declared conditional semantic maps arms 2/3 to the result, so taint in any arm value flows to the expression's value - the JLS `14.11.2` behaviour for free. Multi-label arms (`case A, B`) OR their tests; a `when` guard ANDs into the arm condition. |
+| `yield e` (14)                                               | The arm value of its block. A `yield` reached in plain statement position lowers to an `<operator>.yield` call with the expression as its argument, so nothing is dropped.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `instanceof` type pattern (16)                               | The type test plus a binding: a LOCAL of the pattern's type and an assignment `<binding> = <tested expr>`. The binding is definitely assigned when the test succeeds (`JLS 6.3`), and the assignment carries exactly that taint relation. The LOCAL is registered on the scope (`Scope.registerPatternLocalAst`) and attached as a direct child of the body BLOCK - the position every `method.local`-style traversal and the dataflow engine expect.                                                                                                                                           |
+| Record pattern (21)                                          | Each component variable binds the same way, aliasing the matched value: a tainted record taints every bound component. The record's type test is an `<operator>.instanceOf` call against a TYPE_REF.                                                                                                                                                                                                                                                                                                                                                                                              |
+| Pattern `case` labels with guards (21)                       | Statement-form switches keep their SWITCH control structure; a pattern label adds a `case` JUMP_TARGET, the binding (as above), and - in the expression form - an `instanceof` arm condition. The guard expression is lowered in place, after the labels.                                                                                                                                                                                                                                                                                                                                       |
+| Method references (8)                                        | A METHOD_REF node (the same shape a lambda lowers to) whose `methodFullName` is the resolved qualified name, or the source form when the receiver cannot be resolved. This is what lets a framework registration such as `router.get("/x").handler(this::handleItems)` resolve its handler.                                                                                                                                                                                                                                       |
+| Local class / record (16)                                    | A full TYPE_DECL under the enclosing METHOD, built with the shared type-decl machinery - its fields, constructors and accessors are first-class graph citizens.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Text blocks (15), `var`, unnamed variables `_` (22)           | Ordinary literals/locals - lowered by the existing paths; nothing special needed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Module imports (25), flexible constructor bodies (25)         | Parse-level constructs: an import is an IMPORT node; pre-`super()` statements are ordinary body statements that precede the `<init>` call.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Virtual threads (21), stream gatherers (24), FFM (22+)        | Ordinary calls; the FFM entry points are tagged `native` by the framework taggers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+Two invariants of the switch-expression lowering are worth remembering, because they were bugs
+first:
+
+1. **Bindings cannot ride under the value expression.** An expression-position switch funnels its
+   value into an ARGUMENT slot (`String v = switch ...`, `return switch ...`), and an ARGUMENT
+   edge into a LOCAL or BLOCK node violates the schema. Worse, statements tucked under the
+   conditional call are invisible to reaching definitions, because the declared
+   `<operator>.conditional` semantic only maps the value arms - a binding def inside the
+   condition subtree never reaches an arm's use of the binding. Bindings therefore return as
+   LEADING ASTs in statement position (`astsForVariableDecl` and `astForReturnNode` hoist them),
+   with the LOCAL on the scope channel.
+2. **Annotation string values lower twice.** The historic ANNOTATION_LITERAL value node is
+   untaggable (no TAGGED_BY support in the runtime schema) and invisible to literal traversals,
+   so a route (`@GetMapping("/users")`) or statement (`@Query("SELECT ...")`) that exists only
+   there is invisible to the taggers. A real LITERAL duplicate under the parameter assignment
+   makes the value a first-class expression node; `AnnotationTests` pins both shapes.
+
+## Framework Tagging and Semantics
+
+Java graphs get the same boundary vocabulary the other frontends have:
+
+- **`ChennaiTagsPass.tagJavaRoutes`** (x2cpg) tags `framework-route` / `framework-input` /
+  `framework-output` plus family tags. The shapes and collision gates live in
+  `x2cpg/passes/taggers/java/JavaFrameworks.scala`:
+  - HTTP: Spring mapping annotations (`@GetMapping`/`@PostMapping`/... and their request-data
+    parameter annotations), JAX-RS/Jakarta (import-gated `@GET`/`@Path`/`@QueryParam`/...),
+    Micronaut, servlet overrides (recognised by the servlet parameter TYPES, which keeps a user
+    `service()` method untagged), and router DSLs (`router.get("/x").handler(this::h)` - route
+    literals and handler resolution through METHOD_REF).
+  - gRPC: methods with a `StreamObserver` parameter are tagged `grpc-service`; the observer
+    parameter is framework-output, `onNext`/`onError`/`onCompleted` calls are outputs.
+  - Databases: JDBC/JPA/JdbcTemplate call names and `@Query`/`@Select`/... annotation values
+    tagged `sql`; document stores are import-gated.
+  - AI/LLM: LangChain4j, Spring AI, OpenAI, Gemini, Bedrock, Azure - invocation calls
+    `ai-llm`+`ai-invoke`, prompt builders `ai-llm`+`ai-prompt` (the Python tagger's vocabulary).
+  - MCP: `@Tool` methods are `mcp-tool` entrypoints with client-facing parameters.
+  - Cloud: AWS/GCP/Azure calls `cloud`; `RequestHandler.handleRequest` implementations are
+    event-facing entrypoints.
+  - Native: `System.loadLibrary`, NATIVE-modifier methods, and `java.lang.foreign` downcalls
+    tagged `native`.
+  - Messaging/SDK: `@KafkaListener`/`@JmsListener`/`@RabbitListener` methods are queue-driven
+    inputs; OkHttp/Retrofit/Feign/`java.net.http` calls are `http-client`.
+- **`EasyTagsPass.tagJavaPatterns`** gained the Python arm's sink families (`code-execution` for
+  `Runtime.exec`/`ProcessBuilder.start`, `ssrf`, `file-io`, `unsafe-deserialization`,
+  `reflection`), so a Java graph has tagged sinks without a hand-written `chennai.json`.
+- **`dataflowengineoss/semantics/JavaFrameworkSemantics.scala`** is the flow-semantics home:
+  OWASP Encoder/Spring/commons escapers clear taint (fully qualified, therefore language-safe in
+  the global defaults), deserialisation carriers pass input taint into the returned object, and
+  the request readers (`getParameter`, `getHeader`, ...) map receiver to return. The request
+  readers are BARE names and are therefore language-gated through `DefaultSemantics
+  .flowsForLanguage`, exactly like the PHP sanitizer list.
+
+The fixtures that pin all of this live in `ModernJavaSyntaxTests`, `ModernJavaDataflowTests` and
+`JavaFrameworkTagsTest` under `javasrc2cpg/src/test/.../querying/`, and end-to-end (frontend,
+taggers, data-flow engine, reachable slicer, no `chennai.json`) in atom's
+`ReachablesCrossLanguageWorkflowTests` "reachables for java" sections.
 
 ## Config Fields (real names from `Main.scala`)
 

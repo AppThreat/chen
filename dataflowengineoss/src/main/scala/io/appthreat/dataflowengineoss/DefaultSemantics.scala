@@ -1,6 +1,6 @@
 package io.appthreat.dataflowengineoss
 
-import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics
+import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, PassThroughMapping, Semantics}
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 
@@ -31,7 +31,18 @@ object DefaultSemantics:
   def flowsForLanguage(language: String): List[FlowSemantic] =
       language match
         case Languages.PHP => phpFlows
-        case _             => List.empty
+        case lang
+            if Seq(
+              Languages.JAVA,
+              Languages.JAVASRC,
+              "JAR",
+              "JIMPLE",
+              "ANDROID",
+              "APK",
+              "DEX"
+            ).contains(lang) =>
+            javaRequestReaderFlows
+        case _ => List.empty
 
   private def F = (x: String, y: List[(Int, Int)]) => FlowSemantic.from(x, y)
 
@@ -152,6 +163,11 @@ object DefaultSemantics:
   )
 
   /** Semantic summaries for common external Java calls.
+    *
+    * Includes the framework sanitizers and carriers of
+    * [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics]]: every entry there is
+    * fully qualified, so the summaries are language-neutral-safe (a bare name cannot collide with a
+    * same-named function in a C/JS/PHP graph).
     */
   def javaFlows: List[FlowSemantic] = List(
     PTF("java.lang.String.split:java.lang.String[](java.lang.String)", List((0, 0))),
@@ -201,7 +217,29 @@ object DefaultSemantics:
       "org.apache.http.HttpResponse.setEntity:void(org.apache.http.HttpEntity)",
       List((1, 0), (1, 1), (1, 0))
     )
-  )
+  ) ++ javaFrameworkFlows
+
+  /** Sanitizers (empty mappings: taint does not pass) and carriers (arg taint reaches the result)
+    * from [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics]].
+    *
+    * Sanitizers are declared with an empty mapping list - a declared semantic is authoritative, so
+    * the argument no longer flows to the result. Carriers use `PTF`, whose PassThroughMapping flows
+    * every non-receiver parameter to the return: a deserialised object is its input. The two string
+    * builders are declared with explicit index mappings because their receiver (arg 0)
+    * participates.
+    */
+  def javaFrameworkFlows: List[FlowSemantic] =
+      JavaFrameworkSemantics.allSanitizerFullNames.toList.sorted.map(
+        F(_, List.empty[(Int, Int)])
+      ) ++
+          List(
+            F(
+              "java.lang.String.format:java.lang.String(java.lang.String,java.lang.Object[])",
+              List((1, -1), (2, -1))
+            ),
+            F("java.lang.String.concat:java.lang.String(java.lang.String)", List((0, -1), (1, -1)))
+          ) ++
+          JavaFrameworkSemantics.allCarrierFullNames.toList.map(name => PTF(name))
 
   /** Semantic summaries for PHP framework sanitizers (Laravel, Symfony, WordPress).
     *
@@ -227,6 +265,16 @@ object DefaultSemantics:
     * non-PHP graph would clear taint for any same-named function (a C/JS `e()` helper). They are
     * added per graph by [[flowsForLanguage]].
     */
+  /** Request-reader summaries for Java graphs, from
+    * [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics.RequestReaders]]: the value
+    * returned by a request accessor is request data, so the receiver's taint flows to the return.
+    * Bare names - language-gated (see [[flowsForLanguage]]), so a `getParameter` on a non-request
+    * receiver inside a Java graph is conservatively treated as request data, while graphs of other
+    * languages are unaffected.
+    */
+  def javaRequestReaderFlows: List[FlowSemantic] =
+      JavaFrameworkSemantics.RequestReaders.callNames.toList.sorted.map(F(_, List((0, -1))))
+
   def phpFlows: List[FlowSemantic] =
       PhpFrameworkSemantics.allSanitizerNames.toList.sorted.map(F(_, List.empty[(Int, Int)]))
 

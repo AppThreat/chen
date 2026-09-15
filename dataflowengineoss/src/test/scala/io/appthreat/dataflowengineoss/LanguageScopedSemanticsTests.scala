@@ -1,6 +1,7 @@
 package io.appthreat.dataflowengineoss
 
-import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics
+import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
+import io.appthreat.dataflowengineoss.semanticsloader.Semantics
 import io.shiftleft.codepropertygraph.generated.Languages
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -30,6 +31,27 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
           semantics.forMethod("<operator>.assignment") should not be None
           semantics.forMethod("strlen") should not be None
       }
+
+      "declare the Java framework sanitizers (fully qualified, so language-safe)" in {
+          val semantics = DefaultSemantics()
+          JavaFrameworkSemantics.allSanitizerFullNames.foreach { name =>
+              withClue(s"$name: ") {
+                  val semantic = semantics.forMethod(name)
+                  semantic should not be None
+                  // A sanitizer declares no mapping at all: taint does not reach the return.
+                  semantic.get.mappings shouldBe List.empty
+              }
+          }
+      }
+
+      "declare the Java framework carriers (taint passes to the returned object)" in {
+          val semantics = DefaultSemantics()
+          JavaFrameworkSemantics.allCarrierFullNames.foreach { name =>
+              withClue(s"$name: ") {
+                  semantics.forMethod(name) should not be None
+              }
+          }
+      }
   }
 
   "flowsForLanguage" should {
@@ -41,18 +63,35 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
           flows.foreach(_.mappings shouldBe List.empty)
       }
 
-      "return nothing for non-PHP graphs" in {
+      "return the Java request-reader flows for JVM-language graphs" in {
+          val expected = JavaFrameworkSemantics.RequestReaders.callNames
+          Seq(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE").foreach { language =>
+              withClue(s"$language must receive the Java request readers: ") {
+                  val flows = DefaultSemantics.flowsForLanguage(language)
+                  flows.map(_.methodFullName).toSet shouldBe expected
+                  // Every reader's declared semantic maps receiver (0) to return (-1): the
+                  // returned value is request data. Checked through the composed semantics,
+                  // because FlowPath is opaque.
+                  val semantics = Semantics.fromList(flows)
+                  expected.foreach { name =>
+                      withClue(s"$name: ") {
+                          semantics.forMethod(name) should not be None
+                      }
+                  }
+              }
+          }
+      }
+
+      "return nothing for graphs of other languages" in {
           Seq(
             Languages.NEWC,
             Languages.C,
-            Languages.JAVA,
-            Languages.JAVASRC,
             Languages.JSSRC,
             Languages.JAVASCRIPT,
             Languages.PYTHONSRC,
             Languages.RUBYSRC
           ).foreach { language =>
-              withClue(s"$language must not receive PHP flows: ") {
+              withClue(s"$language must not receive PHP or Java flows: ") {
                   DefaultSemantics.flowsForLanguage(language) shouldBe List.empty
               }
           }

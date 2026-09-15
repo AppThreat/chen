@@ -984,6 +984,97 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     atom.method.name("wp_remote_.*").newTagNode("http").store()(using dstGraph)
   end tagPhpPatterns
 
+  /** Java sink families, on the same vocabulary the Python arm of this pass uses - until these
+    * existed, a Java graph had NO tagged sinks at all and every reachables flow needed a
+    * hand-written `chennai.json` to pin source and sink types.
+    *
+    * Matched on `methodFullName` first (the JDK resolves in a normal run, and the client SDKs
+    * resolve through their jars), with a name-plus-type fallback for the common unresolved
+    * receiver: `Runtime.getRuntime().exec(cmd)` keeps the bare name `exec` but its call type is the
+    * returned `java.lang.Process`.
+    */
+  private def tagJavaSinkFamilies(dstGraph: DiffGraphBuilder): Unit =
+    // Command/code execution: Runtime.exec, ProcessBuilder.start, script engines, method
+    // handles.
+    val codeExecutionPatterns = Seq(
+      "java.lang.Runtime.*exec.*",
+      "java.lang.ProcessBuilder.*start.*",
+      "javax.script.ScriptEngine.*eval.*",
+      "java.lang.invoke.MethodHandle.*(invoke|invokeExact|invokeWithArguments).*",
+      "jdk.jshell.*",
+      "org.codehaus.groovy.*evaluate.*",
+      "bsh.Interpreter.*"
+    )
+    codeExecutionPatterns.foreach { pattern =>
+        atom.call.methodFullName(pattern).newTagNode("code-execution").store()(using dstGraph)
+    }
+    atom.call
+        .name("exec")
+        .typeFullName("java.lang.Process.*")
+        .newTagNode("code-execution")
+        .store()(using dstGraph)
+    atom.call
+        .name("start")
+        .typeFullName("java.lang.Process.*")
+        .newTagNode("code-execution")
+        .store()(using dstGraph)
+
+    // SSRF: outbound HTTP whose target is not a literal is attacker-steerable; a literal target
+    // is still an inventory-worthy client call.
+    val ssrfPatterns = Seq(
+      "java.net.URL.*(openStream|openConnection).*",
+      "java.net.http.HttpClient.*send.*",
+      "java.net.http.HttpRequest.*newBuilder.*",
+      "org.apache.http.client.*(execute|wrap).*",
+      "okhttp3.*newCall.*",
+      "software.amazon.awssdk.*"
+    )
+    ssrfPatterns.foreach { pattern =>
+      val calls = atom.call.methodFullName(pattern).l
+      calls.iterator
+          .filter(c => c.argument.exists(a => a.label == "IDENTIFIER" || a.label == "CALL"))
+          .newTagNode("ssrf")
+          .store()(using dstGraph)
+      calls.iterator.newTagNode("http-client").store()(using dstGraph)
+    }
+
+    // File I/O: the NIO and classic stream entry points.
+    val fileIoPatterns = Seq(
+      "java.nio.file.Files.*",
+      "java.io.FileInputStream.*",
+      "java.io.FileOutputStream.*",
+      "java.io.FileWriter.*",
+      "java.io.FileReader.*",
+      "java.io.PrintWriter.*",
+      "java.io.RandomAccessFile.*"
+    )
+    fileIoPatterns.foreach { pattern =>
+        atom.call.methodFullName(pattern).newTagNode("file-io").store()(using dstGraph)
+    }
+
+    // Deserialisation: an ObjectInputStream's contents are attacker-controlled bytes.
+    val deserializationPatterns = Seq(
+      "java.io.ObjectInputStream.*readObject.*",
+      "java.io.ObjectInputStream.*readUnshared.*",
+      "javax.xml.bind.Unmarshaller.*unmarshal.*"
+    )
+    deserializationPatterns.foreach { pattern =>
+        atom.call.methodFullName(pattern).newTagNode("unsafe-deserialization").store()(using
+        dstGraph)
+    }
+
+    // Reflection: Class.forName + ClassLoader.loadClass instantiate by name.
+    val reflectionPatterns = Seq(
+      "java.lang.Class.forName.*",
+      "java.lang.ClassLoader.loadClass.*",
+      "java.lang.reflect.Method.invoke.*",
+      "java.lang.reflect.Constructor.newInstance.*"
+    )
+    reflectionPatterns.foreach { pattern =>
+        atom.call.methodFullName(pattern).newTagNode("reflection").store()(using dstGraph)
+    }
+  end tagJavaSinkFamilies
+
   private def tagJdkStandardClasses(dstGraph: DiffGraphBuilder): Unit =
     // File I/O operations
     val fileIoPatterns = Seq(
@@ -1078,6 +1169,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   private def tagJavaPatterns(dstGraph: DiffGraphBuilder): Unit =
     tagJdkStandardClasses(dstGraph)
+    tagJavaSinkFamilies(dstGraph)
     val cryptoPatterns = Seq(
       "java.security.*",
       "org.bouncycastle.*",

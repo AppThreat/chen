@@ -7,7 +7,7 @@
   "downloadUrl": "https://github.com/AppThreat/chen",
   "issueTracker": "https://github.com/AppThreat/chen/issues",
   "name": "chen",
-  "version": "3.1.0",
+  "version": "3.4.0",
   "description": "Code Hierarchy Exploration Net (chen) is an advanced exploration toolkit for your application source code and its dependency hierarchy.",
   "applicationCategory": "code-analysis",
   "keywords": [
@@ -16,10 +16,20 @@
     "dependency-analysis",
     "code-hierarchy-analysis"
   ],
-  "programmingLanguage": ["Scala 3"],
-  "runtimePlatform": ["JVM"],
-  "operatingSystem": ["Linux", "Windows", "MacOS"],
-  "softwareRequirements": ["Java >= 23"],
+  "programmingLanguage": [
+    "Scala 3"
+  ],
+  "runtimePlatform": [
+    "JVM"
+  ],
+  "operatingSystem": [
+    "Linux",
+    "Windows",
+    "MacOS"
+  ],
+  "softwareRequirements": [
+    "Java >= 23"
+  ],
   "author": [
     {
       "@type": "Person",

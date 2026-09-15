@@ -126,6 +126,33 @@ class Scope:
           typeDeclContainer.registerTypeDecl(decl)
       }
 
+  /** LOCAL declarations synthesized while lowering an EXPRESSION (a type pattern inside an
+    * `instanceof` or a pattern `case` label of a switch expression).
+    *
+    * Such a local cannot be returned as part of the expression's ASTs: expression-position
+    * constructs end up in ARGUMENT slots of the enclosing call/assignment/return, and an ARGUMENT
+    * edge into a LOCAL violates the schema. It is registered here instead, and the enclosing method
+    * (or lambda) body builder attaches the collected declarations as direct children of the body
+    * BLOCK - which is where every local-step (`method.local`, `block.local`) and the dataflow
+    * engine expect a method's locals to live.
+    *
+    * Declaration order note: these locals are attached to the body block's head, so a pattern
+    * binding is declared before the statement that contains it. A declaration has no runtime
+    * effect, so this only moves the (empty) definition site, never a taint step.
+    */
+  private val patternLocalAsts = mutable.ListBuffer.empty[Ast]
+
+  def registerPatternLocalAst(ast: Ast): Unit = patternLocalAsts.append(ast)
+
+  /** Drains the registered pattern-local declarations. Called once by each body builder, innermost
+    * first (a lambda body is built while the enclosing method body is still being built), so a
+    * lambda's pattern locals attach to the lambda's own body block.
+    */
+  def takePatternLocalAsts: List[Ast] =
+    val taken = patternLocalAsts.toList
+    patternLocalAsts.clear()
+    taken
+
   // TODO: The below section of todos are all methods that have been added for simple compatibility with the old
   //  scope. The plan is to refactor the code to handle these directly in the AstCreator to make the code easier
   //  to reason about, so these should be removed when that happens.

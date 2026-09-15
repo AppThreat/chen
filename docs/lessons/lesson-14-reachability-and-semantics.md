@@ -31,6 +31,18 @@ destination parameters or the return value. When the engine crosses a call site:
 `PassThroughMapping` is a shorthand: every non-receiver parameter (index ≥ 1) flows both to itself
 (output parameter) and to the return value — useful for wrappers that forward taint unchanged.
 
+**Language-scoped and framework semantics.** `DefaultSemantics()` carries only summaries whose
+names cannot collide across languages (operators, fully-qualified JDK/Java calls). Summaries
+keyed on bare names are added per graph through `DefaultSemantics.flowsForLanguage(language)`:
+the PHP framework sanitizers (`e`, `esc_html`, ...) clear taint only in a PHP graph, and the Java
+request readers (`getParameter`, `getHeader`, ... — receiver 0 to return -1, because
+`request.getParameter("q")` returns request data) apply only to JVM-language graphs. The Java
+framework vocabulary is documented in
+`dataflowengineoss/.../semantics/JavaFrameworkSemantics.scala`: fully-qualified sanitizers
+(OWASP Encoder, Spring `HtmlUtils`, commons-text escapers) and deserialisation carriers
+(Jackson/Gson) are language-safe and live in the global `javaFlows`; the bare request-reader
+names are gated. The same file's doc comment records why each split is where it is.
+
 **Sanitizers and validators** are CPG nodes tagged by `ChennaiTagsPass` (driven by the
 `--validation-config` JSON). `passesThrough` and `doesNotPassThrough` in the query DSL filter the
 resulting path set without re-running the engine.
