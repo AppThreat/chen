@@ -1,0 +1,16 @@
+docs/lessons/lesson-10-astgen.md
+  h_6a4cc5cdf68def 25,139-147
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 25-26,152-189,199-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44a485c2da072ab23085e6c729b60e4fc4e96dfa",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
