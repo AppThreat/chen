@@ -1,0 +1,14 @@
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 183-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4245353e34827484931f9fd1047b6b5a3a0a42f7",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
