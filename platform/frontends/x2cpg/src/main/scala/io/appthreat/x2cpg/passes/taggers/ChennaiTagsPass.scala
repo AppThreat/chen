@@ -159,15 +159,21 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private val NEXT_HTTP_ENTRYPOINTS =
       Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
 
+  /** A path separator in a FILE name, either way round. File names reach the graph with the
+    * separator of the platform the atom was built on, so every segment of a file-convention regex
+    * has to accept both - a `/`-only segment silently stops matching on Windows.
+    */
+  private val Sep = "[/\\\\]"
+
   private val NEXT_ROUTE_FILE_REGEX =
-      "(.*[/\\\\])?app(/.+)?[/\\\\]route\\.(js|jsx|ts|tsx|mjs|mts)$"
+      s"(.*$Sep)?app($Sep.+)?${Sep}route\\.(js|jsx|ts|tsx|mjs|mts)$$"
   private val NEXT_API_FILE_REGEX =
-      "(.*[/\\\\])?pages[/\\\\]api[/\\\\].*\\.(js|jsx|ts|tsx|mjs|mts)$"
+      s"(.*$Sep)?pages${Sep}api$Sep.*\\.(js|jsx|ts|tsx|mjs|mts)$$"
   private val NEXT_ENTRYPOINT_NAMES =
       Set("getServerSideProps", "getStaticProps", "generateMetadata")
 
   private val NUXT_SERVER_FILE_REGEX =
-      "(.*[/\\\\])?server[/\\\\](api|routes)[/\\\\].*\\.(js|ts|mjs|mts)$"
+      s"(.*$Sep)?server$Sep(api|routes)$Sep.*\\.(js|ts|mjs|mts)$$"
 
   /** h3/Nitro request readers: the first argument is the request event, the return value is request
     * data.
