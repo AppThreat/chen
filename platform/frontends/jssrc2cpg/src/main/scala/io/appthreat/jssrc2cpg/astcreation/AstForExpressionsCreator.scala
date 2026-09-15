@@ -78,18 +78,31 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
         case MemberExpression =>
             val base   = createBabelNodeInfo(callee.json("object"))
             val member = createBabelNodeInfo(callee.json("property"))
+            // The call name is taken from the property's source slice. A
+            // zero-width property (an empty slice) never occurs in Babel's
+            // own output, but astgen's Svelte mapping synthesizes member
+            // calls such as `<expr>.map(fn)` for `{#each}` blocks with an
+            // invented, zero-width `.map` identifier - fall back to the
+            // declared name so those calls stay queryable by name.
+            // safeStr, not json("name").strOpt: the property may not carry a
+            // `name` key at all (e.g. a computed a["b"]() property), and
+            // ujson's apply throws on a missing key - which would abort the
+            // whole file inside AstCreationPass.
+            val memberCode =
+                if member.code.isEmpty then safeStr(member.json, "name").getOrElse("")
+                else member.code
             base.node match
               case ThisExpression =>
                   val receiverAst = astForNodeWithFunctionReference(callee.json)
                   val baseNode = identifierNode(base, base.code)
                       .dynamicTypeHintFullName(this.rootTypeDecl.map(_.fullName).toSeq)
                   scope.addVariableReference(base.code, baseNode)
-                  (receiverAst, baseNode, member.code)
+                  (receiverAst, baseNode, memberCode)
               case Identifier =>
                   val receiverAst = astForNodeWithFunctionReference(callee.json)
                   val baseNode    = identifierNode(base, base.code)
                   scope.addVariableReference(base.code, baseNode)
-                  (receiverAst, baseNode, member.code)
+                  (receiverAst, baseNode, memberCode)
               case _ =>
                   val tmpVarName  = generateUnusedVariableName(usedVariableNames, "_tmp")
                   val baseTmpNode = identifierNode(base, tmpVarName)
@@ -105,7 +118,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                         base.columnNumber
                       )
                   val memberNode = createFieldIdentifierNode(
-                    member.code,
+                    memberCode,
                     member.lineNumber,
                     member.columnNumber
                   )
@@ -119,7 +132,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   val thisTmpNode = identifierNode(callee, tmpVarName)
                   scope.addVariableReference(tmpVarName, thisTmpNode)
 
-                  (fieldAccessAst, thisTmpNode, member.code)
+                  (fieldAccessAst, thisTmpNode, memberCode)
             end match
         case _ =>
             val receiverAst = astForNodeWithFunctionReference(callee.json)

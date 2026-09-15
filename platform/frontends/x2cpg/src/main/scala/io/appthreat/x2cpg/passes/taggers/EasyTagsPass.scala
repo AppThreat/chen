@@ -4,7 +4,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, StoredNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Local, StoredNode}
 import scala.util.matching.Regex
 
 /** Creates tags on nodes based on common patterns and language-specific conventions */
@@ -114,6 +114,64 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           .store()(using dstGraph)
     }
 
+  // Raw-HTML template sinks: the value is interpolated into the DOM without
+  // escaping, which is the XSS sink shape of every JS template dialect the
+  // JavaScript frontend ingests.
+  //
+  //   Svelte  {@html expr}                    -> TEMPLATE_DOM JSXExpressionContainer
+  //   Vue     v-html="expr"                   -> TEMPLATE_DOM JSXAttribute
+  //   React   dangerouslySetInnerHTML={{...}}  -> TEMPLATE_DOM JSXAttribute
+  //
+  // Anchored at the start of the node's `code` on purpose: the enclosing
+  // JSXFragment's code is the whole template, so an unanchored `.*@html.*`
+  // would tag the entire component as a sink.
+  private val RAW_HTML_TEMPLATE_SINKS =
+      "(?s)(\\{@html\\b.*|v-html\\b.*|dangerouslySetInnerHTML\\b.*)"
+
+  // Svelte's `{@html}` is named after the construct (`SvelteHtmlTag`) when astgen supplies the
+  // `svelteKind` key, which is a stronger signal than the code pattern; the code pattern still
+  // covers Vue and React, and Svelte output from an older astgen.
+  private val RAW_HTML_TEMPLATE_DOM_NAMES =
+      "JSXAttribute|JSXExpressionContainer|SvelteHtmlTag"
+
+  private val SVELTE_RAW_HTML_DOM_NAME = "SvelteHtmlTag"
+
+  private val RawHtmlCodePattern = RAW_HTML_TEMPLATE_SINKS.r
+
+  /** Tags raw-HTML template interpolations as `framework-output`, at the DOM node and at the
+    * interpolated expression.
+    *
+    * The TEMPLATE_DOM node is tagged as an inventory of render sites, queried from the DOM side
+    * (`cpg.templateDom.where(_.tag.name("framework-output")).code.l`) because `tag` has no
+    * `templateDom` step. Reachability does not consume this tag.
+    *
+    * The reachable half is the interpolated expression itself. `AstForTemplateDomCreator` wraps a
+    * template interpolation in an `<operator>.interpolation` call, so the rendered value is a call
+    * argument with a reaching definition, and `ReachableSlicing.collectBasicFlows` picks the call
+    * up via its `.call` sink category. A flow therefore terminates on the markup that renders the
+    * value, not on the script-side line that computed it.
+    */
+  private def tagRawHtmlTemplateSinks(dstGraph: DiffGraphBuilder): Unit =
+    val sinkSites = atom.templateDom
+        .name(RAW_HTML_TEMPLATE_DOM_NAMES)
+        .filter(dom =>
+            dom.name == SVELTE_RAW_HTML_DOM_NAME || RawHtmlCodePattern.matches(dom.code)
+        )
+        .l
+    if sinkSites.isEmpty then return
+
+    sinkSites.iterator.newTagNode("framework-output").store()(using dstGraph)
+
+    // The interpolation wrapper, or the expression's own call when it already was one
+    // (`{@html render()}`). Restricted to the sink site's own subtree so a nested element's
+    // interpolation is not tagged along with it.
+    sinkSites.iterator.ast
+        .collectAll[Call]
+        .dedup
+        .newTagNode("framework-output")
+        .store()(using dstGraph)
+  end tagRawHtmlTemplateSinks
+
   private def tagJavaScriptPatterns(dstGraph: DiffGraphBuilder): Unit =
     // Request/Response patterns
     JS_REQUEST_PATTERNS.foreach(p =>
@@ -122,6 +180,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     JS_RESPONSE_PATTERNS.foreach(p =>
         atom.call.code(p).newTagNode("framework-output").store()(using dstGraph)
     )
+
+    tagRawHtmlTemplateSinks(dstGraph)
 
     // Prototype risks
     atom.method.name("create")

@@ -31,6 +31,28 @@ class ConfigPassTest extends AnyWordSpec with Matchers:
 
   }
 
+  "ConfigPass for Svelte files" should {
+
+      "generate ConfigFiles correctly for a simple SvelteKit project" in {
+          File.usingTemporaryDirectory("jssrc2cpgTest") { dir =>
+            val fileA = dir / "a.svelte"
+            val fileB = dir / "b.svelte"
+            fileA.write("<script>let x = 1;</script>\n<p>{x}</p>")
+            fileB.write("<p>plain template</p>")
+
+            val cpg = Cpg.emptyCpg
+            new ConfigPass(cpg, Config().withInputPath(dir.pathAsString)).createAndApply()
+
+            val List(configFileA, configFileB) = cpg.configFile.l
+            configFileA.name shouldBe "a.svelte"
+            configFileA.content shouldBe "<script>let x = 1;</script>\n<p>{x}</p>"
+            configFileB.name shouldBe "b.svelte"
+            configFileB.content shouldBe "<p>plain template</p>"
+          }
+      }
+
+  }
+
   "ConfigPass for other config files" should {
 
       "generate ConfigFiles correctly for simple JS project" in {

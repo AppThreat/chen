@@ -4,7 +4,8 @@ import io.circe.*
 import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, MethodRef}
+import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Local, Method, MethodRef}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -55,6 +56,38 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // the juice-shop tagging phase (jstack: ChennaiTagsPass -> String.matches -> Pattern.compile).
   private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
   private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
+
+  // SvelteKit identifies route handlers by file name, not by a registration call: a
+  // `load` exported from `+page.server.ts` *is* the route handler, so there is no
+  // `app.get("/path", handler)` shape for the JS_ROUTES_CALL_REGEX above to match.
+  // Names follow https://svelte.dev/docs/kit/routing.
+  private val SVELTEKIT_DATA_FILE_REGEX     = ".*\\+(page|layout)(\\.server)?\\.(js|ts|mjs|mts)"
+  private val SVELTEKIT_ENDPOINT_FILE_REGEX = ".*\\+server\\.(js|ts|mjs|mts)"
+  private val SVELTEKIT_HOOKS_FILE_REGEX =
+      ".*hooks(\\.server|\\.client)?\\.(js|ts|mjs|mts)"
+  private val SVELTE_COMPONENT_FILE_REGEX = ".*\\.svelte"
+
+  /** Prefix of the lowered form of an ESM export (`export let data` -> `exports.data = data`). */
+  private val ExportsPrefix = "exports."
+
+  /** `load` runs per request and receives `{ params, url, request, cookies, fetch, locals }`. */
+  private val SVELTEKIT_DATA_ENTRYPOINTS = Set("load")
+
+  /** `+server.ts` exports one function per HTTP verb, plus `fallback` for the rest. */
+  private val SVELTEKIT_HTTP_ENTRYPOINTS =
+      Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "fallback")
+
+  /** `hooks.server.ts` / `hooks.ts` sit in front of every request. */
+  private val SVELTEKIT_HOOK_ENTRYPOINTS =
+      Set(
+        "handle",
+        "handleError",
+        "handleFetch",
+        "handleValidationError",
+        "init",
+        "reroute",
+        "transport"
+      )
 
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
@@ -128,7 +161,90 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         .filterNot(_.name == "this")
         .newTagNode(FRAMEWORK_INPUT)
         .store()(using dstGraph)
+    tagSvelteKitRoutes(dstGraph)
   end tagJsRoutes
+
+  /** SvelteKit route semantics.
+    *
+    * Two halves, because SvelteKit's request path crosses a file boundary that has no edge in the
+    * graph: the server's `load` return becomes the component's `data` prop by convention, not by a
+    * call or an import.
+    *
+    * Server half: the entrypoints in `+page.server.ts`, `+server.ts` and `hooks.server.ts` are
+    * tagged `framework-route`, and their parameters `framework-input`. The parameters are the
+    * request (`{ params, url, request, cookies }`), so this is what makes server-side flows such as
+    * `params.slug` reaching a query show up.
+    *
+    * Component half: `$props()` in a `.svelte` file is tagged `framework-input`. In a route
+    * component the `data` prop is whatever the server `load` returned; in any component the props
+    * come from outside it. Paired with the `framework-output` tag `EasyTagsPass` puts on a value
+    * rendered through `{@html}`, this closes a reportable props -> raw-HTML path inside the
+    * component without needing the cross-file edge.
+    *
+    * Anonymous methods in a server file are tagged alongside the named entrypoints: `export const
+    * actions = { default: async ({ request }) => ... }` compiles to an anonymous method, and it is
+    * a request handler like any other. Named helper functions in the same file are deliberately
+    * left alone - only the entrypoint names and the anonymous handlers are treated as web-facing.
+    *
+    * Svelte 4's `export let` props are not covered; `$props()` is the Svelte 5 form.
+    */
+  private def tagSvelteKitRoutes(dstGraph: DiffGraphBuilder): Unit =
+    def tagEntrypoints(fileRegex: String, entrypointNames: Set[String]): Unit =
+      val methods = atom.file.name(fileRegex).method.internal.l
+      if methods.isEmpty then return
+      // Anonymous handlers are numbered when a file has more than one (`anonymous`,
+      // `anonymous1`, ...), which is the normal case for an `actions` object.
+      val handlers = methods
+          .filter(m => entrypointNames.contains(m.name) || m.name.startsWith("anonymous"))
+          .distinctBy(_.id)
+      if handlers.isEmpty then return
+      handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+      handlers.iterator.parameter
+          .filterNot(_.name == "this")
+          .newTagNode(FRAMEWORK_INPUT)
+          .store()(using dstGraph)
+
+    tagEntrypoints(SVELTEKIT_DATA_FILE_REGEX, SVELTEKIT_DATA_ENTRYPOINTS)
+    tagEntrypoints(SVELTEKIT_ENDPOINT_FILE_REGEX, SVELTEKIT_HTTP_ENTRYPOINTS)
+    tagEntrypoints(SVELTEKIT_HOOKS_FILE_REGEX, SVELTEKIT_HOOK_ENTRYPOINTS)
+
+    val componentMethods = atom.file.name(SVELTE_COMPONENT_FILE_REGEX).method.internal.l
+    if componentMethods.isEmpty then return
+
+    // Svelte 5: props arrive from a `$props()` call, and taint flows from it through the
+    // destructuring into each prop binding.
+    componentMethods.iterator.call
+        .nameExact("$props")
+        .dedup
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+
+    // Svelte 4: `export let data` lowers to `exports.data = data`, so the locals assigned into
+    // `exports.*` are the component's props. There is no producing call to tag - the parent
+    // component assigns the binding - so the prop's *reads* are tagged instead: a read of an
+    // externally supplied binding is a web-facing input read, the same reasoning that makes a
+    // controller method's parameters framework-input.
+    //
+    // When a prop is rendered directly (`{@html data.body}`) the read is both the source and
+    // inside the sink; `ReachableSlicing` already drops entries whose first and last node are the
+    // same, so that degenerate case needs no special handling here.
+    // Keyed on the exported name rather than on the assignment's right-hand identifier: that
+    // identifier carries no REF edge to the local, so a `refsTo` join finds nothing.
+    val exportedPropNames = componentMethods.iterator.call
+        .nameExact(Operators.assignment)
+        .flatMap(_.argumentOption(1))
+        .map(_.code)
+        .filter(_.startsWith(ExportsPrefix))
+        .map(_.stripPrefix(ExportsPrefix))
+        .toSet
+    if exportedPropNames.nonEmpty then
+      componentMethods.iterator.local
+          .filter(local => exportedPropNames.contains(local.name))
+          .referencingIdentifiers
+          .dedup
+          .newTagNode(FRAMEWORK_INPUT)
+          .store()(using dstGraph)
+  end tagSvelteKitRoutes
 
   private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
     val cRoutePatterns = Array(
