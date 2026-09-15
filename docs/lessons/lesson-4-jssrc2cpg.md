@@ -22,8 +22,8 @@ calls are bound at runtime. `jssrc2cpg` therefore builds the graph in two clearl
 stages:
 
 1. **AST generation (out of process).** A native Node-based tool, `astgen` (Babel/Esprima under
-   the hood), parses every `.js`, `.jsx`, `.ts`, `.tsx`, `.vue` file and emits one JSON AST file
-   per source file. This is driven by
+   the hood), parses every `.js`, `.jsx`, `.ts`, `.tsx`, `.vue`, `.svelte` file and emits one JSON
+   AST file per source file. This is driven by
    [`AstGenRunner`](https://github.com/AppThreat/chen/blob/main/platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala).
 2. **CPG ingestion (in process).** `AstCreationPass` reads the JSON and materialises `METHOD`,
    `TYPE_DECL`, `CALL`, `BLOCK`, `LOCAL`, control-flow, and AST nodes.
@@ -149,6 +149,103 @@ cpg.call.name("innerHTML|outerHTML|insertAdjacentHTML").l
 cpg.call.methodFullName(".*express.*").code.take(20).l
 ```
 
+### Single-file components (`.vue`, `.svelte`)
+
+Vue and Svelte components put script, template, and style in one document. astgen flattens each
+into a normal Babel AST: script statements as top-level `Program` body, and the template as
+standard **JSX** nodes. Nothing Vue- or Svelte-specific reaches chen, so `AstForTemplateDomCreator`
+turns the template into `TEMPLATE_DOM` nodes with no framework-specific code.
+
+Svelte's control flow is mapped onto the JSX equivalents, which is what makes it traversable:
+
+| Svelte | Emitted as |
+| --- | --- |
+| `{#if c}A{:else}B{/if}` | `ConditionalExpression` with `JSXFragment` branches |
+| `{#each xs as x, i}` | `xs.map((x, i) => <>…</>)` — a real `map` call and closure |
+| `{#await p}…{:then v}` | `p.then(v => <>…</>, e => <>…</>)` |
+| `{#snippet f(a)}` / `{@render f(x)}` | assignment of an arrow function / a call |
+| `on:click={h}`, `bind:value={q}` | `JSXAttribute` with a `JSXNamespacedName` |
+
+Query the template like any other DOM:
+
+```scala
+// every directive as written in the .svelte source
+cpg.templateDom.nameExact("JSXAttribute").code.l
+
+// the closures synthesized for {#each} bodies
+cpg.call.nameExact("map").l
+```
+
+Because offsets are absolute byte positions into the component file, `code` fields read back as
+the original source (`on:click={increment}`, `{#each article.tagList as tag}`) and `--code-dump`
+works normally.
+
+**Template dataflow works.** An interpolated expression is wrapped in an
+`<operator>.interpolation` call, which makes it a call argument and therefore a use the data
+dependence graph can see. Without that wrapper an expression sitting directly inside a
+`JSXExpressionContainer` had no reaching definition at all - `DdgGenerator.uses` harvests uses from
+`Return` and `Call` nodes only - so `<div>{bio}</div>` and `{@html bio}` could never be reached.
+That applied to React JSX and Vue equally, and is fixed for all three.
+
+```scala
+cpg.call.nameExact("<operator>.interpolation").l
+cpg.call.nameExact("<operator>.interpolation").reachableByFlows(sources)
+```
+
+An expression that is *already* a call (`{@html data.article.body}` is a field access) carries its
+own uses, so no wrapper is added and the existing call is the interpolation site.
+
+Svelte blocks and tags all map onto `JSXExpressionContainer`, so the DOM node is named after the
+construct instead - `SvelteIfBlock`, `SvelteEachBlock`, `SvelteHtmlTag`, `SvelteAwaitBlock`,
+`SvelteSnippetBlock`, `SvelteRenderTag`, `SvelteConstTag`, `SvelteDebugTag`, `SvelteExpressionTag`.
+Elements and attributes keep their JSX names, so Vue, React and Svelte stay uniform there:
+
+```scala
+cpg.templateDom.nameExact("SvelteHtmlTag").code.l      // every {@html} site, verbatim
+cpg.templateDom.nameExact("SvelteEachBlock").code.l
+```
+
+Two things still to know. A flow whose source and sink land on the *same line* is suppressed by
+`ReachableSlicing` as zero-information, because `toSlice` renders at most one node per `file#line`.
+And the template statement is emitted last in the program body on purpose: Svelte hoists the
+instance script, so markup renders after it even when the `<script>` tag sits below the markup.
+
+## SvelteKit routes
+
+SvelteKit has no route-registration call for the Express-style patterns to match — a `load`
+exported from `+page.server.ts` *is* the handler — so `ChennaiTagsPass` keys off the file name
+instead:
+
+| File | Entrypoints tagged `framework-route` |
+| --- | --- |
+| `+page.server.*`, `+page.*`, `+layout.server.*`, `+layout.*` | `load`, plus the `actions` handlers |
+| `+server.*` | `GET POST PUT PATCH DELETE OPTIONS HEAD fallback` |
+| `hooks.server.*`, `hooks.*`, `hooks.client.*` | `handle handleError handleFetch handleValidationError init reroute transport` |
+
+Their parameters — the request object, `{ params, url, request, cookies }` — are tagged
+`framework-input`, which is what makes server-side flows surface. `actions` handlers compile to
+anonymous methods (`anonymous`, `anonymous1`, …), so those are tagged alongside the named
+entrypoints; named helper functions in the same file are left alone.
+
+The request path crosses a file boundary with no edge in the graph: the server's `load` return
+becomes the component's `data` prop by SvelteKit convention, not by a call or an import. The
+component side is covered instead by tagging `$props()` in a `.svelte` file `framework-input` — the
+component's input boundary. Paired with the `framework-output` tag on a value rendered through
+`{@html}`, that closes a reportable path inside the component:
+
+```text
++page.svelte L2  $props()                        [framework-input]
++page.svelte L6  raw
++page.svelte L7  return '<div>' + raw + '</div>'
++page.svelte L4  decorate(data.body)
+```
+
+Note that a flow whose source and sink land on the *same line* — `const { data } = $props()` read
+straight into `{@html data.body}` — is suppressed by `ReachableSlicing` as zero-information, since
+`toSlice` renders at most one node per `file#line`. The value has to pass through something on
+another line to be reported. Svelte 4's `export let` props are not tagged; `$props()` is the
+Svelte 5 form.
+
 ## Notes for Security Analysts
 
 - Without `ImportResolverPass`, calls into third-party modules keep a `methodFullName` of
@@ -158,3 +255,6 @@ cpg.call.methodFullName(".*express.*").code.take(20).l
   information but is slower. Disable it with `--no-tsTypes` for very large pure-JS code bases.
 - `PrivateKeyFilePass` is useful on its own for secret detection: it tags files whose content
   matches PEM/private-key patterns.
+- `.vue` and `.svelte` files are also emitted as `CONFIG_FILE` nodes by `ConfigPass`, so
+  `cpg.configFile.name(".*\\.svelte")` gives you the raw component text when the graph shape is
+  not what you need.

@@ -22,7 +22,7 @@ written in the target ecosystems — the **ASTGen runners**:
 
 | Language  | Binary            | Runner class                                       |
 | --------- | ----------------- | -------------------------------------------------- |
-| JS/TS/Vue | `astgen`          | `jssrc2cpg/.../utils/AstGenRunner`                 |
+| JS/TS/Vue/Svelte | `astgen`   | `jssrc2cpg/.../utils/AstGenRunner`                 |
 | Ruby      | `rbastgen`        | `ruby2atom/.../parser/RubyAstGenRunner`            |
 | Python    | _(none)_          | native `PyParser` in `pysrc2cpg` — no subprocess   |
 | PHP       | `php-parser` phar | invoked from `php2atom` via the local `php` binary |
@@ -136,3 +136,12 @@ astCreationPass.createAndApply()                                 // ingests JSON
   after a global `astgen` upgrade.
 - `ExternalCommand.run` wraps the command in the platform shell (`sh -c` / `cmd /c`), so shell
   metacharacters in paths must be quoted.
+- **`astgen --version` is part of the cache key.** `AstGenRunner.astGenFingerprint` folds it into
+  the parse-cache fingerprint, so upgrading `@appthreat/atom-parsetools` invalidates cached ASTs
+  automatically. The corollary: if astgen's emitted shape changes without a version bump, stale
+  cached parses are silently reused. Svelte support raised the AST format version to `4.2.0`
+  (parsetools 1.6.0) for exactly this reason.
+- **Single-file components run through the same JS invocation.** `.vue` and `.svelte` files are
+  discovered by the main `astgen -t ts|flow` run; the extra `-t vue` pass exists only for
+  `.vue`-specific type handling. Svelte components come back as ordinary Babel JSX, so no chen-side
+  node types are involved — see [Lesson 4](lesson-4-jssrc2cpg.md) for the mapping table.

@@ -57,4 +57,31 @@ class ConstClosurePassTests extends DataFlowCodeToCpgSuite:
           barCall.methodFullName.endsWith("program:anonymous1") shouldBe true
       }
   }
+
+  "should name the closure a Svelte {#snippet} block declares" in {
+      // A snippet is emitted as an assignment of an arrow function to the snippet name, but the
+      // assignment's code is the template source rather than a `const ` declaration, so the
+      // const-closure branch skips it. Without the snippet-aware branch the method stays
+      // `anonymous` and `{@render row(...)}` cannot resolve to it.
+      val cpg = code(
+        """
+        |<script lang="ts">
+        |let rows = ['a'];
+        |</script>
+        |
+        |{#snippet row(item)}
+        |  <li>{item}</li>
+        |{/snippet}
+        |
+        |<ul>{@render row(rows[0])}</ul>
+        |""".stripMargin,
+        "s.svelte"
+      )
+
+      val List(m) = cpg.method.name("row").l
+      m.name shouldBe "row"
+      m.fullName should endWith(":row")
+      cpg.methodRef.methodFullNameExact(m.fullName).size shouldBe 1
+  }
+
 end ConstClosurePassTests

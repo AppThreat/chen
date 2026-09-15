@@ -15,9 +15,13 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
 
   private val logger: Logger = LoggerFactory.getLogger(getClass)
 
-  protected val allExtensions: Set[String] = Set(".json", ".js", ".vue", ".html", ".pug")
+  // Single-file components (.vue, .svelte) are treated as configuration
+  // artifacts alongside the usual config/script files so their content is
+  // queryable via configFile nodes.
+  protected val allExtensions: Set[String] =
+      Set(".json", ".js", ".vue", ".svelte", ".html", ".pug")
   protected val selectedExtensions: Set[String] =
-      Set(".json", ".config.js", ".conf.js", ".vue", ".html", ".pug")
+      Set(".json", ".config.js", ".conf.js", ".vue", ".svelte", ".html", ".pug")
 
   override def generateParts(): Array[File] =
       configFiles(config, allExtensions).toArray

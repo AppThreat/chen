@@ -704,4 +704,77 @@ class DataflowTest extends DataFlowCodeToCpgSuite:
           sink.reachableBy(identifierSource).size shouldBe 1
       }
   }
+
+  "Bind a Svelte $props() field to its template and {@html} usages" in {
+      val cpg: Cpg = code(
+        """
+        |<script lang="ts">
+        |let { userBio }: { userBio: string } = $props();
+        |</script>
+        |
+        |<div class="bio">{@html userBio}</div>
+        |""".stripMargin,
+        "bio.svelte"
+      )
+
+      // The $props() call feeds the destructuring assignment in the script
+      // block's control flow.
+      val List(propsCall) = cpg.call.nameExact("$props").l
+      val flows           = cpg.assignment.code("userBio = .*").reachableByFlows(propsCall)
+      flows.isEmpty shouldBe false
+
+      // The template's {@html} identifier lives in the same program method as
+      // the script locals and resolves to the same local binding, so name and
+      // scope-level queries join template usages to script declarations.
+      // (A full DDG path through TEMPLATE_DOM nodes is future work and holds
+      // equally for Vue templates today.)
+      val List(userBioLocal) = cpg.local.nameExact("userBio").l
+      val List(templateUse)  = cpg.identifier.nameExact("userBio").lineNumber(6).l
+      templateUse.method.fullName.endsWith(":program") shouldBe true
+      templateUse.refsTo.head shouldBe userBioLocal
+      cpg.identifier.nameExact("userBio").lineNumber(3).head.refsTo.head shouldBe userBioLocal
+  }
+
+  "Reach a Svelte template interpolation from a script-side source" in {
+      val cpg: Cpg = code(
+        """
+        |<script lang="ts">
+        |const bio = taint();
+        |</script>
+        |
+        |<div>{@html bio}</div>
+        |""".stripMargin,
+        "bare.svelte"
+      )
+
+      // A bare identifier inside a template container is wrapped in
+      // `<operator>.interpolation`, which makes it a call argument and so a use the data
+      // dependence graph can see. Without the wrapper this flow does not exist.
+      val source = cpg.call.nameExact("taint").l
+      val sink   = cpg.call.nameExact("<operator>.interpolation").l
+      sink should not be empty
+      sink.reachableByFlows(source.iterator).size should be > 0
+  }
+
+  "Reach a template interpolation when the markup precedes the script" in {
+      val cpg: Cpg = code(
+        """
+        |<p>{@html bio}</p>
+        |
+        |<script lang="ts">
+        |const bio = taint();
+        |</script>
+        |""".stripMargin,
+        "hoisted.svelte"
+      )
+
+      // Svelte hoists the instance script, so the markup renders after it regardless of
+      // textual position. astgen emits the template statement last for this reason; ordering
+      // by offset would invert the control flow here and lose the flow entirely.
+      val source = cpg.call.nameExact("taint").l
+      val sink   = cpg.call.nameExact("<operator>.interpolation").l
+      sink should not be empty
+      sink.reachableByFlows(source.iterator).size should be > 0
+  }
+
 end DataflowTest
