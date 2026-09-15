@@ -1,0 +1,16 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/Svelte5ShapeAstCreationPassTest.scala
+  h_6a4cc5cdf68def 9-13
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteDomAstCreationPassTest.scala
+  h_6a4cc5cdf68def 9-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1479773f860903a342c9f59a2f4927d78b8502fc",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
