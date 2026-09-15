@@ -1,0 +1,18 @@
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 220-255
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteKitRouteTagsTest.scala
+  h_6a4cc5cdf68def 1-169
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 59-87,160,163-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e8462de9ceb0b50c3fcbcab12378993dc61f9b7",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
