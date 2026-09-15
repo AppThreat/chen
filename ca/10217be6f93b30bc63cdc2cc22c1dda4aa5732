@@ -1,0 +1,16 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ImportResolverPass.scala
+  h_6a4cc5cdf68def 55-57
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/SvelteKitAliasImportTests.scala
+  h_6a4cc5cdf68def 6-7,33-35,37,55-57,70-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ca10217be6f93b30bc63cdc2cc22c1dda4aa5732",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
