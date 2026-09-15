@@ -1,0 +1,48 @@
+README.md
+  h_6a4cc5cdf68def 28,35-38
+build.sbt
+  h_6a4cc5cdf68def 3
+codemeta.json
+  h_6a4cc5cdf68def 10,19-32,41
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/DefaultSemantics.scala
+  h_6a4cc5cdf68def 3,34-45,166-170,220-242,268-277
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/semantics/JavaFrameworkSemantics.scala
+  h_6a4cc5cdf68def 1-129
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/LanguageScopedSemanticsTests.scala
+  h_6a4cc5cdf68def 3-4,34-54,66-85,94
+docs/lessons/lesson-11-custom-taggers.md
+  h_6a4cc5cdf68def 23
+docs/lessons/lesson-14-reachability-and-semantics.md
+  h_6a4cc5cdf68def 34-45
+docs/lessons/lesson-2-javasrc2cpg.md
+  h_6a4cc5cdf68def 7-9,47-121
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  h_6a4cc5cdf68def 16,44,49-50,54,57,76-77,85-86,148,1020-1047,1053-1059,1065-1071,1101-1110,1124,1190-1194,1212,1319-1338,1344,1373-1376,1382,1386-1387,1389,1393-1402,1404,1413,1913-1915,1924-2176,2193-2201,2214-2226,2229-2241,2245,2280,2288-2291,2293,2669-2673,2681,2799-2806,2828-2840,2843-2967,3309-3321,3324-3346,3559-3564,3567
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/scope/Scope.scala
+  h_6a4cc5cdf68def 129-155
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/AnnotationTests.scala
+  h_6a4cc5cdf68def 46-51,55-57,95-97,101-103
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/JavaFrameworkTagsTest.scala
+  h_6a4cc5cdf68def 1-538
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/ModernJavaSyntaxTests.scala
+  h_6a4cc5cdf68def 1-366
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/dataflow/ModernJavaDataflowTests.scala
+  h_6a4cc5cdf68def 1-250
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 5,20,41,236-237,765-1278
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 987-1077,1172
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/java/JavaFrameworks.scala
+  h_6a4cc5cdf68def 1-386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "665ca6472ee3fcfd2307a4fe92b592777e358a5b",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
