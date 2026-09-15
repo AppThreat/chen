@@ -21,10 +21,14 @@ class VueJsDomAstCreationPassTest extends AbstractDomPassTest:
           ":attr=\"image.name\"",
           "v-bind:alt=\"image.description\""
         )
+        // Directive attribute values are emitted as expression containers since astgen 4.3.0
+        // (`:src={image.url}` keeps its reference to the script binding), so a template with
+        // bound attributes now also carries JSXExpressionContainer nodes.
         templateDomName(cpg) shouldBe Set(
           "JSXElement",
           "JSXOpeningElement",
           "JSXAttribute",
+          "JSXExpressionContainer",
           "JSXClosingElement",
           "JSXText"
         )

@@ -140,7 +140,9 @@ astCreationPass.createAndApply()                                 // ingests JSON
   the parse-cache fingerprint, so upgrading `@appthreat/atom-parsetools` invalidates cached ASTs
   automatically. The corollary: if astgen's emitted shape changes without a version bump, stale
   cached parses are silently reused. Svelte support raised the AST format version to `4.2.0`
-  (parsetools 1.6.0) for exactly this reason.
+  (parsetools 1.6.0) for exactly this reason, and Vue directive expression values raised it to
+  `4.3.0` (parsetools 1.7.0): `v-html="x"` attribute values became JSX expression containers, a
+  shape change invisible to the cache without the bump.
 - **Single-file components run through the same JS invocation.** `.vue` and `.svelte` files are
   discovered by the main `astgen -t ts|flow` run; the extra `-t vue` pass exists only for
   `.vue`-specific type handling. Svelte components come back as ordinary Babel JSX, so no chen-side

@@ -246,6 +246,60 @@ straight into `{@html data.body}` — is suppressed by `ReachableSlicing` as zer
 another line to be reported. Svelte 4's `export let` props are not tagged; `$props()` is the
 Svelte 5 form.
 
+## Angular, React and Vue routes and props
+
+The three component frameworks are recognised by `ChennaiTagsPass` from shapes the frontend already
+emits, not by pattern-matching source text.
+
+**Route tables** — Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
+`RouterModule.forRoot`/`provideRouter`) and React Router (`createBrowserRouter`) all lower to the
+same object-property assignments, `_tmp_1.path = "/about/:id"` and `_tmp_1.component = About`. A
+temp carrying a `.path` assignment plus a route-record sibling key is a route record: the path
+literal is tagged `framework-route` and the rendered component becomes a handler whose parameters
+are tagged `framework-input`. An object that merely has a `path` property is not a route record.
+
+Three independent guards keep ordinary objects out, because a bad route is not just a noisy tag —
+it surfaces in slice output as an application route. A router package must be imported at all.
+Sibling keys are then split by how route-specific they are: a **strong** key names something to
+render or somewhere to go (`component`, `element`, `redirect`, `pathMatch`, and the lazy forms
+`loadChildren`, `loadComponent`, `lazy`) and admits any path, since child routes are written with
+bare relative segments; a **weak** key (`children`, `loader`, `action` — which also describe file
+trees, bundler configs and menus) additionally requires a route-shaped path. And a relative
+filesystem value (`./src`) is never a route. The conservative edge: an Angular parent route written
+as `{ path: 'admin', children: [...] }` — bare path, no component — is missed, while
+`{ path: '/admin', children: [...] }` is found; its children carry components and are found either
+way.
+
+**React** — `<Route path="/profile" element={<Profile />} />` tags the path attribute's literal and
+resolves the rendered component (from the identifier, or from the JSX tag name when the value is an
+element — the `JSXIdentifier` carries no reference edge). `useParams`, `useSearchParams` and
+`useLocation` are tagged `framework-input` — the URL reaches a component through those hooks. And a
+capitalized method that renders a template is a React component by the framework's own naming
+rule, so its first (props) parameter is web-facing input:
+
+```text
+app.jsx L2  useParams()          [framework-input]
+app.jsx L4  __html: bio          [framework-output]   ← dangerouslySetInnerHTML
+```
+
+**Vue** — `defineProps`/`withDefaults`/`defineModel` calls and `useRoute()` are
+`framework-input`, as is the props parameter of an options-API `setup(props)` method. Since
+atom-parsetools 4.3.0 a directive value like `v-html="content"` keeps a reference to the script
+binding, so a props-to-raw-HTML path inside one component is reportable end to end.
+
+**Angular** — `@Input()` members and their `this.x` reads are `framework-input` (matched
+exactly, so an `@Input() id` does not taint `this.idx`), `@Output()` members are
+`framework-output`, `ActivatedRoute` reads are input — whether the field is named `route` or
+`activatedRoute` (`route.params`, `this.activatedRoute.snapshot.queryParams`,
+`paramMap.get(...)`), and a `bypassSecurityTrust*` call — the sanitizer escape hatch that feeds
+`[innerHTML]`-style bindings — is output.
+
+**Next.js and Nuxt** file conventions are keyed off the file name, like SvelteKit: an app-router
+`route.ts` tags its HTTP-verb exports, a `pages/api` handler tags every export, `middleware.ts`
+and the `getServerSideProps`/`getStaticProps`/`generateMetadata` loaders are entrypoints; Nuxt
+tags `defineEventHandler`/`eventHandler` lambdas and the exports of `server/api`/`server/routes`
+files, with the h3 request readers (`readBody`, `getRouterParam`, `getQuery`, …) as input.
+
 ## Notes for Security Analysts
 
 - Without `ImportResolverPass`, calls into third-party modules keep a `methodFullName` of
