@@ -5,7 +5,14 @@ import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Local, Method, MethodRef}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    Call,
+    Identifier,
+    Literal,
+    Local,
+    Method,
+    MethodRef
+}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -91,6 +98,73 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
+  // ---------------------------------------------------------------------
+  // Angular / React / Vue recognizers
+  // ---------------------------------------------------------------------
+
+  // React Router (and Next.js) expose the URL through hooks; the call result
+  // carries the request data, so the call itself is the source.
+  private val REACT_INPUT_HOOKS = Set("useParams", "useSearchParams", "useLocation")
+
+  private val ANGULAR_ROUTE_INPUT_REGEX =
+      "(?s).*(this\\.)?route\\.(snapshot\\.)?(params|queryParams|paramMap|queryParamMap|fragment|url|data).*"
+
+  // Angular's DomSanitizer escape hatch: the returned value is rendered as
+  // raw markup by the [innerHTML]-style binding it is fed to.
+  private val ANGULAR_SANITIZER_BYPASS_REGEX =
+      ".*bypassSecurityTrust(HTML|Html|SCRIPT|Script|STYLE|Style|URL|Url|RESOURCE_URL|ResourceUrl).*"
+
+  // Route tables in Vue (`createRouter({ routes })`), Angular
+  // (`RouterModule.forRoot(routes)`, `provideRouter(routes)`) and React Router
+  // (`createBrowserRouter([{ path, element }])`) all lower to the same shape:
+  // an array of anonymous objects whose properties are assigned one by one -
+  //   _tmp_1.path = "/about/:id"
+  //   _tmp_1.component = About
+  // A temp carrying `.path` plus one of these siblings is a route record in
+  // any of the three frameworks; no import sniffing needed.
+  private val ROUTE_RECORD_SIBLING_KEYS =
+      Set(
+        "component",
+        "components",
+        "element",
+        "redirect",
+        "children",
+        "pathMatch",
+        "loader",
+        "action"
+      )
+
+  // The HTTP verbs a Next.js app-router `route.ts` may export, the same
+  // convention SvelteKit's `+server.ts` uses.
+  private val NEXT_HTTP_ENTRYPOINTS =
+      Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+
+  private val NEXT_ROUTE_FILE_REGEX =
+      "(.*[/\\\\])?app(/.+)?[/\\\\]route\\.(js|jsx|ts|tsx|mjs|mts)$"
+  private val NEXT_API_FILE_REGEX =
+      "(.*[/\\\\])?pages[/\\\\]api[/\\\\].*\\.(js|jsx|ts|tsx|mjs|mts)$"
+  private val NEXT_ENTRYPOINT_NAMES =
+      Set("getServerSideProps", "getStaticProps", "generateMetadata")
+
+  private val NUXT_SERVER_FILE_REGEX =
+      "(.*[/\\\\])?server[/\\\\](api|routes)[/\\\\].*\\.(js|ts|mjs|mts)$"
+
+  /** h3/Nitro request readers: the first argument is the request event, the return value is request
+    * data.
+    */
+  private val H3_INPUT_CALLS =
+      Set("readBody", "readRawBody", "getRouterParam", "getRouterParams", "getQuery", "useQuery")
+
+  /** True when any import comes from one of the given npm packages. ESM imports lower to
+    * `<package>:<name>` and `require(...)` to the bare specifier, so the package is the text before
+    * the first colon.
+    */
+  private def usesPackages(packagePrefixes: String*): Boolean =
+      atom.imports.importedEntity.exists { e =>
+        val pkg = e.takeWhile(_ != ':')
+        packagePrefixes.exists(p => pkg == p || pkg.startsWith(s"$p/") || pkg.startsWith(s"$p-"))
+      }
+
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
@@ -142,10 +216,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // `importedEntity` is the bare specifier for `require(...)` (e.g. "vue") and "<package>:<name>"
     // for ESM imports (e.g. "vue-router:useRoute", "@vue/composition-api:ref"), so strip the
     // ESM name suffix before matching the package.
-    val usesVue = atom.imports.importedEntity.exists { e =>
-      val pkg = e.takeWhile(_ != ':')
-      pkg == "vue" || pkg.startsWith("vue-") || pkg.startsWith("vue/") || pkg.startsWith("@vue/")
-    }
+    val usesVue = usesPackages("vue", "@vue")
     if usesVue then
       atom.call
           .filter(_.code.contains("$route"))
@@ -161,8 +232,319 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         .filterNot(_.name == "this")
         .newTagNode(FRAMEWORK_INPUT)
         .store()(using dstGraph)
+    tagRouteTableRecords(dstGraph)
+    tagReactRouter(dstGraph)
+    tagVueComponentInputs(dstGraph)
+    tagAngular(dstGraph)
+    tagNextJsRoutes(dstGraph)
+    tagNuxtServerRoutes(dstGraph)
     tagSvelteKitRoutes(dstGraph)
   end tagJsRoutes
+
+  /** Tag a handler method (a component or function a route renders) and its first parameter as the
+    * web-facing boundary: the method becomes a route entrypoint and its first parameter - the
+    * component props - web-facing input.
+    */
+  private def tagHandlerMethod(handler: Method, dstGraph: DiffGraphBuilder): Unit =
+    Iterator(handler).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    handler.parameter
+        .filterNot(_.name == "this")
+        .headOption
+        .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+
+  /** Resolve a route-record's `component`/`element` value to the handler method it names.
+    *
+    * Function components reference the method directly; class components (Angular, Vue class API)
+    * lower to a local whose name is also the TypeDecl name, so the method falls back to a lookup by
+    * name.
+    */
+  private def resolveComponentMethod(identifier: Identifier): Option[Method] =
+      identifier._refOut.collectFirst { case m: Method => m }.orElse {
+          atom.method.internal.nameExact(identifier.name).headOption
+      }
+
+  /** The tag name of a JSX element's code (`<Profile />` -> `Profile`), when it names a component.
+    *
+    * A `element={<Profile />}` value lowers to TEMPLATE_DOM nodes only - the JSXIdentifier tag
+    * carries no identifier node and no reference edge - so the component can only be resolved from
+    * the element's own code. Lowercase tags are host elements (`div`), not components.
+    */
+  private def jsxComponentName(domCode: String): Option[String] =
+    val name = domCode.drop(1).takeWhile(c => c != ' ' && c != '>' && c != '/')
+    Option.when(name.nonEmpty && name.charAt(0).isUpper)(name)
+
+  /** Route-table records shared by Vue, Angular and React Router.
+    *
+    * `{ path: '/about/:id', component: About }` lowers to `_tmp_1.path = "/about/:id"` and
+    * `_tmp_1.component = About` assignments. A temp with a `.path` assignment plus a route-record
+    * sibling key (`component`, `element`, `redirect`, `children`, ...) is a route record; the path
+    * literal is tagged `framework-route`, and the component the record renders is resolved to its
+    * method and tagged as a handler.
+    *
+    * Keyed on the containing method plus the base identifier's name: the synthesized `_tmp_N` names
+    * are unique within a method but not across files, and they carry no REF edges to a local that
+    * could be keyed on instead.
+    */
+  private def tagRouteTableRecords(dstGraph: DiffGraphBuilder): Unit =
+    // (method, baseName) -> key -> assignment call, for every `_tmp.key = value` property assignment
+    val propAssignments = atom.call
+        .nameExact(Operators.assignment)
+        .flatMap { call =>
+            call.argument
+                .isCall
+                .nameExact(Operators.fieldAccess)
+                .headOption
+                .flatMap { fieldAccess =>
+                  val key = fieldAccess.code.substring(fieldAccess.code.lastIndexOf('.') + 1)
+                  fieldAccess.argument.isIdentifier.headOption.map { base =>
+                      ((call.method, base.name), key, call)
+                  }
+                }
+        }
+        .l
+
+    val byTemp = propAssignments.groupBy(_._1)
+    byTemp.foreach { case ((_, _), assignments) =>
+        val keys = assignments.map(_._2).toSet
+        if keys.contains("path") && keys.exists(ROUTE_RECORD_SIBLING_KEYS) then
+          assignments.foreach {
+              case (_, "path", call) =>
+                  call.argument.isLiteral.headOption
+                      .foreach(lit =>
+                          Iterator(lit).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+                      )
+              case (_, key, call) if key == "component" || key == "element" =>
+                  call.argument.isIdentifier.headOption match
+                    case Some(ident) =>
+                        resolveComponentMethod(ident).foreach(tagHandlerMethod(_, dstGraph))
+                    case None =>
+                        // `element: <App />` keeps no identifier; the component is the JSX
+                        // tag named in the assigned code.
+                        call.argument.l.headOption
+                            .map(_.code)
+                            .flatMap(jsxComponentName)
+                            .orElse(jsxComponentName(call.code))
+                            .flatMap(nm => atom.method.internal.nameExact(nm).headOption)
+                            .foreach(tagHandlerMethod(_, dstGraph))
+              case _ => // not a handler-carrying key
+          }
+        end if
+    }
+  end tagRouteTableRecords
+
+  /** React Router JSX routes and request hooks.
+    *
+    * `<Route path="/profile" element={<Profile />} />` is the JSX form of a route registration: the
+    * `path` attribute's literal is the route and the component the `element`/`component` attribute
+    * renders is the handler. The URL itself reaches components through the
+    * `useParams`/`useSearchParams`/`useLocation` hooks, which are tagged as input.
+    *
+    * Function components receive their data through props: a capitalized method that renders a
+    * template (contains TEMPLATE_DOM) is a React component by the framework's own naming rule, so
+    * its first parameter is tagged `framework-input` - the same reasoning that makes a controller
+    * method's parameters web-facing.
+    */
+  private def tagReactRouter(dstGraph: DiffGraphBuilder): Unit =
+    val usesReact =
+        usesPackages("react", "react-dom", "react-router", "next")
+    if !usesReact then return
+
+    REACT_INPUT_HOOKS.foreach { hook =>
+        atom.call.nameExact(hook).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+    }
+
+    // The opening element carries the attributes; its code starts with the tag name.
+    atom.templateDom
+        .nameExact("JSXOpeningElement")
+        .filter(_.code.startsWith("<Route"))
+        .foreach { routeElem =>
+            routeElem.ast
+                .collectAll[io.shiftleft.codepropertygraph.generated.nodes.TemplateDom]
+                .nameExact("JSXAttribute")
+                .foreach { attr =>
+                    attr.code match
+                      case c if c.startsWith("path=") =>
+                          attr.ast.isLiteral.headOption
+                              .foreach(lit =>
+                                  Iterator(lit).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+                              )
+                      case c if c.startsWith("element=") || c.startsWith("component=") =>
+                          attr.ast.isIdentifier
+                              .dedup
+                              .foreach { ident =>
+                                  resolveComponentMethod(ident)
+                                      .foreach(tagHandlerMethod(_, dstGraph))
+                              }
+                          // `element={<Profile />}` has no identifier - the component is the
+                          // JSX element's own tag name.
+                          attr.ast
+                              .collectAll[io.shiftleft.codepropertygraph.generated.nodes.TemplateDom]
+                              .nameExact("JSXElement")
+                              .code(".*")
+                              .foreach { elemDom =>
+                                  jsxComponentName(elemDom.code)
+                                      .flatMap(nm => atom.method.internal.nameExact(nm).headOption)
+                                      .foreach(tagHandlerMethod(_, dstGraph))
+                              }
+                      case _ =>
+                }
+        }
+
+    atom.method
+        .internal
+        .filter(m => m.name.nonEmpty && m.name.charAt(0).isUpper)
+        .filter(_.ast.isTemplateDom.nonEmpty)
+        .foreach { component =>
+            component.parameter
+                .filterNot(_.name == "this")
+                .headOption
+                .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+        }
+  end tagReactRouter
+
+  /** Vue component props boundary.
+    *
+    * Composition API: `defineProps()` / `withDefaults(defineProps(), {...})` is the props
+    * declaration - the call is tagged `framework-input`, the same treatment Svelte 5's `$props()`
+    * gets. Options API: `setup(props)` and `data(props)` receive the props as their first
+    * parameter. `useRoute()` (vue-router) returns the live route, whose `.params`/`.query` carry
+    * URL data.
+    */
+  private def tagVueComponentInputs(dstGraph: DiffGraphBuilder): Unit =
+    val usesVue = usesPackages("vue", "@vue", "vue-router")
+    if !usesVue then return
+
+    atom.call
+        .name("defineProps|withDefaults|defineModel")
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+
+    atom.call.nameExact("useRoute").newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+
+    atom.method
+        .internal
+        .nameExact("setup")
+        .foreach { setup =>
+            setup.parameter
+                .filterNot(_.name == "this")
+                .headOption
+                .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+        }
+  end tagVueComponentInputs
+
+  /** Angular decorators and route-parameter reads.
+    *
+    * `@Input()` members are the parent-to-child data boundary: the member and its `this.x` reads
+    * are tagged `framework-input`. `@Output()` members (EventEmitter) are the child-to-parent
+    * boundary and are tagged `framework-output`. Classes annotated `@Component`/`@Directive`/
+    * `@Pipe`/`@Injectable` are tagged `framework` for inventory. URL data arrives via
+    * `ActivatedRoute` (`route.params`, `route.snapshot.queryParams`, `paramMap.get(...)`), and
+    * `bypassSecurityTrust*` marks values rendered as raw markup.
+    */
+  private def tagAngular(dstGraph: DiffGraphBuilder): Unit =
+    val usesAngular = usesPackages("@angular")
+    if !usesAngular then return
+
+    // @Input()/@Output() land as annotations on class members
+    val angularMembers = atom.annotation.nameExact("Input", "Output").l
+    angularMembers.foreach { annotation =>
+        annotation.astParent match
+          case member: io.shiftleft.codepropertygraph.generated.nodes.Member =>
+              val tag = if annotation.name == "Input" then FRAMEWORK_INPUT else FRAMEWORK_OUTPUT
+              Iterator(member).newTagNode(tag).store()(using dstGraph)
+              // `this.<member>` reads inside the class are the actual taint carriers
+              member.typeDecl.method.flatMap(_.ast.isCall).code(s".*this\\.${member.name}.*")
+                  .newTagNode(tag).store()(using dstGraph)
+          case _ =>
+    }
+
+    // NB: class-level inventory tagging of @Component/@Injectable classes was deliberately
+    // dropped - neither TYPE_DECL nor ANNOTATION nodes support TAGGED_BY edges, and the
+    // @Input/@Output member tagging below is what carries the dataflow semantics.
+
+    atom.call
+        .filter(_.code.contains("route."))
+        .code(ANGULAR_ROUTE_INPUT_REGEX)
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+
+    atom.call
+        .filter(_.code.contains("bypassSecurityTrust"))
+        .code(ANGULAR_SANITIZER_BYPASS_REGEX)
+        .newTagNode(FRAMEWORK_OUTPUT)
+        .store()(using dstGraph)
+  end tagAngular
+
+  /** Next.js file-convention routes.
+    *
+    * An app-router `route.ts` (e.g. `app/api/users/route.ts`) exports one function per HTTP verb
+    * (the same convention as SvelteKit's `+server.ts`); every export of a `pages/api` file is a
+    * handler; `middleware.ts` intercepts every request; and
+    * `getServerSideProps`/`getStaticProps`/`generateMetadata` are the page-data loaders, whose
+    * context parameter carries request data.
+    */
+  private def tagNextJsRoutes(dstGraph: DiffGraphBuilder): Unit =
+    def tagExported(names: Set[String], fileRegex: String): Unit =
+      val methods = atom.file.name(fileRegex).method.internal.l
+      // An empty `names` (pages/api) means every export is a handler, named or anonymous.
+      val handlers =
+          if names.isEmpty then methods.filterNot(m => m.name.contains("<") || m.name == ":program")
+          else methods.filter(m => names.contains(m.name) || m.name.startsWith("anonymous"))
+      handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+      handlers.iterator.parameter
+          .filterNot(_.name == "this")
+          .newTagNode(FRAMEWORK_INPUT)
+          .store()(using dstGraph)
+
+    tagExported(NEXT_HTTP_ENTRYPOINTS, NEXT_ROUTE_FILE_REGEX)
+    tagExported(Set.empty, NEXT_API_FILE_REGEX)
+
+    // Page-data loaders and middleware, wherever they are defined
+    atom.method
+        .internal
+        .name(NEXT_ENTRYPOINT_NAMES.map(n => s"^$n$$").mkString("|"))
+        .foreach(tagHandlerMethod(_, dstGraph))
+    atom.method
+        .internal
+        .nameExact("middleware")
+        .where(_.filename(".*middleware\\.(js|ts|mjs|mts)$"))
+        .foreach(tagHandlerMethod(_, dstGraph))
+  end tagNextJsRoutes
+
+  /** Nuxt/Nitro server routes.
+    *
+    * Files under `server/api` and `server/routes` export handlers directly; elsewhere handlers are
+    * registered by wrapping them in `defineEventHandler(...)`/`eventHandler(...)`. The h3 request
+    * readers (`readBody`, `getRouterParam`, ...) return request data and are tagged as input.
+    */
+  private def tagNuxtServerRoutes(dstGraph: DiffGraphBuilder): Unit =
+    val usesNuxt     = usesPackages("nuxt", "h3", "nitro")
+    val hasServerDir = atom.file.name(NUXT_SERVER_FILE_REGEX).nonEmpty
+    if !usesNuxt && !hasServerDir then return
+
+    atom.call.name("defineEventHandler|eventHandler|defineRouteHandler").foreach { call =>
+        call.argument
+            .flatMap {
+                case r: MethodRef => r._refOut.collectFirst { case m: Method => m }
+                case arg          => arg._refOut.collectFirst { case m: Method => m }
+            }
+            .dedup
+            .foreach(tagHandlerMethod(_, dstGraph))
+    }
+
+    val serverMethods = atom.file.name(NUXT_SERVER_FILE_REGEX).method.internal.l
+    val handlers = serverMethods
+        .filterNot(_.name.contains("<"))
+        .filter(m => m.name != ":program")
+    handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    handlers.iterator.parameter
+        .filterNot(_.name == "this")
+        .newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+
+    atom.call.name(H3_INPUT_CALLS.map(n => s"^$n$$").mkString("|")).newTagNode(FRAMEWORK_INPUT)
+        .store()(using dstGraph)
+  end tagNuxtServerRoutes
 
   /** SvelteKit route semantics.
     *
