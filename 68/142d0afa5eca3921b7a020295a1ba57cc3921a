@@ -1,0 +1,28 @@
+docs/lessons/lesson-11-custom-taggers.md
+  h_6a4cc5cdf68def 23
+docs/lessons/lesson-2-javasrc2cpg.md
+  h_6a4cc5cdf68def 88
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  h_6a4cc5cdf68def 1187-1191,1209,1370-1372,1383,1390-1392,1395,1907,2224,2262-2268,2272,2511-2517,2535,2546,3561-3563
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/PatternLocalOwnershipTests.scala
+  h_6a4cc5cdf68def 1-87
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/dataflow/ModernJavaDataflowTests.scala
+  h_6a4cc5cdf68def 181-201
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 5,41,796,819,1042,1052-1054,1058-1063,1068,1070-1072,1077-1087,1165,1210,1222-1225,1239-1248,1263
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 1029
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/JavaFrameworks.scala
+  h_6a4cc5cdf68def 1,194-205,268-271,273,318-323,325-328,331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "68142d0afa5eca3921b7a020295a1ba57cc3921a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
