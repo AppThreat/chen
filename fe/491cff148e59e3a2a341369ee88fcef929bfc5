@@ -1,0 +1,20 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_c664be3b96b1fa::t_e7751941e62b25 162-167,169,171
+  s_c664be3b96b1fa::t_03787b0f51cd39 176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe491cff148e59e3a2a341369ee88fcef929bfc5",
+  "prompts": {},
+  "sessions": {
+    "s_c664be3b96b1fa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e81729b-f8af-4d44-a896-5d09b7e2059a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
