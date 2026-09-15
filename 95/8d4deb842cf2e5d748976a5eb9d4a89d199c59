@@ -1,0 +1,37 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/VueRouteTagsTest.scala
+  s_c664be3b96b1fa::t_f3ddc8c5e27127 62,67-69,73-112
+  s_b3f24ddbee87b8::t_022c605fc9a408 113
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_c664be3b96b1fa::t_ee4e66337b86cd 125-153
+  s_c664be3b96b1fa::t_0ff1be9dfa5521 324-343
+  s_c664be3b96b1fa::t_a5bb3daaca7d81 213
+  s_c664be3b96b1fa::t_27d294aa55a89c 194-196
+  s_c664be3b96b1fa::t_5bf072afb94c7d 397-400,404-406
+  s_c664be3b96b1fa::t_9b1dabeb237463 347-349,355-367
+docs/lessons/lesson-4-jssrc2cpg.md
+  s_c664be3b96b1fa::t_c905f84477f5ba 257-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "958d4deb842cf2e5d748976a5eb9d4a89d199c59",
+  "prompts": {},
+  "sessions": {
+    "s_b3f24ddbee87b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64cf016c-1265-46f7-82b8-b12df9b0385a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_c664be3b96b1fa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e81729b-f8af-4d44-a896-5d09b7e2059a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
