@@ -1,0 +1,18 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2Cpg.scala
+  h_6a4cc5cdf68def 34-35,66
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2CpgOnFileSystem.scala
+  h_6a4cc5cdf68def 21-22,28-34,216-217
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/Py2CpgCacheDirTests.scala
+  h_6a4cc5cdf68def 1-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2704ab087e3f5d43415c9cbf8ac9c51ef149a3ba",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
