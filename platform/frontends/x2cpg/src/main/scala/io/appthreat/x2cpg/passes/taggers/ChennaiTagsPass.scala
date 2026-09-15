@@ -122,13 +122,35 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // an array of anonymous objects whose properties are assigned one by one -
   //   _tmp_1.path = "/about/:id"
   //   _tmp_1.component = About
-  // A temp carrying `.path` plus one of these siblings is a route record. Only strongly
-  // route-specific sibling keys count: `children`/`loader`/`action` also occur on file trees,
-  // webpack configs and menu structures, and a `{ path, children }` object must not become a
-  // route. A route table is also not recognised at all unless one of the router packages is
-  // imported, and a `.path` value that is a filesystem path (`./`, `../`) is never a route.
-  private val ROUTE_RECORD_SIBLING_KEYS =
-      Set("component", "components", "element", "redirect", "pathMatch")
+  // A temp carrying `.path` plus one of these siblings is a route record. The whole recogniser
+  // only runs when a router package is imported, which is what keeps unrelated `{ path, ... }`
+  // objects out; the sibling keys are then split by how route-specific they are.
+  //
+  // Strong keys name a thing to render or somewhere to go, and occur on little else: a record
+  // carrying one is a route whatever its path looks like (React Router and Vue child routes use
+  // bare relative segments - `{ path: 'users', component: Users }`).
+  private val ROUTE_RECORD_STRONG_KEYS =
+      Set(
+        "component",
+        "components",
+        "element",
+        "redirect",
+        "pathMatch",
+        // Angular lazy routes (`loadChildren`, and `loadComponent` for standalone components)
+        // and React Router's `lazy` - the handler arrives through a dynamic import, so there is
+        // no identifier to resolve, but the record is unambiguously a route.
+        "loadChildren",
+        "loadComponent",
+        "lazy"
+      )
+
+  // Weak keys are real route-record keys too - `{ path: '/admin', children: [...] }` is the
+  // standard Vue Router and Angular nesting idiom, and `loader`/`action` are React Router data
+  // routes - but they also occur on file trees, webpack configs and menu structures. A record
+  // carrying only a weak key therefore additionally has to have a route-shaped path.
+  private val ROUTE_RECORD_WEAK_KEYS = Set("children", "loader", "action")
+
+  private val ROUTE_RECORD_SIBLING_KEYS = ROUTE_RECORD_STRONG_KEYS ++ ROUTE_RECORD_WEAK_KEYS
 
   private val ROUTER_PACKAGES = Seq("vue-router", "@angular", "react-router", "nuxt")
 
@@ -169,6 +191,9 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * component - and duplicate TAG nodes with the same name surface in downstream output. Tags
     * emitted by other passes (EasyTagsPass) are not covered; this only deduplicates within this
     * pass.
+    *
+    * Cleared at the top of `run`: the memo is instance state, so without the reset a second
+    * `createAndApply()` on the same instance would silently emit nothing at all.
     */
   private val emittedTags = scala.collection.mutable.HashSet.empty[(Long, String)]
 
@@ -185,6 +210,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
+    emittedTags.clear()
     tagFrameworkRoutes(dstGraph)
     processChennaiConfig(dstGraph)
 
@@ -295,22 +321,50 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     val name = domCode.drop(1).takeWhile(c => c != ' ' && c != '>' && c != '/')
     Option.when(name.nonEmpty && name.charAt(0).isUpper)(name)
 
+  /** The literal's value with its surrounding quotes removed. */
+  private def literalValue(code: String): String =
+      if code.length >= 2 && (code.head == '"' || code.head == '\'') && code.last == code.head then
+        code.substring(1, code.length - 1)
+      else code
+
+  /** A relative filesystem path (`./src`, `../lib`) - never a route, whatever it sits next to. */
+  private def isFilesystemPath(code: String): Boolean =
+    val value = literalValue(code)
+    value.startsWith("./") || value.startsWith("../")
+
+  /** A route-shaped path: absolute (`/admin`), parameterised (`/users/:id`, `[slug]`) or a
+    * wildcard. Required of a record that carries only a weak sibling key, where the path is the
+    * only thing telling a nested route apart from a file tree or a menu structure.
+    */
+  private def looksLikeRoutePath(code: String): Boolean =
+    val value = literalValue(code)
+    !isFilesystemPath(code) &&
+    (value.startsWith("/") || value.contains(":") || value.contains("*") || value.contains("["))
+
   /** Route-table records shared by Vue, Angular and React Router.
     *
     * `{ path: '/about/:id', component: About }` lowers to `_tmp_1.path = "/about/:id"` and
-    * `_tmp_1.component = About` assignments. A temp with a `.path` assignment plus a strongly
-    * route-specific sibling key (`component`, `element`, `redirect`, `pathMatch`) is a route
-    * record; the path literal is tagged `framework-route`, and the component the record renders is
-    * resolved to its method and tagged as a handler.
+    * `_tmp_1.component = About` assignments. A temp with a `.path` assignment plus a route-record
+    * sibling key is a route record; the path literal is tagged `framework-route`, and the component
+    * the record renders is resolved to its method and tagged as a handler.
     *
     * Keyed on the containing method plus the base identifier's name: the synthesized `_tmp_N` names
     * are unique within a method but not across files, and they carry no REF edges to a local that
     * could be keyed on instead.
     *
-    * Guarded by a router-package import: without one, a `{ path, children }` file tree or a `{
-    * path, loader }` webpack config would be tagged as routes and, via the slice consumers, surface
-    * in user-visible output as application routes. Filesystem-looking path values (`./`, `../`) are
-    * excluded for the same reason even when the guard passes.
+    * Precision comes from three independent controls, because a bad route is not merely a noisy tag
+    * - it surfaces in user-visible slice output as an application route:
+    *   - a router-package import is required at all (a `{ path, children }` file tree or a `{ path,
+    *     loader }` webpack config in a router-less project is never looked at);
+    *   - a strong sibling key (something to render or somewhere to go) admits any path, while a
+    *     weak-only record (`children`/`loader`/`action`, which also describe trees and menus) must
+    *     additionally have a route-shaped path;
+    *   - a relative filesystem path value (`./`, `../`) is never a route.
+    *
+    * The conservative edge of the middle control: an Angular parent route written with a bare
+    * relative path and no component - `{ path: 'admin', children: [...] }` - is not recognised,
+    * while `{ path: '/admin', children: [...] }` is. Its children, which carry components, are
+    * recognised either way.
     */
   private def tagRouteTableRecords(dstGraph: DiffGraphBuilder): Unit =
     if !usesPackages(ROUTER_PACKAGES*) then return
@@ -340,15 +394,16 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
     val byTemp = propAssignments.groupBy(_._1)
     byTemp.foreach { case (_, assignments) =>
-        val keys = assignments.map(_._2).toSet
-        if keys.contains("path") && keys.exists(ROUTE_RECORD_SIBLING_KEYS) then
+        val keys      = assignments.map(_._2).toSet
+        val hasStrong = keys.exists(ROUTE_RECORD_STRONG_KEYS)
+        val hasWeak   = keys.exists(ROUTE_RECORD_WEAK_KEYS)
+        if keys.contains("path") && (hasStrong || hasWeak) then
           assignments.foreach {
               case (_, "path", call) =>
                   call.argument.isLiteral.headOption
-                      .filterNot(lit =>
-                          // a filesystem path, not a route: `./src`, `../lib`, never a route
-                          lit.code.startsWith("\"./") || lit.code.startsWith("\"../") ||
-                              lit.code.startsWith("'./") || lit.code.startsWith("'../")
+                      .filter(lit =>
+                          if hasStrong then !isFilesystemPath(lit.code)
+                          else looksLikeRoutePath(lit.code)
                       )
                       .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
               case (_, key, call) if key == "component" || key == "element" =>

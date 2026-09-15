@@ -59,14 +59,56 @@ class VueRouteTagsTest extends DataFlowCodeToCpgSuite:
           val cpg = tagged(code(
             """
           |import { createRouter } from 'vue-router';
-          |const tree = { path: './src', children: [ { path: './src/a.js', children: [] } ] };
+          |const tree = { path: './src', children: [ { path: 'src/a.js', children: [] } ] };
           |""".stripMargin,
             "tree.js"
           ))
 
-          // children/loader are weak signals and are not route-record sibling keys; a filesystem
-          // path value is not a route
+          // `children` is only a weak sibling key: it also describes trees and menus, so a record
+          // carrying nothing else has to have a route-shaped path. Neither a relative filesystem
+          // path nor a bare `src/a.js` qualifies.
           cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
+      }
+
+      "tag a nested parent route that has children and no component of its own" in {
+          val cpg = tagged(code(
+            """
+          |import { createRouter } from 'vue-router';
+          |function Users() { return 'users'; }
+          |const routes = [
+          |  { path: '/admin', children: [ { path: 'users', component: Users } ] }
+          |];
+          |""".stripMargin,
+            "nested.js"
+          ))
+
+          // the parent qualifies on its route-shaped path, the child on its component
+          cpg.literal.where(_.tag.name("framework-route")).code.sorted.l shouldBe List(
+            "\"/admin\"",
+            "\"users\""
+          )
+      }
+
+      "tag a lazy route whose handler arrives through a dynamic import" in {
+          val cpg = tagged(code(
+            """
+          |import { createRouter } from 'vue-router';
+          |const routes = [
+          |  { path: '/lazy', component: () => import('./Lazy.vue') },
+          |  { path: 'reports', loadChildren: () => import('./reports') },
+          |  { path: 'standalone', loadComponent: () => import('./one') }
+          |];
+          |""".stripMargin,
+            "lazy.js"
+          ))
+
+          // loadChildren/loadComponent are strong keys, so a bare relative path is fine - there is
+          // no identifier to resolve to a handler, but the route itself must not be lost
+          cpg.literal.where(_.tag.name("framework-route")).code.sorted.l shouldBe List(
+            "\"/lazy\"",
+            "\"reports\"",
+            "\"standalone\""
+          )
       }
 
       "not tag a route table in a project with no router package" in {

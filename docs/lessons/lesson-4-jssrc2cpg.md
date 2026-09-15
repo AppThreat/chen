@@ -254,13 +254,21 @@ emits, not by pattern-matching source text.
 **Route tables** — Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
 `RouterModule.forRoot`/`provideRouter`) and React Router (`createBrowserRouter`) all lower to the
 same object-property assignments, `_tmp_1.path = "/about/:id"` and `_tmp_1.component = About`. A
-temp carrying a `.path` assignment plus a strongly route-specific sibling key (`component`,
-`element`, `redirect`, `pathMatch`) is a route record: the path literal is tagged
-`framework-route` and the rendered component becomes a handler whose parameters are tagged
-`framework-input`. Three guards keep ordinary objects out: a router package must be imported,
-weak sibling signals (`children`, `loader` — file trees, bundler configs) do not count, and a
-filesystem-looking `.path` value (`./src`) is never a route. An object that merely has a `path`
-property is not a route record.
+temp carrying a `.path` assignment plus a route-record sibling key is a route record: the path
+literal is tagged `framework-route` and the rendered component becomes a handler whose parameters
+are tagged `framework-input`. An object that merely has a `path` property is not a route record.
+
+Three independent guards keep ordinary objects out, because a bad route is not just a noisy tag —
+it surfaces in slice output as an application route. A router package must be imported at all.
+Sibling keys are then split by how route-specific they are: a **strong** key names something to
+render or somewhere to go (`component`, `element`, `redirect`, `pathMatch`, and the lazy forms
+`loadChildren`, `loadComponent`, `lazy`) and admits any path, since child routes are written with
+bare relative segments; a **weak** key (`children`, `loader`, `action` — which also describe file
+trees, bundler configs and menus) additionally requires a route-shaped path. And a relative
+filesystem value (`./src`) is never a route. The conservative edge: an Angular parent route written
+as `{ path: 'admin', children: [...] }` — bare path, no component — is missed, while
+`{ path: '/admin', children: [...] }` is found; its children carry components and are found either
+way.
 
 **React** — `<Route path="/profile" element={<Profile />} />` tags the path attribute's literal and
 resolves the rendered component (from the identifier, or from the JSX tag name when the value is an
