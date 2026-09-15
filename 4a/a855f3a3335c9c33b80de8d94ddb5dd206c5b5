@@ -1,0 +1,40 @@
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 183-188,191-192,195-201,204-205,208-212
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTemplateDomCreator.scala
+  h_6a4cc5cdf68def 6-7,10-16,20-38,125,134-168
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ConstClosurePass.scala
+  h_6a4cc5cdf68def 12-18,21-22,29,43-59
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ImportResolverPass.scala
+  h_6a4cc5cdf68def 18-38,55-58,62-67
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/dataflow/DataflowTest.scala
+  h_6a4cc5cdf68def 737-779
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/AbstractDomPassTest.scala
+  h_6a4cc5cdf68def 17-23,25
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ConstClosurePassTests.scala
+  h_6a4cc5cdf68def 60-86
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/SvelteKitAliasImportTests.scala
+  h_6a4cc5cdf68def 1-67
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/RawHtmlTemplateSinkTagsTest.scala
+  h_6a4cc5cdf68def 60,101,115-120,140,143-147
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/Svelte5ShapeAstCreationPassTest.scala
+  h_6a4cc5cdf68def 52
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteDomAstCreationPassTest.scala
+  h_6a4cc5cdf68def 150-152,155,181
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/SvelteKitRouteTagsTest.scala
+  h_6a4cc5cdf68def 147-187,204-206
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 7-8,70-72,211-216,221-246
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 131-135,137-142,144-145,148-152,157-159,165-169,171-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4aa855f3a3335c9c33b80de8d94ddb5dd206c5b5",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
