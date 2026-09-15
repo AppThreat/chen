@@ -69,7 +69,7 @@ jobs:
       - run: sha512sum target/chen.zip > target/chen.zip.sha512
       - name: Generate SBOM with cdxgen
         run: |
-          npm install -g @cyclonedx/cdxgen
+          npm install -g @cdxgen/cdxgen
           cdxgen -t sbt -o bom.json . --no-recurse
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
