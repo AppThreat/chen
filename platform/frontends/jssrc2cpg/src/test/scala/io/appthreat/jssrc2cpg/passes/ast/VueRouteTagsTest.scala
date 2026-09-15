@@ -54,6 +54,53 @@ class VueRouteTagsTest extends DataFlowCodeToCpgSuite:
 
           cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
       }
+
+      "not tag a { path, children } file tree even when a router is imported" in {
+          val cpg = tagged(code(
+            """
+          |import { createRouter } from 'vue-router';
+          |const tree = { path: './src', children: [ { path: './src/a.js', children: [] } ] };
+          |""".stripMargin,
+            "tree.js"
+          ))
+
+          // children/loader are weak signals and are not route-record sibling keys; a filesystem
+          // path value is not a route
+          cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
+      }
+
+      "not tag a route table in a project with no router package" in {
+          val cpg = tagged(code(
+            """
+          |const menu = [
+          |  { path: '/home', component: renderHome },
+          |  { path: '/about', redirect: '/home', pathMatch: 'full' }
+          |];
+          |function renderHome() { return 'home'; }
+          |""".stripMargin,
+            "menu.js"
+          ))
+
+          // the record shape matches, but no router package is imported
+          cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
+      }
+
+      "not tag a filesystem-looking path value even in a routed project" in {
+          val cpg = tagged(code(
+            """
+          |import { createRouter } from 'vue-router';
+          |const routes = [
+          |  { path: './relative', component: A },
+          |  { path: '/ok', component: B }
+          |];
+          |function A() { return 1; }
+          |function B() { return 2; }
+          |""".stripMargin,
+            "fsroute.js"
+          ))
+
+          cpg.literal.where(_.tag.name("framework-route")).code.l shouldBe List("\"/ok\"")
+      }
   }
 
   "Vue composition API inputs" should {

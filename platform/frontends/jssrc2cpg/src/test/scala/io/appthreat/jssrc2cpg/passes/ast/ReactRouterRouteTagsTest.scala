@@ -39,7 +39,9 @@ class ReactRouterRouteTagsTest extends DataFlowCodeToCpgSuite:
           cpg.literal.where(_.tag.name("framework-route")).code.l shouldBe List("\"/profile\"")
           // the rendered component is a route entrypoint, and its props parameter web-facing input
           routes(cpg) shouldBe List("Profile")
-          cpg.tag.name("framework-input").parameter.name.distinct.l shouldBe List("props")
+          // tagged once despite both the route-handler rule and the component-props rule
+          // reaching the parameter
+          cpg.tag.name("framework-input").parameter.name.l shouldBe List("props")
       }
 
       "tag the legacy component= attribute form too" in {
@@ -67,6 +69,26 @@ class ReactRouterRouteTagsTest extends DataFlowCodeToCpgSuite:
             "svg.jsx"
           ))
 
+          cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
+      }
+
+      "match the Route tag name exactly, not as a prefix" in {
+          val cpg = tagged(code(
+            """
+          |import { Routes, Route } from 'react-router-dom';
+          |function RouteGuard(props) { return <div>{props.x}</div>; }
+          |export default function App() {
+          |  return (
+          |    <Routes>
+          |      <RouteGuard path="/guard" />
+          |    </Routes>
+          |  );
+          |}
+          |""".stripMargin,
+            "guard.jsx"
+          ))
+
+          // <Routes> and <RouteGuard> are not <Route>; only the exact tag name counts
           cpg.literal.where(_.tag.name("framework-route")).l shouldBe empty
       }
   }
@@ -125,7 +147,9 @@ class ReactRouterRouteTagsTest extends DataFlowCodeToCpgSuite:
             "welcome.jsx"
           ))
 
-          cpg.tag.name("framework-input").parameter.name.distinct.l shouldBe List("props")
+          // tagged once despite both the route-handler rule and the component-props rule
+          // reaching the parameter
+          cpg.tag.name("framework-input").parameter.name.l shouldBe List("props")
       }
   }
 
@@ -165,8 +189,9 @@ class ReactRouterRouteTagsTest extends DataFlowCodeToCpgSuite:
 
           routes(cpg) shouldBe List("GET", "POST")
           // a destructured `{ params }` parameter is renamed by the frontend (param1_0); the
-          // file-name heuristic in tagJsRoutes also tags these parameters, so dedup the tags
-          cpg.tag.name("framework-input").parameter.name.distinct.sorted.l shouldBe
+          // file-name heuristic in tagJsRoutes reaches the same parameters, and the pass's
+          // storeTag dedup keeps them singly-tagged
+          cpg.tag.name("framework-input").parameter.name.sorted.l shouldBe
               List("param1_0", "request")
       }
 
@@ -179,10 +204,7 @@ class ReactRouterRouteTagsTest extends DataFlowCodeToCpgSuite:
           ))
 
           routes(cpg) shouldBe List("handler")
-          cpg.tag.name("framework-input").parameter.name.distinct.sorted.l shouldBe List(
-            "req",
-            "res"
-          )
+          cpg.tag.name("framework-input").parameter.name.sorted.l shouldBe List("req", "res")
       }
 
       "tag page-data loaders and middleware" in {

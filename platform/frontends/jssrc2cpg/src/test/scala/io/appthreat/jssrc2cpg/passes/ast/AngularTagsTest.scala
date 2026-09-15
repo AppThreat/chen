@@ -37,6 +37,24 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").member.name.l should not contain "title"
       }
 
+      "not bleed an @Input member onto similarly-named members" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, Input } from '@angular/core';
+          |@Component({ selector: 'app-card' })
+          |export class Card {
+          |  @Input() id: string;
+          |  idx: string;
+          |  render() { return this.idx + this.id; }
+          |}
+          |""".stripMargin,
+            "card.component.ts"
+          ))
+
+          // this.idx is NOT an @Input read, and the enclosing + call is not a field access
+          cpg.tag.name("framework-input").call.code.l shouldBe List("this.id")
+      }
+
       "tag @Output members as framework-output" in {
           val cpg = tagged(code(
             """
@@ -113,6 +131,26 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
   }
 
   "ActivatedRoute" should {
+
+      "tag activatedRoute reads, not only a field literally named route" in {
+          val cpg = tagged(code(
+            """
+          |import { Component } from '@angular/core';
+          |import { ActivatedRoute } from '@angular/router';
+          |@Component({ selector: 'app-detail' })
+          |export class DetailComponent {
+          |  constructor(private activatedRoute: ActivatedRoute) {}
+          |  load() {
+          |    return this.activatedRoute.snapshot.queryParams;
+          |  }
+          |}
+          |""".stripMargin,
+            "detail2.component.ts"
+          ))
+
+          val taggedCalls = cpg.tag.name("framework-input").call.code.l
+          taggedCalls should contain("this.activatedRoute.snapshot.queryParams")
+      }
 
       "tag route parameter reads as framework-input" in {
           val cpg = tagged(code(

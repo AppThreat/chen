@@ -106,8 +106,10 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // carries the request data, so the call itself is the source.
   private val REACT_INPUT_HOOKS = Set("useParams", "useSearchParams", "useLocation")
 
+  // `route.` and `activatedRoute.` are both idiomatic field names for an ActivatedRoute, so the
+  // identifier segment is matched case-insensitively.
   private val ANGULAR_ROUTE_INPUT_REGEX =
-      "(?s).*(this\\.)?route\\.(snapshot\\.)?(params|queryParams|paramMap|queryParamMap|fragment|url|data).*"
+      "(?is).*(this\\.)?route\\.(snapshot\\.)?(params|queryParams|paramMap|queryParamMap|fragment|url|data).*"
 
   // Angular's DomSanitizer escape hatch: the returned value is rendered as
   // raw markup by the [innerHTML]-style binding it is fed to.
@@ -120,19 +122,15 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // an array of anonymous objects whose properties are assigned one by one -
   //   _tmp_1.path = "/about/:id"
   //   _tmp_1.component = About
-  // A temp carrying `.path` plus one of these siblings is a route record in
-  // any of the three frameworks; no import sniffing needed.
+  // A temp carrying `.path` plus one of these siblings is a route record. Only strongly
+  // route-specific sibling keys count: `children`/`loader`/`action` also occur on file trees,
+  // webpack configs and menu structures, and a `{ path, children }` object must not become a
+  // route. A route table is also not recognised at all unless one of the router packages is
+  // imported, and a `.path` value that is a filesystem path (`./`, `../`) is never a route.
   private val ROUTE_RECORD_SIBLING_KEYS =
-      Set(
-        "component",
-        "components",
-        "element",
-        "redirect",
-        "children",
-        "pathMatch",
-        "loader",
-        "action"
-      )
+      Set("component", "components", "element", "redirect", "pathMatch")
+
+  private val ROUTER_PACKAGES = Seq("vue-router", "@angular", "react-router", "nuxt")
 
   // The HTTP verbs a Next.js app-router `route.ts` may export, the same
   // convention SvelteKit's `+server.ts` uses.
@@ -164,6 +162,25 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         val pkg = e.takeWhile(_ != ':')
         packagePrefixes.exists(p => pkg == p || pkg.startsWith(s"$p/") || pkg.startsWith(s"$p-"))
       }
+
+  /** Emitted-tag memo. Several recognisers in this pass reach the same boundary from different
+    * angles - the controller-file heuristic and the Next.js file conventions both tag a handler's
+    * parameters, and a React component's props are tagged both as a routed handler and as a
+    * component - and duplicate TAG nodes with the same name surface in downstream output. Tags
+    * emitted by other passes (EasyTagsPass) are not covered; this only deduplicates within this
+    * pass.
+    */
+  private val emittedTags = scala.collection.mutable.HashSet.empty[(Long, String)]
+
+  private def storeTag[T <: io.shiftleft.codepropertygraph.generated.nodes.StoredNode](
+    nodes: Iterator[T],
+    tag: String,
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+      nodes
+          .filter(n => emittedTags.add((n.id, tag)))
+          .newTagNode(tag)
+          .store()(using dstGraph)
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
@@ -227,11 +244,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         .method
         .internal
         .filterNot(_.name.contains("<"))
-    controllerMethods
-        .parameter
-        .filterNot(_.name == "this")
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    // Through storeTag: the Next.js/Nuxt file conventions below reach the same parameters, and
+    // duplicate TAG nodes would surface in downstream output.
+    storeTag(
+      controllerMethods.parameter.filterNot(_.name == "this"),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
     tagRouteTableRecords(dstGraph)
     tagReactRouter(dstGraph)
     tagVueComponentInputs(dstGraph)
@@ -246,21 +265,24 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * component props - web-facing input.
     */
   private def tagHandlerMethod(handler: Method, dstGraph: DiffGraphBuilder): Unit =
-    Iterator(handler).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+    storeTag(Iterator(handler), FRAMEWORK_ROUTE, dstGraph)
     handler.parameter
         .filterNot(_.name == "this")
         .headOption
-        .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+        .foreach(p => storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph))
 
   /** Resolve a route-record's `component`/`element` value to the handler method it names.
     *
-    * Function components reference the method directly; class components (Angular, Vue class API)
-    * lower to a local whose name is also the TypeDecl name, so the method falls back to a lookup by
-    * name.
+    * Function components reference the method directly. Failing that, the method is looked up by
+    * name in the identifier's own FILE first - component names like `Home`, `Layout`, `Index`
+    * collide freely across a monorepo, and the same-file match is the one that is almost always
+    * meant - before falling back to any internal method with that name.
     */
   private def resolveComponentMethod(identifier: Identifier): Option[Method] =
       identifier._refOut.collectFirst { case m: Method => m }.orElse {
-          atom.method.internal.nameExact(identifier.name).headOption
+          val fileMethods = identifier.file.method.internal
+          fileMethods.nameExact(identifier.name).headOption
+              .orElse(atom.method.internal.nameExact(identifier.name).headOption)
       }
 
   /** The tag name of a JSX element's code (`<Profile />` -> `Profile`), when it names a component.
@@ -276,17 +298,29 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   /** Route-table records shared by Vue, Angular and React Router.
     *
     * `{ path: '/about/:id', component: About }` lowers to `_tmp_1.path = "/about/:id"` and
-    * `_tmp_1.component = About` assignments. A temp with a `.path` assignment plus a route-record
-    * sibling key (`component`, `element`, `redirect`, `children`, ...) is a route record; the path
-    * literal is tagged `framework-route`, and the component the record renders is resolved to its
-    * method and tagged as a handler.
+    * `_tmp_1.component = About` assignments. A temp with a `.path` assignment plus a strongly
+    * route-specific sibling key (`component`, `element`, `redirect`, `pathMatch`) is a route
+    * record; the path literal is tagged `framework-route`, and the component the record renders is
+    * resolved to its method and tagged as a handler.
     *
     * Keyed on the containing method plus the base identifier's name: the synthesized `_tmp_N` names
     * are unique within a method but not across files, and they carry no REF edges to a local that
     * could be keyed on instead.
+    *
+    * Guarded by a router-package import: without one, a `{ path, children }` file tree or a `{
+    * path, loader }` webpack config would be tagged as routes and, via the slice consumers, surface
+    * in user-visible output as application routes. Filesystem-looking path values (`./`, `../`) are
+    * excluded for the same reason even when the guard passes.
     */
   private def tagRouteTableRecords(dstGraph: DiffGraphBuilder): Unit =
-    // (method, baseName) -> key -> assignment call, for every `_tmp.key = value` property assignment
+    if !usesPackages(ROUTER_PACKAGES*) then return
+
+    // (method, baseName) -> key -> assignment call, for every `_tmp.key = value` property
+    // assignment whose key is `path` or a route-record sibling key. Keying on the extracted key
+    // (rather than a `.path` code substring) keeps the SIBLING assignments in the collection -
+    // a `component` assignment's code contains no ".path" - and drops every unrelated property
+    // assignment before the grouping.
+    val interestingKeys = "path" +: ROUTE_RECORD_SIBLING_KEYS.toSeq
     val propAssignments = atom.call
         .nameExact(Operators.assignment)
         .flatMap { call =>
@@ -301,18 +335,22 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
                   }
                 }
         }
+        .filter((_, key, _) => interestingKeys.contains(key))
         .l
 
     val byTemp = propAssignments.groupBy(_._1)
-    byTemp.foreach { case ((_, _), assignments) =>
+    byTemp.foreach { case (_, assignments) =>
         val keys = assignments.map(_._2).toSet
         if keys.contains("path") && keys.exists(ROUTE_RECORD_SIBLING_KEYS) then
           assignments.foreach {
               case (_, "path", call) =>
                   call.argument.isLiteral.headOption
-                      .foreach(lit =>
-                          Iterator(lit).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+                      .filterNot(lit =>
+                          // a filesystem path, not a route: `./src`, `../lib`, never a route
+                          lit.code.startsWith("\"./") || lit.code.startsWith("\"../") ||
+                              lit.code.startsWith("'./") || lit.code.startsWith("'../")
                       )
+                      .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
               case (_, key, call) if key == "component" || key == "element" =>
                   call.argument.isIdentifier.headOption match
                     case Some(ident) =>
@@ -336,13 +374,17 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     *
     * `<Route path="/profile" element={<Profile />} />` is the JSX form of a route registration: the
     * `path` attribute's literal is the route and the component the `element`/`component` attribute
-    * renders is the handler. The URL itself reaches components through the
-    * `useParams`/`useSearchParams`/`useLocation` hooks, which are tagged as input.
+    * renders is the handler. The tag name is matched exactly - a prefix match would also fire on
+    * `<Routes>` and on user components like `<RouteGuard path=...>`. The URL itself reaches
+    * components through the `useParams`/`useSearchParams`/`useLocation` hooks, which are tagged as
+    * input.
     *
     * Function components receive their data through props: a capitalized method that renders a
     * template (contains TEMPLATE_DOM) is a React component by the framework's own naming rule, so
     * its first parameter is tagged `framework-input` - the same reasoning that makes a controller
-    * method's parameters web-facing.
+    * method's parameters web-facing. This is deliberately wide - every React component qualifies,
+    * including presentational leaves - because props are the only input boundary a function
+    * component has.
     */
   private def tagReactRouter(dstGraph: DiffGraphBuilder): Unit =
     val usesReact =
@@ -350,13 +392,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     if !usesReact then return
 
     REACT_INPUT_HOOKS.foreach { hook =>
-        atom.call.nameExact(hook).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+        storeTag(atom.call.nameExact(hook), FRAMEWORK_INPUT, dstGraph)
     }
 
     // The opening element carries the attributes; its code starts with the tag name.
     atom.templateDom
         .nameExact("JSXOpeningElement")
-        .filter(_.code.startsWith("<Route"))
+        .filter(dom => jsxComponentName(dom.code) == Some("Route"))
         .foreach { routeElem =>
             routeElem.ast
                 .collectAll[io.shiftleft.codepropertygraph.generated.nodes.TemplateDom]
@@ -365,9 +407,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
                     attr.code match
                       case c if c.startsWith("path=") =>
                           attr.ast.isLiteral.headOption
-                              .foreach(lit =>
-                                  Iterator(lit).newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
-                              )
+                              .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
                       case c if c.startsWith("element=") || c.startsWith("component=") =>
                           attr.ast.isIdentifier
                               .dedup
@@ -398,7 +438,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             component.parameter
                 .filterNot(_.name == "this")
                 .headOption
-                .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+                .foreach(p => storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph))
         }
   end tagReactRouter
 
@@ -414,12 +454,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     val usesVue = usesPackages("vue", "@vue", "vue-router")
     if !usesVue then return
 
-    atom.call
-        .name("defineProps|withDefaults|defineModel")
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    storeTag(
+      atom.call.name("defineProps|withDefaults|defineModel"),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
 
-    atom.call.nameExact("useRoute").newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
+    storeTag(atom.call.nameExact("useRoute"), FRAMEWORK_INPUT, dstGraph)
 
     atom.method
         .internal
@@ -428,7 +469,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             setup.parameter
                 .filterNot(_.name == "this")
                 .headOption
-                .foreach(p => Iterator(p).newTagNode(FRAMEWORK_INPUT).store()(using dstGraph))
+                .foreach(p => storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph))
         }
   end tagVueComponentInputs
 
@@ -451,10 +492,18 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         annotation.astParent match
           case member: io.shiftleft.codepropertygraph.generated.nodes.Member =>
               val tag = if annotation.name == "Input" then FRAMEWORK_INPUT else FRAMEWORK_OUTPUT
-              Iterator(member).newTagNode(tag).store()(using dstGraph)
-              // `this.<member>` reads inside the class are the actual taint carriers
-              member.typeDecl.method.flatMap(_.ast.isCall).code(s".*this\\.${member.name}.*")
-                  .newTagNode(tag).store()(using dstGraph)
+              storeTag(Iterator(member), tag, dstGraph)
+              // `this.<member>` field-access reads inside the class are the actual taint carriers.
+              // Matched by codeExact because the field access's code IS `this.<member>`: an
+              // unanchored substring match would bleed an `@Input() id` onto every read of
+              // `this.idx`/`this.idField`, and would also tag enclosing operator calls whose code
+              // merely contains the access.
+              storeTag(
+                member.typeDecl.method.flatMap(_.ast.isCall).nameExact(Operators.fieldAccess)
+                    .codeExact(s"this.${member.name}"),
+                tag,
+                dstGraph
+              )
           case _ =>
     }
 
@@ -462,17 +511,24 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // dropped - neither TYPE_DECL nor ANNOTATION nodes support TAGGED_BY edges, and the
     // @Input/@Output member tagging below is what carries the dataflow semantics.
 
-    atom.call
-        .filter(_.code.contains("route."))
-        .code(ANGULAR_ROUTE_INPUT_REGEX)
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    // Cheap case-insensitive prefilter before the regex: `route.` and `Route.` both occur
+    // (`this.route.params`, `this.activatedRoute.snapshot.queryParams`), and this loop runs over
+    // every call in the graph.
+    storeTag(
+      atom.call
+          .filter(_.code.toLowerCase.contains("route."))
+          .code(ANGULAR_ROUTE_INPUT_REGEX),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
 
-    atom.call
-        .filter(_.code.contains("bypassSecurityTrust"))
-        .code(ANGULAR_SANITIZER_BYPASS_REGEX)
-        .newTagNode(FRAMEWORK_OUTPUT)
-        .store()(using dstGraph)
+    storeTag(
+      atom.call
+          .filter(_.code.contains("bypassSecurityTrust"))
+          .code(ANGULAR_SANITIZER_BYPASS_REGEX),
+      FRAMEWORK_OUTPUT,
+      dstGraph
+    )
   end tagAngular
 
   /** Next.js file-convention routes.
@@ -490,11 +546,12 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       val handlers =
           if names.isEmpty then methods.filterNot(m => m.name.contains("<") || m.name == ":program")
           else methods.filter(m => names.contains(m.name) || m.name.startsWith("anonymous"))
-      handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
-      handlers.iterator.parameter
-          .filterNot(_.name == "this")
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(using dstGraph)
+      storeTag(handlers.iterator, FRAMEWORK_ROUTE, dstGraph)
+      storeTag(
+        handlers.iterator.parameter.filterNot(_.name == "this"),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
 
     tagExported(NEXT_HTTP_ENTRYPOINTS, NEXT_ROUTE_FILE_REGEX)
     tagExported(Set.empty, NEXT_API_FILE_REGEX)
@@ -516,6 +573,12 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * Files under `server/api` and `server/routes` export handlers directly; elsewhere handlers are
     * registered by wrapping them in `defineEventHandler(...)`/`eventHandler(...)`. The h3 request
     * readers (`readBody`, `getRouterParam`, ...) return request data and are tagged as input.
+    *
+    * The directory layout alone is accepted as a Nuxt signal because Nuxt AUTO-imports
+    * `defineEventHandler` and friends - a real Nuxt server directory may contain no recognisable
+    * import at all. To keep a plain Express/Fastify project that happens to use the same layout
+    * from having every internal helper tagged, only handler-shaped exports are tagged there: a
+    * method that takes at least one parameter (the event) or is the anonymous/default export.
     */
   private def tagNuxtServerRoutes(dstGraph: DiffGraphBuilder): Unit =
     val usesNuxt     = usesPackages("nuxt", "h3", "nitro")
@@ -536,14 +599,21 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     val handlers = serverMethods
         .filterNot(_.name.contains("<"))
         .filter(m => m.name != ":program")
-    handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
-    handlers.iterator.parameter
-        .filterNot(_.name == "this")
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+        .filter(m =>
+            m.parameter.filterNot(_.name == "this").nonEmpty || m.name.startsWith("anonymous")
+        )
+    storeTag(handlers.iterator, FRAMEWORK_ROUTE, dstGraph)
+    storeTag(
+      handlers.iterator.parameter.filterNot(_.name == "this"),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
 
-    atom.call.name(H3_INPUT_CALLS.map(n => s"^$n$$").mkString("|")).newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
+    storeTag(
+      atom.call.name(H3_INPUT_CALLS.map(n => s"^$n$$").mkString("|")),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
   end tagNuxtServerRoutes
 
   /** SvelteKit route semantics.

@@ -254,10 +254,13 @@ emits, not by pattern-matching source text.
 **Route tables** — Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
 `RouterModule.forRoot`/`provideRouter`) and React Router (`createBrowserRouter`) all lower to the
 same object-property assignments, `_tmp_1.path = "/about/:id"` and `_tmp_1.component = About`. A
-temp carrying a `.path` assignment plus a route-record sibling key (`component`, `element`,
-`redirect`, `children`, `pathMatch`, `loader`, …) is a route record in any of the three: the path
-literal is tagged `framework-route` and the rendered component becomes a handler whose parameters
-are tagged `framework-input`. An object that merely has a `path` property is not a route record.
+temp carrying a `.path` assignment plus a strongly route-specific sibling key (`component`,
+`element`, `redirect`, `pathMatch`) is a route record: the path literal is tagged
+`framework-route` and the rendered component becomes a handler whose parameters are tagged
+`framework-input`. Three guards keep ordinary objects out: a router package must be imported,
+weak sibling signals (`children`, `loader` — file trees, bundler configs) do not count, and a
+filesystem-looking `.path` value (`./src`) is never a route. An object that merely has a `path`
+property is not a route record.
 
 **React** — `<Route path="/profile" element={<Profile />} />` tags the path attribute's literal and
 resolves the rendered component (from the identifier, or from the JSX tag name when the value is an
@@ -276,11 +279,12 @@ app.jsx L4  __html: bio          [framework-output]   ← dangerouslySetInnerHTM
 atom-parsetools 4.3.0 a directive value like `v-html="content"` keeps a reference to the script
 binding, so a props-to-raw-HTML path inside one component is reportable end to end.
 
-**Angular** — `@Input()` members and their `this.x` reads are `framework-input`, `@Output()`
-members are `framework-output`, `ActivatedRoute` reads (`route.params`,
-`route.snapshot.queryParams`, `paramMap.get(...)`) are input, and a
-`bypassSecurityTrust*` call — the sanitizer escape hatch that feeds `[innerHTML]`-style bindings —
-is output.
+**Angular** — `@Input()` members and their `this.x` reads are `framework-input` (matched
+exactly, so an `@Input() id` does not taint `this.idx`), `@Output()` members are
+`framework-output`, `ActivatedRoute` reads are input — whether the field is named `route` or
+`activatedRoute` (`route.params`, `this.activatedRoute.snapshot.queryParams`,
+`paramMap.get(...)`), and a `bypassSecurityTrust*` call — the sanitizer escape hatch that feeds
+`[innerHTML]`-style bindings — is output.
 
 **Next.js and Nuxt** file conventions are keyed off the file name, like SvelteKit: an app-router
 `route.ts` tags its HTTP-verb exports, a `pages/api` handler tags every export, `middleware.ts`
