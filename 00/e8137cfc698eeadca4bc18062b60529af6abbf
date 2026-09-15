@@ -1,0 +1,18 @@
+docs/lessons/lesson-4-jssrc2cpg.md
+  h_6a4cc5cdf68def 183-186,199-214
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/RawHtmlTemplateSinkTagsTest.scala
+  h_6a4cc5cdf68def 1-143
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 7,117-178,188-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00e8137cfc698eeadca4bc18062b60529af6abbf",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
