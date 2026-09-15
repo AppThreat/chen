@@ -3,6 +3,8 @@ package io.appthreat.jssrc2cpg.passes
 import io.appthreat.jssrc2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
+import java.io.File
+
 /** `$lib` import resolution.
   *
   * SvelteKit rewrites `$lib` to `src/lib`. The mapping lives in `.svelte-kit/tsconfig.json`, which
@@ -28,9 +30,11 @@ class SvelteKitAliasImportTests extends DataFlowCodeToCpgSuite:
             "src/routes/+page.server.js"
           )
 
-          // the call resolves to the internal method rather than <unknownFullName>
+          // the call resolves to the internal method rather than <unknownFullName>.
+          // Method full names embed the platform separator (file names come from
+          // Paths.relativize), so the expectation is built with File.separator.
           val List(call) = cpg.call.nameExact("getArticle").l
-          call.methodFullName should include("src/lib/api.js")
+          call.methodFullName should include(Seq("src", "lib", "api.js").mkString(File.separator))
       }
 
       "resolve a nested $lib path" in {
@@ -48,7 +52,9 @@ class SvelteKitAliasImportTests extends DataFlowCodeToCpgSuite:
           )
 
           val List(call) = cpg.call.nameExact("esc").l
-          call.methodFullName should include("src/lib/util/html.js")
+          call.methodFullName should include(
+            Seq("src", "lib", "util", "html.js").mkString(File.separator)
+          )
       }
 
       "leave the framework-provided $app namespace unresolved" in {
@@ -61,7 +67,8 @@ class SvelteKitAliasImportTests extends DataFlowCodeToCpgSuite:
           )
 
           // no file backs $app/navigation, so nothing internal should be invented for it
-          cpg.call.nameExact("goto").methodFullName.l.foreach(_ should not include "src/lib")
+          val libRoot = Seq("src", "lib").mkString(File.separator)
+          cpg.call.nameExact("goto").methodFullName.l.foreach(_ should not include libRoot)
       }
   }
 end SvelteKitAliasImportTests

@@ -52,10 +52,9 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     val currentFile = s"$root$fileName"
     // We want to know if the import is local since if an external name is used to match internal methods we may have
     // false paths.
-    val svelteKitAliasPath = resolveSvelteKitAlias(
-      (if pathPattern.matcher(rawEntity).find() then rawEntity else rawEntity).split(pathSep).head
-    )
-    val isLocalImport = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
+    // ESM imports arrive as "specifier:importedName", requires as the bare specifier
+    val svelteKitAliasPath = resolveSvelteKitAlias(rawEntity.split(pathSep).head)
+    val isLocalImport      = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
     // TODO: At times there is an operation inside of a require, e.g. path.resolve(__dirname + "/../config/env/all.js")
     //  this tries to recover the string but does not perform string constant propagation
     val entity = if matcher.find() then matcher.group(1) else rawEntity
