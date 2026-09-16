@@ -1,0 +1,43 @@
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/DynamicProxyTests.scala
+  s_968be6984e88f3::t_b9a2264c473077 1-42,47-125
+  s_968be6984e88f3::t_945cffb3d3b0d0 43-46
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/TaintPrecisionTests.scala
+  s_968be6984e88f3::t_3d2356918d1dd2 135-200
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskSolver.scala
+  s_968be6984e88f3::t_9df81900f6873b 93-95
+  s_968be6984e88f3::t_65b53e674672c6 96-99,102-121
+  s_968be6984e88f3::t_945cffb3d3b0d0 91-92,100-101
+  s_968be6984e88f3::t_fc8936074f5e5f 191-196,265-272
+  s_968be6984e88f3::t_2b3e219aec3c39 9
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/ReflectionLoweringPass.scala
+  s_968be6984e88f3::t_6a6cee3f3b0e8e 60,103-104,107-109,113-174
+  s_968be6984e88f3::t_3f91930c655064 287-290
+  s_968be6984e88f3::t_945cffb3d3b0d0 110-112,291-292
+  s_968be6984e88f3::t_4a23cae24c06b2 175
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskCreator.scala
+  s_968be6984e88f3::t_91dcc1fb4d4700 5,9,188-193,246-264
+  s_968be6984e88f3::t_b8784d145ed0e3 265
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/dataflow/ObjectTests.scala
+  s_968be6984e88f3::t_33b993039794eb 140-146,148-153,155,170,180
+  s_968be6984e88f3::t_c5c5a8f7fde9f9 147,154
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/package.scala
+  s_968be6984e88f3::t_91dcc1fb4d4700 9-19
+platform/frontends/jimple2cpg/src/test/scala/io/appthreat/jimple2cpg/querying/dataflow/ObjectTests.scala
+  s_968be6984e88f3::t_c5c5a8f7fde9f9 138,140,155,165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "45ac46b93b2e6d4f8c37860742736ff55a176952",
+  "prompts": {},
+  "sessions": {
+    "s_968be6984e88f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bc8e2f4-852a-48dc-9b75-cf5608cbf8dd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
