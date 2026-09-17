@@ -31,6 +31,30 @@ case class NodeTypeInfo(
   isField: Boolean = false,
   isStatic: Boolean = false
 )
+
+/** A register/drain channel for ASTs synthesized while one construct is lowered and attached by the
+  * builder of an enclosing construct.
+  *
+  * The three channels held by [[Scope]] differ in what they hold and why - their comments say so.
+  * What they share is the drain contract, stated once here: draining is innermost-first - a nested
+  * body (a lambda, a nested type, a compact constructor) is fully built, and drains its own
+  * channel, before the enclosing body drains - and `take` returns the ASTs in registration order,
+  * so a construct never adopts a sibling's or a child's pending ASTs. The two silent bugs in this
+  * lowering (a record's pattern locals never drained out of the record, a field initializer's
+  * drained ASTs discarded) were both violations of this contract, which is why a drain point may
+  * only be added together with the code that attaches what it drained.
+  */
+private[scope] final class AstChannel:
+  private val pending = mutable.ListBuffer.empty[Ast]
+
+  def register(ast: Ast): Unit = pending.append(ast)
+
+  /** Everything registered so far, in registration order; leaves the channel empty. */
+  def take(): List[Ast] =
+    val taken = pending.toList
+    pending.clear()
+    taken
+
 class Scope:
   private var scopeStack: List[JavaScopeElement] = Nil
 
@@ -116,6 +140,11 @@ class Scope:
 
   def enclosingTypeDeclFullName: Option[String] = enclosingTypeDecl.map(_.fullName)
 
+  def enclosingMethodFullName: Option[String] =
+      scopeStack.collectFirst { case methodScope: MethodScope =>
+          methodScope.method.fullName
+      }
+
   def enclosingMethodReturnType: Option[ExpectedType] =
       scopeStack.collectFirst { case methodScope: MethodScope =>
           methodScope.returnType
@@ -125,6 +154,72 @@ class Scope:
       scopeStack.collectFirst { case typeDeclContainer: TypeDeclContainer =>
           typeDeclContainer.registerTypeDecl(decl)
       }
+
+  /** LOCAL declarations synthesized while lowering an EXPRESSION (a type pattern inside an
+    * `instanceof` or a pattern `case` label of a switch expression).
+    *
+    * Such a local cannot be returned as part of the expression's ASTs: expression-position
+    * constructs end up in ARGUMENT slots of the enclosing call/assignment/return, and an ARGUMENT
+    * edge into a LOCAL violates the schema. It is registered here instead, and the enclosing method
+    * (or lambda) body builder attaches the collected declarations as direct children of the body
+    * BLOCK - which is where every local-step (`method.local`, `block.local`) and the dataflow
+    * engine expect a method's locals to live.
+    *
+    * Declaration order note: these locals are attached to the body block's head, so a pattern
+    * binding is declared before the statement that contains it. A declaration has no runtime
+    * effect, so this only moves the (empty) definition site, never a taint step.
+    */
+  private val patternLocalAsts = AstChannel()
+
+  def registerPatternLocalAst(ast: Ast): Unit = patternLocalAsts.register(ast)
+
+  /** Drains the registered pattern-local declarations. Called once by each body builder, innermost
+    * first (a lambda body is built while the enclosing method body is still being built), so a
+    * lambda's pattern locals attach to the lambda's own body block.
+    */
+  def takePatternLocalAsts: List[Ast] = patternLocalAsts.take()
+
+  /** Statement-position ASTs synthesized while lowering an EXPRESSION - the selector binding and
+    * the arm side effects of a switch expression.
+    *
+    * These are assignments and calls, so unlike a LOCAL they *could* sit in an ARGUMENT slot
+    * without violating the schema - but they would then be extra arguments of the enclosing
+    * construct: `sink(switch (k) {...})` would lower to a two-argument `sink`, and `"x" + switch
+    * (k) {...}` to a three-operand addition. Returning them alongside the value only works for the
+    * handful of callers that know to split the sequence (a variable initializer, a return, an
+    * assignment RHS); every other position - a call argument, a binary operand, an array index, a
+    * cast - splices whole expression sequences into argument slots.
+    *
+    * They are therefore registered here and drained by [[AstCreator.astsForStatement]], which emits
+    * them immediately BEFORE the statement whose expression produced them. That is the position
+    * they already had under the old hoisting, now reached from every expression context rather than
+    * three of them.
+    *
+    * Draining is innermost-first, exactly like [[takePatternLocalAsts]]: a nested statement is
+    * fully built (and drains its own) before the enclosing statement drains, so a statement never
+    * adopts a sibling's pending ASTs.
+    */
+  private val pendingStatementAsts = AstChannel()
+
+  def registerPendingStatementAst(ast: Ast): Unit = pendingStatementAsts.register(ast)
+
+  def takePendingStatementAsts: List[Ast] = pendingStatementAsts.take()
+
+  /** TYPE_DECLs for anonymous classes (`new Runnable() { .. }`), awaiting attachment to the type
+    * that encloses them.
+    *
+    * An anonymous class is compiled to a class of its own, so its natural home is the enclosing
+    * TYPE_DECL rather than whatever expression happened to create it - which is also the only
+    * placement that works everywhere one can appear, a field initializer as much as a method body.
+    * [[AstCreator.astForTypeDecl]] drains this at the end of each type, so a nested named type
+    * collects its own before the outer one drains, and the anonymous class lands under the type it
+    * was written in.
+    */
+  private val anonymousTypeDeclAsts = AstChannel()
+
+  def registerAnonymousTypeDeclAst(ast: Ast): Unit = anonymousTypeDeclAsts.register(ast)
+
+  def takeAnonymousTypeDeclAsts: List[Ast] = anonymousTypeDeclAsts.take()
 
   // TODO: The below section of todos are all methods that have been added for simple compatibility with the old
   //  scope. The plan is to refactor the code to handle these directly in the AstCreator to make the code easier

@@ -6,6 +6,7 @@ import io.appthreat.dataflowengineoss.queryengine.QueryEngineStatistics.{
     PATH_CACHE_MISSES
 }
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
+import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.{toCfgNodeMethods, toExpressionMethods, *}
 
@@ -87,13 +88,43 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
       * available in the result table. If not, determine results recursively.
       */
     def computeResultsForParents() =
-        deduplicateWithinTask(expandIn(
-          curNode.asInstanceOf[CfgNode],
-          path,
-          callSiteStack
-        ).iterator.flatMap { parent =>
-            createResultsFromCacheOrCompute(parent, path)
-        }.toVector)
+      val parents =
+          narrowToFieldContext(expandIn(curNode.asInstanceOf[CfgNode], path, callSiteStack))
+      deduplicateWithinTask(parents.iterator.flatMap { parent =>
+          createResultsFromCacheOrCompute(parent, path)
+      }.toVector)
+
+    /** Drops the writes of other fields when the walk only got here by reading one of them.
+      *
+      * A method that writes several fields of the same object taints the object as a whole, so
+      * reading ANY field of it afterwards used to find the value written to ANY other - `new
+      * User(tainted, safe)` made `user.other` look tainted, and with it every getter, every
+      * `equals`, every logging call that touched an unrelated field of a partly tainted object.
+      *
+      * The read that brought the walk here names the field whose value is being asked about, so the
+      * writes to other fields are not steps on the path. Only the field writes are filtered: the
+      * parameter itself and any other parent still stand, so a method that also passes the object
+      * somewhere the attribution cannot follow keeps its flow.
+      */
+    def narrowToFieldContext(parents: Vector[PathElement]): Vector[PathElement] =
+        task.fingerprint.fieldContext match
+          case Some(field) if curNode.isInstanceOf[MethodParameterOut] =>
+              // writtenFieldOf walks each parent's arguments; compute it once into the partition
+              // key instead of re-deriving it in a second pass over the field writes.
+              val (fieldWrites, others) =
+                  parents.map(p => p -> writtenFieldOf(p.node)).partition(_._2.isDefined)
+              if fieldWrites.isEmpty then parents
+              else
+                others.map(_._1) ++ fieldWrites.collect {
+                    case (p, Some(written)) if written == field => p
+                }
+          case _ => parents
+
+    def writtenFieldOf(node: StoredNode): Option[String] =
+        node match
+          case call: Call if call.name == Operators.fieldAccess =>
+              call.argument.collectAll[FieldIdentifier].headOption.map(_.canonicalName)
+          case _ => None
 
     def deduplicateWithinTask(vec: Vector[ReachableByResult]): Vector[ReachableByResult] =
         vec
@@ -163,7 +194,12 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
       callDepth: Int
     ): Option[Vector[ReachableByResult]] =
         table.get(
-          TaskFingerprint(first.node.asInstanceOf[CfgNode], callSiteStack, callDepth)
+          TaskFingerprint(
+            first.node.asInstanceOf[CfgNode],
+            callSiteStack,
+            callDepth,
+            task.fingerprint.fieldContext
+          )
         ).map { res =>
             res.map { r =>
               val stopIndex =
@@ -232,7 +268,14 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
       // All other cases: expand into parents
       case _ =>
           computeResultsForParents()
-    val key = TaskFingerprint(curNode.asInstanceOf[CfgNode], task.callSiteStack, task.callDepth)
+    // The field context is part of the key: the cached answer for this node was computed under it,
+    // and is not the answer for the same node reached through a read of a different field.
+    val key = TaskFingerprint(
+      curNode.asInstanceOf[CfgNode],
+      task.callSiteStack,
+      task.callDepth,
+      task.fingerprint.fieldContext
+    )
     table.updateWith(key) {
         case Some(existingValue) => Some(existingValue ++ res)
         case None                => Some(res)

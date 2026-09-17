@@ -101,15 +101,50 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
     nextNodes.foreach(t => result ++= traverseInheritance(t, up, visited))
     result
 
+  /** The override of `baseMethod` in `subclass`, if it declares one.
+    *
+    * An exact signature match is the answer whenever there is one. When there is not, the usual
+    * reason is a generic supertype: `Box[T].put(Object)` is implemented by `StringBox.put(String)`,
+    * and the compiler bridges the two. Requiring an exact match there loses the edge into every
+    * implementation of a generic interface - `Comparator`, `Function`, `Consumer`, a typed
+    * repository - which is most of the interfaces worth following. So a same-name, same-arity
+    * candidate stands in for the bridge method, but only when it is the ONLY one: with several
+    * same-arity overloads there is nothing to distinguish them by, and guessing would attach the
+    * call to a body it may never reach.
+    */
   private def staticLookup(subclass: String, baseMethod: Method): Option[String] =
       typeMap.get(subclass) match
         case Some(sc) =>
-            sc._methodViaAstOut
-                .nameExact(baseMethod.name)
-                .and(_.signatureExact(baseMethod.signature))
-                .map(_.fullName)
-                .headOption
+            val sameName = sc._methodViaAstOut.nameExact(baseMethod.name).l
+            sameName.find(_.signature == baseMethod.signature).map(_.fullName).orElse {
+                sameName.filter(m =>
+                    parameterCount(m.signature) == parameterCount(
+                      baseMethod.signature
+                    )
+                ) match
+                  case List(single) => Some(single.fullName)
+                  case _            => None
+            }
         case None => None
+
+  /** The number of parameters a `returnType(paramType, ..)` signature declares. */
+  private def parameterCount(signature: String): Int =
+    val open = signature.indexOf('(')
+    if open < 0 || !signature.endsWith(")") then -1
+    else
+      val params = signature.substring(open + 1, signature.length - 1)
+      if params.isEmpty then 0
+      else
+        // Split on top-level commas only, so a generic parameter type keeps its own.
+        var depth = 0
+        var count = 1
+        params.foreach {
+            case '<' => depth += 1
+            case '>' => depth -= 1
+            case ',' => if depth == 0 then count += 1
+            case _   =>
+        }
+        count
 
   private def resolveCallInSuperClasses(call: Call): Boolean =
       call.methodFullName match
@@ -118,7 +153,10 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
 
   private def resolveRegularMethodInSuperclass(call: Call): Boolean =
     val (fullName, signature) = splitMethodSignature(call)
-    val typeDeclFullName      = fullName.replace(s".${call.name}", "")
+    // Only the trailing `.name` is the method: `replace` would also strike a package segment that
+    // happens to share the method's name, turning `com.log.Child.log` into `com.Child` and losing
+    // every inherited-method edge in such a package.
+    val typeDeclFullName = fullName.stripSuffix(s".${call.name}")
     val candidates = cpg.typeDecl
         .fullNameExact(allSuperClasses(typeDeclFullName).toIndexedSeq*)
         .astChildren

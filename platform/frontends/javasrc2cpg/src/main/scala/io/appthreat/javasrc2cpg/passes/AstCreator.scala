@@ -1,5 +1,6 @@
 package io.appthreat.javasrc2cpg.passes
 
+import com.github.javaparser.ast.Modifier
 import com.github.javaparser.ast.`type`.TypeParameter
 import com.github.javaparser.ast.{CompilationUnit, Node, NodeList, PackageDeclaration}
 import com.github.javaparser.ast.body.{
@@ -7,12 +8,14 @@ import com.github.javaparser.ast.body.{
     BodyDeclaration,
     CallableDeclaration,
     ClassOrInterfaceDeclaration,
+    CompactConstructorDeclaration,
     ConstructorDeclaration,
     EnumConstantDeclaration,
     FieldDeclaration,
     InitializerDeclaration,
     MethodDeclaration,
     Parameter,
+    RecordDeclaration,
     TypeDeclaration,
     VariableDeclarator
 }
@@ -40,15 +43,20 @@ import com.github.javaparser.ast.expr.{
     LongLiteralExpr,
     MarkerAnnotationExpr,
     MethodCallExpr,
+    MethodReferenceExpr,
     NameExpr,
     NormalAnnotationExpr,
     NullLiteralExpr,
     ObjectCreationExpr,
+    PatternExpr,
+    RecordPatternExpr,
     SingleMemberAnnotationExpr,
     StringLiteralExpr,
     SuperExpr,
+    SwitchExpr,
     TextBlockLiteralExpr,
     ThisExpr,
+    TypePatternExpr,
     UnaryExpr,
     VariableDeclarationExpr
 }
@@ -67,6 +75,8 @@ import com.github.javaparser.ast.stmt.{
     ForStmt,
     IfStmt,
     LabeledStmt,
+    LocalClassDeclarationStmt,
+    LocalRecordDeclarationStmt,
     ReturnStmt,
     Statement,
     SwitchEntry,
@@ -74,7 +84,8 @@ import com.github.javaparser.ast.stmt.{
     SynchronizedStmt,
     ThrowStmt,
     TryStmt,
-    WhileStmt
+    WhileStmt,
+    YieldStmt
 }
 import com.github.javaparser.resolution.UnsolvedSymbolException
 import com.github.javaparser.resolution.declarations.{
@@ -136,6 +147,7 @@ import io.shiftleft.codepropertygraph.generated.{
     Operators
 }
 import io.shiftleft.codepropertygraph.generated.nodes.{
+    AstNodeNew,
     NewAnnotation,
     NewArrayInitializer,
     NewBlock,
@@ -240,12 +252,14 @@ class AstCreator(
 
   // TODO: Perhaps move this to a NameProvider or some such? Look at kt2cpg to see if some unified representation
   // makes sense.
-  private val LambdaNamePrefix   = "lambda$"
-  private val lambdaKeyPool      = new IntervalKeyPool(first = 0, last = Long.MaxValue)
-  private val IndexNamePrefix    = "$idx"
-  private val indexKeyPool       = new IntervalKeyPool(first = 0, last = Long.MaxValue)
-  private val IterableNamePrefix = "$iterLocal"
-  private val iterableKeyPool    = new IntervalKeyPool(first = 0, last = Long.MaxValue)
+  private val LambdaNamePrefix         = "lambda$"
+  private val SwitchSelectorNamePrefix = "switch$"
+  private val lambdaKeyPool            = new IntervalKeyPool(first = 0, last = Long.MaxValue)
+  private val IndexNamePrefix          = "$idx"
+  private val indexKeyPool             = new IntervalKeyPool(first = 0, last = Long.MaxValue)
+  private val switchSelectorKeyPool    = new IntervalKeyPool(first = 0, last = Long.MaxValue)
+  private val IterableNamePrefix       = "$iterLocal"
+  private val iterableKeyPool          = new IntervalKeyPool(first = 0, last = Long.MaxValue)
 
   /** Entry point of AST creation. Translates a compilation unit created by JavaParser into a
     * DiffGraph containing the corresponding CPG AST.
@@ -530,6 +544,8 @@ class AstCreator(
           "interface "
         else if typ.isEnumDeclaration then
           "enum "
+        else if typ.isRecordDeclaration then
+          "record "
         else
           "class "
     codeBuilder.append(classPrefix)
@@ -557,7 +573,13 @@ class AstCreator(
           ModifierTypes.ABSTRACT
         ))
 
-    List(accessModifier, abstractModifier).flatten
+    // A final class has no subclasses, so a call on it has exactly one possible receiver type.
+    val finalModifier =
+        Option.when(typ.getModifiers.asScala.exists(_.getKeyword == Modifier.Keyword.FINAL))(
+          newModifierNode(ModifierTypes.FINAL)
+        )
+
+    List(accessModifier, abstractModifier, finalModifier).flatten
   end modifiersForTypeDecl
 
   private def createTypeDeclNode(
@@ -636,17 +658,38 @@ class AstCreator(
       List.empty
 
     val staticInits: mutable.Buffer[Ast] = mutable.Buffer()
+    val fieldPatternLocals               = mutable.Buffer[Ast]()
     val memberAsts = typ.getMembers.asScala.flatMap { member =>
       val astWithInits =
           astForTypeDeclMember(member, astParentFullName = NodeTypes.TYPE_DECL)
       staticInits.appendAll(astWithInits.staticInits)
+      // Pattern bindings lowered OUTSIDE any block - a type pattern inside a FIELD initializer
+      // (`boolean f = o instanceof String s && ...`) - have no block of their own. Drain after
+      // EACH member: a method later in the same loop drains via its own body block, and would
+      // otherwise adopt a field's binding registered earlier in the loop. They attach to the
+      // TYPE_DECL - a field-initializer binding is a local of no method, which is exactly what
+      // that placement says.
+      fieldPatternLocals.appendAll(scope.takePatternLocalAsts)
+      // Same boundary for the statement-position ASTs of a field initializer's switch
+      // expression: drained here so they cannot leak into the next member's body. They have no
+      // statement to precede at class level, so they are discarded rather than misplaced - a
+      // field-initializer switch keeps its value expression, only the (unconditional,
+      // over-approximating) binding statements are dropped.
+      scope.takePendingStatementAsts
       astWithInits.ast
     }
 
-    val defaultConstructorAst = if !isInterface && typ.getConstructors.isEmpty then
-      Some(astForDefaultConstructor())
-    else
-      None
+    val recordComponentAsts = typ match
+      case record: RecordDeclaration => astsForRecordComponents(record)
+      case _                         => RecordComponentAsts.empty
+
+    val defaultConstructorAst =
+        if !isInterface && typ.getConstructors.isEmpty && !typ.isRecordDeclaration then
+          Some(astForDefaultConstructor())
+        else
+          // A record's generated constructor is the CANONICAL one, taking its components - the
+          // no-arg default would be a constructor the record does not have.
+          recordComponentAsts.canonicalConstructor
 
     val annotationAsts = typ.getAnnotations.asScala.map(astForAnnotationExpr)
 
@@ -657,8 +700,16 @@ class AstCreator(
 
     val modifiers = modifiersForTypeDecl(typ, isInterface)
 
+    // Anonymous classes written anywhere inside this type - in a method body or a field
+    // initializer - are classes of this type, and attach here. See Scope.anonymousTypeDeclAsts.
+    val anonymousTypeDecls = scope.takeAnonymousTypeDeclAsts
+
     val typeDeclAst = Ast(typeDeclNode)
+        .withChildren(anonymousTypeDecls)
+        .withChildren(recordComponentAsts.members)
+        .withChildren(recordComponentAsts.accessors)
         .withChildren(enumEntryAsts)
+        .withChildren(fieldPatternLocals)
         .withChildren(memberAsts)
         .withChildren(defaultConstructorAst.toList)
         .withChildren(annotationAsts)
@@ -694,6 +745,222 @@ class AstCreator(
     typeDeclAst
   end astForTypeDecl
 
+  /** The members, accessors and canonical constructor the compiler derives from a record header. */
+  private case class RecordComponentAsts(
+    members: Seq[Ast],
+    accessors: Seq[Ast],
+    canonicalConstructor: Option[Ast]
+  )
+
+  private object RecordComponentAsts:
+    val empty: RecordComponentAsts = RecordComponentAsts(Seq.empty, Seq.empty, None)
+
+  /** Everything a record declares implicitly: one field per component, an accessor named after each
+    * component, and the canonical constructor.
+    *
+    * None of it appears in the source, and without it a record has no state at all in the graph:
+    * `new User(name, age)` resolves to nothing, `u.name()` resolves to nothing, and the component
+    * names referenced inside the record's own methods resolve to nothing. Records carry the data in
+    * most Java 17-and-later code - DTOs, request and response bodies, pattern-matching carriers -
+    * so that is a large blind spot on exactly the values worth tracking.
+    *
+    * A component whose accessor or constructor the record DOES declare explicitly is left to the
+    * ordinary member lowering, so an accessor that validates or copies is the one that ends up in
+    * the graph. A compact constructor (`record User(..) { User { .. } }`) likewise suppresses the
+    * generated canonical one rather than competing with it.
+    */
+  private def astsForRecordComponents(record: RecordDeclaration): RecordComponentAsts =
+    val components = record.getParameters.asScala.toList
+    if components.isEmpty then RecordComponentAsts.empty
+    else
+      val recordFullName = scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
+
+      val componentTypes = components.map { component =>
+          typeInfoCalc
+              .fullName(component.getType)
+              .orElse(scope.lookupType(component.getTypeAsString))
+              .getOrElse(guessTypeFullName(component.getTypeAsString))
+      }
+      componentTypes.foreach(typeInfoCalc.registerType)
+
+      val members = components.zip(componentTypes).map { case (component, typeFullName) =>
+          Ast(memberNode(
+            component,
+            component.getNameAsString,
+            component.toString,
+            typeFullName
+          )).withChild(Ast(newModifierNode(ModifierTypes.PRIVATE)))
+      }
+
+      val explicitMethodNames =
+          record.getMethods.asScala.filter(_.getParameters.isEmpty).map(_.getNameAsString).toSet
+
+      val accessors = components.zip(componentTypes).collect {
+          case (component, typeFullName)
+              if !explicitMethodNames.contains(component.getNameAsString) =>
+              astForRecordAccessor(record, component.getNameAsString, typeFullName, recordFullName)
+      }
+
+      // An explicitly declared canonical constructor is lowered as an ordinary member. A COMPACT one
+      // is not a constructor on its own - javac completes it with the component assignments - so it
+      // is folded into the generated canonical constructor instead.
+      val canonicalConstructor =
+          Option.when(record.getConstructors.isEmpty)(
+            astForRecordCanonicalConstructor(
+              record,
+              components,
+              componentTypes,
+              recordFullName,
+              record.getCompactConstructors.asScala.headOption
+            )
+          )
+
+      RecordComponentAsts(members, accessors, canonicalConstructor)
+    end if
+  end astsForRecordComponents
+
+  /** `T name() { return this.name; }` for one record component. */
+  private def astForRecordAccessor(
+    record: RecordDeclaration,
+    name: String,
+    typeFullName: String,
+    recordFullName: String
+  ): Ast =
+    val signature = s"$typeFullName()"
+    val methodNode = NewMethod()
+        .name(name)
+        .fullName(composeMethodFullName(recordFullName, name, signature))
+        .signature(signature)
+        .code(s"$typeFullName $name()")
+        .lineNumber(line(record))
+        .filename(filename)
+        .isExternal(false)
+
+    val thisAst = Ast(thisNodeForMethod(Some(recordFullName), line(record)))
+    val fieldAccess = fieldAccessAst(
+      "this",
+      Some(recordFullName),
+      name,
+      Some(typeFullName),
+      line(record),
+      column(record)
+    )
+    val returnNode = returnAst(
+      NewReturn()
+          .code(s"return this.$name;")
+          .lineNumber(line(record))
+          .columnNumber(column(record)),
+      Seq(fieldAccess)
+    )
+    val bodyAst = Ast(NewBlock().typeFullName(TypeConstants.Void)).withChild(returnNode)
+
+    methodAstWithAnnotations(
+      methodNode,
+      Seq(thisAst),
+      bodyAst,
+      newMethodReturnNode(typeFullName, line = line(record), column = None),
+      List(newModifierNode(ModifierTypes.PUBLIC), newModifierNode(ModifierTypes.VIRTUAL))
+    )
+  end astForRecordAccessor
+
+  /** `User(String name, int age) { this.name = name; this.age = age; }`. */
+  private def astForRecordCanonicalConstructor(
+    record: RecordDeclaration,
+    components: List[Parameter],
+    componentTypes: List[String],
+    recordFullName: String,
+    compact: Option[CompactConstructorDeclaration]
+  ): Ast =
+    val signature = composeMethodLikeSignature(TypeConstants.Void, componentTypes)
+    val methodNode = NewMethod()
+        .name(io.appthreat.x2cpg.Defines.ConstructorMethodName)
+        .fullName(
+          composeMethodFullName(
+            recordFullName,
+            io.appthreat.x2cpg.Defines.ConstructorMethodName,
+            signature
+          )
+        )
+        .signature(signature)
+        .code(record.getNameAsString + components.mkString("(", ", ", ")"))
+        .lineNumber(line(record))
+        .filename(filename)
+        .isExternal(false)
+
+    // The compact constructor's statements are lowered inside this method's scope, so the component
+    // names they validate resolve to the constructor's own parameters.
+    scope.pushMethodScope(methodNode, ExpectedType.Void)
+
+    val thisAst = Ast(thisNodeForMethod(Some(recordFullName), line(record)))
+    val parameterNodes = components.zip(componentTypes).zipWithIndex.map {
+        case ((component, typeFullName), position) =>
+            (
+              NewMethodParameterIn()
+                  .name(component.getNameAsString)
+                  .code(component.toString)
+                  .lineNumber(line(record))
+                  .evaluationStrategy(
+                    if component.getType.isPrimitiveType then EvaluationStrategies.BY_VALUE
+                    else EvaluationStrategies.BY_SHARING
+                  )
+                  .typeFullName(typeFullName)
+                  .index(position + 1)
+                  .order(position + 1)
+            )
+    }
+    parameterNodes.foreach(scope.addParameter)
+    val parameterAsts = parameterNodes.map(Ast(_))
+
+    val compactStatements =
+        compact.toList.flatMap(_.getBody.getStatements.asScala.toList).flatMap(astsForStatement)
+
+    // A type pattern in the compact constructor (`R { if (o instanceof String s) .. }`) binds in
+    // this method, but the lowering of its statements happens here rather than in
+    // `astForBlockStatement`, so nothing else drains it: without this the LOCAL escapes the record
+    // altogether - lost for a top-level record, adopted by the outer type for a nested one - and
+    // the uses of the binding in this body have nothing to resolve against.
+    val patternLocals = scope.takePatternLocalAsts
+
+    val assignments = components.zip(componentTypes).map { case (component, typeFullName) =>
+        val name = component.getNameAsString
+        val target =
+            fieldAccessAst(
+              "this",
+              Some(recordFullName),
+              name,
+              Some(typeFullName),
+              line(record),
+              column(record)
+            )
+        val source = Ast(newIdentifierNode(name, typeFullName))
+        callAst(
+          newOperatorCallNode(
+            Operators.assignment,
+            s"this.$name = $name",
+            Some(typeFullName),
+            line(record),
+            column(record)
+          ),
+          Seq(target, source)
+        )
+    }
+
+    val bodyAst = Ast(NewBlock().typeFullName(TypeConstants.Void))
+        .withChildren(patternLocals)
+        .withChildren(compactStatements)
+        .withChildren(assignments)
+
+    val ast = methodAstWithAnnotations(
+      methodNode,
+      thisAst +: parameterAsts,
+      bodyAst,
+      newMethodReturnNode(TypeConstants.Void, line = line(record), column = None),
+      List(newModifierNode(ModifierTypes.CONSTRUCTOR), newModifierNode(ModifierTypes.PUBLIC))
+    )
+    scope.popScope()
+    ast
+  end astForRecordCanonicalConstructor
+
   private def astForDefaultConstructor(): Ast =
     val typeFullName = scope.enclosingTypeDeclFullName
     val signature    = s"${TypeConstants.Void}()"
@@ -721,6 +988,27 @@ class AstCreator(
   end astForDefaultConstructor
 
   private def astForEnumEntry(entry: EnumConstantDeclaration): Ast =
+    // A constant with a body (`ECHO { String apply(String s) { .. } }`) is an anonymous subclass of
+    // the enum, and is lowered as one - otherwise its overrides, which are the whole point of the
+    // form, would be dropped along with the body.
+    //
+    // Divergence from javac, kept deliberately: javac names this class `E$1` from a per-enum
+    // counter, we name it `E$ECHO` after the constant. The name is internal to the graph
+    // (deterministic, self-referenced), but matching CPG full names against compiled artifacts or
+    // stack traces will not find these classes.
+    val classBody = entry.getClassBody.asScala.toList
+    if classBody.nonEmpty then
+      val enumFullName = scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
+      astForImplicitSubclass(
+        name = entry.getNameAsString,
+        fullName = s"$enumFullName$$${entry.getNameAsString}",
+        code = entry.getNameAsString,
+        baseTypeFullName = Some(enumFullName),
+        members = classBody,
+        lineNumber = line(entry),
+        columnNumber = column(entry)
+      )
+
     // TODO Fix enum entries in general
     val typeFullName =
         tryWithSafeStackOverflow(entry.resolve().getType).toOption.flatMap(
@@ -734,10 +1022,16 @@ class AstCreator(
         s"${typeFullName.getOrElse(Defines.UnresolvedNamespace)}.${Defines.ConstructorMethodName}"
 
     Ast(entryNode)
+  end astForEnumEntry
 
   private def modifiersForFieldDeclaration(decl: FieldDeclaration): Seq[Ast] =
     val staticModifier =
         Option.when(decl.isStatic)(newModifierNode(ModifierTypes.STATIC))
+
+    // A final field is assignable only by a constructor or an initializer of the declaring class,
+    // and at most once (JLS 16), so every write to one is visible within its own type.
+    val finalModifier =
+        Option.when(decl.isFinal)(newModifierNode(ModifierTypes.FINAL))
 
     val accessModifierType =
         if decl.isPublic then
@@ -751,7 +1045,8 @@ class AstCreator(
 
     val accessModifier = accessModifierType.map(newModifierNode)
 
-    List(staticModifier, accessModifier).flatten.map(Ast(_))
+    List(staticModifier, finalModifier, accessModifier).flatten.map(Ast(_))
+  end modifiersForFieldDeclaration
 
   private def astForFieldVariable(
     v: VariableDeclarator,
@@ -1007,24 +1302,62 @@ class AstCreator(
     val code         = annotationExpr.toString
     val name         = annotationExpr.getName.getIdentifier
     val node         = annotationNode(annotationExpr, code, name, fullName)
+
+    /** A string-valued member additionally lowers to a real LITERAL under the parameter assignment.
+      * The ANNOTATION_LITERAL value node keeps its historic shape (pinned by AnnotationTests) but
+      * cannot carry TAGGED_BY edges or be reached by literal traversals, and a route
+      * (`@GetMapping("/users")`) or statement (`@Query("SELECT ...")`) that exists only there is
+      * invisible to the framework taggers and to every literal-based consumer. The duplicate
+      * LITERAL makes the value a first-class expression node. An ARRAY member
+      * (`@RequestMapping({"/a", "/b"})`) contributes one LITERAL per string element.
+      */
+    def escapedStringLiteral(value: String, node: Node): Ast =
+      val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+      Ast(
+        NewLiteral()
+            .code(s"\"$escaped\"")
+            .typeFullName("java.lang.String")
+            .lineNumber(line(node))
+            .columnNumber(column(node))
+      )
+
+    def withStringLiteral(assignmentAst: Ast, value: Expression): Ast =
+        value match
+          case str: StringLiteralExpr =>
+              assignmentAst.withChild(escapedStringLiteral(str.getValue, str))
+          case block: TextBlockLiteralExpr =>
+              assignmentAst.withChild(escapedStringLiteral(block.getValue, block))
+          case array: ArrayInitializerExpr =>
+              val elementLiterals = array.getValues.asScala.collect {
+                  case str: StringLiteralExpr => str
+              }.map(str => escapedStringLiteral(str.getValue, str))
+              assignmentAst.withChildren(elementLiterals.toList)
+          case _ => assignmentAst
+
     annotationExpr match
       case _: MarkerAnnotationExpr =>
           annotationAst(node, List.empty)
       case normal: NormalAnnotationExpr =>
           val assignmentAsts = normal.getPairs.asScala.toList.map { pair =>
-              annotationAssignmentAst(
-                pair.getName.getIdentifier,
-                pair.toString,
-                convertAnnotationValueExpr(pair.getValue).getOrElse(Ast())
+              withStringLiteral(
+                annotationAssignmentAst(
+                  pair.getName.getIdentifier,
+                  pair.toString,
+                  convertAnnotationValueExpr(pair.getValue).getOrElse(Ast())
+                ),
+                pair.getValue
               )
           }
           annotationAst(node, assignmentAsts)
       case single: SingleMemberAnnotationExpr =>
           val assignmentAsts = List(
-            annotationAssignmentAst(
-              "value",
-              single.getMemberValue.toString,
-              convertAnnotationValueExpr(single.getMemberValue).getOrElse(Ast())
+            withStringLiteral(
+              annotationAssignmentAst(
+                "value",
+                single.getMemberValue.toString,
+                convertAnnotationValueExpr(single.getMemberValue).getOrElse(Ast())
+              ),
+              single.getMemberValue
             )
           )
           annotationAst(node, assignmentAsts)
@@ -1054,6 +1387,12 @@ class AstCreator(
         if methodDeclaration.isStatic then ModifierTypes.STATIC else ModifierTypes.VIRTUAL
     val staticVirtualModifier = Some(newModifierNode(staticVirtualModifierType))
 
+    // `native` methods (JNI) keep their NATIVE modifier - the framework taggers key on it to
+    // mark the JNI boundary.
+    val nativeModifier = Option.when(
+      methodDeclaration.getModifiers.asScala.exists(_.getKeyword == Modifier.Keyword.NATIVE)
+    )(newModifierNode(ModifierTypes.NATIVE))
+
     val accessModifierType = if methodDeclaration.isPublic then
       Some(ModifierTypes.PUBLIC)
     else if methodDeclaration.isPrivate then
@@ -1067,7 +1406,18 @@ class AstCreator(
       None
     val accessModifier = accessModifierType.map(newModifierNode)
 
-    List(accessModifier, abstractModifier, staticVirtualModifier).flatten
+    // A final method cannot be overridden, so its VIRTUAL dispatch has one possible target.
+    val finalModifier = Option.when(
+      methodDeclaration.getModifiers.asScala.exists(_.getKeyword == Modifier.Keyword.FINAL)
+    )(newModifierNode(ModifierTypes.FINAL))
+
+    List(
+      accessModifier,
+      abstractModifier,
+      staticVirtualModifier,
+      nativeModifier,
+      finalModifier
+    ).flatten
   end modifiersForMethod
 
   private def getIdentifiersForTypeParameters(methodDeclaration: MethodDeclaration)
@@ -1130,9 +1480,11 @@ class AstCreator(
         scope.addParameter(node)
     }
 
-    val bodyAst = methodDeclaration.getBody.toScala.map(astForBlockStatement(_)).getOrElse(Ast(
-      NewBlock()
-    ))
+    // Pattern-binding locals of the body statements are attached by astForBlockStatement
+    // itself (per-block drain), so nothing extra to do here.
+    val bodyAst = methodDeclaration.getBody.toScala.map(astForBlockStatement(_)).getOrElse(
+      Ast(NewBlock())
+    )
     val methodReturn = newMethodReturnNode(
       returnTypeFullName.getOrElse(TypeConstants.Any),
       None,
@@ -1253,32 +1605,42 @@ class AstCreator(
     resources.appended(controlStructureAst)
   end astsForTry
 
+  /** One statement, preceded by any statement-position ASTs its own expressions synthesized.
+    *
+    * A switch expression lowers to a selector binding and (for pattern or block arms) binding
+    * assignments and arm side effects, which must run before the statement that contains the
+    * expression rather than becoming extra arguments of it - see
+    * [[Scope.registerPendingStatementAst]]. Nested statements are built (and drain) first, so the
+    * drain here only collects what THIS statement's own expressions registered.
+    */
   private def astsForStatement(statement: Statement): Seq[Ast] =
-      // TODO: Implement missing handlers
-      // case _: LocalClassDeclarationStmt  => Seq()
-      // case _: LocalRecordDeclarationStmt => Seq()
-      // case _: YieldStmt                  => Seq()
+    val statementAsts = astsForStatementInner(statement)
+    scope.takePendingStatementAsts ++ statementAsts
+
+  private def astsForStatementInner(statement: Statement): Seq[Ast] =
       statement match
         case x: ExplicitConstructorInvocationStmt =>
             Seq(astForExplicitConstructorInvocation(x))
-        case x: AssertStmt       => Seq(astForAssertStatement(x))
-        case x: BlockStmt        => Seq(astForBlockStatement(x))
-        case x: BreakStmt        => Seq(astForBreakStatement(x))
-        case x: ContinueStmt     => Seq(astForContinueStatement(x))
-        case x: DoStmt           => Seq(astForDo(x))
-        case _: EmptyStmt        => Seq() // Intentionally skipping this
-        case x: ExpressionStmt   => astsForExpression(x.getExpression, ExpectedType.Void)
-        case x: ForEachStmt      => astForForEach(x)
-        case x: ForStmt          => Seq(astForFor(x))
-        case x: IfStmt           => Seq(astForIf(x))
-        case x: LabeledStmt      => astsForLabeledStatement(x)
-        case x: ReturnStmt       => Seq(astForReturnNode(x))
-        case x: SwitchStmt       => Seq(astForSwitchStatement(x))
-        case x: SynchronizedStmt => Seq(astForSynchronizedStatement(x))
-        case x: ThrowStmt        => Seq(astForThrow(x))
-        case x: TryStmt          => astsForTry(x)
-        case x: WhileStmt        => Seq(astForWhile(x))
-        // case x: LocalClassDeclarationStmt => Seq(astForLocalClassDeclarationStmt(x))
+        case x: AssertStmt                 => Seq(astForAssertStatement(x))
+        case x: BlockStmt                  => Seq(astForBlockStatement(x))
+        case x: BreakStmt                  => Seq(astForBreakStatement(x))
+        case x: ContinueStmt               => Seq(astForContinueStatement(x))
+        case x: DoStmt                     => Seq(astForDo(x))
+        case _: EmptyStmt                  => Seq() // Intentionally skipping this
+        case x: ExpressionStmt             => astsForExpression(x.getExpression, ExpectedType.Void)
+        case x: ForEachStmt                => astForForEach(x)
+        case x: ForStmt                    => Seq(astForFor(x))
+        case x: IfStmt                     => Seq(astForIf(x))
+        case x: LabeledStmt                => astsForLabeledStatement(x)
+        case x: LocalClassDeclarationStmt  => astForLocalTypeDeclaration(x.getClassDeclaration)
+        case x: LocalRecordDeclarationStmt => astForLocalTypeDeclaration(x.getRecordDeclaration)
+        case x: ReturnStmt                 => astForReturnNode(x)
+        case x: SwitchStmt                 => astsForSwitchStatement(x)
+        case x: SynchronizedStmt           => Seq(astForSynchronizedStatement(x))
+        case x: ThrowStmt                  => Seq(astForThrow(x))
+        case x: TryStmt                    => astsForTry(x)
+        case x: WhileStmt                  => Seq(astForWhile(x))
+        case x: YieldStmt                  => Seq(astForYieldStatement(x))
         case x =>
             logger.debug(
               s"Attempting to generate AST for unknown statement of type ${x.getClass}"
@@ -1307,26 +1669,35 @@ class AstCreator(
             .columnNumber(column(stmt))
             .code(s"if (${stmt.getCondition.toString})")
 
-    val conditionAst =
-        astsForExpression(stmt.getCondition, ExpectedType.Boolean).headOption.toList
+    // A switch-expression condition (`if (switch (x) {...})`) lowers to leading statements plus
+    // the value expression; all of them belong before the branches, and only the VALUE - the
+    // last AST - is the condition.
+    val conditionAsts = astsForExpression(stmt.getCondition, ExpectedType.Boolean).toList
 
     val thenAsts = astsForStatement(stmt.getThenStmt)
     val elseAst  = astForElse(stmt.getElseStmt.toScala).toList
 
     val ast = Ast(ifNode)
-        .withChildren(conditionAst)
+        .withChildren(conditionAsts)
         .withChildren(thenAsts)
         .withChildren(elseAst)
 
-    conditionAst.flatMap(_.root.toList) match
-      case r :: Nil =>
+    conditionAsts.lastOption.flatMap(_.root) match
+      case Some(r) =>
           ast.withConditionEdge(ifNode, r)
-      case _ =>
+      case None =>
           ast
   end astForIf
 
+  /** The VALUE AST of a loop condition, for the CONDITION edge. A switch-expression condition
+    * (`while (switch (x) {...})`) lowers to leading statements plus the value; only the value is
+    * the condition, and the leading statements ride along under the control structure.
+    */
+  private def conditionAstsFor(condition: Expression): Option[Ast] =
+      astsForExpression(condition, ExpectedType.Boolean).lastOption
+
   def astForWhile(stmt: WhileStmt): Ast =
-    val conditionAst = astsForExpression(stmt.getCondition, ExpectedType.Boolean).headOption
+    val conditionAst = conditionAstsFor(stmt.getCondition)
     val stmtAsts     = astsForStatement(stmt.getBody)
     val code         = s"while (${stmt.getCondition.toString})"
     val lineNumber   = line(stmt)
@@ -1335,7 +1706,7 @@ class AstCreator(
     whileAst(conditionAst, stmtAsts, Some(code), lineNumber, columnNumber)
 
   private def astForDo(stmt: DoStmt): Ast =
-    val conditionAst = astsForExpression(stmt.getCondition, ExpectedType.Boolean).headOption
+    val conditionAst = conditionAstsFor(stmt.getCondition)
     val stmtAsts     = astsForStatement(stmt.getBody)
     val code         = s"do {...} while (${stmt.getCondition.toString})"
     val lineNumber   = line(stmt)
@@ -1826,23 +2197,309 @@ class AstCreator(
     scope.popScope()
     ast
 
-  private def astForSwitchStatement(stmt: SwitchStmt): Ast =
+  /** A STATEMENT-form switch. When an entry carries a pattern label (Java 21), its binding assigns
+    * from the selector, whose value Java computes once at switch entry; duplicating the selector's
+    * nodes per binding would re-evaluate it per pattern arm (a `compute()` selector would appear N
+    * times). A pattern-bearing switch therefore binds the selector to a `switch$N` local first -
+    * the same single-evaluation treatment [[astsForSwitchExpr]] gives the expression form.
+    * Constant-only switches keep the selector inline, unchanged.
+    */
+  private def astsForSwitchStatement(stmt: SwitchStmt): Seq[Ast] =
     val switchNode =
         NewControlStructure()
             .controlStructureType(ControlStructureTypes.SWITCH)
             .code(s"switch(${stmt.getSelector.toString})")
 
     val selectorAsts = astsForExpression(stmt.getSelector, ExpectedType.empty)
-    val selectorNode = selectorAsts.head.root.get
+    val hasPatternLabels = stmt.getEntries.asScala.exists(
+      _.getLabels.asScala.exists(_.isInstanceOf[PatternExpr])
+    )
 
-    val entryAsts = stmt.getEntries.asScala.flatMap(astForSwitchEntry)
+    val (selectorBinding, entryAsts, conditionAsts) =
+        if hasPatternLabels then
+          val (binding, use) = bindSwitchSelector(stmt.getSelector, selectorAsts)
+          val entries = stmt.getEntries.asScala.flatMap { entry =>
+              astsForSwitchEntry(entry, Some(use()), stmt.getSelector.toString)
+          }
+          (Some(binding), entries, Seq(use()))
+        else
+          val entries = stmt.getEntries.asScala.flatMap(astsForSwitchEntry(_, None, ""))
+          (None, entries, selectorAsts)
+
+    val selectorNode = conditionAsts.head.root.get
 
     val switchBodyAst = Ast(NewBlock()).withChildren(entryAsts)
 
-    Ast(switchNode)
-        .withChildren(selectorAsts)
+    val switchAst = Ast(switchNode)
+        .withChildren(conditionAsts)
         .withChild(switchBodyAst)
         .withConditionEdge(switchNode, selectorNode)
+
+    selectorBinding.toList ++ Seq(switchAst)
+  end astsForSwitchStatement
+
+  /** A switch expression (Java 14+), lowered to nested `<operator>.conditional` calls.
+    *
+    * `switch (sel) { case A -> v1; case B -> v2; default -> v3 }` becomes `conditional(equals(sel,
+    * A), v1, conditional(equals(sel, B), v2, v3))`, which gives the construct its `JLS 14.11.2`
+    * dataflow for free: `<operator>.conditional` already propagates arguments 2 and 3 to its
+    * result, so taint in any arm value flows to the expression's value, and the CFG treats each arm
+    * value as a branch join.
+    *
+    * Pattern labels (`case Circle c`, Java 21) lower their test to an `instanceof` condition and
+    * their bindings to locals assigned from the selector (see [[patternBindingAsts]]); a `when`
+    * guard is ANDed into the arm condition. Block arms keep their non-yield statements - those run
+    * before the arm's value is produced - and `yield e` contributes `e` as the arm value.
+    *
+    * The returned sequence carries the synthesized binding/side-effect ASTs first and the value
+    * expression last, so callers that flatten the sequence into statement position keep source
+    * order.
+    */
+  private def astsForSwitchExpr(expr: SwitchExpr, expectedType: ExpectedType): Seq[Ast] =
+    val selectorAsts = astsForExpression(expr.getSelector, ExpectedType.empty)
+    val entries      = expr.getEntries.asScala.toList
+
+    val typeFullName = expressionReturnTypeFullName(expr)
+        .orElse(expectedType.fullName)
+        .getOrElse(TypeConstants.Any)
+
+    // The selector is evaluated ONCE: bound to a synthetic local here, and every arm test and
+    // pattern binding below reads that local (see [[bindSwitchSelector]]).
+    val (selectorBinding, selectorUse) = bindSwitchSelector(expr.getSelector, selectorAsts)
+    val selectorCode                   = expr.getSelector.toString
+
+    // Per entry: (conditionAst, valueAst, bindingAndSideEffectAsts). The default entry (no
+    // labels) has no condition and lands innermost.
+    case class Arm(condition: Option[Ast], value: Ast, prefix: Seq[Ast])
+
+    val armValues = entries.map { entry =>
+      val prefix = mutable.Buffer.empty[Ast]
+
+      // Bindings of every pattern label of this entry alias the selector (the temp local).
+      entry.getLabels.asScala.foreach {
+          case pattern: PatternExpr =>
+              prefix.appendAll(
+                patternBindingAsts(pattern, matchedExprAsts = Seq(selectorUse()), anchor = entry)
+              )
+          case _ =>
+      }
+
+      val conditionParts = entry.getLabels.asScala.toList.flatMap { label =>
+          label match
+            case pattern: PatternExpr => patternLabelTestAst(pattern, selectorUse(), selectorCode)
+            case _                    =>
+                // A constant label compares the selector for equality.
+                val labelAsts = astsForExpression(label, ExpectedType.empty)
+                val equalsCall = newOperatorCallNode(
+                  Operators.equals,
+                  code = s"$selectorCode == ${labelAsts.rootCodeOrEmpty}",
+                  typeFullName = Some(TypeConstants.Boolean),
+                  line = line(label),
+                  column = column(label)
+                )
+                Some(callAst(equalsCall, Seq(selectorUse()) ++ labelAsts))
+      }
+
+      // `case A, B -> ...` matches either label; the guard narrows further.
+      val withGuard = entry.getGuard.toScala.map { guard =>
+        val guardAsts = astsForExpression(guard, ExpectedType.Boolean)
+        val andCall = newOperatorCallNode(
+          Operators.logicalAnd,
+          code = guardAsts.rootCodeOrEmpty,
+          typeFullName = Some(TypeConstants.Boolean),
+          line = line(entry),
+          column = column(entry)
+        )
+        callAst(andCall, guardAsts)
+      }
+
+      val condition = (conditionParts, withGuard) match
+        case (Nil, None)        => None
+        case (parts, None)      => Some(orTogether(parts))
+        case (Nil, Some(guard)) => Some(guard)
+        case (parts, Some(guard)) =>
+            val or = orTogether(parts)
+            val andCall = newOperatorCallNode(
+              Operators.logicalAnd,
+              code = s"${or.rootCodeOrEmpty} && ${guard.rootCodeOrEmpty}",
+              typeFullName = Some(TypeConstants.Boolean),
+              line = line(entry),
+              column = column(entry)
+            )
+            Some(callAst(andCall, Seq(or, guard)))
+
+      // The arm value: an EXPRESSION entry's single statement expression, or the yielded
+      // expression of a BLOCK / STATEMENT_GROUP arm.
+      val valueAst: Ast = entry.getType match
+        case SwitchEntry.Type.EXPRESSION =>
+            entry.getStatements.asScala.headOption
+                .collect { case exprStmt: ExpressionStmt =>
+                    astsForExpression(exprStmt.getExpression, expectedType)
+                }
+                .getOrElse(Seq.empty)
+                .headOption
+                .getOrElse(Ast())
+        case SwitchEntry.Type.THROWS_STATEMENT =>
+            entry.getStatements.asScala.headOption
+                .map(stmt => astsForStatement(stmt))
+                .getOrElse(Seq.empty)
+                .headOption.getOrElse(Ast())
+        case _ =>
+            // A BLOCK arm (`case 1 -> { ... }`) carries its statements wrapped in a single
+            // BlockStmt; a STATEMENT_GROUP colon arm carries them directly. Unwrap the block
+            // so the arm's side effects land in the prefix and `yield` is found as the value.
+            val statements = entry.getStatements.asScala.toList.flatMap {
+                case block: BlockStmt => block.getStatements.asScala.toList
+                case other            => List(other)
+            }
+            statements.foreach {
+                case stmt: YieldStmt => // the value, extracted below
+                case other           => prefix.appendAll(astsForStatement(other))
+            }
+            statements
+                .collectFirst { case yieldStmt: YieldStmt => yieldStmt }
+                .map(yieldStmt => astsForExpression(yieldStmt.getExpression, expectedType))
+                .getOrElse(Seq.empty)
+                .headOption.getOrElse(Ast())
+
+      Arm(condition, valueAst, prefix.toList)
+    }
+
+    val defaultArm = armValues.find(_.condition.isEmpty)
+    val casedArms  = armValues.filter(_.condition.isDefined)
+
+    val nested = casedArms.foldRight(defaultArm.map(_.value).getOrElse(Ast())) { (arm, elseAst) =>
+      val conditionalCall = newOperatorCallNode(
+        Operators.conditional,
+        code = s"switch (${expr.getSelector.toString})",
+        typeFullName = Some(typeFullName),
+        line = line(expr),
+        column = column(expr)
+      )
+      callAst(conditionalCall, Seq(arm.condition.get, arm.value, elseAst))
+    }
+
+    val prefixes = armValues.flatMap(_.prefix)
+
+    // The selector binding, pattern bindings and block-arm side effects must NOT hang off the
+    // value expression: an expression-position switch funnels its value into an ARGUMENT slot,
+    // and ARGUMENT edges into LOCAL/BLOCK nodes violate the schema (see
+    // [[Scope.registerPatternLocalAst]]). Statements tucked under the conditional call are also
+    // invisible to reaching definitions, because the declared `<operator>.conditional` semantic
+    // only maps the value arms - a binding def inside the condition subtree never reaches an
+    // arm's use of the binding.
+    //
+    // Nor may they be RETURNED alongside the value: only a variable initializer, a return and an
+    // assignment RHS know to split such a sequence, while every other expression position - a
+    // call argument, a binary operand, an array index - splices the whole sequence into argument
+    // slots, which would make `sink(switch (k) {...})` a two-argument call. The binding LOCALs
+    // therefore go to the pattern-local channel (direct children of the body BLOCK) and the
+    // assignments and side effects to the pending-statement channel, which
+    // [[astsForStatement]] emits immediately before the enclosing statement. This method returns
+    // exactly one AST: the value.
+    //
+    // Deliberate over-approximation, stated plainly: those statements sit BEFORE the whole
+    // lowered switch, so every arm's side effects and every arm's pattern binding are modelled
+    // as executing unconditionally, whatever arm actually matches at runtime. For taint this is
+    // the conservative direction (a superset of the real flows); for call-graph counts it can
+    // over-count side effects in arms that never run.
+    (selectorBinding +: prefixes).foreach(scope.registerPendingStatementAst)
+    Seq(nested)
+  end astsForSwitchExpr
+
+  /** `yield e;` reached in statement position (Java 14 switch expressions).
+    *
+    * The switch-expression lowering extracts yield values directly from arm blocks, so this path is
+    * only reached for malformed or future positions. The value expression is preserved as the
+    * argument of a `yield` call so its calls, identifiers and taint steps survive.
+    */
+  private def astForYieldStatement(stmt: YieldStmt): Ast =
+    val valueAsts =
+        astsForExpression(
+          stmt.getExpression,
+          scope.enclosingMethodReturnType.getOrElse(
+            ExpectedType.empty
+          )
+        )
+    val callNode = newOperatorCallNode(
+      "<operator>.yield",
+      code = stmt.toString,
+      typeFullName = valueAsts.headOption.flatMap(_.rootType),
+      line = line(stmt),
+      column = column(stmt)
+    )
+    callAst(callNode, valueAsts)
+
+  /** `orTogether`: a chain of `<operator>.logicalOr` calls over the conditions of a multi-label
+    * `case A, B ->` entry.
+    */
+  private def orTogether(conditions: Seq[Ast]): Ast =
+      conditions match
+        case Nil           => Ast()
+        case single +: Nil => single
+        case head +: tail =>
+            val orCall = newOperatorCallNode(
+              Operators.logicalOr,
+              code = (head +: tail).map(_.rootCodeOrEmpty).mkString(" || "),
+              typeFullName = Some(TypeConstants.Boolean),
+              line = None,
+              column = None
+            )
+            callAst(orCall, head +: tail)
+
+  /** A method reference (`System.out::println`, `this::handler`, Java 8).
+    *
+    * Lowered to a METHOD_REF node - the same shape a lambda lowers to - so a framework registration
+    * that takes a functional interface (`.handler(this::handle)`, gRPC `StreamObserver::onNext`)
+    * exposes the referenced method for call-graph and route resolution. Resolution is best effort:
+    * without the declaring type on the classpath the symbol solver cannot qualify the method, and
+    * the node then carries the source form as its code with the identifier as the name hint.
+    */
+  private def astForMethodReferenceExpr(expr: MethodReferenceExpr): Ast =
+    val maybeResolved = tryWithSafeStackOverflow(expr.resolve()).toOption
+    val code          = expr.toString
+    val methodFullName = maybeResolved
+        .map { resolved =>
+          // Use the fully resolved signature when the symbol solver can supply parameter and return
+          // types: METHOD_REF nodes are linked to their METHOD by full name, so an
+          // `<unresolvedSignature>` here silently drops the call-graph edge into the referenced body.
+          val signature = methodSignature(resolved, ResolvedTypeParametersMap.empty())
+          composeMethodFullName(
+            resolved.declaringType().getQualifiedName,
+            resolved.getName,
+            signature
+          )
+        }
+        .getOrElse(code)
+    val typeFullName = maybeResolved
+        .flatMap(resolved =>
+            tryWithSafeStackOverflow(typeInfoCalc.fullName(resolved.getReturnType)).toOption
+                .flatten
+        )
+        .getOrElse(TypeConstants.Any)
+    Ast(
+      NewMethodRef()
+          .methodFullName(methodFullName)
+          .typeFullName(typeFullName)
+          .code(code)
+          .lineNumber(line(expr))
+          .columnNumber(column(expr))
+    )
+  end astForMethodReferenceExpr
+
+  /** A class or record declared inside a method body (Java 16 local classes/records).
+    *
+    * The declaration is lowered with the shared type-decl machinery and attached as an AST child of
+    * the enclosing METHOD's statement tree, so its methods, fields and constructors are first-class
+    * graph citizens and calls such as `new Point(1, 2).x()` resolve. The astParentType/FULL_NAME
+    * pair names that method, matching where the AST edge actually attaches (the pair is data for
+    * consumers that read it instead of following the edge).
+    */
+  private def astForLocalTypeDeclaration(declaration: TypeDeclaration[?]): Seq[Ast] =
+    val astParentFullName = scope.enclosingMethodFullName.getOrElse(
+      scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
+    )
+    Seq(astForTypeDecl(declaration, NodeTypes.METHOD, astParentFullName))
 
   private def astForSynchronizedStatement(stmt: SynchronizedStmt): Ast =
     val parentNode =
@@ -1860,7 +2517,15 @@ class AstCreator(
         .withChildren(exprAsts)
         .withChild(bodyAst)
 
-  private def astsForSwitchCases(entry: SwitchEntry): Seq[Ast] =
+  /** The case labels of one switch entry, as JUMP_TARGET markers plus label expressions.
+    *
+    * A constant label (`case 1`) keeps its expression as before. A pattern label (Java 21, `case
+    * Circle c` / `case Rect(double w, double h)`) has no runtime constant to compare, so the jump
+    * target alone carries the label text and the pattern's bindings are lowered by
+    * [[astsForSwitchEntry]] as selector aliases; the pattern's `instanceof` test is part of the arm
+    * condition when the enclosing switch lowers as an expression.
+    */
+  private def astsForSwitchCases(entry: SwitchEntry, selectorUse: Option[Ast]): Seq[Ast] =
       entry.getLabels.asScala.toList match
         case Nil =>
             val target = NewJumpTarget()
@@ -1873,17 +2538,39 @@ class AstCreator(
               val jumpTarget = NewJumpTarget()
                   .name("case")
                   .code(label.toString)
-              val labelAsts = astsForExpression(label, ExpectedType.empty).toList
-
-              Ast(jumpTarget) :: labelAsts
+              label match
+                // A pattern's bindings are locals aliased to the selector; the pattern's own
+                // expression node must not be lowered as an ordinary expression (it is not
+                // one - `Circle c` is a declaration).
+                case pattern: PatternExpr =>
+                    Seq(Ast(jumpTarget)) ++ patternBindingAsts(
+                      pattern,
+                      matchedExprAsts = selectorUse.toList,
+                      anchor = pattern
+                    )
+                case _ =>
+                    val labelAsts = astsForExpression(label, ExpectedType.empty).toList
+                    Seq(Ast(jumpTarget)) ++ labelAsts
             }
 
-  private def astForSwitchEntry(entry: SwitchEntry): Seq[Ast] =
-    val labelAsts = astsForSwitchCases(entry)
+  /** One switch entry of a STATEMENT-form switch: labels (with pattern bindings), then the `when`
+    * guard condition, then the entry statements. `selectorUse` is the once-bound selector read when
+    * the switch carries pattern labels, absent otherwise.
+    */
+  private def astsForSwitchEntry(
+    entry: SwitchEntry,
+    selectorUse: Option[Ast],
+    selectorCode: String
+  ): Seq[Ast] =
+    val labelAsts = astsForSwitchCases(entry, selectorUse)
+
+    val guardAsts = entry.getGuard.toScala.toList.flatMap { guard =>
+        astsForExpression(guard, ExpectedType.Boolean)
+    }
 
     val statementAsts = entry.getStatements.asScala.flatMap(astsForStatement)
 
-    labelAsts ++ statementAsts
+    labelAsts ++ guardAsts ++ statementAsts
 
   private def astForAssertStatement(stmt: AssertStmt): Ast =
     val callNode = NewCall()
@@ -1912,13 +2599,21 @@ class AstCreator(
 
     val stmtAsts = stmt.getStatements.asScala.flatMap(astsForStatement)
 
+    // Pattern-binding locals synthesized while lowering this block's statements (type patterns
+    // in `instanceof`, pattern `case` labels) attach HERE - see
+    // [[Scope.registerPatternLocalAst]]. Draining per block keeps ownership lexically correct:
+    // the innermost block drains first, so a lambda's block body owns its own bindings and a
+    // binding in this block cannot be stolen by a nested body built later in the same lowering.
+    val patternLocals = scope.takePatternLocalAsts
+
     scope.popScope()
     Ast(block)
         .withChildren(prefixAsts)
+        .withChildren(patternLocals)
         .withChildren(stmtAsts)
   end astForBlockStatement
 
-  private def astForReturnNode(ret: ReturnStmt): Ast =
+  private def astForReturnNode(ret: ReturnStmt): Seq[Ast] =
     val returnNode = NewReturn()
         .lineNumber(line(ret))
         .columnNumber(column(ret))
@@ -1926,9 +2621,12 @@ class AstCreator(
     if ret.getExpression.isPresent then
       val expectedType = scope.enclosingMethodReturnType.getOrElse(ExpectedType.empty)
       val exprAsts     = astsForExpression(ret.getExpression.get(), expectedType)
-      returnAst(returnNode, exprAsts)
+      // A `return switch (...)` with pattern/block arms carries leading statements; they run
+      // before the return's value is produced.
+      val (leading, valueAsts) = hoistExpressionAsts(exprAsts)
+      leading ++ List(returnAst(returnNode, valueAsts))
     else
-      Ast(returnNode)
+      List(Ast(returnNode))
 
   private def astForUnaryExpr(expr: UnaryExpr, expectedType: ExpectedType): Ast =
     val operatorName = expr.getOperator match
@@ -2150,7 +2848,13 @@ class AstCreator(
         }
         .getOrElse(expectedExprType) // resolved target type should be more accurate
     val targetAst = astsForExpression(expr.getTarget, expectedType)
-    val argsAsts  = astsForExpression(expr.getValue, expectedType)
+    // A switch-expression RHS with pattern/block arms carries leading statements; they belong
+    // before the assignment in statement position, and the assignment's type comes from the
+    // VALUE (the last AST), not from a leading binding.
+    val (leadingAsts, argsAsts) = hoistExpressionAsts(astsForExpression(
+      expr.getValue,
+      expectedType
+    ))
     val valueType = argsAsts.headOption.flatMap(_.rootType)
 
     val typeFullName =
@@ -2168,7 +2872,7 @@ class AstCreator(
 
     if partialConstructorQueue.isEmpty then
       val assignAst = callAst(callNode, targetAst ++ argsAsts)
-      Seq(assignAst)
+      leadingAsts ++ Seq(assignAst)
     else
       val partialConstructor = partialConstructorQueue.head
       partialConstructorQueue.clear()
@@ -2179,7 +2883,7 @@ class AstCreator(
             // e.g. Foo f = new Foo();
             val initAst =
                 completeInitForConstructor(partialConstructor, Ast(identifier.copy))
-            Seq(callAst(callNode, targetAst ++ argsAsts), initAst)
+            leadingAsts ++ Seq(callAst(callNode, targetAst ++ argsAsts), initAst)
 
         case _ =>
             // In this case the left hand side is more complex than an identifier, so
@@ -2304,8 +3008,11 @@ class AstCreator(
             )
             Ast(identifier).withRefEdges(identifier, maybeCorrespNode.map(_.node).toList)
 
-      // Since all partial constructors will be dealt with here, don't pass them up.
-      val declAst = callAst(callNode, Seq(targetAst) ++ initializerAsts)
+      // Since all partial constructors will be dealt with here, don't pass them up. A switch
+      // expression initializer with pattern/block arms carries leading statements (`k = sel`),
+      // which belong before the assignment in statement position.
+      val (leadingInitializerAsts, valueAsts) = hoistExpressionAsts(initializerAsts)
+      val declAst                             = callAst(callNode, Seq(targetAst) ++ valueAsts)
 
       val constructorAsts = partialConstructorQueue.map(completeInitForConstructor(
         _,
@@ -2313,7 +3020,7 @@ class AstCreator(
       ))
       partialConstructorQueue.clear()
 
-      Seq(declAst) ++ constructorAsts
+      leadingInitializerAsts ++ (Seq(declAst) ++ constructorAsts)
     }
 
     assignments.toList
@@ -2431,6 +3138,14 @@ class AstCreator(
     callAst(callNode, identifierAsts ++ Seq(fieldIdAst))
   end astForFieldAccessExpr
 
+  /** `instanceof` with an optional type pattern (Java 16+).
+    *
+    * Without a pattern this is the plain type test. With a pattern - `o instanceof String s` - the
+    * binding `s` is definitely assigned when the test succeeds (`JLS 6.3`), so in addition to the
+    * type-test call the pattern binding is lowered as a local plus an assignment from the tested
+    * expression: a tainted tested value therefore taints the binding, which is exactly the taint
+    * relation the source program has.
+    */
   private def astForInstanceOfExpr(expr: InstanceOfExpr): Ast =
     val booleanTypeFullName = Some(TypeConstants.Boolean)
     val callNode =
@@ -2452,8 +3167,187 @@ class AstCreator(
             .typeFullName(typeFullName)
     val typeAst = Ast(typeNode)
 
-    callAst(callNode, exprAst ++ Seq(typeAst))
+    val testAst = callAst(callNode, exprAst ++ Seq(typeAst))
+    expr.getPattern.toScala match
+      case Some(pattern) =>
+          // The binding ASTs (local + assignment) attach as children of the type-test call:
+          // keeping them separate would put LOCAL nodes into ARGUMENT slots wherever the
+          // `instanceof` itself sits in expression position (`sink(o instanceof String s)`).
+          patternBindingAsts(
+            pattern,
+            matchedExprAsts = exprAst,
+            anchor = expr.getExpression
+          ).foldLeft(testAst)((acc, binding) => acc.withChild(binding))
+      case None =>
+          testAst
   end astForInstanceOfExpr
+
+  /** Pattern bindings of a [[PatternExpr]], as local declarations plus assignments from the matched
+    * value.
+    *
+    * A type pattern (`String s`) binds one variable of the pattern's type. A record pattern
+    * (`Box(String content)`, Java 21) binds one variable per nested pattern; each component is an
+    * alias of the matched record's component, and since components are retrieved positionally from
+    * the matched value each binding aliases the matched value itself - conservative for taint (a
+    * tainted record taints every bound component) and precise enough for definite assignment,
+    * because the pattern only binds when the whole record matches.
+    *
+    * @param pattern
+    *   the pattern to lower.
+    * @param matchedExprAsts
+    *   the AST(s) of the matched expression; when empty (a bare pattern in expression position,
+    *   which the grammar does not produce) only the local declarations are emitted.
+    * @param anchor
+    *   a node used for line/column metadata of the synthesized local nodes.
+    */
+  private def patternBindingAsts(
+    pattern: PatternExpr,
+    matchedExprAsts: Seq[Ast],
+    anchor: Node
+  ): Seq[Ast] =
+    def localFor(name: String, typeName: String, typeFullName: String): (NewLocal, Ast) =
+      val local = NewLocal()
+          .name(name)
+          .code(s"$typeName $name")
+          .typeFullName(typeFullName)
+          .lineNumber(line(anchor))
+          .columnNumber(column(anchor))
+      scope.addLocal(local)
+      (local, Ast(local))
+
+    def assignmentFor(localAst: Ast, name: String, typeName: Option[String]): Option[Ast] =
+        matchedExprAsts.headOption.flatMap { matchedAst =>
+            matchedAst.root.collectFirst { case copyable: AstNodeNew => copyable }.map {
+                matchedRoot =>
+                  val identifier = newIdentifierNode(name, typeName.getOrElse(TypeConstants.Any))
+                  val identifierAstWithRef =
+                      Ast(identifier).withRefEdge(identifier, localAst.root.get)
+                  val matchedCopy = matchedAst.subTreeCopy(matchedRoot)
+                  val assignCall = newOperatorCallNode(
+                    Operators.assignment,
+                    code = s"$name = ${matchedExprAsts.rootCodeOrEmpty}",
+                    typeFullName = typeName,
+                    line = line(anchor),
+                    column = column(anchor)
+                  )
+                  callAst(assignCall, Seq(identifierAstWithRef, matchedCopy))
+            }
+        }
+
+    pattern match
+      case typePattern: TypePatternExpr =>
+          val name = typePattern.getNameAsString
+          val typeFullName = tryWithSafeStackOverflow(
+            typeInfoCalc.fullName(typePattern.getType)
+          ).toOption.flatten.getOrElse(TypeConstants.Any)
+          val (_, localAst) = localFor(name, typePattern.getTypeAsString, typeFullName)
+          scope.registerPatternLocalAst(localAst)
+          assignmentFor(localAst, name, Some(typeFullName)).toList
+
+      case recordPattern: RecordPatternExpr =>
+          recordPattern.getPatternList.asScala.flatMap { nested =>
+              nested match
+                case nestedTypePattern: TypePatternExpr =>
+                    val name = nestedTypePattern.getNameAsString
+                    val nestedTypeFullName = tryWithSafeStackOverflow(
+                      typeInfoCalc.fullName(nestedTypePattern.getType)
+                    ).toOption.flatten.getOrElse(TypeConstants.Any)
+                    val (_, localAst) =
+                        localFor(name, nestedTypePattern.getTypeAsString, nestedTypeFullName)
+                    scope.registerPatternLocalAst(localAst)
+                    assignmentFor(localAst, name, Some(nestedTypeFullName)).toList
+                case nestedRecord: RecordPatternExpr =>
+                    patternBindingAsts(nestedRecord, matchedExprAsts, anchor)
+                case _ => Seq.empty
+          }.toSeq
+
+      case _ => Seq.empty
+    end match
+  end patternBindingAsts
+
+  /** Binds a switch selector to a synthetic local so the selector is evaluated exactly once.
+    *
+    * Java evaluates `switch (sel) { ... }`'s selector a single time, however many arms test it.
+    * Duplicating the selector's expression nodes per arm (the alternative) inflates the call graph
+    * \- a selector like `compute()` would appear N times, a tagged selector would be counted N
+    * times, and a side-effecting selector would be modelled as running N times. The lowering
+    * therefore assigns the selector to a `switch$N` local (delivered through the pattern-local
+    * channel, like a pattern binding) and every arm test or binding reads the local through a fresh
+    * copy of one identifier node.
+    *
+    * @return
+    *   the assignment AST (leading, statement position) and a factory producing a fresh read.
+    */
+  private def bindSwitchSelector(
+    selectorExpr: Expression,
+    selectorAsts: Seq[Ast]
+  ): (Ast, () => Ast) =
+    val name = nextSwitchSelectorName()
+    val typeFullName = expressionReturnTypeFullName(selectorExpr)
+        .orElse(selectorAsts.headOption.flatMap(_.rootType))
+        .getOrElse(TypeConstants.Any)
+    val local = NewLocal()
+        .name(name)
+        .code(name)
+        .typeFullName(typeFullName)
+        .lineNumber(line(selectorExpr))
+        .columnNumber(column(selectorExpr))
+    scope.addLocal(local)
+    scope.registerPatternLocalAst(Ast(local))
+
+    val identifier    = newIdentifierNode(name, typeFullName)
+    val identifierAst = Ast(identifier).withRefEdge(identifier, local)
+    val assignCall = newOperatorCallNode(
+      Operators.assignment,
+      code = s"$name = ${selectorAsts.rootCodeOrEmpty}",
+      typeFullName = Some(typeFullName),
+      line = line(selectorExpr),
+      column = column(selectorExpr)
+    )
+    val binding = callAst(assignCall, List(identifierAst) ++ selectorAsts.toList)
+    (
+      binding,
+      () =>
+          identifierAst.root.collectFirst { case copyable: AstNodeNew =>
+              identifierAst.subTreeCopy(copyable)
+          }.getOrElse(Ast())
+    )
+  end bindSwitchSelector
+
+  /** The type-test condition of a pattern `case` label, for use as the arm condition of a lowered
+    * pattern switch: `<operator>.instanceOf(selector, <TypeRef>)`. Boolean patterns (`case null`)
+    * and `default` labels have no test and the caller treats them specially.
+    */
+  private def patternLabelTestAst(
+    label: Expression,
+    selectorUse: Ast,
+    selectorCode: String
+  ): Option[Ast] =
+      label match
+        case pattern: PatternExpr =>
+            val patternType = pattern match
+              case typePattern: TypePatternExpr     => Some(typePattern.getType)
+              case recordPattern: RecordPatternExpr => Some(recordPattern.getType)
+              case _                                => None
+            patternType.map { testType =>
+              val typeFullName =
+                  tryWithSafeStackOverflow(typeInfoCalc.fullName(testType)).toOption.flatten
+                      .getOrElse(TypeConstants.Any)
+              val callNode = newOperatorCallNode(
+                Operators.instanceOf,
+                code = s"$selectorCode instanceof ${testType.toString}",
+                typeFullName = Some(TypeConstants.Boolean),
+                line = line(pattern),
+                column = column(pattern)
+              )
+              val typeNode = NewTypeRef()
+                  .code(testType.toString)
+                  .lineNumber(line(pattern))
+                  .columnNumber(column(pattern))
+                  .typeFullName(typeFullName)
+              callAst(callNode, Seq(selectorUse, Ast(typeNode)))
+            }
+        case _ => None
 
   private def fieldAccessAst(
     identifierName: String,
@@ -2675,6 +3569,10 @@ class AstCreator(
 
     val argumentTypes = argumentTypesForMethodLike(maybeResolvedExpr)
 
+    expr.getAnonymousClassBody.toScala.foreach { body =>
+        astForAnonymousClassBody(expr, body.asScala.toList, typeFullName)
+    }
+
     val allocNode = newOperatorCallNode(
       Operators.alloc,
       expr.toString,
@@ -2711,6 +3609,120 @@ class AstCreator(
       case _ =>
           blockAst
   end astForObjectCreationExpr
+
+  private val anonymousClassCounts = mutable.Map.empty[String, Int]
+
+  /** The body of an anonymous class (`new Runnable() { public void run() { .. } }`).
+    *
+    * Without this the body is dropped outright: the expression lowers to an `alloc`/`<init>` pair
+    * naming the base type and nothing else, so every statement inside - which is where the
+    * listener, callback or comparator logic actually lives - is invisible to the call graph and to
+    * data flow.
+    *
+    * It is lowered as what javac makes of it: a class of its own, named `Enclosing$1` after the
+    * enclosing type, declaring the base type as its supertype. That supertype is what makes it
+    * reachable - the creation expression keeps naming the base type, so a call through the
+    * base-typed variable (`Runnable r = new Runnable() {..}; r.run()`) resolves to this class's
+    * override through the ordinary inheritance-based dispatch resolution, with no special case for
+    * anonymity anywhere downstream.
+    *
+    * The declaration is handed to the enclosing TYPE_DECL rather than returned, because an
+    * anonymous class is not an expression and can appear where no statement can (a field
+    * initializer).
+    */
+  private def astForAnonymousClassBody(
+    expr: ObjectCreationExpr,
+    members: List[BodyDeclaration[?]],
+    baseTypeFullName: Option[String]
+  ): Unit =
+    val enclosingFullName =
+        scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
+    val index = anonymousClassCounts.updateWith(enclosingFullName) {
+        case Some(n) => Some(n + 1)
+        case None    => Some(1)
+    }.get
+    astForImplicitSubclass(
+      name = s"$$$index",
+      fullName = s"$enclosingFullName$$$index",
+      code = expr.getType.toString,
+      baseTypeFullName = baseTypeFullName,
+      members = members,
+      lineNumber = line(expr),
+      columnNumber = column(expr)
+    )
+  end astForAnonymousClassBody
+
+  /** A class the source never names: an anonymous class body, or the body of an enum constant.
+    *
+    * Both are compiled to a subclass of their own, and both are invisible without one - see
+    * [[astForAnonymousClassBody]] for why that matters. The declaration is registered with the
+    * scope rather than returned, because neither construct sits anywhere a TYPE_DECL could be
+    * attached from here.
+    */
+  private def astForImplicitSubclass(
+    name: String,
+    fullName: String,
+    code: String,
+    baseTypeFullName: Option[String],
+    members: List[BodyDeclaration[?]],
+    lineNumber: Option[Integer],
+    columnNumber: Option[Integer]
+  ): Unit =
+    val enclosingFullName =
+        scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
+
+    val typeDeclNode = NewTypeDecl()
+        .name(name)
+        .fullName(fullName)
+        .lineNumber(lineNumber)
+        .columnNumber(columnNumber)
+        .inheritsFromTypeFullName(baseTypeFullName.toSeq)
+        .filename(filename)
+        .code(code)
+        .astParentType(NodeTypes.TYPE_DECL)
+        .astParentFullName(enclosingFullName)
+    typeInfoCalc.registerType(fullName)
+
+    scope.pushTypeDeclScope(typeDeclNode)
+
+    val staticInits: mutable.Buffer[Ast]        = mutable.Buffer()
+    val fieldPatternLocals: mutable.Buffer[Ast] = mutable.Buffer()
+    val memberAsts = members.flatMap { member =>
+      val astWithInits = astForTypeDeclMember(member, astParentFullName = NodeTypes.TYPE_DECL)
+      staticInits.appendAll(astWithInits.staticInits)
+      // As in `astForTypeDecl`: a type pattern in a FIELD initializer binds outside any block, so
+      // it has no body to land in and attaches to the TYPE_DECL instead. Dropping it, as this did,
+      // left identifier uses of the binding with no LOCAL to resolve against.
+      fieldPatternLocals.appendAll(scope.takePatternLocalAsts)
+      // Statement-position ASTs of a field initializer's switch expression are discarded for the
+      // same reason they are in the named-type path: at class level they have no statement to
+      // precede.
+      scope.takePendingStatementAsts
+      astWithInits.ast
+    }
+
+    // An anonymous class never declares a constructor, so it always gets the generated one; its
+    // member initializers have to run somewhere.
+    val constructorAst = astForDefaultConstructor()
+    val clinitAst      = clinitAstFromStaticInits(staticInits.toSeq)
+    val localDecls     = scope.localDeclsInScope
+    val lambdaMethods  = scope.lambdaMethodsInScope
+    // Drained inside this scope, so a further anonymous class written in this body becomes a child
+    // of THIS declaration rather than escaping to the enclosing named type.
+    val nestedAnonymous = scope.takeAnonymousTypeDeclAsts
+
+    val ast = Ast(typeDeclNode)
+        .withChildren(nestedAnonymous)
+        .withChildren(memberAsts)
+        .withChild(constructorAst)
+        .withChildren(clinitAst.toSeq)
+        .withChildren(fieldPatternLocals.toSeq)
+        .withChildren(localDecls)
+        .withChildren(lambdaMethods)
+
+    scope.popScope()
+    scope.registerAnonymousTypeDeclAst(ast)
+  end astForImplicitSubclass
 
   private var tempConstCount = 0
   private def blockAstForConstructorInvocation(
@@ -2796,34 +3808,44 @@ class AstCreator(
     callAst(callRoot, args, Some(thisAst))
   end astForExplicitConstructorInvocation
 
+  /** Splits the ASTs of an expression into leading statement-position ASTs and the value ASTs.
+    *
+    * A switch expression with pattern arms (Java 21) or block arms lowers to leading statements -
+    * the pattern bindings (`k = selector`) and the arm side effects - followed by the value
+    * expression itself. Only the value ASTs may take ARGUMENT slots of the enclosing construct; the
+    * leading statements belong immediately before it, in statement position, where reaching
+    * definitions can connect the binding's def to its uses inside the arms.
+    */
+  private def hoistExpressionAsts(asts: Seq[Ast]): (Seq[Ast], Seq[Ast]) =
+      asts match
+        case init :+ last if init.nonEmpty => (init, List(last))
+        case other                         => (List.empty, other)
+
   private def astsForExpression(expression: Expression, expectedType: ExpectedType): Seq[Ast] =
-      // TODO: Implement missing handlers
-      // case _: MethodReferenceExpr     => Seq()
-      // case _: PatternExpr             => Seq()
-      // case _: SuperExpr               => Seq()
-      // case _: SwitchExpr              => Seq()
-      // case _: TypeExpr                => Seq()
       expression match
-        case _: AnnotationExpr          => Seq()
-        case x: ArrayAccessExpr         => Seq(astForArrayAccessExpr(x, expectedType))
-        case x: ArrayCreationExpr       => Seq(astForArrayCreationExpr(x, expectedType))
-        case x: ArrayInitializerExpr    => Seq(astForArrayInitializerExpr(x, expectedType))
-        case x: AssignExpr              => astsForAssignExpr(x, expectedType)
-        case x: BinaryExpr              => Seq(astForBinaryExpr(x, expectedType))
-        case x: CastExpr                => Seq(astForCastExpr(x, expectedType))
-        case x: ClassExpr               => Seq(astForClassExpr(x))
-        case x: ConditionalExpr         => Seq(astForConditionalExpr(x, expectedType))
-        case x: EnclosedExpr            => astForEnclosedExpression(x, expectedType)
-        case x: FieldAccessExpr         => Seq(astForFieldAccessExpr(x, expectedType))
-        case x: InstanceOfExpr          => Seq(astForInstanceOfExpr(x))
-        case x: LambdaExpr              => Seq(astForLambdaExpr(x, expectedType))
-        case x: LiteralExpr             => Seq(astForLiteralExpr(x))
-        case x: MethodCallExpr          => Seq(astForMethodCall(x, expectedType))
-        case x: NameExpr                => Seq(astForNameExpr(x, expectedType))
-        case x: ObjectCreationExpr      => Seq(astForObjectCreationExpr(x, expectedType))
-        case x: SuperExpr               => Seq(astForSuperExpr(x, expectedType))
-        case x: ThisExpr                => Seq(astForThisExpr(x, expectedType))
-        case x: UnaryExpr               => Seq(astForUnaryExpr(x, expectedType))
+        case _: AnnotationExpr       => Seq()
+        case x: ArrayAccessExpr      => Seq(astForArrayAccessExpr(x, expectedType))
+        case x: ArrayCreationExpr    => Seq(astForArrayCreationExpr(x, expectedType))
+        case x: ArrayInitializerExpr => Seq(astForArrayInitializerExpr(x, expectedType))
+        case x: AssignExpr           => astsForAssignExpr(x, expectedType)
+        case x: BinaryExpr           => Seq(astForBinaryExpr(x, expectedType))
+        case x: CastExpr             => Seq(astForCastExpr(x, expectedType))
+        case x: ClassExpr            => Seq(astForClassExpr(x))
+        case x: ConditionalExpr      => Seq(astForConditionalExpr(x, expectedType))
+        case x: EnclosedExpr         => astForEnclosedExpression(x, expectedType)
+        case x: FieldAccessExpr      => Seq(astForFieldAccessExpr(x, expectedType))
+        case x: InstanceOfExpr       => Seq(astForInstanceOfExpr(x))
+        case x: LambdaExpr           => Seq(astForLambdaExpr(x, expectedType))
+        case x: LiteralExpr          => Seq(astForLiteralExpr(x))
+        case x: MethodCallExpr       => Seq(astForMethodCall(x, expectedType))
+        case x: MethodReferenceExpr  => Seq(astForMethodReferenceExpr(x))
+        case x: NameExpr             => Seq(astForNameExpr(x, expectedType))
+        case x: ObjectCreationExpr   => Seq(astForObjectCreationExpr(x, expectedType))
+        case x: PatternExpr => patternBindingAsts(x, matchedExprAsts = Seq.empty, anchor = x)
+        case x: SuperExpr   => Seq(astForSuperExpr(x, expectedType))
+        case x: SwitchExpr  => astsForSwitchExpr(x, expectedType)
+        case x: ThisExpr    => Seq(astForThisExpr(x, expectedType))
+        case x: UnaryExpr   => Seq(astForUnaryExpr(x, expectedType))
         case x: VariableDeclarationExpr => astsForVariableDecl(x)
         case x                          => Seq(unknownAst(x))
 
@@ -2894,6 +3916,9 @@ class AstCreator(
 
   private def nextLambdaName(): String =
       s"$LambdaNamePrefix${lambdaKeyPool.next}"
+
+  private def nextSwitchSelectorName(): String =
+      s"$SwitchSelectorNamePrefix${switchSelectorKeyPool.next}"
 
   private def nextIndexName(): String =
       s"$IndexNamePrefix${indexKeyPool.next}"
@@ -3033,11 +4058,20 @@ class AstCreator(
                   NewReturn()
                       .code(s"return ${body.toString}")
                       .lineNumber(line(body))
-              val returnArgs = astsForStatement(stmt)
-              Seq(returnAst(returnNode, returnArgs))
+              // `astsForStatement` prepends the statement-position ASTs the expression
+              // synthesized (a switch expression's selector binding). Those are siblings of the
+              // return, not extra RETURN children - the same split the statement form does.
+              val (leading, returnArgs) = hoistExpressionAsts(astsForStatement(stmt))
+              leading ++ Seq(returnAst(returnNode, returnArgs))
+
+            // This branch builds the lambda's block directly (not via astForBlockStatement),
+            // so it drains the pattern-local channel itself; a lambda whose body IS a block
+            // goes through astForBlockStatement and drains there.
+            val patternLocals = scope.takePatternLocalAsts
 
             blockAst
                 .withChildren(localsForCapturedVars.map(Ast(_)))
+                .withChildren(patternLocals)
                 .withChildren(bodyAst)
 
   private def lambdaMethodSignature(returnType: Option[String], parameters: Seq[Ast]): String =
@@ -3194,17 +4228,39 @@ class AstCreator(
       )
 
     val maybeBoundMethod = maybeImplementedInterface.flatMap { interface =>
-        interface.getDeclaredMethods.asScala
-            .filter(_.isAbstract)
-            .filterNot { method =>
-                // Filter out java.lang.Object methods re-declared by the interface as these are also considered abstract.
-                // See https://docs.oracle.com/javase/8/docs/api/java/lang/FunctionalInterface.html for details.
-                Try(method.getSignature) match
-                  case Success(signature) => ObjectMethodSignatures.contains(signature)
-                  case Failure(_) =>
-                      false // If the signature could not be calculated, it's probably not a standard object method.
-            }
-            .headOption
+      val candidates = interface.getDeclaredMethods.asScala
+          .filter(_.isAbstract)
+          // A default method has a body, so it is never the one a lambda implements.
+          .filterNot(method => Try(method.isDefaultMethod).getOrElse(false))
+          .filterNot { method =>
+              // Filter out java.lang.Object methods re-declared by the interface as these are also considered abstract.
+              // See https://docs.oracle.com/javase/8/docs/api/java/lang/FunctionalInterface.html for details.
+              Try(method.getSignature) match
+                case Success(signature) => ObjectMethodSignatures.contains(signature)
+                case Failure(_) =>
+                    false // If the signature could not be calculated, it's probably not a standard object method.
+          }
+          .toList
+      // `getDeclaredMethods` is an unordered Set - its iteration order differs between two calls
+      // in the SAME run, let alone between runs - so taking the head of it picked a different
+      // method each time whenever more than one candidate survived. That changed the lambda's
+      // signature, hence its full name, hence what the call graph linked: on Apache Shiro it
+      // moved the reported flows by ~20% between runs over identical input.
+      //
+      // A lambda implements the single abstract method of a functional interface, so one
+      // candidate is the answer and several mean the interface is not one - JavaParser reports
+      // Guice's `Matcher` as declaring `matches`, `and` and `or` all abstract. Narrowing by the
+      // lambda's own arity settles the common case; anything still ambiguous is left unresolved,
+      // which falls back to the expected type rather than naming a method the lambda may not
+      // implement. Either way the answer is the same on every run.
+      candidates match
+        case single :: Nil => Some(single)
+        case several =>
+            several.filter(method =>
+                Try(method.getNumberOfParams).getOrElse(-1) == expr.getParameters.size
+            ) match
+              case single :: Nil => Some(single)
+              case _             => None
     }
 
     LambdaImplementedInfo(maybeImplementedType, maybeBoundMethod)

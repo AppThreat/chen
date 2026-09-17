@@ -28,6 +28,10 @@ class ModifierAccessors[A <: Node](val traversal: Iterator[A]) extends AnyVal:
   def isStatic: Iterator[A] =
       hasModifier(ModifierTypes.STATIC)
 
+  /** Filter: only `final` nodes */
+  def isFinal: Iterator[A] =
+      hasModifier(ModifierTypes.FINAL)
+
   /** Filter: only `native` nodes */
   def isNative: Iterator[A] =
       hasModifier(ModifierTypes.NATIVE)

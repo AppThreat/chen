@@ -36,9 +36,12 @@ class CdxPass(
                     json.hcursor.downField("components").focus.flatMap(_.asArray).getOrElse(
                       Vector.empty
                     )
-                val donePkgs = mutable.Set[String]()
+                val donePkgs             = mutable.Set[String]()
+                val unambiguousJvmGroups = jvmGroupsNamingOneComponent(components)
 
-                components.foreach(processComponent(_, donePkgs, dstGraph))
+                components.foreach(
+                  processComponent(_, donePkgs, unambiguousJvmGroups, dstGraph)
+                )
             case Left(error) =>
                 System.err.println(s"Failed to parse cdx json: $error")
       }
@@ -46,6 +49,7 @@ class CdxPass(
   private def processComponent(
     comp: Json,
     donePkgs: mutable.Set[String],
+    unambiguousJvmGroups: Set[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
     val cursor          = comp.hcursor
@@ -58,7 +62,79 @@ class CdxPass(
     else CdxTagVocab.extractDescTags(compDescription).take(TAGS_COUNT)
 
     processPypiComponent(cursor, compPurl, compType, descTags, donePkgs, dstGraph)
-    processProperties(cursor, compPurl, compType, descTags, donePkgs, dstGraph)
+    val taggedFromProperties =
+        processProperties(cursor, compPurl, compType, descTags, donePkgs, dstGraph)
+    if !taggedFromProperties then
+      processJvmPurl(compPurl, compType, descTags, donePkgs, unambiguousJvmGroups, dstGraph)
+  end processComponent
+
+  /** Maven group ids that exactly one component in this SBOM belongs to.
+    *
+    * A group id only identifies a component when no sibling shares it. `org.springframework` is the
+    * group of a dozen artifacts, so seeing `org.springframework.web.X` in the code says nothing
+    * about WHICH of them it came from - attributing it to whichever component happened to be read
+    * first would be a confident wrong answer, and on Spring Petclinic that was 797 nodes attributed
+    * to `spring-context-support` alone. A group with a single component has no such ambiguity.
+    */
+
+  private def jvmGroupsNamingOneComponent(components: Vector[Json]): Set[String] =
+      components
+          .flatMap(c => mavenGroupOf(c.hcursor.downField("purl").as[String].getOrElse("")))
+          .groupBy(identity)
+          .collect { case (group, occurrences) if occurrences.sizeIs == 1 => group }
+          .toSet
+
+  private def mavenGroupOf(purl: String): Option[String] =
+      Option.when(purl.startsWith("pkg:maven/"))(
+        purl.stripPrefix("pkg:maven/").split("/").headOption
+      ).flatten
+
+  /** Tags a JVM component by the namespace its purl already names, for SBOMs that do not carry a
+    * `Namespaces` property.
+    *
+    * That property is the precise answer - it lists the packages a jar actually declares - but it
+    * only exists when the SBOM generator opened the jars. An SBOM built from build-file metadata
+    * alone has none, which is what an ordinary `cdxgen -t java` run produces, and the Java path was
+    * then a no-op: every component was read and none was tagged. A Maven purl carries the group id
+    * (`pkg:maven/org.springframework.boot/spring-boot-starter-web`), and for the overwhelming
+    * majority of JVM artifacts the group id IS the package root, so it identifies the component's
+    * code well enough to attach the purl and its tags to.
+    *
+    * Only used when the component declared no namespaces, so an SBOM that carries them keeps the
+    * precise mapping.
+    */
+  private def processJvmPurl(
+    purl: String,
+    compType: String,
+    descTags: List[String],
+    donePkgs: mutable.Set[String],
+    unambiguousJvmGroups: Set[String],
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+      if isJvmLanguage then
+        mavenGroupOf(purl)
+            // A group id that is not a package root (a single segment, or one of the JDK's own)
+            // says nothing about where the code lives, and one shared with sibling components does
+            // not say which of them it is.
+            .filter(group =>
+                group.contains(".") && !group.startsWith("java.") &&
+                    !group.startsWith("javax.") && unambiguousJvmGroups.contains(group)
+            )
+            .foreach { group =>
+              val bpkg = normalizePackage(group)
+              if bpkg.nonEmpty && donePkgs.add(bpkg) then
+                tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
+            }
+
+  /** Languages whose components this pass attributes by Maven group id.
+    *
+    * NB: `ChennaiTagsPass` gates on a shorter list (no ANDROID/APK/DEX). The two are deliberately
+    * not shared - widening that one is a tagging change, not a refactor.
+    */
+  private val JvmLanguages: Set[String] =
+      Set(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE", "ANDROID", "APK", "DEX")
+
+  private def isJvmLanguage: Boolean = JvmLanguages.contains(language)
 
   private def processPypiComponent(
     cursor: HCursor,
@@ -106,6 +182,10 @@ class CdxPass(
         }
   end processPypiComponent
 
+  /** @return
+    *   whether any namespace was found to tag, which is what tells the caller a purl-derived
+    *   fallback is needed.
+    */
   private def processProperties(
     cursor: HCursor,
     purl: String,
@@ -113,7 +193,8 @@ class CdxPass(
     descTags: List[String],
     donePkgs: mutable.Set[String],
     dstGraph: DiffGraphBuilder
-  ): Unit =
+  ): Boolean =
+    var tagged     = false
     val properties = cursor.downField("properties").focus.flatMap(_.asArray).getOrElse(Vector.empty)
     properties.foreach { prop =>
       val nsstr  = prop.hcursor.downField("value").as[String].getOrElse("")
@@ -130,10 +211,13 @@ class CdxPass(
             .foreach(pkg =>
               var bpkg = pkg.takeWhile(_ != '$')
               bpkg = normalizePackage(bpkg)
-              if bpkg.nonEmpty && donePkgs.add(bpkg) then
-                tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
+              if bpkg.nonEmpty then
+                tagged = true
+                if donePkgs.add(bpkg) then
+                  tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
             )
     }
+    tagged
   end processProperties
 
   private def propertyValues(cursor: HCursor, propName: String): List[String] =

@@ -43,10 +43,18 @@ class AnnotationTests extends JavaSrcCode2CpgFixture:
       }
 
       "test annotation node parameter value" in {
-          val Seq(paramValue) = cpg.method.name("function").annotation.parameterAssign.value.l
+          // A string-valued member lowers to BOTH the historic ANNOTATION_LITERAL and a real
+          // LITERAL duplicate (which carries TAGGED_BY and is reachable by literal traversals -
+          // the framework taggers key on it).
+          val Seq(paramValue) =
+              cpg.method.name("function").annotation.parameterAssign.value.l
+                  .collect { case a: AnnotationLiteral => a }
           paramValue.code shouldBe "classAnnotation"
           paramValue.order shouldBe 2
           paramValue.argumentIndex shouldBe 2
+          val Seq(literalValue) =
+              cpg.method.name("function").annotation.parameterAssign.value.isLiteral.l
+          literalValue.code shouldBe "\"classAnnotation\""
       }
   }
 
@@ -84,10 +92,15 @@ class AnnotationTests extends JavaSrcCode2CpgFixture:
       }
 
       "test annotation node parameter value" in {
-          val Seq(paramValue) = cpg.method.name("function").annotation.parameterAssign.value.l
+          val Seq(paramValue) =
+              cpg.method.name("function").annotation.parameterAssign.value.l
+                  .collect { case a: AnnotationLiteral => a }
           paramValue.code shouldBe "classAnnotation"
           paramValue.order shouldBe 2
           paramValue.argumentIndex shouldBe 2
+          val Seq(literalValue) =
+              cpg.method.name("function").annotation.parameterAssign.value.isLiteral.l
+          literalValue.code shouldBe "\"classAnnotation\""
       }
   }
 

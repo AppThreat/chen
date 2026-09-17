@@ -2,9 +2,11 @@ package io.appthreat.dataflowengineoss.queryengine
 
 import io.appthreat.dataflowengineoss.queryengine.Engine.argToOutputParams
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{
     Call,
     Expression,
+    FieldIdentifier,
     Method,
     MethodParameterIn,
     MethodParameterOut,
@@ -183,7 +185,12 @@ class TaskCreator(context: EngineContext):
                               x :: result.callSiteStack
                           }.getOrElse(result.callSiteStack)
                       ReachableByTask(
-                        result.taskStack :+ TaskFingerprint(p, newStack, callDepth + 1),
+                        result.taskStack :+ TaskFingerprint(
+                          p,
+                          newStack,
+                          callDepth + 1,
+                          fieldReadContext(arg, path)
+                        ),
                         path
                       )
                     }
@@ -235,6 +242,26 @@ class TaskCreator(context: EngineContext):
       context.config.useSummaries &&
           context.config.summaries.get(method.fullName)
               .exists(summary => !summary.returnTaintable)
+
+  /** The field whose read brought the walk to `arg`.
+    *
+    * An object-valued argument is reached either directly (`u.other`, where the access sits next to
+    * the argument on the path) or through a callee that read the field off its own receiver
+    * (`u.other()`, where the path runs `u <- u <- this <- this.other`). Both shapes are a read of
+    * one named field, and that name is what says which of the callee's writes could have put the
+    * value there.
+    */
+  private def fieldReadContext(arg: Expression, path: Vector[PathElement]): Option[String] =
+    val bases = Set(arg.code, "this")
+    path.iterator
+        .map(_.node)
+        .collectFirst {
+            case call: Call
+                if call.name == Operators.fieldAccess &&
+                    call.argument.headOption.exists(b => bases.contains(b.code)) =>
+                call.argument.collectAll[FieldIdentifier].headOption.map(_.canonicalName)
+        }
+        .flatten
 
   private def restrictSize(l: Vector[ReachableByTask]): Vector[ReachableByTask] =
       if l.size <= context.config.maxOutputArgsExpansion then

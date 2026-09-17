@@ -25,13 +25,17 @@ Because it follows data rather than matching on names and patterns, chen disting
 - Run variant and reachability analysis to decide whether a known weakness pattern is present and exploitable given how your code actually calls it.
 - Trace taint from sources to sinks across call chains, with interprocedural summaries that keep the analysis tractable on large, bundled, or transpiled code.
 - Attach semantic meaning to flows, including personally identifiable information, regulated data such as `pci-dss`, `gdpr`, and `phi-medical`, secrets, third party tracker SDKs, and network direction such as `service-egress`, `service-ingress`, and `on-device-ai`. This is developed with mobile and Android analysis in mind.
+- Recognize framework boundaries across languages - routes, web-facing inputs and outputs - for Java (Spring MVC/WebFlux, JAX-RS/Jakarta, Micronaut, servlets, Vert.x, gRPC services, JDBC/JPA/MyBatis, LangChain4j/Spring AI and other AI SDKs, MCP server tools, AWS/GCP/Azure, Kafka/JMS/RabbitMQ listeners, JNI and the FFM API), JavaScript and TypeScript (Express-style routers, React Router, Vue, Angular, Next.js, Nuxt, SvelteKit), Python (Django, Flask, aiohttp), PHP (Laravel, Symfony, WordPress) and Ruby (Rails, Sinatra).
 - Slice a program down to a compact, self-contained view around a point of interest for data-flow, usages, or reachables.
 - Export subgraphs and run graph algorithms such as PageRank over the Code Property Graph for downstream tooling and machine learning.
 
 ## Languages supported
 
 - C and C++, including headers and pre-processed `.i` files through the `H` frontend
-- Java (requires compilation) and JAR bytecode
+- Java source from Java 8 through Java 26 syntax (records, sealed types, pattern matching for
+  `instanceof` and `switch` with guards and record patterns, switch expressions with `yield`,
+  text blocks, unnamed variables, local classes and records, module imports, flexible
+  constructor bodies, virtual threads and the FFM API) and JAR bytecode
 - Android APK and split bundles (`.apkm`, `.apks`, `.xapk`), which require the Android SDK via `ANDROID_HOME` or the container image
 - JavaScript, TypeScript, and Flow, including Vue and Svelte/SvelteKit single-file components (the Svelte template is modelled as JSX-equivalent structure with exact source offsets)
 - Python, from 3.x through 3.14

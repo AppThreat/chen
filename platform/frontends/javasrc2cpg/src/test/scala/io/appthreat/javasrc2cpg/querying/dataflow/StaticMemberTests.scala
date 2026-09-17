@@ -4,11 +4,15 @@ import io.appthreat.javasrc2cpg.testfixtures.JavaDataflowFixture
 import io.appthreat.dataflowengineoss.language.*
 import io.shiftleft.semanticcpg.language.*
 
-/** These tests are added as a wishlist for static member accesses. These results are consistent
-  * with static members in C++ using c2cgp, however. For practical reasons, only handling `final`
-  * static members is probably the way to go, so at least the first 2 tests should pass.
+/** Data flow through static members, which
+  * [[io.appthreat.dataflowengineoss.passes.reachingdef.StaticMemberDefUsePass]] carries between
+  * methods.
   *
-  * TODO: Fix dataflow from static members, treating them as final.
+  * The model is mutable rather than final: a static member is a location any method may write and
+  * any method may read, with no ordering between them, so a write anywhere reaches a read anywhere.
+  * The cases below pin down both halves of that - what it now finds that it could not before, and
+  * what it still does not claim (a member no one writes, and a definition a local write has
+  * killed).
   */
 class StaticMemberTests extends JavaDataflowFixture:
 
@@ -78,10 +82,19 @@ class StaticMemberTests extends JavaDataflowFixture:
       sink.reachableBy(source).size shouldBe 1
   }
 
-  it should "not find a path for `SAFE` data directly" in {
+  /** `Bar.good` is initialised `"SAFE"`, but `test7` assigns `"MALICIOUS"` to it, and nothing
+    * orders the two methods. So the flow is real for any execution that calls `test7` first - which
+    * `StaticMemberDefUsePass` reports, having no basis to claim an ordering between two methods
+    * anyone may call in any order from any thread. This is the one case in this file where the
+    * mutable-static model and the treat-statics-as-final wishlist in the class comment disagree,
+    * and the mutable reading is the sound one for taint. `test5` and `test6` below still find
+    * nothing, so the model has not simply become permissive: a member no one writes stays clean,
+    * and a local write still kills the definitions that precede it.
+    */
+  it should "find a path for `SAFE` data that another method overwrites" in {
       val source = getSources
       val sink   = cpg.method(".*test3.*").call.name(".*println.*").argument(1)
-      sink.reachableBy(source).size shouldBe 0
+      sink.reachableBy(source).size shouldBe 1
   }
 
   it should "find a path for `MALICIOUS` data from the same class" in {

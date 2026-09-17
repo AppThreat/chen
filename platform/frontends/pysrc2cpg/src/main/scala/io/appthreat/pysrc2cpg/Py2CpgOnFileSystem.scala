@@ -18,11 +18,19 @@ case class Py2CpgOnFileSystemConfig(
   strictParse: Boolean = false,
   pythonDeps: PythonDepsMode = PythonDepsMode.Disabled,
   pythonDepsRounds: Int = 2,
-  typeshedDir: Option[Path] = None
+  typeshedDir: Option[Path] = None,
+  cacheDir: String = ""
 ) extends X2CpgConfig[Py2CpgOnFileSystemConfig]
     with TypeRecoveryParserConfig[Py2CpgOnFileSystemConfig]:
   def withVenvDir(venvDir: Path): Py2CpgOnFileSystemConfig =
       copy(venvDir = venvDir).withInheritedFields(this)
+
+  /** Directory for the AST cache; empty means `<input>/.chen`. The same override the C/C++ and PHP
+    * frontends expose, so a caller analysing a tree it must not write into (a checked-in test
+    * fixture, a read-only checkout) can redirect the fragments elsewhere.
+    */
+  def withCacheDir(cacheDir: String): Py2CpgOnFileSystemConfig =
+      copy(cacheDir = cacheDir).withInheritedFields(this)
 
   def withIgnoreVenvDir(value: Boolean): Py2CpgOnFileSystemConfig =
       copy(ignoreVenvDir = value).withInheritedFields(this)
@@ -205,7 +213,8 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                   config.requirementsTxt,
                   config.schemaValidation,
                   strictParse = config.strictParse,
-                  moduleNames = moduleNames
+                  moduleNames = moduleNames,
+                  cacheDir = config.cacheDir
                 )
                 py2Cpg.buildCpg()
                 // Dependency ingestion runs after the project itself is built. `stubs`/`summaries` grow

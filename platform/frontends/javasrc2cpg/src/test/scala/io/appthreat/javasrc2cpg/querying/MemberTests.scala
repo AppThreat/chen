@@ -443,3 +443,56 @@ class MemberTests extends JavaSrcCode2CpgFixture:
       }
   }
 end MemberTests
+
+class FinalMemberTests extends JavaSrcCode2CpgFixture:
+  lazy val cpg = code("""
+      |class Foo {
+      |    int plain;
+      |    final int blankFinal;
+      |    final int assignedFinal = 1;
+      |    public final String publicFinal = "s";
+      |    static final int staticFinal = 2;
+      |
+      |    Foo() {
+      |        blankFinal = 0;
+      |    }
+      |}
+      |""".stripMargin)
+
+  private def modifiersOf(name: String): Set[String] =
+      cpg.member(name).modifier.modifierType.toSet
+
+  "should mark a final field FINAL, whatever its visibility or storage" in {
+      modifiersOf("blankFinal") should contain(ModifierTypes.FINAL)
+      modifiersOf("assignedFinal") should contain(ModifierTypes.FINAL)
+      modifiersOf("publicFinal") should contain(ModifierTypes.FINAL)
+      modifiersOf("staticFinal") should contain(ModifierTypes.FINAL)
+  }
+
+  "should leave a non-final field without the modifier" in {
+      modifiersOf("plain") should not contain ModifierTypes.FINAL
+  }
+
+  "should mark a final class and a final method FINAL" in {
+      val cpg2 = code("""
+          |final class Sealed {
+          |    final void cannotOverride() {}
+          |    void ordinary() {}
+          |}
+          |class Open {
+          |    void ordinary() {}
+          |}
+          |""".stripMargin)
+      cpg2.typeDecl.name("Sealed").modifier.modifierType.toSet should contain(ModifierTypes.FINAL)
+      cpg2.typeDecl.name("Open").modifier.modifierType.toSet should not contain ModifierTypes.FINAL
+      cpg2.method.name("cannotOverride").modifier.modifierType.toSet should contain(
+        ModifierTypes.FINAL
+      )
+      cpg2.method.name("ordinary").modifier.modifierType.toSet should not contain ModifierTypes.FINAL
+  }
+
+  "should keep the access and static modifiers alongside it" in {
+      modifiersOf("publicFinal") shouldBe Set(ModifierTypes.FINAL, ModifierTypes.PUBLIC)
+      modifiersOf("staticFinal") shouldBe Set(ModifierTypes.STATIC, ModifierTypes.FINAL)
+  }
+end FinalMemberTests
