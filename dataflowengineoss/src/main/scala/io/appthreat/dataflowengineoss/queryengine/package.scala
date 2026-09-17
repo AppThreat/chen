@@ -6,7 +6,17 @@ package object queryengine:
 
   /** The TaskFingerprint uniquely identifies a task.
     */
-  case class TaskFingerprint(sink: CfgNode, callSiteStack: List[Call], callDepth: Int)
+  /** @param fieldContext
+    *   the field whose read brought the walk here, when it entered a callee because the caller read
+    *   one field of an object the callee had written. Part of the fingerprint because the same node
+    *   reached through a read of a different field is a different question with a different answer.
+    */
+  case class TaskFingerprint(
+    sink: CfgNode,
+    callSiteStack: List[Call],
+    callDepth: Int,
+    fieldContext: Option[String] = None
+  )
 
   /** A (partial) result, informing about a path that exists from a source to another node in the
     * graph.

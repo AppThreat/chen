@@ -10,7 +10,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class CdxPassTests extends AnyWordSpec with Matchers:
 
-  import CdxPassTests.Fixture
+  import CdxPassTests.{Fixture, JvmFixture}
 
   private def componentJson(name: String, purl: String, extra: String = ""): String =
       s"""{"type": "library", "name": "$name", "purl": "$purl"$extra}"""
@@ -157,10 +157,92 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             // description containing " authentication"; the vendored rule must not
             cpg.tag.name("auth").l shouldBe empty
           }
+      "tag a JVM component from its purl when the SBOM declares no namespaces" in
+          JvmFixture(components =
+              Seq(componentJson(
+                name = "h2",
+                purl = "pkg:maven/com.h2database/h2@2.2.224"
+              ))
+          ) { cpg =>
+              cpg.call.name("connect").tag.name.toSet should contain(
+                "pkg:maven/com.h2database/h2@2.2.224"
+              )
+          }
+
+      "prefer the declared namespaces over the purl when both are available" in
+          JvmFixture(components =
+              Seq(componentJson(
+                name = "h2",
+                purl = "pkg:maven/com.h2database/h2@2.2.224",
+                extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.h2.jdbc"}
+            ]"""
+              ))
+          ) { cpg =>
+            // The namespace the component declares is tagged...
+            cpg.call.name("execute").tag.name.toSet should contain(
+              "pkg:maven/com.h2database/h2@2.2.224"
+            )
+            // ...and the group id is not also claimed on its behalf.
+            cpg.call.name("connect").tag.name.toSet shouldBe empty
+          }
+
+      "not attribute a group id that several components share" in
+          JvmFixture(components =
+              Seq(
+                componentJson(
+                  name = "spring-web",
+                  purl = "pkg:maven/org.springframework/spring-web@6.1.0"
+                ),
+                componentJson(
+                  name = "spring-beans",
+                  purl = "pkg:maven/org.springframework/spring-beans@6.1.0"
+                )
+              )
+          ) { cpg =>
+              cpg.call.name("getBean").tag.name.toSet shouldBe empty
+          }
   }
 end CdxPassTests
 
 object CdxPassTests:
+
+  /** A JVM graph whose calls sit under the package roots the JVM tests key off. */
+  private object JvmFixture:
+    def apply[T](components: Seq[String])(fun: Cpg => T): T =
+      val bom =
+          s"""{
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "components": [${components.mkString(",")}]
+          }"""
+      val cpg = MockCpg().withMetaData(Languages.JAVASRC, Nil).withCustom { (graph, _) =>
+        graph.addNode(NewConfigFile().name("bom.json").content(bom))
+        // The JVM path keys off the type a call is made on, so each call carries its owning type.
+        graph.addNode(
+          NewCall().name("connect")
+              .methodFullName("com.h2database.Driver.connect:void()")
+              .typeFullName("com.h2database.Driver")
+              .code("connect")
+        )
+        graph.addNode(
+          NewCall().name("execute")
+              .methodFullName("org.h2.jdbc.JdbcStatement.execute:void()")
+              .typeFullName("org.h2.jdbc.JdbcStatement")
+              .code("execute")
+        )
+        graph.addNode(
+          NewCall().name("getBean")
+              .methodFullName("org.springframework.beans.Factory.getBean:void()")
+              .typeFullName("org.springframework.beans.Factory")
+              .code("getBean")
+        )
+      }.cpg
+      new CdxPass(cpg).createAndApply()
+      fun(cpg)
+    end apply
+  end JvmFixture
 
   private object Fixture:
     def apply[T](

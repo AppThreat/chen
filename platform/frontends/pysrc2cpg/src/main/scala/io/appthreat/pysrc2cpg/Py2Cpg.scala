@@ -31,7 +31,8 @@ class Py2Cpg(
   requirementsTxt: String = "requirements.txt",
   schemaValidationMode: ValidationMode,
   strictParse: Boolean = false,
-  moduleNames: Map[String, String] = Map.empty
+  moduleNames: Map[String, String] = Map.empty,
+  cacheDir: String = ""
 ):
   private val diffGraph   = new DiffGraphBuilder()
   private val nodeBuilder = new NodeBuilder(diffGraph)
@@ -62,6 +63,7 @@ class Py2Cpg(
       inputProviders,
       schemaValidationMode,
       inputPath,
+      cacheDir = cacheDir,
       strictParse = strictParse,
       moduleNames = moduleNames
     )

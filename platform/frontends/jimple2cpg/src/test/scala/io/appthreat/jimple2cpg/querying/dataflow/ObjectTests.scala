@@ -135,9 +135,9 @@ class ObjectTests extends JimpleDataFlowCodeToCpgSuite:
           sink.reachableBy(source).size shouldBe 1
       }
 
-      "find a path if a safe field is accessed (approximation)" in {
+      "not find a path when a safe field is accessed" in {
           val (source, sink) = getConstSourceSink("test2")
-          sink.reachableBy(source).size shouldBe 1
+          sink.reachableBy(source).size shouldBe 0
       }
 
       "find a path if a field is directly reassigned to `MALICIOUS`" in {
@@ -152,8 +152,7 @@ class ObjectTests extends JimpleDataFlowCodeToCpgSuite:
 
       "not find a path when accessing a safe field via a getter" in {
           val (source, sink) = getConstSourceSink("test5")
-          // TODO: This should not find a path, but does due to over-tainting.
-          sink.reachableBy(source).size shouldBe 1
+          sink.reachableBy(source).size shouldBe 0
       }
 
       "find a path to a void printer via a field" in {
@@ -163,8 +162,7 @@ class ObjectTests extends JimpleDataFlowCodeToCpgSuite:
 
       "not find a path to a void printer via a safe field" in {
           val (source, sink) = getMultiFnSourceSink("test7", "printT")
-          // TODO: The data flow appears to be object-field insensitive and taints the whole object instance
-          sink.reachableBy(source).size shouldBe 1
+          sink.reachableBy(source).size shouldBe 0
       }
 
       "not find a path if `MALICIOUS` is overwritten via a setter" in {

@@ -1,6 +1,6 @@
 package io.appthreat.dataflowengineoss
 
-import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics
+import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, PassThroughMapping, Semantics}
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 
@@ -21,6 +21,14 @@ object DefaultSemantics:
     val list = operatorFlows ++ cFlows ++ javaFlows
     Semantics.fromList(list)
 
+  /** Languages that get the JVM request-reader flows.
+    *
+    * NB: `ChennaiTagsPass` gates route tagging on a shorter list (no ANDROID/APK/DEX). The lists
+    * are deliberately not shared - aligning them is a behaviour change, not a refactor.
+    */
+  private val JvmLanguages: Set[String] =
+      Set(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE", "ANDROID", "APK", "DEX")
+
   /** Flow semantics that must only be applied to graphs of the given language.
     *
     * @param language
@@ -31,9 +39,27 @@ object DefaultSemantics:
   def flowsForLanguage(language: String): List[FlowSemantic] =
       language match
         case Languages.PHP => phpFlows
-        case _             => List.empty
+        case lang if JvmLanguages.contains(lang) =>
+            javaRequestReaderFlows
+        case _ => List.empty
 
   private def F = (x: String, y: List[(Int, Int)]) => FlowSemantic.from(x, y)
+
+  /** `StringBuilder`/`StringBuffer` mutator `name`, for every overload: each argument taints the
+    * builder it is appended to (and the returned builder, which is the same object), and the
+    * builder keeps whatever it already held. Arguments 1 to 3 cover every overload in the JDK.
+    *
+    * A CHAINED call (`sb.append(a).append(tainted)`) is not covered: there the tainted argument
+    * reaches the inner call's result, and identifying that result with the `sb` the chain started
+    * from is an aliasing question a mapping table cannot answer. The unchained form - which is what
+    * a loop-built or statement-by-statement string looks like - is the one carried here.
+    */
+  private def stringBuilderAccumulator(name: String): FlowSemantic =
+      FlowSemantic.from(
+        "java\\.lang\\.String(Builder|Buffer)\\." + name + ":.*",
+        List((0, 0), (0, -1)) ++ (1 to 3).toList.flatMap(i => List((i, 0), (i, -1))),
+        regex = true
+      )
 
   private def PTF(x: String, ys: List[(Int, Int)] = List.empty): FlowSemantic =
       FlowSemantic(x).copy(mappings = FlowSemantic.from(x, ys).mappings :+ PassThroughMapping)
@@ -152,11 +178,25 @@ object DefaultSemantics:
   )
 
   /** Semantic summaries for common external Java calls.
+    *
+    * Includes the framework sanitizers and carriers of
+    * [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics]]: every entry there is
+    * fully qualified, so the summaries are language-neutral-safe (a bare name cannot collide with a
+    * same-named function in a C/JS/PHP graph).
     */
   def javaFlows: List[FlowSemantic] = List(
     PTF("java.lang.String.split:java.lang.String[](java.lang.String)", List((0, 0))),
     PTF("java.lang.String.split:java.lang.String[](java.lang.String,int)", List((0, 0))),
     PTF("java.lang.String.compareTo:int(java.lang.String)", List((0, 0))),
+    // A string builder accumulates into its RECEIVER, which is the one direction the permissive
+    // default for an unknown external call cannot express: it taints the return value only, so
+    // `sb.append(tainted); sink(sb.toString())` lost the flow entirely - and that is how most
+    // hand-built SQL and command strings are assembled. Regex entries because `append`, `insert`
+    // and `replace` are overloaded across every primitive and `Object`, and the resolved
+    // methodFullName carries the signature.
+    stringBuilderAccumulator("append"),
+    stringBuilderAccumulator("insert"),
+    stringBuilderAccumulator("replace"),
     F("java.io.PrintWriter.print:void(java.lang.String)", List((0, 0), (1, 1))),
     F("java.io.PrintWriter.println:void(java.lang.String)", List((0, 0), (1, 1))),
     F("java.io.PrintStream.println:void(java.lang.String)", List((0, 0), (1, 1))),
@@ -201,7 +241,29 @@ object DefaultSemantics:
       "org.apache.http.HttpResponse.setEntity:void(org.apache.http.HttpEntity)",
       List((1, 0), (1, 1), (1, 0))
     )
-  )
+  ) ++ javaFrameworkFlows
+
+  /** Sanitizers (empty mappings: taint does not pass) and carriers (arg taint reaches the result)
+    * from [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics]].
+    *
+    * Sanitizers are declared with an empty mapping list - a declared semantic is authoritative, so
+    * the argument no longer flows to the result. Carriers use `PTF`, whose PassThroughMapping flows
+    * every non-receiver parameter to the return: a deserialised object is its input. The two string
+    * builders are declared with explicit index mappings because their receiver (arg 0)
+    * participates.
+    */
+  def javaFrameworkFlows: List[FlowSemantic] =
+      JavaFrameworkSemantics.allSanitizerFullNames.toList.sorted.map(
+        F(_, List.empty[(Int, Int)])
+      ) ++
+          List(
+            F(
+              "java.lang.String.format:java.lang.String(java.lang.String,java.lang.Object[])",
+              List((1, -1), (2, -1))
+            ),
+            F("java.lang.String.concat:java.lang.String(java.lang.String)", List((0, -1), (1, -1)))
+          ) ++
+          JavaFrameworkSemantics.allCarrierFullNames.toList.map(name => PTF(name))
 
   /** Semantic summaries for PHP framework sanitizers (Laravel, Symfony, WordPress).
     *
@@ -229,6 +291,31 @@ object DefaultSemantics:
     */
   def phpFlows: List[FlowSemantic] =
       PhpFrameworkSemantics.allSanitizerNames.toList.sorted.map(F(_, List.empty[(Int, Int)]))
+
+  /** Request-reader summaries for Java graphs, from
+    * [[io.appthreat.dataflowengineoss.semantics.JavaFrameworkSemantics.RequestReaders]]: the value
+    * returned by a request accessor is request data, so the receiver's taint flows to the return.
+    *
+    * Two shapes, for the two resolution states of a Java graph: receiver-qualified REGEX entries
+    * for resolved calls, and bare names for unresolved ones. The bare names are why the whole list
+    * is language-gated (see [[flowsForLanguage]]) - a `getParameter` on a non-request receiver
+    * inside a Java graph is conservatively treated as request data, while graphs of other languages
+    * are unaffected.
+    */
+  def javaRequestReaderFlows: List[FlowSemantic] =
+    val readers = JavaFrameworkSemantics.RequestReaders
+    // Bare names (unresolved calls) + receiver-qualified REGEX entries (resolved calls,
+    // whose methodFullName carries a `:signature` suffix, so only a regex can match across
+    // overloads): the receiver (parameter 0) flows to the return, because the returned
+    // value IS request data.
+    readers.callNames.toList.sorted.map(F(_, List((0, -1)))) ++
+        readers.fullNames.toList.sorted.map(name =>
+            FlowSemantic.from(
+              java.util.regex.Pattern.quote(name) + ":.*",
+              List((0, -1)),
+              regex = true
+            )
+        )
 
   /** @return
     *   procedure semantics for operators and common external Java calls only.

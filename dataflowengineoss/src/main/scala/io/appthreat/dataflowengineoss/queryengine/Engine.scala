@@ -31,7 +31,8 @@ class Engine(context: EngineContext):
   private val logger: org.slf4j.Logger = LoggerFactory.getLogger(getClass)
 
   private val executorService: ExecutorService =
-      Executors.newVirtualThreadPerTaskExecutor()
+      if Engine.solveTasksInParallel then Executors.newVirtualThreadPerTaskExecutor()
+      else Executors.newSingleThreadExecutor()
   private val completionService =
       new ExecutorCompletionService[TaskSummary](executorService)
 
@@ -173,6 +174,23 @@ class Engine(context: EngineContext):
 end Engine
 
 object Engine:
+
+  /** Whether to solve tasks on many threads. Off by default, because it costs findings.
+    *
+    * Solving in parallel does not just reorder the answer, it changes it: which task reaches
+    * `submitTasks` first decides which duplicates are run and which are held for completion from
+    * the result table afterwards, and the two paths do not produce the same results. Measured on
+    * Apache Shiro (~10k calls), consecutive parallel runs over a byte-identical graph reported
+    * between 88 and 109 flows - up to 19% of the findings appearing or disappearing with nothing
+    * changed but thread timing. Solving on one thread reports 108 every time.
+    *
+    * The cost of that is small and was measured rather than assumed: on the same graph the
+    * reachables slice goes from ~665ms to ~910ms, against a ~13s end-to-end run - under 2% of the
+    * total. A security tool whose findings change between runs is worse than a slightly slower one,
+    * so the deterministic path is the default. `chen.dataflow.parallel=true` restores the old
+    * behaviour for anyone who has measured their own tradeoff and wants it.
+    */
+  def solveTasksInParallel: Boolean = sys.props.get("chen.dataflow.parallel").contains("true")
 
   /** Traverse from a node to incoming DDG nodes, taking into account semantics. This method is
     * exposed via the `ddgIn` step, but is also called by the engine internally by the `TaskSolver`.

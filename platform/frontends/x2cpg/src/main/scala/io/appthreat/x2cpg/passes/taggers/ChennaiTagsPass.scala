@@ -2,7 +2,9 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.circe.*
 import io.circe.parser.*
+import io.appthreat.x2cpg.passes.taggers.JavaFrameworks
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{
@@ -16,7 +18,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
-import java.util.regex.Pattern
+import _root_.java.util.regex.Pattern
 import scala.util.{Try, Using}
 
 /** Creates tags on any node based on framework patterns and configuration.
@@ -30,7 +32,12 @@ import scala.util.{Try, Using}
   */
 class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPass(atom):
 
-  private val FRAMEWORK_ROUTE  = "framework-route"
+  private val FRAMEWORK_ROUTE = "framework-route"
+  // The route a handler actually serves, as a key/value tag on the handler method. Named to match
+  // what the Python recognizers already emit (`PythonRecognizerUtil.ROUTE_PATH_TAG`), so a consumer
+  // reads one tag for every language.
+  private val ROUTE_PATH       = "route-path"
+  private val HTTP_METHOD      = "http-method"
   private val FRAMEWORK_INPUT  = "framework-input"
   private val FRAMEWORK_OUTPUT = "framework-output"
   // A call to a declared sanitiser or validator. Flows that pass through such a call are considered
@@ -97,6 +104,15 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       )
 
   private val CHENNAI_CONFIG_FILE = "chennai.json"
+
+  /** Languages whose routes are tagged by `tagJavaRoutes`.
+    *
+    * NB: shorter than the JVM lists in `CdxPass` and `DefaultSemantics`, which also carry
+    * ANDROID/APK/DEX. The three are deliberately not shared - widening this one would start tagging
+    * routes in Android graphs, which is a tagging change rather than a refactor.
+    */
+  private val JVM_ROUTE_LANGUAGES: Set[String] =
+      Set(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE")
 
   // ---------------------------------------------------------------------
   // Angular / React / Vue recognizers
@@ -215,6 +231,24 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
+  /** The graph's import entities, materialised once. The Java recognisers consult imports ~10 times
+    * per graph; each `cpg.imports.importedEntity.l` is a full traversal, so the set is computed
+    * once here and every gate reads it.
+    */
+  private lazy val importEntities: Seq[String] = atom.imports.importedEntity.to(Seq)
+
+  /** True when the graph imports anything under one of the given roots - equality, a prefix
+    * (`root.`), or an interior segment (`.root.`). The trailing-segment arm (`endsWith(".root")`)
+    * is deliberately absent: a root like `redis` would otherwise match any package merely ending in
+    * `.redis`.
+    */
+  private def usesImports(roots: String*): Boolean =
+      importEntities.exists { entity =>
+          roots.exists(root =>
+              entity == root || entity.startsWith(s"$root.") || entity.contains(s".$root.")
+          )
+      }
+
   override def run(dstGraph: DiffGraphBuilder): Unit =
     emittedTags.clear()
     tagFrameworkRoutes(dstGraph)
@@ -232,6 +266,8 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             tagRubyRoutes(dstGraph)
         case lang if lang == Languages.JSSRC || lang == Languages.JAVASCRIPT =>
             tagJsRoutes(dstGraph)
+        case lang if JVM_ROUTE_LANGUAGES.contains(lang) =>
+            tagJavaRoutes(dstGraph)
         case _ => // No specific routing for this language
   private def tagJsRoutes(dstGraph: DiffGraphBuilder): Unit =
     val routeCalls = atom.call.filter { c =>
@@ -243,12 +279,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .isLiteral
           .headOption
           .newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
+      // The handler is found by walking its REF edge. A generic REF walk, not
+      // MethodRef.referencedMethod: that accessor throws when the linker could not resolve a
+      // reference (unresolved source-form refs carry no REF edge), and an unresolvable handler
+      // must be skipped, not fatal to the pass.
       call.argument
           .lastOption
-          .flatMap {
-              case r: MethodRef => r._refOut.collectFirst { case m: Method => m }
-              case arg          => arg._refOut.collectFirst { case m: Method => m }
-          }
+          .flatMap(arg => arg.start.out(EdgeTypes.REF).collectFirst { case m: Method => m })
           .foreach { handlerMethod =>
             val params = handlerMethod.parameter.l.sortBy(_.order)
             if params.nonEmpty then
@@ -311,7 +348,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * meant - before falling back to any internal method with that name.
     */
   private def resolveComponentMethod(identifier: Identifier): Option[Method] =
-      identifier._refOut.collectFirst { case m: Method => m }.orElse {
+      identifier.refsTo.collectFirst { case m: Method => m }.orElse {
           val fileMethods = identifier.file.method.internal
           fileMethods.nameExact(identifier.name).headOption
               .orElse(atom.method.internal.nameExact(identifier.name).headOption)
@@ -648,10 +685,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
     atom.call.name("defineEventHandler|eventHandler|defineRouteHandler").foreach { call =>
         call.argument
-            .flatMap {
-                case r: MethodRef => r._refOut.collectFirst { case m: Method => m }
-                case arg          => arg._refOut.collectFirst { case m: Method => m }
-            }
+            .flatMap(arg => arg.start.out(EdgeTypes.REF).collectFirst { case m: Method => m })
             .dedup
             .foreach(tagHandlerMethod(_, dstGraph))
     }
@@ -759,6 +793,703 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .store()(using dstGraph)
   end tagSvelteKitRoutes
 
+  // =============================================================================================
+  // Java (javasrc2cpg and the JVM byte-code frontends). The shapes and collision gates are
+  // documented in [[JavaFrameworks]]; each recognizer below names the family it covers.
+  // =============================================================================================
+
+  private val JAVA_GRPC_TAG = "grpc-service"
+
+  /** Tag a routed Java method and its parameters: the method is the entrypoint (framework-route),
+    * its non-`this` parameters are web-facing input, and in a response-writing context (a
+    * \@RestController handler, a servlet) the method's return is the output boundary.
+    */
+  private def tagJavaHandlerMethod(
+    handler: Method,
+    dstGraph: DiffGraphBuilder,
+    responseWriting: Boolean = false
+  ): Unit =
+    storeTag(Iterator(handler), FRAMEWORK_ROUTE, dstGraph)
+    storeTag(
+      handler.parameter.filterNot(_.name == "this"),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
+    if responseWriting then
+      storeTag(Iterator(handler.methodReturn), FRAMEWORK_OUTPUT, dstGraph)
+
+  /** The route literals of a mapping annotation (`@GetMapping("/users")`), from its `value` and
+    * `path` members only - a NormalAnnotationExpr may also carry `produces`/`consumes`/ `headers`,
+    * whose string values are media types, not routes.
+    *
+    * A route value is either absolute (`"/users"`, including the root `"/"`) or a relative segment
+    * (`"users"`, normal when a class-level `@RequestMapping` supplies the prefix) - so a leading
+    * slash is NOT required. The class-level prefix is not composed onto the method-level literal;
+    * consumers that need full paths join them (the class-level mapping is taggable the same way).
+    *
+    * javasrc2cpg lowers each string element to an ANNOTATION_LITERAL (untaggable - no TAGGED_BY
+    * support) plus a real LITERAL duplicate; the tag goes to the LITERAL. An array member
+    * (`@RequestMapping({"/a", "/b"})`) contributes one literal per element.
+    *
+    * `.ast` is deliberate despite the general rule against subtree walks: the walk starts at the
+    * matched `value`/`path` member assignment, whose subtree is that member's own literals - a
+    * handful of nodes bounded by the annotation, not a method body, and the only alternative is
+    * hand-rolling the astChildren recursion this one hop replaces.
+    */
+  private def javaRouteLiterals(method: Method, annotationNames: Seq[String]): Iterator[Literal] =
+      method.annotation
+          .name(annotationNames.mkString("|"))
+          .parameterAssign
+          .where(_.parameter.code("^(value|path)$"))
+          .ast
+          .isLiteral
+          .filter(l => looksLikeRouteValue(l.code))
+
+  /** Route literals declared by the annotations on a handler's own TYPE - the class-level
+    * `@RequestMapping("/api")` or JAX-RS `@Path("/api")` that every method route hangs off.
+    *
+    * `.ast` is deliberate, as in [[javaRouteLiterals]]: the walk starts at the matched member
+    * assignment, whose subtree is that member's own literals - bounded by the annotation, not a
+    * method body.
+    */
+  private def classRouteLiterals(method: Method, annotationNames: Seq[String]): Iterator[Literal] =
+      method.typeDecl.annotation
+          .name(annotationNames.mkString("|"))
+          .parameterAssign
+          .where(_.parameter.code("^(value|path)$"))
+          .ast
+          .isLiteral
+          .filter(l => looksLikeRouteValue(l.code))
+
+  /** Records the route a handler actually serves, as a `route-path` tag on the METHOD.
+    *
+    * The literals alone do not say this. A class-level `@RequestMapping("/api")` and a method-level
+    * `@GetMapping("/users")` are two separate strings in the graph, and the route that exists at
+    * runtime - `/api/users` - is written nowhere. A consumer reading the tagged literals has to
+    * rediscover the pairing and the joining rules to report which endpoint a finding is on.
+    *
+    * Both halves may be declared several times (`@RequestMapping({"/api", "/v2"})`), in which case
+    * every combination is a real route and each is recorded. A handler with no class-level prefix
+    * keeps its own paths, and a class-level prefix with no method-level path (`@RequestMapping` on
+    * the class, `@GetMapping` with no value) is itself the route.
+    *
+    * Both literal sets are supplied by the caller - the same sets it tags FRAMEWORK_ROUTE on - so
+    * the annotation queries run once per handler instead of once per consumer.
+    */
+  private def tagComposedRoutes(
+    handler: Method,
+    classLiterals: List[Literal],
+    methodLiterals: List[Literal],
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+    val prefixes = classLiterals.map(l => unquote(l.code)).distinct
+    val paths    = methodLiterals.map(l => unquote(l.code)).distinct
+    val composed = (prefixes, paths) match
+      case (Nil, Nil) => Nil
+      case (Nil, ps)  => ps
+      case (pre, Nil) => pre
+      case (pre, ps)  => for p <- pre; s <- ps yield joinRoute(p, s)
+    composed.distinct.foreach(route =>
+        Iterator(handler).newTagNodePair(ROUTE_PATH, route).store()(using dstGraph)
+    )
+
+  /** The HTTP verb a Spring mapping annotation names, where it names one. `@RequestMapping` does
+    * not - its verb is a `method = RequestMethod.X` member, or absent, meaning every verb - so it
+    * contributes no `http-method` tag rather than a guess.
+    */
+  private def springHttpMethod(annotationName: String): Option[String] =
+      Option(annotationName)
+          .filter(_.endsWith("Mapping"))
+          .map(_.stripSuffix("Mapping").toUpperCase)
+          .filter(verb => verb.nonEmpty && verb != "REQUEST")
+
+  /** `/api` + `users` and `/api/` + `/users` both make `/api/users`. */
+  private def joinRoute(prefix: String, path: String): String =
+    val head = prefix.stripSuffix("/")
+    val tail = path.stripPrefix("/")
+    if tail.isEmpty then (if head.isEmpty then "/" else head)
+    else s"$head/$tail"
+
+  private def unquote(code: String): String =
+      if code.length >= 2 && code.head == '"' && code.last == '"' then
+        code.substring(1, code.length - 1)
+      else code
+
+  /** A quoted annotation value that names a route: the root route, an absolute path, or a relative
+    * segment (letters, digits, `-`, `_`, `.`, `*`, and `{param}`/`[param]` markers).
+    *
+    * The character whitelist only rejects strings that cannot be paths at all (spaces, quotes, `@`,
+    * `=`); it does NOT separate a route from a media type - `application/json` passes it. Media
+    * types are excluded upstream instead, by reading only the `value` and `path` members.
+    */
+  private def looksLikeRouteValue(code: String): Boolean =
+      if code.length < 2 || code.head != '"' || code.last != '"' then false
+      else
+        val value = code.substring(1, code.length - 1)
+        value.nonEmpty &&
+        value.forall(c =>
+            c.isLetterOrDigit || c == '/' || c == '-' || c == '_' || c == '.' || c == '*' ||
+                c == '{' || c == '}' || c == '[' || c == ']' || c == ':' || c == '+'
+        )
+
+  /** Java framework boundaries.
+    *
+    * HTTP is covered three ways because Java web code comes in three shapes:
+    *   - annotation-mapped controllers (Spring MVC/WebFlux, JAX-RS/Jakarta, Micronaut): the mapping
+    *     annotation names the route, the annotated method is the handler;
+    *   - servlet overrides: the entrypoint is the method NAME (doGet/...), disambiguated by the
+    *     servlet parameter types;
+    *   - router DSLs (Vert.x, Javalin, Spark): `router.get("/path").handler(this::handle)` - the
+    *     route is a string literal on a receiver-named call, the handler a method reference or
+    *     lambda argument.
+    *
+    * The remaining families tag their respective boundaries: gRPC service methods (bidirectional
+    * StreamObserver), database statement calls, AI/LLM model invocations, MCP tool methods,
+    * cloud/serverless handlers, native (JNI/FFM) interop, and message listeners.
+    */
+  private def tagJavaRoutes(dstGraph: DiffGraphBuilder): Unit =
+    val http = JavaFrameworks.Http
+
+    // ---- Spring MVC/WebFlux --------------------------------------------------------------
+    // @GetMapping("/users/{id}") String getUser(@RequestParam String id): the mapping
+    // annotation makes the method a route; @RequestParam/@RequestBody/... parameters are
+    // web-facing; a @RestController's handler returns the response body.
+    val springHandlers = atom.method
+        .where(_.annotation.name(http.springMappingAnnotations.mkString("|")))
+        .l
+    springHandlers.foreach { handler =>
+      // One traversal per literal set per handler: the tags below and tagComposedRoutes are the
+      // same queries, and running them per consumer doubled the annotation traversals.
+      val methodLiterals = javaRouteLiterals(handler, http.springMappingAnnotations).l
+      val classLiterals  = classRouteLiterals(handler, http.springMappingAnnotations).l
+      methodLiterals.foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+      // A class-level @RequestMapping is a route of its own (the prefix every method route
+      // hangs off); tag it wherever the handler's type declares one.
+      classLiterals.foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+      tagComposedRoutes(handler, classLiterals, methodLiterals, dstGraph)
+      handler.annotation
+          .name(http.springMappingAnnotations.mkString("|"))
+          .name
+          .flatMap(springHttpMethod)
+          .foreach(verb =>
+              Iterator(handler).newTagNodePair(HTTP_METHOD, verb).store()(using dstGraph)
+          )
+      val inRestController = handler.typeDecl
+          .annotation
+          .name(http.springControllerAnnotations.mkString("|"))
+          .nonEmpty
+      tagJavaHandlerMethod(handler, dstGraph, responseWriting = inRestController)
+    }
+
+    // Parameters carrying request-data annotations are web-facing even on methods that carry
+    // no mapping annotation of their own (a helper invoked by a handler, or a Spring event
+    // listener) - the annotation itself is the declaration.
+    storeTag(
+      atom.parameter.where(_.annotation.name(http.springParamAnnotations.mkString("|"))),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
+
+    // ---- JAX-RS / Jakarta REST (RESTEasy, Quarkus, Micronaut-compatible) -----------------
+    val usesJaxRs = usesImports(http.jaxRsImportRoots*)
+    if usesJaxRs then
+      val resourceMethods = atom.method
+          .where(_.annotation.name((http.jaxRsVerbAnnotations :+ http.jaxRsPathAnnotation)
+              .mkString("|")))
+          .l
+      resourceMethods.foreach { handler =>
+        // `.ast` here walks the @Path annotation's own subtree - annotation, its member
+        // assignment, the literals - a handful of nodes, not a method body; same reasoning as
+        // javaRouteLiterals.
+        //
+        // NB this filter is stricter than `javaRouteLiterals`, which the tagComposedRoutes call
+        // below uses for the same annotations: it takes only absolute paths beyond the root, so a
+        // relative `@Path("users")` composes into a route-path but gets no framework-route tag of
+        // its own. The divergence predates the helpers and no rationale for it is recorded - JAX-RS
+        // method paths are relative as often as Spring's. Reconciling them changes what gets
+        // tagged (a tagging change with corpus consequences), so it is flagged here rather than
+        // folded in; it needs its own test and justification.
+        handler.annotation
+            .name(http.jaxRsPathAnnotation)
+            .ast
+            .isLiteral
+            .filter(l => l.code.startsWith("\"/") && l.code.length > 3)
+            .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+        // JAX-RS composes the same way Spring does: `@Path` on the resource class is the prefix for
+        // the `@Path` on each method.
+        tagComposedRoutes(
+          handler,
+          classRouteLiterals(handler, Seq(http.jaxRsPathAnnotation)).l,
+          javaRouteLiterals(handler, Seq(http.jaxRsPathAnnotation)).l,
+          dstGraph
+        )
+        handler.annotation
+            .name(http.jaxRsVerbAnnotations.mkString("|"))
+            .name
+            .foreach(verb =>
+                Iterator(handler).newTagNodePair(HTTP_METHOD, verb.toUpperCase).store()(using
+                dstGraph)
+            )
+        tagJavaHandlerMethod(handler, dstGraph, responseWriting = true)
+      }
+      storeTag(
+        atom.parameter.where(_.annotation.name(http.jaxRsParamAnnotations.mkString("|"))),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+    end if
+
+    // ---- Micronaut @Controller methods ---------------------------------------------------
+    if usesImports(http.micronautImportRoots*) then
+      atom.method
+          .where(_.annotation.name("Get|Post|Put|Delete|Patch|Head|Options"))
+          .l
+          .foreach(handler =>
+            javaRouteLiterals(
+              handler,
+              Seq("Get", "Post", "Put", "Delete", "Patch", "Head", "Options")
+            )
+                .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+            tagJavaHandlerMethod(handler, dstGraph, responseWriting = true)
+          )
+
+    // ---- Servlets ------------------------------------------------------------------------
+    // doGet/doPost/... overrides are recognised by shape: a servlet method has a request or
+    // response parameter. That gate keeps a user `service()` method untagged.
+    val servletLikeMethods = atom.method
+        .name(http.servletMethods.mkString("|"))
+        .where(_.parameter.typeFullName(".*(HttpServletRequest|ServletResponse|ServletRequest).*"))
+        .l
+    servletLikeMethods.foreach { handler =>
+      storeTag(Iterator(handler), FRAMEWORK_ROUTE, dstGraph)
+      storeTag(
+        handler.parameter.filter(p =>
+            p.typeFullName.contains("Request") && !p.typeFullName.contains("Response")
+        ),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+      storeTag(
+        handler.parameter.filter(_.typeFullName.contains("Response")),
+        FRAMEWORK_OUTPUT,
+        dstGraph
+      )
+    }
+
+    // ---- Router DSLs (Vert.x, Javalin, Spark) --------------------------------------------
+    // The registration `router.get("/api/items")` carries the route literal; the handler is
+    // attached by `.handler(this::handleItems)` / `.handler(ctx -> ...)` or passed as the
+    // second registration argument.
+    // javasrc2cpg renders an unresolved receiver call as `get("/api/items")` - no receiver
+    // prefix - so the registration is matched on the call name plus a route-shaped literal
+    // argument, and ONLY in a project that imports a router DSL. A parameter type merely
+    // named `*Router*` is not a gate: any project with its own MessageRouter class would have
+    // every `map.get("/x")` tagged as a route otherwise.
+    val usesRouterDsl = usesImports(
+      "io.vertx.ext.web",
+      "io.vertx.reactivex.ext.web",
+      "io.javalin",
+      "spark.Spark",
+      "io.vertx.core.http"
+    )
+    val routerCalls =
+        (if usesRouterDsl then
+           atom.call
+               .name("get|post|put|delete|patch|head|options|route|addRoute")
+               .filterNot(_.name.startsWith("<operator"))
+               .filter(_.argument.isLiteral.exists(l =>
+                   l.code.startsWith("\"/") || l.code.startsWith("'/")
+               ))
+               .l
+         else Nil)
+    routerCalls.foreach { call =>
+      call.argument.isLiteral
+          .filter(l => l.code.startsWith("\"") || l.code.startsWith("'"))
+          .headOption
+          .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+      // The handler argument of `app.get("/x", handler)` forms.
+      call.argument
+          .flatMap {
+              case r: MethodRef => resolveJavaMethodRef(r)
+              case arg          => arg.start.out(EdgeTypes.REF).collectFirst { case m: Method => m }
+          }
+          .dedup
+          .foreach(m => tagJavaHandlerMethod(m, dstGraph))
+    }
+    // Same gate as `routerCalls` above, and for the same reason: `handler` and `addHandler` are
+    // ordinary names outside a router DSL (logging, exception dispatch, event buses), and every
+    // method reference passed to one would otherwise become a route with tainted parameters.
+    val handlerAttachments =
+        if usesRouterDsl then atom.call.name(http.routerHandlerCallNames.mkString("|")).l else Nil
+    handlerAttachments.foreach { call =>
+        call.argument
+            .flatMap {
+                case r: MethodRef => resolveJavaMethodRef(r)
+                case arg => arg.start.out(EdgeTypes.REF).collectFirst { case m: Method => m }
+            }
+            .dedup
+            .foreach(m => tagJavaHandlerMethod(m, dstGraph))
+    }
+    // A RoutingContext parameter is the web-facing input of any handler it appears in.
+    storeTag(
+      atom.parameter.typeFullName(".*(RoutingContext|io\\.vertx\\.ext\\.web\\.RoutingContext).*"),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
+    // Request-data accessors on the routing context: the returned value is request data.
+    storeTag(
+      atom.method.parameter
+          .typeFullName(".*RoutingContext.*")
+          .method
+          .call
+          .name(http.contextRequestCallNames.mkString("|")),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
+
+    // ---- gRPC services -------------------------------------------------------------------
+    // A service method of the generated base class takes (request, StreamObserver response):
+    // the request is input, the observer is the output channel, and onNext/onCompleted calls
+    // write to it.
+    // `StreamObserver` is gRPC-specific in practice, but the bare-name-under-an-import-gate
+    // discipline applies here too - a project with its own StreamObserver gets no routes.
+    val rpc = JavaFrameworks.Rpc
+    val grpcMethods =
+        if usesImports("io.grpc") then
+          atom.method.where(_.parameter.typeFullName(".*StreamObserver.*")).l
+        else Nil
+    grpcMethods.foreach { m =>
+      storeTag(Iterator(m), JAVA_GRPC_TAG, dstGraph)
+      storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+      m.parameter.foreach { p =>
+          if p.typeFullName.contains("StreamObserver") then
+            storeTag(Iterator(p), FRAMEWORK_OUTPUT, dstGraph)
+          else storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph)
+      }
+    }
+    storeTag(
+      grpcMethods.iterator.call.name(rpc.observerOutputCalls.mkString("|")),
+      FRAMEWORK_OUTPUT,
+      dstGraph
+    )
+
+    // ---- Databases ------------------------------------------------------------------------
+    tagJavaDatabaseCalls(dstGraph)
+
+    // ---- AI/LLM ---------------------------------------------------------------------------
+    tagJavaAiCalls(dstGraph)
+
+    // ---- MCP tools ------------------------------------------------------------------------
+    tagJavaMcpTools(dstGraph)
+
+    // ---- Cloud / serverless ---------------------------------------------------------------
+    tagJavaCloudHandlers(dstGraph)
+
+    // ---- Native interop --------------------------------------------------------------------
+    tagJavaNativeCalls(dstGraph)
+
+    // ---- Messaging listeners and SDK clients -----------------------------------------------
+    tagJavaSdkBoundaries(dstGraph)
+  end tagJavaRoutes
+
+  /** Resolve a lowered method reference (`this::handleItems`, `Handler::handle`) to the method it
+    * names. javasrc2cpg lowers a resolvable reference to its qualified name and an unresolvable one
+    * to the source text, so the target is matched by full name first and by the method's simple
+    * name second - derived from the segment before the signature colon and after the last dot,
+    * which handles both the `this::handle` source form and a resolved `com.foo.Bar.handle:void()`
+    * that missed the exact lookup.
+    *
+    * The name fallback is FILE-SCOPED only: a project-wide same-name lookup would pick an arbitrary
+    * method and fabricate an entrypoint out of a coincidence of names. It also resolves to nothing
+    * when the file holds more than one method of that name - see inside.
+    */
+  private def resolveJavaMethodRef(ref: MethodRef): Option[Method] =
+    val full = ref.methodFullName
+    atom.method.fullNameExact(full).headOption.orElse {
+        // The unresolved source form `this::handle` carries its own separator; a resolved
+        // `com.foo.Bar.handle:void()` carries a signature colon. Both must yield the method's
+        // simple name.
+        val name = full.indexOf("::") match
+          case i if i >= 0 =>
+              full.substring(i + 2).takeWhile(c => c.isLetterOrDigit || c == '_' || c == '$')
+          case _ =>
+              full.takeWhile(_ != ':').split("[.]").lastOption.getOrElse("")
+        // Overloads cannot be told apart from the reference alone. The parameter count the target
+        // must have is fixed by the functional interface the reference is passed to, not by the
+        // reference or its call site (the enclosing `handler(...)` call's own arguments say nothing
+        // about the handler's shape), and that interface is a library type the analyzed sources do
+        // not contain - so the arity a `parameter.size` filter would need is not recoverable here.
+        // An arbitrary pick then tags a route with the wrong handler and its parameters as
+        // framework-input - the false-route-with-tainted-inputs failure the router-DSL import gate
+        // exists to prevent. Missing a possible route costs less than fabricating one.
+        if name.isEmpty then None
+        else
+          ref.file.method.internal.nameExact(name).l match
+            case Seq(single) => Some(single)
+            case _           => None
+    }
+  end resolveJavaMethodRef
+
+  /** JDBC / JPA / template / annotation-declared statements.
+    *
+    * The `sql` tag matches the family vocabulary EasyTagsPass already uses for `java.sql.*`, so the
+    * SQL statements of a Spring or MyBatis project land in the same bucket as raw JDBC.
+    */
+  private def tagJavaDatabaseCalls(dstGraph: DiffGraphBuilder): Unit =
+    val db = JavaFrameworks.Database
+
+    // JDBC: by name, excluding operator calls; `executeQuery`/`prepareStatement` are
+    // distinctive enough, and unresolved receivers keep the bare name.
+    storeTag(
+      atom.call.name(db.jdbcCallNames.mkString("|")).filterNot(_.name.startsWith("<operator")),
+      "sql",
+      dstGraph
+    )
+
+    // Spring JdbcTemplate family, import-gated AND receiver-gated: query*/update/execute are
+    // everyday method names outside the template, so a resolved call must name a Template type.
+    // Unresolved calls in such a project fall back to the JDBC names above.
+    if usesImports("org.springframework.jdbc", "org.springframework.data")
+    then
+      storeTag(
+        atom.call
+            .name(
+              "query|queryForObject|queryForList|queryForMap|update|batchUpdate|execute|executeSql"
+            )
+            .filterNot(_.name.startsWith("<operator"))
+            .filter(_.methodFullName.contains("Template")),
+        "sql",
+        dstGraph
+      )
+
+    // JPA EntityManager / Hibernate Session query builders.
+    storeTag(
+      atom.call
+          .name(db.jpaQueryCallNames.mkString("|"))
+          .filterNot(_.name.startsWith("<operator")),
+      "sql",
+      dstGraph
+    )
+
+    // Entity operations (`persist`/`merge`/`remove`) are everyday collection and cache method
+    // names; only in a project that imports a persistence API are they database writes.
+    if usesImports(db.jpaImportRoots*) then
+      storeTag(
+        atom.call
+            .name(db.jpaEntityCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator")),
+        "sql",
+        dstGraph
+      )
+
+    // @Query/@Select/... - the annotation's string member IS the statement.
+    atom.method
+        .where(_.annotation.name(db.queryAnnotations.mkString("|")))
+        .l
+        .foreach { m =>
+            m.annotation
+                .name(db.queryAnnotations.mkString("|"))
+                .ast
+                .isLiteral
+                .filter(l => l.code.length > 2)
+                .foreach(lit => storeTag(Iterator(lit), "sql", dstGraph))
+        }
+
+    // Document and key-value stores.
+    if usesImports(db.documentStoreImportRoots*) then
+      storeTag(
+        atom.call.name("find|insert|save|delete|findById|findAll|upsert")
+            .filterNot(_.name.startsWith("<operator"))
+            .filter(c => c.methodFullName.contains("Template")),
+        "sql",
+        dstGraph
+      )
+  end tagJavaDatabaseCalls
+
+  /** AI/LLM model invocations and prompt construction, on the Python tagger's vocabulary: `ai-llm`
+    * is the family inventory, `ai-invoke` the model call (the flow sink), `ai-prompt` the prompt
+    * builder. Bare call names, so the whole family is import-gated.
+    */
+  private def tagJavaAiCalls(dstGraph: DiffGraphBuilder): Unit =
+    if !usesImports(JavaFrameworks.AiLlm.importRoots*) then return
+
+    val invocations = atom.call
+        .name(JavaFrameworks.AiLlm.invocationCallNames.mkString("|"))
+        .filterNot(_.name.startsWith("<operator"))
+        .l
+    storeTag(invocations.iterator, "ai-llm", dstGraph)
+    storeTag(invocations.iterator, "ai-invoke", dstGraph)
+
+    val prompts = atom.call
+        .name(JavaFrameworks.AiLlm.promptCallNames.mkString("|"))
+        .filterNot(_.name.startsWith("<operator"))
+        .l
+    storeTag(prompts.iterator, "ai-llm", dstGraph)
+    storeTag(prompts.iterator, "ai-prompt", dstGraph)
+
+  /** MCP server tools: a `@Tool`-annotated method is remotely invocable by an MCP client - the tool
+    * equivalent of a route - and its parameters are client-facing input. An exchange parameter
+    * (McpServerFeatures) carries the live session.
+    */
+  private def tagJavaMcpTools(dstGraph: DiffGraphBuilder): Unit =
+    if !usesImports(JavaFrameworks.Mcp.importRoots*) then return
+
+    val toolMethods = atom.method
+        .where(_.annotation.name(JavaFrameworks.Mcp.toolAnnotations.mkString("|")))
+        .l
+    toolMethods.foreach { m =>
+      storeTag(Iterator(m), "mcp-tool", dstGraph)
+      storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+      storeTag(
+        m.parameter.filterNot(_.name == "this"),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+    }
+    storeTag(
+      atom.parameter.typeFullName(
+        ".*(McpSyncServerExchange|McpAsyncServerExchange|McpServerExchange).*"
+      ),
+      FRAMEWORK_INPUT,
+      dstGraph
+    )
+  end tagJavaMcpTools
+
+  /** Cloud SDK calls and serverless function handlers. A `RequestHandler` implementation's
+    * `handleRequest` is event-facing: its input parameter is the function's payload.
+    */
+  private def tagJavaCloudHandlers(dstGraph: DiffGraphBuilder): Unit =
+    val cloud = JavaFrameworks.Cloud
+
+    // Resolved calls carry the package in methodFullName; unresolved ones are covered by the
+    // import gate plus the call name.
+    val cloudPrefixes = cloud.importRoots.map(Pattern.quote).mkString("|")
+    storeTag(
+      atom.call.methodFullName(s"($cloudPrefixes)\\..*"),
+      "cloud",
+      dstGraph
+    )
+    if usesImports(cloud.importRoots*) then
+      storeTag(
+        atom.call
+            .name(
+              "putObject|getObject|deleteObject|listObjects|publish|subscribe|sendMessage|receiveMessage|invoke|startExecution"
+            )
+            .filterNot(_.name.startsWith("<operator")),
+        "cloud",
+        dstGraph
+      )
+
+    val handlerMethods = atom.method
+        .name(cloud.handlerEntryMethods.mkString("|"))
+        .filter(m =>
+            m.typeDecl.inheritsFromTypeFullName.exists(i =>
+                cloud.handlerInterfaceNames.exists(h => i.contains(h))
+            )
+        )
+        .l
+    handlerMethods.foreach { m =>
+      storeTag(Iterator(m), "cloud", dstGraph)
+      storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+      storeTag(
+        m.parameter.filterNot(p => p.name == "this" || p.name == "context"),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+    }
+  end tagJavaCloudHandlers
+
+  /** Native interop: JNI library loads, `native` methods, and the FFM (java.lang.foreign)
+    * downcall/upcall machinery. The downcall setup and the MethodHandle invocation are the boundary
+    * where data crosses into native code.
+    */
+  private def tagJavaNativeCalls(dstGraph: DiffGraphBuilder): Unit =
+    // `System.loadLibrary`/`System.load` resolve against the JDK, so the fullName arm below is
+    // the precise one; the bare-name arm additionally covers solver-less builds
+    // (`loadLibrary` is distinctive on its own - `load` was dropped for matching every loader).
+    val nat = JavaFrameworks.Native
+
+    // Each traversal below feeds two tags; materialize it once and hand an iterator to each
+    // rather than running the query per tag.
+    val libraryLoadCalls = atom.call.name(nat.libraryLoadCallNames.mkString("|")).l
+    storeTag(libraryLoadCalls.iterator, "native", dstGraph)
+    storeTag(libraryLoadCalls.iterator, "native-library", dstGraph)
+    nat.libraryLoadFullNames.foreach { pattern =>
+      val calls = atom.call.methodFullName(pattern).l
+      storeTag(calls.iterator, "native", dstGraph)
+      storeTag(calls.iterator, "native-library", dstGraph)
+    }
+
+    // `native` methods are declared with the NATIVE modifier.
+    storeTag(
+      atom.method.where(_.modifier.modifierType("NATIVE")),
+      "native",
+      dstGraph
+    )
+
+    storeTag(
+      atom.call.methodFullName("java\\.lang\\.foreign\\..*"),
+      "native",
+      dstGraph
+    )
+    // The bare-name arm is import-gated: after dropping the unambiguous fullName prefix above,
+    // an ungated name match would tag every `downcallHandle`-shaped helper in a plain project.
+    if usesImports(nat.foreignPackageRoots*) then
+      storeTag(
+        atom.call
+            .name(nat.foreignCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator")),
+        "native",
+        dstGraph
+      )
+      // The invocation of a downcall handle is the actual native call.
+      storeTag(
+        atom.call.name(nat.methodHandleCallNames.mkString("|")),
+        "native",
+        dstGraph
+      )
+  end tagJavaNativeCalls
+
+  /** Message listeners (queue-driven entrypoints) and outbound SDK clients. A listener method is
+    * the messaging equivalent of a route: the framework invokes it with an incoming message, so the
+    * method and its message parameter are framework-input.
+    */
+  private def tagJavaSdkBoundaries(dstGraph: DiffGraphBuilder): Unit =
+    val sdk = JavaFrameworks.Sdk
+
+    val listenerMethods = atom.method
+        .where(_.annotation.name(sdk.listenerAnnotations.mkString("|")))
+        .l
+    // The listener METHOD is the entrypoint (framework-route, like every other handler
+    // family); its parameters carry the incoming message (framework-input).
+    listenerMethods.foreach { m =>
+      storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+      storeTag(
+        m.parameter.filterNot(_.name == "this"),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+    }
+
+    // Outbound HTTP clients: resolved calls carry the package; otherwise the import gate plus
+    // the characteristic call names.
+    storeTag(
+      atom.call.methodFullName(sdk.httpClientPackages.map(p =>
+          Pattern.quote(p)
+      ).mkString("", ".*|", ".*")),
+      "http-client",
+      dstGraph
+    )
+    if usesImports(sdk.httpClientPackages*) then
+      storeTag(
+        atom.call
+            .name(sdk.httpClientCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator")),
+        "http-client",
+        dstGraph
+      )
+  end tagJavaSdkBoundaries
+
   private def tagCRoutes(dstGraph: DiffGraphBuilder): Unit =
     val cRoutePatterns = Array(
       "Routes::(Post|Get|Delete|Head|Options|Put).*",
@@ -802,8 +1533,9 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     PYTHON_ROUTES_DECORATORS_REGEXES.foreach { pattern =>
       val decoratedMethods = atom.methodRef
           .where(_.inCall.code(pattern).argument)
-          ._refOut
-          .collectAll[Method]
+          // MethodRef.refOut is the schema-typed accessor - Iterator[Method] already, and unlike
+          // `referencedMethod` it yields nothing rather than throwing on an unlinked reference.
+          .flatMap(_.refOut)
 
       // NB: the request-access expression itself is tagged framework-input by
       // EasyTagsPass (step 3b). This pass used to tag the LHS identifier of an

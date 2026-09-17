@@ -6,6 +6,7 @@ import io.appthreat.javasrc2cpg.passes.{
     ConfigFileCreationPass,
     JavaTypeHintCallLinker,
     JavaTypeRecoveryPass,
+    ReflectionLoweringPass,
     TypeInferencePass
 }
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
@@ -40,7 +41,11 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config]:
             cpg
           ).createAndApply()
           new TypeInferencePass(cpg).createAndApply()
+        // After type inference, so the reflective call sites it rewrites carry their final
+        // methodFullNames, and before the overlays, so the call linkers see ordinary calls.
+        new ReflectionLoweringPass(cpg).createAndApply()
       }
+end JavaSrc2Cpg
 
 object JavaSrc2Cpg:
   val language: String = Languages.JAVASRC

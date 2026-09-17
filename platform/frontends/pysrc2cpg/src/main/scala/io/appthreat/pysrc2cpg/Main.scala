@@ -33,6 +33,9 @@ private object Frontend:
             "Excludes all files where the relative path from input-dir contains at least one of names specified here."
           )
           .action(((value, config) => config.withIgnoreDirNames(value))),
+      opt[String]("cache-dir")
+          .text("Directory for the AST cache (default: <input>/.chen).")
+          .action((dir, config) => config.withCacheDir(dir)),
       XTypeRecovery.parserOptions
     )
   end cmdLineParser
