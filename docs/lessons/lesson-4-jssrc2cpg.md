@@ -158,13 +158,13 @@ turns the template into `TEMPLATE_DOM` nodes with no framework-specific code.
 
 Svelte's control flow is mapped onto the JSX equivalents, which is what makes it traversable:
 
-| Svelte | Emitted as |
-| --- | --- |
-| `{#if c}A{:else}B{/if}` | `ConditionalExpression` with `JSXFragment` branches |
-| `{#each xs as x, i}` | `xs.map((x, i) => <>…</>)` — a real `map` call and closure |
-| `{#await p}…{:then v}` | `p.then(v => <>…</>, e => <>…</>)` |
-| `{#snippet f(a)}` / `{@render f(x)}` | assignment of an arrow function / a call |
-| `on:click={h}`, `bind:value={q}` | `JSXAttribute` with a `JSXNamespacedName` |
+| Svelte                               | Emitted as                                                 |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `{#if c}A{:else}B{/if}`              | `ConditionalExpression` with `JSXFragment` branches        |
+| `{#each xs as x, i}`                 | `xs.map((x, i) => <>…</>)` — a real `map` call and closure |
+| `{#await p}…{:then v}`               | `p.then(v => <>…</>, e => <>…</>)`                         |
+| `{#snippet f(a)}` / `{@render f(x)}` | assignment of an arrow function / a call                   |
+| `on:click={h}`, `bind:value={q}`     | `JSXAttribute` with a `JSXNamespacedName`                  |
 
 Query the template like any other DOM:
 
@@ -192,7 +192,7 @@ cpg.call.nameExact("<operator>.interpolation").l
 cpg.call.nameExact("<operator>.interpolation").reachableByFlows(sources)
 ```
 
-An expression that is *already* a call (`{@html data.article.body}` is a field access) carries its
+An expression that is _already_ a call (`{@html data.article.body}` is a field access) carries its
 own uses, so no wrapper is added and the existing call is the interpolation site.
 
 Svelte blocks and tags all map onto `JSXExpressionContainer`, so the DOM node is named after the
@@ -205,7 +205,7 @@ cpg.templateDom.nameExact("SvelteHtmlTag").code.l      // every {@html} site, ve
 cpg.templateDom.nameExact("SvelteEachBlock").code.l
 ```
 
-Two things still to know. A flow whose source and sink land on the *same line* is suppressed by
+Two things still to know. A flow whose source and sink land on the _same line_ is suppressed by
 `ReachableSlicing` as zero-information, because `toSlice` renders at most one node per `file#line`.
 And the template statement is emitted last in the program body on purpose: Svelte hoists the
 instance script, so markup renders after it even when the `<script>` tag sits below the markup.
@@ -213,14 +213,14 @@ instance script, so markup renders after it even when the `<script>` tag sits be
 ## SvelteKit routes
 
 SvelteKit has no route-registration call for the Express-style patterns to match — a `load`
-exported from `+page.server.ts` *is* the handler — so `ChennaiTagsPass` keys off the file name
+exported from `+page.server.ts` _is_ the handler — so `ChennaiTagsPass` keys off the file name
 instead:
 
-| File | Entrypoints tagged `framework-route` |
-| --- | --- |
-| `+page.server.*`, `+page.*`, `+layout.server.*`, `+layout.*` | `load`, plus the `actions` handlers |
-| `+server.*` | `GET POST PUT PATCH DELETE OPTIONS HEAD fallback` |
-| `hooks.server.*`, `hooks.*`, `hooks.client.*` | `handle handleError handleFetch handleValidationError init reroute transport` |
+| File                                                         | Entrypoints tagged `framework-route`                                          |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `+page.server.*`, `+page.*`, `+layout.server.*`, `+layout.*` | `load`, plus the `actions` handlers                                           |
+| `+server.*`                                                  | `GET POST PUT PATCH DELETE OPTIONS HEAD fallback`                             |
+| `hooks.server.*`, `hooks.*`, `hooks.client.*`                | `handle handleError handleFetch handleValidationError init reroute transport` |
 
 Their parameters — the request object, `{ params, url, request, cookies }` — are tagged
 `framework-input`, which is what makes server-side flows surface. `actions` handlers compile to
@@ -240,7 +240,7 @@ component's input boundary. Paired with the `framework-output` tag on a value re
 +page.svelte L4  decorate(data.body)
 ```
 
-Note that a flow whose source and sink land on the *same line* — `const { data } = $props()` read
+Note that a flow whose source and sink land on the _same line_ — `const { data } = $props()` read
 straight into `{@html data.body}` — is suppressed by `ReachableSlicing` as zero-information, since
 `toSlice` renders at most one node per `file#line`. The value has to pass through something on
 another line to be reported. Svelte 4's `export let` props are not tagged; `$props()` is the

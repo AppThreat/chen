@@ -1,6 +1,8 @@
 - [Home](/)
 - [CLI Usage](CLI.md)
 - [Traversal](TRAVERSAL.md)
+- [DSL Operations](DSL_OPERATIONS.md)
+- [DSL in Depth](DSL_IN_DEPTH.md)
 - [Flux vs Classic Data-Flow](FLOW_ENGINE_COMPARISON.md)
 - Lessons
   - [Lesson 1: C/C++ - c2cpg](lessons/lesson-1-c2cpg.md)

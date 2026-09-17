@@ -20,12 +20,12 @@ The grammars of JavaScript, TypeScript, and Ruby change frequently and are awkwa
 in Scala. Rather than maintaining hand-written parsers, chen delegates parsing to native tools
 written in the target ecosystems — the **ASTGen runners**:
 
-| Language  | Binary            | Runner class                                       |
-| --------- | ----------------- | -------------------------------------------------- |
-| JS/TS/Vue/Svelte | `astgen`   | `jssrc2cpg/.../utils/AstGenRunner`                 |
-| Ruby      | `rbastgen`        | `ruby2atom/.../parser/RubyAstGenRunner`            |
-| Python    | _(none)_          | native `PyParser` in `pysrc2cpg` — no subprocess   |
-| PHP       | `php-parser` phar | invoked from `php2atom` via the local `php` binary |
+| Language         | Binary            | Runner class                                       |
+| ---------------- | ----------------- | -------------------------------------------------- |
+| JS/TS/Vue/Svelte | `astgen`          | `jssrc2cpg/.../utils/AstGenRunner`                 |
+| Ruby             | `rbastgen`        | `ruby2atom/.../parser/RubyAstGenRunner`            |
+| Python           | _(none)_          | native `PyParser` in `pysrc2cpg` — no subprocess   |
+| PHP              | `php-parser` phar | invoked from `php2atom` via the local `php` binary |
 
 The shared base, `AstGenRunnerBase`, lives in
 [platform/frontends/x2cpg/.../astgen/AstGenRunner.scala](https://github.com/AppThreat/chen/blob/main/platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/astgen/AstGenRunner.scala).
