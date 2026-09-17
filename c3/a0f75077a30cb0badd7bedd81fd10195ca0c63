@@ -1,0 +1,55 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_968be6984e88f3::t_9b25ab7347fb96 944,1397
+  s_968be6984e88f3::t_ba40be7d547157 1115-1116,1118-1121
+  s_968be6984e88f3::t_dd836d85234900 1132
+  s_968be6984e88f3::t_5eb1d3a7cd5403 1080-1084
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/StaticMemberDefUsePass.scala
+  s_968be6984e88f3::t_aaaac54dda657a 47-48,52
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/ReflectionLoweringPass.scala
+  s_968be6984e88f3::t_c38de08664d19f 225
+  s_968be6984e88f3::t_505e7f24b41c41 61-63,69-75
+  s_968be6984e88f3::t_b9b2ed558d0d4e 351,353
+  s_968be6984e88f3::t_abac842795031d 243-247
+  s_968be6984e88f3::t_4ac8c2abdd0faa 199
+  s_968be6984e88f3::t_a2685e80ba8e9e 302,304
+  s_968be6984e88f3::t_5a85d8c56e984a 64-68,349-350
+  s_968be6984e88f3::t_7163f43cdf7b89 95
+  s_968be6984e88f3::t_ea29eede8026de 216-219,222-224,226
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/JavaFrameworkTagsTest.scala
+  s_968be6984e88f3::t_5d010abfbd63df 308-327
+  s_968be6984e88f3::t_eed110c71e884b 254-280
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/PatternLocalOwnershipTests.scala
+  s_968be6984e88f3::t_2a6326a4f0ecc8 107-146,149
+  s_968be6984e88f3::t_5124c07a382cd4 147-148
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPass.scala
+  s_968be6984e88f3::t_3510e2cfca7de8 39-40,42-44,52,68,92-105,111,137
+  s_968be6984e88f3::t_3e29fd515e95b5 69,129-135
+  s_9d783fb1e8d1fd::t_10abdc82de526f 136
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_968be6984e88f3::t_b5c53b4116ea0f 3680
+  s_9d783fb1e8d1fd::t_7e2a454b0b61a6 916-922,948,3681,3685-3691,3711
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c3a0f75077a30cb0badd7bedd81fd10195ca0c63",
+  "prompts": {},
+  "sessions": {
+    "s_968be6984e88f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bc8e2f4-852a-48dc-9b75-cf5608cbf8dd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_9d783fb1e8d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b6339c-f98b-44f9-a0af-a2adbc268048",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
