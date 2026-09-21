@@ -12,13 +12,14 @@ object DefaultSemantics:
     *   a default set of common external procedure calls for all languages.
     *
     * This list is LANGUAGE NEUTRAL on purpose. `FlowSemantic.from` matches on the exact
-    * `methodFullName` with no language scoping, so a language-specific summary for a bare name
-    * (PHP's `e`, `esc_html`, `htmlspecialchars`) would silently clear taint for an unrelated
-    * function of the same name in a C/Java/JS graph. Language-specific flows are added per graph by
-    * [[flowsForLanguage]], which `OssDataFlow` applies using the CPG's own `metaData.language`.
+    * `methodFullName` with no language scoping, so a language-specific summary for a bare name (C's
+    * `free`/`read`/`getc`, PHP's `e`, `esc_html`, `htmlspecialchars`) would silently clear taint
+    * for an unrelated function of the same name in a Java/JS/Python graph. Language-specific flows
+    * are added per graph by [[flowsForLanguage]], which `OssDataFlow` applies using the CPG's own
+    * `metaData.language`.
     */
   def apply(): Semantics =
-    val list = operatorFlows ++ cFlows ++ javaFlows
+    val list = operatorFlows ++ javaFlows
     Semantics.fromList(list)
 
   /** Languages that get the JVM request-reader flows.
@@ -38,7 +39,8 @@ object DefaultSemantics:
     */
   def flowsForLanguage(language: String): List[FlowSemantic] =
       language match
-        case Languages.PHP => phpFlows
+        case Languages.PHP                => phpFlows
+        case Languages.C | Languages.NEWC => cFlows
         case lang if JvmLanguages.contains(lang) =>
             javaRequestReaderFlows
         case _ => List.empty
@@ -135,6 +137,19 @@ object DefaultSemantics:
 
   /** Semantic summaries for common external C/C++ calls.
     *
+    * These are keyed on BARE names (`strncpy`, `free`), because that is how c2cpg names libc calls.
+    * They are therefore NOT part of [[apply]]: a bare name would collide with a same-named function
+    * in a Java/JS/PHP graph (PHP's `e` sanitizer defect is the precedent). They reach a C/C++ graph
+    * through [[flowsForLanguage]] keyed on `Languages.C`/`Languages.NEWC`.
+    *
+    * Mapping conventions used below, for `f(dst, src, ...)`:
+    *   - every argument keeps its own definition: the identity mappings `(i, i)`;
+    *   - a buffer writer maps `(src, dst)` so the copied-from argument taints the destination, plus
+    *     `(src, -1)` when the function returns its destination;
+    *   - an untrusted source (read/recv/fgets family) maps its stream/fd argument to the buffer it
+    *     fills, so the flow starts at the stream identifier rather than at the destination;
+    *   - an allocator maps its size arguments to the returned pointer.
+    *
     * @see
     *   <a
     *   href="https://www.ibm.com/docs/en/i/7.3?topic=extensions-standard-c-library-functions-table-by-name">Standard
@@ -143,12 +158,17 @@ object DefaultSemantics:
   def cFlows: List[FlowSemantic] = List(
     F("abs", List((1, 1), (1, -1))),
     F("abort", List.empty[(Int, Int)]),
+    F("accept", List((1, 1), (2, 2), (3, 3), (1, 2), (1, 3), (1, -1))),
+    F("alloca", List((1, 1), (1, -1))),
+    F("aligned_alloc", List((1, 1), (2, 2), (2, -1))),
     F("asctime", List((1, 1), (1, -1))),
     F("asctime_r", List((1, 1), (1, -1))),
+    F("asprintf", List((1, 1), (2, 2), (2, 1), (2, -1)) ++ variadicSources(3, 1)),
     F("atof", List((1, 1), (1, -1))),
     F("atoi", List((1, 1), (1, -1))),
     F("atol", List((1, 1), (1, -1))),
-    F("calloc", List((1, -1), (2, -1))),
+    F("bcopy", List((1, 1), (2, 2), (3, 3), (1, 2))),
+    F("calloc", List((1, 1), (2, 2), (1, -1), (2, -1))),
     F("ceil", List((1, 1), (1, 1))),
     F("clock", List.empty[(Int, Int)]),
     F("ctime", List((1, -1))),
@@ -167,15 +187,66 @@ object DefaultSemantics:
     F("ferror", List((1, 1), (1, -1))),
     F("fflush", List((1, 1), (1, -1))),
     F("fgetc", List((1, 1), (1, -1))),
-    F("fwrite", List((1, 1), (1, -1), (2, -1), (3, -1), (4, -1))),
+    F("fgets", List((1, 1), (2, 2), (3, 3), (3, 1), (1, -1), (3, -1))),
+    F("fread", List((1, 1), (2, 2), (3, 3), (4, 4), (4, 1), (3, -1))),
     F("free", List((1, 1))),
+    F("fscanf", scanFlows(3)),
+    F("fwrite", List((1, 1), (1, -1), (2, -1), (3, -1), (4, -1))),
     F("getc", List((1, 1))),
-    F("scanf", List((2, 2))),
+    F("getdelim", List((1, 1), (2, 2), (3, 3), (4, 4), (4, 1), (4, 2), (4, -1))),
+    F("getenv", List((1, 1), (1, -1))),
+    F("getline", List((1, 1), (2, 2), (3, 3), (3, 1), (3, 2), (3, -1))),
+    F("gets", List((1, 1), (1, -1))),
+    F("malloc", List((1, 1), (1, -1))),
+    F("memcpy", List((1, 1), (2, 2), (3, 3), (2, 1), (1, -1), (2, -1))),
+    F("memmove", List((1, 1), (2, 2), (3, 3), (2, 1), (1, -1), (2, -1))),
+    F("mempcpy", List((1, 1), (2, 2), (3, 3), (2, 1), (1, -1), (2, -1))),
+    F("mmap", List((1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (2, -1), (5, -1))),
+    F("pread", List((1, 1), (2, 2), (3, 3), (4, 4), (1, 2), (3, -1))),
+    F("read", List((1, 1), (2, 2), (3, 3), (1, 2), (3, -1))),
+    F("readlink", List((1, 1), (2, 2), (3, 3), (1, 2), (3, -1), (1, -1))),
+    F("realloc", List((1, 1), (2, 2), (1, -1), (2, -1))),
+    F("reallocarray", List((1, 1), (2, 2), (3, 3), (1, -1), (2, -1), (3, -1))),
+    F("recv", List((1, 1), (2, 2), (3, 3), (4, 4), (1, 2), (3, -1))),
+    F(
+      "recvfrom",
+      List((1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (1, 2), (1, 5), (1, 6), (3, -1))
+    ),
+    F("recvmsg", List((1, 1), (2, 2), (3, 3), (1, 2), (1, -1))),
+    F("scanf", List((1, 1), (1, -1)) ++ (2 to 6).toList.flatMap(i => List((i, i), (1, i)))),
+    F("snprintf", List((1, 1), (2, 2), (3, 3), (3, 1), (1, -1), (3, -1)) ++ variadicSources(4, 1)),
+    F("sprintf", List((1, 1), (2, 2), (2, 1), (1, -1), (2, -1)) ++ variadicSources(3, 1)),
+    F("sscanf", List((1, 1), (2, 2), (1, -1)) ++ scanFlows(3)),
+    F("stpcpy", List((1, 1), (2, 2), (2, 1), (1, -1), (2, -1))),
+    F("strcasecmp", List((1, 1), (1, -1), (2, 2), (2, -1))),
+    F("strcat", List((1, 1), (2, 2), (2, 1), (1, -1), (2, -1))),
     F("strcmp", List((1, 1), (1, -1), (2, 2), (2, -1))),
+    F("strcpy", List((1, 1), (2, 2), (2, 1), (1, -1), (2, -1))),
+    F("strdup", List((1, 1), (1, -1))),
     F("strlen", List((1, 1), (1, -1))),
-    F("strncpy", List((1, 1), (2, 2), (3, 3), (1, -1), (2, -1))),
-    F("strncat", List((1, 1), (1, -1), (2, 2), (2, -1)))
+    F("strncat", List((1, 1), (2, 2), (3, 3), (1, -1), (2, -1), (2, 1))),
+    F("strncmp", List((1, 1), (1, -1), (2, 2), (2, -1), (3, 3))),
+    F("strncpy", List((1, 1), (2, 2), (3, 3), (1, -1), (2, -1), (2, 1))),
+    F("strndup", List((1, 1), (2, 2), (1, -1), (2, -1))),
+    F("strtok", List((1, 1), (2, 2), (1, -1))),
+    F("strtok_r", List((1, 1), (2, 2), (3, 3), (1, 3), (1, -1))),
+    F("vsnprintf", List((1, 1), (2, 2), (3, 3), (4, 4), (3, 1), (4, 1), (1, -1), (3, -1), (4, -1))),
+    F("vsprintf", List((1, 1), (2, 2), (3, 3), (2, 1), (3, 1), (1, -1), (2, -1), (3, -1)))
   )
+
+  /** Mappings for the variadic tail of a printf-style writer: every source argument `i` in
+    * `from..from+5` keeps its own definition and taints the destination `dst` and the return value.
+    * The fixed arguments (destination, size, format) are spelled out at each entry.
+    */
+  private def variadicSources(from: Int, dst: Int): List[(Int, Int)] =
+      (from to from + 5).toList.flatMap(i => List((i, i), (i, dst), (i, -1)))
+
+  /** Mappings for a scanf-style reader whose output arguments start at `from`: the input (stream,
+    * subject string) and the format both taint every output pointer, which is what makes a scanned
+    * value carry the input's taint.
+    */
+  private def scanFlows(from: Int): List[(Int, Int)] =
+      (from to from + 4).toList.flatMap(i => List((1, i), (2, i), (i, i)))
 
   /** Semantic summaries for common external Java calls.
     *
@@ -324,9 +395,16 @@ object DefaultSemantics:
   def javaSemantics(): Semantics = Semantics.fromList(operatorFlows ++ javaFlows)
 
   /** @return
+    *   the semantics a C/C++ graph should be analysed with: the language-neutral defaults plus the
+    *   libc summaries from [[cFlows]].
+    */
+  def cSemantics(): Semantics = Semantics.fromList(operatorFlows ++ javaFlows ++ cFlows)
+
+  /** @return
     *   the semantics a PHP graph should be analysed with: the language-neutral defaults plus the
-    *   PHP framework sanitizers.
+    *   PHP framework sanitizers (and none of the C summaries - a bare PHP `free` helper must not
+    *   pick up libc `free`'s summary).
     */
   def phpSemantics(): Semantics =
-      Semantics.fromList(operatorFlows ++ cFlows ++ javaFlows ++ phpFlows)
+      Semantics.fromList(operatorFlows ++ javaFlows ++ phpFlows)
 end DefaultSemantics
