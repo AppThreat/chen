@@ -1704,6 +1704,87 @@ class DataFlowTests extends DataFlowCodeToCpgSuite:
           }
       }
   }
+  // The argv probe from the memory-safety findings (§1, probe 2): before the C flow semantics
+  // were fixed, every one of these flows began at the destination buffer, because the
+  // permissive default for an unresolved external taints only the return value and the
+  // `strncpy` summary lacked the (2, 1) source-to-destination mapping.
+  "ArgvTaintThroughLibcWriters" should {
+      val cpg = code("""
+        |int main(int argc, char **argv) {
+        |    char a[64], b[64], c[64], d[64];
+        |    strncpy(a, argv[1], 63); system(a);
+        |    strcpy (b, argv[1]);     system(b);
+        |    fgets  (c, sizeof(c), stdin); system(c);
+        |    sprintf(d, "%s", argv[1]);    system(d);
+        |}""".stripMargin)
+
+      def systemArg(line: Int) =
+          cpg.call.name("system").lineNumber(line).head.argument(1).start
+
+      /** The data-dependence edge the C semantics control: the source argument must reach the
+        * destination argument through the libc call. `reachableByFlows` expands call arguments
+        * permissively at query time, so it alone does not regress-test the summary table - the
+        * REACHING_DEF edges do, and every later pass (slicing, summaries, part-2 detectors) reads
+        * those.
+        */
+      def argDefs(callName: String, argIndex: Int): Set[String] =
+          cpg.call.name(callName).head.argument(argIndex)._reachingDefIn.l.collect {
+              case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => n.code
+          }.toSet
+
+      "carry argv through strncpy into system" in {
+          argDefs("strncpy", 1) should contain("argv[1]")
+          val source = cpg.method.name("main").parameter.name("argv")
+          val flows  = systemArg(4).reachableByFlows(source).l
+          flows.isEmpty shouldBe false
+          flows.flatMap(_.elements).l.map(_.code).contains("argv[1]") shouldBe true
+      }
+
+      "carry argv through strcpy into system" in {
+          argDefs("strcpy", 1) should contain("argv[1]")
+          val source = cpg.method.name("main").parameter.name("argv")
+          val flows  = systemArg(5).reachableByFlows(source).l
+          flows.isEmpty shouldBe false
+          flows.flatMap(_.elements).l.map(_.code).contains("argv[1]") shouldBe true
+      }
+
+      "carry the fgets stream into system" in {
+          // argv is not an argument of fgets; the source this flow must start from is the stream.
+          argDefs("fgets", 1) should contain("stdin")
+          val source = cpg.identifier.name("stdin")
+          val flows  = systemArg(6).reachableByFlows(source).l
+          flows.isEmpty shouldBe false
+      }
+
+      "carry argv through sprintf into system" in {
+          argDefs("sprintf", 1) should contain("argv[1]")
+          val source = cpg.method.name("main").parameter.name("argv")
+          val flows  = systemArg(7).reachableByFlows(source).l
+          flows.isEmpty shouldBe false
+          flows.flatMap(_.elements).l.map(_.code).contains("argv[1]") shouldBe true
+      }
+  }
+
+  // scanf's previous summary mapped only (2, 2), so a scanned value was never tainted by the
+  // stream at all: the format argument is scanf's only in-graph input, and it did not reach the
+  // output pointers.
+  "ScanfTaintsScannedOutputs" should {
+      val cpg = code("""
+        |void foo(void) {
+        |    char name[64];
+        |    int count;
+        |    scanf("%s %d", name, &count);
+        |    system(name);
+        |}""".stripMargin)
+
+      "taint the scanned buffer from the format argument" in {
+          val nameDefs = cpg.call.name("scanf").head.argument(2)._reachingDefIn.l
+              .collect { case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => n.code }
+              .toSet
+          nameDefs should contain("\"%s %d\"")
+      }
+  }
+
 end DataFlowTests
 
 class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
@@ -2004,6 +2085,7 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
           )
       }
   }
+
   "DataFlowTest72" should {
       val cpg = code("""
         |struct struct_length {
