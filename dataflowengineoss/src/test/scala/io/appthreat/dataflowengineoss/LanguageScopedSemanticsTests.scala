@@ -171,6 +171,24 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "the memoised default" should {
+
+      "be one shared instance" in {
+          // The DDG steps use it as their implicit default argument, and Scala re-evaluates a
+          // default expression per call: unless the expression itself is memoised, the semantics
+          // table is rebuilt once per DDG edge per path inside slicing repeats. The regex-result
+          // cache only pays for itself on a shared instance too.
+          DefaultSemantics.memoised should be theSameInstanceAs DefaultSemantics.memoised
+      }
+
+      "carry the language-neutral defaults" in {
+          DefaultSemantics.memoised.forMethod("<operator>.assignment") should not be None
+          DefaultSemantics.memoised.forMethod("java.lang.String.format:java.lang.String(java.lang.String,java.lang.Object[])") should not be None
+          // and none of the language-scoped bare names
+          DefaultSemantics.memoised.forMethod("free") shouldBe None
+      }
+  }
+
   "phpSemantics" should {
 
       "declare every PHP sanitizer as taint clearing" in {
