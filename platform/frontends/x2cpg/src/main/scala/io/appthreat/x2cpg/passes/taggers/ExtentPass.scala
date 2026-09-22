@@ -44,16 +44,18 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   import ExtentPass.*
   import OverlayFacts.*
 
-  /** C1: the member-extent facts are not method-local, so they are built once, up front, in a
-    * single traversal over assignments - never re-derived per field access. Lazy so a graph with no
-    * pointer-member destinations never pays for it.
-    */
-  private lazy val memberExtents: Map[Member, String] = memberExtentsOf(atom)
-
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if !MemoryApiPass.appliesTo(atom) then return
     val argExtents  = mutable.LinkedHashMap.empty[StoredNode, String]
     val declExtents = mutable.LinkedHashMap.empty[StoredNode, String]
+
+    // D4 report buckets, over the destination arguments whose shape is a (direct or indirect)
+    // field access - the bucket whose ceiling is the member-extent map
+    var fieldDsts           = 0
+    var fieldKnown          = 0
+    var fieldAllocSomewhere = 0
+    var fieldNoAlloc        = 0
+    var fieldUnresolvable   = 0
 
     OverlayFacts
         .memoryArgumentSites(atom)
@@ -79,6 +81,26 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                     decls.foreach(d => declExtents(d) = value)
                 case None =>
                     argExtents(dst) = ValueUnknown
+            }
+
+            dstArgs.foreach { dst =>
+              val isFieldShape = dst match
+                case c: Call =>
+                    c.name == "<operator>.fieldAccess" ||
+                    c.name == "<operator>.indirectFieldAccess"
+                case _ => false
+              if isFieldShape then
+                fieldDsts += 1
+                argExtents.get(dst) match
+                  case Some(v) if v != ValueUnknown =>
+                      fieldKnown += 1
+                  case _ =>
+                      OverlayFacts.memberRefOf(atom, dst.asInstanceOf[Call]) match
+                        case None =>
+                            fieldUnresolvable += 1
+                        case Some(member) =>
+                            if memberAllocs.contains(member) then fieldAllocSomewhere += 1
+                            else fieldNoAlloc += 1
             }
         }
 
@@ -106,31 +128,64 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
           (node, TagExtent, value)
       }
     )
+
+    if fieldDsts > 0 then
+      println(
+        s"ExtentPass: field-access destinations $fieldDsts: " +
+            s"${fieldKnown} with a known extent, $fieldAllocSomewhere allocated somewhere in the " +
+            s"tree but no single capacity, $fieldNoAlloc with no allocation found, " +
+            s"$fieldUnresolvable whose member could not be resolved"
+      )
   end run
 
-  /** C1: struct members whose capacity lives at their allocation. One traversal over assignments
-    * whose LEFT side is a member and whose right side is an inventoried `mem-alloc` call (through a
-    * cast): the allocation's size argument becomes the member's extent (`alloc:<id>`, or
-    * `sizeof:<expr>` when the size is a sizeof). Two allocations of DIFFERENT sizes are no capacity
-    * at all - the member gets nothing.
+  /** C1 (part 4, D4): the member-extent facts are not method-local, so they are built once, up
+    * front. The search is whole-graph in BOTH dimensions now: it reads every assignment in the tree
+    * (an `init` may allocate `ctx->buf` that a `read_packet` writes), and it follows two more
+    * shapes than the same-expression match part 3 shipped - the allocation stashed in a local
+    * before it reaches the member, and the allocation made THROUGH the member's own address
+    * (`av_reallocp(&ctx->buf, n)`). Sizes are kept per member even when they conflict: a member
+    * allocated at two different sizes gets no extent (no single capacity exists), but it is still a
+    * member with an allocation somewhere in the tree - the split the D4 deliverable asks for.
     */
-  private def memberExtentsOf(cpg: Cpg): Map[Member, String] =
+  private lazy val memberAllocs: Map[Member, mutable.LinkedHashSet[String]] = memberAllocsOf(atom)
+
+  private lazy val memberExtents: Map[Member, String] =
+      memberAllocs.collect {
+          case (member, values) if values.size == 1 =>
+              member -> values.head
+      }.toMap
+
+  private def memberAllocsOf(cpg: Cpg): Map[Member, mutable.LinkedHashSet[String]] =
     val sizes = mutable.LinkedHashMap.empty[Member, mutable.LinkedHashSet[String]]
-    cpg.call.name("<operator>.assignment").l.foreach { assignment =>
-        assignment.argumentOption(1).foreach { lhs =>
-            allocationSizeValueOf(assignment.argumentOption(2)).foreach { sizeValue =>
-                lhs match
-                  case fa: Call =>
-                      OverlayFacts.memberRefOf(cpg, fa).foreach { member =>
-                          sizes
-                              .getOrElseUpdate(member, mutable.LinkedHashSet.empty[String])
-                              .add(sizeValue)
-                      }
-                  case _ => ()
-            }
+    def note(member: Member, value: String): Unit =
+        sizes.getOrElseUpdate(member, mutable.LinkedHashSet.empty[String]).add(value)
+    def memberOfLhs(lhs: Expression): Option[Member] = lhs match
+      case fa: Call => OverlayFacts.memberRefOf(cpg, fa)
+      case _        => None
+
+    // the allocation assigned to the member: directly, or through a local that holds it
+    cpg.call.name("<operator>.assignment").foreach { assignment =>
+        assignment.argumentOption(1).flatMap(memberOfLhs).foreach { member =>
+          allocationSizeValueOf(assignment.argumentOption(2)).foreach(note(member, _))
+          assignment.argumentOption(2).flatMap(allocExtentOf).foreach(note(member, _))
         }
     }
-    sizes.collect { case (member, values) if values.size == 1 => member -> values.head }.toMap
+
+    // the allocation made through the member's own address: av_reallocp(&member, n)
+    val allocCallNodes = (cpg.tag.name(MemoryApiPass.TagAlloc).l ++
+        cpg.tag.name(MemoryApiPass.TagRealloc).l)
+        .flatMap(_._taggedByIn.collectAll[Call].l)
+        .distinct
+    allocCallNodes.foreach { alloc =>
+        alloc.argumentOption(1).collect {
+            case addr: Call if addr.name == "<operator>.addressOf" =>
+                addr
+        }.flatMap(addr => addr.argumentOption(1).flatMap(memberOfLhs))
+            .foreach(member => sizeArgValueOf(alloc).foreach(note(member, _)))
+    }
+
+    sizes.toMap
+  end memberAllocsOf
 
   /** The extent value of the allocation a right-hand side expression produces, through casts. A
     * realloc produces the pointer too (D1): `ctx->buf = av_realloc(ctx->buf, n)` is how the
