@@ -232,7 +232,29 @@ object DefaultSemantics:
     F("strtok_r", List((1, 1), (2, 2), (3, 3), (1, 3), (1, -1))),
     F("vsnprintf", List((1, 1), (2, 2), (3, 3), (4, 4), (3, 1), (4, 1), (1, -1), (3, -1), (4, -1))),
     F("vsprintf", List((1, 1), (2, 2), (3, 3), (2, 1), (3, 1), (1, -1), (2, -1), (3, -1)))
-  )
+  ) ++ clampingMacroFlows
+
+  /** Semantics for the common clamping macros (`FFMIN`, `FFMAX`, `FFABS`, `av_clip`), so that a
+    * clamp the frontend left unexpanded as an opaque call still propagates "the result is derived
+    * from - and bounded by - its arguments" instead of being an unknown function. Real builds
+    * always have a mix of expanded and unexpanded macro sites, so both halves are needed: the CFG
+    * wiring (c2cpg `cfgForInlinedCall`) makes the expansion visible, these summaries make the
+    * unexpanded call safe.
+    *
+    * A macro invocation is emitted as a CALL with a location-encoded fullName
+    * (`path/to/header.h:49:49:FFMIN:2`), hence the regexes: the bare name cannot be keyed.
+    */
+  private def clampingMacroFlows: List[FlowSemantic] =
+      List(
+        FlowSemantic.from(".*:FFMIN:\\d+$", List((1, 1), (2, 2), (1, -1), (2, -1)), regex = true),
+        FlowSemantic.from(".*:FFMAX:\\d+$", List((1, 1), (2, 2), (1, -1), (2, -1)), regex = true),
+        FlowSemantic.from(".*:FFABS:\\d+$", List((1, 1), (1, -1)), regex = true),
+        FlowSemantic.from(
+          ".*:av_clip:\\d+$",
+          List((1, 1), (2, 2), (3, 3), (1, -1), (2, -1), (3, -1)),
+          regex = true
+        )
+      )
 
   /** Mappings for the variadic tail of a printf-style writer: every source argument `i` in
     * `from..from+5` keeps its own definition and taints the destination `dst` and the return value.
