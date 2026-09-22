@@ -22,7 +22,8 @@ import scala.collection.mutable
   *     128-byte buffer" apart from "no idea at all";
   *   - `sizeof:<expr>` - `sizeof(x)` in the allocation that produced the pointer, or as the copy's
   *     own length argument against the same buffer;
-  *   - `alloc:<id>` - the size argument of the `mem-alloc` call that produced the pointer;
+  *   - `alloc:<id>` - the size argument of the `mem-alloc`/`mem-realloc` call that produced the
+  *     pointer;
   *   - `param:<name>` - a capacity parameter paired with a buffer parameter (the R1 adjacent-pair
   *     detection promoted out of the prototype query, predicate unchanged);
   *   - `field:<name>` - a struct member holding the length beside the buffer (`payload` /
@@ -131,22 +132,38 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     }
     sizes.collect { case (member, values) if values.size == 1 => member -> values.head }.toMap
 
-  /** The extent value of the allocation a right-hand side expression produces, through casts. */
+  /** The extent value of the allocation a right-hand side expression produces, through casts. A
+    * realloc produces the pointer too (D1): `ctx->buf = av_realloc(ctx->buf, n)` is how the
+    * member's capacity grows.
+    */
   private def allocationSizeValueOf(rhs: Option[Expression]): Option[String] =
     def allocCallOf(e: Expression): Option[Call] = e match
-      case c: Call if c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty => Some(c)
+      case c: Call if isAllocationCall(c) => Some(c)
       case c: Call if c.name.startsWith("<operator>.cast") =>
           c.argument.l.collectFirst { case inner: Call => inner }.flatMap(allocCallOf)
       case _ => None
-    rhs.flatMap(allocCallOf).flatMap(alloc =>
-        alloc.argument.l
-            .find(arg => arg.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-            .map {
-                case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
-                    s"$ValueSizeof:${sz.code}"
-                case sizeArg => s"$ValueAlloc:${sizeArg.id}"
-            }
-    )
+    rhs.flatMap(allocCallOf).flatMap(alloc => sizeArgValueOf(alloc))
+
+  /** The byte-size factor of an allocation's length arguments. A count-by-size allocator tags BOTH
+    * factors `mem-len` (D1); the capacity is the byte size, which in every inventoried signature is
+    * either the `sizeof` or the trailing factor.
+    */
+  private def sizeArgValueOf(alloc: Call): Option[String] =
+    val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+    lenArgs
+        .collectFirst {
+            case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                s"$ValueSizeof:${sz.code}"
+        }
+        .orElse(lenArgs.lastOption.map {
+            case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                s"$ValueSizeof:${sz.code}"
+            case sizeArg => s"$ValueAlloc:${sizeArg.id}"
+        })
+
+  private def isAllocationCall(c: Call): Boolean =
+      c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty ||
+          c.tag.name(MemoryApiPass.TagRealloc).l.nonEmpty
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
@@ -255,7 +272,10 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         case Seq(l, r) if r == buf && isIntegral(l.typeFullName) => l.name
     }
 
-  /** `alloc:<size-argument id>`, or `sizeof:<expr>` when the size argument is a sizeof. */
+  /** `alloc:<size-argument id>`, or `sizeof:<expr>` when the size argument is a sizeof. The
+    * pointer's producer may be a realloc (D1) - `p = av_realloc(p, n)` sizes p exactly like a
+    * malloc does.
+    */
   private def allocExtentOf(use: Expression): Option[String] =
       OverlayFacts
           .reachingDefsIn(use)
@@ -266,16 +286,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
           .flatMap { assignment =>
               assignment.argumentOption(2).collect { case alloc: Call => alloc }
           }
-          .find(alloc => alloc.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty)
-          .flatMap { alloc =>
-              alloc.argument.l
-                  .find(arg => arg.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-                  .map {
-                      case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
-                          s"$ValueSizeof:${sz.code}"
-                      case sizeArg => s"$ValueAlloc:${sizeArg.id}"
-                  }
-          }
+          .find(isAllocationCall)
+          .flatMap(sizeArgValueOf)
 
   private def extentOfField(fieldAccess: Call): Option[(String, List[StoredNode])] =
       OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>

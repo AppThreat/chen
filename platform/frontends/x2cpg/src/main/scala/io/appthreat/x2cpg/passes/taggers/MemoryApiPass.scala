@@ -24,21 +24,22 @@ import scala.collection.mutable
   *
   * After the inventory is applied, the pass infers the wrapper layer a project builds over it (part
   * 3 task C2): a defined method every one of whose value-returns flows from an inventoried
-  * `mem-alloc` result - through casts and NULL fallbacks, with no free and no untrusted read in the
-  * body - is itself an allocator, and a body whose only external calls are inventoried `mem-free`
-  * calls is a free wrapper. The inferred roles are emitted as ORDINARY `mem-alloc` / `mem-free` /
-  * `mem-len` tags at the wrapper's call sites, so ExtentPass and the rules need no second
-  * vocabulary. Inference is conservative: a body that returns anything not derived from the
-  * allocation, or that calls anything beside the frees it wraps, is left untagged; a conclusion
-  * that disagrees with the declared inventory is reported and the declared entry wins. The summary
-  * line states what was concluded.
+  * `mem-alloc` or `mem-realloc` result - through casts and NULL fallbacks, with no free and no
+  * untrusted read in the body - is itself an allocator, and a body whose only external calls are
+  * inventoried `mem-free` calls is a free wrapper. The inferred roles are emitted as ORDINARY
+  * `mem-alloc` / `mem-free` / `mem-realloc` / `mem-len` tags at the wrapper's call sites, so
+  * ExtentPass and the rules need no second vocabulary. Inference is conservative: a body that
+  * returns anything not derived from the allocation, or that calls anything beside the frees it
+  * wraps, is left untagged; a conclusion that disagrees with the declared inventory is reported and
+  * the declared entry wins. The summary line states what was concluded.
   *
   * Tags emitted (each alongside the `memory-safety` umbrella, the way [[PiiTagsPass]] emits
   * `pii-email` alongside `sensitive-data`):
   *   - `mem-dst` / `mem-src` / `mem-len`, valued with the API name, on the ARGUMENT playing that
-  *     role;
-  *   - `mem-alloc` / `mem-free`, valued with the family (`heap`, `new`, `mmap`, `file`, `socket`),
-  *     on the call;
+  *     role; a count-by-size allocator's element count carries `mem-len` too, because the size that
+  *     can overflow is the product (part 4, D1);
+  *   - `mem-alloc` / `mem-free` / `mem-realloc`, valued with the family (`heap`, `new`, `mmap`,
+  *     `file`, `socket`), on the call;
   *   - `untrusted-read`, valued with the API name, on the call and on the buffer it fills.
   *
   * The umbrella tag is what lets `atom reachables --sink-tag memory-safety` and a chennai session
@@ -105,9 +106,14 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     entry.dst.foreach(i => argAt(i).foreach(n => record(TagDst, entry.name, n)))
     entry.src.foreach(i => argAt(i).foreach(n => record(TagSrc, entry.name, n)))
     entry.len.foreach(i => argAt(i).foreach(n => record(TagLen, entry.name, n)))
+    // D1: a count-by-size allocator bounds the operation by the PRODUCT, so the element count
+    // joins the size as a length role - the attacker-influenced factor carries mem-len too and
+    // the overflow question can be asked about it (ValueOrigin gives it an origin from here).
+    entry.count.foreach(i => argAt(i).foreach(n => record(TagLen, entry.name, n)))
 
     entry.alloc.foreach(family => record(TagAlloc, family, call))
     entry.free.foreach(family => record(TagFree, family, call))
+    entry.realloc.foreach(family => record(TagRealloc, family, call))
 
     entry.untrustedRead.foreach { i =>
       record(TagUntrustedRead, entry.name, call)
@@ -139,8 +145,11 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     val inferred = mutable.LinkedHashMap.empty[String, MemApiVocab.MemApiEntry]
     // methods whose conclusion disagreed with the declaration: reported once, not once per round
     val reported = mutable.HashSet.empty[String]
-    // the alloc/free/read call nodes the inventory produced, grown by each round's conclusions
-    // so a wrapper of a wrapper chains
+    // the alloc/realloc/free/read call nodes the inventory produced, grown by each round's
+    // conclusions so a wrapper of a wrapper chains. A realloc is a PRODUCER of a fresh pointer
+    // for inference purposes and is kept out of the free set (D1): reading alloc and free as one
+    // overlapping pair turned every realloc-only wrapper into "allocates and frees", a shape
+    // neither conclusion branch accepts.
     val callsByTag = mutable.HashMap.empty[String, mutable.LinkedHashSet[Call]]
     def callsOf(tag: String): mutable.LinkedHashSet[Call] =
         callsByTag.getOrElseUpdate(
@@ -157,11 +166,13 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     var concluded = true
     while concluded && round <= MaxInferenceRounds do
       concluded = false
-      val allocIds = callsOf(MemoryApiPass.TagAlloc).map(_.id).toSet
-      val freeIds  = callsOf(MemoryApiPass.TagFree).map(_.id).toSet
-      val readIds  = callsOf(MemoryApiPass.TagUntrustedRead).map(_.id).toSet
+      val allocIds   = callsOf(MemoryApiPass.TagAlloc).map(_.id).toSet
+      val reallocIds = callsOf(MemoryApiPass.TagRealloc).map(_.id).toSet
+      val freeIds    = callsOf(MemoryApiPass.TagFree).map(_.id).toSet
+      val readIds    = callsOf(MemoryApiPass.TagUntrustedRead).map(_.id).toSet
 
-      val candidates = (callsOf(MemoryApiPass.TagAlloc) ++ callsOf(MemoryApiPass.TagFree))
+      val candidates = (callsOf(MemoryApiPass.TagAlloc) ++ callsOf(MemoryApiPass.TagRealloc) ++
+          callsOf(MemoryApiPass.TagFree))
           .map(_.method)
           .filterNot(_.isExternal)
           .toList
@@ -169,28 +180,30 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
 
       candidates.foreach { method =>
           if !inferred.contains(method.name) && !reported.contains(method.name) then
-            concludeWrapper(method, allocIds, freeIds, readIds, lenArgIds).foreach { entry =>
-                declared.get(method.name) match
-                  case Some(d) if roleOf(d) != roleOf(entry) =>
-                      // inference must say what it concluded, and must not quietly prefer
-                      // either source when it disagrees with the declaration. Recorded so the
-                      // next fixpoint round does not re-derive and re-report the same one.
-                      reported += method.name
-                      System.err.println(
-                        s"warn: memory-api inference concludes ${method.name} is an " +
-                            s"${roleOf(entry).getOrElse("?")} wrapper, but the declared " +
-                            s"inventory gives it the role ${roleOf(d).getOrElse("none")}; " +
-                            "keeping the declaration"
-                      )
-                  case Some(_) => () // the declaration already tagged these call sites
-                  case None =>
-                      inferred(method.name) = entry
-                      concluded = true
-                      atom.call.name(method.name).foreach { site =>
-                        tagCall(entry, site, record)
-                        entry.alloc.foreach(_ => callsOf(MemoryApiPass.TagAlloc) += site)
-                        entry.free.foreach(_ => callsOf(MemoryApiPass.TagFree) += site)
-                      }
+            concludeWrapper(method, allocIds, reallocIds, freeIds, readIds, lenArgIds).foreach {
+                entry =>
+                    declared.get(method.name) match
+                      case Some(d) if roleOf(d) != roleOf(entry) =>
+                          // inference must say what it concluded, and must not quietly prefer
+                          // either source when it disagrees with the declaration. Recorded so the
+                          // next fixpoint round does not re-derive and re-report the same one.
+                          reported += method.name
+                          System.err.println(
+                            s"warn: memory-api inference concludes ${method.name} is an " +
+                                s"${roleOf(entry).getOrElse("?")} wrapper, but the declared " +
+                                s"inventory gives it the role ${roleOf(d).getOrElse("none")}; " +
+                                "keeping the declaration"
+                          )
+                      case Some(_) => () // the declaration already tagged these call sites
+                      case None =>
+                          inferred(method.name) = entry
+                          concluded = true
+                          atom.call.name(method.name).foreach { site =>
+                            tagCall(entry, site, record)
+                            entry.alloc.foreach(_ => callsOf(MemoryApiPass.TagAlloc) += site)
+                            entry.realloc.foreach(_ => callsOf(MemoryApiPass.TagRealloc) += site)
+                            entry.free.foreach(_ => callsOf(MemoryApiPass.TagFree) += site)
+                          }
             }
       }
       round += 1
@@ -198,33 +211,36 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
 
     if inferred.nonEmpty then
       println(
-        s"MemoryApiPass: inferred ${inferred.values.count(_.alloc.isDefined)} allocator and " +
-            s"${inferred.values.count(_.free.isDefined)} free wrapper methods from call shapes"
+        s"MemoryApiPass: inferred ${inferred.values.count(e => e.alloc.isDefined || e.realloc.isDefined)} " +
+            s"allocator and ${inferred.values.count(_.free.isDefined)} free wrapper methods from call shapes"
       )
     inferred.values.toList
   end inferWrappers
 
   /** The wrapper conclusion for one candidate method, or none. Allocators need every value-return
-    * to flow from an allocation; free wrappers allow nothing in the body beside the frees they
-    * wrap.
+    * to flow from an allocation (a realloc wrapper's return flows from its realloc - a producer of
+    * a fresh pointer); free wrappers allow nothing in the body beside the frees they wrap.
     */
   private def concludeWrapper(
     method: Method,
     allocIds: Set[Long],
+    reallocIds: Set[Long],
     freeIds: Set[Long],
     readIds: Set[Long],
     lenArgIds: Set[Long]
   ): Option[MemApiVocab.MemApiEntry] =
-    val bodyCalls    = method.call.l
-    val bodyAllocIds = bodyCalls.map(_.id).toSet.intersect(allocIds)
-    val bodyFreeIds  = bodyCalls.map(_.id).toSet.intersect(freeIds)
-    val bodyReadIds  = bodyCalls.map(_.id).toSet.intersect(readIds)
+    val producerIds = allocIds ++ reallocIds
+    val bodyCalls   = method.call.l
+    val bodyProdIds = bodyCalls.map(_.id).toSet.intersect(producerIds)
+    val bodyFreeIds = bodyCalls.map(_.id).toSet.intersect(freeIds)
+    val bodyReadIds = bodyCalls.map(_.id).toSet.intersect(readIds)
 
-    if bodyAllocIds.nonEmpty && bodyFreeIds.isEmpty && bodyReadIds.isEmpty
-      && bodyCalls.filterNot(_.name.startsWith("<operator>")).forall(c => allocIds.contains(c.id))
-    then
-      allocatorEntry(method, allocIds, lenArgIds)
-    else if bodyFreeIds.nonEmpty && bodyAllocIds.isEmpty && bodyReadIds.isEmpty
+    if bodyProdIds.nonEmpty && bodyFreeIds.isEmpty && bodyReadIds.isEmpty
+      && bodyCalls.filterNot(_.name.startsWith("<operator>")).forall(c =>
+          producerIds.contains(c.id)
+      )
+    then allocatorEntry(method, allocIds, reallocIds, lenArgIds)
+    else if bodyFreeIds.nonEmpty && bodyProdIds.isEmpty && bodyReadIds.isEmpty
       && bodyCalls.filterNot(_.name.startsWith("<operator>")).forall(c => freeIds.contains(c.id))
       && returnsNoValue(method)
     then Some(MemApiVocab.MemApiEntry(method.name, free = Some(FamilyHeap)))
@@ -234,8 +250,10 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
   private def allocatorEntry(
     method: Method,
     allocIds: Set[Long],
+    reallocIds: Set[Long],
     lenArgIds: Set[Long]
   ): Option[MemApiVocab.MemApiEntry] =
+    val producerIds = allocIds ++ reallocIds
     val valueReturns = method.ast.collectAll[Return].l
         .flatMap(_.astChildren.collect { case e: Expression => e })
     // at least one return must flow from a REAL allocation (the anchor - a literal anchors
@@ -243,15 +261,15 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     // return must flow or be an external constant (the NULL-on-failure fallback)
     val anchored = valueReturns.exists {
         case _: Literal => false
-        case e          => flowsFromAllocation(e, allocIds)
+        case e          => flowsFromAllocation(e, producerIds)
     }
-    val allFlowish = valueReturns.forall(flowsOrNullConstant(_, allocIds))
+    val allFlowish = valueReturns.forall(flowsOrNullConstant(_, producerIds))
     if !anchored || !allFlowish then None
     else
       // the size role is the parameter feeding the wrapped allocation's size argument, when
       // exactly one is - a size of `n * 4` still counts through its parameter
       val sizeParams = (for
-        call <- method.call.l if allocIds.contains(call.id)
+        call <- method.call.l if producerIds.contains(call.id)
         arg  <- call.argument.l if lenArgIds.contains(arg.id)
         leaves = arg.ast.l.collect { case i: Identifier => i }.toList ++ List(arg)
             .collect { case i: Identifier => i }
@@ -261,7 +279,17 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
       val len = sizeParams match
         case List(idx) => Some(idx)
         case _         => None
-      Some(MemApiVocab.MemApiEntry(method.name, len = len, alloc = Some(FamilyHeap)))
+      // the family follows the body: a wrapper over plain allocations is an allocator, one over
+      // reallocs only is a realloc wrapper, a mixed one is honestly both
+      Some(
+        MemApiVocab.MemApiEntry(
+          method.name,
+          len = len,
+          alloc = Option.when(method.call.l.exists(c => allocIds.contains(c.id)))(FamilyHeap),
+          realloc = Option.when(method.call.l.exists(c => reallocIds.contains(c.id)))(FamilyHeap)
+        )
+      )
+    end if
   end allocatorEntry
 
   /** Does this expression's value come from an allocation: the allocation call itself, a cast of
@@ -332,9 +360,10 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
           .flatMap(_.astChildren)
           .isEmpty
 
-  /** The one-word summary of an entry's alloc/free role, for the disagreement report. */
+  /** The one-word summary of an entry's alloc/realloc/free role, for the disagreement report. */
   private def roleOf(entry: MemApiVocab.MemApiEntry): Option[String] =
       if entry.alloc.isDefined then Some("allocator")
+      else if entry.realloc.isDefined then Some("realloc")
       else if entry.free.isDefined then Some("free")
       else None
 end MemoryApiPass
@@ -344,11 +373,17 @@ object MemoryApiPass:
   /** The umbrella tag every fine-grained tag is emitted alongside. */
   final val UmbrellaTag = "memory-safety"
 
-  final val TagDst           = "mem-dst"
-  final val TagSrc           = "mem-src"
-  final val TagLen           = "mem-len"
-  final val TagAlloc         = "mem-alloc"
-  final val TagFree          = "mem-free"
+  final val TagDst   = "mem-dst"
+  final val TagSrc   = "mem-src"
+  final val TagLen   = "mem-len"
+  final val TagAlloc = "mem-alloc"
+  final val TagFree  = "mem-free"
+
+  /** The third family (D1): the call releases its input pointer and returns a fresh allocation. It
+    * is deliberately NOT emitted as both `mem-alloc` and `mem-free` - every consumer reads those as
+    * disjoint sets, and a realloc is honestly neither.
+    */
+  final val TagRealloc       = "mem-realloc"
   final val TagUntrustedRead = "untrusted-read"
 
   /** The family inferred wrappers emit; the inventory's own families are unchanged. */

@@ -22,10 +22,13 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
     |int process(int fd, char *src, int n) {
     |    char buf[64];
     |    char *heap = malloc(128);
+    |    char *grid = calloc(n, sizeof(char));
     |    memcpy(buf, src, n);
     |    snprintf(buf, sizeof(buf), "%s", src);
     |    read(fd, buf, n);
+    |    heap = realloc(heap, 256);
     |    free(heap);
+    |    free(grid);
     |    return readlink(src, buf, n);
     |}
     |""".stripMargin,
@@ -54,6 +57,15 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           memcpy.argument(3).tag.name("mem-len").value.l shouldBe List("memcpy")
       }
 
+      "tag BOTH factors of a count-by-size allocator as mem-len (D1)" in {
+          // calloc(nmemb, size): the size that can overflow is the product, so the element
+          // count carries mem-len too and ValueOrigin can attribute an origin to it
+          val calloc = call("calloc")
+          calloc.argument(1).tag.name.l should contain("mem-len")
+          calloc.argument(2).tag.name.l should contain("mem-len")
+          calloc.tag.name("mem-alloc").value.l shouldBe List("heap")
+      }
+
       "let snprintf's different arity come free from the resource" in {
           // snprintf(dst, size, fmt, ...) - the destination is argument 1, the length argument 2,
           // not memcpy's argument 3. No hard-coded indices anywhere in the consumer.
@@ -69,6 +81,17 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           malloc.tag.name("mem-alloc").value.l shouldBe List("heap")
           malloc.argument(1).tag.name.l should contain("mem-len")
           call("free").tag.name("mem-free").value.l shouldBe List("heap")
+      }
+
+      "make a realloc the third family, not alloc AND free (D1)" in {
+          val realloc = call("realloc")
+          realloc.tag.name("mem-realloc").value.l shouldBe List("heap")
+          // the two release/allocate sets are read as disjoint downstream: a call carrying
+          // both would be a double-free and a fresh allocation at once
+          realloc.tag.name.l should not contain "mem-alloc"
+          realloc.tag.name.l should not contain "mem-free"
+          // the byte size still bounds the new allocation
+          realloc.argument(2).tag.name.l should contain("mem-len")
       }
 
       "tag the call and the filled buffer for untrusted readers" in {
@@ -87,10 +110,13 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           cpg.tag.name("mem-len").l should not be empty
           cpg.tag.name("mem-alloc").l should not be empty
           cpg.tag.name("mem-free").l should not be empty
+          cpg.tag.name("mem-realloc").l should not be empty
           cpg.tag.name("untrusted-read").l should not be empty
           // every node carrying any memory tag also carries the umbrella
           val taggedNodes =
-              cpg.call.filter(_.tag.name("mem-alloc|mem-free|untrusted-read").l.nonEmpty).l ++
+              cpg.call.filter(
+                _.tag.name("mem-alloc|mem-free|mem-realloc|untrusted-read").l.nonEmpty
+              ).l ++
                   cpg.call.flatMap(_.argument).filter(
                     _.tag.name("mem-dst|mem-src|mem-len|untrusted-read").l.nonEmpty
                   ).l
@@ -103,10 +129,18 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           cpg.call.name("process").l shouldBe Nil // internal, not an API call site
           val taggedCallNames = cpg.call.filter(_.tag.name("memory-safety").l.nonEmpty).name.l.toSet
           // Call-level tags exist only where the inventory declares a call-level role
-          // (alloc/free/untrusted-read). memcpy and snprintf are pure writers: their CALL nodes
-          // carry no memory tag, only their arguments do - while snprintf's length argument
+          // (alloc/free/realloc/untrusted-read). memcpy and snprintf are pure writers: their CALL
+          // nodes carry no memory tag, only their arguments do - while snprintf's length argument
           // happens to be a sizeof() call, which is tagged in its argument role.
-          taggedCallNames shouldBe Set("malloc", "free", "read", "readlink", "<operator>.sizeOf")
+          taggedCallNames shouldBe Set(
+            "malloc",
+            "calloc",
+            "realloc",
+            "free",
+            "read",
+            "readlink",
+            "<operator>.sizeOf"
+          )
           call("memcpy").tag.name.l should not contain "memory-safety"
           call("memcpy").argument(1).tag.name.l should contain("memory-safety")
       }
@@ -120,8 +154,15 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           inv("bcopy").src shouldBe Some(1)
           inv("getenv").untrustedCall shouldBe true
           inv("getenv").untrustedRead shouldBe None
-          inv("realloc").alloc shouldBe Some("heap")
-          inv("realloc").free shouldBe Some("heap") // realloc releases its input too
+          // realloc is the third family (D1): neither an allocation nor a release
+          inv("realloc").realloc shouldBe Some("heap")
+          inv("realloc").alloc shouldBe None
+          inv("realloc").free shouldBe None
+          // count-by-size allocators declare both factors
+          inv("calloc").count shouldBe Some(1)
+          inv("calloc").len shouldBe Some(2)
+          inv("reallocarray").count shouldBe Some(2)
+          inv("reallocarray").len shouldBe Some(3)
           inv("<operator>.new").alloc shouldBe Some("new")
       }
 

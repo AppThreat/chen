@@ -25,11 +25,21 @@ object MemApiVocab:
     * @param src
     *   argument the copied/read data comes from.
     * @param len
-    *   argument that bounds the operation (byte count, capacity).
+    *   argument that bounds the operation in BYTES (byte count, element size, capacity).
+    * @param count
+    *   element-count argument of a count-by-size allocator (`calloc(nmemb, size)`): the size that
+    *   can overflow is the PRODUCT, so the count joins `len` as a tagged length role and the
+    *   overflow question can be asked about either factor. Absent for single-size allocators.
     * @param alloc
     *   allocation family of the call (`heap`, `new`, `new[]`, `mmap`, `file`, `socket`).
     * @param free
-    *   release family of the call; `realloc` carries both, it releases its first argument.
+    *   release family of the call.
+    * @param realloc
+    *   the third family: the call releases its input pointer AND returns a fresh allocation
+    *   (`realloc`, `av_reallocp_array`). Carried SEPARATELY from `alloc`/`free` - part 4 (D1) -
+    *   because every consumer reads those two as disjoint sets, and a realloc is honestly neither:
+    *   it does not leave the input valid (not a pure allocation) and it yields a new pointer (not a
+    *   pure release).
     * @param untrustedRead
     *   argument the API fills with untrusted data (the buffer a `read`/`recv`/`fgets` fills).
     * @param untrustedCall
@@ -46,8 +56,10 @@ object MemApiVocab:
     dst: Option[Int] = None,
     src: Option[Int] = None,
     len: Option[Int] = None,
+    count: Option[Int] = None,
     alloc: Option[String] = None,
     free: Option[String] = None,
+    realloc: Option[String] = None,
     untrustedRead: Option[Int] = None,
     untrustedCall: Boolean = false,
     clamp: Option[String] = None
@@ -61,8 +73,10 @@ object MemApiVocab:
         dst = json.hcursor.get[Int]("dst").toOption,
         src = json.hcursor.get[Int]("src").toOption,
         len = json.hcursor.get[Int]("len").toOption,
+        count = json.hcursor.get[Int]("count").toOption,
         alloc = json.hcursor.get[String]("alloc").toOption,
         free = json.hcursor.get[String]("free").toOption,
+        realloc = json.hcursor.get[String]("realloc").toOption,
         untrustedRead = json.hcursor.get[Int]("untrustedRead").toOption,
         untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false),
         clamp = json.hcursor.get[String]("clamp").toOption
