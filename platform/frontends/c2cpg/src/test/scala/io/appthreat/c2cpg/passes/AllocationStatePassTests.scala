@@ -6,6 +6,7 @@ import io.appthreat.x2cpg.passes.taggers.{
     MemoryApiPass,
     MemorySafetyFindingPass
 }
+import io.shiftleft.codepropertygraph.generated.nodes.{Return, StoredNode}
 import io.shiftleft.semanticcpg.language.*
 
 /** MS4 (part 4, D3): allocation-state rules over the AllocationStatePass facts. Every positive
@@ -87,6 +88,22 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    if (n < 0) { return 2; }
     |    free(p);
     |    return 0;
+    |}
+    |
+    |int bad_leak_two_exits(int n)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    if (p == NULL) return 1;
+    |    if (n < 0) { return 2; }
+    |    if (n > 99) { return 3; }
+    |    free(p);
+    |    return 0;
+    |}
+    |
+    |void bad_leak_no_explicit_return(void)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    p[0] = 'x';
     |}
     |
     |void bad_leak_overwrite(void)
@@ -196,6 +213,34 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "fire at the early return that abandons the allocation" in {
         findingsIn("bad_leak_early_return") shouldBe Set("MS-ALLOC-003")
+    }
+
+    "report the EARLIEST leaking exit, not the last one" in {
+        // two early returns abandon the same allocation; the fact belongs on the first, which is
+        // where a reader fixes it. `minBy(-line)` reported the last one instead.
+        val leaks = cpg.method
+            .name("bad_leak_two_exits")
+            .ast
+            .collectAll[StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-003"))
+            .l
+        leaks.size shouldBe 1
+        // and it is the explicit `return 2;`, not the implicit end - METHOD_RETURN carries the
+        // function's DECLARATION line, so ordering exits by line alone hands it every leak
+        leaks.head.label shouldBe "RETURN"
+        leaks.head.propertyOption("CODE").get.toString should include("2")
+    }
+
+    "fire at the implicit end of a function with no explicit return" in {
+        // the fact lands on METHOD_RETURN, which is a CFG_NODE and NOT an Expression - the
+        // renderer has to name it to see it
+        cpg.method
+            .name("bad_leak_no_explicit_return")
+            .methodReturn
+            .tag
+            .name("ms-finding")
+            .value
+            .l should contain("MS-ALLOC-003")
     }
 
     "fire at the assignment that overwrites the only handle" in {

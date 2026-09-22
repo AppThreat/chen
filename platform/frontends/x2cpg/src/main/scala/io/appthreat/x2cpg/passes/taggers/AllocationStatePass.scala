@@ -150,8 +150,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       }
     // one leak fact per allocation: the earliest exit where it is still live
     leakFacts.groupBy(_._1).foreach { case (_, exits) =>
-        val (_, exit, name) =
-            exits.minBy { case (_, node, _) => -lineOf(node) }
+        // the EARLIEST exit, as the scaladoc says: the first `return` that walks out on a live
+        // allocation is where a reader fixes the leak, and every later exit restates it.
+        // `minBy(-line)` picked the LAST one instead.
+        //
+        // A real `return` always wins over the implicit end, and that is not a line comparison:
+        // METHOD_RETURN carries the line of the function's DECLARATION, so it is "earliest" by
+        // line in every function that has one and would swallow every explicit exit.
+        val (_, exit, name) = exits.minBy { case (_, node, _) =>
+            (node.isInstanceOf[MethodReturn], lineOf(node))
+        }
         record(exit, TagLeak, s"leak:$name")
     }
   end analyseMethod
@@ -326,18 +334,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     out
   end transferCall
 
-  /** The control structure whose condition `node` is, when `node` is a guard condition - the
-    * condition may be a call (`p == NULL`, `!p`) or, for `if (p)`, the identifier itself.
-    */
-  private def conditionGuardOf(node: CfgNode): Option[ControlStructure] =
-      node match
-        case c: (Call | Identifier) =>
-            c._astIn.collectFirst { case cs: ControlStructure => cs }
-        // the frontend can carry the condition as both an AST child and a CFG-inlined
-        // copy, so membership stays structural - an id check against cs.condition
-        // silently disabled every null narrowing on real trees
-        case _ => None
-
   /** Guard narrowing at an `==`/`!=` NULL comparison: on paths where `p == NULL` holds, p is null;
     * where `p != NULL` (or the negation) holds, a nulled p is live again. Which side a successor
     * sits on is decided by AST nesting under the control structure.
@@ -497,9 +493,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         Set("NULL", "nullptr").contains(c.name.trim)
     case i: Identifier => i.name == "NULL" || i.name == "nullptr"
     case _             => false
-
-  private def tagValues(node: StoredNode, tag: String): Set[String] =
-      node.tag.name(tag).value.l.toSet
 
   private def argAt(args: List[Expression], index: Int): Option[Expression] =
       args.find(_.argumentIndex == index)

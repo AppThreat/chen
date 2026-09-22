@@ -199,22 +199,32 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       case _ => None
     rhs.flatMap(allocCallOf).flatMap(alloc => sizeArgValueOf(alloc))
 
-  /** The byte-size factor of an allocation's length arguments. A count-by-size allocator tags BOTH
-    * factors `mem-len` (D1); the capacity is the byte size, which in every inventoried signature is
-    * either the `sizeof` or the trailing factor.
+  /** The capacity an allocation establishes, from its length arguments.
+    *
+    * A count-by-size allocator tags BOTH factors `mem-len` (D1), and then NO single argument is the
+    * capacity - `calloc(n, sizeof(x))` holds `n * sizeof(x)` bytes, and naming either factor
+    * reports a capacity the buffer does not have. Only a product of literals can be named, so the
+    * rest answer `unknown`: an extent that is one element wide would present as a known capacity to
+    * the index rules, which is the shape standing rule 4 forbids (a fact we do not have, dressed as
+    * one we do).
     */
   private def sizeArgValueOf(alloc: Call): Option[String] =
     val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-    lenArgs
-        .collectFirst {
-            case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
-                s"$ValueSizeof:${sz.code}"
-        }
-        .orElse(lenArgs.lastOption.map {
-            case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
-                s"$ValueSizeof:${sz.code}"
-            case sizeArg => s"$ValueAlloc:${sizeArg.id}"
-        })
+    def valueOf(arg: Expression): String = arg match
+      case sz: Call if sz.name.startsWith("<operator>.sizeOf") => s"$ValueSizeof:${sz.code}"
+      case sizeArg                                             => s"$ValueAlloc:${sizeArg.id}"
+    lenArgs match
+      case Nil        => None
+      case List(only) => Some(valueOf(only))
+      case several    =>
+          // every factor a literal: the product IS knowable, and it is a const extent
+          val literals = several.map {
+              case l: Literal => l.code.trim.toLongOption
+              case _          => None
+          }
+          Option.when(literals.forall(_.isDefined))(
+            s"$ValueConst:${literals.flatten.product}"
+          )
 
   private def isAllocationCall(c: Call): Boolean =
       c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty ||
