@@ -166,10 +166,18 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
               val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
                   tags.contains(ValueOriginPass.OriginUntrustedRead)
               val halfBounded = tags.contains(ValueOriginPass.OriginStructField) &&
-                  isSignedIndex(idx)
-              val fires = (attackerIndex && knownExtent && !boundedAbove && !boundedBelow) ||
-                  (halfBounded && boundedAbove && !boundedBelow)
-              if fires then record(idx, ruleIdFor(access))
+                  signednessOf(idx).contains(true)
+              // The two arms are separate rules because they know different amounts. The attacker
+              // arm has a capacity and an origin and no bound: evidence. The half-bounded arm has
+              // a HYPOTHESIS - this signed counter could be negative - which is true of most
+              // signed counters and wrong about almost all of them (76 of libavformat's index
+              // findings, against one CVE shape). It reports at `low`, so a default run at
+              // `--min-confidence medium` does not drown in it, and looking for the shape
+              // deliberately still works.
+              if attackerIndex && knownExtent && !boundedAbove && !boundedBelow then
+                record(idx, ruleIdFor(access))
+              else if halfBounded && boundedAbove && !boundedBelow then
+                record(idx, RuleNegativeIndexHazard)
             end for
           }
   end ruleIndexBounds
@@ -189,12 +197,17 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     case l: Literal    => l.typeFullName
     case _             => ""
 
-  /** Can this index go negative? c2cpg often leaves the TYPE of a field-access expression empty, so
-    * a `pls->cur_seq_no` index resolves its type through the member it reads; an index whose type
-    * is nowhere recorded is treated as signed - the negative-index hazard stands, and the absence
-    * of a type is not evidence of unsignedness.
+  /** Can this index go negative, and do we actually know? c2cpg often leaves the TYPE of a
+    * field-access expression empty, so a `pls->cur_seq_no` index resolves its type through the
+    * member it reads; when neither records a type, the answer is None - we do not know.
+    *
+    * The distinction is load-bearing. Treating "no type recorded" as signed made the rule fire 120
+    * times on libavformat, 105 of them on indices whose type the frontend simply never wrote down:
+    * an absent fact quietly satisfying a rule, which is what `unknown` extents are forbidden to do.
+    * A negative-index claim needs evidence that the index CAN be negative, and the frontend's
+    * silence is not that evidence.
     */
-  private def isSignedIndex(idx: Expression): Boolean =
+  private def signednessOf(idx: Expression): Option[Boolean] =
     val declared = typeOfExpr(idx) match
       // c2cpg writes the placeholder type "<empty>" rather than an empty string
       case t if t.nonEmpty && t != "<empty>" => Some(t)
@@ -202,9 +215,10 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
           idx match
             case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName)
             case _       => None
-    declared match
-      case Some(t) => OverlayFacts.isSignedIntegral(t)
-      case None    => true
+    declared.collect {
+        case t if OverlayFacts.isSignedIntegral(t)   => true
+        case t if OverlayFacts.isUnsignedIntegral(t) => false
+    }
 
   /** MS-BOUND-001: the destination's extent is an adjacent capacity parameter, and that parameter
     * reaches neither the copy's length nor a bound on it.
@@ -257,6 +271,9 @@ object MemorySafetyFindingPass:
   final val RuleIndexRead         = "MS-BOUND-003"
   final val RuleIndexWrite        = "MS-BOUND-004"
 
+  /** The half-bounded signed-index arm: a hypothesis, reported at `low`. */
+  final val RuleNegativeIndexHazard = "MS-BOUND-005"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -305,6 +322,15 @@ object MemorySafetyFindingPass:
       confidence = "medium",
       message = "array write at an index that can leave the buffer: attacker-controlled and " +
           "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleNegativeIndexHazard,
+      cwe = "CWE-125",
+      kind = "negative-index-hazard",
+      severity = "medium",
+      confidence = "low",
+      message = "signed index bounded above but not below, so a negative value passes the " +
+          "check - the CVE-2026-75146 shape, and also what most correct counters look like"
     )
   ).map(r => r.id -> r).toMap
 

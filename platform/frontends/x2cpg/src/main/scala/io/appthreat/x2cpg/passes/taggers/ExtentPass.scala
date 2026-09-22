@@ -204,14 +204,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         val inwards = (arith.name, offset) match
           case ("<operator>.addition", Some(k)) if k >= 0 => Some(k)
           case _                                          => None
-        val reduced = baseValue match
-          case const if inwards.isDefined && baseValue.startsWith(s"$ValueConst:") =>
-              val n = const.stripPrefix(s"$ValueConst:").toLongOption.getOrElse(0L)
-              if inwards.get < n then s"$ValueConst:${n - inwards.get}"
-              else s"$ValueOffset:$baseValue"
-          case known if knownExtentPrefixes.exists(baseValue.startsWith) =>
+        val declaredSize = Option.when(baseValue.startsWith(s"$ValueConst:"))(
+          baseValue.stripPrefix(s"$ValueConst:").toLongOption
+        ).flatten
+        val reduced = (inwards, declaredSize) match
+          case (Some(k), Some(n)) if k < n => s"$ValueConst:${n - k}"
+          case _ if knownExtentPrefixes.exists(baseValue.startsWith) =>
               s"$ValueOffset:$baseValue"
-          case other => other
+          case _ => baseValue
         // the arithmetic reshapes the write's extent, not the buffer's: the declaration keeps
         // its own (full) fact, so a guard against the declared capacity still matches it
         (reduced, List.empty[StoredNode])

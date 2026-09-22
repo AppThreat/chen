@@ -304,7 +304,7 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
   "MS-BOUND-003/004 (C4 index bounds)" should {
 
       "fire on a signed field index bounded only above - the negative-index shape" in {
-          indexFindings("bad_half_bounded") shouldBe Set("MS-BOUND-003")
+          indexFindings("bad_half_bounded") shouldBe Set("MS-BOUND-005")
       }
 
       "go quiet when the fixed tree adds the >= 0 conjunct" in {

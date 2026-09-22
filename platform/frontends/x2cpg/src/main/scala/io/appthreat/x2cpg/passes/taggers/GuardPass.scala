@@ -120,11 +120,9 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     var walking = true
     while walking do
       cursor._astIn.nextOption() match
-        case Some(parent: Block)            => walking = false
-        case Some(parent: ControlStructure) => walking = false
-        case Some(parent: Method)           => walking = false
-        case Some(parent: CfgNode)          => cursor = parent
-        case None                           => walking = false
+        case Some(_: Block | _: ControlStructure | _: Method) => walking = false
+        case Some(parent: CfgNode)                            => cursor = parent
+        case _                                                => walking = false
     cursor
 
   /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a

@@ -78,7 +78,7 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
 
     // The wrapper layer over the inventory (C2): infer allocator/free roles from method bodies,
     // then tag the wrappers' call sites exactly as the inventory's own entries are tagged.
-    val inferred = inferWrappers(inventory, matchesByTag, record)
+    inferWrappers(inventory, matchesByTag, record)
 
     // The umbrella is emitted once per node across all categories, not once per (tag, value)
     // group: a `memcpy` destination carries `mem-dst` and the call carries `mem-alloc`-style
@@ -137,6 +137,8 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     record: (String, String, StoredNode) => Unit
   ): List[MemApiVocab.MemApiEntry] =
     val inferred = mutable.LinkedHashMap.empty[String, MemApiVocab.MemApiEntry]
+    // methods whose conclusion disagreed with the declaration: reported once, not once per round
+    val reported = mutable.HashSet.empty[String]
     // the alloc/free/read call nodes the inventory produced, grown by each round's conclusions
     // so a wrapper of a wrapper chains
     val callsByTag = mutable.HashMap.empty[String, mutable.LinkedHashSet[Call]]
@@ -166,12 +168,14 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
           .distinct
 
       candidates.foreach { method =>
-          if !inferred.contains(method.name) then
+          if !inferred.contains(method.name) && !reported.contains(method.name) then
             concludeWrapper(method, allocIds, freeIds, readIds, lenArgIds).foreach { entry =>
                 declared.get(method.name) match
                   case Some(d) if roleOf(d) != roleOf(entry) =>
                       // inference must say what it concluded, and must not quietly prefer
-                      // either source when it disagrees with the declaration
+                      // either source when it disagrees with the declaration. Recorded so the
+                      // next fixpoint round does not re-derive and re-report the same one.
+                      reported += method.name
                       System.err.println(
                         s"warn: memory-api inference concludes ${method.name} is an " +
                             s"${roleOf(entry).getOrElse("?")} wrapper, but the declared " +
@@ -297,8 +301,14 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
                   c.argument.l.collect { case x: Expression => x }
                       .exists(flowsFromAllocation(_, allocIds))
               case "<operator>.conditional" =>
+                  // `cond ? p : NULL` flows; `cond ? 0 : NULL` is two constants and anchors
+                  // nothing, the same reason a bare literal return does not anchor
                   val branches = Seq(2, 3).flatMap(c.argumentOption)
-                  branches.nonEmpty && branches.forall(flowsOrNullConstant(_, allocIds))
+                  branches.nonEmpty && branches.forall(flowsOrNullConstant(_, allocIds)) &&
+                  branches.exists {
+                      case _: Literal => false
+                      case b          => flowsFromAllocation(b, allocIds)
+                  }
               case _ => allocIds.contains(c.id)
         case _ => false
 
