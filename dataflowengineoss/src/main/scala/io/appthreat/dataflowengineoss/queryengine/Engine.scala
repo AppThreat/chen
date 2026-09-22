@@ -224,9 +224,13 @@ object Engine:
                 // This runs once per candidate DDG edge of every repeat step; an argument has
                 // at most one incoming ARGUMENT edge in practice, so the call-site comparison
                 // works on the single options rather than materialising two lists per edge.
+                // NB both-absent must compare equal, as the two empty lists it replaces did:
+                // when neither node is an argument the walk falls into the semantic/callee
+                // branch below, where an absent call yields no semantics and no explorable
+                // callee, hence a visible element. Requiring the parent call to be present
+                // here would silently turn those elements invisible.
                 val parentCallOpt = parentNode.inCall.nextOption()
-                val sameCallSite = parentCallOpt.isDefined &&
-                    parentCallOpt == childNode.inCall.nextOption()
+                val sameCallSite  = parentCallOpt == childNode.inCall.nextOption()
                 val visible = if sameCallSite then
                   val semanticExists = parentNode.semanticsForCallByArg.hasNext
                   // Methods the walk treats as a descendable callee (internal, or external
@@ -329,7 +333,7 @@ end Engine
   *   additional configurations for the data flow engine.
   */
 case class EngineContext(
-  semantics: Semantics = DefaultSemantics(),
+  semantics: Semantics = DefaultSemantics.memoised,
   config: EngineConfig = EngineConfig()
 )
 

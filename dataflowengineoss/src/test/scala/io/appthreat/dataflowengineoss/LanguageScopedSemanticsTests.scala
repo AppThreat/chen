@@ -20,7 +20,18 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
     * name in a non-C graph.
     */
   private val bareCNames =
-      Seq("free", "read", "getc", "exit", "strlen", "strncpy", "strcpy", "sprintf", "scanf", "malloc")
+      Seq(
+        "free",
+        "read",
+        "getc",
+        "exit",
+        "strlen",
+        "strncpy",
+        "strcpy",
+        "sprintf",
+        "scanf",
+        "malloc"
+      )
 
   "the language-neutral default semantics" should {
 
@@ -178,12 +189,14 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
           // default expression per call: unless the expression itself is memoised, the semantics
           // table is rebuilt once per DDG edge per path inside slicing repeats. The regex-result
           // cache only pays for itself on a shared instance too.
-          DefaultSemantics.memoised should be theSameInstanceAs DefaultSemantics.memoised
+          (DefaultSemantics.memoised should be).theSameInstanceAs(DefaultSemantics.memoised)
       }
 
       "carry the language-neutral defaults" in {
           DefaultSemantics.memoised.forMethod("<operator>.assignment") should not be None
-          DefaultSemantics.memoised.forMethod("java.lang.String.format:java.lang.String(java.lang.String,java.lang.Object[])") should not be None
+          DefaultSemantics.memoised.forMethod(
+            "java.lang.String.format:java.lang.String(java.lang.String,java.lang.Object[])"
+          ) should not be None
           // and none of the language-scoped bare names
           DefaultSemantics.memoised.forMethod("free") shouldBe None
       }

@@ -47,9 +47,9 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
 
     // One traversal over calls; matches accumulated per tag and emitted in a single batch.
     val matchesByTag =
-        mutable.LinkedHashMap.empty[String, mutable.ArrayBuffer[(StoredNode, String)]]
+        mutable.LinkedHashMap.empty[String, mutable.LinkedHashSet[(StoredNode, String)]]
     def record(tag: String, value: String, node: StoredNode): Unit =
-        matchesByTag.getOrElseUpdate(tag, mutable.ArrayBuffer.empty) += ((node, value))
+        matchesByTag.getOrElseUpdate(tag, mutable.LinkedHashSet.empty) += ((node, value))
 
     atom.call.foreach { call =>
         inventory.get(call.name).foreach { entry =>
@@ -57,13 +57,18 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
         }
     }
 
+    // The umbrella is emitted once per node across all categories, not once per (tag, value)
+    // group: a `memcpy` destination carries `mem-dst` and the call carries `mem-alloc`-style
+    // tags from several groups, and re-emitting `memory-safety` per group would attach the same
+    // tag to the same node repeatedly.
+    val umbrella = mutable.LinkedHashSet.empty[StoredNode]
     matchesByTag.foreach { case (tag, tagged) =>
-        val grouped = tagged.groupMap(_._2)(_._1)
-        grouped.foreach { case (value, nodes) =>
+        tagged.groupMap(_._2)(_._1).foreach { case (value, nodes) =>
             nodes.iterator.newTagNodePair(tag, value).store()(using dstGraph)
-            nodes.iterator.newTagNode(UmbrellaTag).store()(using dstGraph)
+            umbrella ++= nodes
         }
     }
+    umbrella.iterator.newTagNode(UmbrellaTag).store()(using dstGraph)
   end run
 
   private def tagCall(

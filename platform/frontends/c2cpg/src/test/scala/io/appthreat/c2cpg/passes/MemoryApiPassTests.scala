@@ -36,7 +36,8 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
   private def tagValues(node: Any): Set[String] =
       node match
         case c: Call => c.tag.name.l.toSet
-        case n       => n.asInstanceOf[io.shiftleft.codepropertygraph.generated.nodes.StoredNode].tag.name.l.toSet
+        case n =>
+            n.asInstanceOf[io.shiftleft.codepropertygraph.generated.nodes.StoredNode].tag.name.l.toSet
 
   private def call(name: String): Call = cpg.call.name(name).head
 
@@ -127,7 +128,7 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
             {"name": "av_memcpy", "dst": 1, "src": 2, "len": 3},
             {"name": "memcpy", "dst": 4}
           ]}"""
-          val inv = MemApiVocab.inventory(Some(external))
+          val inv      = MemApiVocab.inventory(Some(external))
           // a declared in-house wrapper tags without patching chen
           inv("av_memcpy").len shouldBe Some(3)
           // an external entry REPLACES the built-in one with the same name

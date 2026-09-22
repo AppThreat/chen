@@ -16,8 +16,8 @@ import io.shiftleft.semanticcpg.language.*
   * invisible: no CFG edges, no reaching definitions, and a bounds detector would report every
   * correctly clamped copy as a finding.
   *
-  * The macro is deliberately defined in a HEADER: same-translation-unit macros do not exercise
-  * the synthetic-call path the way a foreign-file macro does (the FFmpeg `FFMIN` shape).
+  * The macro is deliberately defined in a HEADER: same-translation-unit macros do not exercise the
+  * synthetic-call path the way a foreign-file macro does (the FFmpeg `FFMIN` shape).
   */
 class MacroGuardTests extends DataFlowCodeToCpgSuite:
 
@@ -52,7 +52,7 @@ class MacroGuardTests extends DataFlowCodeToCpgSuite:
           call.dispatchType shouldBe DispatchTypes.INLINED
           // path/to/clamps.h:<line>:<line>:FFMIN:<argc> - the shape the clamping-macro
           // semantics are keyed on.
-          call.methodFullName should fullyMatch regex ".*:FFMIN:\\d+$"
+          (call.methodFullName should fullyMatch).regex(".*:FFMIN:\\d+$")
       }
 
       "have its expansion wired into the method CFG" in {

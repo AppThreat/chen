@@ -3,7 +3,7 @@ package io.appthreat.x2cpg.passes.taggers
 import io.circe.parser.*
 
 import scala.io.Source
-import scala.util.{Failure, Success, Try, Using}
+import scala.util.Using
 
 /** The memory-API vocabulary used by [[MemoryApiPass]], loaded from the versioned
   * `memory-apis.json` resource so that adding an API (or a project's in-house wrapper) is a data
@@ -61,15 +61,21 @@ object MemApiVocab:
         untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false)
       )
 
-  private def decodeApis(jsonStr: String): List[MemApiEntry] =
-      parse(jsonStr) match
-        case Right(json) =>
-            json.hcursor.downField("apis").as[List[io.circe.Json]].getOrElse(List.empty)
-                .flatMap(decodeEntry)
-        case Left(_) => List.empty
+  /** @return
+    *   the decoded entries, or a reason the document could not be read. The reason matters for an
+    *   external config: a typo'd override that silently decoded to nothing would look exactly like
+    *   a config that legitimately declares no APIs.
+    */
+  private def decodeApis(jsonStr: String): Either[String, List[MemApiEntry]] =
+      parse(jsonStr).left.map(_.message).flatMap { json =>
+          json.hcursor.downField("apis").as[List[io.circe.Json]] match
+            case Right(entries) => Right(entries.flatMap(decodeEntry))
+            case Left(err)      => Left(s"no readable `apis` array: ${err.message}")
+      }
 
   private lazy val builtin: List[MemApiEntry] =
-      Using(Source.fromResource(ResourcePath))(_.mkString).toOption.toList.flatMap(decodeApis)
+      Using(Source.fromResource(ResourcePath))(_.mkString).toOption.toList
+          .flatMap(decodeApis(_).getOrElse(List.empty))
 
   /** The effective inventory: the built-in resource merged with the optional external config
     * (external entries win by name). Invalid external JSON is reported to stderr and ignored rather
@@ -79,12 +85,10 @@ object MemApiVocab:
   def inventory(externalConfig: Option[String]): Map[String, MemApiEntry] =
     val external = externalConfig match
       case Some(jsonStr) =>
-          Try(decodeApis(jsonStr)) match
-            case Success(entries) => entries
-            case Failure(ex) =>
-                System.err.println(
-                  s"warn: ignoring invalid memory-api config: ${ex.getMessage}"
-                )
+          decodeApis(jsonStr) match
+            case Right(entries) => entries
+            case Left(reason) =>
+                System.err.println(s"warn: ignoring invalid memory-api config: $reason")
                 List.empty
       case None => List.empty
     val merged = builtin.filterNot(b => external.exists(_.name == b.name)) ++ external

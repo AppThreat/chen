@@ -34,6 +34,11 @@ object DefaultSemantics:
     *
     * Sharing is safe because the instance is read-only after construction - the only mutation is
     * [[Semantics.loadRegexSemantics]], which each pipeline runs once, before queries start.
+    *
+    * It carries only what [[apply]] carries, so it is LANGUAGE NEUTRAL: no `cFlows`, no `phpFlows`.
+    * A caller that knows its graph's language must build its own instance from `apply().elements ++
+    * flowsForLanguage(lang)` - `OssDataFlow`, `DataFlowSlicing` and `ReachableSlicing` all do. This
+    * default is the right answer only where the language is genuinely unknown.
     */
   lazy val memoised: Semantics = apply()
 
