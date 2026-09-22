@@ -2079,9 +2079,14 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
       "find flows" in {
           val source = cpg.identifier("v1").l
           val sink   = cpg.method("foo").methodReturn.l
+          // The BAR(v1) elements appear because the synthetic macro call carries its argument
+          // (x) as an argument node: v1's definition reaches the call, and the call reaches the
+          // method return. Before macro arguments were attached, no flow could cross the macro
+          // call boundary at all.
           sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
-            List(("v1 = 0", 5), ("RET", 4)),
-            List(("v1 = 1", 6), ("RET", 4))
+            List(("v1 = 0", 5), ("BAR(v1)", 6), ("RET", 4)),
+            List(("v1 = 1", 6), ("RET", 4)),
+            List(("BAR(v1)", 6), ("RET", 4))
           )
       }
   }
