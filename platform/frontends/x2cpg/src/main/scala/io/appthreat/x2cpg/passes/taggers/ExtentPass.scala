@@ -14,6 +14,12 @@ import scala.collection.mutable
   *
   *   - `const:128` - a declared array (`char buf[128]`, through a `#define`, and struct members:
   *     `int[16]` is in `typeFullName`, confirmed by part-1 task A5);
+  *   - `const:N-k` - a copy into `buf + k` for a literal k: the remaining capacity of the same
+  *     buffer from the write's start;
+  *   - `offset:<extent>` - somewhere inside (or, for `base - k`, before) a buffer whose extent is
+  *     `<extent>`, reduced by an unknown amount. NOT an extent: a rule that needs a capacity must
+  *     reject it exactly as it rejects `unknown`. It exists so a later rule can tell "inside a
+  *     128-byte buffer" apart from "no idea at all";
   *   - `sizeof:<expr>` - `sizeof(x)` in the allocation that produced the pointer, or as the copy's
   *     own length argument against the same buffer;
   *   - `alloc:<id>` - the size argument of the `mem-alloc` call that produced the pointer;
@@ -37,9 +43,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   import ExtentPass.*
   import OverlayFacts.*
 
+  /** C1: the member-extent facts are not method-local, so they are built once, up front, in a
+    * single traversal over assignments - never re-derived per field access. Lazy so a graph with no
+    * pointer-member destinations never pays for it.
+    */
+  private lazy val memberExtents: Map[Member, String] = memberExtentsOf(atom)
+
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if !MemoryApiPass.appliesTo(atom) then return
-
     val argExtents  = mutable.LinkedHashMap.empty[StoredNode, String]
     val declExtents = mutable.LinkedHashMap.empty[StoredNode, String]
 
@@ -70,6 +81,24 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
             }
         }
 
+    // C4: the base of an array index is a buffer access, so its extent is the same fact it is
+    // for a memcpy destination. Memory-call destinations are resolved first and never
+    // overwritten: their resolution saw the copy's own sizeof evidence.
+    atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .foreach { access =>
+            access.argumentOption(1).foreach { base =>
+                if !argExtents.contains(base) then
+                  extentOf(base, access.method, None) match
+                    case Some((value, decls)) =>
+                        argExtents(base) = value
+                        decls.foreach(d => declExtents(d) = value)
+                    case None =>
+                        argExtents(base) = ValueUnknown
+            }
+        }
+
     OverlayFacts.emitTags(
       dstGraph,
       (argExtents.toList ++ declExtents.toList).map { case (node, value) =>
@@ -77,6 +106,47 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       }
     )
   end run
+
+  /** C1: struct members whose capacity lives at their allocation. One traversal over assignments
+    * whose LEFT side is a member and whose right side is an inventoried `mem-alloc` call (through a
+    * cast): the allocation's size argument becomes the member's extent (`alloc:<id>`, or
+    * `sizeof:<expr>` when the size is a sizeof). Two allocations of DIFFERENT sizes are no capacity
+    * at all - the member gets nothing.
+    */
+  private def memberExtentsOf(cpg: Cpg): Map[Member, String] =
+    val sizes = mutable.LinkedHashMap.empty[Member, mutable.LinkedHashSet[String]]
+    cpg.call.name("<operator>.assignment").l.foreach { assignment =>
+        assignment.argumentOption(1).foreach { lhs =>
+            allocationSizeValueOf(assignment.argumentOption(2)).foreach { sizeValue =>
+                lhs match
+                  case fa: Call =>
+                      OverlayFacts.memberRefOf(cpg, fa).foreach { member =>
+                          sizes
+                              .getOrElseUpdate(member, mutable.LinkedHashSet.empty[String])
+                              .add(sizeValue)
+                      }
+                  case _ => ()
+            }
+        }
+    }
+    sizes.collect { case (member, values) if values.size == 1 => member -> values.head }.toMap
+
+  /** The extent value of the allocation a right-hand side expression produces, through casts. */
+  private def allocationSizeValueOf(rhs: Option[Expression]): Option[String] =
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call if c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty => Some(c)
+      case c: Call if c.name.startsWith("<operator>.cast") =>
+          c.argument.l.collectFirst { case inner: Call => inner }.flatMap(allocCallOf)
+      case _ => None
+    rhs.flatMap(allocCallOf).flatMap(alloc =>
+        alloc.argument.l
+            .find(arg => arg.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+            .map {
+                case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                    s"$ValueSizeof:${sz.code}"
+                case sizeArg => s"$ValueAlloc:${sizeArg.id}"
+            }
+    )
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
@@ -88,18 +158,68 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   ): Option[(String, List[StoredNode])] =
       dst match
         case c: Call if c.name == "<operator>.addressOf" =>
-            c.argumentOption(1).flatMap(extentOf(_, method, None))
+            // the copy's own sizeof evidence is evidence about the address target too:
+            // memcpy(&dst, src, sizeof(dst)) is a correctly bounded copy
+            c.argumentOption(1).flatMap(extentOf(_, method, sizeofInCopy))
         case c: Call
             if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" =>
             // &buf[off] still writes into buf's capacity
-            c.argumentOption(1).flatMap(extentOf(_, method, None))
+            c.argumentOption(1)
+                .flatMap(extentOf(_, method, sizeofInCopy))
+                .orElse(sizeofInCopy.map(v => (v, List.empty[StoredNode])))
         case i: Identifier =>
             extentOfVariable(i.name, i, method, sizeofInCopy)
         case c: Call
+            if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+            additiveExtentOf(c, method, sizeofInCopy)
+        case c: Call
             if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
-            extentOfField(c)
+            extentOfField(c).orElse(sizeofInCopy.map(v => (v, List.empty[StoredNode])))
         case _ =>
             sizeofInCopy.map(v => (v, List.empty[StoredNode]))
+
+  /** Pointer arithmetic over a buffer. `base + k` for a literal k shrinks a known capacity by k
+    * (`const:N` -> `const:N-k`); every other shape - a non-literal offset, a subtraction whose
+    * start may be negative, a literal offset at or past the capacity - says only "at an unknown
+    * distance inside `<base extent>`": the `offset:` value, never presented as a capacity. A base
+    * that itself resolves to nothing stays `unknown`: there is no capacity to reduce.
+    */
+  private def additiveExtentOf(
+    arith: Call,
+    method: Method,
+    sizeofInCopy: Option[String]
+  ): Option[(String, List[StoredNode])] =
+    def literalOf(e: Option[Expression]): Option[Long] = e.flatMap {
+        case l: Literal => l.code.toLongOption
+        case _          => None
+    }
+    val (base, offset) =
+        (arith.argumentOption(1), arith.argumentOption(2)) match
+          case (b, o) if literalOf(o).isDefined => (b, literalOf(o))
+          case (b, o) if literalOf(b).isDefined => (o, literalOf(b))
+          case (b, _)                           => (b, None)
+    base.flatMap(extentOf(_, method, sizeofInCopy)).map { case (baseValue, _) =>
+        // the distance the write starts inside the capacity; a subtraction or a negative
+        // literal may start BEFORE the buffer, which no capacity describes
+        val inwards = (arith.name, offset) match
+          case ("<operator>.addition", Some(k)) if k >= 0 => Some(k)
+          case _                                          => None
+        val declaredSize = Option.when(baseValue.startsWith(s"$ValueConst:"))(
+          baseValue.stripPrefix(s"$ValueConst:").toLongOption
+        ).flatten
+        val reduced = (inwards, declaredSize) match
+          case (Some(k), Some(n)) if k < n => s"$ValueConst:${n - k}"
+          case _ if knownExtentPrefixes.exists(baseValue.startsWith) =>
+              s"$ValueOffset:$baseValue"
+          case _ => baseValue
+        // the arithmetic reshapes the write's extent, not the buffer's: the declaration keeps
+        // its own (full) fact, so a guard against the declared capacity still matches it
+        (reduced, List.empty[StoredNode])
+    }
+  end additiveExtentOf
+
+  private val knownExtentPrefixes: Set[String] =
+      Set(ValueConst, ValueSizeof, ValueAlloc, ValueParam, ValueField).map(_ + ":")
 
   private def extentOfVariable(
     name: String,
@@ -162,6 +282,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
           arrayExtent(member.typeFullName)
               .map(n => (s"$ValueConst:$n", List(member)))
               .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
+              // C1: a pointer member's capacity is wherever its allocation is
+              .orElse(memberExtents.get(member).map(v => (v, List(member))))
       }
 
   /** A struct member holding the length beside a pointer member, by the C `_len`/`_size` suffix
@@ -183,6 +305,7 @@ object ExtentPass:
   final val TagExtent = "extent"
 
   final val ValueConst   = "const"
+  final val ValueOffset  = "offset"
   final val ValueSizeof  = "sizeof"
   final val ValueAlloc   = "alloc"
   final val ValueParam   = "param"

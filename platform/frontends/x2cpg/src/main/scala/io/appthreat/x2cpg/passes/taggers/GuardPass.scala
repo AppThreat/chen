@@ -58,7 +58,16 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
         .map { case (call, rows) => call -> rows.map { case (_, arg, _) => arg }.distinct }
     val argNodeIds = sites.map { case (_, arg, _) => arg.id }.toSet
 
-    guardBounds(argsByCall, add)
+    // C4: an array index is a value a guard can bound exactly like a copy length. The tagged
+    // node is the index ARGUMENT; the controller is the statement the access lives in - CDG
+    // edges reach statement nodes, not the nested access.
+    val indexEntries = atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .flatMap(c => c.argumentOption(2).map(arg => (c, List(arg))))
+
+    guardBounds(argsByCall.toList, add)
+    guardBounds(indexEntries, add, controllerOf = statementRootOf)
     clampBounds(argNodeIds, add)
 
     OverlayFacts.emitTags(
@@ -69,12 +78,16 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     )
   end run
 
-  /** Facts from comparisons that control memory operations. */
+  /** Facts from comparisons that control memory operations. `controllerOf` decides which node
+    * carries the control relationship - the memory call itself, or (for index accesses) the
+    * statement the access is nested in.
+    */
   private def guardBounds(
-    argsByCall: Map[Call, List[Expression]],
-    add: (StoredNode, String, String) => Unit
+    entries: List[(Call, List[Expression])],
+    add: (StoredNode, String, String) => Unit,
+    controllerOf: Call => CfgNode = identity
   ): Unit =
-      argsByCall.foreach { case (call, args) =>
+      entries.foreach { case (call, args) =>
           val argKeys = args.flatMap { a =>
               // a guard bounding a variable bounds the whole length when the length is that
               // variable scaled by a constant or a sizeof: `malloc(n * sizeof(T))` under
@@ -82,7 +95,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               // bounding one summand bounds nothing.
               scaledKeyOf(a).orElse(variableKey(a)).map(k => k -> a)
           }.toMap
-          call.controlledBy.collect { case c: Call => c }.foreach { controller =>
+          controllerOf(call).controlledBy.collect { case c: Call => c }.foreach { controller =>
               conjuncts(controller, holdsAt(controller, call)).getOrElse(Nil).foreach {
                   case (cmp, cmpHolds) =>
                       directionalFacts(cmp, cmpHolds).foreach { case (bounded, above, bound) =>
@@ -98,6 +111,19 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               }
           }
       }
+
+  /** The statement an expression is rooted in: the innermost node whose parent is a block, a
+    * control structure, or a method. CDG in-edges land on such nodes.
+    */
+  private def statementRootOf(node: CfgNode): CfgNode =
+    var cursor  = node
+    var walking = true
+    while walking do
+      cursor._astIn.nextOption() match
+        case Some(_: Block | _: ControlStructure | _: Method) => walking = false
+        case Some(parent: CfgNode)                            => cursor = parent
+        case _                                                => walking = false
+    cursor
 
   /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
     * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
@@ -317,7 +343,12 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
 
   private def declExtent(decl: Option[StoredNode]): Option[String] =
       decl.flatMap: d =>
-        d.tag.name(ExtentPass.TagExtent).value.l.headOption.filterNot(_ == ExtentPass.ValueUnknown)
+        // an `offset:` value (pointer arithmetic into a buffer) is not a capacity and must not
+        // present as the bound a comparison was made against
+        d.tag.name(ExtentPass.TagExtent).value.l.headOption
+            .filterNot(v =>
+                v == ExtentPass.ValueUnknown || v.startsWith(ExtentPass.ValueOffset + ":")
+            )
 end GuardPass
 
 object GuardPass:

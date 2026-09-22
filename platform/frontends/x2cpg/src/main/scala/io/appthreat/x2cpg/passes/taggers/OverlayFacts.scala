@@ -93,6 +93,69 @@ private[taggers] object OverlayFacts:
 
   def isIntegral(t: String): Boolean = integralTypes.contains(t.stripPrefix("const ").trim)
 
+  private val signedIntegralTypes = Set(
+    "int",
+    "long",
+    "long long",
+    "short",
+    "ssize_t",
+    "ptrdiff_t",
+    "int8_t",
+    "int16_t",
+    "int32_t",
+    "int64_t"
+  )
+
+  /** GCC writes compound type names with the sign word last (`short unsigned`); every lookup in
+    * this object normalises to the canonical order first.
+    */
+  def normalizeTypeName(t: String): String =
+    val words = t.stripPrefix("const ").trim.split("\\s+").toList
+    val sign  = words.find(w => w == "unsigned" || w == "signed")
+    val rest  = words.filterNot(w => sign.contains(w))
+    (sign.toList ::: rest).mkString(" ")
+
+  /** A signed integral type: the only kind an index can go negative in. */
+  def isSignedIntegral(t: String): Boolean =
+      signedIntegralTypes.contains(normalizeTypeName(t))
+
+  /** An unsigned integral type - its values never go negative, whatever the width. */
+  def isUnsignedIntegral(t: String): Boolean =
+    val s = normalizeTypeName(t)
+    s.startsWith("unsigned ") || s.startsWith("uint") || s == "size_t" || s == "size_type"
+
+  /** Declared width in bits, LP64 (long = 64). The LLP64 choice - long = 32, the Windows model
+    * FFmpeg also ships on - is a fact the consumer can apply when the target demands it; the width
+    * table states which model it is rather than hiding the choice.
+    */
+  def integralWidth(t: String): Option[Int] =
+      integralWidths.get(normalizeTypeName(t))
+
+  private val integralWidths: Map[String, Int] = Map(
+    "char"               -> 8,
+    "signed char"        -> 8,
+    "unsigned char"      -> 8,
+    "short"              -> 16,
+    "unsigned short"     -> 16,
+    "int"                -> 32,
+    "unsigned int"       -> 32,
+    "long"               -> 64,
+    "unsigned long"      -> 64,
+    "long long"          -> 64,
+    "unsigned long long" -> 64,
+    "size_t"             -> 64,
+    "ssize_t"            -> 64,
+    "ptrdiff_t"          -> 64,
+    "int8_t"             -> 8,
+    "uint8_t"            -> 8,
+    "int16_t"            -> 16,
+    "uint16_t"           -> 16,
+    "int32_t"            -> 32,
+    "uint32_t"           -> 32,
+    "int64_t"            -> 64,
+    "uint64_t"           -> 64
+  )
+
   /** Reaching definitions backwards from `node`, breadth-first with a hop budget: the walk the
     * value-origin and finding rules run instead of a `.df(...)` reachability solve. Identifier
     * expansion applies [[expansionExclusionOf]]: the flow semantics and the Flux engine emit

@@ -7,7 +7,9 @@ import io.shiftleft.codepropertygraph.generated.nodes.Call
 import io.shiftleft.semanticcpg.language.*
 
 /** MemoryApiPass: tags only - roles come from the inventory, arguments get the tags, every
-  * fine-grained tag travels with the `memory-safety` umbrella.
+  * fine-grained tag travels with the `memory-safety` umbrella. The C2 inference concludes wrapper
+  * roles from method bodies - never names - and is conservative: anything but a clean allocation
+  * flow or a pure free wrapper stays untagged.
   */
 class MemoryApiPassTests extends CCodeToCpgSuite:
 

@@ -20,6 +20,11 @@ import scala.collection.mutable
   *     `queries/unbounded-memcpy.sc`: the length argument is caller- or reader-controlled
   *     (`caller-param` / `untrusted-read`) and nothing bounds it from above (`bounded-above` /
   *     `bounded-by-extent`). Three tag lookups - no regex, no argument indices, no API name list.
+  *     Part 3 (C3) adds the interprocedural half: a `caller-param`-only length reports only when
+  *     the call graph shows no caller establishing the bound - the method has no intra-tree
+  *     callers, or some call site passes a non-constant for the feeding parameter. 51 of part 2's
+  *     66 libavformat findings were "this function copies as many bytes as its caller asked for",
+  *     which is what a correct helper looks like from inside.
   *   - **MS-BOUND-001** - size-parameter contract violation (CWE-787), replacing
   *     `queries/MS-BOUND-PARAM.sc`: the destination is a buffer parameter whose extent is an
   *     adjacent capacity parameter (`extent` `param:<name>`), and that capacity reaches no bound on
@@ -27,9 +32,18 @@ import scala.collection.mutable
   *     as a guard on it. The shape behind CVE-2026-75143: `size = payload_len` destroys the
   *     caller's capacity before `memcpy(buf, payload, size)`.
   *
+  * Part 3 (C4) adds the index family, over the facts that already existed but had no reader:
+  *
+  *   - **MS-BOUND-003** (CWE-125, read) / **MS-BOUND-004** (CWE-787, write) - the index is
+  *     attacker-controlled (`caller-param` / `untrusted-read`) into a base of known capacity with
+  *     no upper bound; or it is a signed struct-field read bounded only ABOVE (CVE-2026-75146's
+  *     negative-index shape, which the fixed tree's `>= 0` conjunct silences). `bounded-below` is
+  *     the fact that separates the bug from the guard that fixes it.
+  *
   * `unknown` extents never satisfy a rule that needs an extent: MS-BOUND-001 fires only on an
-  * explicit `param:` extent, and MS-BOUND-002 needs no extent at all. Runs last in the overlay,
-  * after MemoryApi, Extent, Guard and ValueOrigin. C/C++ graphs only.
+  * explicit `param:` extent, MS-BOUND-002 needs no extent at all, and the index rules accept only
+  * `const:`/`alloc:` capacities. Runs last in the overlay, after MemoryApi, Extent, Guard and
+  * ValueOrigin. C/C++ graphs only.
   */
 class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
 
@@ -49,6 +63,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
 
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
+    ruleIndexBounds(record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -58,26 +73,152 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     )
   end run
 
-  /** MS-BOUND-002: attacker-controlled length, no upper bound. A length that flows from the
-    * destination's own paired capacity parameter is NOT unbounded - it honours the buffer/ capacity
-    * contract, and only MS-BOUND-001 (which fires when that contract is broken) has any business
-    * reporting at such a site.
+  /** MS-BOUND-002: attacker-controlled length, no upper bound, into a buffer the call actually
+    * writes (CWE-787 is about a destination; an allocation-size argument creates a buffer, it does
+    * not overrun one). A length that flows from the destination's own paired capacity parameter is
+    * NOT unbounded - it honours the buffer/capacity contract, and only MS-BOUND-001 (which fires
+    * when that contract is broken) has any business reporting at such a site.
+    *
+    * C3: a caller-param-only length is the signature of a correctly written helper - the bound
+    * lives at its callers - so it reports only when the call graph says the callers do NOT
+    * establish the bound: the method has no intra-tree callers at all (framework-reachable), or
+    * some call site passes a value for the feeding parameter that is not provably a constant or a
+    * sizeof. An untrusted-read length always reports: the function read it itself.
     */
   private def ruleUnboundedCopy(
     argsByCall: Map[Call, List[Expression]],
     record: (StoredNode, String) => Unit
   ): Unit =
       argsByCall.foreach { case (call, args) =>
-          val capParam = capacityParamOf(call, args)
+          val capParam     = capacityParamOf(call, args)
+          val writesBuffer = args.exists(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
           lengthArgsOf(args).foreach { lenArg =>
             val tags = lenArg.tag.name.l
-            val controlled = tags.contains(ValueOriginPass.OriginCallerParam) ||
-                tags.contains(ValueOriginPass.OriginUntrustedRead)
+            val controlled = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                (tags.contains(ValueOriginPass.OriginCallerParam) &&
+                    unboundedAtCallSites(call.method, lenArg))
             val honoursCapacity = capParam.exists(reaches(lenArg, _))
-            if controlled && !isBounded(tags) && !honoursCapacity then
+            if writesBuffer && controlled && !isBounded(tags) && !honoursCapacity then
               record(lenArg, RuleUnboundedCopy)
           }
       }
+
+  /** Does some caller leave this caller-param length unbounded? Report when the method has no
+    * intra-tree callers (externally reachable - framework callbacks and exports), when the length
+    * cannot be attributed to a parameter, or when any resolved call site passes a value whose
+    * origin is not purely constant (literals and sizeofs). Every call site passing a provable
+    * constant is the helper whose bound lives at its callers, and stays silent.
+    */
+  private def unboundedAtCallSites(method: Method, lenArg: Expression): Boolean =
+    val callers = method._callIn.collectAll[Call].l.distinct
+    if callers.isEmpty then true
+    else
+      val params = lenArg.tag.name(ValueOriginPass.OriginCallerParam).value.l
+          .flatMap(name => method.parameter.name(name).headOption)
+      if params.isEmpty then true
+      else
+        val siteArgs =
+            for
+              site  <- callers
+              param <- params
+              arg   <- site.argumentOption(param.index)
+            yield arg
+        if siteArgs.isEmpty then true
+        else
+          siteArgs.exists(arg =>
+              ValueOriginPass.originNamesOf(arg) != Set(ValueOriginPass.OriginConstant)
+          )
+  end unboundedAtCallSites
+
+  /** MS-BOUND-003/004 (C4): index out of bounds, over facts that already exist on the graph.
+    * `ValueOriginPass` tags array indices with their origin and nobody read them. Two arms:
+    *
+    *   - **unchecked attacker index**: an index whose origin is `caller-param` or `untrusted-read`,
+    *     on a base whose extent is a known capacity (`const:N` / `alloc:`), with no `bounded-above`
+    *     \- and no `bounded-below` either, since a signed index that can go negative can also go
+    *     above.
+    *   - **half-bounded signed index** (the CVE-2026-75146 shape): the author bounded the index
+    *     ABOVE (`cur_seq_no < n_fragments`) but not below, and the index is a signed value read out
+    *     of a struct - someone else set it, it can be negative, and the comparison that is there
+    *     does not stop it. `bounded-below` finally earns its keep: the fixed tree adds the `>= 0`
+    *     conjunct and the arm goes quiet.
+    *
+    * CWE-125 for a read, CWE-787 for a write - the distinction is which side of an assignment the
+    * index access sits on.
+    */
+  private def ruleIndexBounds(record: (StoredNode, String) => Unit): Unit =
+      atom.call
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .foreach { access =>
+            for
+              idx  <- access.argumentOption(2)
+              base <- access.argumentOption(1)
+            do
+              val tags = idx.tag.name.l
+              val extent = base.tag.name(ExtentPass.TagExtent).value.l.headOption
+                  .getOrElse(ExtentPass.ValueUnknown)
+              val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
+                  extent.startsWith(ExtentPass.ValueAlloc + ":")
+              val boundedAbove = tags.contains(GuardPass.TagAbove) ||
+                  tags.contains(GuardPass.TagByExtent)
+              val boundedBelow = tags.contains(GuardPass.TagBelow)
+              val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
+                  tags.contains(ValueOriginPass.OriginUntrustedRead)
+              val halfBounded = tags.contains(ValueOriginPass.OriginStructField) &&
+                  signednessOf(idx).contains(true)
+              // The two arms are separate rules because they know different amounts. The attacker
+              // arm has a capacity and an origin and no bound: evidence. The half-bounded arm has
+              // a HYPOTHESIS - this signed counter could be negative - which is true of most
+              // signed counters and wrong about almost all of them (76 of libavformat's index
+              // findings, against one CVE shape). It reports at `low`, so a default run at
+              // `--min-confidence medium` does not drown in it, and looking for the shape
+              // deliberately still works.
+              if attackerIndex && knownExtent && !boundedAbove && !boundedBelow then
+                record(idx, ruleIdFor(access))
+              else if halfBounded && boundedAbove && !boundedBelow then
+                record(idx, RuleNegativeIndexHazard)
+            end for
+          }
+  end ruleIndexBounds
+
+  /** A read through the index is CWE-125, a write through it CWE-787. */
+  private def ruleIdFor(access: Call): String =
+    val isWrite = access._astIn.collectFirst { case c: Call => c }.exists(c =>
+        c.name.startsWith("<operator>.assignment") &&
+            c.argumentOption(1).exists(_.id == access.id)
+    )
+    if isWrite then RuleIndexWrite else RuleIndexRead
+
+  /** The declared type of an index expression, when the frontend recorded one. */
+  private def typeOfExpr(e: Expression): String = e match
+    case i: Identifier => i.typeFullName
+    case c: Call       => c.typeFullName
+    case l: Literal    => l.typeFullName
+    case _             => ""
+
+  /** Can this index go negative, and do we actually know? c2cpg often leaves the TYPE of a
+    * field-access expression empty, so a `pls->cur_seq_no` index resolves its type through the
+    * member it reads; when neither records a type, the answer is None - we do not know.
+    *
+    * The distinction is load-bearing. Treating "no type recorded" as signed made the rule fire 120
+    * times on libavformat, 105 of them on indices whose type the frontend simply never wrote down:
+    * an absent fact quietly satisfying a rule, which is what `unknown` extents are forbidden to do.
+    * A negative-index claim needs evidence that the index CAN be negative, and the frontend's
+    * silence is not that evidence.
+    */
+  private def signednessOf(idx: Expression): Option[Boolean] =
+    val declared = typeOfExpr(idx) match
+      // c2cpg writes the placeholder type "<empty>" rather than an empty string
+      case t if t.nonEmpty && t != "<empty>" => Some(t)
+      case _ =>
+          idx match
+            case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName)
+            case _       => None
+    declared.collect {
+        case t if OverlayFacts.isSignedIntegral(t)   => true
+        case t if OverlayFacts.isUnsignedIntegral(t) => false
+    }
 
   /** MS-BOUND-001: the destination's extent is an adjacent capacity parameter, and that parameter
     * reaches neither the copy's length nor a bound on it.
@@ -127,6 +268,11 @@ object MemorySafetyFindingPass:
 
   final val RuleUnboundedCopy     = "MS-BOUND-002"
   final val RuleSizeParamContract = "MS-BOUND-001"
+  final val RuleIndexRead         = "MS-BOUND-003"
+  final val RuleIndexWrite        = "MS-BOUND-004"
+
+  /** The half-bounded signed-index arm: a hypothesis, reported at `low`. */
+  final val RuleNegativeIndexHazard = "MS-BOUND-005"
 
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
@@ -158,6 +304,33 @@ object MemorySafetyFindingPass:
       confidence = "medium",
       message = "attacker-controlled copy length with no guard bounding it against the " +
           "destination's capacity"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexRead,
+      cwe = "CWE-125",
+      kind = "oob-index-read",
+      severity = "high",
+      confidence = "medium",
+      message = "array read at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexWrite,
+      cwe = "CWE-787",
+      kind = "oob-index-write",
+      severity = "high",
+      confidence = "medium",
+      message = "array write at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleNegativeIndexHazard,
+      cwe = "CWE-125",
+      kind = "negative-index-hazard",
+      severity = "medium",
+      confidence = "low",
+      message = "signed index bounded above but not below, so a negative value passes the " +
+          "check - the CVE-2026-75146 shape, and also what most correct counters look like"
     )
   ).map(r => r.id -> r).toMap
 
