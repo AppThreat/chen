@@ -1,0 +1,19 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_b3f24ddbee87b8::t_f37803baa504f9 1-550
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f157016c738ebf85eac14a65fbc534e07aff88e3",
+  "prompts": {},
+  "sessions": {
+    "s_b3f24ddbee87b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64cf016c-1265-46f7-82b8-b12df9b0385a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
