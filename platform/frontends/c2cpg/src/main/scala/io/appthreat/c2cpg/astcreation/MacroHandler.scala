@@ -96,10 +96,59 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
             )
             val macroDefinitionName = ASTStringUtil.getSimpleName(macroDefinition.getName)
             if macroExpansionName == macroDefinitionName then
-              matchingMacro = Option((macroDefinition, List[String]()))
+              matchingMacro = Option((macroDefinition, macroInvocationArguments(node)))
       }
     matchingMacro
   end extractMatchingMacro
+
+  /** The argument expressions of a function-like macro invocation, as source text.
+    *
+    * The synthetic CALL this trait builds for a macro invocation used to carry NO arguments (the
+    * argument list here was always empty), which meant nothing could taint the call's value: the
+    * data-flow chain `x = FFMIN(a, b)` stopped at the macro call for every consumer - a guard
+    * written as a macro was invisible to taint tracking. The invocation's own source text is the
+    * argument source; the corresponding expression subtrees are matched inside the expansion by
+    * [[argumentTrees]].
+    *
+    * Object-like macros (`#define NULL 0`) have no parentheses and yield no arguments.
+    */
+  private def macroInvocationArguments(node: IASTNode): List[String] =
+    val text = safeGetRawSignature(node).trim
+    val open = text.indexOf('(')
+    if open < 0 then
+      List.empty
+    else
+      val args = text.substring(open + 1)
+      val body = args.substring(0, args.lastIndexOf(')')).trim
+      if body.isEmpty then List.empty else splitTopLevelCommas(body)
+
+  /** Split on commas that are not nested inside parentheses/brackets/braces or quotes. */
+  private def splitTopLevelCommas(s: String): List[String] =
+    val parts  = mutable.ListBuffer[String]()
+    val curr   = new StringBuilder
+    var depth  = 0
+    var inChar = false
+    var inStr  = false
+    s.foreach { c =>
+      val escaped = curr.length > 0 && curr.charAt(curr.length - 1) == '\\'
+      val quote   = (c == '"' && !inChar) || (c == '\'' && !inStr)
+      val unquote =
+          (c == '"' && inStr && !escaped) || (c == '\'' && inChar && !escaped)
+      if quote || unquote then
+        curr.append(c)
+        if c == '"' then inStr = !inStr else inChar = !inChar
+      else if inChar || inStr then curr.append(c)
+      else
+        c match
+          case '(' | '[' | '{' => depth += 1; curr.append(c)
+          case ')' | ']' | '}' => depth -= 1; curr.append(c)
+          case ',' if depth == 0 =>
+              parts.addOne(curr.toString.trim); curr.clear()
+          case _ => curr.append(c)
+    }
+    if curr.nonEmpty then parts.addOne(curr.toString.trim)
+    parts.toList.filter(_.nonEmpty)
+  end splitTopLevelCommas
 
   /** Determine whether `node` is expanded from the macro expansion at `loc`.
     */
