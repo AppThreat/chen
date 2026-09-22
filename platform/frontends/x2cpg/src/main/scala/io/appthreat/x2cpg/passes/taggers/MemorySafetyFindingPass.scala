@@ -604,7 +604,14 @@ object MemorySafetyFindingPass:
       cwe = "CWE-401",
       kind = "memory-leak",
       severity = "medium",
-      confidence = "medium",
+      // `low`, on the MS-BOUND-005 precedent. The rule scores 4 true against 9 false on the
+      // corpus (31%), and one of the nine is a `@nofinding` negative control - `good_capped`
+      // in c/cwe789_uncontrolled_alloc.c, whose `if (p) free(p);` is an UNBRACED if that the
+      // state pass's branch narrowing does not see. None of that was visible while the atom
+      // renderer was dropping the exit-anchored findings; the 89% this rule was credited with
+      // was measured through that defect. Until the unbraced-if case lands, a leak is a
+      // hypothesis, not a finding.
+      confidence = "low",
       message = "an allocation is still live, un-freed and un-escaped at this exit - no path " +
           "from it reaches a free or hands ownership on"
     ),

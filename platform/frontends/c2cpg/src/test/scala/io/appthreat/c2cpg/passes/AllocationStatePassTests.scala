@@ -231,16 +231,19 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
         leaks.head.propertyOption("CODE").get.toString should include("2")
     }
 
-    "fire at the implicit end of a function with no explicit return" in {
-        // the fact lands on METHOD_RETURN, which is a CFG_NODE and NOT an Expression - the
-        // renderer has to name it to see it
-        cpg.method
+    "anchor a leak at the ALLOCATION when the exit is the implicit end of the function" in {
+        // METHOD_RETURN's line is the function's declaration, which is not a location a reader
+        // can act on - `c/cwe401_memory_leak.c`'s loop leak scored as spurious five lines from
+        // its own malloc for exactly this reason. The allocation is the statement that leaks.
+        val anchors = cpg.method
             .name("bad_leak_no_explicit_return")
-            .methodReturn
-            .tag
-            .name("ms-finding")
-            .value
-            .l should contain("MS-ALLOC-003")
+            .ast
+            .collectAll[StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-003"))
+            .l
+        anchors.size shouldBe 1
+        anchors.head.label shouldBe "CALL"
+        anchors.head.propertyOption("CODE").get.toString should include("malloc")
     }
 
     "fire at the assignment that overwrites the only handle" in {

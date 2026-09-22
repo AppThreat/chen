@@ -87,9 +87,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // per CFG node per worklist visit, and per-visit tag traversals were what made this pass
     // crawl on a 253 KLOC tree (D3 measurement round)
     val callFacts = mutable.LongMap.empty[CallFacts]
+    val callNodes = mutable.LongMap.empty[Call]
     val guards    = mutable.LongMap.empty[ControlStructure]
     method.ast.collectAll[Call].foreach { c =>
       val r = roles.getOrElse(c.id(), RoleInfoNone)
+      callNodes.update(c.id(), c)
       callFacts.update(
         c.id(),
         CallFacts(
@@ -149,7 +151,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => ()
       }
     // one leak fact per allocation: the earliest exit where it is still live
-    leakFacts.groupBy(_._1).foreach { case (_, exits) =>
+    leakFacts.groupBy(_._1).foreach { case (site, exits) =>
         // the EARLIEST exit, as the scaladoc says: the first `return` that walks out on a live
         // allocation is where a reader fixes the leak, and every later exit restates it.
         // `minBy(-line)` picked the LAST one instead.
@@ -160,7 +162,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         val (_, exit, name) = exits.minBy { case (_, node, _) =>
             (node.isInstanceOf[MethodReturn], lineOf(node))
         }
-        record(exit, TagLeak, s"leak:$name")
+        // ... and when the implicit end IS the exit, it is not a location at all: its line is
+        // the function's declaration, several lines from anything a reader would look at. The
+        // allocation is the honest anchor there - it is the statement that leaks.
+        val anchor = exit match
+          case _: MethodReturn => callNodes.get(site).getOrElse(exit)
+          case other           => other
+        record(anchor, TagLeak, s"leak:$name")
     }
   end analyseMethod
 
