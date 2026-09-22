@@ -73,6 +73,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleIndexBounds(record)
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
+    ruleAllocationState(record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -81,6 +82,58 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       }
     )
   end run
+
+  /** MS-ALLOC-001/002/003 (D3): double-free, use-after-free and leak, over the states
+    * [[AllocationStatePass]] put on the graph. The rules are pure readers of those facts - the pass
+    * decides WHAT the state at a program point is, the rules decide WHAT IT MEANS:
+    *
+    *   - **MS-ALLOC-001** (CWE-415): a free of a pointer that is `freed` (must-freed, every path)
+    *     or `maybe-freed` (freed on some path reaching it - the conditional-double-free shape). A
+    *     double CLOSE of a `file`-family handle is CWE-1341 (**MS-ALLOC-004**), the same state fact
+    *     over a different family.
+    *   - **MS-ALLOC-002** (CWE-416): a use of a `freed`/`maybe-freed` pointer - through a memory
+    *     call's arguments, another call's arguments, or an index/field access base.
+    *   - **MS-ALLOC-003** (CWE-401): the `alloc-leak` fact on an exit node - an allocation still
+    *     live, un-freed and un-escaped there.
+    *
+    * A pointer that is `null` (the free-and-reset idiom), `escaped`, or untracked is silent: the
+    * pass says `escaped` when it genuinely does not know, and a rule must not turn on that silence.
+    */
+  private def ruleAllocationState(record: (StoredNode, String) => Unit): Unit =
+    atom.tag
+        .name(AllocationStatePass.TagState)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l.map(n => (n, t.value)))
+        .foreach { case (node, state) =>
+            state match
+              case "freed" | "maybe-freed" =>
+                  // the SAME fact means two things by site: a free of an already-freed
+                  // pointer is a double-free, any other use is a use-after-free
+                  val enclosing = node._astIn.collectFirst { case c: Call => c }
+                  val isFreeSite = enclosing.exists(c =>
+                      tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
+                          tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                  )
+                  if isFreeSite then
+                    val family = enclosing.flatMap(c =>
+                        tagValues(c, MemoryApiPass.TagFree).headOption
+                    )
+                    record(
+                      node,
+                      if family.contains("file") then RuleDoubleClose else RuleDoubleFree
+                    )
+                  else record(node, RuleUseAfterFree)
+              case _ => ()
+        }
+    atom.tag
+        .name(AllocationStatePass.TagLeak)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleLeak))
+  end ruleAllocationState
+
+  private def tagValues(node: StoredNode, tag: String): Set[String] =
+      node.tag.name(tag).value.l.toSet
 
   /** MS-BOUND-002: attacker-controlled length, no upper bound, into a buffer the call actually
     * writes (CWE-787 is about a destination; an allocation-size argument creates a buffer, it does
@@ -441,6 +494,15 @@ object MemorySafetyFindingPass:
   final val RuleIntegerOverflow   = "MS-INT-001"
   final val RuleResignAcrossGuard = "MS-INT-002"
 
+  final val RuleDoubleFree   = "MS-ALLOC-001"
+  final val RuleUseAfterFree = "MS-ALLOC-002"
+  final val RuleLeak         = "MS-ALLOC-003"
+
+  /** A double CLOSE of a file-family handle: the same state fact as MS-ALLOC-001 over a different
+    * family, and a different CWE.
+    */
+  final val RuleDoubleClose = "MS-ALLOC-004"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -518,6 +580,41 @@ object MemorySafetyFindingPass:
       message = "a sign-changing cast is the value a comparison bounds, while the guarded uses " +
           "read it at its declared width - the guard checked one signedness, the use happens at " +
           "another (CVE-2026-75145 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleDoubleFree,
+      cwe = "CWE-415",
+      kind = "double-free",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer already freed on some path reaching this point is freed again - " +
+          "the free-and-reset idiom (p = NULL) is what makes the second free safe"
+    ),
+    MemorySafetyRule(
+      id = RuleUseAfterFree,
+      cwe = "CWE-416",
+      kind = "use-after-free",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer that is already freed on some path reaching this point is read or " +
+          "written - freed memory must not be used before it is replaced"
+    ),
+    MemorySafetyRule(
+      id = RuleLeak,
+      cwe = "CWE-401",
+      kind = "memory-leak",
+      severity = "medium",
+      confidence = "medium",
+      message = "an allocation is still live, un-freed and un-escaped at this exit - no path " +
+          "from it reaches a free or hands ownership on"
+    ),
+    MemorySafetyRule(
+      id = RuleDoubleClose,
+      cwe = "CWE-1341",
+      kind = "double-close",
+      severity = "high",
+      confidence = "high",
+      message = "a file handle already closed on some path reaching this point is closed again"
     )
   ).map(r => r.id -> r).toMap
 
