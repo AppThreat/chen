@@ -881,12 +881,9 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     atom.method.internal.name("main").parameter.newTagNode("cli-source").store()(using dstGraph)
     atom.method.internal.name("wmain").parameter.newTagNode("cli-source").store()(using dstGraph)
 
-    // Event patterns
-    atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("event").store()(
-      using dstGraph
-    )
-    atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("framework-input")
-        .store()(using dstGraph)
+    // The `.*(ucm_|ucbuf_|event).*` method-name heuristic is gone: untrusted input for C is
+    // now tagged from the memory-API inventory (MemoryApiPass's untrusted-read), a list with
+    // named sources rather than a name regex that fires on any function mentioning "event".
 
     val eventVerbs   = Seq("call", "handle", "emit", "invoke", "store")
     val eventPattern = raw".*(?:${eventVerbs.mkString("|")})[_A-Z].*"
@@ -897,17 +894,9 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           using dstGraph
         )
 
-    // Validation patterns
-    val validationVerbs   = Seq("validate", "check", "verify")
-    val validationPattern = raw".*(?:${validationVerbs.mkString("|")})[_A-Z].*"
-
-    atom.method.internal.name(validationPattern).parameter.newTagNode("validation").store()(
-      using dstGraph
-    )
-    atom.method.internal.name(validationPattern).callIn(using NoResolve).argument.newTagNode(
-      "validation"
-    )
-        .store()(using dstGraph)
+    // The `.*(validate|check|verify)[_A-Z].*` method-name heuristic is gone with the rest of
+    // the C name regexes: a sanitiser is something declared in a validation config or an
+    // inventory entry, not any function whose name happens to start with "check_".
 
     atom.method.internal.name(".*(parse[_A-Z]).*").parameter.newTagNode("parse").store()(using
     dstGraph)
