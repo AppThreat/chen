@@ -12,66 +12,300 @@
     "Argument indices are 1-based. `untrustedCall` marks a call whose RESULT or variadic",
     "outputs carry untrusted data with no single buffer argument to point at (getenv, the",
     "scanf family). C++ new/delete are indistinguishable from new[]/delete[] in the graph",
-    "(frontend probe NOTES-frontend.md Q3), so both carry the plain `new` family."
+    "(frontend probe NOTES-frontend.md Q3), so both carry the plain `new` family.",
+    "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded."
   ],
   "apis": [
-    { "name": "strcpy", "dst": 1, "src": 2 },
-    { "name": "stpcpy", "dst": 1, "src": 2 },
-    { "name": "strcat", "dst": 1, "src": 2 },
-    { "name": "strncat", "dst": 1, "src": 2, "len": 3 },
-    { "name": "strncpy", "dst": 1, "src": 2, "len": 3 },
-    { "name": "stpncpy", "dst": 1, "src": 2, "len": 3 },
-    { "name": "memcpy", "dst": 1, "src": 2, "len": 3 },
-    { "name": "memmove", "dst": 1, "src": 2, "len": 3 },
-    { "name": "mempcpy", "dst": 1, "src": 2, "len": 3 },
-    { "name": "memccpy", "dst": 1, "src": 2, "len": 3 },
-    { "name": "bcopy", "dst": 2, "src": 1, "len": 3 },
-    { "name": "memset", "dst": 1, "len": 3 },
-    { "name": "sprintf", "dst": 1, "src": 2 },
-    { "name": "vsprintf", "dst": 1, "src": 3 },
-    { "name": "snprintf", "dst": 1, "src": 3, "len": 2 },
-    { "name": "vsnprintf", "dst": 1, "src": 4, "len": 2 },
-    { "name": "asprintf", "dst": 1, "src": 2 },
-    { "name": "strdup", "src": 1, "alloc": "heap" },
-    { "name": "strndup", "src": 1, "len": 2, "alloc": "heap" },
-    { "name": "strtok", "src": 1 },
-    { "name": "strtok_r", "src": 1 },
-    { "name": "malloc", "len": 1, "alloc": "heap" },
-    { "name": "calloc", "len": 1, "alloc": "heap" },
-    { "name": "realloc", "len": 2, "alloc": "heap", "free": "heap" },
-    { "name": "reallocarray", "len": 2, "alloc": "heap", "free": "heap" },
-    { "name": "aligned_alloc", "len": 2, "alloc": "heap" },
-    { "name": "free", "free": "heap" },
-    { "name": "<operator>.new", "alloc": "new" },
-    { "name": "<operator>.delete", "free": "new" },
-    { "name": "mmap", "len": 2, "alloc": "mmap" },
-    { "name": "munmap", "free": "mmap" },
-    { "name": "fopen", "alloc": "file" },
-    { "name": "fdopen", "alloc": "file" },
-    { "name": "freopen", "alloc": "file" },
-    { "name": "fclose", "free": "file" },
-    { "name": "open", "alloc": "file" },
-    { "name": "openat", "alloc": "file" },
-    { "name": "close", "free": "file" },
-    { "name": "opendir", "alloc": "file" },
-    { "name": "closedir", "free": "file" },
-    { "name": "socket", "alloc": "socket" },
-    { "name": "accept", "alloc": "socket", "untrustedRead": 2 },
-    { "name": "read", "len": 3, "untrustedRead": 2 },
-    { "name": "pread", "len": 3, "untrustedRead": 2 },
-    { "name": "readv", "len": 3, "untrustedRead": 2 },
-    { "name": "recv", "len": 3, "untrustedRead": 2 },
-    { "name": "recvfrom", "len": 3, "untrustedRead": 2 },
-    { "name": "recvmsg", "untrustedRead": 2 },
-    { "name": "fread", "len": 2, "untrustedRead": 1 },
-    { "name": "fgets", "len": 2, "untrustedRead": 1 },
-    { "name": "gets", "untrustedRead": 1 },
-    { "name": "getline", "untrustedRead": 1 },
-    { "name": "getdelim", "untrustedRead": 1 },
-    { "name": "readlink", "len": 3, "untrustedRead": 2 },
-    { "name": "getenv", "untrustedCall": true },
-    { "name": "scanf", "untrustedCall": true },
-    { "name": "sscanf", "untrustedCall": true },
-    { "name": "fscanf", "untrustedCall": true }
+    {
+      "name": "strcpy",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "stpcpy",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "strcat",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "strncat",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "strncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "stpncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "memcpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "memmove",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "mempcpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "memccpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "bcopy",
+      "dst": 2,
+      "src": 1,
+      "len": 3
+    },
+    {
+      "name": "memset",
+      "dst": 1,
+      "len": 3
+    },
+    {
+      "name": "sprintf",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "vsprintf",
+      "dst": 1,
+      "src": 3
+    },
+    {
+      "name": "snprintf",
+      "dst": 1,
+      "src": 3,
+      "len": 2
+    },
+    {
+      "name": "vsnprintf",
+      "dst": 1,
+      "src": 4,
+      "len": 2
+    },
+    {
+      "name": "asprintf",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "strdup",
+      "src": 1,
+      "alloc": "heap"
+    },
+    {
+      "name": "strndup",
+      "src": 1,
+      "len": 2,
+      "alloc": "heap"
+    },
+    {
+      "name": "strtok",
+      "src": 1
+    },
+    {
+      "name": "strtok_r",
+      "src": 1
+    },
+    {
+      "name": "malloc",
+      "len": 1,
+      "alloc": "heap"
+    },
+    {
+      "name": "calloc",
+      "len": 1,
+      "alloc": "heap"
+    },
+    {
+      "name": "realloc",
+      "len": 2,
+      "alloc": "heap",
+      "free": "heap"
+    },
+    {
+      "name": "reallocarray",
+      "len": 2,
+      "alloc": "heap",
+      "free": "heap"
+    },
+    {
+      "name": "aligned_alloc",
+      "len": 2,
+      "alloc": "heap"
+    },
+    {
+      "name": "free",
+      "free": "heap"
+    },
+    {
+      "name": "<operator>.new",
+      "alloc": "new"
+    },
+    {
+      "name": "<operator>.delete",
+      "free": "new"
+    },
+    {
+      "name": "mmap",
+      "len": 2,
+      "alloc": "mmap"
+    },
+    {
+      "name": "munmap",
+      "free": "mmap"
+    },
+    {
+      "name": "fopen",
+      "alloc": "file"
+    },
+    {
+      "name": "fdopen",
+      "alloc": "file"
+    },
+    {
+      "name": "freopen",
+      "alloc": "file"
+    },
+    {
+      "name": "fclose",
+      "free": "file"
+    },
+    {
+      "name": "open",
+      "alloc": "file"
+    },
+    {
+      "name": "openat",
+      "alloc": "file"
+    },
+    {
+      "name": "close",
+      "free": "file"
+    },
+    {
+      "name": "opendir",
+      "alloc": "file"
+    },
+    {
+      "name": "closedir",
+      "free": "file"
+    },
+    {
+      "name": "socket",
+      "alloc": "socket"
+    },
+    {
+      "name": "accept",
+      "alloc": "socket",
+      "untrustedRead": 2
+    },
+    {
+      "name": "read",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "pread",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "readv",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "recv",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "recvfrom",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "recvmsg",
+      "untrustedRead": 2
+    },
+    {
+      "name": "fread",
+      "len": 2,
+      "untrustedRead": 1
+    },
+    {
+      "name": "fgets",
+      "len": 2,
+      "untrustedRead": 1
+    },
+    {
+      "name": "gets",
+      "untrustedRead": 1
+    },
+    {
+      "name": "getline",
+      "untrustedRead": 1
+    },
+    {
+      "name": "getdelim",
+      "untrustedRead": 1
+    },
+    {
+      "name": "readlink",
+      "len": 3,
+      "untrustedRead": 2
+    },
+    {
+      "name": "getenv",
+      "untrustedCall": true
+    },
+    {
+      "name": "scanf",
+      "untrustedCall": true
+    },
+    {
+      "name": "sscanf",
+      "untrustedCall": true
+    },
+    {
+      "name": "fscanf",
+      "untrustedCall": true
+    },
+    {
+      "name": "FFMIN",
+      "clamp": "min"
+    },
+    {
+      "name": "FFMAX",
+      "clamp": "max"
+    },
+    {
+      "name": "av_clip",
+      "clamp": "clip"
+    }
   ]
 }
