@@ -12,8 +12,6 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Call, Expression, Method}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
-import scala.collection.mutable
-
 class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyVal:
 
   /** Determine whether evaluation of the call this argument is a part of results in usage of this
@@ -70,8 +68,11 @@ class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyV
     // doing so drops taint through the most common data flow of all, `int q = p;` (and every
     // arithmetic/compound-assignment into a numeric variable), so `sink(q)` would not be
     // reachable from `p`.
-    val s = semanticsForCallByArg.l
-    s.isEmpty || s.exists { semantic =>
+    //
+    // The empty-check and the exists run on the iterator directly: this method sits inside the
+    // per-DDG-edge validation the slicing repeat performs, and materialising `.l` here was a
+    // measurable share of the run's allocation.
+    def matchesSemantic(semantic: FlowSemantic): Boolean =
         semantic.mappings.exists {
             case FlowMapping(
                   ParameterNode(_, Some(srcName)),
@@ -92,7 +93,8 @@ class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyV
                 true
             case _ => false
         }
-    }
+    val s = semanticsForCallByArg
+    !s.hasNext || s.exists(matchesSemantic)
   end hasDefinedFlowTo
 
   /** Retrieve flow semantic for the call this argument is a part of.
@@ -102,9 +104,17 @@ class ExpressionMethods[NodeType <: Expression](val node: NodeType) extends AnyV
           semantics.forMethod(method.fullName)
       }
 
+  /** The methods called by the call this argument belongs to, as an iterator view.
+    *
+    * `NoResolve.getCalledMethods` materialises an `ArrayBuffer` per invocation, and this lookup
+    * runs up to three times per DDG-edge validation (isUsed, isDefined, hasDefinedFlowTo) inside
+    * slicing repeats - on FFmpeg's libavformat that buffer churn was one of the largest allocation
+    * sites in the whole run. For NoResolve the callee methods are exactly the CALL edges out of the
+    * call node, streamed here without an intermediate collection.
+    */
   private def argToMethods(arg: Expression): Iterator[Method] =
       arg.inCall.flatMap { call =>
-          if call.nonEmpty then NoResolve.getCalledMethods(call)
-          else mutable.ArrayBuffer.empty[Method]
+          if call.nonEmpty then call._callOut.collect { case m: Method => m }
+          else Iterator.empty[Method]
       }
 end ExpressionMethods

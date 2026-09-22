@@ -22,6 +22,21 @@ object DefaultSemantics:
     val list = operatorFlows ++ javaFlows
     Semantics.fromList(list)
 
+  /** A memoised [[apply]], for use where an implicit default argument would otherwise do.
+    *
+    * Scala re-evaluates a default argument expression on every call that omits it, and the DDG
+    * steps (`ddgIn`, `ddgInPathElem`) are invoked as bare `_.ddgIn` inside slicing `repeat`
+    * worklists - once per DDG edge per path. Rebuilding the table (several hundred `FlowSemantic`
+    * objects plus a fresh `mutable.Map`) at that rate was measured at ~28 GB/s of garbage - 4.5 TB
+    * allocated in 155 s - while slicing FFmpeg's libavformat. A shared instance also keeps the
+    * regex-result cache warm: a fresh instance starts with an empty cache, so regex semantics were
+    * re-matched forever and the cache never paid for itself.
+    *
+    * Sharing is safe because the instance is read-only after construction - the only mutation is
+    * [[Semantics.loadRegexSemantics]], which each pipeline runs once, before queries start.
+    */
+  lazy val memoised: Semantics = apply()
+
   /** Languages that get the JVM request-reader flows.
     *
     * NB: `ChennaiTagsPass` gates route tagging on a shorter list (no ANDROID/APK/DEX). The lists
