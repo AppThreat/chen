@@ -90,7 +90,9 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
     * walk lands on. A node that already determines an origin (parameter, literal, tagged call,
     * field access) STOPS the walk: expanding through it into its arguments would report the
     * arguments' origins too, and a length defined by `read(fd, tmp, n)` is an untrusted read, not
-    * an untrusted read mixed with whatever `fd` is.
+    * an untrusted read mixed with whatever `fd` is. Each identifier expands with
+    * OverlayFacts.expansionExclusionOf, so the argument-to-argument edges of its enclosing call (a
+    * guard's other operand, a memory call's sibling arguments) are not read as definitions.
     */
   private def walkDefs(start: Identifier, depth: Int): Set[(String, String)] =
     val out                        = mutable.LinkedHashSet.empty[(String, String)]
@@ -104,13 +106,17 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
             node match
               case i: Identifier =>
                   // an intermediate assignment target: keep walking to its definitions
-                  next ++= i._reachingDefIn.collectAll[StoredNode].l.filterNot(seen)
+                  val exclude = OverlayFacts.expansionExclusionOf(i)
+                  next ++= i._reachingDefIn.collectAll[StoredNode].l
+                      .filterNot(seen)
+                      .filterNot(d => exclude.contains(d.id))
               case other =>
                   out ++= classifyDef(other, depth)
       }
       frontier = next.toList
       hops -= 1
     out.toSet
+  end walkDefs
 
   /** The origin of a node the REACHING_DEF walk landed on. */
   private def classifyDef(d: StoredNode, depth: Int): Set[(String, String)] = d match
@@ -124,6 +130,10 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
     c.name match
       case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" =>
           Set((OriginStructField, c.code))
+      case n if n.startsWith("<operator>.sizeOf") =>
+          // sizeof never varies with its operand's provenance: it is a constant, whatever flows
+          // into the pointer it measures
+          Set((OriginConstant, c.code))
       case _ =>
           if c.tag.name(MemoryApiPass.TagUntrustedRead).l.nonEmpty then
             Set((OriginUntrustedRead, c.name))

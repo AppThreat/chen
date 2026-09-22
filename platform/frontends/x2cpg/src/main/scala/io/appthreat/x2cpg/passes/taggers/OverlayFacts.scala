@@ -93,15 +93,36 @@ private[taggers] object OverlayFacts:
   def isIntegral(t: String): Boolean = integralTypes.contains(t.stripPrefix("const ").trim)
 
   /** Reaching definitions backwards from `node`, breadth-first with a hop budget: the walk the
-    * value-origin and finding rules run instead of a `.df(...)` reachability solve.
+    * value-origin and finding rules run instead of a `.df(...)` reachability solve. Identifier
+    * expansion applies [[expansionExclusionOf]]: the flow semantics and the Flux engine emit
+    * argument-to-argument REACHING_DEF edges (a memory call's siblings, a comparison's other
+    * operand) that are plumbing, not definitions.
     */
   def reachingDefsIn(node: StoredNode, maxHops: Int = 8): List[StoredNode] =
-      bfs(node, maxHops)(n => n._reachingDefIn.collectAll[StoredNode].l)
+      bfs(node, maxHops) {
+          case i: Identifier =>
+              val exclude = expansionExclusionOf(i)
+              i._reachingDefIn.collectAll[StoredNode].l.filterNot(d => exclude.contains(d.id))
+          case other =>
+              other._reachingDefIn.collectAll[StoredNode].l
+      }
 
   /** Identifier uses defined (transitively) by `node`, forwards along REACHING_DEF. */
   def reachingUsesOut(node: StoredNode, maxHops: Int = 8): List[Identifier] =
       bfs(node, maxHops)(n => n._reachingDefOut.collectAll[StoredNode].l)
           .collect { case i: Identifier => i }
+
+  /** The nodes an identifier's definition walk must not cross: the argument subtree of its
+    * ENCLOSING call, unless that call is an assignment. A comparison's other operand and a memory
+    * call's sibling arguments did not define the value (on graphs built with the memory-API flow
+    * semantics, those edges exist and would otherwise turn every guarded length into `mixed`); an
+    * assignment's RHS did define it and must stay reachable.
+    */
+  def expansionExclusionOf(i: Identifier): Set[Long] =
+      i._astIn.collectFirst { case c: Call => c } match
+        case Some(c) if c.name != "<operator>.assignment" =>
+            (Iterator.single[StoredNode](c) ++ c.argument.iterator).map(_.id).toSet
+        case _ => Set.empty[Long]
 
   private def bfs(start: StoredNode, maxHops: Int)(
     expand: StoredNode => List[StoredNode]

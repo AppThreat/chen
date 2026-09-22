@@ -75,7 +75,13 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     add: (StoredNode, String, String) => Unit
   ): Unit =
       argsByCall.foreach { case (call, args) =>
-          val argKeys = args.flatMap(a => variableKey(a).map(k => k -> a)).toMap
+          val argKeys = args.flatMap { a =>
+              // a guard bounding a variable bounds the whole length when the length is that
+              // variable scaled by a constant or a sizeof: `malloc(n * sizeof(T))` under
+              // `if (n > MAX / sizeof(T))`. Operand sums (`a + b`) are deliberately not covered -
+              // bounding one summand bounds nothing.
+              scaledKeyOf(a).orElse(variableKey(a)).map(k => k -> a)
+          }.toMap
           call.controlledBy.collect { case c: Call => c }.foreach { controller =>
               conjuncts(controller, holdsAt(controller, call)).getOrElse(Nil).foreach {
                   case (cmp, cmpHolds) =>
@@ -92,6 +98,29 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               }
           }
       }
+
+  /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
+    * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
+    * expression.
+    */
+  private def scaledKeyOf(arg: Expression): Option[String] = arg match
+    case c: Call =>
+        c.name match
+          case "<operator>.multiplication" | "<operator>.division" =>
+              val operands = c.argument.l.take(2)
+              operands match
+                case Seq(a, b) =>
+                    if isScaleOperand(b) then variableKey(a)
+                    else if isScaleOperand(a) then variableKey(b)
+                    else None
+                case _ => None
+          case _ => None
+    case _ => None
+
+  private def isScaleOperand(e: Expression): Boolean = e match
+    case _: Literal => true
+    case c: Call    => c.name.startsWith("<operator>.sizeOf")
+    case _          => false
 
   /** Facts from clamping assignments: `x = a < b ? a : b`, an INLINED macro expansion of it, or a
     * vocabulary clamp call. Tagged at the definition and at the memory-operation arguments that use
