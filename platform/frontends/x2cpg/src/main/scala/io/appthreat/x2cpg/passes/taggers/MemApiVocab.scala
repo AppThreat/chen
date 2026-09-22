@@ -35,6 +35,11 @@ object MemApiVocab:
     * @param untrustedCall
     *   true when the call's result or variadic outputs are untrusted but no single buffer argument
     *   exists (`getenv`, the scanf family).
+    * @param clamp
+    *   when the API is a clamping macro/helper: `min` (result bounded above by each argument),
+    *   `max` (bounded below) or `clip` (arg2 below, arg3 above). This is how an UNEXPANDED
+    *   `FFMIN`-style call still establishes a bound in GuardPass - the same declared-vocabulary
+    *   route part 1 used for the flow semantics, so a project's own `MYMIN` is a data change.
     */
   final case class MemApiEntry(
     name: String,
@@ -44,7 +49,8 @@ object MemApiVocab:
     alloc: Option[String] = None,
     free: Option[String] = None,
     untrustedRead: Option[Int] = None,
-    untrustedCall: Boolean = false
+    untrustedCall: Boolean = false,
+    clamp: Option[String] = None
   )
 
   private def decodeEntry(json: io.circe.Json): Option[MemApiEntry] =
@@ -58,7 +64,8 @@ object MemApiVocab:
         alloc = json.hcursor.get[String]("alloc").toOption,
         free = json.hcursor.get[String]("free").toOption,
         untrustedRead = json.hcursor.get[Int]("untrustedRead").toOption,
-        untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false)
+        untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false),
+        clamp = json.hcursor.get[String]("clamp").toOption
       )
 
   /** @return
