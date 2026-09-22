@@ -115,15 +115,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
   /** The statement an expression is rooted in: the innermost node whose parent is a block, a
     * control structure, or a method. CDG in-edges land on such nodes.
     */
-  private def statementRootOf(node: CfgNode): CfgNode =
-    var cursor  = node
-    var walking = true
-    while walking do
-      cursor._astIn.nextOption() match
-        case Some(_: Block | _: ControlStructure | _: Method) => walking = false
-        case Some(parent: CfgNode)                            => cursor = parent
-        case _                                                => walking = false
-    cursor
+  private def statementRootOf(node: CfgNode): CfgNode = GuardPass.statementRootOf(node)
 
   /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
     * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
@@ -246,6 +238,80 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     * per-comparison fact can be honestly emitted.
     */
   private def conjuncts(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
+      GuardPass.conjuncts(expr, holds)
+
+  /** Which value a comparison bounds and against what, given that it holds (or does not hold)
+    * there: `len > cap` NOT holding at a point means `len <= cap` there. Returns (bounded operand,
+    * isAbove, bounding operand). Directional operators only; equality establishes nothing
+    * directional.
+    */
+  private def directionalFacts(
+    cmp: Call,
+    holds: Boolean
+  ): List[(Expression, Boolean, Expression)] =
+      GuardPass.directionalFacts(cmp, holds)
+
+  /** Does `condition` (as written) hold at `target`? Decided by control-structure nesting: the
+    * condition holds inside its own then-subtree or loop body, does not hold inside its else, and
+    * does not hold after an early-exit if (the only way a following node stays control-dependent on
+    * the condition).
+    */
+  private def holdsAt(condition: Call, target: Call): Boolean =
+      GuardPass.holdsAt(condition, target)
+
+  /** The extent fact a bounding expression carries, when it is a buffer's capacity: a sizeof call,
+    * or a variable whose declaration ExtentPass tagged.
+    */
+  private def extentValueOf(bound: Expression): Option[String] = bound match
+    case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+        c.argumentOption(1).map(operand => s"${ExtentPass.ValueSizeof}:${operand.code}")
+    case i: Identifier =>
+        declExtent(i.method.local.name(i.name).headOption)
+            .orElse(declExtent(i.method.parameter.name(i.name).headOption))
+    case c: Call
+        if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
+        OverlayFacts.memberRefOf(atom, c).flatMap(m => declExtent(Some(m)))
+    case _ => None
+
+  private def declExtent(decl: Option[StoredNode]): Option[String] =
+      decl.flatMap: d =>
+        // an `offset:` value (pointer arithmetic into a buffer) is not a capacity and must not
+        // present as the bound a comparison was made against
+        d.tag.name(ExtentPass.TagExtent).value.l.headOption
+            .filterNot(v =>
+                v == ExtentPass.ValueUnknown || v.startsWith(ExtentPass.ValueOffset + ":")
+            )
+end GuardPass
+
+object GuardPass:
+  final val TagAbove    = "bounded-above"
+  final val TagBelow    = "bounded-below"
+  final val TagByExtent = "bounded-by-extent"
+
+  /** The pure comparison semantics, shared with the rules (D0): what a boolean expression
+    * establishes, which side of a comparison it bounds, and whether a condition holds at a point.
+    * They read nothing but the comparison's arguments and the AST/control nesting.
+    */
+  private[taggers] val comparisonOps = Set(
+    "<operator>.greaterThan",
+    "<operator>.greaterEqualsThan",
+    "<operator>.lessThan",
+    "<operator>.lessEqualsThan",
+    "<operator>.equals",
+    "<operator>.notEquals"
+  )
+
+  private[taggers] def statementRootOf(node: CfgNode): CfgNode =
+    var cursor  = node
+    var walking = true
+    while walking do
+      cursor._astIn.nextOption() match
+        case Some(_: Block | _: ControlStructure | _: Method) => walking = false
+        case Some(parent: CfgNode)                            => cursor = parent
+        case _                                                => walking = false
+    cursor
+
+  private[taggers] def conjuncts(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
       expr.name match
         case n if comparisonOps.contains(n) => Some(List((expr, holds)))
         case "<operator>.logicalNot" =>
@@ -261,12 +327,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
       case (Some(ls), Some(rs)) => Some(ls ++ rs)
       case _                    => None
 
-  /** Which value a comparison bounds and against what, given that it holds (or does not hold)
-    * there: `len > cap` NOT holding at a point means `len <= cap` there. Returns (bounded operand,
-    * isAbove, bounding operand). Directional operators only; equality establishes nothing
-    * directional.
-    */
-  private def directionalFacts(
+  private[taggers] def directionalFacts(
     cmp: Call,
     holds: Boolean
   ): List[(Expression, Boolean, Expression)] =
@@ -282,12 +343,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               case _ => Nil
         case _ => Nil
 
-  /** Does `condition` (as written) hold at `target`? Decided by control-structure nesting: the
-    * condition holds inside its own then-subtree or loop body, does not hold inside its else, and
-    * does not hold after an early-exit if (the only way a following node stays control-dependent on
-    * the condition).
-    */
-  private def holdsAt(condition: Call, target: Call): Boolean =
+  private[taggers] def holdsAt(condition: Call, target: Call): Boolean =
       ownerOf(condition) match
         case Some(owner) =>
             var cursor: Option[StoredNode] = Some(target)
@@ -327,42 +383,5 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
   private def isElse(cs: ControlStructure): Boolean =
       cs.parserTypeName.equalsIgnoreCase("else")
 
-  /** The extent fact a bounding expression carries, when it is a buffer's capacity: a sizeof call,
-    * or a variable whose declaration ExtentPass tagged.
-    */
-  private def extentValueOf(bound: Expression): Option[String] = bound match
-    case c: Call if c.name.startsWith("<operator>.sizeOf") =>
-        c.argumentOption(1).map(operand => s"${ExtentPass.ValueSizeof}:${operand.code}")
-    case i: Identifier =>
-        declExtent(i.method.local.name(i.name).headOption)
-            .orElse(declExtent(i.method.parameter.name(i.name).headOption))
-    case c: Call
-        if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
-        OverlayFacts.memberRefOf(atom, c).flatMap(m => declExtent(Some(m)))
-    case _ => None
-
-  private def declExtent(decl: Option[StoredNode]): Option[String] =
-      decl.flatMap: d =>
-        // an `offset:` value (pointer arithmetic into a buffer) is not a capacity and must not
-        // present as the bound a comparison was made against
-        d.tag.name(ExtentPass.TagExtent).value.l.headOption
-            .filterNot(v =>
-                v == ExtentPass.ValueUnknown || v.startsWith(ExtentPass.ValueOffset + ":")
-            )
-end GuardPass
-
-object GuardPass:
-  final val TagAbove    = "bounded-above"
-  final val TagBelow    = "bounded-below"
-  final val TagByExtent = "bounded-by-extent"
-
-  private val comparisonOps = Set(
-    "<operator>.greaterThan",
-    "<operator>.greaterEqualsThan",
-    "<operator>.lessThan",
-    "<operator>.lessEqualsThan",
-    "<operator>.equals",
-    "<operator>.notEquals"
-  )
-
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end GuardPass

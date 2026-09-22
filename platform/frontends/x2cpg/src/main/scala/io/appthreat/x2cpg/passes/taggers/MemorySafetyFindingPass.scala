@@ -42,8 +42,15 @@ import scala.collection.mutable
   *
   * `unknown` extents never satisfy a rule that needs an extent: MS-BOUND-001 fires only on an
   * explicit `param:` extent, MS-BOUND-002 needs no extent at all, and the index rules accept only
-  * `const:`/`alloc:` capacities. Runs last in the overlay, after MemoryApi, Extent, Guard and
-  * ValueOrigin. C/C++ graphs only.
+  * `const:`/`alloc:` capacities. Part 4 (D0) adds the integer family, over the C5 width facts:
+  *
+  *   - **MS-INT-001** (CWE-190) - an allocation/copy length computed by attacker-influenced
+  *     arithmetic (`int-arith-len`), no guard bounding an operand above, no widened operand;
+  *   - **MS-INT-002** (CWE-197, `high`) - a sign-changing cast that a guard bounds, with the
+  *     guarded uses reading the declared view. A resign that merely exists is not a finding.
+  *
+  * Runs last in the overlay, after MemoryApi, Extent, Guard, ValueOrigin and IntegerWidth. C/C++
+  * graphs only.
   */
 class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
 
@@ -64,6 +71,8 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
     ruleIndexBounds(record)
+    ruleIntegerArithmeticLength(record)
+    ruleResignAcrossGuard(record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -190,6 +199,161 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     )
     if isWrite then RuleIndexWrite else RuleIndexRead
 
+  /** MS-INT-001 (D0, CWE-190): an allocation or copy length computed by arithmetic whose operands
+    * are attacker-influenced, with no guard bounding an operand from above and no widened operand.
+    * The facts were left on the graph by C5 and nobody read them: `int-arith-len` names the
+    * arithmetic AND its attacker origins (the evidence the rule turns on - never a type's absence),
+    * and D1's count role is what makes the attacker-influenced factor of a count-by-size allocator
+    * visible at all (hevc.c:847's `numNalus + 1` carried no length fact before it).
+    *
+    * The guard conjunct reuses GuardPass's comparison semantics at OPERAND level: a guard bounds
+    * `numNalus`, not `numNalus + 1`, so the tag-level bound lookup (which keys on the argument)
+    * never sees it. An operand bounded above - `count > UINT_MAX / sizeof(int)` - is exactly the
+    * guard that makes the overflow impossible, and the rule stands down; the fixed tree of
+    * CVE-2026-75141 adds precisely that guard. A widened operand - `(size_t) a * b` - means the
+    * arithmetic already computes at the wider width, so there is nothing to overflow; standing down
+    * there is evidence-based (a widening cast exists), not silence-based.
+    */
+  private def ruleIntegerArithmeticLength(record: (StoredNode, String) => Unit): Unit =
+      OverlayFacts.memoryArgumentSites(atom)
+          .collect { case (call, arg, MemoryApiPass.TagLen) => (call, arg) }
+          .foreach { case (memCall, lenArg) =>
+              // the first length arithmetic along the def chain that satisfies every conjunct: a
+              // product nested in another product reports once, at the node nearest the length
+              (lenArg +: OverlayFacts.reachingDefsIn(lenArg)).collectFirst {
+                  case arith: Call
+                      if isLengthArithmetic(arith) && attackerArithmetic(arith)
+                          && !widenedOperandOf(arith)
+                          && !guardBoundsAnOperand(memCall, arith) =>
+                      record(arith, RuleIntegerOverflow)
+              }
+          }
+
+  private def isLengthArithmetic(c: Call): Boolean =
+      c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
+
+  /** The arithmetic's `int-arith-len` fact names its operand origins (`struct-field+constant`); the
+    * rule fires only when at least one of them is a rule-relevant attacker origin.
+    */
+  private def attackerArithmetic(arith: Call): Boolean =
+      arith.tag.name(IntegerWidthPass.TagArithLen).value.l.exists(
+        _.split("\\+").exists(attackerOrigins)
+      )
+
+  private val attackerOrigins = Set(
+    ValueOriginPass.OriginCallerParam,
+    ValueOriginPass.OriginUntrustedRead,
+    ValueOriginPass.OriginStructField,
+    ValueOriginPass.OriginMixed
+  )
+
+  /** True when some operand of the arithmetic is cast to a WIDER type than the operand itself: the
+    * author already widened before the multiply, and a 64-bit product is a different question.
+    */
+  private def widenedOperandOf(arith: Call): Boolean =
+      arith.argument.l.collect { case e: Expression => e }.exists {
+          case c: Call if c.name == "<operator>.cast" =>
+              val operand = c.argumentOption(2).orElse(c.argumentOption(1))
+              integralWidth(castTargetName(c)).exists { tw =>
+                  operand.exists(o => integralWidth(typeOfExpr(o)).exists(_ < tw))
+              }
+          case _ => false
+      }
+
+  /** The target type of a cast, as written: c2cpg lays a cast out as (type placeholder, operand),
+    * the target type being the FIRST argument's rendered name - the same convention
+    * [[IntegerWidthPass]] reads its width facts with.
+    */
+  private def castTargetName(c: Call): String =
+      if c.argumentOption(2).isDefined then
+        c.argumentOption(1).map(_.code).getOrElse(typeOfExpr(c))
+      else typeOfExpr(c)
+
+  /** Does some comparison controlling the memory call bound one of the arithmetic's operands (or
+    * the arithmetic itself) from ABOVE? Only an upper bound makes the overflow impossible.
+    */
+  private def guardBoundsAnOperand(memCall: Call, arith: Call): Boolean =
+    val operandKeys = arith.argument.l
+        .collect { case e: Expression => e }
+        .flatMap(castUnwrappingKey)
+        .toSet
+    memCall.controlledBy.collect { case c: Call => c }.exists { controller =>
+        GuardPass
+            .conjuncts(controller, GuardPass.holdsAt(controller, memCall))
+            .getOrElse(Nil)
+            .exists { case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
+                    above && (bounded.id == arith.id ||
+                        castUnwrappingKey(bounded).exists(operandKeys.contains))
+                }
+            }
+    }
+
+  /** MS-INT-002 (D0, CWE-197): a value whose guard ran at one signedness and whose use happens at
+    * another. The `int-resign` fact on `(long) obu_size` says the cast reinterprets the value; the
+    * rule adds the crossing: the cast is a comparison's BOUNDED operand (the guard tested the
+    * re-signed view) and the same variable is used elsewhere under that comparison's control (the
+    * use reads the declared view). A narrowing that merely exists is not a finding - and a cast on
+    * the guard's OTHER operand (`obu_size > (unsigned) frame_size`, both fixed trees of the
+    * rtpenc_av1 pair) does not cross anything: the bounded value never changed width.
+    */
+  private def ruleResignAcrossGuard(record: (StoredNode, String) => Unit): Unit =
+      atom.call.name("<operator>.cast").l.foreach { cast =>
+          if cast.tag.name(IntegerWidthPass.TagResign).value.l.nonEmpty then
+            enclosingComparison(cast).foreach { cmp =>
+                castOperand(cast).flatMap(castUnwrappingKey).foreach { key =>
+                  val crossed = usesOfKey(cast.method, key).exists { stmt =>
+                      stmt.controlledBy.collect { case c: Call => c }.exists(_.id == cmp.id) &&
+                      GuardPass
+                          .directionalFacts(cmp, GuardPass.holdsAt(cmp, stmt))
+                          .exists { case (bounded, above, _) =>
+                              // an UPPER bound is the crossing: the guard rejected the too-large
+                              // values in the cast's signedness. A bound FROM below - what the
+                              // fixed trees' `obu_size > (unsigned) frame_size` produces, where the
+                              // cast is the bound and not the bounded value - crosses nothing.
+                              above && bounded.id == cast.id
+                          }
+                  }
+                  if crossed then record(cast, RuleResignAcrossGuard)
+                }
+            }
+      }
+
+  /** The comparison the cast sits in, walking up through expression calls only. */
+  private def enclosingComparison(node: AstNode): Option[Call] =
+    var cursor: Option[StoredNode] = node._astIn.nextOption()
+    var found: Option[Call]        = None
+    while found.isEmpty && cursor.isDefined do
+      cursor.get match
+        case c: Call =>
+            if GuardPass.comparisonOps.contains(c.name) then found = Some(c)
+            else cursor = c._astIn.nextOption()
+        case _ => cursor = None
+    found
+
+  private def castOperand(cast: Call): Option[Expression] =
+      cast.argumentOption(2).orElse(cast.argumentOption(1))
+
+  /** The statements of `method` whose expression tree reads the variable `key`, as statement roots
+    * (the nodes CDG edges reach). Collected per method, not per graph.
+    */
+  private def usesOfKey(method: Method, key: String): Set[Call] =
+      method.ast
+          .collectAll[Expression]
+          .filter(e => castUnwrappingKey(e).contains(key))
+          .map(e => GuardPass.statementRootOf(e))
+          .collect { case c: Call => c }
+          .l
+          .toSet
+
+  /** The variable a comparison bounds, through the casts the frontend leaves in the comparison:
+    * `(long) x` talks about `x`.
+    */
+  private def castUnwrappingKey(e: Expression): Option[String] = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        castOperand(c).flatMap(castUnwrappingKey)
+    case other => OverlayFacts.variableKey(other)
+
   /** The declared type of an index expression, when the frontend recorded one. */
   private def typeOfExpr(e: Expression): String = e match
     case i: Identifier => i.typeFullName
@@ -274,6 +438,9 @@ object MemorySafetyFindingPass:
   /** The half-bounded signed-index arm: a hypothesis, reported at `low`. */
   final val RuleNegativeIndexHazard = "MS-BOUND-005"
 
+  final val RuleIntegerOverflow   = "MS-INT-001"
+  final val RuleResignAcrossGuard = "MS-INT-002"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -331,6 +498,26 @@ object MemorySafetyFindingPass:
       confidence = "low",
       message = "signed index bounded above but not below, so a negative value passes the " +
           "check - the CVE-2026-75146 shape, and also what most correct counters look like"
+    ),
+    MemorySafetyRule(
+      id = RuleIntegerOverflow,
+      cwe = "CWE-190",
+      kind = "integer-overflow-length",
+      severity = "high",
+      confidence = "medium",
+      message = "allocation or copy length computed by attacker-influenced arithmetic with no " +
+          "guard bounding an operand from above and no widened accumulator - the product or " +
+          "sum can wrap before it bounds the buffer (CVE-2026-75141 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleResignAcrossGuard,
+      cwe = "CWE-197",
+      kind = "lossy-cast-in-guard",
+      severity = "high",
+      confidence = "high",
+      message = "a sign-changing cast is the value a comparison bounds, while the guarded uses " +
+          "read it at its declared width - the guard checked one signedness, the use happens at " +
+          "another (CVE-2026-75145 shape)"
     )
   ).map(r => r.id -> r).toMap
 
