@@ -23,6 +23,10 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
     |    int data_len;
     |};
     |
+    |struct one { unsigned char *buf; };
+    |struct two { unsigned char *buf; };
+    |struct many { unsigned char *buf; };
+    |
     |unsigned char *get_buf(void);
     |
     |void const_local(unsigned char *src, int n) {
@@ -103,6 +107,27 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
     |void addressof_index(unsigned char *src, int i, int n) {
     |    char buf[SZ];
     |    memcpy(&buf[i], src, n);
+    |}
+    |
+    |void member_from_alloc(unsigned char *src, int n) {
+    |    struct one *w = malloc(sizeof(struct one));
+    |    w->buf = malloc(256);
+    |    memcpy(w->buf, src, n);
+    |}
+    |
+    |void member_from_alloc_sizeof(unsigned char *src, int n) {
+    |    struct two w;
+    |    w.buf = malloc(sizeof(struct two));
+    |    memcpy(w.buf, src, n);
+    |}
+    |
+    |void member_from_two_allocs(unsigned char *src, int n) {
+    |    struct many w;
+    |    if (n > 0)
+    |        w.buf = malloc(32);
+    |    else
+    |        w.buf = malloc(64);
+    |    memcpy(w.buf, src, n);
     |}
     |""".stripMargin,
     "extent.c"
@@ -192,6 +217,21 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
 
       "keep the buffer's capacity for &buf[i]" in {
           dstExtentOf("addressof_index") shouldBe List("const:128")
+      }
+
+      "derive a pointer member's extent from the allocation assigned to it" in {
+          val extent = dstExtentOf("member_from_alloc").head
+          extent.startsWith("alloc:") shouldBe true
+          val sizeNodeId = extent.stripPrefix("alloc:").toLong
+          cpg.literal.code("256").l.map(_.id) should contain(sizeNodeId)
+      }
+
+      "derive a pointer member's extent as sizeof when the allocation size is one" in {
+          dstExtentOf("member_from_alloc_sizeof") shouldBe List("sizeof:sizeof(struct two)")
+      }
+
+      "emit nothing for a member assigned from two allocations of different sizes" in {
+          dstExtentOf("member_from_two_allocs") shouldBe List("unknown")
       }
 
       "tag the declaration the extent came from, so guards can match against it" in {

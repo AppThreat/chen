@@ -43,9 +43,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   import ExtentPass.*
   import OverlayFacts.*
 
+  /** C1: the member-extent facts are not method-local, so they are built once, up front, in a
+    * single traversal over assignments - never re-derived per field access. Lazy so a graph with no
+    * pointer-member destinations never pays for it.
+    */
+  private lazy val memberExtents: Map[Member, String] = memberExtentsOf(atom)
+
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if !MemoryApiPass.appliesTo(atom) then return
-
     val argExtents  = mutable.LinkedHashMap.empty[StoredNode, String]
     val declExtents = mutable.LinkedHashMap.empty[StoredNode, String]
 
@@ -83,6 +88,47 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       }
     )
   end run
+
+  /** C1: struct members whose capacity lives at their allocation. One traversal over assignments
+    * whose LEFT side is a member and whose right side is an inventoried `mem-alloc` call (through a
+    * cast): the allocation's size argument becomes the member's extent (`alloc:<id>`, or
+    * `sizeof:<expr>` when the size is a sizeof). Two allocations of DIFFERENT sizes are no capacity
+    * at all - the member gets nothing.
+    */
+  private def memberExtentsOf(cpg: Cpg): Map[Member, String] =
+    val sizes = mutable.LinkedHashMap.empty[Member, mutable.LinkedHashSet[String]]
+    cpg.call.name("<operator>.assignment").l.foreach { assignment =>
+        assignment.argumentOption(1).foreach { lhs =>
+            allocationSizeValueOf(assignment.argumentOption(2)).foreach { sizeValue =>
+                lhs match
+                  case fa: Call =>
+                      OverlayFacts.memberRefOf(cpg, fa).foreach { member =>
+                          sizes
+                              .getOrElseUpdate(member, mutable.LinkedHashSet.empty[String])
+                              .add(sizeValue)
+                      }
+                  case _ => ()
+            }
+        }
+    }
+    sizes.collect { case (member, values) if values.size == 1 => member -> values.head }.toMap
+
+  /** The extent value of the allocation a right-hand side expression produces, through casts. */
+  private def allocationSizeValueOf(rhs: Option[Expression]): Option[String] =
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call if c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty => Some(c)
+      case c: Call if c.name.startsWith("<operator>.cast") =>
+          c.argument.l.collectFirst { case inner: Call => inner }.flatMap(allocCallOf)
+      case _ => None
+    rhs.flatMap(allocCallOf).flatMap(alloc =>
+        alloc.argument.l
+            .find(arg => arg.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+            .map {
+                case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                    s"$ValueSizeof:${sz.code}"
+                case sizeArg => s"$ValueAlloc:${sizeArg.id}"
+            }
+    )
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
@@ -218,6 +264,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
           arrayExtent(member.typeFullName)
               .map(n => (s"$ValueConst:$n", List(member)))
               .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
+              // C1: a pointer member's capacity is wherever its allocation is
+              .orElse(memberExtents.get(member).map(v => (v, List(member))))
       }
 
   /** A struct member holding the length beside a pointer member, by the C `_len`/`_size` suffix
