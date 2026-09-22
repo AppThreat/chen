@@ -93,6 +93,23 @@ private[taggers] object OverlayFacts:
 
   def isIntegral(t: String): Boolean = integralTypes.contains(t.stripPrefix("const ").trim)
 
+  private val signedIntegralTypes = Set(
+    "int",
+    "long",
+    "long long",
+    "short",
+    "ssize_t",
+    "ptrdiff_t",
+    "int8_t",
+    "int16_t",
+    "int32_t",
+    "int64_t"
+  )
+
+  /** A signed integral type: the only kind an index can go negative in. */
+  def isSignedIntegral(t: String): Boolean =
+      signedIntegralTypes.contains(t.stripPrefix("const ").trim)
+
   /** Reaching definitions backwards from `node`, breadth-first with a hop budget: the walk the
     * value-origin and finding rules run instead of a `.df(...)` reachability solve. Identifier
     * expansion applies [[expansionExclusionOf]]: the flow semantics and the Flux engine emit

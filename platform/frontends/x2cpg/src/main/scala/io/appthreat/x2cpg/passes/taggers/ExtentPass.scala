@@ -81,6 +81,24 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
             }
         }
 
+    // C4: the base of an array index is a buffer access, so its extent is the same fact it is
+    // for a memcpy destination. Memory-call destinations are resolved first and never
+    // overwritten: their resolution saw the copy's own sizeof evidence.
+    atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .foreach { access =>
+            access.argumentOption(1).foreach { base =>
+                if !argExtents.contains(base) then
+                  extentOf(base, access.method, None) match
+                    case Some((value, decls)) =>
+                        argExtents(base) = value
+                        decls.foreach(d => declExtents(d) = value)
+                    case None =>
+                        argExtents(base) = ValueUnknown
+            }
+        }
+
     OverlayFacts.emitTags(
       dstGraph,
       (argExtents.toList ++ declExtents.toList).map { case (node, value) =>

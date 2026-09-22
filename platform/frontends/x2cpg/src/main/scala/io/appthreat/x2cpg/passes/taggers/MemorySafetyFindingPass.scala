@@ -32,9 +32,18 @@ import scala.collection.mutable
   *     as a guard on it. The shape behind CVE-2026-75143: `size = payload_len` destroys the
   *     caller's capacity before `memcpy(buf, payload, size)`.
   *
+  * Part 3 (C4) adds the index family, over the facts that already existed but had no reader:
+  *
+  *   - **MS-BOUND-003** (CWE-125, read) / **MS-BOUND-004** (CWE-787, write) - the index is
+  *     attacker-controlled (`caller-param` / `untrusted-read`) into a base of known capacity with
+  *     no upper bound; or it is a signed struct-field read bounded only ABOVE (CVE-2026-75146's
+  *     negative-index shape, which the fixed tree's `>= 0` conjunct silences). `bounded-below` is
+  *     the fact that separates the bug from the guard that fixes it.
+  *
   * `unknown` extents never satisfy a rule that needs an extent: MS-BOUND-001 fires only on an
-  * explicit `param:` extent, and MS-BOUND-002 needs no extent at all. Runs last in the overlay,
-  * after MemoryApi, Extent, Guard and ValueOrigin. C/C++ graphs only.
+  * explicit `param:` extent, MS-BOUND-002 needs no extent at all, and the index rules accept only
+  * `const:`/`alloc:` capacities. Runs last in the overlay, after MemoryApi, Extent, Guard and
+  * ValueOrigin. C/C++ graphs only.
   */
 class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
 
@@ -54,6 +63,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
 
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
+    ruleIndexBounds(record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -118,8 +128,83 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
           siteArgs.exists(arg =>
               ValueOriginPass.originNamesOf(arg) != Set(ValueOriginPass.OriginConstant)
           )
-    end if
   end unboundedAtCallSites
+
+  /** MS-BOUND-003/004 (C4): index out of bounds, over facts that already exist on the graph.
+    * `ValueOriginPass` tags array indices with their origin and nobody read them. Two arms:
+    *
+    *   - **unchecked attacker index**: an index whose origin is `caller-param` or `untrusted-read`,
+    *     on a base whose extent is a known capacity (`const:N` / `alloc:`), with no `bounded-above`
+    *     \- and no `bounded-below` either, since a signed index that can go negative can also go
+    *     above.
+    *   - **half-bounded signed index** (the CVE-2026-75146 shape): the author bounded the index
+    *     ABOVE (`cur_seq_no < n_fragments`) but not below, and the index is a signed value read out
+    *     of a struct - someone else set it, it can be negative, and the comparison that is there
+    *     does not stop it. `bounded-below` finally earns its keep: the fixed tree adds the `>= 0`
+    *     conjunct and the arm goes quiet.
+    *
+    * CWE-125 for a read, CWE-787 for a write - the distinction is which side of an assignment the
+    * index access sits on.
+    */
+  private def ruleIndexBounds(record: (StoredNode, String) => Unit): Unit =
+      atom.call
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .foreach { access =>
+            for
+              idx  <- access.argumentOption(2)
+              base <- access.argumentOption(1)
+            do
+              val tags = idx.tag.name.l
+              val extent = base.tag.name(ExtentPass.TagExtent).value.l.headOption
+                  .getOrElse(ExtentPass.ValueUnknown)
+              val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
+                  extent.startsWith(ExtentPass.ValueAlloc + ":")
+              val boundedAbove = tags.contains(GuardPass.TagAbove) ||
+                  tags.contains(GuardPass.TagByExtent)
+              val boundedBelow = tags.contains(GuardPass.TagBelow)
+              val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
+                  tags.contains(ValueOriginPass.OriginUntrustedRead)
+              val halfBounded = tags.contains(ValueOriginPass.OriginStructField) &&
+                  isSignedIndex(idx)
+              val fires = (attackerIndex && knownExtent && !boundedAbove && !boundedBelow) ||
+                  (halfBounded && boundedAbove && !boundedBelow)
+              if fires then record(idx, ruleIdFor(access))
+            end for
+          }
+  end ruleIndexBounds
+
+  /** A read through the index is CWE-125, a write through it CWE-787. */
+  private def ruleIdFor(access: Call): String =
+    val isWrite = access._astIn.collectFirst { case c: Call => c }.exists(c =>
+        c.name.startsWith("<operator>.assignment") &&
+            c.argumentOption(1).exists(_.id == access.id)
+    )
+    if isWrite then RuleIndexWrite else RuleIndexRead
+
+  /** The declared type of an index expression, when the frontend recorded one. */
+  private def typeOfExpr(e: Expression): String = e match
+    case i: Identifier => i.typeFullName
+    case c: Call       => c.typeFullName
+    case l: Literal    => l.typeFullName
+    case _             => ""
+
+  /** Can this index go negative? c2cpg often leaves the TYPE of a field-access expression empty, so
+    * a `pls->cur_seq_no` index resolves its type through the member it reads; an index whose type
+    * is nowhere recorded is treated as signed - the negative-index hazard stands, and the absence
+    * of a type is not evidence of unsignedness.
+    */
+  private def isSignedIndex(idx: Expression): Boolean =
+    val declared = typeOfExpr(idx) match
+      // c2cpg writes the placeholder type "<empty>" rather than an empty string
+      case t if t.nonEmpty && t != "<empty>" => Some(t)
+      case _ =>
+          idx match
+            case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName)
+            case _       => None
+    declared match
+      case Some(t) => OverlayFacts.isSignedIntegral(t)
+      case None    => true
 
   /** MS-BOUND-001: the destination's extent is an adjacent capacity parameter, and that parameter
     * reaches neither the copy's length nor a bound on it.
@@ -169,6 +254,8 @@ object MemorySafetyFindingPass:
 
   final val RuleUnboundedCopy     = "MS-BOUND-002"
   final val RuleSizeParamContract = "MS-BOUND-001"
+  final val RuleIndexRead         = "MS-BOUND-003"
+  final val RuleIndexWrite        = "MS-BOUND-004"
 
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
@@ -200,6 +287,24 @@ object MemorySafetyFindingPass:
       confidence = "medium",
       message = "attacker-controlled copy length with no guard bounding it against the " +
           "destination's capacity"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexRead,
+      cwe = "CWE-125",
+      kind = "oob-index-read",
+      severity = "high",
+      confidence = "medium",
+      message = "array read at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexWrite,
+      cwe = "CWE-787",
+      kind = "oob-index-write",
+      severity = "high",
+      confidence = "medium",
+      message = "array write at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
     )
   ).map(r => r.id -> r).toMap
 
