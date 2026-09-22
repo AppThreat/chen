@@ -55,45 +55,56 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
       }
     )
 
-  /** `int-narrow` and `int-resign` on assignments, increments and casts. */
+  /** `int-narrow` and `int-resign` on assignments, increments and casts. Dispatch is a string
+    * switch over one streamed call enumeration and the arguments are read ONCE per node (D2: the
+    * regex name filter plus an argument sub-traversal per `argumentOption` were what cost this pass
+    * 22 GB on libavformat - the facts are unchanged, only how they are fetched).
+    */
   private def narrowingFacts(record: (StoredNode, String, String) => Unit): Unit =
-      atom.call
-          .name(
-            "<operator>.assignment|<operator>.assignmentPlus|<operator>.assignmentMinus|<operator>.postIncrement|<operator>.preIncrement|<operator>.cast"
-          )
-          .l
-          .foreach { c =>
-              c.name match
-                case "<operator>.cast" =>
-                    // c2cpg lays a cast out as (type placeholder, operand): the target type is
-                    // the FIRST argument's rendered name, the operand the second
-                    val operandOpt = c.argumentOption(2).orElse(c.argumentOption(1))
-                    val targetName =
-                        if c.argumentOption(2).isDefined then
-                          c.argumentOption(1).map(_.code).getOrElse(c.typeFullName)
-                        else c.typeFullName
-                    operandOpt.foreach { operand =>
-                      val (from, fromW) = declaredWidthOf(operand)
-                      integralWidth(targetName).foreach { tw =>
-                          if fromW > tw then
-                            record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
-                          else if fromW > 0 && signednessOf(from) != signednessOf(targetName) then
-                            record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
+      atom.call.foreach { c =>
+          c.name match
+            case "<operator>.cast" =>
+                // c2cpg lays a cast out as (type placeholder, operand): the target type is
+                // the FIRST argument's rendered name, the operand the second
+                val args       = argumentsOf(c)
+                val operandOpt = argAt(args, 2).orElse(argAt(args, 1))
+                val targetName =
+                    if argAt(args, 2).isDefined then
+                      argAt(args, 1).map(_.code).getOrElse(c.typeFullName)
+                    else c.typeFullName
+                operandOpt.foreach { operand =>
+                  val (from, fromW) = declaredWidthOf(operand)
+                  integralWidth(targetName).foreach { tw =>
+                      if fromW > tw then
+                        record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
+                      else if fromW > 0 && signednessOf(from) != signednessOf(targetName) then
+                        record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
+                  }
+                }
+            case "<operator>.assignment" | "<operator>.assignmentPlus" |
+                "<operator>.assignmentMinus" | "<operator>.postIncrement" |
+                "<operator>.preIncrement" =>
+                val args = argumentsOf(c)
+                argAt(args, 1).foreach { lhs =>
+                  val to = declaredTypeOf(lhs)
+                  integralWidth(to).foreach { tw =>
+                      argAt(args, 2).orElse(argAt(args, 1)).foreach { rhs =>
+                        val (from, fromW) = computedWidthOf(rhs)
+                        if fromW > tw then
+                          record(c, TagNarrow, s"from:$from:$fromW->to:$to:$tw")
                       }
-                    }
-                case _ =>
-                    c.argumentOption(1).foreach { lhs =>
-                      val to = declaredTypeOf(lhs)
-                      integralWidth(to).foreach { tw =>
-                          c.argumentOption(2).orElse(c.argumentOption(1)).foreach { rhs =>
-                            val (from, fromW) = computedWidthOf(rhs)
-                            if fromW > tw then
-                              record(c, TagNarrow, s"from:$from:$fromW->to:$to:$tw")
-                          }
-                      }
-                    }
-          }
+                  }
+                }
+            case _ => ()
+      }
   end narrowingFacts
+
+  /** The arguments of a call, fetched with one traversal and ordered locally. */
+  private def argumentsOf(c: Call): List[Expression] =
+      c.argument.l.sortBy(_.argumentIndex)
+
+  private def argAt(args: List[Expression], index: Int): Option[Expression] =
+      args.find(_.argumentIndex == index)
 
   /** `int-arith-len`: attacker-influenced arithmetic reaching a copy length or allocation size. */
   private def arithLengthFacts(record: (StoredNode, String, String) => Unit): Unit =
@@ -127,7 +138,7 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
   )
 
   /** The declared type of an assignment destination: an identifier's type, or - for the field
-    * accesses the frontend often leaves typeless - the member it writes.
+    * accesses the frontend often leaves typeless - the type of the member it writes.
     */
   private def declaredTypeOf(lhs: Expression): String =
     val direct = lhs match
@@ -137,12 +148,45 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
     if direct.nonEmpty && direct != "<empty>" then direct
     else
       lhs match
-        case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName).getOrElse("")
+        case c: Call => memberTypeOf(c).getOrElse("")
         case _       => ""
 
   /** The type an operand expression carries, through the typeless-field fallback. */
   private def operandType(c: Call): Option[String] =
       c.argumentOption(1).map(declaredTypeOf).filter(_.nonEmpty)
+
+  /** The struct member type a field-access call reads, resolved exactly where
+    * `OverlayFacts.memberRefOf` resolves it (base identifier type, or the nested field access's
+    * member type; pointer stripped), but answered from [[memberTypes]] - a whole-graph `typeDecl`
+    * scan PER ASSIGNMENT was the shape that cost this pass 22 GB on libavformat (D2). The declared
+    * members of the tree do not change while the overlay runs, so the question has a single answer
+    * for the whole pass no matter how many times it is asked.
+    */
+  private def memberTypeOf(fieldAccess: Call): Option[String] =
+    val args = argumentsOf(fieldAccess)
+    for
+      fi   <- args.collectFirst { case fi: FieldIdentifier => fi }
+      base <- argAt(args, 1)
+      baseType <- base match
+        case i: Identifier => Option.when(i.typeFullName.nonEmpty)(i.typeFullName)
+        case c: Call =>
+            c.name match
+              case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" =>
+                  memberTypeOf(c)
+              case _ => None
+        case _ => None
+      typeName = baseType.stripSuffix("*").trim
+      memberType <- memberTypes.get((typeName, fi.canonicalName))
+    yield memberType
+
+  private lazy val memberTypes: Map[(String, String), String] =
+    val types = mutable.HashMap.empty[(String, String), String]
+    atom.typeDecl.foreach { td =>
+        td.member.foreach { m =>
+            if !types.contains((td.name, m.name)) then types((td.name, m.name)) = m.typeFullName
+        }
+    }
+    types.toMap
 
   /** (declared type, width) of an expression; width 0 when the type is not a known integral. */
   private def declaredWidthOf(e: Expression): (String, Int) =
@@ -158,7 +202,7 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
         case c: Call
             if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" ||
                 c.name == "<operator>.multiplication" =>
-            val parts = c.argument.l.collect { case x: Expression => x }.map(declaredWidthOf)
+            val parts = argumentsOf(c).map(declaredWidthOf)
             val width = (parts.map(_._2) :+ 32).max
             val label = parts.find(_._2 == width).map(_._1).getOrElse("promoted")
             (label, width)
