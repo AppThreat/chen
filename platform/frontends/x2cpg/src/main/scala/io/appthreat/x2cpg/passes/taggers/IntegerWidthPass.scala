@@ -112,23 +112,65 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
         .memoryArgumentSites(atom)
         .collect { case (_, e, MemoryApiPass.TagLen) => e }
         .distinct
+    // ONE multi-source bounded BFS from every length argument, instead of one walk per
+    // argument (D2): the per-argument walks re-visited the same dense def-neighbourhoods
+    // hundreds of times over, which was this pass's 22 GB. A node enters the walk once, at its
+    // minimum hop distance from any length argument - the union of the per-argument
+    // hop-bounded reachable sets, which is exactly the set of facts, collected once.
+    val visited     = mutable.LongMap.empty[Int]
+    var frontier    = List.empty[(StoredNode, Int)]
+    val originCache = mutable.HashMap.empty[Long, Set[String]]
     lenArgs.foreach { len =>
-      // the length argument may BE the arithmetic (`malloc(n * 4)`), so it joins the walk -
-      // reachingDefsIn deliberately excludes its own start node
-      val candidates = len +: OverlayFacts.reachingDefsIn(len)
-      candidates.foreach {
-          case c: Call
-              if c.name == "<operator>.multiplication" ||
-                  c.name == "<operator>.addition" =>
-              val origins = c.argument.l.collect { case e: Expression => e }
-                  .flatMap(ValueOriginPass.originNamesOf)
-                  .filterNot(_ == ValueOriginPass.OriginUnknown)
-              if origins.exists(attackerOrigins.contains) then
-                record(c, TagArithLen, origins.mkString("+"))
-          case _ => ()
-      }
+      visited.update(len.id(), 0)
+      frontier = (len, 0) :: frontier
+      // the length argument may BE the arithmetic (`malloc(n * 4)`): the seed is a candidate
+      collectArithFact(len, 0, originCache, mutable.ListBuffer.empty, record)
     }
+    while frontier.nonEmpty do
+      val next = mutable.ListBuffer.empty[(StoredNode, Int)]
+      frontier.foreach { case (node, dist) =>
+          val successors = expandDefs(node)
+          successors.foreach { candidate =>
+            val fresh = !visited.contains(candidate.id())
+            if fresh then
+              visited.update(candidate.id(), dist + 1)
+              collectArithFact(candidate, dist + 1, originCache, next, record)
+          }
+      }
+      frontier = next.toList
   end arithLengthFacts
+
+  private def collectArithFact(
+    candidate: StoredNode,
+    dist: Int,
+    originCache: mutable.HashMap[Long, Set[String]],
+    next: mutable.ListBuffer[(StoredNode, Int)],
+    record: (StoredNode, String, String) => Unit
+  ): Unit =
+    candidate match
+      case c: Call
+          if c.name == "<operator>.multiplication" || c.name == "<operator>.addition" =>
+          val origins = c.argument.l.collect { case e: Expression => e }.flatMap { e =>
+              originCache.getOrElseUpdate(
+                e.id,
+                ValueOriginPass
+                    .originNamesOf(e)
+                    .filterNot(_ == ValueOriginPass.OriginUnknown)
+              )
+          }
+          if origins.exists(attackerOrigins.contains) then
+            record(c, TagArithLen, origins.mkString("+"))
+      case _ =>
+    if dist < MaxWalkHops then next += ((candidate, dist))
+  end collectArithFact
+
+  /** The def-neighbours of a node: the same expansion OverlayFacts.reachingDefsIn performs. */
+  private def expandDefs(node: StoredNode): List[StoredNode] = node match
+    case i: Identifier =>
+        val exclude = OverlayFacts.expansionExclusionOf(i)
+        i._reachingDefIn.iterator.filterNot(d => exclude.contains(d.id())).toList
+    case other =>
+        other._reachingDefIn.iterator.toList
 
   private val attackerOrigins = Set(
     ValueOriginPass.OriginCallerParam,
@@ -219,5 +261,8 @@ object IntegerWidthPass:
   final val TagNarrow   = "int-narrow"
   final val TagResign   = "int-resign"
   final val TagArithLen = "int-arith-len"
+
+  /** the walk budget OverlayFacts.reachingDefsIn uses by default */
+  private val MaxWalkHops = 8
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
