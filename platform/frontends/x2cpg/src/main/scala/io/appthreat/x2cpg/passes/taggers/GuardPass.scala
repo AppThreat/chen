@@ -317,7 +317,12 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
 
   private def declExtent(decl: Option[StoredNode]): Option[String] =
       decl.flatMap: d =>
-        d.tag.name(ExtentPass.TagExtent).value.l.headOption.filterNot(_ == ExtentPass.ValueUnknown)
+        // an `offset:` value (pointer arithmetic into a buffer) is not a capacity and must not
+        // present as the bound a comparison was made against
+        d.tag.name(ExtentPass.TagExtent).value.l.headOption
+            .filterNot(v =>
+                v == ExtentPass.ValueUnknown || v.startsWith(ExtentPass.ValueOffset + ":")
+            )
 end GuardPass
 
 object GuardPass:

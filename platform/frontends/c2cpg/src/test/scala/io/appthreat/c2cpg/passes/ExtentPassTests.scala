@@ -60,6 +60,50 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
     |    unsigned char *p = get_buf();
     |    memcpy(p, src, n);
     |}
+    |
+    |void additive_literal(unsigned char *src, int n) {
+    |    char buf[SZ];
+    |    memcpy(buf + 4, src, n);
+    |}
+    |
+    |void additive_composed(unsigned char *src, int n) {
+    |    char buf[SZ];
+    |    memcpy(buf + 2 + 4, src, n);
+    |}
+    |
+    |void additive_variable(unsigned char *src, int off, int n) {
+    |    char buf[SZ];
+    |    memcpy(buf + off, src, n);
+    |}
+    |
+    |void subtractive_literal(unsigned char *src, int n) {
+    |    char buf[SZ];
+    |    memcpy(buf - 4, src, n);
+    |}
+    |
+    |void additive_past_end(unsigned char *src, int n) {
+    |    char buf[8];
+    |    memcpy(buf + 16, src, n);
+    |}
+    |
+    |void additive_unknown_base(unsigned char *src, int n) {
+    |    unsigned char *p = get_buf();
+    |    memcpy(p + 4, src, n);
+    |}
+    |
+    |void additive_param_base(unsigned char *buf, int size, unsigned char *src, int n) {
+    |    memcpy(buf + 4, src, n);
+    |}
+    |
+    |void addressof_scalar_typed_by_copy(unsigned char *src) {
+    |    int dst;
+    |    memcpy(&dst, src, sizeof(dst));
+    |}
+    |
+    |void addressof_index(unsigned char *src, int i, int n) {
+    |    char buf[SZ];
+    |    memcpy(&buf[i], src, n);
+    |}
     |""".stripMargin,
     "extent.c"
   )
@@ -114,8 +158,46 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
           dstExtentOf("unknown_row") shouldBe List("unknown")
       }
 
+      "reduce a const extent by a literal offset" in {
+          dstExtentOf("additive_literal") shouldBe List("const:124")
+      }
+
+      "reduce a const extent through composed literal offsets" in {
+          dstExtentOf("additive_composed") shouldBe List("const:122")
+      }
+
+      "say offset:, not a capacity, when the offset is not a literal" in {
+          dstExtentOf("additive_variable") shouldBe List("offset:const:128")
+      }
+
+      "say offset: for a subtraction, whose start may be before the buffer" in {
+          dstExtentOf("subtractive_literal") shouldBe List("offset:const:128")
+      }
+
+      "say offset: when a literal offset reaches past the capacity" in {
+          dstExtentOf("additive_past_end") shouldBe List("offset:const:8")
+      }
+
+      "stay unknown when the base itself has no extent" in {
+          dstExtentOf("additive_unknown_base") shouldBe List("unknown")
+      }
+
+      "carry a param extent into offset: rather than inventing a number" in {
+          dstExtentOf("additive_param_base") shouldBe List("offset:param:size")
+      }
+
+      "resolve memcpy(&dst, src, sizeof(dst)) through the copy's own sizeof" in {
+          dstExtentOf("addressof_scalar_typed_by_copy") shouldBe List("sizeof:dst")
+      }
+
+      "keep the buffer's capacity for &buf[i]" in {
+          dstExtentOf("addressof_index") shouldBe List("const:128")
+      }
+
       "tag the declaration the extent came from, so guards can match against it" in {
-          cpg.local.name("buf").l.flatMap(_.tag.name("extent").value.l) shouldBe List("const:128")
+          cpg.local.name("buf").l.flatMap(_.tag.name("extent").value.l).distinct shouldBe List(
+            "const:128"
+          )
           cpg.method
               .name("param_row")
               .parameter

@@ -14,6 +14,12 @@ import scala.collection.mutable
   *
   *   - `const:128` - a declared array (`char buf[128]`, through a `#define`, and struct members:
   *     `int[16]` is in `typeFullName`, confirmed by part-1 task A5);
+  *   - `const:N-k` - a copy into `buf + k` for a literal k: the remaining capacity of the same
+  *     buffer from the write's start;
+  *   - `offset:<extent>` - somewhere inside (or, for `base - k`, before) a buffer whose extent is
+  *     `<extent>`, reduced by an unknown amount. NOT an extent: a rule that needs a capacity must
+  *     reject it exactly as it rejects `unknown`. It exists so a later rule can tell "inside a
+  *     128-byte buffer" apart from "no idea at all";
   *   - `sizeof:<expr>` - `sizeof(x)` in the allocation that produced the pointer, or as the copy's
   *     own length argument against the same buffer;
   *   - `alloc:<id>` - the size argument of the `mem-alloc` call that produced the pointer;
@@ -88,18 +94,68 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   ): Option[(String, List[StoredNode])] =
       dst match
         case c: Call if c.name == "<operator>.addressOf" =>
-            c.argumentOption(1).flatMap(extentOf(_, method, None))
+            // the copy's own sizeof evidence is evidence about the address target too:
+            // memcpy(&dst, src, sizeof(dst)) is a correctly bounded copy
+            c.argumentOption(1).flatMap(extentOf(_, method, sizeofInCopy))
         case c: Call
             if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" =>
             // &buf[off] still writes into buf's capacity
-            c.argumentOption(1).flatMap(extentOf(_, method, None))
+            c.argumentOption(1)
+                .flatMap(extentOf(_, method, sizeofInCopy))
+                .orElse(sizeofInCopy.map(v => (v, List.empty[StoredNode])))
         case i: Identifier =>
             extentOfVariable(i.name, i, method, sizeofInCopy)
         case c: Call
+            if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+            additiveExtentOf(c, method, sizeofInCopy)
+        case c: Call
             if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
-            extentOfField(c)
+            extentOfField(c).orElse(sizeofInCopy.map(v => (v, List.empty[StoredNode])))
         case _ =>
             sizeofInCopy.map(v => (v, List.empty[StoredNode]))
+
+  /** Pointer arithmetic over a buffer. `base + k` for a literal k shrinks a known capacity by k
+    * (`const:N` -> `const:N-k`); every other shape - a non-literal offset, a subtraction whose
+    * start may be negative, a literal offset at or past the capacity - says only "at an unknown
+    * distance inside `<base extent>`": the `offset:` value, never presented as a capacity. A base
+    * that itself resolves to nothing stays `unknown`: there is no capacity to reduce.
+    */
+  private def additiveExtentOf(
+    arith: Call,
+    method: Method,
+    sizeofInCopy: Option[String]
+  ): Option[(String, List[StoredNode])] =
+    def literalOf(e: Option[Expression]): Option[Long] = e.flatMap {
+        case l: Literal => l.code.toLongOption
+        case _          => None
+    }
+    val (base, offset) =
+        (arith.argumentOption(1), arith.argumentOption(2)) match
+          case (b, o) if literalOf(o).isDefined => (b, literalOf(o))
+          case (b, o) if literalOf(b).isDefined => (o, literalOf(b))
+          case (b, _)                           => (b, None)
+    base.flatMap(extentOf(_, method, sizeofInCopy)).map { case (baseValue, _) =>
+        // the distance the write starts inside the capacity; a subtraction or a negative
+        // literal may start BEFORE the buffer, which no capacity describes
+        val inwards = (arith.name, offset) match
+          case ("<operator>.addition", Some(k)) if k >= 0 => Some(k)
+          case _                                          => None
+        val reduced = baseValue match
+          case const if inwards.isDefined && baseValue.startsWith(s"$ValueConst:") =>
+              val n = const.stripPrefix(s"$ValueConst:").toLongOption.getOrElse(0L)
+              if inwards.get < n then s"$ValueConst:${n - inwards.get}"
+              else s"$ValueOffset:$baseValue"
+          case known if knownExtentPrefixes.exists(baseValue.startsWith) =>
+              s"$ValueOffset:$baseValue"
+          case other => other
+        // the arithmetic reshapes the write's extent, not the buffer's: the declaration keeps
+        // its own (full) fact, so a guard against the declared capacity still matches it
+        (reduced, List.empty[StoredNode])
+    }
+  end additiveExtentOf
+
+  private val knownExtentPrefixes: Set[String] =
+      Set(ValueConst, ValueSizeof, ValueAlloc, ValueParam, ValueField).map(_ + ":")
 
   private def extentOfVariable(
     name: String,
@@ -183,6 +239,7 @@ object ExtentPass:
   final val TagExtent = "extent"
 
   final val ValueConst   = "const"
+  final val ValueOffset  = "offset"
   final val ValueSizeof  = "sizeof"
   final val ValueAlloc   = "alloc"
   final val ValueParam   = "param"
