@@ -76,6 +76,30 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
     )
   end run
 
+  /** Collapse a set of origins to the emitted pair: one origin as-is, several to `mixed`, nothing
+    * to `unknown`. The mixed evidence names the contributing origins only - origins and their
+    * individual evidences are separate sets, and zipping them fabricates pairings
+    * (`caller-param:'\0'`) that never existed.
+    */
+  private def originTagOf(origins: Set[(String, String)]): Option[(String, String)] =
+      if origins.isEmpty then Some((OriginUnknown, ""))
+      else if origins.size == 1 then origins.headOption
+      else Some((OriginMixed, origins.map(_._1).toList.sorted.mkString("+")))
+end ValueOriginPass
+
+object ValueOriginPass:
+  final val TagOrigin = "origin"
+
+  final val OriginCallerParam   = "caller-param"
+  final val OriginUntrustedRead = "untrusted-read"
+  final val OriginConstant      = "constant"
+  final val OriginStructField   = "struct-field"
+  final val OriginMixed         = "mixed"
+  final val OriginUnknown       = "unknown"
+
+  final val MaxDepth = 3
+  final val MaxHops  = 8
+
   /** (origin, evidence) for an expression, or nothing when nothing is derivable. */
   private def originsOf(expr: Expression, depth: Int): Set[(String, String)] =
     if depth < 0 then return Set.empty
@@ -86,6 +110,12 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
       case c: Call =>
           callOrigins(c, depth)
       case _ => Set.empty
+
+  /** The origin names of an expression without their evidence, for consumers inside the overlay -
+    * the C3 call-site check asks only "is this passed length provably a constant".
+    */
+  private[taggers] def originNamesOf(expr: Expression): Set[String] =
+      originsOf(expr, MaxDepth).map(_._1)
 
   /** Walk the definitions of an identifier backwards over REACHING_DEF, classifying each node the
     * walk lands on. A node that already determines an origin (parameter, literal, tagged call,
@@ -144,28 +174,5 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
                 .flatMap(originsOf(_, depth))
                 .toSet
 
-  /** Collapse a set of origins to the emitted pair: one origin as-is, several to `mixed`, nothing
-    * to `unknown`. The mixed evidence names the contributing origins only - origins and their
-    * individual evidences are separate sets, and zipping them fabricates pairings
-    * (`caller-param:'\0'`) that never existed.
-    */
-  private def originTagOf(origins: Set[(String, String)]): Option[(String, String)] =
-      if origins.isEmpty then Some((OriginUnknown, ""))
-      else if origins.size == 1 then origins.headOption
-      else Some((OriginMixed, origins.map(_._1).toList.sorted.mkString("+")))
-end ValueOriginPass
-
-object ValueOriginPass:
-  final val TagOrigin = "origin"
-
-  final val OriginCallerParam   = "caller-param"
-  final val OriginUntrustedRead = "untrusted-read"
-  final val OriginConstant      = "constant"
-  final val OriginStructField   = "struct-field"
-  final val OriginMixed         = "mixed"
-  final val OriginUnknown       = "unknown"
-
-  final val MaxDepth = 3
-  final val MaxHops  = 8
-
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end ValueOriginPass

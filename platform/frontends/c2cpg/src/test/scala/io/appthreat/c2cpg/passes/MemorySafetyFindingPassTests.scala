@@ -102,6 +102,36 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |    memcpy(d, s, 64);
         |    return 0;
         |}
+        |
+        |/* ---- C3: the caller-param arm is interprocedural ---- */
+        |
+        |static int helper_constant(unsigned char *d, const unsigned char *s, int size)
+        |{
+        |    memcpy(d, s, size);
+        |    return size;
+        |}
+        |
+        |static int helper_variable(unsigned char *d, const unsigned char *s, int size)
+        |{
+        |    memcpy(d, s, size);
+        |    return size;
+        |}
+        |
+        |void call_constant(unsigned char *d, const unsigned char *s)
+        |{
+        |    helper_constant(d, s, 32);
+        |}
+        |
+        |void call_variable(unsigned char *d, const unsigned char *s, int n)
+        |{
+        |    helper_variable(d, s, n);
+        |}
+        |
+        |void alloc_only(int n)
+        |{
+        |    unsigned char *p = malloc(n);
+        |    free(p);
+        |}
         |""".stripMargin,
         "findings.c"
       )
@@ -180,6 +210,26 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
 
       "not fire on a constant length" in {
           lenFinding("good_constant") shouldBe empty
+      }
+  }
+
+  "MS-BOUND-002 under C3 (interprocedural caller-param arm)" should {
+
+      "stay silent when every call site passes a provable constant" in {
+          lenFinding("helper_constant") shouldBe empty
+      }
+
+      "fire when a call site passes a non-constant for the length" in {
+          lenFinding("helper_variable") shouldBe Set("MS-BOUND-002")
+      }
+
+      "keep firing on an uncalled helper: no intra-tree callers means externally reachable" in {
+          lenFinding("bad_unbounded") shouldBe Set("MS-BOUND-002")
+      }
+
+      "not report an allocation size: CWE-787 needs a destination buffer" in {
+          cpg.method.name("alloc_only").call.name("malloc").l.flatMap(_.argument.l)
+              .flatMap(_.tag.name("ms-finding").value.l) shouldBe Nil
       }
   }
 
