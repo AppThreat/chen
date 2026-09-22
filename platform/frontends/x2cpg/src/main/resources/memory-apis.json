@@ -13,6 +13,11 @@
     "outputs carry untrusted data with no single buffer argument to point at (getenv, the",
     "scanf family). C++ new/delete are indistinguishable from new[]/delete[] in the graph",
     "(frontend probe NOTES-frontend.md Q3), so both carry the plain `new` family.",
+    "Count-by-size allocators (calloc, reallocarray) declare both factors: `count` is the",
+    "element-count role and `len` the byte-size role; both arguments carry the mem-len tag",
+    "and the overflow question is asked about the product (part 4, D1). A realloc is the",
+    "third family, `realloc`: it invalidates its input pointer and returns a fresh",
+    "allocation, so it carries neither the alloc nor the free tag.",
     "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded."
   ],
   "apis": [
@@ -137,20 +142,20 @@
     },
     {
       "name": "calloc",
-      "len": 1,
+      "count": 1,
+      "len": 2,
       "alloc": "heap"
     },
     {
       "name": "realloc",
       "len": 2,
-      "alloc": "heap",
-      "free": "heap"
+      "realloc": "heap"
     },
     {
       "name": "reallocarray",
-      "len": 2,
-      "alloc": "heap",
-      "free": "heap"
+      "count": 2,
+      "len": 3,
+      "realloc": "heap"
     },
     {
       "name": "aligned_alloc",

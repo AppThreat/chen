@@ -37,6 +37,10 @@ class MemoryApiInferenceTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |void *my_resize(void *p, size_t n) {
+    |    return realloc(p, n);
+    |}
+    |
     |void *returns_param(void *p) {
     |    return p;
     |}
@@ -67,6 +71,7 @@ class MemoryApiInferenceTests extends DataFlowCodeToCpgSuite:
     |    char *f = alloc_then_free(8);
     |    char *g = alloc_and_log(8);
     |    char *h = only_literal_return(2);
+    |    char *r = my_resize(b, 32);
     |    memcpy(a, b, 4);
     |    memcpy(h, g, 4);
     |    memcpy(c, d, 4);
@@ -109,6 +114,17 @@ class MemoryApiInferenceTests extends DataFlowCodeToCpgSuite:
         cpg.call.name("my_free").l should not be empty
         cpg.call.name("my_free").l.foreach { site =>
             site.tag.name("mem-free").value.l shouldBe List("heap")
+        }
+    }
+
+    "conclude a realloc wrapper as the third family, not alloc-and-free (D1)" in {
+        cpg.call.name("my_resize").l should not be empty
+        cpg.call.name("my_resize").l.foreach { site =>
+          site.tag.name("mem-realloc").value.l shouldBe List("heap")
+          site.tag.name("mem-alloc").l shouldBe Nil
+          site.tag.name("mem-free").l shouldBe Nil
+          // the byte size travels: the parameter feeding realloc's size argument
+          site.argument(2).tag.name("mem-len").value.l shouldBe List("my_resize")
         }
     }
 

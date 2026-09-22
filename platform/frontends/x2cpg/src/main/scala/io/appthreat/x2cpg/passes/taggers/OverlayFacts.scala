@@ -166,10 +166,27 @@ private[taggers] object OverlayFacts:
       bfs(node, maxHops) {
           case i: Identifier =>
               val exclude = expansionExclusionOf(i)
-              i._reachingDefIn.collectAll[StoredNode].l.filterNot(d => exclude.contains(d.id))
+              neighboursWithout(i._reachingDefIn.iterator, exclude)
           case other =>
-              other._reachingDefIn.collectAll[StoredNode].l
+              val out = mutable.ListBuffer.empty[StoredNode]
+              val it  = other._reachingDefIn.iterator
+              while it.hasNext do out += it.next().asInstanceOf[StoredNode]
+              out.toList
       }
+
+  /** The neighbours of `raw` whose ids are not in `exclude`, iterated without building a traversal
+    * per node: `reachingDefsIn` walks millions of adjacency lists on a real tree, and the per-node
+    * traversal materialisation was the bulk of the overlay's allocation (D2).
+    */
+  private def neighboursWithout(
+    raw: Iterator[StoredNode],
+    exclude: Set[Long]
+  ): List[StoredNode] =
+    val out = mutable.ListBuffer.empty[StoredNode]
+    raw.foreach { d =>
+        if !exclude.contains(d.id()) then out += d
+    }
+    out.toList
 
   /** Identifier uses defined (transitively) by `node`, forwards along REACHING_DEF. */
   def reachingUsesOut(node: StoredNode, maxHops: Int = 8): List[Identifier] =
