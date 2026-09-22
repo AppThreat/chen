@@ -68,11 +68,12 @@ class ValueOriginPass(atom: Cpg) extends CpgPass(atom):
       }
     }
 
-    targets.toList.foreach { case (node, (origin, evidence)) =>
-        Iterator.single(node).newTagNodePair(TagOrigin, origin).store()(using dstGraph)
-        Iterator.single(node).newTagNodePair(origin, evidence).store()(using dstGraph)
-    }
-    targets.keys.iterator.newTagNode(MemoryApiPass.UmbrellaTag).store()(using dstGraph)
+    OverlayFacts.emitTags(
+      dstGraph,
+      targets.toList.flatMap { case (node, (origin, evidence)) =>
+          List((node, TagOrigin, origin), (node, origin, evidence))
+      }
+    )
   end run
 
   /** (origin, evidence) for an expression, or nothing when nothing is derivable. */

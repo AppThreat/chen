@@ -50,12 +50,12 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
 
-    findings.toList.foreach { case (node, ruleIds) =>
-        ruleIds.foreach { ruleId =>
-            Iterator.single(node).newTagNodePair(TagFinding, ruleId).store()(using dstGraph)
-        }
-    }
-    findings.keys.iterator.newTagNode(MemoryApiPass.UmbrellaTag).store()(using dstGraph)
+    OverlayFacts.emitTags(
+      dstGraph,
+      findings.toList.flatMap { case (node, ruleIds) =>
+          ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
+      }
+    )
   end run
 
   /** MS-BOUND-002: attacker-controlled length, no upper bound. A length that flows from the
@@ -68,21 +68,14 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     record: (StoredNode, String) => Unit
   ): Unit =
       argsByCall.foreach { case (call, args) =>
-          val capParam = args
-              .flatMap(a => a.tag.name(ExtentPass.TagExtent).value.l)
-              .collectFirst { case v if v.startsWith(ExtentPass.ValueParam + ":") => v }
-              .flatMap { extent =>
-                val capName = extent.stripPrefix(ExtentPass.ValueParam + ":")
-                Option(call.method).flatMap(_.parameter.name(capName).headOption)
-              }
-          args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty).foreach { lenArg =>
+          val capParam = capacityParamOf(call, args)
+          lengthArgsOf(args).foreach { lenArg =>
             val tags = lenArg.tag.name.l
             val controlled = tags.contains(ValueOriginPass.OriginCallerParam) ||
                 tags.contains(ValueOriginPass.OriginUntrustedRead)
-            val bounded = tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
-            val honoursCapacity =
-                capParam.exists(cap => OverlayFacts.reachingDefsIn(lenArg).contains(cap))
-            if controlled && !bounded && !honoursCapacity then record(lenArg, RuleUnboundedCopy)
+            val honoursCapacity = capParam.exists(reaches(lenArg, _))
+            if controlled && !isBounded(tags) && !honoursCapacity then
+              record(lenArg, RuleUnboundedCopy)
           }
       }
 
@@ -94,21 +87,38 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     record: (StoredNode, String) => Unit
   ): Unit =
       argsByCall.foreach { case (call, args) =>
-          val dstExtent = args
-              .flatMap(a => a.tag.name(ExtentPass.TagExtent).value.l)
-              .collectFirst { case v if v.startsWith(ExtentPass.ValueParam + ":") => v }
-          dstExtent.foreach { extent =>
-            val capName = extent.stripPrefix(ExtentPass.ValueParam + ":")
-            for
-              method <- Option(call.method)
-              cap    <- method.parameter.name(capName).headOption
-              lenArg <- args.find(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-              tags    = lenArg.tag.name.l
-              bounded = tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
-              if !bounded && !OverlayFacts.reachingDefsIn(lenArg).contains(cap)
-            do record(lenArg, RuleSizeParamContract)
-          }
+          for
+            cap    <- capacityParamOf(call, args)
+            lenArg <- lengthArgsOf(args).headOption
+            if !isBounded(lenArg.tag.name.l) && !reaches(lenArg, cap)
+          do record(lenArg, RuleSizeParamContract)
       }
+
+  /** The destination's paired capacity parameter, when [[ExtentPass]] resolved its extent to one.
+    * Both rules turn on this: 001 fires when the contract it states is broken, 002 stands down when
+    * it is honoured.
+    */
+  private def capacityParamOf(call: Call, args: List[Expression]): Option[MethodParameterIn] =
+      args
+          .flatMap(a => a.tag.name(ExtentPass.TagExtent).value.l)
+          .collectFirst { case v if v.startsWith(ExtentPass.ValueParam + ":") => v }
+          .flatMap { extent =>
+              call.method.parameter
+                  .name(extent.stripPrefix(ExtentPass.ValueParam + ":"))
+                  .headOption
+          }
+
+  private def lengthArgsOf(args: List[Expression]): List[Expression] =
+      args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+
+  /** An upper bound from either GuardPass family. `bounded-below` is deliberately not one: a length
+    * known to be non-negative is still free to be enormous.
+    */
+  private def isBounded(tags: List[String]): Boolean =
+      tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
+
+  private def reaches(value: Expression, param: MethodParameterIn): Boolean =
+      OverlayFacts.reachingDefsIn(value).contains(param)
 end MemorySafetyFindingPass
 
 object MemorySafetyFindingPass:

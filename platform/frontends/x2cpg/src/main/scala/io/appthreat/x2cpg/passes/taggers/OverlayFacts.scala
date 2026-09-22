@@ -3,6 +3,7 @@ package io.appthreat.x2cpg.passes.taggers
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
+import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.mutable
 
@@ -138,6 +139,21 @@ private[taggers] object OverlayFacts:
       frontier = next.toList
       remaining -= 1
     seen.filterNot(_ == start).toList
+
+  /** Emit `(node, tag, value)` rows the way [[MemoryApiPass]] does: one batched store per distinct
+    * `(tag, value)` pair and a single umbrella store over every node touched. The overlay tags tens
+    * of thousands of nodes on a real tree, so a store per node is the difference between one
+    * traversal of a grouping and a DiffGraph round per tag.
+    */
+  def emitTags(
+    dstGraph: DiffGraphBuilder,
+    rows: Iterable[(StoredNode, String, String)]
+  ): Unit =
+    rows.groupMap { case (_, tag, value) => (tag, value) } { case (node, _, _) => node }
+        .foreach { case ((tag, value), nodes) =>
+            nodes.iterator.distinct.newTagNodePair(tag, value).store()(using dstGraph)
+        }
+    rows.iterator.map(_._1).distinct.newTagNode(MemoryApiPass.UmbrellaTag).store()(using dstGraph)
 
   /** One `(call, argument, role)` row per memory-API argument tag, collected in a single pass over
     * the tag nodes rather than a re-traversal of the graph per role (the PiiTagsPass convention).

@@ -61,12 +61,12 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     guardBounds(argsByCall, add)
     clampBounds(argNodeIds, add)
 
-    bounds.foreach { case (node, tags) =>
-        tags.foreach { case (tag, value) =>
-            Iterator.single(node).newTagNodePair(tag, value).store()(using dstGraph)
-        }
-    }
-    bounds.keys.iterator.newTagNode(MemoryApiPass.UmbrellaTag).store()(using dstGraph)
+    OverlayFacts.emitTags(
+      dstGraph,
+      bounds.toList.flatMap { case (node, tags) =>
+          tags.toList.map { case (tag, value) => (node, tag, value) }
+      }
+    )
   end run
 
   /** Facts from comparisons that control memory operations. */
@@ -289,13 +289,14 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
         case None => false
 
   private def ownerOf(condition: Call): Option[ControlStructure] =
-    var cursor = condition._astIn.nextOption()
-    while cursor.isDefined do
-      cursor match
-        case Some(cs: ControlStructure) => return Some(cs)
-        case Some(_: Method)            => return None
-        case Some(other)                => cursor = other._astIn.nextOption()
-    None
+    var cursor: Option[StoredNode]      = condition._astIn.nextOption()
+    var owner: Option[ControlStructure] = None
+    while owner.isEmpty && cursor.isDefined do
+      cursor.get match
+        case cs: ControlStructure => owner = Some(cs)
+        case _: Method            => cursor = None
+        case other                => cursor = other._astIn.nextOption()
+    owner
 
   private def isElse(cs: ControlStructure): Boolean =
       cs.parserTypeName.equalsIgnoreCase("else")

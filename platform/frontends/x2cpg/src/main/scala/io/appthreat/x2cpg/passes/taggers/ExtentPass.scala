@@ -70,20 +70,13 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
             }
         }
 
-    emit(dstGraph, argExtents)
-    emit(dstGraph, declExtents)
-    (argExtents.keys.iterator ++ declExtents.keys.iterator).distinct
-        .newTagNode(MemoryApiPass.UmbrellaTag)
-        .store()(using dstGraph)
-  end run
-
-  private def emit(
-    dstGraph: DiffGraphBuilder,
-    extents: mutable.LinkedHashMap[StoredNode, String]
-  ): Unit =
-      extents.groupMap(_._2)(_._1).foreach { case (value, nodes) =>
-          nodes.iterator.newTagNodePair(TagExtent, value).store()(using dstGraph)
+    OverlayFacts.emitTags(
+      dstGraph,
+      (argExtents.toList ++ declExtents.toList).map { case (node, value) =>
+          (node, TagExtent, value)
       }
+    )
+  end run
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
