@@ -62,26 +62,142 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     case MemoryApiPass.TagAlloc   => cur.copy(alloc = cur.alloc + t.value)
                     case MemoryApiPass.TagFree    => cur.copy(free = cur.free + t.value)
                     case MemoryApiPass.TagRealloc => cur.copy(realloc = cur.realloc + t.value)
-                    case _                        => cur.copy(isMemoryCall = true)
+                    case MemoryApiPass.TagNullableReturn =>
+                        cur.copy(nullable = true, isMemoryCall = true)
+                    case _ => cur.copy(isMemoryCall = true)
                 )
             case _ => ()
         }
     }
 
-    atom.method.filterNot(_.isExternal).foreach(m => analyseMethod(m, roles, record))
+    // E5: per-method effect summaries, computed intraprocedurally from the same role table
+    // before any method is analysed, so every call site can read them. `frees-param:<i>` - the
+    // method releases parameter i (unconditionally: a free under a guard frees on SOME path, and
+    // a summary that says "always" would turn every conditional-free wrapper into a false double
+    // free). `allocates-return` - every value it returns is a fresh allocation. `escapes-param:
+    // <i>` - parameter i is stored into storage that outlives the call.
+    val effectRows    = mutable.ListBuffer.empty[(StoredNode, String, String)]
+    val effectsByName = mutable.HashMap.empty[String, Set[String]]
+    atom.method.filterNot(_.isExternal).l.foreach { m =>
+      val effects = methodEffects(m, roles)
+      if effects.nonEmpty then
+        effects.foreach(e => effectRows += ((m, TagEffect, e)))
+        // a name shared by several defined methods must not carry either one's effects: a
+        // wrong frees-param summary is a false double free at every call site
+        effectsByName.updateWith(m.name) {
+            case Some(existing) => Some(if existing == effects then existing else Set.empty)
+            case None           => Some(effects)
+        }
+    }
+
+    atom.method.filterNot(_.isExternal).foreach(m =>
+        analyseMethod(m, roles, effectsByName, record)
+    )
 
     OverlayFacts.emitTags(
       dstGraph,
-      tags.toList.flatMap { case (node, ts) => ts.toList.map { case (t, v) => (node, t, v) } }
+      tags.toList.flatMap { case (node, ts) => ts.toList.map { case (t, v) => (node, t, v) } } ++
+          effectRows
     )
   end run
+
+  /** The effect summary of one method body (E5), from the role table - no tag reads per node. */
+  private def methodEffects(method: Method, roles: mutable.LongMap[RoleInfo]): Set[String] =
+    val paramIndex                = method.parameter.l.map(p => p.name -> p.index).toMap
+    val effects                   = mutable.LinkedHashSet.empty[String]
+    def roleOf(c: Call): RoleInfo = roles.getOrElse(c.id(), RoleInfoNone)
+    def unwrapped(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).map(unwrapped).getOrElse(c)
+      // `free(*p)` in a pointer-to-pointer wrapper: the CALLER passes &x, so the freed
+      // value IS the caller's x behind one indirection
+      case c: Call if c.name == "<operator>.indirection" =>
+          c.argumentOption(1).map(unwrapped).getOrElse(c)
+      case other => other
+    def underControlStructure(c: Call): Boolean =
+      var cur = c._astIn.nextOption()
+      var out = false
+      while cur.isDefined && !out do
+        cur.get match
+          case _: ControlStructure => out = true
+          case _: Method           => cur = None
+          case other               => cur = other._astIn.nextOption()
+      out
+    method.ast.collectAll[Call].l.foreach {
+        case c if roleOf(c).free.nonEmpty && !underControlStructure(c) =>
+            // the freed argument (a freep-style wrapper takes the ADDRESS of its parameter)
+            argAt(c.argument.l, 1).map(unwrapped).foreach { freed =>
+                freed match
+                  case addr: Call if addr.name == "<operator>.addressOf" =>
+                      addr.argumentOption(1).collect { case i: Identifier =>
+                          paramIndex.get(i.name)
+                      }.foreach(_.foreach(idx => effects += s"effect:frees-param:$idx"))
+                  case i: Identifier =>
+                      paramIndex.get(i.name).foreach(idx =>
+                          effects += s"effect:frees-param:$idx"
+                      )
+                  case _ => ()
+            }
+        case c if c.name == "<operator>.assignment" =>
+            // a parameter stored into storage that outlives the frame: a member or a global
+            val args = c.argument.l
+            val dst  = argAt(args, 1).map(unwrapped)
+            val rhs  = argAt(args, 2).map(unwrapped)
+            val dstEternal = dst.exists {
+                case d: Call =>
+                    d.name == "<operator>.fieldAccess" || d.name == "<operator>.indirectFieldAccess"
+                case i: Identifier =>
+                    method.local.name(i.name).l.isEmpty && method.parameter.name(i.name).l.isEmpty
+                case _ => false
+            }
+            if dstEternal then
+              rhs.foreach {
+                  case i: Identifier =>
+                      paramIndex.get(i.name).foreach(idx => effects += s"effect:escapes-param:$idx")
+                  case _ => ()
+              }
+        case _ => ()
+    }
+    // allocates-return: some value return is, through casts, an allocation call - or a local
+    // whose definition is one (`char *p = malloc(n); ...; return p;`)
+    def flowsFromAllocation(e: Expression): Boolean = unwrapped(e) match
+      case c: Call => roleOf(c).alloc.nonEmpty
+      case i: Identifier =>
+          OverlayFacts
+              .reachingDefsIn(i)
+              .collect { case d: Identifier => d }
+              .flatMap(d =>
+                  d._astIn.collectFirst {
+                      case a: Call if a.name == "<operator>.assignment" => a
+                  }
+              )
+              .flatMap(_.argumentOption(2))
+              .exists {
+                  case rc: Call if rc.name == "<operator>.cast" =>
+                      castOperand(rc).exists {
+                          case ic: Call => roleOf(ic).alloc.nonEmpty
+                          case _        => false
+                      }
+                  case rc: Call => roleOf(rc).alloc.nonEmpty
+                  case _        => false
+              }
+      case _ => false
+    val returnsFlowFromAlloc = method.ast.collectAll[Return].l.exists { r =>
+        r.astChildren.collect { case e: Expression => e }.exists(flowsFromAllocation)
+    }
+    if returnsFlowFromAlloc then effects += "effect:allocates-return"
+    effects.toSet
+  end methodEffects
 
   private def analyseMethod(
     method: Method,
     roles: mutable.LongMap[RoleInfo],
+    effectsByName: mutable.HashMap[String, Set[String]],
     record: (StoredNode, String, String) => Unit
   ): Unit =
     val leakFacts = mutable.ListBuffer.empty[(Long, StoredNode, String)] // (site, exit, name)
+    val nullUseFacts =
+        mutable.ListBuffer.empty[(Long, StoredNode, String, String)] // (site, use, name, kind)
 
     // every graph/tag read the worklist needs, extracted ONCE per method: the transfer runs
     // per CFG node per worklist visit, and per-visit tag traversals were what made this pass
@@ -100,6 +216,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           r.alloc,
           r.free,
           r.realloc,
+          r.nullable,
           r.isMemoryCall,
           r.alloc.nonEmpty || r.realloc.nonEmpty
         )
@@ -108,12 +225,33 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     method.ast.collectAll[ControlStructure].foreach { cs =>
         cs.condition.foreach(c => guards.update(c.id(), cs))
     }
-    // a method that never allocates, frees, reallocs or touches an inventoried memory call
-    // has no tracked pointer and no facts: skip the worklist entirely
+    // E4: the stack-address question is asked of the same worklist. A method that never
+    // allocates, frees, reallocs or touches an inventoried memory call AND never takes a local's
+    // address has no tracked pointer and no facts: skip the worklist entirely
+    val ctx = MethodContext(
+      locals = method.local.l.map(_.name).toSet,
+      arrayLocals = method.local.l
+          .filter(l =>
+              OverlayFacts.arrayExtent(l.typeFullName).isDefined ||
+                  l.typeFullName.trim.endsWith("[]")
+          )
+          .map(_.name)
+          .toSet,
+      params = method.parameter.l.map(_.name).toSet,
+      refReturn = Option(method.methodReturn.typeFullName).exists(t =>
+          t.endsWith("&") || t.endsWith("&&")
+      )
+    )
+    val hasAddressOfLocal = callFacts.values.exists(cf =>
+        cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
+            .exists { case i: Identifier => ctx.locals.contains(i.name); case _ => false }
+    )
+    val callsASummarisedCallee = callFacts.values.exists(cf => effectsByName.contains(cf.name))
     if !callFacts.values.exists(cf =>
           cf.allocFamilies.nonEmpty || cf.freeFamilies.nonEmpty ||
-              cf.reallocFamilies.nonEmpty
-      )
+              cf.reallocFamilies.nonEmpty || cf.nullable
+      ) && !ctx.arrayLocals.nonEmpty && !hasAddressOfLocal && !callsASummarisedCallee &&
+      !(ctx.refReturn && ctx.locals.nonEmpty)
     then return
     val inStates = mutable.HashMap.empty[Long, Map[String, Tracked]]
     val queued   = mutable.LinkedHashSet.empty[CfgNode]
@@ -138,7 +276,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       val node = queued.head
       queued.remove(node)
       val in  = inStates.getOrElse(node.id(), Map.empty)
-      val out = transfer(node, in, callFacts, leakFacts, record)
+      val out = transfer(node, in, callFacts, effectsByName, leakFacts, nullUseFacts, ctx, record)
 
       node._cfgOut.iterator.foreach {
           case succ: CfgNode =>
@@ -170,6 +308,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case other           => other
         record(anchor, TagLeak, s"leak:$name")
     }
+    // one null-use fact per nullable producer: the FIRST use the pointer reaches without a
+    // narrowing guard in between - the site a reader adds the missing check to. A use under a
+    // guard that proved the pointer NULL is the strongest form and wins over an earlier
+    // unchecked use of the same producer.
+    nullUseFacts.groupBy(_._1).foreach { case (site, uses) =>
+        val (_, use, name, kind) = uses.minBy { case (_, node, _, k) =>
+            (if k == NullDefinite then 0 else 1, lineOf(node))
+        }
+        record(use, TagNullUse, s"$kind:$name")
+    }
   end analyseMethod
 
   private def lineOf(node: StoredNode): Int = node match
@@ -185,21 +333,36 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     node: CfgNode,
     in: Map[String, Tracked],
     callFacts: mutable.LongMap[CallFacts],
+    effectsByName: mutable.HashMap[String, Set[String]],
     leakFacts: mutable.ListBuffer[(Long, StoredNode, String)],
+    nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
       node match
         case c: Call =>
             callFacts.get(c.id()) match
-              case Some(cf) => transferCall(c, cf, callFacts, in, record)
-              case None     => in
+              case Some(cf) =>
+                  transferCall(c, cf, callFacts, effectsByName, in, nullUseFacts, ctx, record)
+              case None => in
         case r: Return =>
             var out = in
             // a returned tracked pointer transfers ownership: it escapes, it does not leak
             r.astChildren.collect { case e: Expression => e }.foreach { e =>
-                trackedNameOf(e).foreach { name =>
-                    out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
-                }
+              // E4: a stack address that leaves the frame - returned directly (&x, a decayed
+              // array), through a local that holds one, or a C++ reference return binding the
+              // local itself. Read the incoming state: the escape-marking below would erase it.
+              val viaTracked = trackedNameOf(e).flatMap(in.get).exists(_.state == StStackAddr)
+              trackedNameOf(e).foreach { name =>
+                  out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
+              }
+              val refToLocale = ctx.refReturn && (e match
+                case i: Identifier =>
+                    ctx.locals.contains(i.name) && !ctx.arrayLocals.contains(i.name)
+                case _ => false
+              )
+              if holdsStackAddress(e, ctx) || viaTracked || refToLocale then
+                record(r, TagStackEscape, "escape:return")
             }
             out.foreach { case (name, t) =>
                 if t.state == StAllocated then leakFacts += ((t.site, r, name))
@@ -213,11 +376,33 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case _ => in
   end transfer
 
+  /** Record the null-use fact a use of a nullable-produced pointer produces: `unchecked` when no
+    * guard has narrowed it since the producing call, `null` when the use sits under a guard that
+    * proved the pointer NULL. A checked or escaped pointer is silent - evidence, not silence,
+    * either way.
+    */
+  private def noteNullUse(
+    nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    use: StoredNode,
+    name: String,
+    t: Tracked
+  ): Unit =
+      if t.nullable && !t.checked && t.state != StEscaped && t.state != StNullReset then
+        nullUseFacts += ((
+          t.site,
+          use,
+          name,
+          if t.state == StNull then NullDefinite else NullUnchecked
+        ))
+
   private def transferCall(
     c: Call,
     cf: CallFacts,
     callFacts: mutable.LongMap[CallFacts],
+    effectsByName: mutable.HashMap[String, Set[String]],
     in: Map[String, Tracked],
+    nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
     var out = in
@@ -230,13 +415,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       argAt(cf.args, 1).foreach { freed =>
         val viaAddress = addressOfOperand(freed)
         (viaAddress.orElse(Some(freed))).flatMap(trackedNameOf).flatMap(useState.get).foreach { t =>
-          if t.state == StFreed || t.state == StMaybeFreed then
-            record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
-          out = out.updated(
-            trackedNameOf(viaAddress.getOrElse(freed)).get,
-            if viaAddress.isDefined then t.copy(state = StNullReset)
-            else t.copy(state = StFreed)
-          )
+            // a nullable NON-allocation (a strchr result) is not ownership: freeing it says
+            // nothing this pass tracks
+            if t.state != StNullable then
+              if t.state == StFreed || t.state == StMaybeFreed then
+                record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
+              out = out.updated(
+                trackedNameOf(viaAddress.getOrElse(freed)).get,
+                if viaAddress.isDefined then t.copy(state = StNullReset)
+                else t.copy(state = StFreed)
+              )
         }
       }
 
@@ -270,13 +458,31 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             }
             rhs match
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
-                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id))
+                  // allocation-family calls are nullable by definition (E3): the pointer may
+                  // be NULL until a guard narrows it
+                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id, nullable = true))
+              case rhsCall: Call
+                  if effectsByName.get(rhsCall.name)
+                      .exists(_.contains("effect:allocates-return")) &&
+                      !callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
+                  // E5: the callee's own summary says every value it returns is a fresh
+                  // allocation - a wrapper the body-shape inference could not conclude
+                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id, nullable = true))
+              case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.nullable) =>
+                  // a non-allocation nullable return (strchr, av_dict_get): not ownership,
+                  // only nullness - leak/free rules never fire on it
+                  out = out.updated(lhs, Tracked(StNullable, rhsCall.id, nullable = true))
               case rhsCall: Call if rhsCall.name == "<operator>.cast" =>
-                  // `p = (char *)malloc(n)` - the allocation hides under the cast
+                  // `p = (char *)malloc(n)` - the allocation hides under the cast; so does the
+                  // `(char **)&buf` a global stash takes (E4)
                   castOperand(rhsCall).flatMap { inner =>
                       inner match
                         case ic: Call if callFacts.get(ic.id()).exists(_.isAllocCall) =>
-                            Some(Tracked(StAllocated, ic.id))
+                            Some(Tracked(StAllocated, ic.id, nullable = true))
+                        case ic: Call if callFacts.get(ic.id()).exists(_.nullable) =>
+                            Some(Tracked(StNullable, ic.id, nullable = true))
+                        case ic if holdsStackAddress(ic, ctx) =>
+                            Some(Tracked(StStackAddr, ic.id))
                         case other if trackedNameOf(other).isDefined =>
                             trackedNameOf(other).flatMap(n => out.get(n))
                         case _ => None
@@ -286,11 +492,25 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               case other if isNullLiteral(other) =>
                   // NULL macro-expanded into an identifier
                   out = out.updated(lhs, Tracked(StNullReset, 0L))
+              // E4: the rhs IS a stack address - a local's address taken, or an array local
+              // decaying to a pointer - so the variable now carries frame storage
+              case other if holdsStackAddress(other, ctx) =>
+                  out = out.updated(lhs, Tracked(StStackAddr, other.id))
               case other =>
                   trackedNameOf(other).flatMap(useState.get).foreach { t =>
                       out = out.updated(lhs, t)
                   }
             end match
+            // a stack address stored into a GLOBAL variable outlives the frame (E4): a plain
+            // local or parameter destination rebinds only this frame's copy and escapes nothing
+            argAt(cf.args, 1).foreach { dst =>
+                dst match
+                  case i: Identifier
+                      if !ctx.locals.contains(i.name) && !ctx.params.contains(i.name) =>
+                      if rhsHoldsStackAddress(rhs, useState, ctx) then
+                        record(c, TagStackEscape, "escape:global")
+                  case _ => ()
+            }
         case (None, Some(rhs)) =>
             // stored into a struct member or through another non-trackable destination: the
             // pointer escapes - ownership left this method's variable space
@@ -301,6 +521,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             rhsTracked.foreach { name =>
                 out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
             }
+            // ... and a stack address stored there escapes the frame with it (E4)
+            if rhsHoldsStackAddress(rhs, useState, ctx) then
+              record(c, TagStackEscape, "escape:store")
         case _ => ()
     end if
 
@@ -310,33 +533,83 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           arg match
             case access: Call if isAccessThroughPointer(access) =>
                 access.argumentOption(1).foreach { base =>
-                    trackedNameOf(base).flatMap(useState.get).foreach { t =>
-                        if t.state == StFreed || t.state == StMaybeFreed then
-                          record(base, TagState, stateName(t.state))
+                    trackedNameOf(base).foreach { name =>
+                        useState.get(name).foreach { t =>
+                          if t.state == StFreed || t.state == StMaybeFreed then
+                            record(base, TagState, stateName(t.state))
+                          noteNullUse(nullUseFacts, base, name, t)
+                        }
                     }
                 }
             case _ => ()
       }
     else if cf.isMemoryCall then
-      // 5. an inventoried memory call USES its pointer arguments; ownership unchanged
+      // 5. an inventoried memory call USES its pointer arguments; ownership unchanged. The
+      //    freed argument of a free-family call is the exception: free(NULL) is a no-op, so
+      //    the free itself is never a null-deref use of the pointer it releases
       Seq(1, 2, 3).flatMap(i => argAt(cf.args, i)).foreach { arg =>
-        val viaAddress = addressOfOperand(arg)
-        trackedNameOf(viaAddress.getOrElse(arg)).flatMap(useState.get).foreach { t =>
-            if t.state == StFreed || t.state == StMaybeFreed then
-              record(viaAddress.getOrElse(arg), TagState, stateName(t.state))
+        val viaAddress      = addressOfOperand(arg)
+        val use             = viaAddress.getOrElse(arg)
+        val nullSafeUseSite = cf.freeFamilies.nonEmpty && arg.argumentIndex == 1
+        trackedNameOf(use).foreach { name =>
+            useState.get(name).foreach { t =>
+              if t.state == StFreed || t.state == StMaybeFreed then
+                record(use, TagState, stateName(t.state))
+              if !nullSafeUseSite then noteNullUse(nullUseFacts, use, name, t)
+            }
         }
       }
     else
       // 6. any other call uses AND escapes its tracked pointer arguments: an addressOf argument
-      //    escapes the ADDRESS - the callee may free or store through it
+      //    escapes the ADDRESS - the callee may free or store through it. An argument the
+      //    callee's summary FREES is recorded by the summary below, as the free site itself -
+      //    not twice, once as a generic use
+      val summaryFreedArgs: Set[Int] =
+          effectsByName
+              .getOrElse(cf.name, Set.empty)
+              .flatMap {
+                  case e if e.startsWith("effect:frees-param:") =>
+                      Set(e.stripPrefix("effect:frees-param:").toInt)
+                  case _ => Set.empty
+              }
       cf.args.foreach { arg =>
-        val viaAddress = addressOfOperand(arg)
-        val operand    = viaAddress.getOrElse(arg)
-        trackedNameOf(operand).flatMap(useState.get).foreach { t =>
-          if t.state == StFreed || t.state == StMaybeFreed then
-            record(operand, TagState, stateName(t.state))
-          out = out.updated(trackedNameOf(operand).get, t.copy(state = StEscaped))
+        val viaAddress       = addressOfOperand(arg)
+        val operand          = viaAddress.getOrElse(arg)
+        val summaryFreesThis = summaryFreedArgs.contains(arg.argumentIndex)
+        trackedNameOf(operand).foreach { name =>
+            useState.get(name).foreach { t =>
+              if (t.state == StFreed || t.state == StMaybeFreed) && !summaryFreesThis then
+                record(operand, TagState, stateName(t.state))
+              noteNullUse(nullUseFacts, operand, name, t)
+              out = out.updated(name, t.copy(state = StEscaped))
+            }
         }
+      }
+      // ... and the callee's effect summary (E5), AFTER the generic escape: a call to a method
+      // that unconditionally frees one of its parameters frees the matching argument HERE - an
+      // interprocedural free as a tag lookup, the existing double-free fact carrying the report.
+      // It runs last because the summary is MORE SPECIFIC than "escaped": the callee did not
+      // merely take the pointer, it released it.
+      effectsByName.get(cf.name).foreach { effects =>
+          effects.foreach {
+              case e if e.startsWith("effect:frees-param:") =>
+                  val idx = e.stripPrefix("effect:frees-param:").toInt
+                  argAt(cf.args, idx).foreach { arg =>
+                    val operand = addressOfOperand(arg).getOrElse(arg)
+                    trackedNameOf(operand).foreach { name =>
+                        useState.get(name).foreach { t =>
+                          if t.state == StFreed || t.state == StMaybeFreed then
+                            // THIS call is the second free: the value names it as the
+                            // free site, which is how the rule tells a double free from a
+                            // use-after-free
+                            record(operand, TagState, ValueSummaryFreed)
+                          if t.state != StNullable then
+                            out = out.updated(name, t.copy(state = StFreed))
+                        }
+                    }
+                  }
+              case _ => ()
+          }
       }
     end if
     out
@@ -398,7 +671,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         if nullHere then StNull
                         else if t.state == StNull then StAllocated
                         else t.state
-                    acc.updated(name, t.copy(state = newState))
+                    // the non-null side of a guard on a nullable-produced pointer is the
+                    // check itself: downstream uses of it are not unchecked (E3)
+                    acc.updated(
+                      name,
+                      t.copy(state = newState, checked = t.checked || !nullHere)
+                    )
                 case None =>
                     // an untracked pointer that is provably null becomes tracked-as-null;
                     // nothing downstream reports on it either way
@@ -458,7 +736,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     // the site is the SMALLER id, whatever the fold order: an order-dependent
                     // merge let the worklist oscillate between (Allocated, s1) and
                     // (Allocated, s2) around allocation loops and never terminate
-                    name -> Tracked(joinStates(ta.state, tb.state), math.min(ta.site, tb.site))
+                    name -> Tracked(
+                      joinStates(ta.state, tb.state),
+                      math.min(ta.site, tb.site),
+                      nullable = ta.nullable || tb.nullable,
+                      checked = ta.checked && tb.checked
+                    )
                 case (Some(t), None) => name -> t
                 case (None, Some(t)) => name -> t
                 case _               => name -> Tracked(StEscaped, 0L)
@@ -468,6 +751,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def joinStates(s1: AllocState, s2: AllocState): AllocState =
       if s1 == s2 then s1
       else if s1 == StEscaped || s2 == StEscaped then StEscaped
+      else if s1 == StStackAddr || s2 == StStackAddr then StStackAddr
+      else if s1 == StNullable || s2 == StNullable then StNullable
       else if s1 == StFreed || s2 == StFreed || s1 == StMaybeFreed || s2 == StMaybeFreed then
         StMaybeFreed
       else if isNullState(s1) && isNullState(s2) then StNullReset
@@ -479,6 +764,42 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def trackedNameOf(e: AstNode): Option[String] = e match
     case i: Identifier => Some(i.name)
     case _             => None
+
+  /** Does this expression DENOTE a stack address (E4): `&local` (through casts), or an array local
+    * decaying to its own first element? A local's address is the frame's; an array local used as a
+    * pointer is the same storage.
+    */
+  private def holdsStackAddress(e: Expression, ctx: MethodContext): Boolean = e match
+    case c: Call =>
+        c.name match
+          case "<operator>.addressOf" =>
+              c.argumentOption(1).exists {
+                  case i: Identifier => ctx.locals.contains(i.name)
+                  case _             => false
+              }
+          case "<operator>.cast" =>
+              c.argument.l.collect { case x: Expression => x }.exists(holdsStackAddress(_, ctx))
+          case _ => false
+    case i: Identifier => ctx.arrayLocals.contains(i.name)
+    case _             => false
+
+  /** Does this rhs put a stack address into the destination it feeds (E4): directly, or through a
+    * local that currently holds one?
+    */
+  private def rhsHoldsStackAddress(
+    rhs: Expression,
+    state: Map[String, Tracked],
+    ctx: MethodContext
+  ): Boolean =
+      holdsStackAddress(rhs, ctx) ||
+          trackedNameOf(rhs).flatMap(state.get).exists(_.state == StStackAddr) || {
+              rhs match
+                case rc: Call if rc.name == "<operator>.cast" =>
+                    castOperand(rc).exists(inner =>
+                        trackedNameOf(inner).flatMap(state.get).exists(_.state == StStackAddr)
+                    )
+                case _ => false
+          }
 
   private def addressOfOperand(e: AstNode): Option[Expression] = e match
     case c: Call if c.name == "<operator>.addressOf" => c.argumentOption(1)
@@ -497,21 +818,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   /** An inventoried memory call (memcpy, read, av_reallocp, free, ...) - the umbrella tag is the
     * inventory's own marker.
     */
-  private def isNullLiteral(e: AstNode): Boolean = e match
-    case l: Literal =>
-        // the preprocessor may have expanded NULL to ((void*)0) - normalise parens/spaces away
-        Set("0", "0L", "0UL", "NULL", "nullptr", "void*0").contains(l.code.replaceAll(
-          "[\\s()]",
-          ""
-        ))
-    case c: Call if c.name == "<operator>.cast" =>
-        // ... or kept it as a cast around the 0 literal
-        castOperand(c).exists(isNullLiteral)
-    case c: Call =>
-        // ... or left it as an unexpanded macro invocation node named NULL
-        Set("NULL", "nullptr").contains(c.name.trim)
-    case i: Identifier => i.name == "NULL" || i.name == "nullptr"
-    case _             => false
+  private def isNullLiteral(e: AstNode): Boolean = AllocationStatePass.isNullLiteral(e, castOperand)
 
   private def argAt(args: List[Expression], index: Int): Option[Expression] =
       args.find(_.argumentIndex == index)
@@ -522,6 +829,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case StMaybeFreed => "maybe-freed"
     case StNull       => "null"
     case StNullReset  => "null-reset"
+    case StNullable   => "nullable"
+    case StStackAddr  => "stack-addr"
     case StEscaped    => "escaped"
 end AllocationStatePass
 
@@ -543,9 +852,29 @@ object AllocationStatePass:
     * reported a leak at the implicit end.
     */
   case object StNullReset extends AllocState
+
+  /** the value of a NON-allocation nullable return (strchr, av_dict_get): may be null, but it is
+    * not ownership - the leak/free rules never fire on it. Part 5 (E3).
+    */
+  case object StNullable extends AllocState
+
+  /** the variable holds the ADDRESS of a stack local of this frame (E4): `q = &x`, or an array
+    * local that decayed. Leaving the frame with it - returned, stored into a member or a global -
+    * is the CWE-562 escape the state pass and the heap escape share one worklist to ask about.
+    */
+  case object StStackAddr extends AllocState
   case object StEscaped   extends AllocState
 
-  final case class Tracked(state: AllocState, site: Long)
+  /** `nullable` - the tracked value came from a call whose result may be NULL (every allocation, or
+    * the inventory's `nullable-return` role); `checked` - a guard has since narrowed it non-null on
+    * every path that reaches here.
+    */
+  final case class Tracked(
+    state: AllocState,
+    site: Long,
+    nullable: Boolean = false,
+    checked: Boolean = false
+  )
 
   /** everything the transfer needs about one call, read once per method */
   final case class CallFacts(
@@ -554,6 +883,7 @@ object AllocationStatePass:
     allocFamilies: Set[String],
     freeFamilies: Set[String],
     reallocFamilies: Set[String],
+    nullable: Boolean,
     isMemoryCall: Boolean,
     isAllocCall: Boolean
   )
@@ -563,12 +893,66 @@ object AllocationStatePass:
     alloc: Set[String],
     free: Set[String],
     realloc: Set[String],
+    nullable: Boolean,
     isMemoryCall: Boolean
   )
-  val RoleInfoNone: RoleInfo = RoleInfo(Set.empty, Set.empty, Set.empty, isMemoryCall = false)
+  val RoleInfoNone: RoleInfo =
+      RoleInfo(Set.empty, Set.empty, Set.empty, nullable = false, isMemoryCall = false)
 
-  final val TagState = "alloc-state"
-  final val TagLeak  = "alloc-leak"
+  final val TagState       = "alloc-state"
+  final val TagLeak        = "alloc-leak"
+  final val TagNullUse     = "null-use"
+  final val TagStackEscape = "stack-escape"
+
+  /** E5: a per-method effect summary, ON the method node - `effect:frees-param:<i>`,
+    * `effect:allocates-return`, `effect:escapes-param:<i>` - so an interprocedural effect is a tag
+    * lookup at the call site.
+    */
+  final val TagEffect = "mem-effect"
+
+  /** the method's own locals, the array-typed ones, its parameters - the frame's storage and the
+    * names that rebind locally - and whether it returns by reference (a C++ `T&` return binds the
+    * returned local itself, no addressOf anywhere) (E4)
+    */
+  final case class MethodContext(
+    locals: Set[String],
+    arrayLocals: Set[String],
+    params: Set[String],
+    refReturn: Boolean
+  )
+
+  /** the `alloc-state` value a summary-free records (E5): the ENCLOSING call is the free - a
+    * wrapper whose body-shape the inventory never saw, named by its effect summary
+    */
+  val ValueSummaryFreed = "freed-by-summary"
+
+  /** the two `null-use` kinds: an unchecked use of a may-be-null value, and a use under a guard
+    * that proved the pointer null
+    */
+  val NullUnchecked = "unchecked"
+  val NullDefinite  = "null"
+
+  /** A NULL as the frontend may have left it: a literal (possibly macro-expanded with parens and
+    * casts), an unexpanded macro invocation, or an identifier. Shared with the null-deref rule.
+    */
+  private[taggers] def isNullLiteral(
+    e: AstNode,
+    castOperand: Call => Option[Expression]
+  ): Boolean = e match
+    case l: Literal =>
+        // the preprocessor may have expanded NULL to ((void*)0) - normalise parens/spaces away
+        Set("0", "0L", "0UL", "NULL", "nullptr", "void*0").contains(l.code.replaceAll(
+          "[\\s()]",
+          ""
+        ))
+    case c: Call if c.name == "<operator>.cast" =>
+        // ... or kept it as a cast around the 0 literal
+        castOperand(c).exists(isNullLiteral(_, castOperand))
+    case c: Call =>
+        // ... or left it as an unexpanded macro invocation node named NULL
+        Set("NULL", "nullptr").contains(c.name.trim)
+    case i: Identifier => i.name == "NULL" || i.name == "nullptr"
+    case _             => false
 
   /** worklist visit cap per CFG node */
   private val VisitCap = 8
@@ -577,6 +961,7 @@ object AllocationStatePass:
     MemoryApiPass.TagAlloc,
     MemoryApiPass.TagFree,
     MemoryApiPass.TagRealloc,
+    MemoryApiPass.TagNullableReturn,
     MemoryApiPass.UmbrellaTag
   )
 

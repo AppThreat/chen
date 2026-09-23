@@ -214,6 +214,9 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
   new AllocationStatePass(cpg).createAndApply()
   new MemorySafetyFindingPass(cpg).createAndApply()
 
+  /** The MS-ALLOC rules only. MS-NULL-001 (part 5, E3) also reads this pass's facts and fires on
+    * several of these fixtures' unchecked parameters - it has its own suite.
+    */
   private def findingsIn(method: String): Set[String] =
       cpg.method
           .name(method)
@@ -223,6 +226,7 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
           .flatMap(_.tag.name("ms-finding").value.l)
           .l
           .toSet
+          .filter(_.startsWith("MS-ALLOC"))
 
   "MS-ALLOC-001" should:
 

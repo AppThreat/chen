@@ -18,7 +18,12 @@
     "and the overflow question is asked about the product (part 4, D1). A realloc is the",
     "third family, `realloc`: it invalidates its input pointer and returns a fresh",
     "allocation, so it carries neither the alloc nor the free tag.",
-    "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded."
+    "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded.",
+    "Nullable-return entries (part 5, E3): `nullableReturn` marks an API whose result may be NULL",
+    "for reasons other than allocation failure - the strchr/strstr family returning no-match NULL.",
+    "Allocation-family calls (alloc/realloc) are nullable BY DEFINITION and need no flag. The pass",
+    "emits `nullable-return` on the call for MS-NULL-001: a dereference of the result with no",
+    "narrowing guard between the call and the use."
   ],
   "apis": [
     {
@@ -130,6 +135,36 @@
     {
       "name": "strtok",
       "src": 1
+    },
+    {
+      "name": "strchr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strrchr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strstr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strcasestr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strpbrk",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "memchr",
+      "src": 2,
+      "nullableReturn": true
     },
     {
       "name": "strtok_r",

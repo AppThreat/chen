@@ -126,7 +126,9 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
   new IntegerWidthPass(cpg).createAndApply()
   new MemorySafetyFindingPass(cpg).createAndApply()
 
-  /** (rule id, line) pairs found on ANY expression of the method. */
+  /** (rule id, line) pairs found on ANY expression of the method, MS-INT rules only - MS-NULL-001
+    * (part 5, E3) also fires on these fixtures' unguarded struct parameters and has its own suite.
+    */
   private def findingsIn(method: String): Set[(String, Int)] =
       cpg.method
           .name(method)
@@ -140,6 +142,7 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
           )
           .l
           .toSet
+          .filter((rule, _) => rule.startsWith("MS-INT"))
 
   "MS-INT-001" should:
 

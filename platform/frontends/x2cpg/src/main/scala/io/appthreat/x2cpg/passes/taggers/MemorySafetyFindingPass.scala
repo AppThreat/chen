@@ -74,12 +74,13 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
     ruleAllocationState(record)
+    val lowConfidenceNodes = ruleNullDereference(record)
 
     OverlayFacts.emitTags(
       dstGraph,
       findings.toList.flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      }
+      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, "low"))
     )
   end run
 
@@ -106,14 +107,17 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l.map(n => (n, t.value)))
         .foreach { case (node, state) =>
             state match
-              case "freed" | "maybe-freed" =>
+              case "freed" | "maybe-freed" | AllocationStatePass.ValueSummaryFreed =>
                   // the SAME fact means two things by site: a free of an already-freed
                   // pointer is a double-free, any other use is a use-after-free
                   val enclosing = node._astIn.collectFirst { case c: Call => c }
-                  val isFreeSite = enclosing.exists(c =>
-                      tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
-                          tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
-                  )
+                  // a summary-freed value (E5) names the call that freed it: the ENCLOSING
+                  // call is the free even though it carries no inventory tag of its own
+                  val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
+                      enclosing.exists(c =>
+                          tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
+                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                      )
                   if isFreeSite then
                     val family = enclosing.flatMap(c =>
                         tagValues(c, MemoryApiPass.TagFree).headOption
@@ -130,7 +134,120 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         .l
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleLeak))
+    // MS-ESC-001 (part 5, E4, CWE-562): a stack address that left its frame - returned, or
+    // stored into a member, a global, or through a pointer parameter. The state pass tracks the
+    // frame's storage through the SAME worklist and escape analysis it tracks the heap's: the
+    // rule is the reader, exactly as for the leak.
+    atom.tag
+        .name(AllocationStatePass.TagStackEscape)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleStackEscape))
   end ruleAllocationState
+
+  /** MS-NULL-001 (part 5, E3, CWE-476): a dereference of a value that may be null, three arms over
+    * two fact sources. Returns the nodes whose finding is a HYPOTHESIS tier - the renderer lowers
+    * those below the rule's own confidence, the same way a whole rule ships at `low` when its
+    * evidence does not earn `medium`.
+    *
+    *   - **unchecked nullable return** (the state pass's `null-use` facts): a use of a pointer
+    *     whose producing call may return NULL - every allocation, or the inventory's
+    *     `nullable-return` role (the strchr family, av_dict_get) - with no narrowing guard between
+    *     the call and the use. The imfdec.c:258 shape: `uri = xmlNodeGetContent(...)`;
+    *     `imf_uri_is_url(uri)` dereferences what the library may have handed back NULL.
+    *   - **check-after-use** (rule-side): a use of a variable whose null guard appears LATER in the
+    *     method - the author knew it could be null, one statement too late. The corpus's
+    *     `bad_check_after_use`: `strlen(s); if (s == NULL) return;`.
+    *   - **unvalidated parameter** (rule-side, the hypothesis tier): a pointer parameter
+    *     dereferenced with no null guard anywhere in the method. The common FFmpeg shape (`s` is
+    *     never null by contract) makes this arm loud, so it carries its own `low` tier - the
+    *     imfdec.c:541 shape fires there, deliberately, and a default run does not drown in it.
+    *
+    * A use under a guard that proved the pointer NON-NULL is not a finding; an escaped pointer is
+    * not one either - the state pass says so, not this rule's silence.
+    */
+  private def ruleNullDereference(
+    record: (StoredNode, String) => Unit
+  ): Set[StoredNode] =
+    // arm 1: the state pass already asked the flow question
+    val stateFacts = atom.tag
+        .name(AllocationStatePass.TagNullUse)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .distinct
+    stateFacts.foreach(node => record(node, RuleNullDeref))
+
+    // arms 2 and 3: per method, the null guards the author wrote and the uses that precede (or
+    // never meet) them
+    val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
+    atom.method.filterNot(_.isExternal).l.foreach { method =>
+      val guards = mutable.LinkedHashMap.empty[String, Int] // variable key -> guard line
+      method.ast.collectAll[ControlStructure].l.foreach { cs =>
+          cs.condition.foreach { cond =>
+              nullGuardKeyOf(cond).foreach { key =>
+                val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                guards.update(key, math.min(guards.getOrElse(key, Int.MaxValue), line))
+              }
+          }
+      }
+      if guards.nonEmpty || method.parameter.exists(p => OverlayFacts.isPointer(p.typeFullName))
+      then
+        // the uses a null guard would have protected: a dereference base, or an argument handed
+        // to a call that will read through it
+        val uses = method.ast.collectAll[Call].l.flatMap { c =>
+          val derefBases = c.name match
+            case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" |
+                "<operator>.indexAccess" | "<operator>.indirectIndexAccess" =>
+                c.argumentOption(1).toList
+            case _ => Nil
+          val callArgs = Option.unless(c.name.startsWith("<operator>"))(c.argument.l).getOrElse(Nil)
+          (derefBases ++ callArgs).collect { case i: Identifier => i }
+        }
+        val paramNames = method.parameter.name.l.toSet
+        uses.foreach { use =>
+            castUnwrappingKey(use).foreach { key =>
+              val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+              guards.get(key) match
+                case Some(guardLine) if guardLine > line =>
+                    // the guard exists but comes AFTER the use: check-after-use
+                    record(use, RuleNullDeref)
+                case None if paramNames.contains(use.name) && isDerefBase(use) =>
+                    // a parameter dereferenced with no guard on it anywhere: hypothesis tier
+                    record(use, RuleNullDeref)
+                    hypothesis += use
+                case _ => ()
+            }
+        }
+      end if
+    }
+    hypothesis.toSet
+  end ruleNullDereference
+
+  /** The variable a null guard's condition tests: `x == NULL` / `NULL != x`, `!x`, or the truth of
+    * `x` itself.
+    */
+  private def nullGuardKeyOf(cond: AstNode): Option[String] = cond match
+    case cmp: Call
+        if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+        val operands = Seq(1, 2).flatMap(cmp.argumentOption)
+        val nullSide = operands.find(isNullLiteralNode)
+        nullSide.flatMap { _ =>
+            operands.filterNot(_ == nullSide).flatMap(castUnwrappingKey).headOption
+        }
+    case not: Call if not.name == "<operator>.logicalNot" =>
+        not.argumentOption(1).flatMap(castUnwrappingKey)
+    case i: Identifier => OverlayFacts.variableKey(i)
+    case _             => None
+
+  private def isNullLiteralNode(e: AstNode): Boolean =
+      AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
+
+  /** Is this identifier the BASE of a field/index access rather than a bare call argument? */
+  private def isDerefBase(use: Identifier): Boolean =
+      use._astIn.collectFirst { case c: Call => c }.exists(c =>
+          c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" ||
+              c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess"
+      )
 
   private def tagValues(node: StoredNode, tag: String): Set[String] =
       node.tag.name(tag).value.l.toSet
@@ -508,6 +625,12 @@ object MemorySafetyFindingPass:
 
   final val TagFinding = "ms-finding"
 
+  /** A finding-level confidence override, emitted when one arm of a rule is a hypothesis tier the
+    * rule's own confidence does not describe. Valued `low` today; a renderer reads it INSTEAD of
+    * the rule's default, never in addition.
+    */
+  final val TagConfidence = "ms-confidence"
+
   final val RuleUnboundedCopy     = "MS-BOUND-002"
   final val RuleSizeParamContract = "MS-BOUND-001"
   final val RuleIndexRead         = "MS-BOUND-003"
@@ -527,6 +650,12 @@ object MemorySafetyFindingPass:
     * family, and a different CWE.
     */
   final val RuleDoubleClose = "MS-ALLOC-004"
+
+  /** A dereference of a value that may be NULL (CWE-476), part 5 E3. */
+  final val RuleNullDeref = "MS-NULL-001"
+
+  /** A stack address that left its frame (CWE-562), part 5 E4. */
+  final val RuleStackEscape = "MS-ESC-001"
 
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
@@ -660,6 +789,29 @@ object MemorySafetyFindingPass:
       severity = "high",
       confidence = "high",
       message = "a file handle already closed on some path reaching this point is closed again"
+    ),
+    MemorySafetyRule(
+      id = RuleNullDeref,
+      cwe = "CWE-476",
+      kind = "null-deref",
+      severity = "high",
+      // medium for the two evidence arms (a nullable-return producer used unchecked; a use the
+      // author's own later null guard admits was nullable). The unvalidated-parameter arm
+      // carries a per-finding `low` (ms-confidence): a pointer parameter with no guard anywhere
+      // is also the common correctly-coded shape, and that tier is a hypothesis.
+      confidence = "medium",
+      message = "a value that may be NULL is dereferenced with no narrowing guard between the " +
+          "producing call and the use - or the author's own null check comes one statement " +
+          "too late"
+    ),
+    MemorySafetyRule(
+      id = RuleStackEscape,
+      cwe = "CWE-562",
+      kind = "stack-address-escape",
+      severity = "high",
+      confidence = "medium",
+      message = "the address of a stack local leaves its frame - returned, or stored into " +
+          "storage that outlives the function - and any later use of it reads dead storage"
     )
   ).map(r => r.id -> r).toMap
 
