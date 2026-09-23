@@ -1,0 +1,180 @@
+package io.appthreat.c2cpg.passes
+
+import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
+import io.appthreat.x2cpg.passes.taggers.{
+    AllocationStatePass,
+    MemoryApiPass,
+    MemorySafetyFindingPass
+}
+import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.semanticcpg.language.*
+
+/** Part 5 review: negative controls for the shapes the E2-E5 changes get wrong. Every function here
+  * is correct C; none may carry a finding at medium or above.
+  */
+class Part5ReviewTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+    |#include <stdlib.h>
+    |#include <string.h>
+    |#include <stdio.h>
+    |
+    |struct node { struct node *next; int v; };
+    |struct ctx { char *buf; int *p; };
+    |
+    |/* E2: a for loop's BODY is on the condition's TRUE edge */
+    |int good_for_walk(const char *s)
+    |{
+    |    int n = 0;
+    |    char *e;
+    |    for (e = strchr(s, ','); e != NULL; e = strchr(e + 1, ','))
+    |        n += e[1];
+    |    return n;
+    |}
+    |
+    |/* E2: a do-while body is re-entered on the TRUE edge */
+    |int good_do_walk(const char *s)
+    |{
+    |    int n = 0;
+    |    char *e = strchr(s, ',');
+    |    if (!e)
+    |        return 0;
+    |    do {
+    |        n += e[1];
+    |        e = strchr(e + 1, ',');
+    |    } while (e != NULL);
+    |    return n;
+    |}
+    |
+    |/* E5: a free on the error path only (goto fail) is NOT an unconditional free */
+    |static int init_or_free(char *p, int n)
+    |{
+    |    if (n < 0)
+    |        goto fail;
+    |    p[0] = 0;
+    |    return 0;
+    |fail:
+    |    free(p);
+    |    return -1;
+    |}
+    |
+    |void good_goto_fail_wrapper(int n)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    if (!p)
+    |        return;
+    |    if (init_or_free(p, n) < 0)
+    |        return;
+    |    free(p);
+    |}
+    |
+    |/* E5: a freep-style wrapper that NULLS the caller's pointer */
+    |static void my_freep(char **pp)
+    |{
+    |    printf("free\n");
+    |    free(*pp);
+    |    *pp = NULL;
+    |}
+    |
+    |void good_freep_nulls(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    my_freep(&p);
+    |    my_freep(&p);
+    |    free(p);
+    |}
+    |
+    |/* E5: returns a fresh allocation on one path, a borrowed pointer on another */
+    |static char *get_or_alloc(char *cache, size_t n)
+    |{
+    |    if (cache)
+    |        return cache;
+    |    return (char *)malloc(n);
+    |}
+    |
+    |void good_borrowed_return(char *cache)
+    |{
+    |    char *q = get_or_alloc(cache, 8);
+    |    free(q);
+    |    free(cache);
+    |}
+    |
+    |/* E4: a static local outlives the frame */
+    |const char *good_static_buf(int v)
+    |{
+    |    static char buf[32];
+    |    snprintf(buf, sizeof(buf), "%d", v);
+    |    return buf;
+    |}
+    |
+    |/* E4: &local stored into a LOCAL struct's member does not leave the frame */
+    |int good_local_struct(void)
+    |{
+    |    int x = 1;
+    |    struct ctx c;
+    |    c.p = &x;
+    |    return *c.p;
+    |}
+    |
+    |/* E3: an int compared with 0 is not a null guard */
+    |int good_int_zero(int size, char *dst)
+    |{
+    |    memset(dst, 0, size);
+    |    if (size == 0)
+    |        return 0;
+    |    if (!size)
+    |        return 1;
+    |    return 2;
+    |}
+    |""".stripMargin,
+    "review5.c"
+  )
+
+  new MemoryApiPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  private def findingsIn(method: String): Set[String] =
+      cpg.method
+          .name(method)
+          .ast
+          .collectAll[StoredNode]
+          .flatMap(_.tag.name("ms-finding").value.l)
+          .l
+          .toSet
+
+  private def effectsOf(method: String): Set[String] =
+      cpg.method.name(method).flatMap(_.tag.name(AllocationStatePass.TagEffect).value.l).l.toSet
+
+  private def nullUsesIn(method: String): List[String] =
+      cpg.method
+          .name(method)
+          .ast
+          .collectAll[StoredNode]
+          .flatMap(_.tag.name(AllocationStatePass.TagNullUse).value.l)
+          .l
+
+  "part 5 negative controls" should:
+    "not mark a for-loop body null" in { nullUsesIn("good_for_walk") shouldBe empty }
+    "not mark a do-while body null" in { nullUsesIn("good_do_walk") shouldBe empty }
+    "not summarise an error-path free" in {
+        effectsOf("init_or_free") shouldBe empty
+        findingsIn("good_goto_fail_wrapper") shouldBe empty
+    }
+    "not report a double free through a nulling freep wrapper" in {
+        findingsIn("good_freep_nulls") should not contain "MS-ALLOC-001"
+    }
+    "not summarise allocates-return for a sometimes-borrowed return" in {
+        effectsOf("get_or_alloc") shouldBe empty
+    }
+    "not report a static local as a stack escape" in {
+        findingsIn("good_static_buf") should not contain "MS-ESC-001"
+    }
+    "not report &local stored in a local struct" in {
+        findingsIn("good_local_struct") should not contain "MS-ESC-001"
+    }
+    "not treat an int compared with 0 as a null guard" in {
+        findingsIn("good_int_zero") should not contain "MS-NULL-001"
+    }
+end Part5ReviewTests

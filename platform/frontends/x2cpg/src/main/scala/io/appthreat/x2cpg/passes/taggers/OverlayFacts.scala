@@ -161,17 +161,20 @@ private[taggers] object OverlayFacts:
     * expansion applies [[expansionExclusionOf]]: the flow semantics and the Flux engine emit
     * argument-to-argument REACHING_DEF edges (a memory call's siblings, a comparison's other
     * operand) that are plumbing, not definitions.
+    *
+    * Part 5 (E1): the exclusion is not an identifier-only concern. A `mem-len` argument that is
+    * itself a call (`memset(dst + off, 0, asf->size_left)`) expands through the SAME
+    * argument-to-argument edges into the destination's subtree, which is how MS-INT-001 came to
+    * report the pointer arithmetic in a copy's DESTINATION as "the length computation". Every
+    * expression node that sits as an argument of a non-assignment call now excludes that call's
+    * argument subtree, exactly as identifiers always have.
     */
   def reachingDefsIn(node: StoredNode, maxHops: Int = 8): List[StoredNode] =
-      bfs(node, maxHops) {
-          case i: Identifier =>
-              val exclude = expansionExclusionOf(i)
-              neighboursWithout(i._reachingDefIn.iterator, exclude)
-          case other =>
-              val out = mutable.ListBuffer.empty[StoredNode]
-              val it  = other._reachingDefIn.iterator
-              while it.hasNext do out += it.next().asInstanceOf[StoredNode]
-              out.toList
+      bfs(node, maxHops) { n =>
+        val exclude = n match
+          case e: Expression => expansionExclusionOf(e)
+          case _             => Set.empty[Long]
+        neighboursWithout(n._reachingDefIn.iterator, exclude)
       }
 
   /** The neighbours of `raw` whose ids are not in `exclude`, iterated without building a traversal
@@ -193,7 +196,7 @@ private[taggers] object OverlayFacts:
       bfs(node, maxHops)(n => n._reachingDefOut.collectAll[StoredNode].l)
           .collect { case i: Identifier => i }
 
-  /** The nodes an identifier's definition walk must not cross: the argument subtree of its
+  /** The nodes an expression's definition walk must not cross: the argument subtree of its
     * ENCLOSING call, unless that call is an assignment. A comparison's other operand and a memory
     * call's sibling arguments did not define the value (on graphs built with the memory-API flow
     * semantics, those edges exist and would otherwise turn every guarded length into `mixed`); an
@@ -201,6 +204,15 @@ private[taggers] object OverlayFacts:
     */
   def expansionExclusionOf(i: Identifier): Set[Long] =
       i._astIn.collectFirst { case c: Call => c } match
+        case Some(c) if c.name != "<operator>.assignment" =>
+            (Iterator.single[StoredNode](c) ++ c.argument.iterator).map(_.id).toSet
+        case _ => Set.empty[Long]
+
+  /** The same exclusion for any expression argument: an argument of a non-assignment call does not
+    * read its sibling arguments' REACHING_DEF edges as definitions of itself.
+    */
+  def expansionExclusionOf(e: Expression): Set[Long] =
+      e._astIn.collectFirst { case c: Call => c } match
         case Some(c) if c.name != "<operator>.assignment" =>
             (Iterator.single[StoredNode](c) ++ c.argument.iterator).map(_.id).toSet
         case _ => Set.empty[Long]

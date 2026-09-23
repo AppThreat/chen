@@ -74,12 +74,13 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
     ruleAllocationState(record)
+    val lowConfidenceNodes = ruleNullDereference(record)
 
     OverlayFacts.emitTags(
       dstGraph,
       findings.toList.flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      }
+      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low"))
     )
   end run
 
@@ -106,14 +107,17 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l.map(n => (n, t.value)))
         .foreach { case (node, state) =>
             state match
-              case "freed" | "maybe-freed" =>
+              case "freed" | "maybe-freed" | AllocationStatePass.ValueSummaryFreed =>
                   // the SAME fact means two things by site: a free of an already-freed
                   // pointer is a double-free, any other use is a use-after-free
                   val enclosing = node._astIn.collectFirst { case c: Call => c }
-                  val isFreeSite = enclosing.exists(c =>
-                      tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
-                          tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
-                  )
+                  // a summary-freed value (E5) names the call that freed it: the ENCLOSING
+                  // call is the free even though it carries no inventory tag of its own
+                  val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
+                      enclosing.exists(c =>
+                          tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
+                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                      )
                   if isFreeSite then
                     val family = enclosing.flatMap(c =>
                         tagValues(c, MemoryApiPass.TagFree).headOption
@@ -130,7 +134,153 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         .l
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleLeak))
+    // MS-ESC-001 (part 5, E4, CWE-562): a stack address that left its frame - returned, or
+    // stored into a member, a global, or through a pointer parameter. The state pass tracks the
+    // frame's storage through the SAME worklist and escape analysis it tracks the heap's: the
+    // rule is the reader, exactly as for the leak.
+    atom.tag
+        .name(AllocationStatePass.TagStackEscape)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleStackEscape))
   end ruleAllocationState
+
+  /** MS-NULL-001 (part 5, E3, CWE-476): a dereference of a value that may be null, three arms over
+    * two fact sources. Returns the nodes whose finding is a HYPOTHESIS tier - the renderer lowers
+    * those below the rule's own confidence, the same way a whole rule ships at `low` when its
+    * evidence does not earn `medium`.
+    *
+    *   - **unchecked nullable return** (the state pass's `null-use` facts): a use of a pointer
+    *     whose producing call may return NULL - every allocation, or the inventory's
+    *     `nullable-return` role (the strchr family, av_dict_get) - with no narrowing guard between
+    *     the call and the use. The imfdec.c:258 shape: `uri = xmlNodeGetContent(...)`;
+    *     `imf_uri_is_url(uri)` dereferences what the library may have handed back NULL.
+    *   - **check-after-use** (rule-side): a use of a variable whose null guard appears LATER in the
+    *     method - the author knew it could be null, one statement too late. The corpus's
+    *     `bad_check_after_use`: `strlen(s); if (s == NULL) return;`.
+    *   - **unvalidated parameter** (rule-side, the hypothesis tier): a pointer parameter
+    *     dereferenced with no null guard anywhere in the method. The common FFmpeg shape (`s` is
+    *     never null by contract) makes this arm loud, so it carries its own `low` tier - the
+    *     imfdec.c:541 shape fires there, deliberately, and a default run does not drown in it.
+    *
+    * A use under a guard that proved the pointer NON-NULL is not a finding; an escaped pointer is
+    * not one either - the state pass says so, not this rule's silence.
+    */
+  private def ruleNullDereference(
+    record: (StoredNode, String) => Unit
+  ): Set[StoredNode] =
+    // arm 1: the state pass already asked the flow question
+    val stateFacts = atom.tag
+        .name(AllocationStatePass.TagNullUse)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .distinct
+    stateFacts.foreach(node => record(node, RuleNullDeref))
+
+    // arms 2 and 3: per method, the null guards the author wrote and the uses that precede (or
+    // never meet) them. `<global>` is skipped: its AST nests every function of the file, so its
+    // "uses" and "guards" would be every function's at once - one function's guard reaching
+    // another function's use through it is not a check-after-use, it is an aggregation artefact
+    val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
+    atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
+      // a bare `if (x)` is a null guard only for POINTER x: FFmpeg truthiness-checks ints
+      // everywhere (`if (ret)`, `if (size)`), and counting those made arm 2 fire on every
+      // earlier use of the int - the bulk of the rule's first libavformat measurement
+      val pointerNames = (method.local.l ++ method.parameter.l)
+          .map(d => d.name -> d.property("TYPE_FULL_NAME"))
+          .collect { case (n, t: String) if OverlayFacts.isPointer(t) => n }
+          .toSet
+      val guards = mutable.LinkedHashMap.empty[String, Int] // variable key -> guard line
+      method.ast.collectAll[ControlStructure].l.foreach { cs =>
+          cs.condition.foreach { cond =>
+              nullGuardKeyOf(cond, pointerNames).foreach { key =>
+                val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                guards.update(key, math.min(guards.getOrElse(key, Int.MaxValue), line))
+              }
+          }
+      }
+      if guards.nonEmpty || method.parameter.exists(p => OverlayFacts.isPointer(p.typeFullName))
+      then
+        // the uses a null guard would have protected: a dereference base, or an argument handed
+        // to a call that will read through it
+        val uses = method.ast.collectAll[Call].l.flatMap { c =>
+          val derefBases = c.name match
+            case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" |
+                "<operator>.indexAccess" | "<operator>.indirectIndexAccess" =>
+                c.argumentOption(1).toList
+            case _ => Nil
+          val callArgs = Option.unless(c.name.startsWith("<operator>"))(c.argument.l).getOrElse(Nil)
+          (derefBases ++ callArgs).collect { case i: Identifier => i }
+        }
+        val paramNames = method.parameter.name.l.toSet
+        uses.foreach { use =>
+            castUnwrappingKey(use).foreach { key =>
+              val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+              guards.get(key) match
+                case Some(guardLine) if guardLine > line =>
+                    // the guard exists but comes AFTER the use: check-after-use
+                    record(use, RuleNullDeref)
+                case None
+                    if paramNames.contains(use.name) && isChainedFieldDerefBase(use) =>
+                    // a parameter dereferenced with no guard on it anywhere, through a pure
+                    // FIELD-ACCESS chain (`head->next->v`): the inner pointer was produced in
+                    // this very expression and nothing anywhere checked it. The corpus run
+                    // decided this boundary twice: the plain parameter deref fired on eleven
+                    // @nofinding lines at low (every correctly written context access is that
+                    // shape), and the field-through-INDEX chain hit three more
+                    record(use, RuleNullDeref)
+                    hypothesis += use
+                case _ => ()
+            }
+        }
+      end if
+    }
+    hypothesis.toSet
+  end ruleNullDereference
+
+  /** The POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
+    * truth of `p` itself. Every shape is restricted to pointer-typed locals and parameters: FFmpeg
+    * tests ints the same three ways (`size == 0`, `!ret`, `if (n)`), and `0` is also how the
+    * frontend spells NULL, so an unrestricted shape made every earlier use of an int counter a
+    * "check-after-use".
+    */
+  private def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] =
+    def pointerKey(e: AstNode): Option[String] = e match
+      case i: Identifier if pointerNames.contains(i.name) => OverlayFacts.variableKey(i)
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).flatMap(pointerKey)
+      case _ => None
+    cond match
+      case cmp: Call
+          if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+          val operands = Seq(1, 2).flatMap(cmp.argumentOption)
+          if operands.exists(isNullLiteralNode) then
+            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption
+          else None
+      case not: Call if not.name == "<operator>.logicalNot" =>
+          not.argumentOption(1).flatMap(pointerKey)
+      case other => pointerKey(other)
+
+  private def isNullLiteralNode(e: AstNode): Boolean =
+      AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
+
+  /** Is this identifier the base of the inner access of a pure FIELD-ACCESS chain
+    * (`head->next->v`)? Index accesses in the chain are deliberately excluded: the corpus run put
+    * three @nofinding lines on the field-through-index form (`vps->hrd[i]`, `fragments[seq_no].n`)
+    * \- the array-member walk correct code does a hundred times a file - while the pure field chain
+    * kept the true shape.
+    */
+  private def isChainedFieldDerefBase(use: Identifier): Boolean =
+      use._astIn.collectFirst { case c: Call => c }.exists { access =>
+          isFieldAccess(access) && access._astIn.collectFirst { case outer: Call => outer }
+              .exists(outer =>
+                  isFieldAccess(outer) &&
+                      outer.argumentOption(1).exists(_.id == access.id)
+              )
+      }
+
+  private def isFieldAccess(c: Call): Boolean =
+      c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess"
 
   private def tagValues(node: StoredNode, tag: String): Set[String] =
       node.tag.name(tag).value.l.toSet
@@ -266,6 +416,15 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * CVE-2026-75141 adds precisely that guard. A widened operand - `(size_t) a * b` - means the
     * arithmetic already computes at the wider width, so there is nothing to overflow; standing down
     * there is evidence-based (a widening cast exists), not silence-based.
+    *
+    * Part 5 (E1) adds the capacity conjunct: the arithmetic must bound a buffer that does not
+    * already have one. An allocator's size/count argument BECOMES the new buffer's capacity, so it
+    * is always in scope (the CVE-2026-75141 shape); a copy into a destination that already carries
+    * an extent (`const:`, `param:`, `field:`, `alloc:`, `sizeof:`) is bounded by a fact the
+    * MS-BOUND rules own, whatever this arithmetic does to the length. The def walk that finds the
+    * arithmetic is [[OverlayFacts.reachingDefsIn]], which no longer crosses argument-to-argument
+    * plumbing edges - part 4's rule reported the pointer arithmetic in a copy's DESTINATION as a
+    * length computation through exactly those edges.
     */
   private def ruleIntegerArithmeticLength(record: (StoredNode, String) => Unit): Unit =
       OverlayFacts.memoryArgumentSites(atom)
@@ -277,10 +436,26 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                   case arith: Call
                       if isLengthArithmetic(arith) && attackerArithmetic(arith)
                           && !widenedOperandOf(arith)
-                          && !guardBoundsAnOperand(memCall, arith) =>
+                          && !guardBoundsAnOperand(memCall, arith)
+                          && lengthBecomesCapacity(memCall) =>
                       record(arith, RuleIntegerOverflow)
               }
           }
+
+  /** Does the length this call consumes become a buffer's capacity? An allocator produces a fresh
+    * buffer whose size IS this argument; a copy into a destination with a recorded extent writes
+    * into a capacity that exists independently of the arithmetic, and the wrap question is the
+    * BOUND rules' to ask.
+    */
+  private def lengthBecomesCapacity(memCall: Call): Boolean =
+    val allocates = tagValues(memCall, MemoryApiPass.TagAlloc).nonEmpty ||
+        tagValues(memCall, MemoryApiPass.TagRealloc).nonEmpty
+    if allocates then true
+    else
+      val dstExtents = memCall.argument.l
+          .filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+          .flatMap(_.tag.name(ExtentPass.TagExtent).value.l)
+      dstExtents.isEmpty || dstExtents.forall(_ == ExtentPass.ValueUnknown)
 
   private def isLengthArithmetic(c: Call): Boolean =
       c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
@@ -483,6 +658,24 @@ object MemorySafetyFindingPass:
 
   final val TagFinding = "ms-finding"
 
+  /** A finding-level confidence override, emitted when one arm of a rule is a hypothesis tier the
+    * rule's own confidence does not describe. Valued `<rule-id>=<confidence>`: the override is
+    * SCOPED to its rule, because one node can carry several findings - a null-deref hypothesis on
+    * the same identifier as a high-confidence use-after-free must not demote the use-after-free. A
+    * renderer reads it INSTEAD of the rule's default, never in addition.
+    */
+  final val TagConfidence = "ms-confidence"
+
+  /** The confidence a finding of `ruleId` on `node` reports: its scoped override, else the rule's.
+    */
+  def confidenceOf(node: StoredNode, rule: MemorySafetyRule): String =
+      node.tag
+          .name(TagConfidence)
+          .value
+          .l
+          .collectFirst { case v if v.startsWith(s"${rule.id}=") => v.stripPrefix(s"${rule.id}=") }
+          .getOrElse(rule.confidence)
+
   final val RuleUnboundedCopy     = "MS-BOUND-002"
   final val RuleSizeParamContract = "MS-BOUND-001"
   final val RuleIndexRead         = "MS-BOUND-003"
@@ -502,6 +695,12 @@ object MemorySafetyFindingPass:
     * family, and a different CWE.
     */
   final val RuleDoubleClose = "MS-ALLOC-004"
+
+  /** A dereference of a value that may be NULL (CWE-476), part 5 E3. */
+  final val RuleNullDeref = "MS-NULL-001"
+
+  /** A stack address that left its frame (CWE-562), part 5 E4. */
+  final val RuleStackEscape = "MS-ESC-001"
 
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
@@ -566,7 +765,20 @@ object MemorySafetyFindingPass:
       cwe = "CWE-190",
       kind = "integer-overflow-length",
       severity = "high",
-      confidence = "medium",
+      // `low`, on the MS-BOUND-005 / MS-ALLOC-003 precedent, decided BEFORE shipping rather than
+      // after (part 5, E1). Part 4 shipped it at medium and it became 76% of the overlay's
+      // libavformat output (6,966 of 9,216 findings across the 16 vulnerable trees, ~435 per
+      // tree) while firing 5,666 times in the FIXED trees - it was not distinguishing vulnerable
+      // code from patched code at all. The E1 diagnosis of the 439 findings in the 75141 tree:
+      // 116 were the pointer arithmetic of a copy's DESTINATION read as "the length" through
+      // argument-to-argument REACHING_DEF plumbing (now cut in OverlayFacts.reachingDefsIn), and
+      // of the rest, two thirds turn on `struct-field` arithmetic - `track->entry + 1`,
+      // `os->bufsize + PADDING` - the shape of every correctly written FFmpeg counter, because a
+      // struct field that some other function validated looks identical to one nobody did. The
+      // one true shape in the bucket (hevc.c:847's uint16_t counter) is NOT separable from that
+      // noise by any fact the graph carries: it fires here, at `low`, exactly as the widening and
+      // guard conjuncts leave it.
+      confidence = "low",
       message = "allocation or copy length computed by attacker-influenced arithmetic with no " +
           "guard bounding an operand from above and no widened accumulator - the product or " +
           "sum can wrap before it bounds the buffer (CVE-2026-75141 shape)"
@@ -622,6 +834,33 @@ object MemorySafetyFindingPass:
       severity = "high",
       confidence = "high",
       message = "a file handle already closed on some path reaching this point is closed again"
+    ),
+    MemorySafetyRule(
+      id = RuleNullDeref,
+      cwe = "CWE-476",
+      kind = "null-deref",
+      severity = "high",
+      // `low`, decided by the per-rule gate BEFORE shipping (part 5, E3) rather than after:
+      // on libavformat the nullable-producer arms fire 567 times per tree (8,986 across the
+      // 16, 76% of the overlay's output) - an av_dict_get result passed to av_log, a
+      // stream-pointer read before the error path, the FFmpeg idiom itself. The corpus loves
+      // the rule (3/3 true, 0 false at its own arm) and imfdec.c:258 fires; none of that is
+      // separable from the style findings by a fact the graph carries, so the whole rule
+      // reports at low and the medium run stays quiet. The chained-parameter arm additionally
+      // carries a per-finding `low` (ms-confidence).
+      confidence = "low",
+      message = "a value that may be NULL is dereferenced with no narrowing guard between the " +
+          "producing call and the use - or the author's own null check comes one statement " +
+          "too late"
+    ),
+    MemorySafetyRule(
+      id = RuleStackEscape,
+      cwe = "CWE-562",
+      kind = "stack-address-escape",
+      severity = "high",
+      confidence = "medium",
+      message = "the address of a stack local leaves its frame - returned, or stored into " +
+          "storage that outlives the function - and any later use of it reads dead storage"
     )
   ).map(r => r.id -> r).toMap
 

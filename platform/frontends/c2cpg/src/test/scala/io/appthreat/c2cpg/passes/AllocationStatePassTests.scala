@@ -121,6 +121,49 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |/* ---- part 5, E2: the unbraced if ---- */
+    |
+    |/* the good_capped shape (c/cwe789_uncontrolled_alloc.c): the false edge of an unbraced
+    |   `if (p) free(p);` runs to the implicit end, and part 4 narrowed NOTHING there - the
+    |   allocated state flowed into METHOD_RETURN and reported a leak on the path where the free
+    |   never ran */
+    |void good_capped_unbraced(size_t n)
+    |{
+    |    char *p = (char *)malloc(n);
+    |    if (p) free(p);
+    |}
+    |
+    |/* an unbraced error path with a value: the then side is where the condition holds, and
+    |   every path here frees */
+    |int good_unbraced_retval(int n)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    if (p == NULL) return 1;
+    |    if (n >= 0) { free(p); return 0; }
+    |    free(p);
+    |    return 2;
+    |}
+    |
+    |/* `if (q != NULL) return;` abandons the allocation on the path where q IS non-null; part
+    |   4's notEquals narrowing inverted both branches and marked q NULL exactly there,
+    |   silencing the leak */
+    |void bad_leak_notEquals_return(void)
+    |{
+    |    char *q = (char *)malloc(64);
+    |    if (q != NULL) return;
+    |    free(q);
+    |}
+    |
+    |/* the free-and-reset idiom's dead branch must not revive into a phantom allocation */
+    |void good_reset_recheck(void)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    if (p == NULL) return;
+    |    free(p);
+    |    p = NULL;
+    |    if (p != NULL) { p[0] = 'a'; }
+    |}
+    |
     |/* ---- realloc frees its input and yields a fresh pointer ---- */
     |
     |char *bad_realloc_then_free(char *old, int n)
@@ -171,6 +214,9 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
   new AllocationStatePass(cpg).createAndApply()
   new MemorySafetyFindingPass(cpg).createAndApply()
 
+  /** The MS-ALLOC rules only. MS-NULL-001 (part 5, E3) also reads this pass's facts and fires on
+    * several of these fixtures' unchecked parameters - it has its own suite.
+    */
   private def findingsIn(method: String): Set[String] =
       cpg.method
           .name(method)
@@ -180,6 +226,7 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
           .flatMap(_.tag.name("ms-finding").value.l)
           .l
           .toSet
+          .filter(_.startsWith("MS-ALLOC"))
 
   "MS-ALLOC-001" should:
 
@@ -252,6 +299,26 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when every path frees" in {
         findingsIn("good_freed") shouldBe empty
+    }
+
+  "part 5, E2: the unbraced if" should:
+
+    "stay silent when an unbraced `if (p) free(p);` frees on the taken path (good_capped)" in {
+        // the false edge to the implicit end is narrowed to p-is-null now; part 4 left the
+        // allocation live there and reported the negative control as a leak
+        findingsIn("good_capped_unbraced") shouldBe empty
+    }
+
+    "keep the early-return narrowing for an unbraced `if (c) return 1;`" in {
+        findingsIn("good_unbraced_retval") shouldBe empty
+    }
+
+    "not invert `if (q != NULL)`: the taken path abandons the allocation" in {
+        findingsIn("bad_leak_notEquals_return") shouldBe Set("MS-ALLOC-003")
+    }
+
+    "not revive a NULL RESET into a phantom allocation under a non-null guard" in {
+        findingsIn("good_reset_recheck") shouldBe empty
     }
 
   "realloc" should:

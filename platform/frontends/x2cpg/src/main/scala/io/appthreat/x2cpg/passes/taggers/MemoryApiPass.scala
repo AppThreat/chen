@@ -115,6 +115,13 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     entry.free.foreach(family => record(TagFree, family, call))
     entry.realloc.foreach(family => record(TagRealloc, family, call))
 
+    // E3: the entry DECLARES that its result may be NULL - pointer-returning allocators, the
+    // strchr family. The fd-returning allocators (open, socket) deliberately do not: an int
+    // fd's failure mode is -1, and conflating the two turned checked fds into null-deref
+    // findings (c/cwe367_toctou.c's negative control).
+    if entry.nullableReturn then
+      record(TagNullableReturn, entry.name, call)
+
     entry.untrustedRead.foreach { i =>
       record(TagUntrustedRead, entry.name, call)
       argAt(i).foreach(n => record(TagUntrustedRead, entry.name, n))
@@ -385,6 +392,11 @@ object MemoryApiPass:
     */
   final val TagRealloc       = "mem-realloc"
   final val TagUntrustedRead = "untrusted-read"
+
+  /** E3: the call's result may be NULL (allocation failure, or the strchr family's no-match NULL).
+    * On the call node, for MS-NULL-001.
+    */
+  final val TagNullableReturn = "nullable-return"
 
   /** The family inferred wrappers emit; the inventory's own families are unchanged. */
   private final val FamilyHeap = "heap"

@@ -50,6 +50,11 @@ object MemApiVocab:
     *   `max` (bounded below) or `clip` (arg2 below, arg3 above). This is how an UNEXPANDED
     *   `FFMIN`-style call still establishes a bound in GuardPass - the same declared-vocabulary
     *   route part 1 used for the flow semantics, so a project's own `MYMIN` is a data change.
+    * @param nullableReturn
+    *   true when the call's result may be NULL: pointer-returning allocators and the
+    *   `strchr`/`strstr` family's no-match NULL. Declared per entry, never implied by the family -
+    *   an fd-returning allocator fails with -1, not NULL. [[MemoryApiPass]] emits `nullable-return`
+    *   for it.
     */
   final case class MemApiEntry(
     name: String,
@@ -62,7 +67,8 @@ object MemApiVocab:
     realloc: Option[String] = None,
     untrustedRead: Option[Int] = None,
     untrustedCall: Boolean = false,
-    clamp: Option[String] = None
+    clamp: Option[String] = None,
+    nullableReturn: Boolean = false
   )
 
   private def decodeEntry(json: io.circe.Json): Option[MemApiEntry] =
@@ -79,7 +85,8 @@ object MemApiVocab:
         realloc = json.hcursor.get[String]("realloc").toOption,
         untrustedRead = json.hcursor.get[Int]("untrustedRead").toOption,
         untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false),
-        clamp = json.hcursor.get[String]("clamp").toOption
+        clamp = json.hcursor.get[String]("clamp").toOption,
+        nullableReturn = json.hcursor.get[Boolean]("nullableReturn").toOption.getOrElse(false)
       )
 
   /** @return

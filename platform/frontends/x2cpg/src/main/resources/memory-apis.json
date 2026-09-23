@@ -18,7 +18,12 @@
     "and the overflow question is asked about the product (part 4, D1). A realloc is the",
     "third family, `realloc`: it invalidates its input pointer and returns a fresh",
     "allocation, so it carries neither the alloc nor the free tag.",
-    "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded."
+    "Clamp entries (part 2, MS3): the value records what the call establishes about its result - min (bounded above by each argument), max (bounded below), clip (arg2 below, arg3 above). FFMIN/FFMAX/av_clip are FFmpeg's clamping macros; a project's own MYMIN is an external-config entry in the same shape. Used by GuardPass for clamps the frontend left unexpanded.",
+    "Nullable-return entries (part 5, E3): `nullableReturn` marks an API whose result may be NULL - ",
+    "allocation-family calls that return POINTERS declare it explicitly; the fd-returning family ",
+    "(open, socket, accept) does NOT: an int fd's failure is -1, checked with `< 0`, and conflating ",
+    "the two turned a checked fd into a null-deref finding. The pass emits `nullable-return` on the ",
+    "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use."
   ],
   "apis": [
     {
@@ -119,17 +124,49 @@
     {
       "name": "strdup",
       "src": 1,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "strndup",
       "src": 1,
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "strtok",
       "src": 1
+    },
+    {
+      "name": "strchr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strrchr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strstr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strcasestr",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "strpbrk",
+      "src": 2,
+      "nullableReturn": true
+    },
+    {
+      "name": "memchr",
+      "src": 2,
+      "nullableReturn": true
     },
     {
       "name": "strtok_r",
@@ -138,29 +175,34 @@
     {
       "name": "malloc",
       "len": 1,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "calloc",
       "count": 1,
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "realloc",
       "len": 2,
-      "realloc": "heap"
+      "realloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "reallocarray",
       "count": 2,
       "len": 3,
-      "realloc": "heap"
+      "realloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "aligned_alloc",
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "free",
@@ -177,7 +219,8 @@
     {
       "name": "mmap",
       "len": 2,
-      "alloc": "mmap"
+      "alloc": "mmap",
+      "nullableReturn": true
     },
     {
       "name": "munmap",
@@ -185,15 +228,18 @@
     },
     {
       "name": "fopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "fdopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "freopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "fclose",
@@ -213,7 +259,8 @@
     },
     {
       "name": "opendir",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "closedir",

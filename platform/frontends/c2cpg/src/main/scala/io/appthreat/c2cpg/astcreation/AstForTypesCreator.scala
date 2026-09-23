@@ -1,7 +1,7 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
@@ -111,7 +111,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           val codeTpe = typeFor(declarator, stripKeywords = false)
           val node    = localNode(declarator, name, s"$codeTpe $name", tpe)
           scope.addToScope(name, (node, tpe))
-          Ast(node)
+          localAst(declaration, node)
       case _ =>
           val tpe = registerType(
             cleanType(typeForDeclSpecifier(
@@ -124,9 +124,25 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
               typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = false, index)
           val node = localNode(declarator, name, s"$codeTpe $name", tpe)
           scope.addToScope(name, (node, tpe))
-          Ast(node)
+          localAst(declaration, node)
     end match
   end astForDeclarator
+
+  /** A local's AST. A declaration with static storage duration (`static char buf[32];` inside a
+    * function) tags its local `storage-class=static`: the storage class is otherwise only in the
+    * local's code, the schema admits no MODIFIER child on a LOCAL, and the memory-safety overlay
+    * must not read code - a static local outlives every frame, so returning its address is not a
+    * stack escape.
+    */
+  private def localAst(declaration: IASTSimpleDeclaration, node: NewLocal): Ast =
+    if declaration.getDeclSpecifier.getStorageClass == IASTDeclSpecifier.sc_static then
+      diffGraph.addEdge(
+        node,
+        NewTag().name(io.appthreat.x2cpg.Defines.StorageClassTag)
+            .value(io.appthreat.x2cpg.Defines.StorageClassStatic),
+        EdgeTypes.TAGGED_BY
+      )
+    Ast(node)
 
   protected def astForInitializer(declarator: IASTDeclarator, init: IASTInitializer): Ast =
       init match
