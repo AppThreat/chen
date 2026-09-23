@@ -147,7 +147,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 case d: Call =>
                     d.name == "<operator>.fieldAccess" || d.name == "<operator>.indirectFieldAccess"
                 case i: Identifier =>
-                    method.local.name(i.name).l.isEmpty && method.parameter.name(i.name).l.isEmpty
+                    // equality, never `.name(data)`: semanticcpg compiles a name argument
+                    // as a REGEX, and a macro-mangled local name (`r->buf[r->buf_len++]`)
+                    // is a pattern syntax error that killed the whole enhancement pass
+                    method.local.l.forall(_.name != i.name) &&
+                    method.parameter.l.forall(_.name != i.name)
                 case _ => false
             }
             if dstEternal then
@@ -228,9 +232,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // E4: the stack-address question is asked of the same worklist. A method that never
     // allocates, frees, reallocs or touches an inventoried memory call AND never takes a local's
     // address has no tracked pointer and no facts: skip the worklist entirely
+    // `<global>`'s "locals" are the file-scope declarations, and file scope in C is STATIC
+    // storage duration - `static const AVOption options[]` outlives every frame. Treating its
+    // initialisers as escapes of stack storage was 464 findings per libavformat tree of pure
+    // static-initialiser noise (E4's first FFmpeg measurement), so an empty context turns the
+    // whole stack-escape question off for it.
+    val isFileScope = method.name == "<global>"
     val ctx = MethodContext(
-      locals = method.local.l.map(_.name).toSet,
-      arrayLocals = method.local.l
+      locals = Option.unless(isFileScope)(method.local.l.map(_.name).toSet).getOrElse(Set.empty),
+      arrayLocals = Option.unless(isFileScope)(method.local.l)
+          .getOrElse(Nil)
           .filter(l =>
               OverlayFacts.arrayExtent(l.typeFullName).isDefined ||
                   l.typeFullName.trim.endsWith("[]")
@@ -238,7 +249,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           .map(_.name)
           .toSet,
       params = method.parameter.l.map(_.name).toSet,
-      refReturn = Option(method.methodReturn.typeFullName).exists(t =>
+      refReturn = !isFileScope && Option(method.methodReturn.typeFullName).exists(t =>
           t.endsWith("&") || t.endsWith("&&")
       )
     )

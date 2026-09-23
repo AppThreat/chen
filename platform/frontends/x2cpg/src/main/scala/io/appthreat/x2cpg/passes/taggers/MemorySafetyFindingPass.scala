@@ -183,10 +183,17 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     // another function's use through it is not a check-after-use, it is an aggregation artefact
     val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
     atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
+      // a bare `if (x)` is a null guard only for POINTER x: FFmpeg truthiness-checks ints
+      // everywhere (`if (ret)`, `if (size)`), and counting those made arm 2 fire on every
+      // earlier use of the int - the bulk of the rule's first libavformat measurement
+      val pointerNames = (method.local.l ++ method.parameter.l)
+          .map(d => d.name -> d.property("TYPE_FULL_NAME"))
+          .collect { case (n, t: String) if OverlayFacts.isPointer(t) => n }
+          .toSet
       val guards = mutable.LinkedHashMap.empty[String, Int] // variable key -> guard line
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
           cs.condition.foreach { cond =>
-              nullGuardKeyOf(cond).foreach { key =>
+              nullGuardKeyOf(cond, pointerNames).foreach { key =>
                 val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
                 guards.update(key, math.min(guards.getOrElse(key, Int.MaxValue), line))
               }
@@ -234,7 +241,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
   /** The variable a null guard's condition tests: `x == NULL` / `NULL != x`, `!x`, or the truth of
     * `x` itself.
     */
-  private def nullGuardKeyOf(cond: AstNode): Option[String] = cond match
+  private def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] = cond match
     case cmp: Call
         if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
         val operands = Seq(1, 2).flatMap(cmp.argumentOption)
@@ -244,8 +251,8 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         }
     case not: Call if not.name == "<operator>.logicalNot" =>
         not.argumentOption(1).flatMap(castUnwrappingKey)
-    case i: Identifier => OverlayFacts.variableKey(i)
-    case _             => None
+    case i: Identifier if pointerNames.contains(i.name) => OverlayFacts.variableKey(i)
+    case _                                              => None
 
   private def isNullLiteralNode(e: AstNode): Boolean =
       AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
@@ -814,11 +821,15 @@ object MemorySafetyFindingPass:
       cwe = "CWE-476",
       kind = "null-deref",
       severity = "high",
-      // medium for the two evidence arms (a nullable-return producer used unchecked; a use the
-      // author's own later null guard admits was nullable). The unvalidated-parameter arm
-      // carries a per-finding `low` (ms-confidence): a pointer parameter with no guard anywhere
-      // is also the common correctly-coded shape, and that tier is a hypothesis.
-      confidence = "medium",
+      // `low`, decided by the per-rule gate BEFORE shipping (part 5, E3) rather than after:
+      // on libavformat the nullable-producer arms fire 567 times per tree (8,986 across the
+      // 16, 76% of the overlay's output) - an av_dict_get result passed to av_log, a
+      // stream-pointer read before the error path, the FFmpeg idiom itself. The corpus loves
+      // the rule (3/3 true, 0 false at its own arm) and imfdec.c:258 fires; none of that is
+      // separable from the style findings by a fact the graph carries, so the whole rule
+      // reports at low and the medium run stays quiet. The chained-parameter arm additionally
+      // carries a per-finding `low` (ms-confidence).
+      confidence = "low",
       message = "a value that may be NULL is dereferenced with no narrowing guard between the " +
           "producing call and the use - or the author's own null check comes one statement " +
           "too late"
