@@ -123,13 +123,17 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     "fire on the unvalidated parameter deref at the low tier (the cwe476 chained row)" in {
         val found = findingsIn("bad_chained")
         found.map(_._1) shouldBe Set("MS-NULL-001")
-        // the hypothesis arm carries its own confidence, below the rule's medium
+        // the hypothesis arm carries its own confidence, SCOPED to its rule
+        val rule = MemorySafetyFindingPass.rules(MemorySafetyFindingPass.RuleNullDeref)
         cpg.method
             .name("bad_chained")
             .ast
             .collectAll[io.shiftleft.codepropertygraph.generated.nodes.Expression]
             .filter(_.tag.name("ms-finding").l.nonEmpty)
-            .forall(_.tag.name("ms-confidence").value.l.contains("low")) shouldBe true
+            .forall(n =>
+                n.tag.name("ms-confidence").value.l.contains("MS-NULL-001=low") &&
+                    MemorySafetyFindingPass.confidenceOf(n, rule) == "low"
+            ) shouldBe true
     }
 
     "fire on an unchecked strchr result" in {

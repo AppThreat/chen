@@ -80,7 +80,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       dstGraph,
       findings.toList.flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, "low"))
+      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low"))
     )
   end run
 
@@ -238,21 +238,28 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     hypothesis.toSet
   end ruleNullDereference
 
-  /** The variable a null guard's condition tests: `x == NULL` / `NULL != x`, `!x`, or the truth of
-    * `x` itself.
+  /** The POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
+    * truth of `p` itself. Every shape is restricted to pointer-typed locals and parameters: FFmpeg
+    * tests ints the same three ways (`size == 0`, `!ret`, `if (n)`), and `0` is also how the
+    * frontend spells NULL, so an unrestricted shape made every earlier use of an int counter a
+    * "check-after-use".
     */
-  private def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] = cond match
-    case cmp: Call
-        if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
-        val operands = Seq(1, 2).flatMap(cmp.argumentOption)
-        val nullSide = operands.find(isNullLiteralNode)
-        nullSide.flatMap { _ =>
-            operands.filterNot(_ == nullSide).flatMap(castUnwrappingKey).headOption
-        }
-    case not: Call if not.name == "<operator>.logicalNot" =>
-        not.argumentOption(1).flatMap(castUnwrappingKey)
-    case i: Identifier if pointerNames.contains(i.name) => OverlayFacts.variableKey(i)
-    case _                                              => None
+  private def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] =
+    def pointerKey(e: AstNode): Option[String] = e match
+      case i: Identifier if pointerNames.contains(i.name) => OverlayFacts.variableKey(i)
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).flatMap(pointerKey)
+      case _ => None
+    cond match
+      case cmp: Call
+          if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+          val operands = Seq(1, 2).flatMap(cmp.argumentOption)
+          if operands.exists(isNullLiteralNode) then
+            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption
+          else None
+      case not: Call if not.name == "<operator>.logicalNot" =>
+          not.argumentOption(1).flatMap(pointerKey)
+      case other => pointerKey(other)
 
   private def isNullLiteralNode(e: AstNode): Boolean =
       AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
@@ -652,10 +659,22 @@ object MemorySafetyFindingPass:
   final val TagFinding = "ms-finding"
 
   /** A finding-level confidence override, emitted when one arm of a rule is a hypothesis tier the
-    * rule's own confidence does not describe. Valued `low` today; a renderer reads it INSTEAD of
-    * the rule's default, never in addition.
+    * rule's own confidence does not describe. Valued `<rule-id>=<confidence>`: the override is
+    * SCOPED to its rule, because one node can carry several findings - a null-deref hypothesis on
+    * the same identifier as a high-confidence use-after-free must not demote the use-after-free. A
+    * renderer reads it INSTEAD of the rule's default, never in addition.
     */
   final val TagConfidence = "ms-confidence"
+
+  /** The confidence a finding of `ruleId` on `node` reports: its scoped override, else the rule's.
+    */
+  def confidenceOf(node: StoredNode, rule: MemorySafetyRule): String =
+      node.tag
+          .name(TagConfidence)
+          .value
+          .l
+          .collectFirst { case v if v.startsWith(s"${rule.id}=") => v.stripPrefix(s"${rule.id}=") }
+          .getOrElse(rule.confidence)
 
   final val RuleUnboundedCopy     = "MS-BOUND-002"
   final val RuleSizeParamContract = "MS-BOUND-001"

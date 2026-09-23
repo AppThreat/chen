@@ -101,95 +101,93 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     )
   end run
 
-  /** The effect summary of one method body (E5), from the role table - no tag reads per node. */
+  /** The effect summary of one method body (E5), from the role table - no tag reads per node.
+    *
+    * Every summary is a claim about what EVERY call does, and a wrong one is a high-confidence
+    * finding at every call site, so each is concluded only on evidence that holds on all paths:
+    *
+    *   - `frees-param:<i>` - a free of parameter i (or of `*p` for a pointer-to-pointer parameter)
+    *     that no condition controls (no incoming CDG edge). A free under an `if`, in a loop, or
+    *     behind an FFmpeg-style `goto fail` label frees on SOME path only. A wrapper that also
+    *     resets the caller's pointer (`free(*pp); *pp = NULL;`) is a freep: it leaves the caller
+    *     null, not dangling, so it carries no summary rather than a false double free.
+    *   - `allocates-return` - EVERY value return is, through casts or a local's definition, an
+    *     allocation (a NULL literal return is allowed: it is the failure path). A function that
+    *     returns a cached pointer on one path and a fresh one on another does not own its result.
+    *   - `escapes-param:<i>` - parameter i stored into a member or a global.
+    */
   private def methodEffects(method: Method, roles: mutable.LongMap[RoleInfo]): Set[String] =
     val paramIndex                = method.parameter.l.map(p => p.name -> p.index).toMap
     val effects                   = mutable.LinkedHashSet.empty[String]
     def roleOf(c: Call): RoleInfo = roles.getOrElse(c.id(), RoleInfoNone)
-    def unwrapped(e: Expression): Expression = e match
-      case c: Call if c.name == "<operator>.cast" =>
-          castOperand(c).map(unwrapped).getOrElse(c)
-      // `free(*p)` in a pointer-to-pointer wrapper: the CALLER passes &x, so the freed
-      // value IS the caller's x behind one indirection
+    def unwrapCasts(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCasts).getOrElse(c)
+      case other                                  => other
+    // the parameter a freed/stored expression names: `p`, or `*pp` for a caller's `&x`
+    def paramOf(e: Expression): Option[Int] = unwrapCasts(e) match
+      case i: Identifier => paramIndex.get(i.name)
       case c: Call if c.name == "<operator>.indirection" =>
-          c.argumentOption(1).map(unwrapped).getOrElse(c)
-      case other => other
-    def underControlStructure(c: Call): Boolean =
-      var cur = c._astIn.nextOption()
-      var out = false
-      while cur.isDefined && !out do
-        cur.get match
-          case _: ControlStructure => out = true
-          case _: Method           => cur = None
-          case other               => cur = other._astIn.nextOption()
-      out
-    method.ast.collectAll[Call].l.foreach {
-        case c if roleOf(c).free.nonEmpty && !underControlStructure(c) =>
-            // the freed argument (a freep-style wrapper takes the ADDRESS of its parameter)
-            argAt(c.argument.l, 1).map(unwrapped).foreach { freed =>
-                freed match
-                  case addr: Call if addr.name == "<operator>.addressOf" =>
-                      addr.argumentOption(1).collect { case i: Identifier =>
-                          paramIndex.get(i.name)
-                      }.foreach(_.foreach(idx => effects += s"effect:frees-param:$idx"))
-                  case i: Identifier =>
-                      paramIndex.get(i.name).foreach(idx =>
-                          effects += s"effect:frees-param:$idx"
-                      )
-                  case _ => ()
+          c.argumentOption(1).collect { case i: Identifier => i }.flatMap(i =>
+              paramIndex.get(i.name)
+          )
+      case _ => None
+    val calls = method.ast.collectAll[Call].l
+    // `*pp = NULL` - the parameters whose pointee the method resets
+    val nulledThrough = calls.collect {
+        case a if a.name == "<operator>.assignment" && a.argumentOption(2).exists(isNullLiteral) =>
+            a.argumentOption(1).collect {
+                case d: Call if d.name == "<operator>.indirection" => d
+            }.flatMap(_.argumentOption(1)).collect { case i: Identifier => i.name }
+    }.flatten.toSet
+    calls.foreach {
+        case c if roleOf(c).free.nonEmpty && c._cdgIn.isEmpty =>
+            argAt(c.argument.l, 1).map(unwrapCasts).foreach { freed =>
+              val viaPointee = freed match
+                case d: Call if d.name == "<operator>.indirection" =>
+                    d.argumentOption(1).collect { case i: Identifier => i.name }
+                case _ => None
+              if !viaPointee.exists(nulledThrough.contains) then
+                paramOf(freed).foreach(idx => effects += s"effect:frees-param:$idx")
             }
         case c if c.name == "<operator>.assignment" =>
-            // a parameter stored into storage that outlives the frame: a member or a global
-            val args = c.argument.l
-            val dst  = argAt(args, 1).map(unwrapped)
-            val rhs  = argAt(args, 2).map(unwrapped)
-            val dstEternal = dst.exists {
+            val dstEternal = argAt(c.argument.l, 1).map(unwrapCasts).exists {
                 case d: Call =>
                     d.name == "<operator>.fieldAccess" || d.name == "<operator>.indirectFieldAccess"
                 case i: Identifier =>
-                    // equality, never `.name(data)`: semanticcpg compiles a name argument
-                    // as a REGEX, and a macro-mangled local name (`r->buf[r->buf_len++]`)
-                    // is a pattern syntax error that killed the whole enhancement pass
+                    // equality, never `.name(data)`: semanticcpg compiles a name argument as a
+                    // REGEX, and a macro-mangled local name is a pattern syntax error
                     method.local.l.forall(_.name != i.name) &&
                     method.parameter.l.forall(_.name != i.name)
                 case _ => false
             }
             if dstEternal then
-              rhs.foreach {
+              argAt(c.argument.l, 2).map(unwrapCasts).foreach {
                   case i: Identifier =>
                       paramIndex.get(i.name).foreach(idx => effects += s"effect:escapes-param:$idx")
                   case _ => ()
               }
         case _ => ()
     }
-    // allocates-return: some value return is, through casts, an allocation call - or a local
-    // whose definition is one (`char *p = malloc(n); ...; return p;`)
-    def flowsFromAllocation(e: Expression): Boolean = unwrapped(e) match
+    def isAllocation(e: Expression): Boolean = unwrapCasts(e) match
+      case c: Call => roleOf(c).alloc.nonEmpty
+      case _       => false
+    def flowsFromAllocation(e: Expression): Boolean = unwrapCasts(e) match
       case c: Call => roleOf(c).alloc.nonEmpty
       case i: Identifier =>
-          OverlayFacts
+          val defs = OverlayFacts
               .reachingDefsIn(i)
               .collect { case d: Identifier => d }
-              .flatMap(d =>
-                  d._astIn.collectFirst {
-                      case a: Call if a.name == "<operator>.assignment" => a
-                  }
-              )
+              .flatMap(_._astIn.collectFirst {
+                  case a: Call if a.name == "<operator>.assignment" => a
+              })
               .flatMap(_.argumentOption(2))
-              .exists {
-                  case rc: Call if rc.name == "<operator>.cast" =>
-                      castOperand(rc).exists {
-                          case ic: Call => roleOf(ic).alloc.nonEmpty
-                          case _        => false
-                      }
-                  case rc: Call => roleOf(rc).alloc.nonEmpty
-                  case _        => false
-              }
+          defs.nonEmpty && defs.forall(d => isAllocation(d) || isNullLiteral(d))
       case _ => false
-    val returnsFlowFromAlloc = method.ast.collectAll[Return].l.exists { r =>
-        r.astChildren.collect { case e: Expression => e }.exists(flowsFromAllocation)
-    }
-    if returnsFlowFromAlloc then effects += "effect:allocates-return"
+    val valueReturns = method.ast.collectAll[Return].l
+        .flatMap(_.astChildren.collectFirst { case e: Expression => e })
+        .filterNot(isNullLiteral)
+    if valueReturns.nonEmpty && valueReturns.forall(flowsFromAllocation) then
+      effects += "effect:allocates-return"
     effects.toSet
   end methodEffects
 
@@ -238,16 +236,23 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // static-initialiser noise (E4's first FFmpeg measurement), so an empty context turns the
     // whole stack-escape question off for it.
     val isFileScope = method.name == "<global>"
+    // a `static` local has static storage duration exactly like file scope: its address outliving
+    // the frame is the idiom (`static char buf[32]; ... return buf;`), not an escape. The
+    // frontend records the storage class as a STATIC modifier on the local
+    val frameLocals =
+        Option.unless(isFileScope)(method.local.l.filterNot(isStaticLocal)).getOrElse(Nil)
+    val arrayLocals = frameLocals.filter(l =>
+        OverlayFacts.arrayExtent(l.typeFullName).isDefined || l.typeFullName.trim.endsWith("[]")
+    )
     val ctx = MethodContext(
-      locals = Option.unless(isFileScope)(method.local.l.map(_.name).toSet).getOrElse(Set.empty),
-      arrayLocals = Option.unless(isFileScope)(method.local.l)
-          .getOrElse(Nil)
-          .filter(l =>
-              OverlayFacts.arrayExtent(l.typeFullName).isDefined ||
-                  l.typeFullName.trim.endsWith("[]")
-          )
-          .map(_.name)
-          .toSet,
+      locals = frameLocals.map(_.name).toSet,
+      arrayLocals = arrayLocals.map(_.name).toSet,
+      // the locals whose storage IS the frame's: arrays and by-value aggregates. A member or an
+      // element of one is frame storage too, so `c.p = &x` on a local struct escapes nothing
+      valueLocals =
+          (arrayLocals ++ frameLocals.filterNot(l => OverlayFacts.isPointer(l.typeFullName)))
+              .map(_.name)
+              .toSet,
       params = method.parameter.l.map(_.name).toSet,
       refReturn = !isFileScope && Option(method.methodReturn.typeFullName).exists(t =>
           t.endsWith("&") || t.endsWith("&&")
@@ -547,8 +552,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             rhsTracked.foreach { name =>
                 out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
             }
-            // ... and a stack address stored there escapes the frame with it (E4)
-            if rhsHoldsStackAddress(rhs, useState, ctx) then
+            // ... and a stack address stored there escapes the frame with it (E4) - unless
+            // "there" is itself frame storage: a member or element of a by-value local
+            if !argAt(cf.args, 1).exists(isFrameStorage(_, ctx)) &&
+              rhsHoldsStackAddress(rhs, useState, ctx)
+            then
               record(c, TagStackEscape, "escape:store")
         case _ => ()
     end if
@@ -711,41 +719,44 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     }
   end branchNarrowing
 
-  /** Is `succ` inside the then-subtree of `cs`? Some(true) then, Some(false) on the else side or
-    * wherever the condition does not hold.
+  /** Which way the condition of `cs` went on the edge to `succ`: Some(true) where it holds,
+    * Some(false) where it does not, None when the structure's successors carry no condition
+    * semantics (a switch) or the successor is inside the condition itself.
     *
-    * The successor sits inside one of the control structure's branch subtrees by AST nesting (child
-    * 1 the then, child 2 the else - and an UNBRACED body hangs inside the then-block child whatever
-    * its statement kind: an expression statement, a `return x;`, even a `goto`, all park under that
-    * block). A successor the climb cannot place is OUTSIDE the control structure entirely, and the
-    * only CFG edge reaching it from the condition is the FALSE edge - the join point, the next
-    * statement, the method's implicit end. Part 4 answered None there (with a `return`-shaped
-    * special case on top), so the state flowed into the join UN-narrowed: `if (p) free(p);`
-    * reported a leak at the implicit end on the path where the free never ran - `good_capped` in
-    * c/cwe789_uncontrolled_alloc.c, the negative control that kept MS-ALLOC-003 at `low`.
+    * The successor is placed by AST nesting, at the DIRECT CHILD of `cs` that contains it. An if's
+    * else child (child 2) is the false side. Any other non-condition child is where the condition
+    * HOLDS: an if's then child, and a loop's body wherever the frontend orders it - child 1 of a
+    * while, the last child of a for (after init/condition/update, whose update is the true edge of
+    * a body-less for), child 0 of a do-while, whose true edge loops back to the body. An UNBRACED
+    * body hangs inside its branch child whatever its statement kind, so it needs no special case.
     *
-    * The one control structure whose successors carry no condition semantics is a switch: its cases
-    * are not "condition false", so it still answers None.
+    * A successor OUTSIDE the structure is reached on the false edge - the join point, the next
+    * statement, the implicit end. Part 4 answered None there, so `if (p) free(p);` flowed into the
+    * join un-narrowed and reported a leak at the implicit end on the path where the free never ran
+    * (`good_capped` in c/cwe789_uncontrolled_alloc.c). The first part 5 version answered by child
+    * index alone - 1 then, 2 else, everything else false - which put a for loop's body (child 3)
+    * and a do-while's (child 0) on the FALSE edge: `for (e = strchr(..); e != NULL; ..) e[1]`
+    * marked `e` definitely NULL inside its own loop.
     */
   private def branchOf(succ: CfgNode, cs: ControlStructure): Option[Boolean] =
-    val children                   = cs.astChildren.l
-    var cursor: Option[StoredNode] = Some(succ)
-    var res: Option[Boolean]       = None
+    if isSwitch(cs) then return None
+    val conditionId                  = cs.condition.headOption.map(_.id())
+    val isIf                         = cs.controlStructureType == "IF"
+    var cursor: Option[StoredNode]   = Some(succ)
+    var res: Option[Option[Boolean]] = None
     while res.isEmpty && cursor.isDefined do
       val cur = cursor.get
-      if cur.id() == cs.id() then cursor = None
-      else
-        cur._astIn.collectFirst { case p: StoredNode => p } match
-          case Some(parent) if parent.id() == cs.id() =>
-              // the condition itself (child 0) is on this climb when the successor sits inside
-              // the condition's own subtree: it belongs to neither branch, so stop
-              res = children.lift(1).filter(_.id() == cur.id()).map(_ => true)
-                  .orElse(children.lift(2).filter(_.id() == cur.id()).map(_ => false))
-              if res.isEmpty then cursor = None
-          case Some(parent) if parent.isInstanceOf[Method] => cursor = None
-          case Some(parent)                                => cursor = Some(parent)
-          case None                                        => cursor = None
-    res.orElse(Option.unless(isSwitch(cs))(false))
+      cur._astIn.collectFirst { case p: StoredNode => p } match
+        case Some(parent) if parent.id() == cs.id() =>
+            res = Some(
+              if conditionId.contains(cur.id()) then None
+              else if isIf && cs.astChildren.l.lift(2).exists(_.id() == cur.id()) then Some(false)
+              else Some(true)
+            )
+        case Some(_: Method) => cursor = None
+        case Some(parent)    => cursor = Some(parent)
+        case None            => cursor = None
+    res.getOrElse(Some(false))
   end branchOf
 
   private def isSwitch(cs: ControlStructure): Boolean =
@@ -808,6 +819,27 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => false
     case i: Identifier => ctx.arrayLocals.contains(i.name)
     case _             => false
+
+  /** Is this destination part of the frame (E4): a member or element, through `.` and `[]` only, of
+    * an array or by-value aggregate local? `->` leaves the frame's storage for wherever the pointer
+    * points, so it is never frame storage.
+    */
+  @scala.annotation.tailrec
+  private def isFrameStorage(dst: Expression, ctx: MethodContext): Boolean = dst match
+    case c: Call
+        if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indexAccess" ||
+            c.name == "<operator>.indirectIndexAccess" =>
+        c.argumentOption(1) match
+          case Some(i: Identifier) => ctx.valueLocals.contains(i.name) &&
+              (c.name == "<operator>.fieldAccess" || ctx.arrayLocals.contains(i.name))
+          case Some(inner: Expression) => isFrameStorage(inner, ctx)
+          case _                       => false
+    case _ => false
+
+  private def isStaticLocal(l: Local): Boolean =
+      l.tag.name(io.appthreat.x2cpg.Defines.StorageClassTag)
+          .value(io.appthreat.x2cpg.Defines.StorageClassStatic)
+          .nonEmpty
 
   /** Does this rhs put a stack address into the destination it feeds (E4): directly, or through a
     * local that currently holds one?
@@ -943,6 +975,7 @@ object AllocationStatePass:
   final case class MethodContext(
     locals: Set[String],
     arrayLocals: Set[String],
+    valueLocals: Set[String],
     params: Set[String],
     refReturn: Boolean
   )

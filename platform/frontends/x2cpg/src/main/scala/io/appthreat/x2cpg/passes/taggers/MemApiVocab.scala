@@ -51,9 +51,10 @@ object MemApiVocab:
     *   `FFMIN`-style call still establishes a bound in GuardPass - the same declared-vocabulary
     *   route part 1 used for the flow semantics, so a project's own `MYMIN` is a data change.
     * @param nullableReturn
-    *   true when the call's result may be NULL for reasons other than allocation failure (the
-    *   `strchr`/`strstr` family's no-match NULL). Allocation-family calls are nullable by
-    *   definition and carry no flag; [[MemoryApiPass]] emits `nullable-return` for either.
+    *   true when the call's result may be NULL: pointer-returning allocators and the
+    *   `strchr`/`strstr` family's no-match NULL. Declared per entry, never implied by the family -
+    *   an fd-returning allocator fails with -1, not NULL. [[MemoryApiPass]] emits `nullable-return`
+    *   for it.
     */
   final case class MemApiEntry(
     name: String,
