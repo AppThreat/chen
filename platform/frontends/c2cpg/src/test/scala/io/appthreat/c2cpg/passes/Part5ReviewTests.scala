@@ -127,6 +127,91 @@ class Part5ReviewTests extends DataFlowCodeToCpgSuite:
     |        return 1;
     |    return 2;
     |}
+    |
+    |/* ---- part 6 (F1): a call is not a dereference ---- */
+    |
+    |struct inner6 { int x; };
+    |struct outer6 { struct inner6 *in; };
+    |
+    |/* F1: a helper that only logs the pointer reads through nothing - handing it an
+    |   unchecked nullable pointer is not a dereference */
+    |static void log_ptr6(const char *tag, char *maybe)
+    |{
+    |    printf("%s %p\n", tag, (void *)maybe);
+    |}
+    |
+    |void good_null_tolerant_helper(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    log_ptr6("p", p);
+    |    if (!p)
+    |        return;
+    |    free(p);
+    |}
+    |
+    |/* F1: a helper that guards its parameter first dereferences it on SOME path only */
+    |static int first_or_zero6(char *s)
+    |{
+    |    if (s == NULL)
+    |        return 0;
+    |    return s[0];
+    |}
+    |
+    |void good_guarded_helper(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    int c = first_or_zero6(p);
+    |    if (!p)
+    |        return;
+    |    (void)c;
+    |    free(p);
+    |}
+    |
+    |/* F1: handing &p to a wrapper passes the SLOT, not the pointer - not a deref of p */
+    |static void reset_if_needed6(char **pp)
+    |{
+    |    if (*pp) {
+    |        free(*pp);
+    |        *pp = NULL;
+    |    }
+    |}
+    |
+    |void good_addressof_not_use(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    reset_if_needed6(&p);
+    |    if (!p)
+    |        return;
+    |    free(p);
+    |}
+    |
+    |/* F1: a use inside the structure whose own condition guards the variable is protected
+    |   by that guard - a loop body under its trailer is not a check-after-use */
+    |size_t good_guarded_loop_use(char *s)
+    |{
+    |    size_t n = 0;
+    |    do {
+    |        n += strlen(s);
+    |    } while (s != NULL);
+    |    return n;
+    |}
+    |
+    |/* F1: a guard that follows a REDEFINITION speaks about a different value */
+    |size_t good_guard_after_reassign(char *s, char *t)
+    |{
+    |    size_t n = strlen(s);
+    |    s = t;
+    |    if (s == NULL)
+    |        return 0;
+    |    return n;
+    |}
+    |
+    |/* F1: a cross-type field chain is an owned sub-object initialised with its parent
+    |   (FFmpeg's s->priv_data->x idiom), not a traversal hop */
+    |void good_cross_type_chain(struct outer6 *o)
+    |{
+    |    o->in->x = 1;
+    |}
     |""".stripMargin,
     "review5.c"
   )
@@ -176,5 +261,24 @@ class Part5ReviewTests extends DataFlowCodeToCpgSuite:
     }
     "not treat an int compared with 0 as a null guard" in {
         findingsIn("good_int_zero") should not contain "MS-NULL-001"
+    }
+    "not count a pointer handed to a non-reading helper as a dereference (F1)" in {
+        findingsIn("good_null_tolerant_helper") shouldBe empty
+    }
+    "not conclude derefs-param for a helper that guards first (F1)" in {
+        effectsOf("first_or_zero6") shouldBe empty
+        findingsIn("good_guarded_helper") shouldBe empty
+    }
+    "not count &p handed to a wrapper as a dereference of p (F1)" in {
+        findingsIn("good_addressof_not_use") shouldBe empty
+    }
+    "not fire check-after-use inside the guard's own loop (F1)" in {
+        findingsIn("good_guarded_loop_use") shouldBe empty
+    }
+    "not fire check-after-use when the guard follows a redefinition (F1)" in {
+        findingsIn("good_guard_after_reassign") shouldBe empty
+    }
+    "not fire the chained-parameter arm on a cross-type sub-object chain (F1)" in {
+        findingsIn("good_cross_type_chain") shouldBe empty
     }
 end Part5ReviewTests

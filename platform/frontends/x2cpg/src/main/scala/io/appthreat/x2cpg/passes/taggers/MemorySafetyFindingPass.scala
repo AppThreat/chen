@@ -157,14 +157,24 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     *     `imf_uri_is_url(uri)` dereferences what the library may have handed back NULL.
     *   - **check-after-use** (rule-side): a use of a variable whose null guard appears LATER in the
     *     method - the author knew it could be null, one statement too late. The corpus's
-    *     `bad_check_after_use`: `strlen(s); if (s == NULL) return;`.
+    *     `bad_check_after_use`: `strlen(s); if (s == NULL) return;`. Part 6 (F1) makes the ordering
+    *     structural: a use nested inside the structure whose condition is the guard is protected (a
+    *     loop body under its own trailer), and a guard that follows a REDEFINITION of the variable
+    *     speaks about a different value - neither is a check-after-use.
     *   - **unvalidated parameter** (rule-side, the hypothesis tier): a pointer parameter
-    *     dereferenced with no null guard anywhere in the method. The common FFmpeg shape (`s` is
-    *     never null by contract) makes this arm loud, so it carries its own `low` tier - the
-    *     imfdec.c:541 shape fires there, deliberately, and a default run does not drown in it.
+    *     dereferenced with no null guard anywhere in the method, through a SELF-REFERENTIAL field
+    *     chain (`head->next->v`, where `next` has `head`'s own pointee type - a traversal hop
+    *     nothing validated). Part 5's boundary kept the whole field chain; that was 3,176 findings
+    *     per libavformat tree, because a cross-type chain (`s->priv_data->x`) is FFmpeg's idiom for
+    *     an owned sub-object initialised with its parent. The type relation is the fact that
+    *     separates the traversal hop from the owned sub-object; an unresolvable member type says
+    *     nothing and stays silent.
     *
     * A use under a guard that proved the pointer NON-NULL is not a finding; an escaped pointer is
-    * not one either - the state pass says so, not this rule's silence.
+    * not one either - the state pass says so, not this rule's silence. A call argument is a use
+    * only at a position the callee READS THROUGH - an inventoried dst/src role, or the callee's own
+    * `derefs-param` summary - exactly the evidence the state pass's arm 1 turns on, so the two arms
+    * cannot disagree about what a dereference is.
     */
   private def ruleNullDereference(
     record: (StoredNode, String) => Unit
@@ -176,6 +186,11 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .distinct
     stateFacts.foreach(node => record(node, RuleNullDeref))
+
+    // the call positions that read through their argument: inventoried roles, and the callee
+    // summaries the state pass concluded - one scan each, not a traversal per use
+    val derefsByName  = AllocationStatePass.derefsParamsByName(atom)
+    val readPositions = OverlayFacts.memoryReadPositions(atom)
 
     // arms 2 and 3: per method, the null guards the author wrote and the uses that precede (or
     // never meet) them. `<global>` is skipped: its AST nests every function of the file, so its
@@ -190,47 +205,88 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
           .map(d => d.name -> d.property("TYPE_FULL_NAME"))
           .collect { case (n, t: String) if OverlayFacts.isPointer(t) => n }
           .toSet
-      val guards = mutable.LinkedHashMap.empty[String, Int] // variable key -> guard line
+      // the guard's LINE (the earliest, when the author wrote several) and the structure it
+      // belongs to - nesting inside that structure is protection, not lateness
+      val guards = mutable.LinkedHashMap.empty[String, (Int, ControlStructure)]
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
           cs.condition.foreach { cond =>
-              nullGuardKeyOf(cond, pointerNames).foreach { key =>
+              OverlayFacts.nullGuardKeyOf(cond, pointerNames).foreach { key =>
                 val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
-                guards.update(key, math.min(guards.getOrElse(key, Int.MaxValue), line))
+                guards.update(
+                  key,
+                  guards.get(key) match
+                    case Some((prevLine, prevCs)) if prevLine <= line => (prevLine, prevCs)
+                    case _                                            => (line, cs)
+                )
               }
           }
       }
+      // the redefinitions of each variable, by line: a guard that follows one speaks about a
+      // different value than the one the use read
+      val redefinitions: Map[String, Seq[Int]] =
+          method.ast
+              .collectAll[Call]
+              .l
+              .flatMap(c =>
+                  c.name match
+                    case "<operator>.assignment" | "<operator>.assignmentPlus" |
+                        "<operator>.assignmentMinus" | "<operator>.postIncrement" |
+                        "<operator>.preIncrement" =>
+                        c.argumentOption(1).collect { case i: Identifier => i }
+                    case _ => None
+              )
+              .groupMap(_.name)(i => i.lineNumber.map(_.toInt).getOrElse(Int.MaxValue))
+              .view
+              .mapValues(_.toSeq.sorted)
+              .toMap
+      val paramNames = method.parameter.name.l.toSet
       if guards.nonEmpty || method.parameter.exists(p => OverlayFacts.isPointer(p.typeFullName))
       then
         // the uses a null guard would have protected: a dereference base, or an argument handed
-        // to a call that will read through it
+        // to a call at a position that reads through it
         val uses = method.ast.collectAll[Call].l.flatMap { c =>
           val derefBases = c.name match
             case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" |
                 "<operator>.indexAccess" | "<operator>.indirectIndexAccess" =>
                 c.argumentOption(1).toList
             case _ => Nil
-          val callArgs = Option.unless(c.name.startsWith("<operator>"))(c.argument.l).getOrElse(Nil)
+          val callArgs =
+              if c.name.startsWith("<operator>") then Nil
+              else
+                val readsThrough = readPositions.getOrElse(c.id, Set.empty) ++
+                    derefsByName.getOrElse(c.name, Set.empty)
+                c.argument.l.filter(a => readsThrough.contains(a.argumentIndex))
           (derefBases ++ callArgs).collect { case i: Identifier => i }
         }
-        val paramNames = method.parameter.name.l.toSet
         uses.foreach { use =>
             castUnwrappingKey(use).foreach { key =>
               val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
               guards.get(key) match
-                case Some(guardLine) if guardLine > line =>
-                    // the guard exists but comes AFTER the use: check-after-use
-                    record(use, RuleNullDeref)
+                case Some((guardLine, cs)) if guardLine > line =>
+                    // the guard exists but comes AFTER the use: check-after-use, unless the
+                    // use sits inside the guard's own structure (a loop body under its
+                    // trailer is guarded from the second iteration on and the author wrote
+                    // the check where the loop could see it), or the variable was
+                    // redefined in between (the guard speaks about a different value)
+                    val insideGuard = isNestedWithin(use, cs)
+                    val redefinedInBetween =
+                        redefinitions.get(key.stripPrefix("v:")).exists(lines =>
+                            lines.exists(l => l > line && l < guardLine)
+                        )
+                    if !insideGuard && !redefinedInBetween then
+                      record(use, RuleNullDeref)
                 case None
-                    if paramNames.contains(use.name) && isChainedFieldDerefBase(use) =>
-                    // a parameter dereferenced with no guard on it anywhere, through a pure
-                    // FIELD-ACCESS chain (`head->next->v`): the inner pointer was produced in
-                    // this very expression and nothing anywhere checked it. The corpus run
-                    // decided this boundary twice: the plain parameter deref fired on eleven
-                    // @nofinding lines at low (every correctly written context access is that
-                    // shape), and the field-through-INDEX chain hit three more
+                    if paramNames.contains(use.name) && isTraversalChainBase(use) =>
+                    // a parameter dereferenced with no guard on it anywhere, through a
+                    // self-referential field chain (`head->next->v`): every hop is a fresh,
+                    // independently-nullable traversal pointer. The part-5 boundary (any pure
+                    // field chain) was the FFmpeg context idiom (`s->priv_data->x`), 3,176
+                    // findings per tree of it; the member's type equal to the parameter's own
+                    // pointee type is the fact that separates the two.
                     record(use, RuleNullDeref)
                     hypothesis += use
                 case _ => ()
+              end match
             }
         }
       end if
@@ -238,44 +294,45 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     hypothesis.toSet
   end ruleNullDereference
 
-  /** The POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
-    * truth of `p` itself. Every shape is restricted to pointer-typed locals and parameters: FFmpeg
-    * tests ints the same three ways (`size == 0`, `!ret`, `if (n)`), and `0` is also how the
-    * frontend spells NULL, so an unrestricted shape made every earlier use of an int counter a
-    * "check-after-use".
-    */
-  private def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] =
-    def pointerKey(e: AstNode): Option[String] = e match
-      case i: Identifier if pointerNames.contains(i.name) => OverlayFacts.variableKey(i)
-      case c: Call if c.name == "<operator>.cast" =>
-          castOperand(c).flatMap(pointerKey)
-      case _ => None
-    cond match
-      case cmp: Call
-          if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
-          val operands = Seq(1, 2).flatMap(cmp.argumentOption)
-          if operands.exists(isNullLiteralNode) then
-            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption
-          else None
-      case not: Call if not.name == "<operator>.logicalNot" =>
-          not.argumentOption(1).flatMap(pointerKey)
-      case other => pointerKey(other)
+  /** Is `node` nested inside `cs`'s subtree? */
+  private def isNestedWithin(node: AstNode, cs: ControlStructure): Boolean =
+    var cursor: Option[StoredNode] = node._astIn.nextOption()
+    var found                      = false
+    var walking                    = true
+    while walking do
+      cursor match
+        case Some(n) =>
+            if n.id == cs.id then
+              found = true
+              walking = false
+            else
+              n match
+                case _: Method => walking = false
+                case _         => cursor = n._astIn.nextOption()
+        case None => walking = false
+    found
 
-  private def isNullLiteralNode(e: AstNode): Boolean =
-      AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
-
-  /** Is this identifier the base of the inner access of a pure FIELD-ACCESS chain
-    * (`head->next->v`)? Index accesses in the chain are deliberately excluded: the corpus run put
-    * three @nofinding lines on the field-through-index form (`vps->hrd[i]`, `fragments[seq_no].n`)
-    * \- the array-member walk correct code does a hundred times a file - while the pure field chain
-    * kept the true shape.
+  /** Is this identifier the base of the inner access of a SELF-REFERENTIAL field chain
+    * (`head->next->v`, where `next` is a pointer of `head`'s own pointee type)? The inner member is
+    * resolved through the graph's type table; an unresolvable member type concludes nothing. Index
+    * accesses in the chain are deliberately excluded, as in part 5: the corpus run put three
+    * \@nofinding lines on the field-through-index form while the pure field chain kept the true
+    * shape.
     */
-  private def isChainedFieldDerefBase(use: Identifier): Boolean =
+  private def isTraversalChainBase(use: Identifier): Boolean =
       use._astIn.collectFirst { case c: Call => c }.exists { access =>
-          isFieldAccess(access) && access._astIn.collectFirst { case outer: Call => outer }
+          isFieldAccess(access) && OverlayFacts.memberRefOf(atom, access).exists { member =>
+            val paramType = use.method.parameter
+                .name(use.name)
+                .l
+                .headOption
+                .map(_.typeFullName)
+                .getOrElse("")
+            OverlayFacts.isPointer(member.typeFullName) &&
+            member.typeFullName.trim == paramType.trim
+          } && access._astIn.collectFirst { case outer: Call => outer }
               .exists(outer =>
-                  isFieldAccess(outer) &&
-                      outer.argumentOption(1).exists(_.id == access.id)
+                  isFieldAccess(outer) && outer.argumentOption(1).exists(_.id == access.id)
               )
       }
 
