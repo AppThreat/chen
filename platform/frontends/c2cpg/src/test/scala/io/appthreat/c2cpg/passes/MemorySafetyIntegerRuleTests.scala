@@ -93,6 +93,28 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
     |    memcpy(d, s, (size_t) n);
     |    return 0;
     |}
+    |
+    |/* ---- part 5, E1 ---- */
+    |
+    |/* the arithmetic is in the DESTINATION expression and the length is a plain identifier: the
+    |   part-4 def walk crossed argument-to-argument edges into the destination's subtree and
+    |   reported the pointer arithmetic as "the length computation" */
+    |int good_dst_arithmetic(char *dst_base, int off, int n, const char *src)
+    |{
+    |    memcpy(dst_base + off, src, n);
+    |    return 0;
+    |}
+    |
+    |/* the copy's destination already carries a capacity: the wrap question belongs to the BOUND
+    |   rules, whatever the arithmetic does to the length */
+    |struct data_block { unsigned char *payload; int payload_len; };
+    |int good_copy_known_capacity(struct data_block *db, const char *src)
+    |{
+    |    char buf[64];
+    |    int n = db->payload_len;
+    |    memcpy(buf, src, n + 1);
+    |    return n;
+    |}
     |""".stripMargin,
     "integers.c"
   )
@@ -141,6 +163,19 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
 
     "stand down when the multiplication is guarded (the cwe190 fixture's good_ pair)" in {
         findingsIn("good_mul_guarded") shouldBe empty
+    }
+
+    "stand down when the arithmetic is the copy's DESTINATION expression, not its length" in {
+        // the length is the plain identifier n; part 4's def walk crossed the memcpy's
+        // argument-to-argument edges into dst_base + off and reported the pointer arithmetic.
+        // (the site itself still draws MS-BOUND-002 - an externally reachable helper copying a
+        // caller-chosen count - which is that rule's question, not this one's)
+        findingsIn("good_dst_arithmetic").map(_._1) should not contain "MS-INT-001"
+    }
+
+    "stand down when the copy's destination already carries a capacity" in {
+        // buf is char[64]: the wrap question about n + 1 is the BOUND rules', not this rule's
+        findingsIn("good_copy_known_capacity") shouldBe empty
     }
 
   "MS-INT-002" should:

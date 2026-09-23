@@ -266,6 +266,15 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * CVE-2026-75141 adds precisely that guard. A widened operand - `(size_t) a * b` - means the
     * arithmetic already computes at the wider width, so there is nothing to overflow; standing down
     * there is evidence-based (a widening cast exists), not silence-based.
+    *
+    * Part 5 (E1) adds the capacity conjunct: the arithmetic must bound a buffer that does not
+    * already have one. An allocator's size/count argument BECOMES the new buffer's capacity, so it
+    * is always in scope (the CVE-2026-75141 shape); a copy into a destination that already carries
+    * an extent (`const:`, `param:`, `field:`, `alloc:`, `sizeof:`) is bounded by a fact the
+    * MS-BOUND rules own, whatever this arithmetic does to the length. The def walk that finds the
+    * arithmetic is [[OverlayFacts.reachingDefsIn]], which no longer crosses argument-to-argument
+    * plumbing edges - part 4's rule reported the pointer arithmetic in a copy's DESTINATION as a
+    * length computation through exactly those edges.
     */
   private def ruleIntegerArithmeticLength(record: (StoredNode, String) => Unit): Unit =
       OverlayFacts.memoryArgumentSites(atom)
@@ -277,10 +286,26 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                   case arith: Call
                       if isLengthArithmetic(arith) && attackerArithmetic(arith)
                           && !widenedOperandOf(arith)
-                          && !guardBoundsAnOperand(memCall, arith) =>
+                          && !guardBoundsAnOperand(memCall, arith)
+                          && lengthBecomesCapacity(memCall) =>
                       record(arith, RuleIntegerOverflow)
               }
           }
+
+  /** Does the length this call consumes become a buffer's capacity? An allocator produces a fresh
+    * buffer whose size IS this argument; a copy into a destination with a recorded extent writes
+    * into a capacity that exists independently of the arithmetic, and the wrap question is the
+    * BOUND rules' to ask.
+    */
+  private def lengthBecomesCapacity(memCall: Call): Boolean =
+    val allocates = tagValues(memCall, MemoryApiPass.TagAlloc).nonEmpty ||
+        tagValues(memCall, MemoryApiPass.TagRealloc).nonEmpty
+    if allocates then true
+    else
+      val dstExtents = memCall.argument.l
+          .filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+          .flatMap(_.tag.name(ExtentPass.TagExtent).value.l)
+      dstExtents.isEmpty || dstExtents.forall(_ == ExtentPass.ValueUnknown)
 
   private def isLengthArithmetic(c: Call): Boolean =
       c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
@@ -566,7 +591,20 @@ object MemorySafetyFindingPass:
       cwe = "CWE-190",
       kind = "integer-overflow-length",
       severity = "high",
-      confidence = "medium",
+      // `low`, on the MS-BOUND-005 / MS-ALLOC-003 precedent, decided BEFORE shipping rather than
+      // after (part 5, E1). Part 4 shipped it at medium and it became 76% of the overlay's
+      // libavformat output (6,966 of 9,216 findings across the 16 vulnerable trees, ~435 per
+      // tree) while firing 5,666 times in the FIXED trees - it was not distinguishing vulnerable
+      // code from patched code at all. The E1 diagnosis of the 439 findings in the 75141 tree:
+      // 116 were the pointer arithmetic of a copy's DESTINATION read as "the length" through
+      // argument-to-argument REACHING_DEF plumbing (now cut in OverlayFacts.reachingDefsIn), and
+      // of the rest, two thirds turn on `struct-field` arithmetic - `track->entry + 1`,
+      // `os->bufsize + PADDING` - the shape of every correctly written FFmpeg counter, because a
+      // struct field that some other function validated looks identical to one nobody did. The
+      // one true shape in the bucket (hevc.c:847's uint16_t counter) is NOT separable from that
+      // noise by any fact the graph carries: it fires here, at `low`, exactly as the widening and
+      // guard conjuncts leave it.
+      confidence = "low",
       message = "allocation or copy length computed by attacker-influenced arithmetic with no " +
           "guard bounding an operand from above and no widened accumulator - the product or " +
           "sum can wrap before it bounds the buffer (CVE-2026-75141 shape)"
