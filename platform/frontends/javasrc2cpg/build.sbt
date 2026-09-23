@@ -58,3 +58,6 @@ credentials +=
     "appthreat",
     sys.env.getOrElse("GITHUB_TOKEN", "N/A")
   )
+
+// jartypereader test fixtures use raw types on purpose - they are what the reader is tested on
+Test / compile / javacOptions += "-Xlint:-rawtypes"

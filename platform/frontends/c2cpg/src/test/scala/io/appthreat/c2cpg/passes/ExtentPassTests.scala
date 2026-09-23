@@ -253,10 +253,7 @@ class ExtentPassTests extends DataFlowCodeToCpgSuite:
           val extentNodes = cpg.tag.name("extent")._taggedByIn.l
           extentNodes should not be empty
           extentNodes.foreach { n =>
-              n match
-                case s: io.shiftleft.codepropertygraph.generated.nodes.StoredNode =>
-                    s.tag.name.l should contain("memory-safety")
-                case _ => fail("extent tags only land on stored nodes")
+              n.tag.name.l should contain("memory-safety")
           }
       }
   }

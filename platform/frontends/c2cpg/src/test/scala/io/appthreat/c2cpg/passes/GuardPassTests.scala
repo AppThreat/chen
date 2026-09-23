@@ -200,10 +200,7 @@ class GuardPassTests extends DataFlowCodeToCpgSuite:
               .distinct
           boundedNodes should not be empty
           boundedNodes.foreach { n =>
-              n match
-                case s: io.shiftleft.codepropertygraph.generated.nodes.StoredNode =>
-                    s.tag.name.l should contain("memory-safety")
-                case _ => fail("bound tags only land on stored nodes")
+              n.tag.name.l should contain("memory-safety")
           }
       }
   }

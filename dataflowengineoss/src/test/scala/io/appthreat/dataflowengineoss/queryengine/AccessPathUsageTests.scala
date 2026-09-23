@@ -1,5 +1,6 @@
 package io.appthreat.dataflowengineoss.queryengine
 
+import scala.annotation.nowarn
 import io.shiftleft.OverflowDbTestInstance
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes, Operators, Properties}
@@ -20,6 +21,9 @@ import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.wordspec.AnyWordSpec
 import overflowdb.*
 
+@nowarn(
+  "cat=deprecation"
+) // builds raw overflowdb nodes; setProperty is the only way without a diff graph
 class AccessPathUsageTests extends AnyWordSpec:
 
   def E(elements: AccessElement*): AccessPath =

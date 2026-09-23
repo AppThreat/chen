@@ -6,7 +6,6 @@ libraryDependencies ++= Seq(
   "org.scalatest" %% "scalatest"         % Versions.scalatest % Test
 )
 
-Compile / doc / scalacOptions ++= Seq("-doc-title", "semanticcpg apidocs", "-doc-version", version.value)
 githubOwner := "appthreat"
 githubRepository := "chen"
 credentials +=

@@ -91,6 +91,8 @@ ThisBuild / Test / fork := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 publish / skip := true // don't publish the root project
+githubOwner      := "appthreat"
+githubRepository := "chen"
 
 // Avoids running root tasks on the benchmarks project
 lazy val root = project

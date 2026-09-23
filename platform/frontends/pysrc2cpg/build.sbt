@@ -36,3 +36,6 @@ credentials +=
     "appthreat",
     sys.env.getOrElse("GITHUB_TOKEN", "N/A")
   )
+
+// the JavaCC-generated parser trips lints we cannot fix in generated code
+Compile / compile / javacOptions ++= Seq("-Xlint:-this-escape", "-Xlint:-dangling-doc-comments")

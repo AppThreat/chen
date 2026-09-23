@@ -9,12 +9,12 @@ import java.util
 trait DummyNodeImpl extends StoredNode:
   // Members declared in overflowdb.Element
   def graph(): overflowdb.Graph                                                = ???
-  def property[A](x$1: overflowdb.PropertyKey[A]): A                           = ???
-  def property(x$1: String): Object                                            = ???
+  def property[A](x: overflowdb.PropertyKey[A]): A                             = ???
+  def property(x: String): Object                                              = ???
   def propertyKeys(): java.util.Set[String]                                    = ???
   def propertiesMap(): java.util.Map[String, Object]                           = ???
-  def propertyOption(x$1: String): java.util.Optional[Object]                  = ???
-  def propertyOption[A](x$1: overflowdb.PropertyKey[A]): java.util.Optional[A] = ???
+  def propertyOption(x: String): java.util.Optional[Object]                    = ???
+  def propertyOption[A](x: overflowdb.PropertyKey[A]): java.util.Optional[A]   = ???
   override def addEdgeImpl(label: String, inNode: Node, keyValues: Any*): Edge = ???
   override def addEdgeImpl(
     label: String,
@@ -36,19 +36,19 @@ trait DummyNodeImpl extends StoredNode:
   // Members declared in scala.Equals
   def canEqual(that: Any): Boolean = ???
 
-  def both(x$1: String*): java.util.Iterator[overflowdb.Node]  = ???
-  def both(): java.util.Iterator[overflowdb.Node]              = ???
-  def bothE(x$1: String*): java.util.Iterator[overflowdb.Edge] = ???
-  def bothE(): java.util.Iterator[overflowdb.Edge]             = ???
-  def id(): Long                                               = ???
-  def in(x$1: String*): java.util.Iterator[overflowdb.Node]    = ???
-  def in(): java.util.Iterator[overflowdb.Node]                = ???
-  def inE(x$1: String*): java.util.Iterator[overflowdb.Edge]   = ???
-  def inE(): java.util.Iterator[overflowdb.Edge]               = ???
-  def out(x$1: String*): java.util.Iterator[overflowdb.Node]   = ???
-  def out(): java.util.Iterator[overflowdb.Node]               = ???
-  def outE(x$1: String*): java.util.Iterator[overflowdb.Edge]  = ???
-  def outE(): java.util.Iterator[overflowdb.Edge]              = ???
+  def both(x: String*): java.util.Iterator[overflowdb.Node]  = ???
+  def both(): java.util.Iterator[overflowdb.Node]            = ???
+  def bothE(x: String*): java.util.Iterator[overflowdb.Edge] = ???
+  def bothE(): java.util.Iterator[overflowdb.Edge]           = ???
+  def id(): Long                                             = ???
+  def in(x: String*): java.util.Iterator[overflowdb.Node]    = ???
+  def in(): java.util.Iterator[overflowdb.Node]              = ???
+  def inE(x: String*): java.util.Iterator[overflowdb.Edge]   = ???
+  def inE(): java.util.Iterator[overflowdb.Edge]             = ???
+  def out(x: String*): java.util.Iterator[overflowdb.Node]   = ???
+  def out(): java.util.Iterator[overflowdb.Node]             = ???
+  def outE(x: String*): java.util.Iterator[overflowdb.Edge]  = ???
+  def outE(): java.util.Iterator[overflowdb.Edge]            = ???
 
   // Members declared in scala.Product
   def productArity: Int           = ???
