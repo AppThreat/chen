@@ -234,7 +234,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
           out = out.updated(
             trackedNameOf(viaAddress.getOrElse(freed)).get,
-            if viaAddress.isDefined then t.copy(state = StNull)
+            if viaAddress.isDefined then t.copy(state = StNullReset)
             else t.copy(state = StFreed)
           )
         }
@@ -282,10 +282,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         case _ => None
                   }.foreach(t => out = out.updated(lhs, t))
               case lit: Literal if isNullLiteral(lit) =>
-                  out = out.updated(lhs, Tracked(StNull, 0L))
+                  out = out.updated(lhs, Tracked(StNullReset, 0L))
               case other if isNullLiteral(other) =>
                   // NULL macro-expanded into an identifier
-                  out = out.updated(lhs, Tracked(StNull, 0L))
+                  out = out.updated(lhs, Tracked(StNullReset, 0L))
               case other =>
                   trackedNameOf(other).flatMap(useState.get).foreach { t =>
                       out = out.updated(lhs, t)
@@ -344,7 +344,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
   /** Guard narrowing at an `==`/`!=` NULL comparison: on paths where `p == NULL` holds, p is null;
     * where `p != NULL` (or the negation) holds, a nulled p is live again. Which side a successor
-    * sits on is decided by AST nesting under the control structure.
+    * sits on is decided by [[branchOf]].
     */
   private def branchNarrowing(
     cond: CfgNode,
@@ -366,9 +366,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               val nullSide    = if isNullLiteral(l) then l else r
               if isNullLiteral(nullSide) then
                 trackedName.map { name =>
-                  val condHolds = branchOf(succ, cs).map(t => if equals then t else !t)
-                  val nullHere  = condHolds.map(h => if h then equals else !equals)
-                  (name, nullHere)
+                    // branchOf is Some(true) exactly where the comparison AS WRITTEN holds:
+                    // `p == NULL` holds -> p is null, `p != NULL` holds -> it is not. Part 4
+                    // computed `!branchOf` for notEquals, which is the then/else INVERSION -
+                    // `if (p != NULL) return;` marked the pointer NULL on the path that
+                    // abandons the allocation and silenced the leak.
+                    (name, branchOf(succ, cs).map(_ == equals))
                 }
               else None
           }
@@ -404,8 +407,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     }
   end branchNarrowing
 
-  /** Is `succ` inside the then-subtree of `cs`? Some(true) then, Some(false) else, None when the
-    * successor is not in either branch (the condition itself, the join point).
+  /** Is `succ` inside the then-subtree of `cs`? Some(true) then, Some(false) on the else side or
+    * wherever the condition does not hold.
+    *
+    * The successor sits inside one of the control structure's branch subtrees by AST nesting (child
+    * 1 the then, child 2 the else - and an UNBRACED body hangs inside the then-block child whatever
+    * its statement kind: an expression statement, a `return x;`, even a `goto`, all park under that
+    * block). A successor the climb cannot place is OUTSIDE the control structure entirely, and the
+    * only CFG edge reaching it from the condition is the FALSE edge - the join point, the next
+    * statement, the method's implicit end. Part 4 answered None there (with a `return`-shaped
+    * special case on top), so the state flowed into the join UN-narrowed: `if (p) free(p);`
+    * reported a leak at the implicit end on the path where the free never ran - `good_capped` in
+    * c/cwe789_uncontrolled_alloc.c, the negative control that kept MS-ALLOC-003 at `low`.
+    *
+    * The one control structure whose successors carry no condition semantics is a switch: its cases
+    * are not "condition false", so it still answers None.
     */
   private def branchOf(succ: CfgNode, cs: ControlStructure): Option[Boolean] =
     val children                   = cs.astChildren.l
@@ -425,20 +441,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case Some(parent) if parent.isInstanceOf[Method] => cursor = None
           case Some(parent)                                => cursor = Some(parent)
           case None                                        => cursor = None
-    res.orElse {
-        // the frontend hangs an UNBRACED `if (c) return x;` body outside the control
-        // structure's children (its then-block stays empty, and the CFG successor can be the
-        // return's inner expression), so the structural climb above finds nothing; a successor
-        // that sits under a RETURN is the branch where the condition HOLDS
-        var c2      = Option(succ: StoredNode)
-        var underRe = false
-        while c2.isDefined && !underRe do
-          c2.get match
-            case _: Return => underRe = true
-            case other     => c2 = other._astIn.collectFirst { case p: StoredNode => p }
-        Option.when(underRe)(true)
-    }
+    res.orElse(Option.unless(isSwitch(cs))(false))
   end branchOf
+
+  private def isSwitch(cs: ControlStructure): Boolean =
+      cs.parserTypeName.toLowerCase.contains("switch")
 
   private def joinPoints(
     a: Map[String, Tracked],
@@ -463,7 +470,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       else if s1 == StEscaped || s2 == StEscaped then StEscaped
       else if s1 == StFreed || s2 == StFreed || s1 == StMaybeFreed || s2 == StMaybeFreed then
         StMaybeFreed
+      else if isNullState(s1) && isNullState(s2) then StNullReset
       else StAllocated // Allocated and Null: owned on the path that matters
+
+  /** Both null states hold no memory; only the narrowing one is conditional on the path. */
+  private def isNullState(s: AllocState): Boolean = s == StNull || s == StNullReset
 
   private def trackedNameOf(e: AstNode): Option[String] = e match
     case i: Identifier => Some(i.name)
@@ -510,6 +521,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case StFreed      => "freed"
     case StMaybeFreed => "maybe-freed"
     case StNull       => "null"
+    case StNullReset  => "null-reset"
     case StEscaped    => "escaped"
 end AllocationStatePass
 
@@ -519,8 +531,19 @@ object AllocationStatePass:
   case object StAllocated  extends AllocState
   case object StFreed      extends AllocState
   case object StMaybeFreed extends AllocState
-  case object StNull       extends AllocState
-  case object StEscaped    extends AllocState
+
+  /** path-conditioned null: the guard proved the pointer null on THIS path - a non-null guard on a
+    * later path revives it (the `if (p == NULL) return;` idiom's else side).
+    */
+  case object StNull extends AllocState
+
+  /** the pointer was ASSIGNED the NULL literal (`free(p); p = NULL;`): null on every path, and no
+    * guard can revive what an assignment killed. Part 5 (E2): reviving this state under a `p !=
+    * NULL` guard turned the free-and-reset idiom's dead branch into a phantom live allocation and
+    * reported a leak at the implicit end.
+    */
+  case object StNullReset extends AllocState
+  case object StEscaped   extends AllocState
 
   final case class Tracked(state: AllocState, site: Long)
 
