@@ -145,6 +145,8 @@ class EffectSummaryTests extends DataFlowCodeToCpgSuite:
     }
 
     "track an allocation returned by a busy allocator (its leak becomes visible)" in {
-        findingsIn("bad_leak_via_alloc_summary") shouldBe Set("MS-ALLOC-003", "MS-NULL-001")
+        // the summary states the ALLOCATION, not the nullability: nullable is a declared
+        // API fact, never inferred, so no null-deref claim rides along
+        findingsIn("bad_leak_via_alloc_summary") shouldBe Set("MS-ALLOC-003")
     }
 end EffectSummaryTests

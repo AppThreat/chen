@@ -458,16 +458,25 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             }
             rhs match
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
-                  // allocation-family calls are nullable by definition (E3): the pointer may
-                  // be NULL until a guard narrows it
-                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id, nullable = true))
+                  // nullable is the CALL's own declared fact (E3): pointer-returning
+                  // allocators carry it, the fd-returning family does not
+                  out = out.updated(
+                    lhs,
+                    Tracked(
+                      StAllocated,
+                      rhsCall.id,
+                      nullable = callFacts.get(rhsCall.id()).exists(_.nullable)
+                    )
+                  )
               case rhsCall: Call
                   if effectsByName.get(rhsCall.name)
                       .exists(_.contains("effect:allocates-return")) &&
                       !callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
                   // E5: the callee's own summary says every value it returns is a fresh
-                  // allocation - a wrapper the body-shape inference could not conclude
-                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id, nullable = true))
+                  // allocation - a wrapper the body-shape inference could not conclude.
+                  // An allocating wrapper's nullability is not stated by the summary, so the
+                  // pointer is tracked as allocation-live only
+                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id))
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.nullable) =>
                   // a non-allocation nullable return (strchr, av_dict_get): not ownership,
                   // only nullness - leak/free rules never fire on it
@@ -478,7 +487,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   castOperand(rhsCall).flatMap { inner =>
                       inner match
                         case ic: Call if callFacts.get(ic.id()).exists(_.isAllocCall) =>
-                            Some(Tracked(StAllocated, ic.id, nullable = true))
+                            Some(
+                              Tracked(
+                                StAllocated,
+                                ic.id,
+                                nullable = callFacts.get(ic.id()).exists(_.nullable)
+                              )
+                            )
                         case ic: Call if callFacts.get(ic.id()).exists(_.nullable) =>
                             Some(Tracked(StNullable, ic.id, nullable = true))
                         case ic if holdsStackAddress(ic, ctx) =>

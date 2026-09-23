@@ -178,9 +178,11 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     stateFacts.foreach(node => record(node, RuleNullDeref))
 
     // arms 2 and 3: per method, the null guards the author wrote and the uses that precede (or
-    // never meet) them
+    // never meet) them. `<global>` is skipped: its AST nests every function of the file, so its
+    // "uses" and "guards" would be every function's at once - one function's guard reaching
+    // another function's use through it is not a check-after-use, it is an aggregation artefact
     val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
-    atom.method.filterNot(_.isExternal).l.foreach { method =>
+    atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
       val guards = mutable.LinkedHashMap.empty[String, Int] // variable key -> guard line
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
           cs.condition.foreach { cond =>
@@ -211,8 +213,14 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                 case Some(guardLine) if guardLine > line =>
                     // the guard exists but comes AFTER the use: check-after-use
                     record(use, RuleNullDeref)
-                case None if paramNames.contains(use.name) && isDerefBase(use) =>
-                    // a parameter dereferenced with no guard on it anywhere: hypothesis tier
+                case None
+                    if paramNames.contains(use.name) && isChainedFieldDerefBase(use) =>
+                    // a parameter dereferenced with no guard on it anywhere, through a pure
+                    // FIELD-ACCESS chain (`head->next->v`): the inner pointer was produced in
+                    // this very expression and nothing anywhere checked it. The corpus run
+                    // decided this boundary twice: the plain parameter deref fired on eleven
+                    // @nofinding lines at low (every correctly written context access is that
+                    // shape), and the field-through-INDEX chain hit three more
                     record(use, RuleNullDeref)
                     hypothesis += use
                 case _ => ()
@@ -242,12 +250,23 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
   private def isNullLiteralNode(e: AstNode): Boolean =
       AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
 
-  /** Is this identifier the BASE of a field/index access rather than a bare call argument? */
-  private def isDerefBase(use: Identifier): Boolean =
-      use._astIn.collectFirst { case c: Call => c }.exists(c =>
-          c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" ||
-              c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess"
-      )
+  /** Is this identifier the base of the inner access of a pure FIELD-ACCESS chain
+    * (`head->next->v`)? Index accesses in the chain are deliberately excluded: the corpus run put
+    * three @nofinding lines on the field-through-index form (`vps->hrd[i]`, `fragments[seq_no].n`)
+    * \- the array-member walk correct code does a hundred times a file - while the pure field chain
+    * kept the true shape.
+    */
+  private def isChainedFieldDerefBase(use: Identifier): Boolean =
+      use._astIn.collectFirst { case c: Call => c }.exists { access =>
+          isFieldAccess(access) && access._astIn.collectFirst { case outer: Call => outer }
+              .exists(outer =>
+                  isFieldAccess(outer) &&
+                      outer.argumentOption(1).exists(_.id == access.id)
+              )
+      }
+
+  private def isFieldAccess(c: Call): Boolean =
+      c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess"
 
   private def tagValues(node: StoredNode, tag: String): Set[String] =
       node.tag.name(tag).value.l.toSet

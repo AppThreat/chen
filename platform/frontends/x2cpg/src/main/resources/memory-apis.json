@@ -23,7 +23,11 @@
     "for reasons other than allocation failure - the strchr/strstr family returning no-match NULL.",
     "Allocation-family calls (alloc/realloc) are nullable BY DEFINITION and need no flag. The pass",
     "emits `nullable-return` on the call for MS-NULL-001: a dereference of the result with no",
-    "narrowing guard between the call and the use."
+    "Nullable-return entries (part 5, E3): `nullableReturn` marks an API whose result may be NULL - ",
+    "allocation-family calls that return POINTERS declare it explicitly; the fd-returning family ",
+    "(open, socket, accept) does NOT: an int fd's failure is -1, checked with `< 0`, and conflating ",
+    "the two turned a checked fd into a null-deref finding. The pass emits `nullable-return` on the ",
+    "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use."
   ],
   "apis": [
     {
@@ -124,13 +128,15 @@
     {
       "name": "strdup",
       "src": 1,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "strndup",
       "src": 1,
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "strtok",
@@ -173,29 +179,34 @@
     {
       "name": "malloc",
       "len": 1,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "calloc",
       "count": 1,
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "realloc",
       "len": 2,
-      "realloc": "heap"
+      "realloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "reallocarray",
       "count": 2,
       "len": 3,
-      "realloc": "heap"
+      "realloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "aligned_alloc",
       "len": 2,
-      "alloc": "heap"
+      "alloc": "heap",
+      "nullableReturn": true
     },
     {
       "name": "free",
@@ -212,7 +223,8 @@
     {
       "name": "mmap",
       "len": 2,
-      "alloc": "mmap"
+      "alloc": "mmap",
+      "nullableReturn": true
     },
     {
       "name": "munmap",
@@ -220,15 +232,18 @@
     },
     {
       "name": "fopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "fdopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "freopen",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "fclose",
@@ -248,7 +263,8 @@
     },
     {
       "name": "opendir",
-      "alloc": "file"
+      "alloc": "file",
+      "nullableReturn": true
     },
     {
       "name": "closedir",

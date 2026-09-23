@@ -115,9 +115,11 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     entry.free.foreach(family => record(TagFree, family, call))
     entry.realloc.foreach(family => record(TagRealloc, family, call))
 
-    // E3: an allocation-family call may return NULL by definition; the strchr family for its
-    // own reason. Either way the call site carries the fact a null-deref rule turns on.
-    if entry.nullableReturn || entry.alloc.isDefined || entry.realloc.isDefined then
+    // E3: the entry DECLARES that its result may be NULL - pointer-returning allocators, the
+    // strchr family. The fd-returning allocators (open, socket) deliberately do not: an int
+    // fd's failure mode is -1, and conflating the two turned checked fds into null-deref
+    // findings (c/cwe367_toctou.c's negative control).
+    if entry.nullableReturn then
       record(TagNullableReturn, entry.name, call)
 
     entry.untrustedRead.foreach { i =>
