@@ -86,6 +86,20 @@ class MemorySemanticsPassTests extends DataFlowCodeToCpgSuite:
     |    my_freep((void **)&p);
     |    my_free(p);
     |}
+    |char *realloc_into_tmp(int n)
+    |{
+    |    char *p = (char *)malloc(n);
+    |    if (!p)
+    |        return NULL;
+    |    char *t = (char *)realloc(p, 2 * n);
+    |    if (!t) {
+    |        free(p);
+    |        return NULL;
+    |    }
+    |    p = t;
+    |    p[0] = 1;
+    |    return p;
+    |}
     |""".stripMargin,
     "semantics.c"
   )
@@ -164,6 +178,10 @@ class MemorySemanticsPassTests extends DataFlowCodeToCpgSuite:
         findingsIn("freep_then_free") should not contain "MS-ALLOC-001"
         findingsIn("freep_then_free") should not contain "MS-ALLOC-003"
     }
+    "not report the free of a realloc input on the failed-realloc path, nor its move as a leak" in {
+        findingsIn("realloc_into_tmp") should not contain "MS-ALLOC-001"
+        findingsIn("realloc_into_tmp") should not contain "MS-ALLOC-003"
+    }
 end MemorySemanticsPassTests
 
 /** A `libavformat/`-scoped run: the allocator layer's header (`libavutil/mem.h`) is reached through
@@ -200,6 +218,8 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
         |struct node { struct node *next; };
         |void free_nodes(struct node *n);
         |void av_free_with_log(void *ptr, int level);
+        |void av_opt_free(void *obj);
+        |void free(void *ptr);
         |""".stripMargin
 
   private val source =
@@ -218,7 +238,7 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
         |    av_free(a); av_freep(&b); av_freep2(&c); av_free(d);
         |    av_reallocp(&q, 8); av_reallocp_array(&q, n + 1, 4); av_realloc_named(0, 4);
         |    my_realloc_buf(q, 4);
-        |    free_nodes(0); av_free_with_log(q, 1); my_freebuf(q);
+        |    free_nodes(0); av_free_with_log(q, 1); my_freebuf(q); av_opt_free(q);
         |}
         |void uaf_through_guessed_free(int n)
         |{
@@ -227,6 +247,15 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
         |        return;
         |    av_free(p);
         |    p[0] = 1;
+        |}
+        |void real_double_free(int n)
+        |{
+        |    char *p = av_malloc(n);
+        |    if (!p)
+        |        return;
+        |    free(p);
+        |    free(p);
+        |    av_free(p);
         |}
         |""".stripMargin
 
@@ -291,6 +320,7 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
         semanticsOf("free_nodes") shouldBe empty       // a typed pointer, not void*
         semanticsOf("av_free_with_log") shouldBe empty // two parameters
         semanticsOf("av_realloc_named") shouldBe empty // a typed pointer, not void*
+        semanticsOf("av_opt_free") shouldBe empty      // frees what the object holds
     }
     "make an untyped-pointer-and-sizes function named realloc a heuristic reallocator" in {
         semanticsOf("av_reallocp") shouldBe Set("realloc:heap", "len:2")
@@ -306,5 +336,14 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
         uses.flatMap(_.tag.nameExact("ms-finding").value.l) should contain("MS-ALLOC-002")
         uses.flatMap(_.tag.nameExact(MemorySafetyFindingPass.TagConfidence).value.l) should
             contain("MS-ALLOC-002=low")
+    }
+    "keep a real double free at its confidence though a guessed free follows" in {
+        // the second free(p): the av_free(p) after it is itself a double free, rightly at low
+        val secondFree = cpg.method.nameExact("real_double_free").call.nameExact("free").l
+            .maxBy(_.lineNumber.map(_.toInt).getOrElse(0))
+        val nodes = secondFree.ast.collectAll[StoredNode].l
+        nodes.flatMap(_.tag.nameExact("ms-finding").value.l) should contain("MS-ALLOC-001")
+        nodes.flatMap(_.tag.nameExact(MemorySafetyFindingPass.TagConfidence).value.l) should
+            not contain "MS-ALLOC-001=low"
     }
 end ScopedHeaderMemorySemanticsTests

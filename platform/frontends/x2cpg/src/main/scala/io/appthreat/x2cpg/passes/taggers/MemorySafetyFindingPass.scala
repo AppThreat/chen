@@ -145,15 +145,23 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       case _ => None
     val freedByMethod = heuristic.toList
         .flatMap(n => atom.call.nameExact(n).l)
-        .flatMap(c => c.argumentOption(1).flatMap(rootName).map(c.method.id -> _))
+        .flatMap(c =>
+            c.argumentOption(1).flatMap(rootName)
+                .map(n => c.method.id -> (n, c.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)))
+        )
         .groupMap(_._1)(_._2)
-        .view.mapValues(_.toSet).toMap
     findings.toList.flatMap { case (node, rules) =>
         node match
           case e: Expression if insideGuessedCall(e) => rules.toList.map(node -> _)
           case e: Expression =>
+              // only a guessed free BEFORE the finding can be what triggered it: a real
+              // `free(p); free(p);` keeps its confidence though `av_free(p)` follows
+              val line  = e.lineNumber.map(_.toInt).getOrElse(-1)
               val names = (e +: e.ast.collectAll[Expression].l).flatMap(rootName).toSet
-              if freedByMethod.get(e.method.id).exists(_.exists(names.contains)) then
+              if freedByMethod.get(e.method.id).exists(_.exists { case (n, l) =>
+                    l < line && names.contains(n)
+                  })
+              then
                 rules.toList.filter(FreeTriggeredRules.contains).map(node -> _)
               else Nil
           case _ => Nil

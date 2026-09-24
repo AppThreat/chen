@@ -716,6 +716,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 record(viaAddress.getOrElse(arg), TagState, stateName(t.state))
           }
           if viaAddress.isDefined then out = out.updated(name, Tracked(StAllocated, c.id))
+          // `tmp = realloc(p, n); if (!tmp) { free(p); ... } p = tmp;` - a failed realloc leaves
+          // its input untouched, so p stays live until the result is stored back over it. Only
+          // `p = realloc(p, n)` consumes p here (the assignment below stores the fresh block)
+          else if assignedTarget(c).exists(_ != name) then ()
           else out = out.updated(name, Tracked(StFreed, 0L))
         }
       }
@@ -727,10 +731,17 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             val rhsIsAlloc = rhs match
               case rc: Call => callFacts.get(rc.id()).exists(_.isAllocCall)
               case _        => false
+            // `p = tmp` where tmp is realloc(p, n)'s result: the block moved, not leaked
+            val rhsIsReallocOfLhs = trackedNameOf(rhs).flatMap(out.get).exists { r =>
+                callFacts.get(r.site).exists(f =>
+                    f.reallocFamilies.nonEmpty && argAt(f.args, 1).flatMap(trackedNameOf)
+                        .contains(lhs)
+                )
+            }
             out.get(lhs).foreach { t =>
                 // overwriting a live allocation loses the only handle: the overwrite IS the leak
                 // (a realloc is not an overwrite - it consumed the old block and produced this)
-                if t.state == StAllocated && !rhsIsAlloc then
+                if t.state == StAllocated && !rhsIsAlloc && !rhsIsReallocOfLhs then
                   record(c, TagLeak, s"leak:$lhs")
             }
             // an int-typed destination of a HEAP-family call holds its error code, not the
@@ -823,6 +834,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   trackedNameOf(other).flatMap(useState.get).foreach { t =>
                       out = out.updated(lhs, t)
                   }
+                  // `p = tmp` after `tmp = realloc(p, n)`: the block moved back into p, and
+                  // tmp no longer owns it - else tmp leaks when p is returned
+                  if rhsIsReallocOfLhs then trackedNameOf(other).foreach(n => out = out - n)
             end match
             // a stack address stored into a GLOBAL variable outlives the frame (E4): a plain
             // local or parameter destination rebinds only this frame's copy and escapes nothing
@@ -1082,6 +1096,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
   /** Both null states hold no memory; only the narrowing one is conditional on the path. */
   private def isNullState(s: AllocState): Boolean = s == StNull || s == StNullReset
+
+  /** The variable a call's result is stored into, through any casts: `tmp = (T *)realloc(p, n)`. */
+  private def assignedTarget(c: Call): Option[String] =
+    var node: AstNode = c
+    var parent        = node._astIn.collectFirst { case p: Call => p }
+    while parent.exists(_.name == "<operator>.cast") do
+      node = parent.get
+      parent = node._astIn.collectFirst { case p: Call => p }
+    parent
+        .filter(_.name == "<operator>.assignment")
+        .flatMap(a => a.argument.l.find(_.argumentIndex == 1))
+        .flatMap(trackedNameOf)
 
   private def trackedNameOf(e: AstNode): Option[String] = e match
     case i: Identifier => Some(i.name)

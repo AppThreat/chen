@@ -398,11 +398,17 @@ object MemorySemanticsPass:
                 case _ => None
         }
 
+  /** A free of memory in general: `free` after at most a library prefix (`av_free`, `av_freep`,
+    * `g_free`, `xfree`). A stem naming a type (`av_opt_free`, `av_frame_free`) frees what the
+    * object HOLDS, not the pointer itself.
+    */
+  private val GenericFreeName = """(?:[a-z0-9]+_)?[a-z]{0,2}freep?[0-9]*""".r
+
   /** `void av_free(void *ptr)`, `void av_freep(void **p)`: a function returning nothing whose one
     * parameter is an untyped pointer and whose name says `free`.
     */
   private def looksLikeDeallocator(name: String, shape: Option[Shape]): Boolean =
-      name.toLowerCase.contains("free") && shape.exists { s =>
+      GenericFreeName.matches(name.toLowerCase) && shape.exists { s =>
           normalisedType(s.returnType) == "void" &&
           (s.params.map(normalisedType) match
             case List("void*") | List("void**") => true
