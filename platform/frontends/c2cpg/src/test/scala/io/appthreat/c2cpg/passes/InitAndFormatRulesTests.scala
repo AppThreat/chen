@@ -107,6 +107,31 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    struct S s = {0};
     |    return s.b;
     |}
+    |int init_bad_local_struct(void)
+    |{
+    |    struct T { int a; int b; } s;
+    |    s.a = 1;
+    |    return s.b;
+    |}
+    |int init_ok_local_struct(void)
+    |{
+    |    struct U { int a; int b; } s;
+    |    s.a = 1;
+    |    s.b = 2;
+    |    return s.a + s.b;
+    |}
+    |int init_ok_local_struct_addr(void)
+    |{
+    |    struct V { int a; int b; } s;
+    |    sscanf("1 2", "%d %d", &s.a, &s.b);
+    |    return s.b;
+    |}
+    |int init_ok_local_whole_read(void)
+    |{
+    |    struct W { int a; int b; } s;
+    |    s.a = 1;
+    |    return s.a + s.a;
+    |}
     |""".stripMargin,
     "rules.c"
   )
@@ -139,6 +164,14 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     "report a local and a member no path initialises" in {
         findingsIn("init_bad_scalar") should contain("MS-INIT-001")
         findingsIn("init_bad_field") should contain("MS-INIT-001")
+    }
+    "report a member of a struct declared inside the function" in {
+        findingsIn("init_bad_local_struct") should contain("MS-INIT-001")
+    }
+    "leave a fully-written in-function struct, an address-taken one and whole-value reads alone" in {
+        Seq("init_ok_local_struct", "init_ok_local_struct_addr", "init_ok_local_whole_read").foreach { m =>
+            withClue(m) { findingsIn(m) should not contain "MS-INIT-001" }
+        }
     }
     "leave initialised, out-param, static, sizeof, loop-carried and maybe-initialised reads alone" in {
         Seq(

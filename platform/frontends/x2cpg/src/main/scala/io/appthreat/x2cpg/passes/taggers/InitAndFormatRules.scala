@@ -117,9 +117,25 @@ object InitAndFormatRules:
       atom.typeDecl.nameExact(name.split("[.:]").last).l.headOption
     ).exists(td => td.member.nonEmpty && td.method.isEmpty && !td.isExternal)
 
-  private def candidateType(atom: Cpg, t: String): Boolean =
+  /** A `struct S { ... } s;` declared INSIDE the function: the frontend keeps no members for it
+    * (only a bare external stub, or nothing), so [[isPodStruct]] cannot see the body. The local's
+    * own `struct` keyword is the evidence this is a C struct defined right here - no constructor,
+    * no fill loop the analysis cannot see - and the per-field question is askable from the field
+    * accesses the function itself makes. An unknown non-struct type (a C++ class through the C
+    * frontend, a header type the tree does not carry) keeps no such keyword and stays out.
+    */
+  private def isLocalStructDefinition(atom: Cpg, t: String, localCode: String): Boolean =
+    localCode.trim.startsWith("struct ") && {
+        val name = t.trim.stripPrefix("struct ").trim
+        atom.typeDecl.fullNameExact(name).l.headOption.orElse(
+          atom.typeDecl.nameExact(name.split("[.:]").last).l.headOption
+        ).forall(td => td.member.isEmpty && td.method.isEmpty)
+    }
+
+  private def candidateType(atom: Cpg, t: String, localCode: String = ""): Boolean =
     val n = t.trim
-    !n.contains("[") && (ScalarType.matches(n) || isPointer(n) || isPodStruct(atom, n))
+    !n.contains("[") && (ScalarType.matches(n) || isPointer(n) || isPodStruct(atom, n) ||
+        isLocalStructDefinition(atom, n, localCode))
 
   private def isStatic(l: Local): Boolean =
       l.code.trim.startsWith("static") ||
@@ -177,7 +193,7 @@ object InitAndFormatRules:
           val params     = method.parameter.name.toSet
           val declaredTwice = locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
           val candidates = locals
-              .filter(l => !isStatic(l) && candidateType(atom, l.typeFullName))
+              .filter(l => !isStatic(l) && candidateType(atom, l.typeFullName, l.code))
               .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
               .map(_.name)
               .toSet -- macroNames -- params -- declaredTwice

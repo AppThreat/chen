@@ -206,6 +206,43 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    fclose(f);
     |    fclose(f);
     |}
+    |
+    |/* ---- part 9: leak facts from CONVERGED states, and the fd failure check ---- */
+    |
+    |/* c/cwe367_toctou.c bad_stat_open: the guarded close frees on the taken path, so the join
+    |   at the implicit end is maybe-freed. A leak recorded from the PRE-join visit - the false
+    |   edge delivering `allocated` to the implicit end before the freed path joins in -
+    |   restates a fact the join had already retracted */
+    |void good_guarded_close(const char *path)
+    |{
+    |    int fd = open(path, 1);
+    |    if (fd >= 0) close(fd);
+    |}
+    |
+    |/* c/cwe416_use_after_free.c bad_loop: the free runs on every iteration of a loop that
+    |   always executes; only the synthetic zero-trip path leaves the allocation live, and
+    |   only until the back edge joins in */
+    |void good_loop_freed(void)
+    |{
+    |    char *p = (char *)malloc(32);
+    |    int i;
+    |    for (i = 0; i < 3; i++)
+    |    {
+    |        p[0] = 'a';
+    |        free(p);
+    |    }
+    |}
+    |
+    |/* c/cwe367_toctou.c good_openat_fstat: an int-handle acquisition's failure sentinel is
+    |   -1, not NULL - the exit under `fd < 0` holds no descriptor and leaks nothing */
+    |int good_fd_checked(const char *path)
+    |{
+    |    int fd = open(path, 1);
+    |    if (fd < 0) return -1;
+    |    (void)write(fd, "data", 4);
+    |    close(fd);
+    |    return 0;
+    |}
     |""".stripMargin,
     "alloc_state.c"
   )
@@ -319,6 +356,24 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "not revive a NULL RESET into a phantom allocation under a non-null guard" in {
         findingsIn("good_reset_recheck") shouldBe empty
+    }
+
+  "part 9: converged leak facts" should:
+
+    "stay silent when a guarded close frees on the taken path (the join is maybe-freed)" in {
+        // recorded eagerly per worklist visit, the fact restated the pre-join `allocated`
+        // state the false edge delivered to the implicit end before the freed path joined in
+        findingsIn("good_guarded_close") should not contain "MS-ALLOC-003"
+    }
+
+    "stay silent when the free runs on every iteration of an always-entered loop" in {
+        findingsIn("good_loop_freed") should not contain "MS-ALLOC-003"
+    }
+
+    "stay silent at an exit under an int-handle acquisition's failure check" in {
+        // `if (fd < 0) return -1;` - the descriptor's failure sentinel is negative, and the
+        // exit on that side holds no resource to leak
+        findingsIn("good_fd_checked") should not contain "MS-ALLOC-003"
     }
 
   "realloc" should:

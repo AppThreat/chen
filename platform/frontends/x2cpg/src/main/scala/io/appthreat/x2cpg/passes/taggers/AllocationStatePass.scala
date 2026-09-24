@@ -465,12 +465,20 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   end methodEffects
 
   private def analyseMethod(
-    method: Method,
-    roles: mutable.LongMap[RoleInfo],
-    effectsByName: mutable.HashMap[String, Set[String]],
-    record: (StoredNode, String, String) => Unit
+      method: Method,
+      roles: mutable.LongMap[RoleInfo],
+      effectsByName: mutable.HashMap[String, Set[String]],
+      record: (StoredNode, String, String) => Unit
   ): Unit =
-    val leakFacts = mutable.ListBuffer.empty[(Long, StoredNode, String)] // (site, exit, name)
+    // (site, exit, name) -> the state at the exit's LATEST visit. A leak is a claim that NO
+    // path frees the allocation ("still live, un-freed and un-escaped"), and the worklist
+    // delivers an exit's predecessors at different rounds: the false edge of `if (fd >= 0)
+    // close(fd);` reaches the implicit end while the state still says `allocated`, rounds
+    // before the freed path joins it into `maybe-freed`. Recording on every visit restated
+    // the pre-join state as a fact the join had already retracted (part 9); the fact is read
+    // only after the worklist drains, from the state each exit settled on.
+    val leakFacts =
+        mutable.LinkedHashMap.empty[(Long, Long, String), (StoredNode, AllocState)]
     val nullUseFacts =
         mutable.ListBuffer.empty[(Long, StoredNode, String, String)] // (site, use, name, kind)
 
@@ -572,6 +580,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 effectsByName.get(cf.name).exists(_.contains("effect:allocates-return"))
         )
 
+    // a tracked site whose handle IS an integer (the fd-returning families): its failure
+    // sentinel is -1 rather than NULL, and the guard that checks it is a `< 0` comparison
+    def isHandleSite(site: Long): Boolean =
+        callFacts.get(site).exists(cf =>
+            cf.allocFamilies.nonEmpty && cf.allocFamilies.subsetOf(IntHandleFamilies)
+        )
+
     enqueue(method, Map.empty)
     while queued.nonEmpty do
       val node = queued.head
@@ -584,13 +599,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               // branch edges leave from the CONDITION CALL of a guard, not from the control
               // structure node, so the narrowing rides on the condition's out-edges
               val succState = guards.get(node.id()) match
-                case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite)
+                case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
                 case None     => out
               enqueue(succ, succState)
           case _ => ()
       }
-    // one leak fact per allocation: the earliest exit where it is still live
-    leakFacts.groupBy(_._1).foreach { case (site, exits) =>
+    // one leak fact per allocation: the earliest exit where it settled as still live
+    val settledLeaks = leakFacts.toList.collect { case ((site, _, name), (exit, StAllocated)) =>
+        (site, exit, name)
+    }
+    settledLeaks.groupBy(_._1).foreach { case (site, exits) =>
         // the EARLIEST exit, as the scaladoc says: the first `return` that walks out on a live
         // allocation is where a reader fixes the leak, and every later exit restates it.
         // `minBy(-line)` picked the LAST one instead.
@@ -631,14 +649,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * own operation produces, returns the out-state for the successors.
     */
   private def transfer(
-    node: CfgNode,
-    in: Map[String, Tracked],
-    callFacts: mutable.LongMap[CallFacts],
-    effectsByName: mutable.HashMap[String, Set[String]],
-    leakFacts: mutable.ListBuffer[(Long, StoredNode, String)],
-    nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
-    ctx: MethodContext,
-    record: (StoredNode, String, String) => Unit
+      node: CfgNode,
+      in: Map[String, Tracked],
+      callFacts: mutable.LongMap[CallFacts],
+      effectsByName: mutable.HashMap[String, Set[String]],
+      leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
+      nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+      ctx: MethodContext,
+      record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
       node match
         case c: Call =>
@@ -669,14 +687,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 record(r, TagStackEscape, "escape:return")
             }
             out.foreach { case (name, t) =>
-                if t.state == StAllocated && !ctx.staticLocals.contains(name) && !isFieldName(name)
-                then leakFacts += ((t.site, r, name))
+                if !ctx.staticLocals.contains(name) && !isFieldName(name)
+                then leakFacts.update((t.site, r.id, name), (r, t.state))
             }
             out
         case mr: MethodReturn =>
             in.foreach { case (name, t) =>
-                if t.state == StAllocated && !ctx.staticLocals.contains(name) && !isFieldName(name)
-                then leakFacts += ((t.site, mr, name))
+                if !ctx.staticLocals.contains(name) && !isFieldName(name)
+                then leakFacts.update((t.site, mr.id, name), (mr, t.state))
             }
             in
         case _ => in
@@ -719,6 +737,51 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case tracked if trackedNameOf(tracked).isDefined =>
         trackedNameOf(tracked).map(name => (name, !holds)).toList
     case _ => Nil
+
+  /** The int-handle failure check (part 9): a comparison of a tracked fd-returning allocation
+    * against a small literal, naming the side on which the acquisition FAILED (the descriptor
+    * is negative). `fd < 0`, `fd <= -1` and `fd == -1` fail where they hold; `fd >= 0` and
+    * `0 > fd` fail where they do not. Borderline forms (`fd <= 0`, `fd > 0`) include fd 0 -
+    * a legal descriptor - on their failure side and are deliberately not recognised. Only a
+    * variable tracked from an int-handle family allocation is considered: a plain int guard
+    * narrows nothing, and a pointer has no ordering to read.
+    */
+  private def handleFailureSides(
+      cond: AstNode,
+      out: Map[String, Tracked],
+      isHandleSite: Long => Boolean
+  ): List[(String, Boolean)] =
+    def lit(e: AstNode): Option[Long] = e match
+        case l: Literal => l.code.trim.toLongOption
+        case _          => None
+    def trackedHandle(e: AstNode): Option[String] = e match
+        case i: Identifier =>
+            out.get(i.name).filter(t => isHandleSite(t.site)).map(_ => i.name)
+        case _ => None
+    cond match
+        case c: Call =>
+            (c.argumentOption(1), c.argumentOption(2)) match
+              case (Some(l), Some(r)) =>
+                  (c.name, trackedHandle(l), lit(r), trackedHandle(r), lit(l)) match
+                      // `fd < 0` / `fd <= -1`: the acquisition failed where this holds
+                      case ("<operator>.lessThan", Some(n), Some(v), _, _) if v <= 0 =>
+                          List((n, true))
+                      case ("<operator>.lessThanOrEqualTo", Some(n), Some(v), _, _) if v <= -1 =>
+                          List((n, true))
+                      // `fd >= 0`: it failed where this does NOT hold
+                      case ("<operator>.greaterThanOrEqual", Some(n), Some(v), _, _) if v >= 0 =>
+                          List((n, false))
+                      // `0 > fd`: it failed where this holds
+                      case ("<operator>.greaterThan", _, _, Some(n), Some(v)) if v >= 0 =>
+                          List((n, true))
+                      // `fd == -1` / `-1 == fd`: it failed where this holds
+                      case ("<operator>.equals", Some(n), Some(v), _, _) if v < 0 =>
+                          List((n, true))
+                      case ("<operator>.equals", _, _, Some(n), Some(v)) if v < 0 =>
+                          List((n, true))
+                      case _ => Nil
+              case _ => Nil
+        case _ => Nil
 
   /** Is this use protected by a null test of `name` in its OWN expression - `p && p->x`, `!p ||
     * p->x`, `p ? p->x : d`? Short-circuit guards are not control structures, so the worklist never
@@ -1111,18 +1174,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   /** Guard narrowing at an `==`/`!=` NULL comparison: on paths where `p == NULL` holds, p is null;
     * where `p != NULL` (or the negation) holds, a nulled p is live again. Which side a successor
     * sits on is decided by [[branchOf]].
+    *
+    * Part 9 adds the int-handle failure check to the same fold: an fd-returning family's
+    * sentinel is -1, not NULL, and the exit under `fd < 0` holds no descriptor - narrowing it
+    * the way a NULL check narrows a pointer keeps the failure path from reporting a leak.
     */
   private def branchNarrowing(
-    cond: CfgNode,
-    cs: ControlStructure,
-    succ: CfgNode,
-    out: Map[String, Tracked],
-    isOwningSite: Long => Boolean
+      cond: CfgNode,
+      cs: ControlStructure,
+      succ: CfgNode,
+      out: Map[String, Tracked],
+      isOwningSite: Long => Boolean,
+      isHandleSite: Long => Boolean
   ): Map[String, Tracked] =
     // branchOf: Some(true) where the condition holds on this successor, None when unknown
     val facts: List[(String, Option[Boolean])] = branchOf(succ, cs) match
-      case Some(holds) => nullFacts(cond, holds).map { case (n, nullHere) => (n, Some(nullHere)) }
-      case None        => Nil
+      case Some(holds) =>
+          nullFacts(cond, holds).map { case (n, nullHere) => (n, Some(nullHere)) } ++
+              handleFailureSides(cond, out, isHandleSite)
+                  .map { case (n, failureHolds) => (n, Some(holds == failureHolds)) }
+      case None => Nil
     facts.foldLeft(out) { case (acc, (name, nullHereOpt)) =>
         nullHereOpt match
           case Some(nullHere) =>

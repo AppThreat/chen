@@ -79,7 +79,14 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleAllocationState(record)
     InitAndFormatRules.formatString(atom, record)
     InitAndFormatRules.uninitialisedReads(atom, record)
-    val lowConfidenceNodes = ruleNullDereference(record)
+    // the hypothesis tiers: a finding whose own arm is a may-claim reports below its rule's
+    // confidence - the null-deref chained-parameter arm, and the invalidation rule's
+    // reference-parameter arm
+    val lowConfidence = mutable.ListBuffer.empty[(StoredNode, String)]
+    lowConfidence ++= ruleNullDereference(record).map(_ -> RuleNullDeref)
+    lowConfidence ++= ContainerInvalidationRules
+        .containerInvalidation(atom, record)
+        .map(_ -> RuleContainerInvalidation)
 
     // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
     // computed by attacker arithmetic; on libavformat 36 of 52 ALLOC-009 findings sat on an
@@ -109,7 +116,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       dstGraph,
       findings.toList.filter(_._2.nonEmpty).flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low")) ++
+      } ++ lowConfidence.map { case (node, rule) => (node, TagConfidence, s"$rule=low") } ++
           heuristicFindings(findings).map { case (node, rule) =>
               (node, TagConfidence, s"$rule=low")
           }
@@ -446,22 +453,121 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * sizeof. An untrusted-read length always reports: the function read it itself.
     */
   private def ruleUnboundedCopy(
-    argsByCall: Map[Call, List[Expression]],
-    record: (StoredNode, String) => Unit
+      argsByCall: Map[Call, List[Expression]],
+      record: (StoredNode, String) => Unit
   ): Unit =
-      argsByCall.foreach { case (call, args) =>
-          val capParam     = capacityParamOf(call, args)
-          val writesBuffer = args.exists(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
-          lengthArgsOf(args).foreach { lenArg =>
+    argsByCall.foreach { case (call, args) =>
+        val capParam = capacityParamOf(call, args)
+        val dstArg   = args.find(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+        val srcArg   = args.find(a => a.tag.name(MemoryApiPass.TagSrc).l.nonEmpty)
+        val writesBuffer = dstArg.isDefined
+        lengthArgsOf(args).foreach { lenArg =>
             val tags = lenArg.tag.name.l
             val controlled = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
                 (tags.contains(ValueOriginPass.OriginCallerParam) &&
                     unboundedAtCallSites(call.method, lenArg))
-            val honoursCapacity = capParam.exists(reaches(lenArg, _))
+            val honoursCapacity = capParam.exists(reaches(lenArg, _)) ||
+                dstArg.exists(d => selfSizedDestination(d, srcArg, lenArg))
             if writesBuffer && controlled && !isBounded(tags) && !honoursCapacity then
               record(lenArg, RuleUnboundedCopy)
-          }
-      }
+        }
+    }
+
+  /** Part 9: the destination was sized FROM this copy's length. FFmpeg's dominant correct
+    * shape - measured 9 of one tree's 38 MS-BOUND-002 findings, every one a false positive:
+    * `tmp = av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer that
+    * `av_malloc(sz + aud_size + extra_size)`s before copying each fragment, and the in-place
+    * strip `memmove(buf, buf + k, len - k)`. The allocation's size argument, the ADDITION
+    * operands inside it, and one further definition level of those operands (a local holding
+    * `isize + header_size`) are the terms searched for the length's own variable key; a length
+    * that appears as a term of the size can never cross a buffer that term bought.
+    *
+    * A destination reached through a struct member (`pkt->data`, sized by av_new_packet in the
+    * library) resolves no allocation here and STAYS a finding: that boundary is the next
+    * pattern, not this conjunct.
+    */
+  private def selfSizedDestination(
+      dst: Expression,
+      src: Option[Expression],
+      lenArg: Expression
+  ): Boolean =
+    def baseIdentifierOf(e: Expression): Option[Identifier] = e match
+        case i: Identifier                              => Some(i)
+        case c: Call if c.name == "<operator>.cast" =>
+            c.argument.l.collect { case x: Expression => x }.lastOption.flatMap(baseIdentifierOf)
+        case c: Call if c.name == "<operator>.addition" =>
+            c.argument.l.collectFirst { case x: Expression => x }.flatMap(baseIdentifierOf)
+        case c: Call
+            if isFieldAccess(c) || c.name == "<operator>.indexAccess" ||
+              c.name == "<operator>.indirectIndexAccess" =>
+            c.argumentOption(1).collect { case x: Expression => x }.flatMap(baseIdentifierOf)
+        case _ => None
+    // an in-place compaction: source and destination share a root VARIABLE - the two
+    // identifier NODES are distinct (the dst argument and the base inside the source's
+    // `buf + k`), so the comparison is on name within the method
+    val inPlace = (baseIdentifierOf(dst), src) match
+        case (Some(d), Some(s)) =>
+            baseIdentifierOf(s).exists(s2 => s2.name == d.name && s2.method.id == d.method.id)
+        case _                  => false
+    // dashdec.c's clear-the-tail idiom: the length is strlen OF THE DESTINATION ITSELF
+    // (`memset(tmp_str, 0, strlen(tmp_str))`) - the write ends at the terminator's slot
+    val clearsOwnLength = lenArg match
+        case c: Call if c.name == "strlen" || c.name == "strnlen" =>
+            c.argumentOption(1).collect { case e: Expression => e }.exists { a =>
+                (baseIdentifierOf(a), baseIdentifierOf(dst)) match
+                    case (Some(x), Some(d)) => x.name == d.name && x.method.id == d.method.id
+                    case _                  => false
+            }
+        case _ => false
+    def definitionTermKeys(i: Identifier): Set[String] =
+        OverlayFacts
+            .reachingDefsIn(i)
+            .collect { case d: Identifier => d }
+            .flatMap(_._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a })
+            .flatMap(_.argumentOption(2))
+            .collect { case e: Expression => e }
+            .flatMap(termKeysOf(_, expand = false))
+            .toSet
+    def termKeysOf(e: Expression, expand: Boolean): Set[String] =
+        val own = OverlayFacts.variableKey(e).toSet
+        e match
+            case c: Call if c.name == "<operator>.addition" =>
+                own ++ c.argument.l.collect { case x: Expression => x }.flatMap { op =>
+                    OverlayFacts.variableKey(op) ++ (op match
+                        case i: Identifier if expand                   => definitionTermKeys(i)
+                        case nc: Call if nc.name == "<operator>.addition" =>
+                            termKeysOf(nc, expand = expand)
+                        case _                                          => Set.empty[String]
+                    )
+                }
+            case i: Identifier if expand => own ++ definitionTermKeys(i)
+            case _                       => own
+    def allocCallOf(e: Expression): Option[Call] = e match
+        case c: Call
+            if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+                tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+            Some(c)
+        // c2cpg lays a cast out as (type placeholder, operand): the operand is argument 2
+        case c: Call if c.name == "<operator>.cast" =>
+            c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
+                .flatMap(allocCallOf)
+        case _ => None
+    def allocationSizingTerms(base: Identifier): Set[String] =
+        OverlayFacts
+            .reachingDefsIn(base)
+            .collect { case d: Identifier => d }
+            .flatMap(_._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a })
+            .flatMap(_.argumentOption(2))
+            .collect { case e: Expression => e }
+            .flatMap(allocCallOf)
+            .flatMap(alloc => alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty))
+            .collect { case e: Expression => e }
+            .flatMap(termKeysOf(_, expand = true))
+            .toSet
+    inPlace || clearsOwnLength || baseIdentifierOf(dst).exists { base =>
+        val lenKeys = castUnwrappingKey(lenArg).toSet
+        lenKeys.nonEmpty && lenKeys.exists(allocationSizingTerms(base).contains)
+    }
 
   /** Does some caller leave this caller-param length unbounded? Report when the method has no
     * intra-tree callers (externally reachable - framework callbacks and exports), when the length
@@ -1455,6 +1561,9 @@ object MemorySafetyFindingPass:
   /** A read of a local no path initialises (CWE-457), part 8. */
   final val RuleUninitialisedRead = "MS-INIT-001"
 
+  /** A view into a container used after the container may have reallocated it (CWE-416), part 9. */
+  final val RuleContainerInvalidation = "MS-INVAL-001"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -1701,6 +1810,16 @@ object MemorySafetyFindingPass:
       confidence = "high",
       message = "no path from the function entry initialises this local (or this member of " +
           "it) before it is read"
+    ),
+    MemorySafetyRule(
+      id = RuleContainerInvalidation,
+      cwe = "CWE-416",
+      kind = "container-view-invalidation",
+      severity = "high",
+      confidence = "medium",
+      message = "an iterator, reference or pointer taken from this container is used after a " +
+          "call that may have reallocated or restructured it - push_back, resize, erase and " +
+          "kin invalidate every view into the container"
     )
   ).map(r => r.id -> r).toMap
 
