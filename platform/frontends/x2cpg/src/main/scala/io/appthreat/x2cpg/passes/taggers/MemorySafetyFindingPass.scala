@@ -77,6 +77,8 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
     ruleAllocationState(record)
+    InitAndFormatRules.formatString(atom, record)
+    InitAndFormatRules.uninitialisedReads(atom, record)
     val lowConfidenceNodes = ruleNullDereference(record)
 
     // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
@@ -1447,6 +1449,12 @@ object MemorySafetyFindingPass:
   /** A stack address that left its frame (CWE-562), part 5 E4. */
   final val RuleStackEscape = "MS-ESC-001"
 
+  /** A printf-family format that is not a constant (CWE-134), part 8. */
+  final val RuleFormatString = "MS-FMT-001"
+
+  /** A read of a local no path initialises (CWE-457), part 8. */
+  final val RuleUninitialisedRead = "MS-INIT-001"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -1675,6 +1683,24 @@ object MemorySafetyFindingPass:
       confidence = "medium",
       message = "the address of a stack local leaves its frame - returned, or stored into " +
           "storage that outlives the function - and any later use of it reads dead storage"
+    ),
+    MemorySafetyRule(
+      id = RuleFormatString,
+      cwe = "CWE-134",
+      kind = "format-string",
+      severity = "high",
+      confidence = "medium",
+      message = "the format argument is not a constant: a caller-supplied or computed string " +
+          "is interpreted as a format, and its conversions read or write the stack"
+    ),
+    MemorySafetyRule(
+      id = RuleUninitialisedRead,
+      cwe = "CWE-457",
+      kind = "uninitialised-read",
+      severity = "medium",
+      confidence = "high",
+      message = "no path from the function entry initialises this local (or this member of " +
+          "it) before it is read"
     )
   ).map(r => r.id -> r).toMap
 

@@ -131,6 +131,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     }
 
     definedMethods.foreach(m => analyseMethod(m, roles, effectsByName, record))
+    failurePathFieldDoubleFrees(definedMethods, roles, record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -138,6 +139,104 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           effectRows
     )
   end run
+
+  /** CVE-2026-64832's shape, neither function wrong on its own: a callee frees a field of the
+    * struct it was handed and returns failure without resetting the field, and a caller, on that
+    * failure, releases the same field again - directly or through a callee that frees it.
+    *
+    * The callee's half: `free(p->f); return <failure>;` (the free is the statement before a
+    * negative or non-zero literal return, or an `AVERROR(...)`), with no `p->f = NULL` anywhere in
+    * the method. The caller's half: the call sits in an `if` condition (or its result in a
+    * variable the condition tests), and the release is inside that `if`'s THEN branch - the
+    * failure branch of `if (f(&s) < 0)`. The report is the callee's free: the one the fix removes.
+    */
+  private def failurePathFieldDoubleFrees(
+    methods: List[Method],
+    roles: mutable.LongMap[RoleInfo],
+    record: (StoredNode, String, String) => Unit
+  ): Unit =
+    def isFree(c: Call): Boolean = roles.getOrElse(c.id(), RoleInfoNone).free.nonEmpty
+    // (param index, field) a free in `m` releases, with the freed argument
+    def paramFieldFrees(m: Method): List[(Int, String, Expression)] =
+      val params = m.parameter.l.map(p => p.name -> p.index).toMap
+      m.ast.collectAll[Call].filter(isFree).l.flatMap { c =>
+          c.argumentOption(1).collect { case e: Expression => e }.flatMap { arg =>
+              trackedNameOf(addressOfOperand(arg).getOrElse(arg)).flatMap { n =>
+                  val (base, field) = n.split("->|\\.", 2) match
+                    case Array(b, f) => (b, f)
+                    case _           => ("", "")
+                  params.get(base).filter(_ => field.nonEmpty).map(i => (i, field, arg))
+              }
+          }
+      }
+    def isFailureReturn(r: Return): Boolean =
+        r.astChildren.collectFirst { case e: Expression => e }.exists {
+            case l: Literal => l.code.trim.startsWith("-") || l.code.trim.toIntOption.exists(_ != 0)
+            case c: Call =>
+                c.name == "<operator>.minus" || c.code.startsWith("AVERROR") ||
+                    c.code.trim.startsWith("-")
+            case _ => false
+        }
+    def nextStatement(e: Expression): Option[AstNode] =
+      val stmt = GuardPass.statementRootOf(e)
+      stmt._astIn.collectFirst { case a: AstNode => a }
+          .flatMap(_.astChildren.l.sortBy(_.order).find(_.order > stmt.order))
+    val byName = methods.filter(_.block.astChildren.nonEmpty).groupBy(_.name)
+    // a failure-path free no reset follows, per unique callee name
+    val failureFrees = byName.collect { case (name, List(m)) =>
+        val params = m.parameter.l.map(p => p.name -> p.index).toMap
+        val reset = m.ast.collectAll[Call].filter(a =>
+            a.name == "<operator>.assignment" && a.argumentOption(2).exists(isNullLiteral)
+        ).l.flatMap(a => a.argumentOption(1).flatMap(trackedNameOf)).toSet
+        name -> paramFieldFrees(m).filter { case (i, f, arg) =>
+            val pname = params.collectFirst { case (n, idx) if idx == i => n }.getOrElse("")
+            !reset.contains(s"$pname->$f") && !reset.contains(s"$pname.$f") &&
+            nextStatement(arg).exists {
+                case r: Return => isFailureReturn(r)
+                case _         => false
+            }
+        }
+    }.filter(_._2.nonEmpty)
+    if failureFrees.isEmpty then return
+    // every field (param index, field) a callee frees at all, for the caller's release
+    val releases = byName.collect { case (name, List(m)) =>
+        name -> paramFieldFrees(m).map { case (i, f, _) => (i, f) }.toSet
+    }
+    def baseOf(e: Expression): Option[String] = addressOfOperand(e).getOrElse(e) match
+      case i: Identifier => Some(i.name)
+      case _             => None
+    failureFrees.foreach { case (calleeName, frees) =>
+        methods.flatMap(_.ast.collectAll[Call].nameExact(calleeName).l).foreach { site =>
+            val caller = site.method
+            // the `if` whose condition holds the call or the variable it was stored into
+            val stored = assignedTarget(site).toSet
+            val guard = caller.ast.collectAll[ControlStructure].l.find { cs =>
+                cs.condition.exists(cond =>
+                    cond.ast.exists(_.id == site.id) || cond.ast.collectAll[Identifier].exists(i =>
+                        stored.contains(i.name)
+                    )
+                )
+            }
+            val failureBranch = guard.toList.flatMap(_.whenTrue.ast.collectAll[Call].l)
+            frees.foreach { case (idx, field, freedArg) =>
+                site.argumentOption(idx).collect { case e: Expression => e }.flatMap(baseOf).foreach {
+                    base =>
+                      val releasedAgain = failureBranch.exists { c =>
+                          val direct = isFree(c) &&
+                              c.argumentOption(1).flatMap(trackedNameOf).exists(n =>
+                                  n == s"$base.$field" || n == s"$base->$field"
+                              )
+                          direct || releases.getOrElse(c.name, Set.empty).exists { case (j, f) =>
+                              f == field && c.argumentOption(j).collect { case e: Expression => e }
+                                  .flatMap(baseOf).contains(base)
+                          }
+                      }
+                      if releasedAgain then record(freedArg, TagState, stateName(StFreed))
+                }
+            }
+        }
+    }
+  end failurePathFieldDoubleFrees
 
   /** The `derefs-param:<i>` conclusions, per METHOD NAME (collapsed across same-named methods the
     * way every effect summary is): a method reads through parameter i on every path. Two phases,
@@ -556,7 +655,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               // local itself. Read the incoming state: the escape-marking below would erase it.
               val viaTracked = trackedNameOf(e).flatMap(in.get).exists(_.state == StStackAddr)
               trackedNameOf(e).foreach { name =>
-                  out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
+                  out.get(name).foreach { t =>
+                      out = withGroup(out, name, t.aliases, StEscaped)
+                      out = out.updated(name, t.copy(state = StEscaped))
+                  }
               }
               val refToLocale = ctx.refReturn && (e match
                 case i: Identifier =>
@@ -567,14 +669,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 record(r, TagStackEscape, "escape:return")
             }
             out.foreach { case (name, t) =>
-                if t.state == StAllocated && !ctx.staticLocals.contains(name) then
-                  leakFacts += ((t.site, r, name))
+                if t.state == StAllocated && !ctx.staticLocals.contains(name) && !isFieldName(name)
+                then leakFacts += ((t.site, r, name))
             }
             out
         case mr: MethodReturn =>
             in.foreach { case (name, t) =>
-                if t.state == StAllocated && !ctx.staticLocals.contains(name) then
-                  leakFacts += ((t.site, mr, name))
+                if t.state == StAllocated && !ctx.staticLocals.contains(name) && !isFieldName(name)
+                then leakFacts += ((t.site, mr, name))
             }
             in
         case _ => in
@@ -686,7 +788,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     if cf.freeFamilies.nonEmpty then
       argAt(cf.args, 1).foreach { freed =>
         val viaAddress = addressOfOperand(freed)
-        (viaAddress.orElse(Some(freed))).flatMap(trackedNameOf).flatMap(useState.get).foreach { t =>
+        // a field nothing here assigned is still a block the struct owns: its first free is the
+        // fact a second one is checked against (`free(b->p); free(b->p);`)
+        val freedName = viaAddress.orElse(Some(freed)).flatMap(trackedNameOf)
+        val known = freedName.flatMap(useState.get).orElse(
+          freedName.filter(isFieldName).map(_ => Tracked(StAllocated, 0L))
+        )
+        known.foreach { t =>
             // a nullable NON-allocation (a strchr result) is not ownership: freeing it says
             // nothing this pass tracks
             if t.state != StNullable then
@@ -696,11 +804,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               // non-heap-free rule reads; ownership language never applies to it
               if t.state == StStackAddr then
                 record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
+              val name = freedName.get
               out = out.updated(
-                trackedNameOf(viaAddress.getOrElse(freed)).get,
+                name,
                 if viaAddress.isDefined then t.copy(state = StNullReset)
                 else t.copy(state = StFreed)
               )
+              if viaAddress.isEmpty then out = withGroup(out, name, t.aliases, StFreed)
         }
       }
     end if
@@ -720,13 +830,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           // its input untouched, so p stays live until the result is stored back over it. Only
           // `p = realloc(p, n)` consumes p here (the assignment below stores the fresh block)
           else if assignedTarget(c).exists(_ != name) then ()
-          else out = out.updated(name, Tracked(StFreed, 0L))
+          else
+            out = withGroup(out, name, out.get(name).map(_.aliases).getOrElse(Set.empty), StFreed)
+            out = out.updated(name, Tracked(StFreed, 0L))
         }
       }
 
     // 3. assignment: fresh allocation, copy-in, NULL reset, or loss of provenance
     if cf.name == "<operator>.assignment" then
-      (argAt(cf.args, 1).flatMap(trackedNameOf), argAt(cf.args, 2)) match
+      val fieldLhs = argAt(cf.args, 1).flatMap(trackedNameOf).filter(isFieldName)
+      (argAt(cf.args, 1).flatMap(trackedNameOf).filterNot(isFieldName), argAt(cf.args, 2)) match
         case (Some(lhs), Some(rhs)) =>
             val rhsIsAlloc = rhs match
               case rc: Call => callFacts.get(rc.id()).exists(_.isAllocCall)
@@ -740,10 +853,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             }
             out.get(lhs).foreach { t =>
                 // overwriting a live allocation loses the only handle: the overwrite IS the leak
-                // (a realloc is not an overwrite - it consumed the old block and produced this)
-                if t.state == StAllocated && !rhsIsAlloc && !rhsIsReallocOfLhs then
-                  record(c, TagLeak, s"leak:$lhs")
+                // (a realloc is not an overwrite - it consumed the old block and produced this;
+                // and an aliased block still has its other handles)
+                if t.state == StAllocated && !rhsIsAlloc && !rhsIsReallocOfLhs &&
+                  !t.aliases.exists(out.contains)
+                then record(c, TagLeak, s"leak:$lhs")
             }
+            // lhs is rebound: it leaves its alias group, and its fields are someone else's now
+            out = dropFieldsOf(unalias(out, lhs), lhs)
             // an int-typed destination of a HEAP-family call holds its error code, not the
             // block: `ret = av_reallocp(&p, n)` allocates into p and returns 0/AVERROR. Tracking
             // ret as the allocation was the largest remaining MS-ALLOC-003 bucket. The handle
@@ -832,7 +949,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   out = out.updated(lhs, Tracked(StStackAddr, other.id))
               case other =>
                   trackedNameOf(other).flatMap(useState.get).foreach { t =>
-                      out = out.updated(lhs, t)
+                      out = out.updated(lhs, t.copy(aliases = Set.empty))
+                      out = linkAlias(out, lhs, trackedNameOf(other).get)
                   }
                   // `p = tmp` after `tmp = realloc(p, n)`: the block moved back into p, and
                   // tmp no longer owns it - else tmp leaks when p is returned
@@ -856,7 +974,22 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   castOperand(rc).flatMap(trackedNameOf)
               case _ => trackedNameOf(rhs)
             rhsTracked.foreach { name =>
-                out.get(name).foreach(t => out = out.updated(name, t.copy(state = StEscaped)))
+                out.get(name).foreach { t =>
+                    out = withGroup(out, name, t.aliases, StEscaped)
+                    out = out.updated(name, t.copy(state = StEscaped))
+                }
+            }
+            // ... and the field itself is tracked from here: a fresh block, a reset, or unknown
+            fieldLhs.foreach { f =>
+                val alloc = rhs match
+                  case rc: Call if rc.name == "<operator>.cast" =>
+                      castOperand(rc).collect { case ic: Call => ic }
+                  case rc: Call => Some(rc)
+                  case _        => None
+                if alloc.exists(a => callFacts.get(a.id()).exists(_.isAllocCall)) then
+                  out = out.updated(f, Tracked(StAllocated, alloc.get.id))
+                else if isNullLiteral(rhs) then out = out.updated(f, Tracked(StNullReset, 0L))
+                else out = out - f
             }
             // ... and a stack address stored there escapes the frame with it (E4) - unless
             // "there" is itself frame storage: a member or element of a by-value local
@@ -867,22 +1000,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case _ => ()
     end if
 
-    if isOperatorCall(cf.name) then
-      // 4. index and field accesses through a tracked base are uses
-      cf.args.foreach { arg =>
-          arg match
-            case access: Call if isAccessThroughPointer(access) =>
-                access.argumentOption(1).foreach { base =>
-                    trackedNameOf(base).foreach { name =>
-                        useState.get(name).foreach { t =>
-                          if t.state == StFreed || t.state == StMaybeFreed then
-                            record(base, TagState, stateName(t.state))
-                          noteNullUse(nullUseFacts, base, name, t)
-                        }
-                    }
-                }
-            case _ => ()
-      }
+    // 4. index and field accesses through a tracked base are uses - as an operator's operand,
+    //    and as any call's argument: `printf("%c", p[0])` reads through p as surely as `p[0] = 1`
+    //    writes through it (a loop that frees p after that printf was never reported)
+    cf.args.foreach { arg =>
+        arg match
+          case access: Call if isAccessThroughPointer(access) =>
+              access.argumentOption(1).foreach { base =>
+                  trackedNameOf(base).foreach { name =>
+                      useState.get(name).foreach { t =>
+                        if t.state == StFreed || t.state == StMaybeFreed then
+                          record(base, TagState, stateName(t.state))
+                        noteNullUse(nullUseFacts, base, name, t)
+                      }
+                  }
+              }
+          case _ => ()
+    }
+    if isOperatorCall(cf.name) then ()
     else if cf.isMemoryCall then
       // 5. an inventoried memory call USES its pointer arguments; ownership unchanged. F1: only
       //    the positions the inventory says the call READS THROUGH (dst/src) are uses for the
@@ -933,9 +1068,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 record(operand, TagState, stateName(t.state))
               if viaAddress.isEmpty && summaryDerefsArgs.contains(arg.argumentIndex) then
                 noteNullUse(nullUseFacts, operand, name, t)
+              out = withGroup(out, name, t.aliases, StEscaped)
               out = out.updated(name, t.copy(state = StEscaped))
             }
         }
+        // the callee may rewrite the members of what it was handed
+        operand match
+          case i: Identifier => out = dropFieldsOf(out, i.name)
+          case _             => ()
       }
       // ... and the callee's effect summary (E5), AFTER the generic escape: a call to a method
       // that unconditionally frees one of its parameters frees the matching argument HERE - an
@@ -956,6 +1096,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                             // use-after-free
                             record(operand, TagState, ValueSummaryFreed)
                           if t.state != StNullable then
+                            out = withGroup(out, name, t.aliases, StFreed)
                             out = out.updated(name, t.copy(state = StFreed))
                         }
                     }
@@ -1076,7 +1217,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                       joinStates(ta.state, tb.state),
                       math.min(ta.site, tb.site),
                       nullable = ta.nullable || tb.nullable,
-                      checked = ta.checked && tb.checked
+                      checked = ta.checked && tb.checked,
+                      aliases = ta.aliases.intersect(tb.aliases)
                     )
                 case (Some(t), None) => name -> t
                 case (None, Some(t)) => name -> t
@@ -1111,7 +1253,59 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
   private def trackedNameOf(e: AstNode): Option[String] = e match
     case i: Identifier => Some(i.name)
-    case _             => None
+    // `s->p` / `s.p` over an identifier base: a field is tracked as its own variable
+    case c: Call
+        if c.name == "<operator>.indirectFieldAccess" || c.name == "<operator>.fieldAccess" =>
+        (c.argumentOption(1), c.argumentOption(2)) match
+          case (Some(b: Identifier), Some(f: FieldIdentifier)) =>
+              val sep = if c.name == "<operator>.indirectFieldAccess" then "->" else "."
+              Some(s"${b.name}$sep${f.canonicalName}")
+          case _ => None
+    case _ => None
+
+  /** A tracked field path: its block is owned by the struct, so it never leaks from the frame. */
+  private def isFieldName(name: String): Boolean = name.contains("->") || name.contains(".")
+
+  /** Forget every field tracked through `base`: rebinding it, or handing it (or its address) to a
+    * callee that may rewrite its members, makes their states stale.
+    */
+  private def dropFieldsOf(m: Map[String, Tracked], base: String): Map[String, Tracked] =
+      m.filterNot { case (n, _) => n.startsWith(s"$base->") || n.startsWith(s"$base.") }
+
+  /** Remove `name` from its alias group, before it is rebound. */
+  private def unalias(m: Map[String, Tracked], name: String): Map[String, Tracked] =
+      m.get(name) match
+        case Some(t) if t.aliases.nonEmpty =>
+            t.aliases.foldLeft(m.updated(name, t.copy(aliases = Set.empty))) { (acc, a) =>
+                acc.get(a).fold(acc)(ta => acc.updated(a, ta.copy(aliases = ta.aliases - name)))
+            }
+        case _ => m
+
+  /** `lhs = rhs` of a tracked pointer: lhs joins rhs's alias group. */
+  private def linkAlias(m: Map[String, Tracked], lhs: String, rhs: String): Map[String, Tracked] =
+      if lhs == rhs || isFieldName(lhs) || isFieldName(rhs) then m
+      else
+        m.get(rhs) match
+          case Some(t) =>
+              val group = (t.aliases + rhs) - lhs
+              group.foldLeft(m.updated(lhs, t.copy(aliases = group))) { (acc, g) =>
+                  acc.get(g).fold(acc)(tg => acc.updated(g, tg.copy(aliases = tg.aliases + lhs)))
+              }
+          case None => m
+
+  /** The state `name` moves to, applied to its alias group as well: the block's fate is shared. */
+  private def withGroup(
+    m: Map[String, Tracked],
+    name: String,
+    aliases: Set[String],
+    state: AllocState
+  ): Map[String, Tracked] =
+      aliases.foldLeft(m) { (acc, a) =>
+          acc.get(a) match
+            case Some(ta) if ta.state == StAllocated =>
+                acc.updated(a, ta.copy(state = state))
+            case _ => acc
+      }
 
   /** Does this expression DENOTE a stack address (E4): `&local` (through casts), or an array local
     * decaying to its own first element? A local's address is the frame's; an array local used as a
@@ -1264,7 +1458,10 @@ object AllocationStatePass:
     state: AllocState,
     site: Long,
     nullable: Boolean = false,
-    checked: Boolean = false
+    checked: Boolean = false,
+    // the other variables holding the SAME block (`q = p`): a free through one frees them all.
+    // A must-alias set - the join intersects it
+    aliases: Set[String] = Set.empty
   )
 
   /** everything the transfer needs about one call, read once per method */

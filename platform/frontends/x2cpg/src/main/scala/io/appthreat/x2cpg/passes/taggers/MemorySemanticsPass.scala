@@ -496,6 +496,19 @@ object MemorySemanticsPass:
 
   // --- bodies -----------------------------------------------------------------------------------
 
+  /** `free(p)` / `free(*pp)` (through casts) of the method's first parameter: what makes it a free
+    * of its argument. `free(b->ctx)` releases a member, and the struct stays the caller's.
+    */
+  private def freesFirstParam(method: Method, free: Call): Boolean =
+    val first = method.parameter.l.find(_.index == 1).map(_.name)
+    def root(e: AstNode): Option[String] = e match
+      case i: Identifier => Some(i.name)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.lastOption.flatMap(root)
+      case c: Call if c.name == "<operator>.indirection" => c.argumentOption(1).flatMap(root)
+      case _ => None
+    free.argumentOption(1).flatMap(root).exists(first.contains)
+
   private def fromBody(
     method: Method,
     known: String => Option[MemApiVocab.MemApiEntry]
@@ -513,7 +526,7 @@ object MemorySemanticsPass:
         if producers.nonEmpty && frees.isEmpty && reads.isEmpty && real.forall(isProducer) then
           allocatorEntry(method, producers, known)
         else if frees.nonEmpty && producers.isEmpty && reads.isEmpty && real.forall(isFree) &&
-          returnsNoValue(method)
+          returnsNoValue(method) && frees.forall(freesFirstParam(method, _))
         then Some(MemApiVocab.MemApiEntry(method.name, free = Some(FamilyHeap)))
         else None
 
