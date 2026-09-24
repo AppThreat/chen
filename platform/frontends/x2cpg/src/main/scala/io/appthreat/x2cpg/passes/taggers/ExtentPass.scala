@@ -339,7 +339,9 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
 
   /** `alloc:<size-argument id>`, or `sizeof:<expr>` when the size argument is a sizeof. The
     * pointer's producer may be a realloc (D1) - `p = av_realloc(p, n)` sizes p exactly like a
-    * malloc does.
+    * malloc does. F4: the allocation may sit under a cast (`p = (char *)malloc(n)`), which is how
+    * cwe122's `buf = (char *)malloc(10)` arrived with extent `unknown` and the constant overflow of
+    * it was invisible to every bounds rule.
     */
   private def allocExtentOf(use: Expression): Option[String] =
       OverlayFacts
@@ -348,11 +350,18 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
           .flatMap { defNode =>
               defNode._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
           }
-          .flatMap { assignment =>
-              assignment.argumentOption(2).collect { case alloc: Call => alloc }
-          }
-          .find(isAllocationCall)
+          .flatMap(assignment => assignment.argumentOption(2).flatMap(allocCallOf))
           .flatMap(sizeArgValueOf)
+          .headOption
+
+  /** The allocation call an expression produces, through casts - shared by the member-extent scan
+    * and the def walk.
+    */
+  private def allocCallOf(e: Expression): Option[Call] = e match
+    case c: Call if isAllocationCall(c) => Some(c)
+    case c: Call if c.name.startsWith("<operator>.cast") =>
+        c.argument.l.collectFirst { case inner: Call => inner }.flatMap(allocCallOf)
+    case _ => None
 
   private def extentOfField(fieldAccess: Call): Option[(String, List[StoredNode])] =
       OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>

@@ -71,6 +71,9 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
     ruleIndexBounds(record)
+    ruleCapacityOverrun(record)
+    ruleWrongDeallocation(record)
+    ruleUncontrolledAllocationSize(record)
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
     ruleAllocationState(record)
@@ -459,6 +462,426 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     )
     if isWrite then RuleIndexWrite else RuleIndexRead
 
+  /** MS-BOUND-006/007 (F4, part 6): a write or copy overruns a buffer whose capacity the graph
+    * KNOWS. The CWE is the storage family the extent names - CWE-121 for a declared array
+    * (`const:`, stack or struct member alike), CWE-122 for an allocator-sized buffer (`alloc:`).
+    * Three arms over facts that already existed when the nine CWE-121/122 corpus rows were all
+    * missed:
+    *
+    *   - **a constant length past the extent**: `memcpy(buf, s, 100)` into `malloc(10)` - the
+    *     cwe122 fixture rows. Invisible until ExtentPass learned to see the allocation under its
+    *     cast (`(char *)malloc(10)` resolved to `unknown`), and no rule asked the
+    *     constant-vs-capacity question - MS-BOUND-002 needs an attacker, and this arm needs only
+    *     arithmetic.
+    *   - **an unbounded string copy into a fixed buffer** (the cwe121 strcpy/sprintf rows): the
+    *     copy family with NO length argument - strcpy/strcat/sprintf - where the content argument's
+    *     origin is attacker-controlled and no guard bounds the source's length against anything. A
+    *     call is of this family exactly when the inventory gives it a dst and no len - data, not a
+    *     name list. Restricted to `const:` extents: `strcpy` into an allocator-sized buffer is
+    *     CWE-131's off-by-one question (needs the strlen arithmetic), not this rule's.
+    *   - **a loop write bounded by an unvalidated count** (the struct-array row, CVE-2026-64831's
+    *     shape): the index is an induction variable a loop comparison bounds above by an
+    *     attacker-origin COUNT, the base has a known extent, and nothing bounds the count itself -
+    *     `for (i = 0; i < count; i++) vps->hrd[i] = src[i]`. The good pair caps the count (`if
+    *     (count > MAX_HRD) return;`) and stands down: the cap is a NOT-holding comparison of an
+    *     early-exit guard, which no CDG edge reaches.
+    */
+  private def ruleCapacityOverrun(record: (StoredNode, String) => Unit): Unit =
+    val attackers = Set(ValueOriginPass.OriginCallerParam, ValueOriginPass.OriginUntrustedRead)
+    val sitesByCall = OverlayFacts.memoryArgumentSites(atom)
+        .groupBy { case (c, _, _) => c }
+        .map { case (c, rows) => c -> rows.map { case (_, arg, _) => arg }.distinct }
+
+    def literalNumberOf(e: Expression): Option[Long] = e match
+      case l: Literal => l.code.trim.toLongOption
+      case _          => None
+
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+          Some(c)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
+      case _ => None
+
+    /** The numeric capacity the dst's extent names, when it is knowable: `const:N` outright,
+      * `alloc:<size-arg>` when the allocation's own size argument is a literal.
+      */
+    def extentCapacity(dst: Expression): Option[Long] =
+        dst.tag.name(ExtentPass.TagExtent).value.l.headOption.flatMap {
+            case v if v.startsWith(s"${ExtentPass.ValueConst}:") =>
+                v.stripPrefix(s"${ExtentPass.ValueConst}:").toLongOption
+            case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
+                OverlayFacts
+                    .reachingDefsIn(dst)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                    .flatMap(allocCallOf)
+                    .flatMap(alloc =>
+                        alloc.argument.l.find(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                    )
+                    .flatMap(literalNumberOf)
+                    .headOption
+            case _ => None
+        }
+
+    /** The rule id an extent family selects: declared array -> CWE-121, allocation -> CWE-122. */
+    def extentRule(dst: Expression): Option[String] =
+        dst.tag.name(ExtentPass.TagExtent).value.l.headOption.flatMap {
+            case v if v.startsWith(s"${ExtentPass.ValueConst}:") => Some(RuleFixedExtentOverrun)
+            case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") => Some(RuleHeapExtentOverrun)
+            case _                                               => None
+        }
+
+    // arm 1: a constant length past the extent
+    sitesByCall.foreach { case (call, args) =>
+        val dstArgs = args.filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+        val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+        for
+          dst  <- dstArgs.headOption
+          len  <- lenArgs.collectFirst(Function.unlift(literalNumberOfAs))
+          cap  <- extentCapacity(dst)
+          rule <- extentRule(dst)
+          if len._2 > cap
+        do record(len._1, rule)
+    }
+
+    // arm 2: the implicit-length copy family (dst role, no len role) into a FIXED buffer
+    sitesByCall.foreach { case (call, args) =>
+        val dstArgs = args.filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+        val srcArgs = args.filter(a => a.tag.name(MemoryApiPass.TagSrc).l.nonEmpty)
+        val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+        if dstArgs.nonEmpty && srcArgs.nonEmpty && lenArgs.isEmpty then
+          dstArgs.headOption.foreach { dst =>
+              extentRule(dst).filter(_ == RuleFixedExtentOverrun).foreach { rule =>
+                // the content: a src argument, or (sprintf's variadic %s) an argument the
+                // inventory gave no role at all
+                val rolePositions = (dstArgs ++ srcArgs).map(_.argumentIndex).toSet
+                val extras = call.argument.l
+                    .filter(a => !rolePositions.contains(a.argumentIndex))
+                    .filterNot(_.isFieldIdentifier)
+                (srcArgs ++ extras).find(a =>
+                    ValueOriginPass.originNamesOf(a).exists(attackers.contains)
+                ).foreach { content =>
+                    if !lengthGuardedCopy(call, content) then record(content, rule)
+                }
+              }
+          }
+    }
+
+    // arm 3: a loop write bounded by an unvalidated count
+    atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+      val conds = method.ast.collectAll[ControlStructure].l
+          .flatMap(_.condition.collect { case c: Call => c })
+      def factsAt(holds: Boolean) =
+          conds.flatMap(c => GuardPass.conjuncts(c, holds).getOrElse(Nil)).flatMap {
+              case (cmp, h) => GuardPass.directionalFacts(cmp, h)
+          }
+      val holdsFacts                           = factsAt(holds = true)
+      val rejectsFacts                         = factsAt(holds = false)
+      def keyOf(e: Expression): Option[String] = OverlayFacts.variableKey(e)
+      def isConstantish(e: Expression): Boolean = e match
+        case _: Literal                                        => true
+        case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+        case c: Call
+            if !c.name.startsWith("<operator>") && c.ast.isLiteral.l.nonEmpty &&
+                c.ast.isIdentifier.l.isEmpty && c.ast.isCall.l.forall(_.id == c.id) =>
+            // an unexpanded macro the frontend left as a call, carrying its expansion as a
+            // subtree of literals - a #define'd bound, read from the graph rather than
+            // guessed from the name (MAX_HRD is 16 because the expansion says so)
+            true
+        // a #define constant: an identifier that is neither a local nor a parameter here -
+        // or one the frontend gave a local but no definition (macro constants get locals),
+        // the same def-less-external-constant reading ValueOriginPass uses for NULL
+        case i: Identifier =>
+            (method.local.name(i.name).l.isEmpty && method.parameter.name(i.name).l.isEmpty) ||
+            OverlayFacts.reachingDefsIn(i).forall(_.isInstanceOf[Method])
+        case _ => false
+      // a count is capped when some early-exit comparison (read at its NOT-holding polarity -
+      // the side an in-block successor runs on, which no CDG edge reaches) bounds it above
+      // against a constant
+      def cappedAbove(bound: Expression): Boolean =
+        val boundKey = keyOf(bound)
+        boundKey.exists(k =>
+            rejectsFacts.exists { case (bounded, above, cap) =>
+                above && keyOf(bounded).contains(k) && isConstantish(cap)
+            }
+        )
+      // a loop bounded by the SAME variable that sizes the allocation writes exactly the
+      // buffer's capacity: `malloc(count * sizeof(int)); for (i < count) arr[i]` is bounded
+      // by construction, whatever count is - the rule stands down
+      def selfSizedLoop(base: Expression, loopBound: Expression): Boolean =
+          base.tag.name(ExtentPass.TagExtent).value.l.headOption.exists {
+              case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
+                  OverlayFacts
+                      .reachingDefsIn(base)
+                      .collect { case d: Identifier => d }
+                      .flatMap(_._astIn.collectFirst {
+                          case a: Call if a.name == "<operator>.assignment" => a
+                      })
+                      .flatMap(_.argumentOption(2))
+                      .flatMap(allocCallOf)
+                      .exists(alloc =>
+                          alloc.argument.l
+                              .filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                              .exists { sz =>
+                                // the size may be the count scaled (`count * sizeof(T)`):
+                                // the bound's key on the size or one of its factors
+                                val szKeys = keyOf(sz).toSet ++ (sz match
+                                  case c: Call
+                                      if c.name == "<operator>.multiplication" ||
+                                          c.name == "<operator>.division" =>
+                                      c.argument.l.flatMap(a => keyOf(a)).toSet
+                                  case _ => Set.empty
+                                )
+                                keyOf(loopBound).exists(szKeys.contains)
+                              }
+                      )
+              case _ => false
+          }
+      method.ast
+          .isCall
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .foreach { access =>
+              for
+                idx    <- access.argumentOption(2)
+                base   <- access.argumentOption(1)
+                rule   <- extentRule(base)
+                idxKey <- keyOf(idx)
+                if ruleIdFor(access) == RuleIndexWrite
+                if idx.tag.name(GuardPass.TagByExtent).l.isEmpty
+                attackerCount = holdsFacts.exists { case (bounded, above, bound) =>
+                    above && keyOf(bounded).contains(idxKey) &&
+                    ValueOriginPass.originNamesOf(bound).exists(attackers.contains) &&
+                    !isConstantish(bound) && !cappedAbove(bound) &&
+                    !selfSizedLoop(base, bound)
+                }
+                if attackerCount
+              do record(idx, rule)
+          }
+    }
+  end ruleCapacityOverrun
+
+  /** The (literal, node) pair of an expression when it is a plain literal - Function.unlift keeps
+    * the for-comprehension shape of the arm-1 loop.
+    */
+  private def literalNumberOfAs(e: Expression): Option[(Expression, Long)] =
+      e match
+        case l: Literal => l.code.trim.toLongOption.map(v => (l, v))
+        case _          => None
+
+  /** Is the copy guarded by a comparison bounding some call over the content variable above - `if
+    * (strlen(userInput) < sizeof(dest)) strcpy(dest, userInput)`? The guard bounds the source's
+    * LENGTH (a call of the variable), not the variable itself, so the structural question is
+    * whether a controller's bounded operand is a call reading that variable.
+    */
+  private def lengthGuardedCopy(call: Call, content: Expression): Boolean =
+      OverlayFacts.variableKey(content).exists { contentKey =>
+          call.controlledBy.collect { case c: Call => c }.exists { controller =>
+              GuardPass
+                  .conjuncts(controller, GuardPass.holdsAt(controller, call))
+                  .getOrElse(Nil)
+                  .exists { case (cmp, holds) =>
+                      GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
+                          above && (bounded match
+                            case bc: Call =>
+                                bc.argument.l.exists(a =>
+                                    OverlayFacts.variableKey(a).contains(contentKey)
+                                )
+                            case _ => false
+                          )
+                      }
+                  }
+          }
+      }
+
+  /** MS-ALLOC-005/006 (F5, part 6): the deallocation of the wrong thing, over the state and
+    * inventory facts. One implementation, two CWE families by shape:
+    *
+    *   - **CWE-590** - a free of storage that is not the heap's: the argument holds this frame's
+    *     storage (the state pass's `stack-addr` fact, or an array/static LOCAL directly - the
+    *     `storage-class=static` tag c2cpg writes), or is a string literal.
+    *   - **CWE-761** - a free of a pointer not at the start of its buffer: the argument is pointer
+    *     arithmetic (`p + 4`, `p += n`), or an identifier whose definition is such arithmetic on a
+    *     tracked allocation.
+    *
+    * and **MS-ALLOC-007 (CWE-762)** - the release family does not match the acquisition family. The
+    * graph cannot distinguish `new[]`/`delete[]` from `new`/`delete` (frontend probe Q3), so the
+    * reachable mismatches are the cross-family ones: `new` released by `free`, `malloc` released by
+    * `delete`. The array/scalar confusion inside one family is out of reach and is said so rather
+    * than guessed.
+    */
+  private def ruleWrongDeallocation(record: (StoredNode, String) => Unit): Unit =
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+          Some(c)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
+      case _ => None
+
+    atom.call.l.foreach { c =>
+      val freeFamilies = tagValues(c, MemoryApiPass.TagFree)
+      if freeFamilies.nonEmpty then
+        c.argumentOption(1).foreach { arg =>
+            // CWE-590: non-heap storage
+            arg match
+              case lit: Literal if lit.code.startsWith("\"") =>
+                  record(lit, RuleNonHeapFree)
+              case i: Identifier =>
+                  // a STATIC or ARRAY local is not heap storage, whatever the callee thinks
+                  val localOpt = i.method.local.name(i.name).l.headOption
+                  localOpt.foreach { local =>
+                      if local.tag
+                            .name(io.appthreat.x2cpg.Defines.StorageClassTag)
+                            .value(io.appthreat.x2cpg.Defines.StorageClassStatic)
+                            .l
+                            .nonEmpty
+                      then record(i, RuleNonHeapFree)
+                      else if OverlayFacts.arrayExtent(local.typeFullName).isDefined ||
+                        local.typeFullName.trim.endsWith("[]")
+                      then record(i, RuleNonHeapFree)
+                  }
+                  // the state pass's frame-storage fact (q = &x; free(q)), and a
+                  // definition that is a string literal (p = "literal"; free(p))
+                  if i.tag.name(AllocationStatePass.TagState).value.l
+                        .contains("stack-addr") ||
+                    OverlayFacts
+                        .reachingDefsIn(i)
+                        .collect { case d: Identifier => d }
+                        .flatMap(d =>
+                            d._astIn.collectFirst {
+                                case a: Call if a.name == "<operator>.assignment" => a
+                            }
+                        )
+                        .flatMap(_.argumentOption(2))
+                        .exists {
+                            case lit: Literal => lit.code.startsWith("\"")
+                            case _            => false
+                        }
+                  then record(i, RuleNonHeapFree)
+                  // CWE-761: the identifier's definition is pointer arithmetic over a
+                  // tracked allocation
+                  val defsAreOffsetArith = OverlayFacts
+                      .reachingDefsIn(i)
+                      .collect { case d: Identifier => d }
+                      .flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call if a.name == "<operator>.assignment" => a
+                          }
+                      )
+                      .flatMap(_.argumentOption(2))
+                      .exists {
+                          case arith: Call
+                              if arith.name == "<operator>.addition" ||
+                                  arith.name == "<operator>.subtraction" =>
+                              arith.argument.l.collect { case x: Expression => x }
+                                  .exists(op =>
+                                      // one operand is the allocation, the other the offset
+                                      allocCallOf(op).isDefined ||
+                                          OverlayFacts.reachingDefsIn(op)
+                                              .collect { case d: Identifier => d }
+                                              .flatMap(d =>
+                                                  d._astIn.collectFirst {
+                                                      case a: Call
+                                                          if a.name == "<operator>.assignment" => a
+                                                  }
+                                              )
+                                              .flatMap(_.argumentOption(2))
+                                              .exists(x => allocCallOf(x).isDefined)
+                                  )
+                          case _ => false
+                      }
+                  if defsAreOffsetArith then record(i, RuleOffsetFree)
+                  // CWE-762: family mismatch against the allocation that produced the pointer
+                  val allocFamily = OverlayFacts
+                      .reachingDefsIn(i)
+                      .collect { case d: Identifier => d }
+                      .flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call if a.name == "<operator>.assignment" => a
+                          }
+                      )
+                      .flatMap(_.argumentOption(2))
+                      .flatMap(allocCallOf)
+                      .flatMap(alloc => tagValues(alloc, MemoryApiPass.TagAlloc).headOption)
+                      .headOption
+                  allocFamily.foreach { acquired =>
+                      if freeFamilies.exists(_ != acquired) then
+                        record(i, RuleMismatchedFree)
+                  }
+              case arith: Call
+                  if arith.name == "<operator>.addition" || arith.name == "<operator>.subtraction" =>
+                  record(arith, RuleOffsetFree)
+              case _ => ()
+        }
+      end if
+    }
+  end ruleWrongDeallocation
+
+  /** MS-ALLOC-008/009 (F5, part 6): an allocation whose size is attacker-controlled with no bound
+    * above - MS-INT-001's question without requiring the arithmetic. The card's constraint is
+    * deliberate: a plain `struct-field` origin is NOT an attacker here (part 5's MS-INT-001
+    * diagnosis showed two thirds of that rule's noise turned on struct-field arithmetic - every
+    * correctly written FFmpeg counter). CWE-789 for a plain unbounded size; CWE-680 when the size
+    * is attacker-influenced ARITHMETIC (the integer-overflow-to-buffer question, which MS-INT-001
+    * asks at `low` with CWE-190 - this rule names the CWE the row actually is). The caller-param
+    * arm reuses MS-BOUND-002's C3 call-site check: a helper whose every intra-tree caller passes a
+    * constant is bounded at its callers.
+    */
+  private def ruleUncontrolledAllocationSize(record: (StoredNode, String) => Unit): Unit =
+    val attackers = Set(ValueOriginPass.OriginUntrustedRead, ValueOriginPass.OriginCallerParam)
+    OverlayFacts
+        .memoryArgumentSites(atom)
+        .collect { case (call, arg, MemoryApiPass.TagLen) => (call, arg) }
+        .foreach { case (call, lenArg) =>
+            val allocates = tagValues(call, MemoryApiPass.TagAlloc).nonEmpty ||
+                tagValues(call, MemoryApiPass.TagRealloc).nonEmpty
+            if allocates then
+              val tags    = lenArg.tag.name.l
+              val origins = ValueOriginPass.originNamesOf(lenArg).filter(attackers.contains)
+              val bounded =
+                  tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
+              def unboundedAtCallers: Boolean =
+                val callers = call.method._callIn.collectAll[Call].l.distinct
+                callers.isEmpty || {
+                    val params = lenArg.tag.name(ValueOriginPass.OriginCallerParam).value.l
+                        .flatMap(name => call.method.parameter.name(name).headOption)
+                    params.isEmpty || {
+                        val siteArgs =
+                            for
+                              site  <- callers
+                              param <- params
+                              arg   <- site.argumentOption(param.index)
+                            yield arg
+                        siteArgs.isEmpty || siteArgs.exists(arg =>
+                            ValueOriginPass.originNamesOf(arg) != Set(
+                              ValueOriginPass.OriginConstant
+                            )
+                        )
+                    }
+                }
+              val controlled = origins.contains(ValueOriginPass.OriginUntrustedRead) ||
+                  (origins.contains(ValueOriginPass.OriginCallerParam) && unboundedAtCallers)
+              if controlled && !bounded then
+                val arithmetic = lenArg match
+                  case c: Call =>
+                      c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
+                  case _ => false
+                record(
+                  lenArg,
+                  if arithmetic then RuleUncontrolledSizeOverflow else RuleUncontrolledSize
+                )
+            end if
+        }
+  end ruleUncontrolledAllocationSize
+
   /** MS-INT-001 (D0, CWE-190): an allocation or copy length computed by arithmetic whose operands
     * are attacker-influenced, with no guard bounding an operand from above and no widened operand.
     * The facts were left on the graph by C5 and nobody read them: `int-arith-len` names the
@@ -741,6 +1164,20 @@ object MemorySafetyFindingPass:
   /** The half-bounded signed-index arm: a hypothesis, reported at `low`. */
   final val RuleNegativeIndexHazard = "MS-BOUND-005"
 
+  /** F4 (part 6): a write or copy overruns a buffer with a KNOWN capacity - the CWE is the storage
+    * family the extent names.
+    */
+  final val RuleFixedExtentOverrun = "MS-BOUND-006"
+  final val RuleHeapExtentOverrun  = "MS-BOUND-007"
+
+  /** F5 (part 6): the deallocation of the wrong thing, and the uncontrolled allocation size.
+    */
+  final val RuleNonHeapFree              = "MS-ALLOC-005"
+  final val RuleOffsetFree               = "MS-ALLOC-006"
+  final val RuleMismatchedFree           = "MS-ALLOC-007"
+  final val RuleUncontrolledSize         = "MS-ALLOC-008"
+  final val RuleUncontrolledSizeOverflow = "MS-ALLOC-009"
+
   final val RuleIntegerOverflow   = "MS-INT-001"
   final val RuleResignAcrossGuard = "MS-INT-002"
 
@@ -818,6 +1255,25 @@ object MemorySafetyFindingPass:
           "check - the CVE-2026-75146 shape, and also what most correct counters look like"
     ),
     MemorySafetyRule(
+      id = RuleFixedExtentOverrun,
+      cwe = "CWE-121",
+      kind = "fixed-extent-overrun",
+      severity = "high",
+      confidence = "medium",
+      message = "a write or copy overruns a fixed buffer's declared capacity - a constant " +
+          "length past the extent, an unbounded string copy into it, or a loop bounded by an " +
+          "unvalidated count"
+    ),
+    MemorySafetyRule(
+      id = RuleHeapExtentOverrun,
+      cwe = "CWE-122",
+      kind = "heap-extent-overrun",
+      severity = "high",
+      confidence = "medium",
+      message = "a write or copy overruns an allocated buffer's capacity - a constant length " +
+          "past the allocation's size, or a loop bounded by an unvalidated count"
+    ),
+    MemorySafetyRule(
       id = RuleIntegerOverflow,
       cwe = "CWE-190",
       kind = "integer-overflow-length",
@@ -849,6 +1305,56 @@ object MemorySafetyFindingPass:
       message = "a sign-changing cast is the value a comparison bounds, while the guarded uses " +
           "read it at its declared width - the guard checked one signedness, the use happens at " +
           "another (CVE-2026-75145 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleNonHeapFree,
+      cwe = "CWE-590",
+      kind = "free-of-non-heap",
+      severity = "high",
+      confidence = "high",
+      message = "storage that is not the heap's is released - a stack buffer, a static, or a " +
+          "string literal; the heap's ownership language does not apply to it"
+    ),
+    MemorySafetyRule(
+      id = RuleOffsetFree,
+      cwe = "CWE-761",
+      kind = "free-of-offset-pointer",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer not at the start of its buffer is released - pointer arithmetic " +
+          "moved it into the allocation, and only the original base is freeable"
+    ),
+    MemorySafetyRule(
+      id = RuleMismatchedFree,
+      cwe = "CWE-762",
+      kind = "mismatched-deallocation",
+      severity = "high",
+      confidence = "high",
+      message = "the release family does not match the acquisition family - a new-ed pointer " +
+          "released with free, or a malloc-ed one with delete; the allocator's metadata " +
+          "disagrees with the release"
+    ),
+    MemorySafetyRule(
+      id = RuleUncontrolledSize,
+      cwe = "CWE-789",
+      kind = "uncontrolled-allocation-size",
+      severity = "medium",
+      // `low` on the MS-INT-001/MS-BOUND-005 precedent: an unguarded param-sized allocation
+      // is also how every correctly written FFmpeg helper looks, and the C3 caller-site
+      // check cannot separate them at one level - measured before shipping, promoted only
+      // if the per-tree count earns it
+      confidence = "low",
+      message = "an allocation size controlled by the attacker with no guard bounding it - a " +
+          "hostile value exhausts memory or hands back a buffer sized by the request"
+    ),
+    MemorySafetyRule(
+      id = RuleUncontrolledSizeOverflow,
+      cwe = "CWE-680",
+      kind = "overflow-sized-allocation",
+      severity = "high",
+      confidence = "low",
+      message = "an allocation size computed from attacker-influenced arithmetic with no " +
+          "guard bounding an operand - the product can wrap before it sizes the buffer"
     ),
     MemorySafetyRule(
       id = RuleDoubleFree,

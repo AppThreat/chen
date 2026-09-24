@@ -28,7 +28,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |/* the cwe476 fixture's unchecked malloc: the producer may return NULL */
     |void bad_unchecked_malloc(size_t n)
     |{
-    |    char *p = (char *)malloc(n);
+    |    char *p = (char *)malloc(16);
     |    p[0] = 'a';
     |    free(p);
     |}
@@ -36,7 +36,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |/* the fixture's good pair: the guard narrows before the use */
     |void good_checked_malloc(size_t n)
     |{
-    |    char *p = (char *)malloc(n);
+    |    char *p = (char *)malloc(16);
     |    if (p == NULL) return;
     |    p[0] = 'a';
     |    free(p);
@@ -82,7 +82,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |   "any argument of a memory call" */
     |void bad_memcpy_unchecked(size_t n)
     |{
-    |    char *dst = (char *)malloc(n);
+    |    char *dst = (char *)malloc(16);
     |    memcpy(dst, "x", 1);
     |    free(dst);
     |}
@@ -91,7 +91,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |   The dst is checked here, so nothing may fire */
     |void good_memcpy_checked_len(const char *src, size_t n)
     |{
-    |    char *dst = (char *)malloc(n);
+    |    char *dst = (char *)malloc(16);
     |    if (dst == NULL) return;
     |    memcpy(dst, src, n);
     |    free(dst);
