@@ -107,9 +107,58 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       dstGraph,
       findings.toList.filter(_._2.nonEmpty).flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low"))
+      } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low")) ++
+          heuristicFindings(findings).map { case (node, rule) =>
+              (node, TagConfidence, s"$rule=low")
+          }
     )
   end run
+
+  /** The rules a free call triggers: the double free and use-after-free the free's state enables,
+    * and the wrong-deallocation checks of the free's own argument.
+    */
+  private val FreeTriggeredRules =
+      Set(RuleDoubleFree, RuleUseAfterFree, RuleNonHeapFree, RuleOffsetFree, RuleMismatchedFree)
+
+  /** Findings that rest on a HEURISTIC summary (MemorySemanticsPass: a `void f(void *)` named
+    * `free`, an `int f(void *, size_t)` named `realloc`, with no body in scope): a finding on the
+    * guessed call or inside one of its arguments, and a free-triggered finding over a pointer a
+    * guessed free releases in the same method. The role is a guess, so the finding reports at
+    * `low`, whatever its rule's confidence.
+    */
+  private def heuristicFindings(
+    findings: mutable.LinkedHashMap[StoredNode, mutable.LinkedHashSet[String]]
+  ): List[(StoredNode, String)] =
+    val heuristic = MemorySemanticsPass.heuristicSummaries(atom)
+    if heuristic.isEmpty then return Nil
+    def insideGuessedCall(e: Expression): Boolean =
+        (e +: e.inAst.collectAll[Expression].l).exists {
+            case c: Call => heuristic.contains(c.name)
+            case _       => false
+        }
+    def rootName(e: Expression): Option[String] = e match
+      case i: Identifier => Some(i.name)
+      case c: Call
+          if c.name == "<operator>.cast" || c.name == "<operator>.addressOf" ||
+              c.name == "<operator>.indirection" =>
+          c.argument.l.collect { case x: Expression => x }.lastOption.flatMap(rootName)
+      case _ => None
+    val freedByMethod = heuristic.toList
+        .flatMap(n => atom.call.nameExact(n).l)
+        .flatMap(c => c.argumentOption(1).flatMap(rootName).map(c.method.id -> _))
+        .groupMap(_._1)(_._2)
+        .view.mapValues(_.toSet).toMap
+    findings.toList.flatMap { case (node, rules) =>
+        node match
+          case e: Expression if insideGuessedCall(e) => rules.toList.map(node -> _)
+          case e: Expression =>
+              val names = (e +: e.ast.collectAll[Expression].l).flatMap(rootName).toSet
+              if freedByMethod.get(e.method.id).exists(_.exists(names.contains)) then
+                rules.toList.filter(FreeTriggeredRules.contains).map(node -> _)
+              else Nil
+          case _ => Nil
+    }
+  end heuristicFindings
 
   /** (method id, line) - the granularity a reader sees a finding at */
   private def siteOf(node: StoredNode): (Long, Int) = node match

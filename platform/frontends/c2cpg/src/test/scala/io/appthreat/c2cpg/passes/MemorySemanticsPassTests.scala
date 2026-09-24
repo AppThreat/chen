@@ -1,9 +1,17 @@
 package io.appthreat.c2cpg.passes
 
+import better.files.File
+import io.appthreat.c2cpg.{C2Cpg, Config}
 import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
+import io.appthreat.dataflowengineoss.layers.dataflows.{OssDataFlow, OssDataFlowOptions}
+import io.appthreat.x2cpg.X2Cpg
 import io.appthreat.x2cpg.passes.taggers.*
+import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.layers.LayerCreatorContext
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
 /** MemorySemanticsPass: the memory facts a hand-written project inventory used to supply, concluded
   * from declarations, bodies and variable storage. Nothing here is named in any inventory - every
@@ -157,3 +165,146 @@ class MemorySemanticsPassTests extends DataFlowCodeToCpgSuite:
         findingsIn("freep_then_free") should not contain "MS-ALLOC-003"
     }
 end MemorySemanticsPassTests
+
+/** A `libavformat/`-scoped run: the allocator layer's header (`libavutil/mem.h`) is reached through
+  * the include path only, so its declarations become no METHOD and its attributes arrive on the
+  * CALLs. None of these names is in any inventory.
+  */
+class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
+
+  private val header =
+      """#include <stddef.h>
+        |#define AV_GCC_VERSION_AT_LEAST(x,y) (__GNUC__ > (x) || __GNUC__ == (x) && __GNUC_MINOR__ >= (y))
+        |#if AV_GCC_VERSION_AT_LEAST(3,1)
+        |    #define av_malloc_attrib __attribute__((__malloc__))
+        |#else
+        |    #define av_malloc_attrib
+        |#endif
+        |#if AV_GCC_VERSION_AT_LEAST(4,3)
+        |    #define av_alloc_size(...) __attribute__((alloc_size(__VA_ARGS__)))
+        |#else
+        |    #define av_alloc_size(...)
+        |#endif
+        |void *av_malloc(size_t size) av_malloc_attrib av_alloc_size(1);
+        |void *av_mallocz(size_t size) av_malloc_attrib av_alloc_size(1);
+        |void *av_calloc(size_t nmemb, size_t size) av_malloc_attrib av_alloc_size(1, 2);
+        |av_alloc_size(1, 2) void *av_malloc_array(size_t nmemb, size_t size);
+        |av_alloc_size(2, 3) void *av_realloc_array(void *ptr, size_t nmemb, size_t size);
+        |char *av_strndup(const char *s, size_t len) av_malloc_attrib;
+        |void av_free(void *ptr);
+        |void av_freep(void *ptr);
+        |void av_freep2(void **ptr);
+        |int av_reallocp(void *ptr, size_t size);
+        |int av_reallocp_array(void *ptr, size_t nmemb, size_t size);
+        |int av_realloc_named(struct node *n, size_t size);
+        |struct node { struct node *next; };
+        |void free_nodes(struct node *n);
+        |void av_free_with_log(void *ptr, int level);
+        |""".stripMargin
+
+  private val source =
+      """#include "libavutil/mem.h"
+        |void log_it(void *p);
+        |/* a body in scope: the heuristic must not override what the body says */
+        |void my_freebuf(void *p) { log_it(p); }
+        |int my_realloc_buf(void *p, size_t n) { log_it(p); return (int)n; }
+        |void uses(int n, void *q, char *s)
+        |{
+        |    void *a = av_mallocz(n);
+        |    void *b = av_calloc(n, 4);
+        |    void *c = av_malloc_array(n, 4);
+        |    q = av_realloc_array(q, n, 4);
+        |    char *d = av_strndup(s, n);
+        |    av_free(a); av_freep(&b); av_freep2(&c); av_free(d);
+        |    av_reallocp(&q, 8); av_reallocp_array(&q, n + 1, 4); av_realloc_named(0, 4);
+        |    my_realloc_buf(q, 4);
+        |    free_nodes(0); av_free_with_log(q, 1); my_freebuf(q);
+        |}
+        |void uaf_through_guessed_free(int n)
+        |{
+        |    char *p = av_malloc(n);
+        |    if (!p)
+        |        return;
+        |    av_free(p);
+        |    p[0] = 1;
+        |}
+        |""".stripMargin
+
+  private lazy val cpg: Cpg =
+    val root = File.newTemporaryDirectory("scopedsem")
+    (root / "libavutil").createDirectories()
+    (root / "libavformat").createDirectories()
+    (root / "libavutil" / "mem.h").write(header)
+    (root / "libavformat" / "a.c").write(source)
+    val out = File.newTemporaryFile("scopedsem", ".atom")
+    out.deleteOnExit()
+    val cpg = new C2Cpg().createCpg(
+      Config()
+          .withInputPath((root / "libavformat").pathAsString)
+          .withOutputPath(out.pathAsString)
+          .withIncludePaths(Set(root.pathAsString))
+          .withAstCache(false)
+          .withFunctionBodies(true)
+    ).get
+    X2Cpg.applyDefaultOverlays(cpg)
+    new OssDataFlow(new OssDataFlowOptions()).run(new LayerCreatorContext(cpg))
+    new MemorySemanticsPass(cpg).createAndApply()
+    new MemoryApiPass(cpg).createAndApply()
+    new ExtentPass(cpg).createAndApply()
+    new GuardPass(cpg).createAndApply()
+    new ValueOriginPass(cpg).createAndApply()
+    new AllocationStatePass(cpg).createAndApply()
+    new MemorySafetyFindingPass(cpg).createAndApply()
+    root.delete(swallowIOExceptions = true)
+    cpg
+
+  private def semanticsOf(name: String): Set[String] =
+      cpg.method.nameExact(name).tag.nameExact(MemorySemanticsPass.TagSemantic).value.l.toSet
+
+  private def evidenceOf(name: String): Set[String] =
+      cpg.method.nameExact(name).tag.nameExact(MemorySemanticsPass.TagEvidence).value.l.toSet
+
+  "attributes of a header outside the analysed input" should:
+    "make the malloc-attributed allocators allocators" in {
+        semanticsOf("av_mallocz") shouldBe Set("alloc:heap", "len:1", "nullable-return")
+        semanticsOf("av_calloc") shouldBe Set("alloc:heap", "count:1", "len:2", "nullable-return")
+        semanticsOf("av_strndup") shouldBe Set("alloc:heap", "nullable-return")
+        evidenceOf("av_mallocz") shouldBe Set(MemorySemanticsPass.EvidenceAttribute)
+    }
+    "make alloc_size without malloc an allocator or a reallocator by the call's signature" in {
+        // no parameter is a pointer: a fresh allocation
+        semanticsOf("av_malloc_array") shouldBe
+            Set("alloc:heap", "count:1", "len:2", "nullable-return")
+        // the first parameter is a pointer: it may hand back its input
+        semanticsOf("av_realloc_array") shouldBe
+            Set("realloc:heap", "count:2", "len:3", "nullable-return")
+    }
+
+  "the deallocator heuristic" should:
+    "make a void function of one void* or void** named free a heuristic free" in {
+        Seq("av_free", "av_freep", "av_freep2").foreach { n =>
+            semanticsOf(n) shouldBe Set("free:heap")
+            evidenceOf(n) shouldBe Set(MemorySemanticsPass.EvidenceHeuristic)
+        }
+    }
+    "leave other shapes alone" in {
+        semanticsOf("free_nodes") shouldBe empty       // a typed pointer, not void*
+        semanticsOf("av_free_with_log") shouldBe empty // two parameters
+        semanticsOf("av_realloc_named") shouldBe empty // a typed pointer, not void*
+    }
+    "make an untyped-pointer-and-sizes function named realloc a heuristic reallocator" in {
+        semanticsOf("av_reallocp") shouldBe Set("realloc:heap", "len:2")
+        semanticsOf("av_reallocp_array") shouldBe Set("realloc:heap", "count:2", "len:3")
+        evidenceOf("av_reallocp_array") shouldBe Set(MemorySemanticsPass.EvidenceHeuristic)
+    }
+    "be ignored when a body is in scope" in {
+        semanticsOf("my_freebuf") should not contain "free:heap"
+        semanticsOf("my_realloc_buf") should not contain "realloc:heap"
+    }
+    "report what a guessed free triggers at low" in {
+        val uses = cpg.method.nameExact("uaf_through_guessed_free").ast.collectAll[StoredNode].l
+        uses.flatMap(_.tag.nameExact("ms-finding").value.l) should contain("MS-ALLOC-002")
+        uses.flatMap(_.tag.nameExact(MemorySafetyFindingPass.TagConfidence).value.l) should
+            contain("MS-ALLOC-002=low")
+    }
+end ScopedHeaderMemorySemanticsTests

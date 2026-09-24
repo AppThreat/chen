@@ -72,8 +72,16 @@ class MemorySemanticsPass(atom: Cpg, externalConfig: Option[String] = None) exte
       println(
         s"MemorySemanticsPass: ${result.summaries.size} function summaries " +
             s"(attribute ${byEvidence.getOrElse(EvidenceAttribute, 0)}, " +
-            s"body ${byEvidence.getOrElse(EvidenceBody, 0)})"
+            s"body ${byEvidence.getOrElse(EvidenceBody, 0)}, " +
+            s"heuristic ${byEvidence.getOrElse(EvidenceHeuristic, 0)})"
       )
+    // CHEN_MEMSEM_DEBUG=1: every summary, to check what a run concluded without a graph query
+    if sys.env.get("CHEN_MEMSEM_DEBUG").contains("1") then
+      result.summaries.toList.sortBy(_._1).foreach { case (name, s) =>
+          System.err.println(
+            s"memsem $name ${s.values.mkString(",")} [${s.evidence.toList.sorted.mkString(",")}]"
+          )
+      }
   end run
 end MemorySemanticsPass
 
@@ -86,6 +94,11 @@ object MemorySemanticsPass:
 
   final val EvidenceAttribute = "attribute"
   final val EvidenceBody      = "body"
+
+  /** A name-and-signature guess, never a proof: [[MemorySafetyFindingPass]] reports a finding a
+    * heuristic free triggers at `low`.
+    */
+  final val EvidenceHeuristic = "heuristic"
 
   final val StorageStack  = "stack"
   final val StorageStatic = "static"
@@ -190,17 +203,22 @@ object MemorySemanticsPass:
   def summarize(cpg: Cpg, declared: Map[String, MemApiVocab.MemApiEntry]): Result =
     val out = mutable.LinkedHashMap.empty[String, Summary]
 
-    // 1. declared attributes: every METHOD carrying one - a header stub or a definition
-    val attrsByName = cpg.method
-        .where(_.tag.nameExact(Defines.FunctionAttributeTag))
-        .l
-        .groupMapReduce(_.name)(m => m.tag.nameExact(Defines.FunctionAttributeTag).value.l.toSet)(
-          _ ++ _
-        )
+    // 1. declared attributes: every METHOD carrying one - a header stub or a definition - and
+    // every CALL carrying one, which is where a header OUTSIDE the analysed input leaves them
+    // (c2cpg builds no METHOD from an included declaration: libavutil/mem.h in a libavformat run)
+    val attrsByName = mutable.LinkedHashMap.empty[String, Set[String]]
+    def addAttrs(name: String, attrs: Iterable[String]): Unit =
+        attrsByName(name) = attrsByName.getOrElse(name, Set.empty) ++ attrs
+    cpg.method.where(_.tag.nameExact(Defines.FunctionAttributeTag)).foreach { m =>
+        addAttrs(m.name, m.tag.nameExact(Defines.FunctionAttributeTag).value.l)
+    }
+    cpg.call.where(_.tag.nameExact(Defines.FunctionAttributeTag)).foreach { c =>
+        addAttrs(c.name, c.tag.nameExact(Defines.FunctionAttributeTag).value.l)
+    }
     val deallocators = mutable.LinkedHashMap.empty[String, Int]
     attrsByName.foreach { case (name, attrs) =>
-        val method = cpg.method.nameExact(name).l.headOption
-        fromAttributes(name, attrs, method, deallocators).foreach(s => out(name) = s)
+        fromAttributes(name, attrs, declaredShape(cpg, name), deallocators)
+            .foreach(s => out(name) = s)
     }
     // GCC 11 `malloc(dealloc, i)`: the named deallocator releases its argument i
     deallocators.foreach { case (dealloc, _) =>
@@ -261,8 +279,136 @@ object MemorySemanticsPass:
           }
     }
 
+    // 4. a deallocator or reallocator whose body is not in scope and whose declaration says
+    // nothing, guessed from its name and signature. Last, so no body conclusion builds on a guess.
+    cpg.method.name.dedup.l.foreach { name =>
+        val lower = name.toLowerCase
+        if (lower.contains("free") || lower.contains("realloc")) && !declared.contains(name) &&
+          !defined.contains(name) && !out.get(name).exists(s =>
+              s.entry.alloc.isDefined || s.entry.realloc.isDefined || s.entry.free.isDefined
+          )
+        then
+          val shape = declaredShape(cpg, name)
+          val guess =
+              if looksLikeDeallocator(name, shape) then
+                Some(MemApiVocab.MemApiEntry(name, free = Some(FamilyHeap)))
+              else reallocatorGuess(name, shape)
+          guess.foreach { g =>
+              out.updateWith(name) {
+                  case Some(s) =>
+                      Some(s.copy(entry = fillEmpty(g, s.entry), evidence = s.evidence + EvidenceHeuristic))
+                  case None => Some(Summary(g, evidence = Set(EvidenceHeuristic)))
+              }
+          }
+    }
+
     Result(out.filterNot { case (name, s) => declared.contains(name) || s.isEmpty }.toMap)
   end summarize
+
+  /** Names of the functions whose memory role the name-and-signature heuristic supplied (it only
+    * supplies one where nothing else did).
+    */
+  def heuristicSummaries(cpg: Cpg): Set[String] =
+      cpg.method.where(_.tag.nameExact(TagEvidence).valueExact(EvidenceHeuristic)).name.toSet
+
+  /** A function's declared return type and parameter types, in order. */
+  final case class Shape(returnType: String, params: List[String]):
+    def returnsPointer: Boolean = OverlayFacts.isPointer(returnType)
+    def isPointerParam(index: Int): Boolean =
+        params.lift(index - 1).exists(t => OverlayFacts.isPointer(t))
+    def pointerParams: List[Int] = params.indices.map(_ + 1).filter(isPointerParam).toList
+
+  private def isUnknownType(t: String): Boolean =
+      t.isEmpty || t == Defines.Any || t == Defines.UnresolvedSignature
+
+  /** `ret(p1,p2)` as c2cpg writes a call's (and a stub's) signature: split at the parameter list's
+    * top-level commas.
+    */
+  private[taggers] def parseSignature(sig: String): Option[Shape] =
+    val open = sig.indexOf('(')
+    if open <= 0 || !sig.trim.endsWith(")") then None
+    else
+      val inner  = sig.trim.substring(open + 1, sig.trim.length - 1)
+      val params = mutable.ListBuffer.empty[String]
+      val cur    = new StringBuilder
+      var depth  = 0
+      inner.foreach {
+          case ',' if depth == 0 => params += cur.toString.trim; cur.clear()
+          case c =>
+              if c == '(' then depth += 1 else if c == ')' then depth -= 1
+              cur += c
+      }
+      if cur.nonEmpty then params += cur.toString.trim
+      val ps = params.toList.filterNot(p => p.isEmpty || p == "void")
+      Some(Shape(sig.take(open).trim, ps))
+
+  /** The shape of `name`: from a METHOD whose return and parameters are typed, else from a
+    * signature - the METHOD's, or that of a call to it (a stub [[MethodStubCreator]] made from
+    * calls types every parameter ANY but keeps the call's declared signature).
+    */
+  private def declaredShape(cpg: Cpg, name: String): Option[Shape] =
+    val methods = cpg.method.nameExact(name).l
+    val typed = methods.collectFirst {
+        case m if !isUnknownType(Option(m.methodReturn.typeFullName).getOrElse("").trim) &&
+              m.parameter.nonEmpty && m.parameter.forall(p => !isUnknownType(p.typeFullName.trim)) =>
+            Shape(
+              m.methodReturn.typeFullName.trim,
+              m.parameter.l.sortBy(_.index).filter(_.index > 0).map(_.typeFullName.trim)
+            )
+    }
+    typed
+        .orElse(methods.iterator.map(m => Option(m.signature).getOrElse(""))
+            .flatMap(parseSignature).find(s => !isUnknownType(s.returnType)))
+        .orElse(cpg.call.nameExact(name).signature.dedup.l.flatMap(parseSignature)
+            .find(s => !isUnknownType(s.returnType)))
+  end declaredShape
+
+  private def normalisedType(t: String): String =
+      t.replace("const", "").filterNot(_.isWhitespace)
+
+  private val IntegerType =
+      """(?:unsigned|signed|size_t|ssize_t|ptrdiff_t|int|long|short|u?int(?:8|16|32|64)_t)(?:int|long)*""".r
+
+  private def isSizeType(t: String): Boolean =
+    val n = normalisedType(t)
+    n == Defines.Any || IntegerType.matches(n)
+
+  /** `int av_reallocp(void *ptr, size_t size)`, `int av_reallocp_array(void *ptr, size_t nmemb,
+    * size_t size)`: a function named `realloc` whose first parameter is an untyped pointer followed
+    * by one size, or by a count and a size - the size is the last argument, the count the one
+    * before it. The result is `realloc`, not `alloc`: it may hand back (or free) its input.
+    */
+  private def reallocatorGuess(name: String, shape: Option[Shape]): Option[MemApiVocab.MemApiEntry] =
+      if !name.toLowerCase.contains("realloc") then None
+      else
+        shape.flatMap { s =>
+            val ps = s.params.map(normalisedType)
+            val firstUntyped = ps.headOption.exists(p => p == "void*" || p == "void**")
+            if !firstUntyped || !ps.tail.forall(isSizeType) then None
+            else
+              ps.size match
+                case 2 => Some(MemApiVocab.MemApiEntry(name, len = Some(2), realloc = Some(FamilyHeap)))
+                case 3 =>
+                    Some(MemApiVocab.MemApiEntry(
+                      name,
+                      count = Some(2),
+                      len = Some(3),
+                      realloc = Some(FamilyHeap)
+                    ))
+                case _ => None
+        }
+
+  /** `void av_free(void *ptr)`, `void av_freep(void **p)`: a function returning nothing whose one
+    * parameter is an untyped pointer and whose name says `free`.
+    */
+  private def looksLikeDeallocator(name: String, shape: Option[Shape]): Boolean =
+      name.toLowerCase.contains("free") && shape.exists { s =>
+          normalisedType(s.returnType) == "void" &&
+          (s.params.map(normalisedType) match
+            case List("void*") | List("void**") => true
+            case _                              => false
+          )
+      }
 
   /** `base` with each role it leaves empty taken from `extra`. */
   private def fillEmpty(
@@ -294,7 +440,7 @@ object MemorySemanticsPass:
   private def fromAttributes(
     name: String,
     attrs: Set[String],
-    method: Option[Method],
+    shape: Option[Shape],
     deallocators: mutable.LinkedHashMap[String, Int]
   ): Option[Summary] =
     val parsed = attrs.toList.collect { case AttrPattern(n, args) =>
@@ -303,12 +449,8 @@ object MemorySemanticsPass:
     def ints(args: List[String]): List[Int] = args.flatMap(_.toIntOption)
     val isMalloc                            = parsed.exists(_._1 == "malloc")
     val allocSize = parsed.collectFirst { case ("alloc_size", args) => ints(args) }
-    val params    = method.map(_.parameter.l.sortBy(_.index)).getOrElse(Nil)
-    val firstIsPointer =
-        params.headOption.exists(p => OverlayFacts.isPointer(p.typeFullName.trim))
-    val returnsPointer = method.exists(m =>
-        OverlayFacts.isPointer(Option(m.methodReturn.typeFullName).getOrElse("").trim)
-    )
+    val firstIsPointer = shape.exists(_.isPointerParam(1))
+    val returnsPointer = shape.exists(_.returnsPointer)
     parsed.collect {
         case ("malloc", dealloc :: rest) if dealloc.toIntOption.isEmpty =>
             deallocators(dealloc) = rest.headOption.flatMap(_.toIntOption).getOrElse(1)
@@ -323,8 +465,7 @@ object MemorySemanticsPass:
     val isAlloc       = isMalloc || (allocSize.isDefined && !isRealloc && returnsPointer)
     val nonnullReturn = parsed.exists(_._1 == "returns_nonnull")
     val nonnullParams = parsed.collect {
-        case ("nonnull", Nil) =>
-            params.filter(p => OverlayFacts.isPointer(p.typeFullName)).map(_.index)
+        case ("nonnull", Nil) => shape.map(_.pointerParams).getOrElse(Nil)
         case ("nonnull", args) => ints(args)
     }.flatten.toSet
     // access(mode, ptr-index[, size-index])

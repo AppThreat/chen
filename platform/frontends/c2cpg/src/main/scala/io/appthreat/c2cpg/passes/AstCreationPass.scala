@@ -64,6 +64,20 @@ object AstCreationPass:
           .sortWith(_.compareToIgnoreCase(_) > 0)
           .toArray
 
+  /** Bump whenever AST creation changes what it emits for unchanged source: a cached AST from an
+    * older frontend is otherwise replayed as-is (the September 2026 `.chen` fragments carried no
+    * call-site `fn-attr` tags, so a warm run silently lost every header attribute).
+    */
+  private val AstFormatVersion = "c2cpg-ast-2"
+
+  /** Everything outside a file that shapes its AST and is known up front: the frontend's output
+    * format, the include paths a header is resolved through, and the defines that gate it. (A
+    * header's own content is not covered.)
+    */
+  def cacheFingerprint(config: Config): String =
+      (AstFormatVersion +: (config.includePaths.toList.sorted ++ config.defines.toList.sorted))
+          .mkString("\u0000")
+
   /** The AST cache key for a file: absolute path identity + file content (matches what the AST pass
     * uses, so warm-restore finds the same `.frag`).
     */
@@ -108,7 +122,7 @@ class AstCreationPass(
         diffGraph,
         filename,
         cacheKey = AstCreationPass.fileCacheKey(filename),
-        fingerprint = "",
+        fingerprint = AstCreationPass.cacheFingerprint(config),
         registerUsedTypes = registerUsedTypes,
         createAst = createAst(filename)
       )

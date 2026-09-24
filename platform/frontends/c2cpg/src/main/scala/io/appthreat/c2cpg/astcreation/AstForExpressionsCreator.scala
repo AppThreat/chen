@@ -157,6 +157,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                     Some(signature),
                     Some(registerType(cleanType(safeGetType(call.getExpressionType))))
                   )
+                  tagCallAttributes(callCpgNode, function)
                   val args = call.getArguments.toList.map(a => astForNode(a))
 
                   createCallAst(callCpgNode, args)
@@ -392,6 +393,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       Some(signature),
       Some(callTypeFullName)
     )
+    idExpr.getName.getBinding match
+      case function: IFunction => tagCallAttributes(callCpgNode, function)
+      case _                   => ()
     val args = call.getArguments.toList.map(a => astForNode(a))
 
     createCallAst(callCpgNode, args)

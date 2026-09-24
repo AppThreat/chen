@@ -60,7 +60,10 @@ class C2Cpg extends X2CpgFrontend[Config]:
             config.onlyAstCache
           )
           val fragments =
-              files.toSeq.map(f => store.fragmentFor(AstCreationPass.fileCacheKey(f), ""))
+              files.toSeq.map(f => store.fragmentFor(
+                AstCreationPass.fileCacheKey(f),
+                AstCreationPass.cacheFingerprint(config)
+              ))
           if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse
           else
             new FragmentSplicePass(

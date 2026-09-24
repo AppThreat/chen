@@ -10,11 +10,16 @@ import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{ICPPASTFunctionDeclarator, ICPPASTLambdaExpression}
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
-import org.eclipse.cdt.internal.core.dom.parser.c.{CASTFunctionDeclarator, CASTParameterDeclaration}
+import org.eclipse.cdt.internal.core.dom.parser.c.{
+    CASTFunctionDeclarator,
+    CASTParameterDeclaration,
+    ICInternalBinding
+}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPASTFunctionDeclarator,
     CPPASTFunctionDefinition,
-    CPPASTParameterDeclaration
+    CPPASTParameterDeclaration,
+    ICPPInternalBinding
 }
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
@@ -25,6 +30,9 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
   private val seenFunctionFullnames = mutable.HashSet.empty[String]
+
+  /** The stub METHOD each declared-only function got, so a redeclaration can add its attributes. */
+  private val declarationStubs = mutable.HashMap.empty[String, NewMethod]
 
   protected def astForMethodRefForLambda(lambdaExpression: ICPPASTLambdaExpression): Ast =
     val filename = fileName(lambdaExpression)
@@ -105,13 +113,66 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     }.distinct.toList
   end gccAttributes
 
-  private def tagFunctionAttributes(method: NewMethod, owners: Seq[IASTNode]): Unit =
-      gccAttributes(owners).foreach { attr =>
+  /** The declarator and declaration specifier of every declaration and the definition of
+    * `function` the translation unit has seen - the included headers' ones among them. A function
+    * declared twice keeps the attributes of both (`seenFunctionFullnames` builds one METHOD, from
+    * the first), and a definition inherits those of its prototype.
+    */
+  private def declarationOwners(function: IBinding): Seq[IASTNode] =
+    val nodes: Seq[IASTNode] = function match
+      case c: ICInternalBinding =>
+          Option(c.getDeclarations).toSeq.flatten ++ Option(c.getDefinition)
+      case c: ICPPInternalBinding =>
+          Option(c.getDeclarations).toSeq.flatten ++ Option(c.getDefinition)
+      case _ => Nil
+    nodes.flatMap { n =>
+        val declarator = n match
+          case name: IASTName => name.getParent
+          case other          => other
+        declarator match
+          case d: IASTFunctionDeclarator =>
+              val spec = d.getParent match
+                case s: IASTSimpleDeclaration   => Option(s.getDeclSpecifier)
+                case f: IASTFunctionDefinition  => Option(f.getDeclSpecifier)
+                case _                          => None
+              d +: spec.toSeq
+          case _ => Nil
+    }.distinct
+  end declarationOwners
+
+  private def tagFunctionAttributes(
+    method: NewMethod,
+    owners: Seq[IASTNode],
+    binding: IBinding = null
+  ): Unit =
+    val tagged = methodAttributes.getOrElseUpdate(method.fullName, mutable.HashSet.empty)
+    gccAttributes(owners ++ Option(binding).toSeq.flatMap(declarationOwners)).foreach { attr =>
+        if tagged.add(attr) then
           diffGraph.addEdge(
             method,
             NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr),
             EdgeTypes.TAGGED_BY
           )
+    }
+  end tagFunctionAttributes
+
+  /** The attributes already on each METHOD (by full name), so none is tagged twice. */
+  private val methodAttributes = mutable.HashMap.empty[String, mutable.HashSet[String]]
+
+  /** One tag node per attribute per translation unit, shared by every call that carries it. */
+  private val callAttributeTags = mutable.HashMap.empty[String, NewTag]
+
+  /** The declared attributes of the function a direct call resolves to, on the CALL: when the
+    * declaration sits in a header outside the analysed input no METHOD is built from it (it is an
+    * included node of every translation unit), and the call is where its semantics survive.
+    */
+  protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
+      gccAttributes(declarationOwners(function)).foreach { attr =>
+          val tag = callAttributeTags.getOrElseUpdate(
+            attr,
+            NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
+          )
+          diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
       }
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
@@ -148,8 +209,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
             tagFunctionAttributes(
               methodNode_,
-              Seq(funcDecl, funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier)
+              Seq(funcDecl, funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier),
+              function
             )
+            declarationStubs(fullname) = methodNode_
             scope.pushNewScope(methodNode_)
 
             val parameterNodes = withIndex(parameters(funcDecl)) { (p, i) =>
@@ -174,6 +237,16 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
             )
             stubAst.merge(typeDeclAst)
           else
+            // a redeclaration: its attributes belong to the stub the first declaration built
+            declarationStubs.get(fullname).foreach { stub =>
+                tagFunctionAttributes(
+                  stub,
+                  Seq(
+                    funcDecl,
+                    funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+                  )
+                )
+            }
             Ast()
           end if
       case field: IField =>
@@ -226,7 +299,11 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     val code        = nodeSignature(funcDef)
     val methodNode_ = methodNode(funcDef, name, code, fullname, Some(signature), filename)
 
-    tagFunctionAttributes(methodNode_, Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier))
+    tagFunctionAttributes(
+      methodNode_,
+      Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier),
+      funcDef.getDeclarator.getName.resolveBinding()
+    )
     methodAstParentStack.push(methodNode_)
     scope.pushNewScope(methodNode_)
 
