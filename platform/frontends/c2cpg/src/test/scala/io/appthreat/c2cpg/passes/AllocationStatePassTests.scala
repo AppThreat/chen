@@ -129,7 +129,7 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |   never ran */
     |void good_capped_unbraced(size_t n)
     |{
-    |    char *p = (char *)malloc(n);
+    |    char *p = (char *)malloc(16);
     |    if (p) free(p);
     |}
     |
@@ -169,7 +169,7 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |char *bad_realloc_then_free(char *old, int n)
     |{
     |    char *p = (char *)malloc(16);
-    |    p = realloc(p, n);
+    |    p = realloc(p, 16);
     |    if (p == NULL) return NULL;
     |    free(p);
     |    return p;

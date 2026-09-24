@@ -28,7 +28,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |/* the cwe476 fixture's unchecked malloc: the producer may return NULL */
     |void bad_unchecked_malloc(size_t n)
     |{
-    |    char *p = (char *)malloc(n);
+    |    char *p = (char *)malloc(16);
     |    p[0] = 'a';
     |    free(p);
     |}
@@ -36,7 +36,7 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |/* the fixture's good pair: the guard narrows before the use */
     |void good_checked_malloc(size_t n)
     |{
-    |    char *p = (char *)malloc(n);
+    |    char *p = (char *)malloc(16);
     |    if (p == NULL) return;
     |    p[0] = 'a';
     |    free(p);
@@ -75,6 +75,26 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |    char *hit = strchr(s, c);
     |    if (!hit) return NULL;
     |    return strdup(hit);
+    |}
+    |
+    |/* part 6 (F1): writing through an unchecked allocation at an inventoried mem-dst
+    |   position IS a dereference - the role the inventory states, not the old blanket
+    |   "any argument of a memory call" */
+    |void bad_memcpy_unchecked(size_t n)
+    |{
+    |    char *dst = (char *)malloc(16);
+    |    memcpy(dst, "x", 1);
+    |    free(dst);
+    |}
+    |
+    |/* part 6 (F1): the length argument of a copy is not a dereference - it is an integer.
+    |   The dst is checked here, so nothing may fire */
+    |void good_memcpy_checked_len(const char *src, size_t n)
+    |{
+    |    char *dst = (char *)malloc(16);
+    |    if (dst == NULL) return;
+    |    memcpy(dst, src, n);
+    |    free(dst);
     |}
     |""".stripMargin,
     "null_deref.c"
@@ -142,5 +162,15 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the strchr result is guarded" in {
         findingsIn("good_checked_strchr") shouldBe empty
+    }
+
+    "fire on a write through an unchecked allocation at a mem-dst position (F1)" in {
+        findingsIn("bad_memcpy_unchecked").map(_._1) shouldBe Set("MS-NULL-001")
+    }
+
+    "stay silent when only the copy's length is handed unchecked (F1)" in {
+        // MS-BOUND-002 may still ask its own question about the caller-controlled length
+        // (the function is externally reachable); the NULL rule must not fire on it
+        findingsIn("good_memcpy_checked_len") should not contain "MS-NULL-001"
     }
 end NullDerefRuleTests

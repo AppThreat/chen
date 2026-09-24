@@ -262,4 +262,68 @@ private[taggers] object OverlayFacts:
         }
         .flatten
         .distinct
+
+  /** The argument positions of one call that a `mem-dst`/`mem-src` role READS OR WRITES THROUGH,
+    * collected in one tag scan: the positions a possibly-null pointer is dereferenced at when
+    * handed to an inventoried memory call. The `len` role is deliberately absent - a length is an
+    * integer, not something the call reads through.
+    */
+  def memoryReadPositions(cpg: Cpg): Map[Long, Set[Int]] =
+    val out = mutable.HashMap.empty[Long, mutable.LinkedHashSet[Int]]
+    cpg.tag
+        .filter(t => t.name == MemoryApiPass.TagDst || t.name == MemoryApiPass.TagSrc)
+        .l
+        .foreach { t =>
+            t._taggedByIn.collectFirst { case e: Expression => e } match
+              case Some(arg) =>
+                  arg._astIn.collectFirst { case c: Call => c }.foreach { call =>
+                      out.getOrElseUpdate(call.id, mutable.LinkedHashSet.empty) += arg.argumentIndex
+                  }
+              case None => ()
+        }
+    out.view.mapValues(_.toSet).toMap
+
+  /** The POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
+    * truth of `p` itself. Every shape is restricted to pointer-typed locals and parameters: FFmpeg
+    * tests ints the same three ways (`size == 0`, `!ret`, `if (n)`), and `0` is also how the
+    * frontend spells NULL, so an unrestricted shape reads every earlier use of an int counter as a
+    * check-after-use. Shared by the null-deref rule and the derefs-param summary, which must agree
+    * on what a guard is or a summary would contradict the rule that consumes it.
+    */
+  def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] =
+    def pointerKey(e: AstNode): Option[String] = e match
+      case i: Identifier if pointerNames.contains(i.name) => variableKey(i)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argumentOption(2).orElse(c.argumentOption(1)).flatMap(pointerKey)
+      case _ => None
+    cond match
+      case cmp: Call
+          if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+          val operands = Seq(1, 2).flatMap(cmp.argumentOption)
+          if operands.exists(isNullLiteralNode) then
+            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption
+          else None
+      case not: Call if not.name == "<operator>.logicalNot" =>
+          not.argumentOption(1).flatMap(pointerKey)
+      case other => pointerKey(other)
+
+  private def isNullLiteralNode(e: AstNode): Boolean =
+      AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
+
+  /** The variable keys any null guard in the method tests, with the ControlStructure each guard
+    * belongs to: a summary that claims "every path" must stand down where the author wrote a check,
+    * and a use nested inside its own guard's structure is protected, not check-after-use.
+    */
+  def nullGuardsOf(method: Method): Map[String, ControlStructure] =
+    val pointerNames = (method.local.l ++ method.parameter.l)
+        .map(d => d.name -> d.property("TYPE_FULL_NAME"))
+        .collect { case (n, t: String) if isPointer(t) => n }
+        .toSet
+    method.ast
+        .collectAll[ControlStructure]
+        .l
+        .flatMap { cs =>
+            cs.condition.flatMap(cond => nullGuardKeyOf(cond, pointerNames)).map(key => (key, cs))
+        }
+        .toMap
 end OverlayFacts

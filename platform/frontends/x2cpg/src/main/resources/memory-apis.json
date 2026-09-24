@@ -5,8 +5,8 @@
     "recording the ROLE of each argument so a consumer writes tag lookups instead of",
     "hard-coded argument indices. Sources: POSIX Issue 7, Linux man-pages (malloc(3),",
     "memcpy(3), read(2), ...), and the FFmpeg usage seen while building the litmus corpus.",
-    "Deliberately omitted: wide-char and _s variants (wcscpy, memcpy_s, ...), Win32 APIs,",
-    "and alloca (stack allocation has no family in the tag vocabulary yet). They surface in",
+    "Deliberately omitted: wide-char and _s variants (wcscpy, memcpy_s, ...) and Win32 APIs",
+    "(alloca joined in part 6 as the `stack` family). They surface in",
     "the coverage report as 'seen but not inventoried', which is how this list is meant to",
     "grow - an entry here needs its man-page argument roles, nothing else.",
     "Argument indices are 1-based. `untrustedCall` marks a call whose RESULT or variadic",
@@ -23,7 +23,11 @@
     "allocation-family calls that return POINTERS declare it explicitly; the fd-returning family ",
     "(open, socket, accept) does NOT: an int fd's failure is -1, checked with `< 0`, and conflating ",
     "the two turned a checked fd into a null-deref finding. The pass emits `nullable-return` on the ",
-    "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use."
+    "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use.",
+    "Part 6 (F1): the str*-search family reads through its HAYSTACK, which is argument 1 - the ",
+    "entries said `src: 2` (the needle/char), so passing a pointer to be searched did not count as ",
+    "a read-through. Fixed to `src: 1`, and `strlen` added as a reader of the same shape: these are ",
+    "the entries that decide whether handing a possibly-null pointer to a call is a dereference."
   ],
   "apis": [
     {
@@ -139,33 +143,37 @@
       "src": 1
     },
     {
+      "name": "strlen",
+      "src": 1
+    },
+    {
       "name": "strchr",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
       "name": "strrchr",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
       "name": "strstr",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
       "name": "strcasestr",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
       "name": "strpbrk",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
       "name": "memchr",
-      "src": 2,
+      "src": 1,
       "nullableReturn": true
     },
     {
@@ -207,6 +215,11 @@
     {
       "name": "free",
       "free": "heap"
+    },
+    {
+      "name": "alloca",
+      "len": 1,
+      "alloc": "stack"
     },
     {
       "name": "<operator>.new",

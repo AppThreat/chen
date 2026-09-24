@@ -103,6 +103,32 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |    return 0;
         |}
         |
+        |/* ---- F3 (part 6): the guard in the ELSE branch ---- */
+        |
+        |/* the bounds check's REJECT path is the then-branch and the copy lives in the
+        |   else: c2cpg types the else as controlStructureType=ELSE with the block's own
+        |   parser type, and GuardPass matched the parser type only - so the condition was
+        |   read as HOLDING at the copy, the disjunction could not be split, no bound was
+        |   emitted, and this fired (codec2.c:87's shape, one of a third of BOUND-003's
+        |   per-tree findings) */
+        |int good_else_guarded_copy(unsigned char *d, const unsigned char *s, int size, int cap)
+        |{
+        |    if (size < 0 || size > cap)
+        |        return -1;
+        |    else
+        |        memcpy(d, s, size);
+        |    return 0;
+        |}
+        |
+        |int good_else_guarded_index(int mode)
+        |{
+        |    int frame_size_table[9];
+        |    if (mode < 0 || mode > 8)
+        |        return 0;
+        |    else
+        |        return frame_size_table[mode];
+        |}
+        |
         |/* ---- C3: the caller-param arm is interprocedural ---- */
         |
         |static int helper_constant(unsigned char *d, const unsigned char *s, int size)
@@ -279,6 +305,11 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
       "not fire on a constant length" in {
           lenFinding("good_constant") shouldBe empty
       }
+
+      "not fire when the guard's in-range path is the ELSE branch (F3)" in {
+          lenFinding("good_else_guarded_copy") shouldBe empty
+          indexFindings("good_else_guarded_index") shouldBe empty
+      }
   }
 
   "MS-BOUND-002 under C3 (interprocedural caller-param arm)" should {
@@ -296,8 +327,10 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
       }
 
       "not report an allocation size: CWE-787 needs a destination buffer" in {
+          // MS-BOUND-002's silence only: an uncapped allocation-size site is MS-ALLOC-008's
+          // own question and may legitimately carry that finding
           cpg.method.name("alloc_only").call.name("malloc").l.flatMap(_.argument.l)
-              .flatMap(_.tag.name("ms-finding").value.l) shouldBe Nil
+              .flatMap(_.tag.name("ms-finding").value.l) should not contain "MS-BOUND-002"
       }
   }
 
