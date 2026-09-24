@@ -212,6 +212,77 @@ class Part5ReviewTests extends DataFlowCodeToCpgSuite:
     |{
     |    o->in->x = 1;
     |}
+    |
+    |/* ---- part 6 (F2): the leak rule's phantom allocations ---- */
+    |
+    |/* F2: a function whose only value return is an int counter whose defs are
+    |   literals - the ff_get_line shape. `return i` with `int i = 0` satisfied
+    |   "every return flows from an allocation" because the NULL-literal
+    |   fallback of allocates-return accepted the 0, and every caller's counter
+    |   variable became a tracked allocation that "leaked" at every exit. */
+    |static int counter_reader(const char *s)
+    |{
+    |    int i = 0;
+    |    while (s[i])
+    |        i++;
+    |    return i;
+    |}
+    |
+    |void good_counter_return_is_not_an_allocation(int n)
+    |{
+    |    int len = counter_reader("x");
+    |    if (len == 0)
+    |        return;
+    |    (void)len;
+    |}
+    |
+    |/* F2: the FFmpeg error-path idiom - the allocation is assigned INSIDE the
+    |   guard's own condition, `if (!(p = malloc(n)))`. The failed allocation is
+    |   NULL on the taken branch: nothing leaked there. */
+    |int good_assign_in_guard_leak_check(size_t n)
+    |{
+    |    char *p;
+    |    if (!(p = (char *)malloc(64)))
+    |        return -1;
+    |    p[0] = 1;
+    |    free(p);
+    |    return 0;
+    |}
+    |
+    |/* F2: the same shape with the assignment as the bare condition */
+    |int good_bare_assign_guard(size_t n)
+    |{
+    |    char *p;
+    |    if ((p = (char *)malloc(64)))
+    |        p[0] = 2;
+    |    else
+    |        return -1;
+    |    free(p);
+    |    return 0;
+    |}
+    |
+    |/* F2: an int-returning function that allocates into an OUT-PARAM and returns an
+    |   error code - the ff_get_extradata shape. Neither the wrapper inference nor the
+    |   allocates-return summary may conclude "allocator" for it: every caller's `ret`
+    |   error variable became a phantom live allocation that "leaked" at each exit. */
+    |static int alloc_into_param(char **out, int n)
+    |{
+    |    *out = (char *)malloc(64);
+    |    if (!*out)
+    |        return -1;
+    |    return 0;
+    |}
+    |
+    |int good_int_returning_allocator(int n)
+    |{
+    |    char *p = NULL;
+    |    int ret = alloc_into_param(&p, n);
+    |    if (ret < 0)
+    |        return ret;
+    |    p[0] = 1;
+    |    free(p);
+    |    return 0;
+    |}
     |""".stripMargin,
     "review5.c"
   )
@@ -280,5 +351,18 @@ class Part5ReviewTests extends DataFlowCodeToCpgSuite:
     }
     "not fire the chained-parameter arm on a cross-type sub-object chain (F1)" in {
         findingsIn("good_cross_type_chain") shouldBe empty
+    }
+    "not conclude allocates-return for a literal-only counter return (F2)" in {
+        effectsOf("counter_reader") shouldBe empty
+        findingsIn("good_counter_return_is_not_an_allocation") shouldBe empty
+    }
+    "not leak where the allocation is assigned inside the guard's condition (F2)" in {
+        findingsIn("good_assign_in_guard_leak_check") shouldBe empty
+        findingsIn("good_bare_assign_guard") shouldBe empty
+    }
+    "not infer an allocator for an int-returning out-param allocator (F2)" in {
+        // derefs-param:1 is honest (`*out` loads through the slot); no allocator claim
+        effectsOf("alloc_into_param") shouldBe Set("effect:derefs-param:1")
+        findingsIn("good_int_returning_allocator") shouldBe empty
     }
 end Part5ReviewTests

@@ -81,6 +81,21 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     // then tag the wrappers' call sites exactly as the inventory's own entries are tagged.
     inferWrappers(inventory, matchesByTag, record)
 
+    // F4 (part 6): the capacity binders - a constructor that stores parameter j into a member
+    // of parameter i and parameter j + parameter k into ANOTHER member of i (`s->buf = buf;
+    // s->buf_end = buf + size`, the PutBitContext/init_put_bits shape) establishes that (j, k)
+    // is a (buffer, capacity) pair. Concluded from the body, never from names, and emitted as
+    // ordinary dst/len roles at the call sites - which is what makes a claimed capacity bigger
+    // than the buffer's real extent visible to the bounds rules with no new vocabulary.
+    val binders = inferBinders
+    binders.foreach { entry =>
+        atom.call.name(entry.name).foreach { site => tagCall(entry, site, record) }
+    }
+    if binders.nonEmpty then
+      println(
+        s"MemoryApiPass: inferred ${binders.size} capacity-binder constructors from call shapes"
+      )
+
     // The umbrella is emitted once per node across all categories, not once per (tag, value)
     // group: a `memcpy` destination carries `mem-dst` and the call carries `mem-alloc`-style
     // tags from several groups, and re-emitting `memory-safety` per group would attach the same
@@ -224,6 +239,95 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     inferred.values.toList
   end inferWrappers
 
+  /** The capacity-binder conclusions (F4): methods whose body stores parameter j into a member of
+    * parameter i, and `param j + param k` into a second member of the same parameter i. The
+    * (buffer, capacity) constructor idiom - a context object that remembers where the buffer ends.
+    * One scan over assignments builds the per-method store facts; a name carrying two disagreeing
+    * bodies concludes nothing, exactly as the wrapper inference does.
+    */
+  private def inferBinders: List[MemApiVocab.MemApiEntry] =
+    def memberStoreOf(lhs: Expression): Option[(String, String)] = lhs match
+      case c: Call
+          if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
+          for
+            base   <- c.argumentOption(1).collect { case i: Identifier => i }
+            member <- OverlayFacts.memberOf(c)
+          yield (base.name, member)
+      case _ => None
+    def paramOf(e: Expression): Option[String] = e.collect { case i: Identifier => i.name }
+        .headOption
+
+    val byMethod = mutable.LinkedHashMap.empty[Method, mutable.ListBuffer[(
+      String,
+      String,
+      String,
+      Option[String]
+    )]]
+    // (base param, member, stored param, offset param of the addition, if any)
+    atom.call.name("<operator>.assignment").l.foreach { assignment =>
+      val method = assignment.method
+      if !method.isExternal then
+        for
+          lhs            <- assignment.argumentOption(1)
+          (base, member) <- memberStoreOf(lhs)
+          rhs            <- assignment.argumentOption(2)
+        do
+          rhs match
+            case r: Call if r.name == "<operator>.addition" =>
+                val operands = Seq(1, 2).flatMap(r.argumentOption)
+                operands.collect { case i: Identifier => i.name } match
+                  case Seq(a, b) =>
+                      byMethod.getOrElseUpdate(method, mutable.ListBuffer.empty) +=
+                          ((base, member, a, Some(b)))
+                  case _ => ()
+            case other =>
+                paramOf(other).foreach(p =>
+                    byMethod.getOrElseUpdate(method, mutable.ListBuffer.empty) +=
+                        ((base, member, p, None))
+                )
+        end for
+      end if
+    }
+
+    val concluded = mutable.LinkedHashMap.empty[String, MemApiVocab.MemApiEntry]
+    val disagreed = mutable.HashSet.empty[String]
+    byMethod.foreach { case (method, stores) =>
+        val paramNames = method.parameter.l.map(_.name).toSet
+        // a direct store of param j into (i, memberA), and a store of param j + param k into
+        // (i, memberB != memberA), both through the same base parameter i
+        val directs =
+            stores.collect { case (b, m, p, None) if paramNames.contains(p) => ((b, p), m) }
+        val offsets = stores.collect {
+            case (b, m, p, Some(k)) if paramNames.contains(p) && paramNames.contains(k) =>
+                ((b, p), (m, k))
+        }
+        val pairs = (for
+          (keyD, memberA)      <- directs
+          (keyO, (memberB, k)) <- offsets
+          if keyD == keyO && memberA != memberB
+        yield (keyD._1, keyD._2, k)).distinct
+        val paramIndex = method.parameter.l.map(p => p.name -> p.index).toMap
+        val resolved: List[(Int, Int)] = pairs.flatMap { case (_, j, k) =>
+            for
+              dstIdx <- paramIndex.get(j)
+              lenIdx <- paramIndex.get(k)
+            yield (dstIdx, lenIdx)
+        }.toList.distinct
+        resolved match
+          case (j, k) :: Nil =>
+              val entry = MemApiVocab.MemApiEntry(method.name, dst = Some(j), len = Some(k))
+              concluded.updateWith(method.name) {
+                  case Some(existing) =>
+                      // a name shared by disagreeing bodies carries nothing, as for the wrappers
+                      if existing != entry then disagreed += method.name
+                      Some(existing)
+                  case None => Some(entry)
+              }
+          case _ => ()
+    }
+    concluded.filterNot { case (name, _) => disagreed.contains(name) }.values.toList
+  end inferBinders
+
   /** The wrapper conclusion for one candidate method, or none. Allocators need every value-return
     * to flow from an allocation (a realloc wrapper's return flows from its realloc - a producer of
     * a fresh pointer); free wrappers allow nothing in the body beside the frees they wrap.
@@ -261,6 +365,12 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     lenArgIds: Set[Long]
   ): Option[MemApiVocab.MemApiEntry] =
     val producerIds = allocIds ++ reallocIds
+    // F2 (part 6): an allocator hands out a POINTER. A method whose declared return is an
+    // int can allocate into an out-parameter and return an error code (ff_get_extradata) -
+    // inferring an allocator role for it marked every caller's error variable as a live
+    // allocation, and the leak rule reported it at each exit
+    if !OverlayFacts.isPointer(Option(method.methodReturn.typeFullName).getOrElse("")) then
+      return None
     val valueReturns = method.ast.collectAll[Return].l
         .flatMap(_.astChildren.collect { case e: Expression => e })
     // at least one return must flow from a REAL allocation (the anchor - a literal anchors

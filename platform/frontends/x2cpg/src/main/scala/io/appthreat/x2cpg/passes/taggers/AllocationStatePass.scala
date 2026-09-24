@@ -301,10 +301,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case _ => ()
     }
     def isAllocation(e: Expression): Boolean = unwrapCasts(e) match
-      case c: Call => roleOf(c).alloc.nonEmpty
+      case c: Call => roleOf(c).alloc.nonEmpty || roleOf(c).realloc.nonEmpty
       case _       => false
     def flowsFromAllocation(e: Expression): Boolean = unwrapCasts(e) match
-      case c: Call => roleOf(c).alloc.nonEmpty
+      case c: Call => isAllocation(c)
       case i: Identifier =>
           val defs = OverlayFacts
               .reachingDefsIn(i)
@@ -318,7 +318,34 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     val valueReturns = method.ast.collectAll[Return].l
         .flatMap(_.astChildren.collectFirst { case e: Expression => e })
         .filterNot(isNullLiteral)
-    if valueReturns.nonEmpty && valueReturns.forall(flowsFromAllocation) then
+    // F2: the ANCHOR. `flowsFromAllocation` accepts the NULL-literal fallback, which is right
+    // for the failure path - but on its own it concludes "allocates" for `return i` where i is
+    // an int counter whose only def is the literal 0 (ff_get_line's shape: every caller's
+    // counter became a phantom tracked allocation and "leaked" at every exit, 500+ findings
+    // per libavformat tree). At least one return must flow from a REAL allocation call.
+    val anchored = valueReturns.exists(e =>
+        unwrapCasts(e) match
+          case c: Call => isAllocation(c)
+          case i: Identifier =>
+              OverlayFacts
+                  .reachingDefsIn(i)
+                  .collect { case d: Identifier => d }
+                  .flatMap(_._astIn.collectFirst {
+                      case a: Call if a.name == "<operator>.assignment" => a
+                  })
+                  .flatMap(_.argumentOption(2))
+                  .exists(isAllocation)
+          case _ => false
+    )
+    // F2: an allocation is a POINTER - a method whose declared return is an int can hand out
+    // an error code while allocating into an out-param (ff_get_extradata's shape: returns 0 on
+    // success), and concluding allocates-return for it tracked every caller's `ret` error
+    // variable as a live allocation that "leaked" at every exit
+    val returnsPointer = Option(method.methodReturn.typeFullName)
+        .exists(t => OverlayFacts.isPointer(t))
+    if returnsPointer && anchored && valueReturns.nonEmpty &&
+      valueReturns.forall(flowsFromAllocation)
+    then
       effects += "effect:allocates-return"
     effects.toSet
   end methodEffects
@@ -569,6 +596,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             if t.state != StNullable then
               if t.state == StFreed || t.state == StMaybeFreed then
                 record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
+              // F5 (CWE-590): the freed pointer holds this frame's storage - the fact the
+              // non-heap-free rule reads; ownership language never applies to it
+              if t.state == StStackAddr then
+                record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
               out = out.updated(
                 trackedNameOf(viaAddress.getOrElse(freed)).get,
                 if viaAddress.isDefined then t.copy(state = StNullReset)
@@ -576,6 +607,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               )
         }
       }
+    end if
 
     // 2. realloc frees its input and yields a fresh allocation. Runs BEFORE the assignment so
     //    `p = realloc(p, n)` stores the fresh pointer over the freed input.
@@ -608,14 +640,20 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             rhs match
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
                   // nullable is the CALL's own declared fact (E3): pointer-returning
-                  // allocators carry it, the fd-returning family does not
+                  // allocators carry it, the fd-returning family does not. F5: an allocation
+                  // of the STACK family (alloca) is frame storage, not owned heap - tracked
+                  // as stack-addr, so it neither leaks at exit nor is freeable
+                  val cf           = callFacts.get(rhsCall.id())
+                  val isStackAlloc = cf.exists(_.allocFamilies.contains("stack"))
                   out = out.updated(
                     lhs,
-                    Tracked(
-                      StAllocated,
-                      rhsCall.id,
-                      nullable = callFacts.get(rhsCall.id()).exists(_.nullable)
-                    )
+                    if isStackAlloc then Tracked(StStackAddr, rhsCall.id)
+                    else
+                      Tracked(
+                        StAllocated,
+                        rhsCall.id,
+                        nullable = cf.exists(_.nullable)
+                      )
                   )
               case rhsCall: Call
                   if effectsByName.get(rhsCall.name)
@@ -636,12 +674,17 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   castOperand(rhsCall).flatMap { inner =>
                       inner match
                         case ic: Call if callFacts.get(ic.id()).exists(_.isAllocCall) =>
+                            val icf  = callFacts.get(ic.id())
+                            val stck = icf.exists(_.allocFamilies.contains("stack"))
                             Some(
-                              Tracked(
-                                StAllocated,
-                                ic.id,
-                                nullable = callFacts.get(ic.id()).exists(_.nullable)
-                              )
+                              // the stack family through its cast: frame storage (F5)
+                              if stck then Tracked(StStackAddr, ic.id)
+                              else
+                                Tracked(
+                                  StAllocated,
+                                  ic.id,
+                                  nullable = icf.exists(_.nullable)
+                                )
                             )
                         case ic: Call if callFacts.get(ic.id()).exists(_.nullable) =>
                             Some(Tracked(StNullable, ic.id, nullable = true))
@@ -805,6 +848,25 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     out: Map[String, Tracked]
   ): Map[String, Tracked] =
     val facts: List[(String, Option[Boolean])] = cond match
+      // F2: `if (!(p = malloc(n)))` - the assignment hands the condition the assigned
+      // variable's truthiness. Where the negation holds the value is null; where it does not,
+      // the guard itself is the check. The FFmpeg error path is written exactly this way, and
+      // the leak rule used to report the taken branch: the allocation had just FAILED.
+      case not: Call
+          if not.name == "<operator>.logicalNot" &&
+              not.argumentOption(1).exists(a =>
+                  a.isInstanceOf[Call] && a.asInstanceOf[Call].name == "<operator>.assignment"
+              ) =>
+          // the negation holds exactly where the assigned value is null: nullHere IS branchOf
+          assignmentTargetOf(not.argumentOption(1).get.asInstanceOf[Call]).toList.flatMap { name =>
+              List((name, branchOf(succ, cs)))
+          }
+      // F2: `if ((p = malloc(n)))` - the same idiom without the negation: holds where the
+      // value is non-null, null on the else side
+      case asg: Call if asg.name == "<operator>.assignment" =>
+          assignmentTargetOf(asg).toList.flatMap { name =>
+              List((name, branchOf(succ, cs).map(h => !h)))
+          }
       case cmp: Call
           if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
           val equals = cmp.name == "<operator>.equals"
@@ -903,6 +965,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case None            => cursor = None
     res.getOrElse(Some(false))
   end branchOf
+
+  /** The variable an assignment-in-condition names: `if (!(p = malloc(n)))` narrows `p`, not the
+    * assignment expression.
+    */
+  private def assignmentTargetOf(assignment: Call): Option[String] =
+      argAt(assignment.argument.l, 1).collect { case i: Identifier => i.name }
 
   private def isSwitch(cs: ControlStructure): Boolean =
       cs.parserTypeName.toLowerCase.contains("switch")
