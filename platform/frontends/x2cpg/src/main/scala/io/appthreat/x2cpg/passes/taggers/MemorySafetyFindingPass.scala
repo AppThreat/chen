@@ -79,13 +79,42 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     ruleAllocationState(record)
     val lowConfidenceNodes = ruleNullDereference(record)
 
+    // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
+    // computed by attacker arithmetic; on libavformat 36 of 52 ALLOC-009 findings sat on an
+    // INT-001 line. One report per site, under the CWE the arithmetic names: a PRODUCT sizing an
+    // allocation is the overflow-to-undersized-buffer shape (CWE-680, the corpus's
+    // `malloc(count * sizeof(int))`), a SUM is the plain wrap (CWE-190, `malloc(len + 1)`)
+    def isProduct(node: StoredNode): Boolean = node match
+      case c: Call => c.name == "<operator>.multiplication"
+      case _       => false
+    val sizeSites = findings.collect {
+        case (node, rules) if rules.contains(RuleUncontrolledSizeOverflow) =>
+            siteOf(node) -> isProduct(node)
+    }.toMap
+    val intSites = findings.collect {
+        case (node, rules) if rules.contains(RuleIntegerOverflow) => siteOf(node)
+    }.toSet
+    findings.foreach { case (node, rules) =>
+        val site = siteOf(node)
+        if rules.contains(RuleUncontrolledSizeOverflow) && intSites.contains(site) &&
+          !sizeSites.getOrElse(site, false)
+        then rules -= RuleUncontrolledSizeOverflow
+        if rules.contains(RuleIntegerOverflow) && sizeSites.getOrElse(site, false) then
+          rules -= RuleIntegerOverflow
+    }
+
     OverlayFacts.emitTags(
       dstGraph,
-      findings.toList.flatMap { case (node, ruleIds) =>
+      findings.toList.filter(_._2.nonEmpty).flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
       } ++ lowConfidenceNodes.map(node => (node, TagConfidence, s"$RuleNullDeref=low"))
     )
   end run
+
+  /** (method id, line) - the granularity a reader sees a finding at */
+  private def siteOf(node: StoredNode): (Long, Int) = node match
+    case e: Expression => (e.method.id, e.lineNumber.map(_.toInt).getOrElse(-1))
+    case other         => (other.id, -1)
 
   /** MS-ALLOC-001/002/003 (D3): double-free, use-after-free and leak, over the states
     * [[AllocationStatePass]] put on the graph. The rules are pure readers of those facts - the pass
@@ -419,39 +448,48 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * index access sits on.
     */
   private def ruleIndexBounds(record: (StoredNode, String) => Unit): Unit =
-      atom.call
-          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
-          .l
-          .foreach { access =>
-            for
-              idx  <- access.argumentOption(2)
-              base <- access.argumentOption(1)
-            do
-              val tags = idx.tag.name.l
-              val extent = base.tag.name(ExtentPass.TagExtent).value.l.headOption
-                  .getOrElse(ExtentPass.ValueUnknown)
-              val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
-                  extent.startsWith(ExtentPass.ValueAlloc + ":")
-              val boundedAbove = tags.contains(GuardPass.TagAbove) ||
-                  tags.contains(GuardPass.TagByExtent)
-              val boundedBelow = tags.contains(GuardPass.TagBelow)
-              val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
-                  tags.contains(ValueOriginPass.OriginUntrustedRead)
-              val halfBounded = tags.contains(ValueOriginPass.OriginStructField) &&
-                  signednessOf(idx).contains(true)
-              // The two arms are separate rules because they know different amounts. The attacker
-              // arm has a capacity and an origin and no bound: evidence. The half-bounded arm has
-              // a HYPOTHESIS - this signed counter could be negative - which is true of most
-              // signed counters and wrong about almost all of them (76 of libavformat's index
-              // findings, against one CVE shape). It reports at `low`, so a default run at
-              // `--min-confidence medium` does not drown in it, and looking for the shape
-              // deliberately still works.
-              if attackerIndex && knownExtent && !boundedAbove && !boundedBelow then
-                record(idx, ruleIdFor(access))
-              else if halfBounded && boundedAbove && !boundedBelow then
-                record(idx, RuleNegativeIndexHazard)
-            end for
-          }
+    // the half-bounded arm reports once per (method, index variable): the missing `>= 0` is one
+    // fix however many accesses the counter indexes - movenc.c wrote `trk->cluster[trk->entry]`
+    // five times in one function, five findings of one hypothesis
+    val halfBoundedFirst = mutable.LinkedHashMap.empty[(Long, String), Expression]
+    atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .foreach { access =>
+          for
+            idx  <- access.argumentOption(2)
+            base <- access.argumentOption(1)
+          do
+            val tags = idx.tag.name.l
+            val extent = base.tag.name(ExtentPass.TagExtent).value.l.headOption
+                .getOrElse(ExtentPass.ValueUnknown)
+            val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
+                extent.startsWith(ExtentPass.ValueAlloc + ":")
+            val boundedAbove = tags.contains(GuardPass.TagAbove) ||
+                tags.contains(GuardPass.TagByExtent)
+            val boundedBelow = tags.contains(GuardPass.TagBelow)
+            val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
+                tags.contains(ValueOriginPass.OriginUntrustedRead)
+            val halfBounded = tags.contains(ValueOriginPass.OriginStructField) &&
+                signednessOf(idx).contains(true)
+            // The two arms are separate rules because they know different amounts. The attacker
+            // arm has a capacity and an origin and no bound: evidence. The half-bounded arm has
+            // a HYPOTHESIS - this signed counter could be negative - which is true of most
+            // signed counters and wrong about almost all of them (76 of libavformat's index
+            // findings, against one CVE shape). It reports at `low`, so a default run at
+            // `--min-confidence medium` does not drown in it, and looking for the shape
+            // deliberately still works.
+            if attackerIndex && knownExtent && !boundedAbove && !boundedBelow then
+              record(idx, ruleIdFor(access))
+            else if halfBounded && boundedAbove && !boundedBelow then
+              val key  = (idx.method.id, OverlayFacts.variableKey(idx).getOrElse(s"n:${idx.id}"))
+              val line = idx.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+              halfBoundedFirst.get(key) match
+                case Some(prev) if prev.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= line =>
+                case _ => halfBoundedFirst(key) = idx
+          end for
+        }
+    halfBoundedFirst.values.foreach(idx => record(idx, RuleNegativeIndexHazard))
   end ruleIndexBounds
 
   /** A read through the index is CWE-125, a write through it CWE-787. */
@@ -866,25 +904,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
               val origins = ValueOriginPass.originNamesOf(lenArg).filter(attackers.contains)
               val bounded =
                   tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
-              def unboundedAtCallers: Boolean =
-                val callers = call.method._callIn.collectAll[Call].l.distinct
-                callers.isEmpty || {
-                    val params = lenArg.tag.name(ValueOriginPass.OriginCallerParam).value.l
-                        .flatMap(name => call.method.parameter.name(name).headOption)
-                    params.isEmpty || {
-                        val siteArgs =
-                            for
-                              site  <- callers
-                              param <- params
-                              arg   <- site.argumentOption(param.index)
-                            yield arg
-                        siteArgs.isEmpty || siteArgs.exists(arg =>
-                            ValueOriginPass.originNamesOf(arg) != Set(
-                              ValueOriginPass.OriginConstant
-                            )
-                        )
-                    }
-                }
+              def unboundedAtCallers: Boolean = callerParamUnbounded(call.method, lenArg)
               val controlled = origins.contains(ValueOriginPass.OriginUntrustedRead) ||
                   (origins.contains(ValueOriginPass.OriginCallerParam) && unboundedAtCallers)
               if controlled && !bounded then
@@ -896,9 +916,52 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                   lenArg,
                   if arithmetic then RuleUncontrolledSizeOverflow else RuleUncontrolledSize
                 )
-            end if
         }
   end ruleUncontrolledAllocationSize
+
+  /** Is the caller-param origin of `expr` (inside `method`) attacker-controlled one hop up? True
+    * when the method has no intra-tree caller (an API or callback entry - nothing bounds it), or
+    * when some caller passes, at a parameter `expr` derives from, a value that is itself
+    * attacker-origin and unbounded at that site. A caller passing its own struct's field or a
+    * length it already checked is the helper's contract being met, not an uncontrolled size.
+    */
+  private def callerParamUnbounded(method: Method, expr: Expression): Boolean =
+    val attackers = Set(ValueOriginPass.OriginUntrustedRead, ValueOriginPass.OriginCallerParam)
+    val callers   = method._callIn.collectAll[Call].l.distinct
+    callers.isEmpty || {
+        val params = (expr +: expr.ast.collectAll[Expression].l)
+            .flatMap(_.tag.name(ValueOriginPass.OriginCallerParam).value.l)
+            .distinct
+            .flatMap(name => method.parameter.nameExact(name).headOption)
+        params.isEmpty || {
+            val siteArgs =
+                for
+                  site  <- callers
+                  param <- params
+                  arg   <- site.argumentOption(param.index)
+                yield arg
+            siteArgs.isEmpty || siteArgs.exists { arg =>
+              val argTags = arg.tag.name.l
+              ValueOriginPass.originNamesOf(arg).exists(attackers.contains) &&
+              !argTags.contains(GuardPass.TagAbove) && !argTags.contains(GuardPass.TagByExtent)
+            }
+        }
+    }
+  end callerParamUnbounded
+
+  /** A length arithmetic whose ONLY attacker origin is a caller parameter the callers bound (see
+    * [[callerParamUnbounded]]): `size + AV_INPUT_BUFFER_PADDING_SIZE` in a helper every caller
+    * hands a checked size is the padding idiom, not a wrap.
+    */
+  private def callerBoundedArithmetic(memCall: Call, arith: Call): Boolean =
+    val origins = arith.tag.name(IntegerWidthPass.TagArithLen).value.l
+        .flatMap(_.split("\\+"))
+        .filter(attackerOrigins)
+        .toSet
+    origins == Set(ValueOriginPass.OriginCallerParam) && !callerParamUnbounded(
+      memCall.method,
+      arith
+    )
 
   /** MS-INT-001 (D0, CWE-190): an allocation or copy length computed by arithmetic whose operands
     * are attacker-influenced, with no guard bounding an operand from above and no widened operand.
@@ -935,10 +998,105 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                       if isLengthArithmetic(arith) && attackerArithmetic(arith)
                           && !widenedOperandOf(arith)
                           && !guardBoundsAnOperand(memCall, arith)
+                          && !earlyExitBoundsAnOperand(memCall, arith)
+                          && !stringLengthSum(arith)
+                          && !wideCounterGrowth(arith)
+                          && !pointerArithmetic(arith)
+                          && !callerBoundedArithmetic(memCall, arith)
                           && lengthBecomesCapacity(memCall) =>
                       record(arith, RuleIntegerOverflow)
               }
           }
+
+  /** An early-exit bound: `if (n > MAX) return AVERROR(EINVAL);` earlier in the method bounds n
+    * above on every path that reaches the allocation, yet the allocation is not control-dependent
+    * on it (it post-dominates the check), so [[guardBoundsAnOperand]] never sees it. FFmpeg writes
+    * almost every size check this way. A comparison read at either polarity counts - the side that
+    * continues is the one the author allowed - as long as it precedes the call in the method and
+    * bounds an operand from above.
+    */
+  private def earlyExitBoundsAnOperand(memCall: Call, arith: Call): Boolean =
+    val operandKeys = arith.argument.l
+        .collect { case e: Expression => e }
+        .flatMap(castUnwrappingKey)
+        .toSet
+    val callLine = memCall.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+    operandKeys.nonEmpty && memCall.method.ast
+        .collectAll[ControlStructure]
+        .l
+        .filter(_.lineNumber.exists(_.toInt < callLine))
+        .flatMap(_.condition.collect { case c: Call => c })
+        .exists { cond =>
+            Seq(true, false).exists { holds =>
+                GuardPass.conjuncts(cond, holds).getOrElse(Nil).exists { case (cmp, h) =>
+                    GuardPass.directionalFacts(cmp, h).exists { case (bounded, above, _) =>
+                        above && castUnwrappingKey(bounded).exists(operandKeys.contains)
+                    }
+                }
+            }
+        }
+  end earlyExitBoundsAnOperand
+
+  /** `count + k` (optionally scaled, `(count + 1) * sizeof(T)`) where every operand origin is a
+    * struct field and k a small literal: the growth-by-one of an array that already holds `count`
+    * elements in memory. It can only wrap when the counter is NARROW - hevc.c's `uint16_t numNalus
+    * + 1` (CVE-2026-75141) wraps at 65,535 entries, which a file can ask for - so the arm reports
+    * it only when the counter's width is KNOWN to be under 32 bits. An int-width counter, or one
+    * whose member type the graph cannot resolve (most FFmpeg members: their structs live in headers
+    * outside the analysed tree), stands down: the hypothesis tier turns on evidence of the narrow
+    * width, not on its absence.
+    */
+  private def wideCounterGrowth(arith: Call): Boolean =
+    def smallLiteral(e: Expression): Boolean = e match
+      case l: Literal => l.code.trim.toLongOption.exists(v => v >= 0 && v <= 64)
+      case _          => false
+    def wideStructCounter(e: Expression): Boolean =
+      val origins = ValueOriginPass.originNamesOf(e)
+      origins.nonEmpty &&
+      origins.subsetOf(Set(ValueOriginPass.OriginStructField, ValueOriginPass.OriginConstant)) &&
+      !OverlayFacts.integralWidth(typeOfExpr(e)).exists(_ < 32)
+    def growth(e: Expression): Boolean = e match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l match
+            case List(a, b) =>
+                (smallLiteral(a) && wideStructCounter(b)) || (smallLiteral(b) && wideStructCounter(
+                  a
+                ))
+            case _ => false
+      case _ => false
+    arith.name match
+      case "<operator>.addition" => growth(arith)
+      case "<operator>.multiplication" =>
+          arith.argument.l match
+            case List(a, b) =>
+                def scale(e: Expression) = e match
+                  case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+                  case l: Literal                                        => true
+                  case _                                                 => false
+                (growth(a) && scale(b)) || (growth(b) && scale(a))
+            case _ => false
+      case _ => false
+  end wideCounterGrowth
+
+  /** `pkt->data + pkt->size`, `buf + 2`: an operand is a POINTER, so the sum is an address, not a
+    * length - it reached the rule through a def chain that ends in a destination, and wrapping an
+    * address is the bounds rules' question.
+    */
+  private def pointerArithmetic(arith: Call): Boolean =
+      arith.argument.l.exists(a => OverlayFacts.isPointer(typeOfExpr(a).trim))
+
+  /** `strlen(s) + 1` and its kin: every non-constant operand is the length of a string that already
+    * exists in memory (or a sizeof), so the sum cannot wrap a size_t on a real address space - the
+    * terminator arithmetic correct code writes everywhere.
+    */
+  private def stringLengthSum(arith: Call): Boolean =
+      arith.name == "<operator>.addition" && arith.argument.l.forall {
+          case _: Literal                                           => true
+          case c: Call if c.name == "strlen" || c.name == "strnlen" => true
+          case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
+          case c: Call if c.name == "<operator>.addition"           => stringLengthSum(c)
+          case _                                                    => false
+      }
 
   /** Does the length this call consumes become a buffer's capacity? An allocator produces a fresh
     * buffer whose size IS this argument; a copy into a destination with a recorded extent writes
@@ -1083,9 +1241,13 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
   /** The declared type of an index expression, when the frontend recorded one. */
   private def typeOfExpr(e: Expression): String = e match
     case i: Identifier => i.typeFullName
-    case c: Call       => c.typeFullName
-    case l: Literal    => l.typeFullName
-    case _             => ""
+    // c2cpg leaves a field access's own type empty; the member it reads has one
+    case c: Call
+        if isFieldAccess(c) && Option(c.typeFullName).forall(t => t.isEmpty || t == "ANY") =>
+        OverlayFacts.memberRefOf(atom, c).map(_.typeFullName).getOrElse("")
+    case c: Call    => c.typeFullName
+    case l: Literal => l.typeFullName
+    case _          => ""
 
   /** Can this index go negative, and do we actually know? c2cpg often leaves the TYPE of a
     * field-access expression empty, so a `pls->cur_seq_no` index resolves its type through the

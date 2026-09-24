@@ -450,6 +450,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         visits.update(node.id(), seen + 1)
         queued += node
 
+    // a tracked site that hands out OWNERSHIP: an allocator (or realloc), or a call whose
+    // summary says it allocates its return. Only these may come back as `allocated`
+    def isOwningSite(site: Long): Boolean =
+        callFacts.get(site).exists(cf =>
+            cf.isAllocCall ||
+                effectsByName.get(cf.name).exists(_.contains("effect:allocates-return"))
+        )
+
     enqueue(method, Map.empty)
     while queued.nonEmpty do
       val node = queued.head
@@ -462,7 +470,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               // branch edges leave from the CONDITION CALL of a guard, not from the control
               // structure node, so the narrowing rides on the condition's out-edges
               val succState = guards.get(node.id()) match
-                case Some(cs) => branchNarrowing(node, cs, succ, out)
+                case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite)
                 case None     => out
               enqueue(succ, succState)
           case _ => ()
@@ -562,13 +570,81 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * proved the pointer NULL. A checked or escaped pointer is silent - evidence, not silence,
     * either way.
     */
+  // the null-ness each tracked variable has where `e` evaluates to `holds`. Part 6 read one
+  // atom per condition; `if (!entry || !node) goto fail;` - FFmpeg's paired-allocation check -
+  // then narrowed nothing, and every use after it was an "unchecked" null dereference. A
+  // disjunction that FAILS makes every disjunct fail; a conjunction that HOLDS makes every
+  // conjunct hold; the other polarity says nothing about any single operand.
+  private def nullFacts(e: AstNode, holds: Boolean): List[(String, Boolean)] = e match
+    case c: Call if c.name == "<operator>.logicalNot" =>
+        c.argumentOption(1).toList.flatMap(nullFacts(_, !holds))
+    case c: Call if c.name == "<operator>.logicalOr" =>
+        if holds then Nil else c.argument.l.flatMap(nullFacts(_, holds = false))
+    case c: Call if c.name == "<operator>.logicalAnd" =>
+        if holds then c.argument.l.flatMap(nullFacts(_, holds = true)) else Nil
+    // F2: `if (!(p = malloc(n)))` / `if ((p = malloc(n)))` - the assignment hands the
+    // condition the assigned variable's truthiness
+    case asg: Call if asg.name == "<operator>.assignment" =>
+        assignmentTargetOf(asg).toList.map(name => (name, !holds))
+    case cmp: Call
+        if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+        val equals = cmp.name == "<operator>.equals"
+        (cmp.argumentOption(1), cmp.argumentOption(2)) match
+          case (Some(l), Some(r)) =>
+              val trackedName = if isNullLiteral(l) then trackedNameOf(r) else trackedNameOf(l)
+              val nullSide    = if isNullLiteral(l) then l else r
+              // `p == NULL` holds -> p is null, `p != NULL` holds -> it is not (part 4
+              // inverted notEquals and silenced `if (p != NULL) return;` leaks)
+              if isNullLiteral(nullSide) then trackedName.map(n => (n, holds == equals)).toList
+              else Nil
+          case _ => Nil
+    // `if (p)` - truthiness of a tracked pointer is its null-ness
+    case tracked if trackedNameOf(tracked).isDefined =>
+        trackedNameOf(tracked).map(name => (name, !holds)).toList
+    case _ => Nil
+
+  /** Is this use protected by a null test of `name` in its OWN expression - `p && p->x`, `!p ||
+    * p->x`, `p ? p->x : d`? Short-circuit guards are not control structures, so the worklist never
+    * narrows through them; they were the largest share of the remaining MS-NULL-001 findings.
+    */
+  private def guardedInExpression(use: StoredNode, name: String): Boolean =
+    var child: StoredNode          = use
+    var cursor: Option[StoredNode] = use._astIn.nextOption()
+    var found                      = false
+    while !found && cursor.exists(_.isInstanceOf[Expression]) do
+      val parent = cursor.get
+      parent match
+        case c: Call =>
+            val args  = c.argument.l
+            val index = args.indexWhere(_.id == child.id)
+            def nonNullWhen(op: AstNode, holds: Boolean): Boolean =
+                nullFacts(op, holds).contains((name, false))
+            found = c.name match
+              case "<operator>.logicalAnd" if index > 0 =>
+                  args.take(index).exists(nonNullWhen(_, holds = true))
+              case "<operator>.logicalOr" if index > 0 =>
+                  args.take(index).exists(nonNullWhen(_, holds = false))
+              case "<operator>.conditional" if index == 1 =>
+                  nonNullWhen(args.head, holds = true)
+              case "<operator>.conditional" if index == 2 =>
+                  nonNullWhen(args.head, holds = false)
+              case _ => false
+        case _ => ()
+      child = parent
+      cursor = parent._astIn.nextOption()
+    end while
+    found
+  end guardedInExpression
+
   private def noteNullUse(
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
     use: StoredNode,
     name: String,
     t: Tracked
   ): Unit =
-      if t.nullable && !t.checked && t.state != StEscaped && t.state != StNullReset then
+      if t.nullable && !t.checked && t.state != StEscaped && t.state != StNullReset &&
+        !guardedInExpression(use, name)
+      then
         nullUseFacts += ((
           t.site,
           use,
@@ -642,7 +718,27 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 if t.state == StAllocated && !rhsIsAlloc then
                   record(c, TagLeak, s"leak:$lhs")
             }
+            // an int-typed destination of a HEAP-family call holds its error code, not the
+            // block: `ret = av_reallocp(&p, n)` allocates into p and returns 0/AVERROR. Tracking
+            // ret as the allocation was the largest remaining MS-ALLOC-003 bucket. The handle
+            // families (file, socket) do return an int that IS the resource, and stay tracked
+            val lhsIsErrorCode = argAt(cf.args, 1).exists { l =>
+              val t = l.property("TYPE_FULL_NAME") match
+                case s: String => s.trim
+                case _         => ""
+              t.nonEmpty && t != "ANY" && !OverlayFacts.isPointer(t)
+            } && (rhs match
+              case rc: Call =>
+                  callFacts.get(rc.id()).exists(f =>
+                      (f.allocFamilies ++ f.reallocFamilies).nonEmpty &&
+                          (f.allocFamilies ++ f.reallocFamilies).forall(fam =>
+                              !IntHandleFamilies.contains(fam)
+                          )
+                  )
+              case _ => false
+            )
             rhs match
+              case _: Call if lhsIsErrorCode => out = out - lhs
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
                   // nullable is the CALL's own declared fact (E3): pointer-returning
                   // allocators carry it, the fd-returning family does not. F5: an allocation
@@ -850,68 +946,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     cond: CfgNode,
     cs: ControlStructure,
     succ: CfgNode,
-    out: Map[String, Tracked]
+    out: Map[String, Tracked],
+    isOwningSite: Long => Boolean
   ): Map[String, Tracked] =
-    val facts: List[(String, Option[Boolean])] = cond match
-      // F2: `if (!(p = malloc(n)))` - the assignment hands the condition the assigned
-      // variable's truthiness. Where the negation holds the value is null; where it does not,
-      // the guard itself is the check. The FFmpeg error path is written exactly this way, and
-      // the leak rule used to report the taken branch: the allocation had just FAILED.
-      case not: Call
-          if not.name == "<operator>.logicalNot" &&
-              not.argumentOption(1).exists(a =>
-                  a.isInstanceOf[Call] && a.asInstanceOf[Call].name == "<operator>.assignment"
-              ) =>
-          // the negation holds exactly where the assigned value is null: nullHere IS branchOf
-          assignmentTargetOf(not.argumentOption(1).get.asInstanceOf[Call]).toList.flatMap { name =>
-              List((name, branchOf(succ, cs)))
-          }
-      // F2: `if ((p = malloc(n)))` - the same idiom without the negation: holds where the
-      // value is non-null, null on the else side
-      case asg: Call if asg.name == "<operator>.assignment" =>
-          assignmentTargetOf(asg).toList.flatMap { name =>
-              List((name, branchOf(succ, cs).map(h => !h)))
-          }
-      case cmp: Call
-          if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
-          val equals = cmp.name == "<operator>.equals"
-          val pairs =
-              for
-                l <- cmp.argumentOption(1).toList
-                r <- cmp.argumentOption(2).toList
-              yield (l, r)
-          pairs.flatMap { case (l, r) =>
-              val trackedName = if isNullLiteral(l) then trackedNameOf(r) else trackedNameOf(l)
-              val nullSide    = if isNullLiteral(l) then l else r
-              if isNullLiteral(nullSide) then
-                trackedName.map { name =>
-                    // branchOf is Some(true) exactly where the comparison AS WRITTEN holds:
-                    // `p == NULL` holds -> p is null, `p != NULL` holds -> it is not. Part 4
-                    // computed `!branchOf` for notEquals, which is the then/else INVERSION -
-                    // `if (p != NULL) return;` marked the pointer NULL on the path that
-                    // abandons the allocation and silenced the leak.
-                    (name, branchOf(succ, cs).map(_ == equals))
-                }
-              else None
-          }
-      // `if (!p)` - truthiness of a tracked pointer is its null-ness
-      case not: Call if not.name == "<operator>.logicalNot" =>
-          not.argumentOption(1).flatMap(trackedNameOf).map { name =>
-              // Some(true) = p is null here, Some(false) = non-null, None = unknown
-              (name, branchOf(succ, cs))
-          }.toList
-      // `if (p)` - the pointer is non-null where the condition holds; the condition node is
-      // then the identifier itself
-      case tracked if trackedNameOf(tracked).isDefined =>
-          trackedNameOf(tracked).map { name =>
-              // holds => non-null; else-branch => null
-              (name, branchOf(succ, cs).map(h => !h))
-          }.toList
-      case _ => Nil
+    // branchOf: Some(true) where the condition holds on this successor, None when unknown
+    val facts: List[(String, Option[Boolean])] = branchOf(succ, cs) match
+      case Some(holds) => nullFacts(cond, holds).map { case (n, nullHere) => (n, Some(nullHere)) }
+      case None        => Nil
     facts.foldLeft(out) { case (acc, (name, nullHereOpt)) =>
         nullHereOpt match
           case Some(nullHere) =>
               acc.get(name) match
+                case Some(t) if !nullHere && t.state == StNull && !isOwningSite(t.site) =>
+                    // the non-null side of a pointer known only to be NULL - one a guard
+                    // created (`if (!ret)` tracks ret as null) or a strchr result a guard
+                    // nulled: nothing on this side owns memory, so the variable is untracked
+                    // again. Reviving it as `allocated` was the phantom allocation that
+                    // leaked at every later exit: ~2/3 of MS-ALLOC-003 on libavformat.
+                    acc - name
                 case Some(t) =>
                     val newState =
                         if nullHere then StNull
@@ -1253,6 +1305,9 @@ object AllocationStatePass:
         Set("NULL", "nullptr").contains(c.name.trim)
     case i: Identifier => i.name == "NULL" || i.name == "nullptr"
     case _             => false
+
+  /** allocation families whose handle IS an integer (a descriptor), unlike a heap block */
+  private val IntHandleFamilies = Set("file", "socket")
 
   /** worklist visit cap per CFG node */
   private val VisitCap = 8

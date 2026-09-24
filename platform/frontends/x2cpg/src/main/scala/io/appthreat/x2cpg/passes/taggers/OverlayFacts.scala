@@ -59,7 +59,7 @@ private[taggers] object OverlayFacts:
                 case _ => None
           case _ => None
         typeName = baseType.stripSuffix("*").trim
-        member <- cpg.typeDecl.name(typeName).member.name(fi.canonicalName).headOption
+        member <- cpg.typeDecl.nameExact(typeName).member.nameExact(fi.canonicalName).headOption
       yield member
 
   /** Declared array size from a type full name (`char[64]`, `int[16]` through a #define). */
