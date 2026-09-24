@@ -89,7 +89,7 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     // than the buffer's real extent visible to the bounds rules with no new vocabulary.
     val binders = inferBinders
     binders.foreach { entry =>
-        atom.call.name(entry.name).foreach { site => tagCall(entry, site, record) }
+        atom.call.nameExact(entry.name).foreach { site => tagCall(entry, site, record) }
     }
     if binders.nonEmpty then
       println(
@@ -220,7 +220,7 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
                       case None =>
                           inferred(method.name) = entry
                           concluded = true
-                          atom.call.name(method.name).foreach { site =>
+                          atom.call.nameExact(method.name).foreach { site =>
                             tagCall(entry, site, record)
                             entry.alloc.foreach(_ => callsOf(MemoryApiPass.TagAlloc) += site)
                             entry.realloc.foreach(_ => callsOf(MemoryApiPass.TagRealloc) += site)

@@ -505,13 +505,17 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
           c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
       case _ => None
 
-    /** The numeric capacity the dst's extent names, when it is knowable: `const:N` outright,
-      * `alloc:<size-arg>` when the allocation's own size argument is a literal.
+    /** The capacity in BYTES the dst's extent names, when it is knowable - a copy length counts
+      * bytes. `const:N` counts ELEMENTS, so it converts only for a byte-sized element type (`int
+      * a[10]` cleared with `memset(a, 0, 40)` is exact, not an overrun); any other element type
+      * concludes nothing. `alloc:<size-arg>` needs every size argument literal - calloc's capacity
+      * is count * size.
       */
     def extentCapacity(dst: Expression): Option[Long] =
         dst.tag.name(ExtentPass.TagExtent).value.l.headOption.flatMap {
             case v if v.startsWith(s"${ExtentPass.ValueConst}:") =>
                 v.stripPrefix(s"${ExtentPass.ValueConst}:").toLongOption
+                    .filter(_ => hasByteElements(dst))
             case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
                 OverlayFacts
                     .reachingDefsIn(dst)
@@ -521,10 +525,15 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                     })
                     .flatMap(_.argumentOption(2))
                     .flatMap(allocCallOf)
-                    .flatMap(alloc =>
-                        alloc.argument.l.find(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-                    )
-                    .flatMap(literalNumberOf)
+                    .flatMap { alloc =>
+                      // the count role is tagged `mem-len` too: calloc's two arguments
+                      val sizeArgs =
+                          alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                      val literals = sizeArgs.flatMap(literalNumberOf)
+                      Option.when(sizeArgs.nonEmpty && literals.size == sizeArgs.size)(
+                        literals.product
+                      )
+                    }
                     .headOption
             case _ => None
         }
@@ -564,13 +573,19 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                 val extras = call.argument.l
                     .filter(a => !rolePositions.contains(a.argumentIndex))
                     .filterNot(_.isFieldIdentifier)
+                // only a STRING grows with the attacker: `sprintf(buf, "%d", n)` formats an
+                // integer of bounded width, whatever n's origin
                 (srcArgs ++ extras).find(a =>
-                    ValueOriginPass.originNamesOf(a).exists(attackers.contains)
+                    OverlayFacts.isPointer(a.property("TYPE_FULL_NAME") match
+                      case t: String => t.trim
+                      case _         => ""
+                    ) && ValueOriginPass.originNamesOf(a).exists(attackers.contains)
                 ).foreach { content =>
                     if !lengthGuardedCopy(call, content) then record(content, rule)
                 }
               }
           }
+        end if
     }
 
     // arm 3: a loop write bounded by an unvalidated count
@@ -667,6 +682,14 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     }
   end ruleCapacityOverrun
 
+  /** Is the declared element type of this array expression one byte wide? The type is read off the
+    * expression (`char[16]`, `uint8_t[4]`); an unresolved type is not assumed to be bytes.
+    */
+  private def hasByteElements(dst: Expression): Boolean =
+    val t = Option(dst.property("TYPE_FULL_NAME")).collect { case s: String => s }.getOrElse("")
+    val element = t.replaceAll("""\[[^\]]*\]""", "").replace("const ", "").trim
+    MemorySafetyFindingPass.ByteTypes.contains(element)
+
   /** The (literal, node) pair of an expression when it is a plain literal - Function.unlift keeps
     * the for-comprehension shape of the arm-1 loop.
     */
@@ -735,16 +758,11 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
               case lit: Literal if lit.code.startsWith("\"") =>
                   record(lit, RuleNonHeapFree)
               case i: Identifier =>
-                  // a STATIC or ARRAY local is not heap storage, whatever the callee thinks
-                  val localOpt = i.method.local.name(i.name).l.headOption
-                  localOpt.foreach { local =>
-                      if local.tag
-                            .name(io.appthreat.x2cpg.Defines.StorageClassTag)
-                            .value(io.appthreat.x2cpg.Defines.StorageClassStatic)
-                            .l
-                            .nonEmpty
-                      then record(i, RuleNonHeapFree)
-                      else if OverlayFacts.arrayExtent(local.typeFullName).isDefined ||
+                  // an ARRAY local (automatic or static) is not heap storage. A static POINTER
+                  // local is the cache idiom - it holds heap storage and freeing it is correct -
+                  // so the storage class alone decides nothing
+                  i.method.local.nameExact(i.name).l.headOption.foreach { local =>
+                      if OverlayFacts.arrayExtent(local.typeFullName).isDefined ||
                         local.typeFullName.trim.endsWith("[]")
                       then record(i, RuleNonHeapFree)
                   }
@@ -1167,6 +1185,10 @@ object MemorySafetyFindingPass:
   /** F4 (part 6): a write or copy overruns a buffer with a KNOWN capacity - the CWE is the storage
     * family the extent names.
     */
+  /** the one-byte element types a declared array's element count converts to bytes through */
+  private[taggers] val ByteTypes =
+      Set("char", "signed char", "unsigned char", "uint8_t", "int8_t", "u_char", "u_int8_t")
+
   final val RuleFixedExtentOverrun = "MS-BOUND-006"
   final val RuleHeapExtentOverrun  = "MS-BOUND-007"
 

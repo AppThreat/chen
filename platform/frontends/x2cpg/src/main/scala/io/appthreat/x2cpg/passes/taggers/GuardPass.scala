@@ -390,7 +390,7 @@ object GuardPass:
     */
   private def isElse(cs: ControlStructure): Boolean =
       cs.controlStructureType.equalsIgnoreCase("ELSE") ||
-          cs.parserTypeName.toLowerCase.contains("else")
+          cs.parserTypeName.equalsIgnoreCase("else")
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
 end GuardPass

@@ -414,6 +414,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               .map(_.name)
               .toSet,
       params = method.parameter.l.map(_.name).toSet,
+      // a static pointer local keeps its allocation past the frame by design (the cache idiom):
+      // it is not a leak at exit
+      staticLocals = method.local.l.filter(isStaticLocal).map(_.name).toSet,
       refReturn = !isFileScope && Option(method.methodReturn.typeFullName).exists(t =>
           t.endsWith("&") || t.endsWith("&&")
       )
@@ -541,12 +544,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 record(r, TagStackEscape, "escape:return")
             }
             out.foreach { case (name, t) =>
-                if t.state == StAllocated then leakFacts += ((t.site, r, name))
+                if t.state == StAllocated && !ctx.staticLocals.contains(name) then
+                  leakFacts += ((t.site, r, name))
             }
             out
         case mr: MethodReturn =>
             in.foreach { case (name, t) =>
-                if t.state == StAllocated then leakFacts += ((t.site, mr, name))
+                if t.state == StAllocated && !ctx.staticLocals.contains(name) then
+                  leakFacts += ((t.site, mr, name))
             }
             in
         case _ => in
@@ -1212,6 +1217,7 @@ object AllocationStatePass:
     arrayLocals: Set[String],
     valueLocals: Set[String],
     params: Set[String],
+    staticLocals: Set[String],
     refReturn: Boolean
   )
 
