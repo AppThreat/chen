@@ -465,10 +465,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   end methodEffects
 
   private def analyseMethod(
-      method: Method,
-      roles: mutable.LongMap[RoleInfo],
-      effectsByName: mutable.HashMap[String, Set[String]],
-      record: (StoredNode, String, String) => Unit
+    method: Method,
+    roles: mutable.LongMap[RoleInfo],
+    effectsByName: mutable.HashMap[String, Set[String]],
+    record: (StoredNode, String, String) => Unit
   ): Unit =
     // (site, exit, name) -> the state at the exit's LATEST visit. A leak is a claim that NO
     // path frees the allocation ("still live, un-freed and un-escaped"), and the worklist
@@ -649,14 +649,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * own operation produces, returns the out-state for the successors.
     */
   private def transfer(
-      node: CfgNode,
-      in: Map[String, Tracked],
-      callFacts: mutable.LongMap[CallFacts],
-      effectsByName: mutable.HashMap[String, Set[String]],
-      leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
-      nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
-      ctx: MethodContext,
-      record: (StoredNode, String, String) => Unit
+    node: CfgNode,
+    in: Map[String, Tracked],
+    callFacts: mutable.LongMap[CallFacts],
+    effectsByName: mutable.HashMap[String, Set[String]],
+    leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
+    nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    ctx: MethodContext,
+    record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
       node match
         case c: Call =>
@@ -739,49 +739,49 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case _ => Nil
 
   /** The int-handle failure check (part 9): a comparison of a tracked fd-returning allocation
-    * against a small literal, naming the side on which the acquisition FAILED (the descriptor
-    * is negative). `fd < 0`, `fd <= -1` and `fd == -1` fail where they hold; `fd >= 0` and
-    * `0 > fd` fail where they do not. Borderline forms (`fd <= 0`, `fd > 0`) include fd 0 -
-    * a legal descriptor - on their failure side and are deliberately not recognised. Only a
-    * variable tracked from an int-handle family allocation is considered: a plain int guard
-    * narrows nothing, and a pointer has no ordering to read.
+    * against the failure boundary, naming the side on which the acquisition FAILED. With the
+    * handle on the left, `fd < 0`, `fd <= -1` and `fd == -1` fail where they hold; `fd >= 0`,
+    * `fd > -1` and `fd != -1` fail where they do not; a handle on the right mirrors the operator.
+    * Any other threshold (`fd >= 5`, `fd > 0`) puts a legal descriptor on the "failed" side and
+    * narrows nothing. `-1` reaches here as a unary minus over the literal `1`.
     */
   private def handleFailureSides(
-      cond: AstNode,
-      out: Map[String, Tracked],
-      isHandleSite: Long => Boolean
+    cond: AstNode,
+    out: Map[String, Tracked],
+    isHandleSite: Long => Boolean
   ): List[(String, Boolean)] =
     def lit(e: AstNode): Option[Long] = e match
-        case l: Literal => l.code.trim.toLongOption
-        case _          => None
+      case l: Literal => l.code.trim.toLongOption
+      case c: Call if c.name == "<operator>.minus" => c.argumentOption(1).flatMap(lit).map(-_)
+      case _ => None
     def trackedHandle(e: AstNode): Option[String] = e match
-        case i: Identifier =>
-            out.get(i.name).filter(t => isHandleSite(t.site)).map(_ => i.name)
-        case _ => None
+      case i: Identifier => out.get(i.name).filter(t => isHandleSite(t.site)).map(_ => i.name)
+      case _             => None
+    val mirrored = Map(
+      "<operator>.lessThan"           -> "<operator>.greaterThan",
+      "<operator>.greaterThan"        -> "<operator>.lessThan",
+      "<operator>.lessEqualsThan"     -> "<operator>.greaterEqualsThan",
+      "<operator>.greaterEqualsThan"  -> "<operator>.lessEqualsThan",
+      "<operator>.equals"             -> "<operator>.equals",
+      "<operator>.notEquals"          -> "<operator>.notEquals"
+    )
     cond match
-        case c: Call =>
-            (c.argumentOption(1), c.argumentOption(2)) match
-              case (Some(l), Some(r)) =>
-                  (c.name, trackedHandle(l), lit(r), trackedHandle(r), lit(l)) match
-                      // `fd < 0` / `fd <= -1`: the acquisition failed where this holds
-                      case ("<operator>.lessThan", Some(n), Some(v), _, _) if v <= 0 =>
-                          List((n, true))
-                      case ("<operator>.lessThanOrEqualTo", Some(n), Some(v), _, _) if v <= -1 =>
-                          List((n, true))
-                      // `fd >= 0`: it failed where this does NOT hold
-                      case ("<operator>.greaterThanOrEqual", Some(n), Some(v), _, _) if v >= 0 =>
-                          List((n, false))
-                      // `0 > fd`: it failed where this holds
-                      case ("<operator>.greaterThan", _, _, Some(n), Some(v)) if v >= 0 =>
-                          List((n, true))
-                      // `fd == -1` / `-1 == fd`: it failed where this holds
-                      case ("<operator>.equals", Some(n), Some(v), _, _) if v < 0 =>
-                          List((n, true))
-                      case ("<operator>.equals", _, _, Some(n), Some(v)) if v < 0 =>
-                          List((n, true))
-                      case _ => Nil
-              case _ => Nil
-        case _ => Nil
+      case c: Call if mirrored.contains(c.name) =>
+          val oriented = (c.argumentOption(1), c.argumentOption(2)) match
+            case (Some(l), Some(r)) =>
+                trackedHandle(l).zip(lit(r)).map((c.name, _))
+                    .orElse(trackedHandle(r).zip(lit(l)).map((mirrored(c.name), _)))
+            case _ => None
+          oriented.toList.flatMap {
+            case ("<operator>.lessThan", (n, 0L))           => List((n, true))
+            case ("<operator>.lessEqualsThan", (n, -1L))    => List((n, true))
+            case ("<operator>.equals", (n, -1L))            => List((n, true))
+            case ("<operator>.greaterEqualsThan", (n, 0L))  => List((n, false))
+            case ("<operator>.greaterThan", (n, -1L))       => List((n, false))
+            case ("<operator>.notEquals", (n, -1L))         => List((n, false))
+            case _                                          => Nil
+          }
+      case _ => Nil
 
   /** Is this use protected by a null test of `name` in its OWN expression - `p && p->x`, `!p ||
     * p->x`, `p ? p->x : d`? Short-circuit guards are not control structures, so the worklist never
@@ -1180,12 +1180,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * the way a NULL check narrows a pointer keeps the failure path from reporting a leak.
     */
   private def branchNarrowing(
-      cond: CfgNode,
-      cs: ControlStructure,
-      succ: CfgNode,
-      out: Map[String, Tracked],
-      isOwningSite: Long => Boolean,
-      isHandleSite: Long => Boolean
+    cond: CfgNode,
+    cs: ControlStructure,
+    succ: CfgNode,
+    out: Map[String, Tracked],
+    isOwningSite: Long => Boolean,
+    isHandleSite: Long => Boolean
   ): Map[String, Tracked] =
     // branchOf: Some(true) where the condition holds on this successor, None when unknown
     val facts: List[(String, Option[Boolean])] = branchOf(succ, cs) match

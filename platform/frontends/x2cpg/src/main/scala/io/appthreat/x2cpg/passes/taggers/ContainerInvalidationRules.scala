@@ -50,8 +50,23 @@ object ContainerInvalidationRules:
     Set("push_back", "emplace_back", "insert", "resize", "reserve", "erase", "clear", "assign",
       "append")
 
+  /** member calls that invalidate and RETURN a fresh valid iterator: `it = v.erase(it)` is the
+    * fix idiom, a re-take rather than a use.
+    */
+  private val RetakingInvalidators = Set("erase", "insert", "emplace")
+
   /** the growth family: a `reserve` before the view was taken makes these non-reallocating. */
   private val GrowthFamily = Set("push_back", "emplace_back", "insert", "append")
+
+  /** `std::vector<int> &v`, `vector<Foo*> v`: the element type of a vector/string parameter. */
+  private val ContainerElement = """(?:std::)?(?:vector|deque)\s*<\s*(.+)>\s*&?\s*\w+\s*$""".r
+  private val StringParam      = """(?:std::)?string\s*&\s*\w+\s*$""".r
+
+  /** `int &elem`, `const char &c`: a reference parameter's referent type. */
+  private val RefParam = """^(.+?)\s*&\s*\w+\s*$""".r
+
+  private def normaliseType(t: String): String =
+      t.replaceAll("\\bconst\\b", "").replaceAll("\\s+", "")
 
   private final case class View(name: String, base: String, takeLine: Int)
   private final case class Invalidation(base: String, line: Int, growth: Boolean)
@@ -73,8 +88,9 @@ object ContainerInvalidationRules:
             case "<operator>.cast" | "<operator>.addressOf" =>
                 c.argument.l.collect { case x: Expression => x }.lastOption.flatMap(viewBase)
             case "<operator>.indexAccess" | "<operator>.indirectIndexAccess" => receiverOf(c)
-            case name if ViewTakers.contains(name)                           => receiverOf(c)
-            case _                                                            => None
+            case name if ViewTakers.contains(name) || RetakingInvalidators.contains(name) =>
+                receiverOf(c)
+            case _ => None
     case _ => None
 
   private def lineOf(n: AstNode): Int = n match
@@ -106,8 +122,6 @@ object ContainerInvalidationRules:
       record: (StoredNode, String) => Unit,
       hypothesis: mutable.LinkedHashSet[StoredNode]
   ): Unit =
-    val localNames = method.local.name.l.toSet
-
     val views        = mutable.ListBuffer.empty[View]
     val invalidations = mutable.ListBuffer.empty[Invalidation]
     val reserves      = mutable.ListBuffer.empty[(String, Int)] // (base, line)
@@ -163,11 +177,19 @@ object ContainerInvalidationRules:
             }
     }
 
-    // arm 2: a reference parameter used after a container PARAMETER (or global) was modified -
-    // whether the caller bound the reference into that container cannot be seen from here
+    // arm 2: a reference parameter used after a container PARAMETER was modified - whether the
+    // caller bound the reference into that container cannot be seen from here. Only a
+    // reference to the container's own element type can be bound into it: `int &elem` beside
+    // `vector<int> &v`, never `Item &item`
+    val elementTypeOf: Map[String, String] = method.parameter.l.flatMap { p =>
+        ContainerElement.findFirstMatchIn(p.code).map(m => p.name -> normaliseType(m.group(1)))
+            .orElse(StringParam.findFirstMatchIn(p.code).map(_ => p.name -> "char"))
+    }.toMap
+    val invalidatedElements = invalidations.flatMap(i => elementTypeOf.get(i.base)).toSet
     val refParams = method.parameter.l
-        .filter(p => p.code.contains("&") && !p.typeFullName.trim.startsWith("std."))
-        .map(_.name)
+        .filterNot(p => elementTypeOf.contains(p.name))
+        .flatMap(p => RefParam.findFirstMatchIn(p.code).map(m => p.name -> normaliseType(m.group(1))))
+        .collect { case (name, t) if invalidatedElements.contains(t) => name }
         .toSet
     if refParams.nonEmpty then
         val paramUses: Map[String, List[Use]] =
@@ -178,8 +200,7 @@ object ContainerInvalidationRules:
                 .mapValues(_.sortBy(_.line))
                 .toMap
         invalidations
-            // a frame-local container cannot be what a caller-bound reference points into
-            .filterNot(i => localNames.contains(i.base))
+            .filter(i => elementTypeOf.contains(i.base))
             .map(_.line).sorted.headOption.foreach { invLine =>
                 refParams.foreach { p =>
                     paramUses.get(p).foreach { uses =>

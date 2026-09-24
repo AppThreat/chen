@@ -453,8 +453,8 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * sizeof. An untrusted-read length always reports: the function read it itself.
     */
   private def ruleUnboundedCopy(
-      argsByCall: Map[Call, List[Expression]],
-      record: (StoredNode, String) => Unit
+    argsByCall: Map[Call, List[Expression]],
+    record: (StoredNode, String) => Unit
   ): Unit =
     argsByCall.foreach { case (call, args) =>
         val capParam = capacityParamOf(call, args)
@@ -474,100 +474,93 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     }
 
   /** Part 9: the destination was sized FROM this copy's length. FFmpeg's dominant correct
-    * shape - measured 9 of one tree's 38 MS-BOUND-002 findings, every one a false positive:
-    * `tmp = av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer that
-    * `av_malloc(sz + aud_size + extra_size)`s before copying each fragment, and the in-place
-    * strip `memmove(buf, buf + k, len - k)`. The allocation's size argument, the ADDITION
-    * operands inside it, and one further definition level of those operands (a local holding
-    * `isize + header_size`) are the terms searched for the length's own variable key; a length
-    * that appears as a term of the size can never cross a buffer that term bought.
+    * shape: `tmp = av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer
+    * that `av_malloc(sz + aud_size + extra_size)`s before copying each fragment, and the in-place
+    * strip `memmove(buf, buf + k, len - k)`. The allocation's size argument, the addition operands
+    * inside it, and one further definition level of those operands (a local holding
+    * `isize + header_size`) are the terms searched for the length. A term matches only when the
+    * length reaches the copy with the same definitions it had in the size: `len += 16` between
+    * the two is the overflow, not the excuse.
     *
-    * A destination reached through a struct member (`pkt->data`, sized by av_new_packet in the
-    * library) resolves no allocation here and STAYS a finding: that boundary is the next
-    * pattern, not this conjunct.
+    * The allocation arm reads a destination that IS a local pointer (through casts and offsets);
+    * a struct-member destination (`pkt->data`, sized by av_new_packet in the library) resolves no
+    * allocation here and stays a finding. The in-place and `strlen(dst)` arms compare whole
+    * buffer keys, so `s->a` and `s->b` are two buffers.
     */
   private def selfSizedDestination(
-      dst: Expression,
-      src: Option[Expression],
-      lenArg: Expression
+    dst: Expression,
+    src: Option[Expression],
+    lenArg: Expression
   ): Boolean =
-    def baseIdentifierOf(e: Expression): Option[Identifier] = e match
-        case i: Identifier                              => Some(i)
-        case c: Call if c.name == "<operator>.cast" =>
-            c.argument.l.collect { case x: Expression => x }.lastOption.flatMap(baseIdentifierOf)
-        case c: Call if c.name == "<operator>.addition" =>
-            c.argument.l.collectFirst { case x: Expression => x }.flatMap(baseIdentifierOf)
-        case c: Call
-            if isFieldAccess(c) || c.name == "<operator>.indexAccess" ||
-              c.name == "<operator>.indirectIndexAccess" =>
-            c.argumentOption(1).collect { case x: Expression => x }.flatMap(baseIdentifierOf)
-        case _ => None
-    // an in-place compaction: source and destination share a root VARIABLE - the two
-    // identifier NODES are distinct (the dst argument and the base inside the source's
-    // `buf + k`), so the comparison is on name within the method
-    val inPlace = (baseIdentifierOf(dst), src) match
-        case (Some(d), Some(s)) =>
-            baseIdentifierOf(s).exists(s2 => s2.name == d.name && s2.method.id == d.method.id)
-        case _                  => false
-    // dashdec.c's clear-the-tail idiom: the length is strlen OF THE DESTINATION ITSELF
-    // (`memset(tmp_str, 0, strlen(tmp_str))`) - the write ends at the terminator's slot
+    // the buffer a pointer expression addresses: offsets and casts dropped, fields kept
+    def bufferOf(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(bufferOf).getOrElse(c)
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collectFirst { case x: Expression => x }.map(bufferOf).getOrElse(c)
+      case other => other
+    def sameBuffer(a: Expression, b: Expression): Boolean =
+        (OverlayFacts.variableKey(bufferOf(a)), OverlayFacts.variableKey(bufferOf(b))) match
+          case (Some(x), Some(y)) => x == y && a.method.id == b.method.id
+          case _                  => false
+    val inPlace = src.exists(sameBuffer(dst, _))
+    // dashdec.c's clear-the-tail idiom: `memset(tmp_str, 0, strlen(tmp_str))`
     val clearsOwnLength = lenArg match
-        case c: Call if c.name == "strlen" || c.name == "strnlen" =>
-            c.argumentOption(1).collect { case e: Expression => e }.exists { a =>
-                (baseIdentifierOf(a), baseIdentifierOf(dst)) match
-                    case (Some(x), Some(d)) => x.name == d.name && x.method.id == d.method.id
-                    case _                  => false
-            }
-        case _ => false
-    def definitionTermKeys(i: Identifier): Set[String] =
+      case c: Call if c.name == "strlen" || c.name == "strnlen" =>
+          c.argumentOption(1).collect { case e: Expression => e }.exists(sameBuffer(dst, _))
+      case _ => false
+    def unwrapCast(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCast).getOrElse(c)
+      case other                                   => other
+    // the ASSIGNMENTS and parameters that reach a use: a call argument is a definition to the
+    // reaching-def graph (`malloc(len)` "redefines" len), which says nothing about its value
+    def valueDefs(i: Identifier): Set[Long] =
+        OverlayFacts.reachingDefsIn(i).collect {
+            case p: MethodParameterIn => p.id
+            case d: Identifier
+                if d._astIn.exists {
+                    case a: Call =>
+                        (a.name.startsWith("<operator>.assignment") ||
+                            a.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")) &&
+                        a.argumentOption(1).exists(_.id == d.id)
+                    case _ => false
+                } => d.id
+        }.toSet
+    def rhsOfDefs(i: Identifier): List[Expression] =
         OverlayFacts
             .reachingDefsIn(i)
             .collect { case d: Identifier => d }
             .flatMap(_._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a })
             .flatMap(_.argumentOption(2))
             .collect { case e: Expression => e }
-            .flatMap(termKeysOf(_, expand = false))
-            .toSet
-    def termKeysOf(e: Expression, expand: Boolean): Set[String] =
-        val own = OverlayFacts.variableKey(e).toSet
-        e match
-            case c: Call if c.name == "<operator>.addition" =>
-                own ++ c.argument.l.collect { case x: Expression => x }.flatMap { op =>
-                    OverlayFacts.variableKey(op) ++ (op match
-                        case i: Identifier if expand                   => definitionTermKeys(i)
-                        case nc: Call if nc.name == "<operator>.addition" =>
-                            termKeysOf(nc, expand = expand)
-                        case _                                          => Set.empty[String]
-                    )
-                }
-            case i: Identifier if expand => own ++ definitionTermKeys(i)
-            case _                       => own
-    def allocCallOf(e: Expression): Option[Call] = e match
-        case c: Call
-            if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
-                tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
-            Some(c)
-        // c2cpg lays a cast out as (type placeholder, operand): the operand is argument 2
-        case c: Call if c.name == "<operator>.cast" =>
-            c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
-                .flatMap(allocCallOf)
-        case _ => None
-    def allocationSizingTerms(base: Identifier): Set[String] =
-        OverlayFacts
-            .reachingDefsIn(base)
-            .collect { case d: Identifier => d }
-            .flatMap(_._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a })
-            .flatMap(_.argumentOption(2))
-            .collect { case e: Expression => e }
-            .flatMap(allocCallOf)
-            .flatMap(alloc => alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty))
-            .collect { case e: Expression => e }
-            .flatMap(termKeysOf(_, expand = true))
-            .toSet
-    inPlace || clearsOwnLength || baseIdentifierOf(dst).exists { base =>
-        val lenKeys = castUnwrappingKey(lenArg).toSet
-        lenKeys.nonEmpty && lenKeys.exists(allocationSizingTerms(base).contains)
-    }
+    // the terms of a size: itself, its addition operands, and (once) the operands' definitions
+    def termsOf(e: Expression, expand: Boolean): List[Expression] =
+        val here = unwrapCast(e)
+        here :: (here match
+          case c: Call if c.name == "<operator>.addition" =>
+              c.argument.l.collect { case x: Expression => x }.flatMap(termsOf(_, expand))
+          case i: Identifier if expand => rhsOfDefs(i).flatMap(termsOf(_, expand = false))
+          case _                       => Nil)
+    def allocCallOf(e: Expression): Option[Call] = unwrapCast(e) match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty => Some(c)
+      case _ => None
+    val len = unwrapCast(lenArg)
+    def matches(term: Expression): Boolean = (len, term) match
+      case (a: Identifier, b: Identifier) => a.name == b.name && valueDefs(a) == valueDefs(b)
+      case _ =>
+          OverlayFacts.variableKey(len).exists(k => OverlayFacts.variableKey(term).contains(k))
+    val sizedByAllocation = bufferOf(dst) match
+      case base: Identifier =>
+          rhsOfDefs(base)
+              .flatMap(allocCallOf)
+              .flatMap(_.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).nonEmpty))
+              .collect { case e: Expression => e }
+              .flatMap(termsOf(_, expand = true))
+              .exists(matches)
+      case _ => false
+    inPlace || clearsOwnLength || sizedByAllocation
+  end selfSizedDestination
 
   /** Does some caller leave this caller-param length unbounded? Report when the method has no
     * intra-tree callers (externally reachable - framework callbacks and exports), when the length

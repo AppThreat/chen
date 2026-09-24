@@ -97,97 +97,97 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |    return 0;
         |}
         |
-    |int good_constant(unsigned char *d, const unsigned char *s)
-    |{
-    |    memcpy(d, s, 64);
-    |    return 0;
-    |}
-    |
-    |/* ---- part 9: the self-sized destination (FFmpeg's dominant correct shape) ---- */
-    |
-    |/* dashdec.c: the buffer was allocated with this very length */
-    |char *good_self_sized_alloc(const char *url, int max_url_size)
-    |{
-    |    char *tmp = (char *)malloc(max_url_size);
-    |    if (!tmp) return NULL;
-    |    memcpy(tmp, url, max_url_size);
-    |    return tmp;
-    |}
-    |
-    |/* matroskadec.c: the allocation is a SUM the copy length is a term of, one definition
-    |   level away (`pkt_size = isize + header_size`) */
-    |int good_self_sized_sum(const unsigned char *data, int isize, int header_size)
-    |{
-    |    int pkt_size = isize + header_size;
-    |    unsigned char *pkt_data = (unsigned char *)malloc(pkt_size + 64);
-    |    if (!pkt_data) return -1;
-    |    memcpy(pkt_data + header_size, data, isize);
-    |    return 0;
-    |}
-    |
-    |/* mpegtsenc.c: one multi-term sum names every copied fragment */
-    |int good_self_sized_terms(const unsigned char *aud, int aud_size, const unsigned char *extra, int extra_size)
-    |{
-    |    unsigned char *data = (unsigned char *)malloc(4 + aud_size + extra_size);
-    |    if (!data) return -1;
-    |    memcpy(data + 4, aud, aud_size);
-    |    memcpy(data + 4 + aud_size, extra, extra_size);
-    |    return 0;
-    |}
-    |
-    |/* hls.c: an in-place compaction - the destination and the source share a root */
-    |void good_in_place_strip(unsigned char *buf, int buf_size, int strip, int len)
-    |{
-    |    memmove(buf, buf + strip, len);
-    |}
-    |
-    |/* the hls shape exactly: the length is a dereference, not a local */
-    |void good_in_place_deref_len(unsigned char *buf, int buf_size, int tag_got_bytes, int *lenp)
-    |{
-    |    *lenp -= tag_got_bytes;
-    |    memmove(buf, buf + tag_got_bytes, *lenp);
-    |}
-    |
-    |/* the loop-carried hls shape: the compaction runs inside the read loop */
-    |void good_in_place_loop(unsigned char *buf, int tag_got_bytes, int *lenp)
-    |{
-    |    int pos = 0;
-    |    for (;;)
-    |    {
-    |        if (*lenp < 10)
-    |            break;
-    |        *lenp -= tag_got_bytes;
-    |        memmove(buf, buf + tag_got_bytes, *lenp);
-    |        pos += tag_got_bytes;
-    |    }
-    |}
-    |
-    |/* dashdec.c: the length is derived from the destination itself - clearing strlen(dst)
-    |   bytes of dst cannot cross dst */
-    |void good_strlen_of_dst(char *tmp_str, int tmp_max_url_size)
-    |{
-    |    memset(tmp_str, 0, strlen(tmp_str));
-    |    memset(tmp_str + 1, 0, strlen(tmp_str));
-    |}
-    |
-    |/* a destination through a struct member resolves no allocation here - the packet library
-    |   sized it (av_new_packet), and this rule stays out of that boundary: still a finding */
-    |struct p9_pkt { unsigned char *data; };
-    |int p9_still_bad_packet_data(struct p9_pkt *p, const unsigned char *s, int len)
-    |{
-    |    memcpy(p->data, s, len);
-    |    return 0;
-    |}
-    |
-    |/* an allocation that does not contain the length is no excuse */
-    |int p9_still_bad_other_size(const unsigned char *s, int len)
-    |{
-    |    unsigned char *d = (unsigned char *)malloc(16);
-    |    memcpy(d, s, len);
-    |    return 0;
-    |}
-    |
-    |/* ---- F3 (part 6): the guard in the ELSE branch ---- */
+        |int good_constant(unsigned char *d, const unsigned char *s)
+        |{
+        |    memcpy(d, s, 64);
+        |    return 0;
+        |}
+        |
+        |/* ---- part 9: the self-sized destination (FFmpeg's dominant correct shape) ---- */
+        |
+        |/* dashdec.c: the buffer was allocated with this very length */
+        |char *good_self_sized_alloc(const char *url, int max_url_size)
+        |{
+        |    char *tmp = (char *)malloc(max_url_size);
+        |    if (!tmp) return NULL;
+        |    memcpy(tmp, url, max_url_size);
+        |    return tmp;
+        |}
+        |
+        |/* matroskadec.c: the allocation is a SUM the copy length is a term of, one definition
+        |   level away (`pkt_size = isize + header_size`) */
+        |int good_self_sized_sum(const unsigned char *data, int isize, int header_size)
+        |{
+        |    int pkt_size = isize + header_size;
+        |    unsigned char *pkt_data = (unsigned char *)malloc(pkt_size + 64);
+        |    if (!pkt_data) return -1;
+        |    memcpy(pkt_data + header_size, data, isize);
+        |    return 0;
+        |}
+        |
+        |/* mpegtsenc.c: one multi-term sum names every copied fragment */
+        |int good_self_sized_terms(const unsigned char *aud, int aud_size, const unsigned char *extra, int extra_size)
+        |{
+        |    unsigned char *data = (unsigned char *)malloc(4 + aud_size + extra_size);
+        |    if (!data) return -1;
+        |    memcpy(data + 4, aud, aud_size);
+        |    memcpy(data + 4 + aud_size, extra, extra_size);
+        |    return 0;
+        |}
+        |
+        |/* hls.c: an in-place compaction - the destination and the source share a root */
+        |void good_in_place_strip(unsigned char *buf, int buf_size, int strip, int len)
+        |{
+        |    memmove(buf, buf + strip, len);
+        |}
+        |
+        |/* the hls shape exactly: the length is a dereference, not a local */
+        |void good_in_place_deref_len(unsigned char *buf, int buf_size, int tag_got_bytes, int *lenp)
+        |{
+        |    *lenp -= tag_got_bytes;
+        |    memmove(buf, buf + tag_got_bytes, *lenp);
+        |}
+        |
+        |/* the loop-carried hls shape: the compaction runs inside the read loop */
+        |void good_in_place_loop(unsigned char *buf, int tag_got_bytes, int *lenp)
+        |{
+        |    int pos = 0;
+        |    for (;;)
+        |    {
+        |        if (*lenp < 10)
+        |            break;
+        |        *lenp -= tag_got_bytes;
+        |        memmove(buf, buf + tag_got_bytes, *lenp);
+        |        pos += tag_got_bytes;
+        |    }
+        |}
+        |
+        |/* dashdec.c: the length is derived from the destination itself - clearing strlen(dst)
+        |   bytes of dst cannot cross dst */
+        |void good_strlen_of_dst(char *tmp_str, int tmp_max_url_size)
+        |{
+        |    memset(tmp_str, 0, strlen(tmp_str));
+        |    memset(tmp_str + 1, 0, strlen(tmp_str));
+        |}
+        |
+        |/* a destination through a struct member resolves no allocation here - the packet library
+        |   sized it (av_new_packet), and this rule stays out of that boundary: still a finding */
+        |struct p9_pkt { unsigned char *data; };
+        |int p9_still_bad_packet_data(struct p9_pkt *p, const unsigned char *s, int len)
+        |{
+        |    memcpy(p->data, s, len);
+        |    return 0;
+        |}
+        |
+        |/* an allocation that does not contain the length is no excuse */
+        |int p9_still_bad_other_size(const unsigned char *s, int len)
+        |{
+        |    unsigned char *d = (unsigned char *)malloc(16);
+        |    memcpy(d, s, len);
+        |    return 0;
+        |}
+        |
+        |/* ---- F3 (part 6): the guard in the ELSE branch ---- */
         |
         |/* the bounds check's REJECT path is the then-branch and the copy lives in the
         |   else: c2cpg types the else as controlStructureType=ELSE with the block's own

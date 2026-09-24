@@ -156,6 +156,19 @@ object InitAndFormatRules:
           case _                                               => None
       else None
 
+  /** `s.f` for `s.f`, `s.f.g`, `s.f.g.h`: the candidate-level member a nested access touches. */
+  private def rootFieldPath(c: Call): Option[(String, String)] =
+      fieldPath(c).orElse(
+        if c.name == "<operator>.fieldAccess" then
+          c.argumentOption(1).collect { case b: Call => b }.flatMap(rootFieldPath)
+        else None
+      )
+
+  /** The outermost access of a member chain `f` is the base of: `s.f` inside `s.f.g.h`. */
+  private def outermostAccess(f: Call): Call =
+      parentCall(f).filter(p => p.name == "<operator>.fieldAccess" && p.argumentOption(1).exists(_.id == f.id))
+          .map(outermostAccess).getOrElse(f)
+
   private def insideUnevaluated(n: AstNode): Boolean =
       n.inAst.collectAll[Call].exists(c =>
           c.name == "<operator>.sizeOf" || c.name == "<operator>.addressOf" ||
@@ -219,8 +232,9 @@ object InitAndFormatRules:
             c.argumentOption(1).foreach {
                 case i: Identifier if candidates.contains(i.name) =>
                     gen(c.id()) = Set(i.name)
+                // `s.f.g = x` initialises (part of) s.f: partly initialised is not uninitialised
                 case f: Call =>
-                    fieldPath(f).filter(p => candidates.contains(p._1)).foreach { case (b, fl) =>
+                    rootFieldPath(f).filter(p => candidates.contains(p._1)).foreach { case (b, fl) =>
                         gen(c.id()) = Set(s"$b.$fl")
                     }
                 case _ => ()
@@ -249,8 +263,9 @@ object InitAndFormatRules:
               reads += ((i, i.name, Set(i.name, s"${i.name}.*")))
         case f: Call if f.name == "<operator>.fieldAccess" =>
             fieldPath(f).filter(p => candidates.contains(p._1)).foreach { case (b, fl) =>
-                val parent  = parentCall(f)
-                val isWrite = parent.exists(p => isLhsOf(f, p) && p.name == "<operator>.assignment")
+                val top     = outermostAccess(f)
+                val parent  = parentCall(top)
+                val isWrite = parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
                 if !isWrite && !insideUnevaluated(f) then reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
             }
         case _ => ()
