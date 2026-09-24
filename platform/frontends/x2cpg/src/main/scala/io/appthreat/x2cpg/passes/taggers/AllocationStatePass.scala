@@ -121,6 +121,15 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         }
     }
 
+    // declared `nonnull` parameters of callees with no body in the graph: the call site's
+    // null-use evidence (case 6 reads derefs-param summaries)
+    MemorySemanticsPass.nonnullParamsByName(atom).foreach { case (name, idxs) =>
+        if !definedMethods.exists(m => m.name == name && m.block.astChildren.nonEmpty) then
+          effectsByName.updateWith(name) { existing =>
+              Some(existing.getOrElse(Set.empty) ++ idxs.map(i => s"effect:derefs-param:$i"))
+          }
+    }
+
     definedMethods.foreach(m => analyseMethod(m, roles, effectsByName, record))
 
     OverlayFacts.emitTags(
@@ -202,6 +211,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
     // collapse by name as every effect summary is: same-named methods that disagree carry nothing
     val byName = mutable.HashMap.empty[String, Set[Int]]
+    // a callee with no body here whose declaration says `nonnull(i)` reads through argument i by
+    // contract (MemorySemanticsPass): the same evidence a derefs-param summary is, from a header
+    val definedNames = methods.filter(_.block.astChildren.nonEmpty).map(_.name).toSet
+    MemorySemanticsPass.nonnullParamsByName(atom).foreach { case (name, idxs) =>
+        if !definedNames.contains(name) then byName(name) = idxs
+    }
     def collapse(): Unit = facts.foreach { case (m, _, _, _, _) =>
         val own = perMethod(m)
         byName.updateWith(m.name) {
@@ -1181,7 +1196,10 @@ object AllocationStatePass:
                 case idxs if idxs.nonEmpty => List(m.name -> idxs.toSet)
                 case _                     => Nil
           }
-          .groupMapReduce(_._1)(_._2)((a, b) => if a == b then a else Set.empty)
+          .groupMapReduce(_._1)(_._2)((a, b) => if a == b then a else Set.empty) ++
+          MemorySemanticsPass.nonnullParamsByName(cpg).filterNot { case (name, _) =>
+              cpg.method.nameExact(name).exists(m => !m.isExternal && m.block.astChildren.nonEmpty)
+          }
 
   sealed trait AllocState
   case object StAllocated  extends AllocState

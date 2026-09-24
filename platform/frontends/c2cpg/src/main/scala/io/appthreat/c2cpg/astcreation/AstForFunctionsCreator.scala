@@ -6,7 +6,7 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newModifierNode
 import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{ICPPASTFunctionDeclarator, ICPPASTLambdaExpression}
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
@@ -75,6 +75,45 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         case _: IVariable => true
         case _            => false
 
+  /** The GCC attributes a function is declared with - on its declarator (the trailing `void
+    * *f(size_t n) __attribute__((malloc, alloc_size(1)));` form) or on its declaration specifier
+    * (the leading form) - normalised to `name` or `name(arg,arg)`, leading/trailing `__` stripped.
+    * They are the only memory semantics a header states for a function whose body is outside the
+    * analysed tree (FFmpeg's `av_malloc_attrib av_alloc_size(1)`).
+    */
+  private def gccAttributes(owners: Seq[IASTNode]): List[String] =
+    def strip(s: String): String = s.stripPrefix("__").stripSuffix("__")
+    def tokens(t: IASTToken): List[String] = t match
+      case l: IASTTokenList => l.getTokens.toList.flatMap(tokens)
+      case single           => List(new String(single.getTokenCharImage))
+    owners.flatMap {
+        case o: IASTAttributeOwner =>
+            o.getAttributeSpecifiers.toList.flatMap {
+                case l: IASTAttributeList => l.getAttributes.toList
+                case _                    => Nil
+            } ++ o.getAttributes.toList
+        case _ => Nil
+    }.flatMap { a =>
+      val name = strip(new String(a.getName)).trim
+      Option.when(name.nonEmpty) {
+          Option(a.getArgumentClause).map(tokens) match
+            case Some(args) if args.nonEmpty =>
+                val rendered = args.mkString.filterNot(_.isWhitespace)
+                s"$name(${rendered.stripPrefix("(").stripSuffix(")")})"
+            case _ => name
+      }
+    }.distinct.toList
+  end gccAttributes
+
+  private def tagFunctionAttributes(method: NewMethod, owners: Seq[IASTNode]): Unit =
+      gccAttributes(owners).foreach { attr =>
+          diffGraph.addEdge(
+            method,
+            NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr),
+            EdgeTypes.TAGGED_BY
+          )
+      }
+
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
     binding match
@@ -107,6 +146,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
               filename
             )
 
+            tagFunctionAttributes(
+              methodNode_,
+              Seq(funcDecl, funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier)
+            )
             scope.pushNewScope(methodNode_)
 
             val parameterNodes = withIndex(parameters(funcDecl)) { (p, i) =>
@@ -183,6 +226,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     val code        = nodeSignature(funcDef)
     val methodNode_ = methodNode(funcDef, name, code, fullname, Some(signature), filename)
 
+    tagFunctionAttributes(methodNode_, Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier))
     methodAstParentStack.push(methodNode_)
     scope.pushNewScope(methodNode_)
 

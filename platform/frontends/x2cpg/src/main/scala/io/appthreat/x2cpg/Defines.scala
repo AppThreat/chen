@@ -17,10 +17,16 @@ object Defines:
 
   // A frontend-recorded storage class on a LOCAL that has static storage duration (C/C++
   // `static` inside a function): the schema has no property or MODIFIER child for it on a LOCAL.
-  val StorageClassTag     = "storage-class"
-  val StorageClassStatic  = "static"
-  val UnresolvedNamespace = "<unresolvedNamespace>"
-  val UnresolvedSignature = "<unresolvedSignature>"
+  val StorageClassTag    = "storage-class"
+  val StorageClassStatic = "static"
+
+  /** A GCC/Clang function attribute written on a declaration or definition, normalised
+    * (`__malloc__` -> `malloc`, `alloc_size(1, 2)` -> `alloc_size(1,2)`): the declared semantics a
+    * header gives a function whose body is out of scope. On the METHOD, one tag per attribute.
+    */
+  val FunctionAttributeTag = "fn-attr"
+  val UnresolvedNamespace  = "<unresolvedNamespace>"
+  val UnresolvedSignature  = "<unresolvedSignature>"
 
   // Name of the synthetic, static method that contains the initialization of member variables.
   val StaticInitMethodName = "<clinit>"

@@ -24,7 +24,7 @@ object ParserConfig:
     config.includePaths.map(Paths.get(_).toAbsolutePath),
     IncludeAutoDiscovery.discoverIncludePathsC(config),
     IncludeAutoDiscovery.discoverIncludePathsCPP(config),
-    config.defines.map {
+    DefaultDefines.GNU_COMPILER ++ config.defines.map {
         case define if define.contains("=") =>
             val s = define.split("=")
             s.head -> s(1)

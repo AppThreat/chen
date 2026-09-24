@@ -639,6 +639,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           val parentDecl =
               s.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclarators.toList(index)
           pointersAsString(s, parentDecl, stripKeywords)
+      case s: IASTElaboratedTypeSpecifier
+          if s.getParent.isInstanceOf[IASTFunctionDefinition] =>
+          // `struct entry *find(...) {...}`: the return type's pointer lives on the function
+          // declarator. Without this case the definition's return type was `struct entry` - no
+          // pointer - while the same function's declaration said `struct entry*`
+          val parentDecl = s.getParent.asInstanceOf[IASTFunctionDefinition].getDeclarator
+          pointersAsString(s, parentDecl, stripKeywords)
       case s: IASTElaboratedTypeSpecifier => ASTStringUtil.getSignatureString(s, null)
       case _                              => Defines.anyTypeName
     if tpe.isEmpty then Defines.anyTypeName else tpe

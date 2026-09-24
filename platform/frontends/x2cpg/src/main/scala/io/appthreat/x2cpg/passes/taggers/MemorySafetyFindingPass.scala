@@ -1090,13 +1090,23 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     * terminator arithmetic correct code writes everywhere.
     */
   private def stringLengthSum(arith: Call): Boolean =
-      arith.name == "<operator>.addition" && arith.argument.l.forall {
-          case _: Literal                                           => true
-          case c: Call if c.name == "strlen" || c.name == "strnlen" => true
-          case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
-          case c: Call if c.name == "<operator>.addition"           => stringLengthSum(c)
-          case _                                                    => false
-      }
+    def smallLiteral(e: Expression) = e match
+      case l: Literal => l.code.trim.toLongOption.exists(v => v >= 0 && v <= 16)
+      case _          => false
+    def stringLength(e: Expression): Boolean = e match
+      case _: Literal                                           => true
+      case c: Call if c.name == "strlen" || c.name == "strnlen" => true
+      case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
+      case c: Call if c.name == "<operator>.addition"           => c.argument.l.forall(stringLength)
+      // a string's length scaled by a small constant (`strlen(s) * 4`, a wide-char buffer)
+      case c: Call if c.name == "<operator>.multiplication" =>
+          c.argument.l match
+            case List(x, y) =>
+                (stringLength(x) && smallLiteral(y)) || (smallLiteral(x) && stringLength(y))
+            case _ => false
+      case _ => false
+    (arith.name == "<operator>.addition" || arith.name == "<operator>.multiplication") &&
+    stringLength(arith)
 
   /** Does the length this call consumes become a buffer's capacity? An allocator produces a fresh
     * buffer whose size IS this argument; a copy into a destination with a recorded extent writes
