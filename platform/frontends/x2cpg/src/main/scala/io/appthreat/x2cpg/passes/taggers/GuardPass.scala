@@ -380,8 +380,17 @@ object GuardPass:
         case other                => cursor = other._astIn.nextOption()
     owner
 
+  /** F3 (part 6): the else branch is typed by `controlStructureType` - c2cpg emits it as `ELSE`
+    * carrying the else-block's own parser type (`CASTCompoundStatement`), so matching on
+    * parserTypeName alone never recognised one. Every guard written as `if (too big) { ... } else {
+    * the copy }` was then read as if the condition HELD at the copy: a disjunction in it could not
+    * be split (`conjuncts(_, holds = true)` is not separable), no bound was emitted, and the bounds
+    * rules fired on correctly guarded code - a third of MS-BOUND-002's and MS-BOUND-003's per-tree
+    * findings, measured.
+    */
   private def isElse(cs: ControlStructure): Boolean =
-      cs.parserTypeName.equalsIgnoreCase("else")
+      cs.controlStructureType.equalsIgnoreCase("ELSE") ||
+          cs.parserTypeName.toLowerCase.contains("else")
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
 end GuardPass
