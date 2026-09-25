@@ -85,6 +85,28 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
     |    return 0;
     |}
     |
+    |int good_disjunctive_rejection(struct fragment *fragments, int count, int seq_no, int roll)
+    |{
+    |    if (seq_no > count || seq_no < 0 || roll)
+    |    {
+    |        return -1;
+    |    }
+    |    return fragments[seq_no].n;
+    |}
+    |
+    |int good_walk_clamped(const unsigned char *buf, int size)
+    |{
+    |    const unsigned char *p = buf;
+    |    const unsigned char *end = buf + size;
+    |    while (end - p > 4)
+    |    {
+    |        uint32_t len = FFMIN(AV_RB32(p), end - p - 4);
+    |        p += 4;
+    |        p += len;
+    |    }
+    |    return 0;
+    |}
+    |
     |int good_walk_guarded(const unsigned char *buf, int rem_size)
     |{
     |    const unsigned char *p = buf;
@@ -167,6 +189,10 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
         findingsIn("good_rejection_does_not_return", "MS-BOUND-003") shouldBe empty
     }
 
+    "split a rejecting disjunction whose third disjunct is not a comparison" in {
+        findingsIn("good_disjunctive_rejection", "MS-BOUND-003") shouldBe empty
+    }
+
   "the pointer-walk arm" should:
     "report an unguarded attacker-sized walk inside a loop" in {
         findingsIn("bad_walk_wraparound", "MS-BOUND-003") should not be empty
@@ -174,6 +200,10 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the step is bounded above" in {
         findingsIn("good_walk_guarded", "MS-BOUND-003") shouldBe empty
+    }
+
+    "stay silent when the step is clamped against the walked pointer" in {
+        findingsIn("good_walk_clamped", "MS-BOUND-003") shouldBe empty
     }
 end Part10BoundsTests
 

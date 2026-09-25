@@ -578,6 +578,25 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
       case (a: Identifier, b: Identifier) => a.name == b.name && valueDefs(a) == valueDefs(b)
       case _ =>
           OverlayFacts.variableKey(len).exists(k => OverlayFacts.variableKey(term).contains(k))
+    // the destination is the data member of a packet the SAME function sized through the
+    // library boundary: av_new_packet(pkt, len) / av_grow_packet(pkt, len) before
+    // memcpy(pkt->data, ..., len). The base the field is read through must be the very
+    // argument the boundary call sized, and the lengths must be the same value (through the
+    // addition operands the boundary's own padding arithmetic introduces). Part 10, the
+    // second self-sized pattern measured on libavformat.
+    val sizedByPacketApi = bufferOf(dst) match
+      case fa: Call if isFieldAccess(fa) =>
+          fa.argumentOption(1).flatMap(OverlayFacts.variableKey).exists { baseKey =>
+              dst.method.ast.collectAll[Call].l.exists { c =>
+                  PacketAllocApis.contains(c.name) &&
+                      c.argumentOption(1).flatMap(OverlayFacts.variableKey).contains(baseKey) &&
+                      // the boundary sizes with the copy's length plus its own header/padding
+                      // arithmetic: av_new_packet(pkt, len + sizeof(start_sequence))
+                      c.argumentOption(2).toList.flatMap(termsOf(_, expand = true))
+                          .exists(matches)
+              }
+          }
+      case _ => false
     val sizedByAllocation = bufferOf(dst) match
       case base: Identifier =>
           rhsOfDefs(base)
@@ -587,8 +606,15 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
               .flatMap(termsOf(_, expand = true))
               .exists(matches)
       case _ => false
-    inPlace || clearsOwnLength || sizedByAllocation
+    inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi
   end selfSizedDestination
+
+  /** The packet-buffer boundary the corpus's own demuxers write through: these two library
+    * calls size the packet's data member, and a copy into that member with the same length is
+    * bounded by construction. Deliberately closed and small - a wholesale "anything that
+    * allocates" reading would excuse real overruns.
+    */
+  private val PacketAllocApis = Set("av_new_packet", "av_grow_packet")
 
   /** Does some caller leave this caller-param length unbounded? Report when the method has no
     * intra-tree callers (externally reachable - framework callbacks and exports), when the length
@@ -788,13 +814,67 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                   if pointerLocals.contains(lhs.name) && readsThrough.contains(lhs.name) &&
                     insideLoop(walk) &&
                     !guardedAbove(s"v:${lhs.name}", walkLine) &&
-                    !OverlayFacts.variableKey(step).exists(guardedAbove(_, walkLine))
+                    !OverlayFacts.variableKey(step).exists(guardedAbove(_, walkLine)) &&
+                    !clampedStep(step, s"v:${lhs.name}")
                   then
                     if ValueOriginPass.originNamesOf(step).exists(attackers.contains) then
                       record(walk, RuleIndexRead)
               }
           }
     }
+
+  /** The step of a walk is CLAMPED against the walked pointer itself - `len =
+    * FFMIN(AV_RB32(buf), end - buf - 4)` before `buf += len` - so the walk cannot leave the
+    * buffer. The clamp is a vocabulary min (the inventory's `clamp: min` family) or the
+    * conditional shape every min macro expands to, one of whose operands still mentions the
+    * walked pointer. hevc.c's and vvc.c's NAL walkers are the shape.
+    */
+  private lazy val minClampNames: Set[String] =
+      MemApiVocab.inventory(None).collect { case (n, e) if e.clamp.contains("min") => n }.toSet
+
+  private def mentionsKey(e: AstNode, key: String, depth: Int): Boolean =
+      if depth < 0 then false
+      else
+        e match
+          case i: Identifier => OverlayFacts.variableKey(i).contains(key)
+          case c: Call       =>
+              OverlayFacts.variableKey(c).contains(key) ||
+                  c.argument.l.exists(a => mentionsKey(a, key, depth - 1))
+          case _ => false
+
+  private def clampedStep(step: Expression, pointerKey: String): Boolean =
+    def clampOf(e: Expression): Boolean = e match
+        case c: Call if minClampNames.contains(c.name) =>
+            c.argument.l.exists(a => mentionsKey(a, pointerKey, 3))
+        case c: Call if c.name == "<operator>.conditional" =>
+            // cond ? a : b where cond compares a and b (the min/max macro shape) and one
+            // operand mentions the walked pointer
+            val operandKeys = Seq(2, 3).flatMap(i =>
+                c.argumentOption(i).flatMap(OverlayFacts.variableKey)
+            ).toSet
+            val condKeys = c.argumentOption(1).toList.flatMap(_.ast.collectAll[Call].l)
+                .filter(cmp => GuardPass.comparisonOps.contains(cmp.name))
+                .flatMap(cmp => cmp.argument.l.collect { case x: Expression => x })
+                .flatMap(OverlayFacts.variableKey).toSet
+            operandKeys.size == 2 && operandKeys.subsetOf(condKeys) &&
+                c.argument.l.exists(a => mentionsKey(a, pointerKey, 3))
+        case _ => false
+    def go(e: Expression, depth: Int): Boolean =
+        if depth < 0 then false
+        else clampOf(e) || (e match
+            case i: Identifier =>
+                OverlayFacts
+                    .reachingDefsIn(i)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                    .exists(go(_, depth - 1))
+            case _ => false
+        )
+    go(step, 2)
+  end clampedStep
 
   /** The (walked pointer, step) of an in-place pointer advance: `p += k`, or `p = p + k`. */
   private def walkTargetOf(walk: Call): Option[(Identifier, Expression)] =

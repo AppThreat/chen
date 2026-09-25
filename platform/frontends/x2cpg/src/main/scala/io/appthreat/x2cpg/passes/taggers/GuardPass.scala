@@ -321,9 +321,19 @@ object GuardPass:
         case _                                => None
 
   private def andThen(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
-    val l = expr.argumentOption(1).collect { case c: Call => c }.flatMap(conjuncts(_, holds))
-    val r = expr.argumentOption(2).collect { case c: Call => c }.flatMap(conjuncts(_, holds))
-    (l, r) match
+    // a non-comparison operand (an integer's truthiness, `audio_roll_distance`) yields no
+    // comparison facts of its own, but its truth or falsity does not BLOCK the comparison
+    // facts of the sibling disjuncts: `!(a > 1 || b > 2U || roll)` still bounds a and b. A
+    // whole-conjunct None (a nested disjunction at the holding polarity) still voids the split.
+    def side(e: Option[AstNode]): Option[List[(Call, Boolean)]] = e match
+        case Some(c: Call) if comparisonOps.contains(c.name) ||
+            c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
+            c.name == "<operator>.logicalOr" => conjuncts(c, holds)
+        // any other operand - an integer's truthiness, a field read - yields no comparison
+        // facts of its own and does not block the sibling's
+        case Some(_) => Some(Nil)
+        case None    => None
+    (side(expr.argumentOption(1)), side(expr.argumentOption(2))) match
       case (Some(ls), Some(rs)) => Some(ls ++ rs)
       case _                    => None
 
