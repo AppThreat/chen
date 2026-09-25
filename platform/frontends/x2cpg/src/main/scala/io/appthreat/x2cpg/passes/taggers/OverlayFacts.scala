@@ -45,6 +45,15 @@ private[taggers] object OverlayFacts:
   /** The struct member a field access reads. c2cpg leaves FIELD_IDENTIFIER REF edges empty, so the
     * member is resolved through the base expression's type (`blk*` -> typeDecl `blk`) and the
     * canonical member name; identifiers without a recovered type resolve nothing.
+    *
+    * Same-named structs in different files are different structs: libavformat defines an
+    * ASFContext per asfdec variant, and their `asf_st` members are `ASFStream*` in one and
+    * `ASFStream*[128]` in another. C's visibility answers which one a read sees - the struct
+    * defined in the file that reads it - and that preference is also what makes the answer
+    * deterministic: the typeDecl a traversal returns first is parse order, which run-to-run
+    * parallelism reorders (part 10 task 0: whole MS-BOUND-003 groups flipped per file on this).
+    * Without a same-file definition the candidates are read in a content-stable order and the
+    * first is taken - arbitrary, but the same arbitrary one every run.
     */
   def memberRefOf(cpg: Cpg, fieldAccess: Call): Option[Member] =
       for
@@ -59,8 +68,40 @@ private[taggers] object OverlayFacts:
                 case _ => None
           case _ => None
         typeName = baseType.stripSuffix("*").trim
-        member <- cpg.typeDecl.nameExact(typeName).member.nameExact(fi.canonicalName).headOption
+        member <- membersOfNamedType(cpg, typeName, fi.canonicalName, fieldAccess.method.filename)
+            .headOption
       yield member
+
+  /** The member `memberName` of the type declarations named `typeName`, preferring the
+    * definition in `inFile`, then a content-stable order. See [[memberRefOf]].
+    */
+  def membersOfNamedType(
+    cpg: Cpg,
+    typeName: String,
+    memberName: String,
+    inFile: String
+  ): List[Member] =
+      val candidates = cpg.typeDecl.nameExact(typeName).l
+          .flatMap(td => membersOfTypeDecl(td).map(m => (td.filename, m)))
+          .filter { case (_, m) => m.name == memberName }
+      val sameFile = candidates.collect { case (f, m) if f == inFile => m }
+      val ordered  = if sameFile.nonEmpty then sameFile
+                     else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
+      ordered.distinctBy(_.id)
+
+  /** The members of one type declaration, read through the AST edge.
+    *
+    * The schema's `TypeDecl.member` step matches members by their `typeDeclFullName` property. A
+    * type that exists both as a definition and as a frontend stub carries that property on
+    * whichever node's pass finished first - parse order is parallel - so the property-keyed step
+    * can return nothing for the very type declaration that owns the members, and whether it does
+    * differs between runs of the SAME tree on the same code. The AST edge is the source of truth;
+    * the schema step is only the fallback for a declaration whose edge was never built.
+    */
+  def membersOfTypeDecl(td: TypeDecl): List[Member] =
+      val viaAst = td.astChildren.collectAll[Member].l
+      if viaAst.nonEmpty then viaAst else td.member.l
+
 
   /** Declared array size from a type full name (`char[64]`, `int[16]` through a #define). */
   def arrayExtent(typeFullName: String): Option[Int] =
@@ -91,7 +132,7 @@ private[taggers] object OverlayFacts:
     "int64_t"
   )
 
-  def isIntegral(t: String): Boolean = integralTypes.contains(t.stripPrefix("const ").trim)
+  def isIntegral(t: String): Boolean = integralTypes.contains(normalizeTypeName(t))
 
   private val signedIntegralTypes = Set(
     "int",
@@ -107,13 +148,20 @@ private[taggers] object OverlayFacts:
   )
 
   /** GCC writes compound type names with the sign word last (`short unsigned`); every lookup in
-    * this object normalises to the canonical order first.
+    * this object normalises to the canonical order first. The bare spellings `unsigned` and
+    * `signed` are `unsigned int` and `int` in C - libavformat's `unsigned count` parameters
+    * carried the bare word, and every integral lookup on them concluded nothing (part 10: the
+    * one-sided bounds arm's `param:` extent and the unsigned-index negative both read it).
     */
   def normalizeTypeName(t: String): String =
-    val words = t.stripPrefix("const ").trim.split("\\s+").toList
-    val sign  = words.find(w => w == "unsigned" || w == "signed")
-    val rest  = words.filterNot(w => sign.contains(w))
-    (sign.toList ::: rest).mkString(" ")
+    val words   = t.stripPrefix("const ").trim.split("\\s+").toList
+    val sign    = words.find(w => w == "unsigned" || w == "signed")
+    val rest    = words.filterNot(w => sign.contains(w))
+    val norm    = (sign.toList ::: rest).mkString(" ")
+    norm match
+      case "unsigned" => "unsigned int"
+      case "signed"   => "int"
+      case other      => other
 
   /** A signed integral type: the only kind an index can go negative in. */
   def isSignedIntegral(t: String): Boolean =

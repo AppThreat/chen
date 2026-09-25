@@ -347,20 +347,29 @@ object MemorySemanticsPass:
     * calls types every parameter ANY but keeps the call's declared signature).
     */
   private def declaredShape(cpg: Cpg, name: String): Option[Shape] =
+    // every pick here is over content-sorted candidates: same-named methods in different files
+    // (FFmpeg's per-demuxer read_header/read_close) carry different signatures, and which one a
+    // traversal returned first was parse order - run-to-run nondeterministic (part 10 task 0)
     val methods = cpg.method.nameExact(name).l
-    val typed = methods.collectFirst {
-        case m if !isUnknownType(Option(m.methodReturn.typeFullName).getOrElse("").trim) &&
-              m.parameter.nonEmpty && m.parameter.forall(p => !isUnknownType(p.typeFullName.trim)) =>
+    val typed = methods
+        .filter(m => !isUnknownType(Option(m.methodReturn.typeFullName).getOrElse("").trim) &&
+            m.parameter.nonEmpty && m.parameter.forall(p => !isUnknownType(p.typeFullName.trim)))
+        .sortBy(m => (m.filename, m.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)))
+        .headOption
+        .map(m =>
             Shape(
               m.methodReturn.typeFullName.trim,
               m.parameter.l.sortBy(_.index).filter(_.index > 0).map(_.typeFullName.trim)
             )
-    }
+        )
     typed
         .orElse(methods.iterator.map(m => Option(m.signature).getOrElse(""))
-            .flatMap(parseSignature).find(s => !isUnknownType(s.returnType)))
+            .flatMap(parseSignature).toSet
+            .filter(s => !isUnknownType(s.returnType))
+            .toList.sortBy(s => (s.returnType, s.params.mkString(","))).headOption)
         .orElse(cpg.call.nameExact(name).signature.dedup.l.flatMap(parseSignature)
-            .find(s => !isUnknownType(s.returnType)))
+            .filter(s => !isUnknownType(s.returnType))
+            .sortBy(s => (s.returnType, s.params.mkString(","))).headOption)
   end declaredShape
 
   private def normalisedType(t: String): String =

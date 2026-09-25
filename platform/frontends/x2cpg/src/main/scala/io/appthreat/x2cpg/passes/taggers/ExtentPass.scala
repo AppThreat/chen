@@ -377,7 +377,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     */
   private def siblingLengthOf(member: Member): Option[String] =
     val wanted = Set(s"${member.name}_len", s"${member.name}_size")
-    member.typeDecl.member.l
+    Option(member.typeDecl).toList
+        .flatMap(td => OverlayFacts.membersOfTypeDecl(td))
         .filter(m => m != member && isIntegral(m.typeFullName))
         .find(m => wanted.contains(m.name))
         .map(_.name)

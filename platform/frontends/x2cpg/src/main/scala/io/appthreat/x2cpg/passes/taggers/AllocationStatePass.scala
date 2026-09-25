@@ -130,6 +130,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           }
     }
 
+    // a method whose body contains a throw may unwind at any of its call sites: the unwind path
+    // is an exit the frame's live allocations never get freed on (part 10: the CWE-401
+    // exception-path leak, cpp/cwe401_exception_leak.cpp's `mayThrow(n)` between new and delete)
+    definedMethods
+        .filter(m => m.ast.collectAll[Call].exists(_.name == "<operator>.throw"))
+        .foreach { m =>
+            effectsByName.updateWith(m.name) {
+                case Some(effects) => Some(effects + EffectMayThrow)
+                case None          => Some(Set(EffectMayThrow))
+            }
+        }
+
     definedMethods.foreach(m => analyseMethod(m, roles, effectsByName, record))
     failurePathFieldDoubleFrees(definedMethods, roles, record)
 
@@ -479,6 +491,27 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // only after the worklist drains, from the state each exit settled on.
     val leakFacts =
         mutable.LinkedHashMap.empty[(Long, Long, String), (StoredNode, AllocState)]
+    // the (name, line) pairs the OVERWRITE arm already reported a leak at: in a loop whose body
+    // re-allocates, the overwrite of iteration n and the exit-settled fact of iteration n+1's
+    // block are one leak at one line, and reporting both rendered the corpus's loop-carried row
+    // twice (part 10). The first report stands; a settled fact at the same (name, line) is its restatement.
+    // the escape CLAIMS settle exactly like the leak facts: the state at an anchor is the JOIN
+    // over every visit (commutative, so order-independent), and the claim is read after the
+    // worklist drains. Recording on whichever visit saw it first was the last run-to-run
+    // nondeterminism - the VisitCap can hide or reveal a visit depending on enqueue order,
+    // which the frontend's parallel parse reorders (part 10, task 0: MS-ESC-001 sites flipped
+    // per file between identical runs).
+    val escFacts = mutable.LinkedHashMap.empty[(Long, String), (StoredNode, Map[String, Tracked])]
+    val overwriteLeakLines = mutable.HashMap.empty[String, Set[Int]]
+    def recordAndNote(node: StoredNode, tag: String, value: String): Unit =
+        node match
+          case c: Call if tag == TagLeak && value.startsWith("leak:") =>
+              val line = c.lineNumber.map(_.toInt).getOrElse(-1)
+              overwriteLeakLines.updateWith(value.stripPrefix("leak:")) { prev =>
+                  Some(prev.getOrElse(Set.empty) + line)
+              }
+          case _ => ()
+        record(node, tag, value)
     val nullUseFacts =
         mutable.ListBuffer.empty[(Long, StoredNode, String, String)] // (site, use, name, kind)
 
@@ -592,18 +625,77 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       val node = queued.head
       queued.remove(node)
       val in  = inStates.getOrElse(node.id(), Map.empty)
-      val out = transfer(node, in, callFacts, effectsByName, leakFacts, nullUseFacts, ctx, record)
+      val out = transfer(node, in, callFacts, effectsByName, leakFacts, escFacts, nullUseFacts, ctx, recordAndNote)
 
-      node._cfgOut.iterator.foreach {
-          case succ: CfgNode =>
-              // branch edges leave from the CONDITION CALL of a guard, not from the control
-              // structure node, so the narrowing rides on the condition's out-edges
-              val succState = guards.get(node.id()) match
-                case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
-                case None     => out
-              enqueue(succ, succState)
-          case _ => ()
+      // successors enqueue in a CONTENT-stable order: line, then code, then which side of the
+      // controlling condition the edge leaves by (then before else). overflowdb iterates a
+      // node's edges in insertion order, which the parallel frontend reorders run-to-run, and
+      // the worklist's VisitCap turns that order into different settled states - run-to-run
+      // nondeterminism visible as MS-ESC-001 sites flipping per file (part 10, task 0). The
+      // branch side is the tiebreaker two structurally identical branches need: same line, same
+      // code, different narrowing.
+      val cs = guards.get(node.id())
+      val successors = node._cfgOut.iterator.collect { case succ: CfgNode => succ }.toList
+          .sortBy { succ =>
+              (succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue), succ.code,
+                  cs.flatMap(branchOf(succ, _)).map(b => if b then 0 else 1).getOrElse(2))
+          }
+      successors.foreach { succ =>
+          // branch edges leave from the CONDITION CALL of a guard, not from the control
+          // structure node, so the narrowing rides on the condition's out-edges
+          val succState = guards.get(node.id()) match
+            case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
+            case None     => out
+          enqueue(succ, succState)
       }
+    // CHEN_STATE_DEBUG=<method-name>: dump the settled state at the escapes/leaks, to check
+    // what a run concluded without guessing (part 10 determinism hunt)
+    sys.env.get("CHEN_STATE_DEBUG").foreach { needle =>
+        if method.name.contains(needle) then
+            escFacts.foreach { case ((_, kind), (node, settled)) =>
+                System.err.println(
+                    s"statedbg ${lineOf(node)} $kind settled=${settled.map { case (k, t) => s"$k:${stateName(t.state)}" }.mkString(",")}"
+                )
+            }
+            leakFacts.foreach { case ((site, exitId, name), (node, st)) =>
+                System.err.println(
+                    s"statedbg leak ${lineOf(node)} exitId=$exitId $name=${stateName(st)}"
+                )
+            }
+    }
+
+    // the settled escape claims, read the way the leak facts are read: the predicates are the
+    // ones the transfer used, evaluated against the state the exit JOINED over every visit
+    escFacts.foreach { case (_, (node, settled)) =>
+        node match
+          case r: Return =>
+              val refToLocale = ctx.refReturn && r.astChildren.exists {
+                  case i: Identifier =>
+                      ctx.locals.contains(i.name) && !ctx.arrayLocals.contains(i.name)
+                  case _ => false
+              }
+              r.astChildren.collect { case e: Expression => e }.foreach { e =>
+                  val viaTracked =
+                      trackedNameOf(e).flatMap(settled.get).exists(_.state == StStackAddr)
+                  if holdsStackAddress(e, ctx) || viaTracked || refToLocale then
+                    record(r, TagStackEscape, "escape:return")
+              }
+          case c: Call if c.name == "<operator>.assignment" =>
+              (argAt(c.argument.l, 1), argAt(c.argument.l, 2)) match
+                case (Some(dst), Some(rhs)) =>
+                    val stackRhs = rhsHoldsStackAddress(rhs, settled, ctx)
+                    dst match
+                      case i: Identifier =>
+                          if !ctx.locals.contains(i.name) && !ctx.params.contains(i.name) &&
+                            stackRhs
+                          then record(c, TagStackEscape, "escape:global")
+                      case _ =>
+                          if !isFrameStorage(dst, ctx) && stackRhs then
+                            record(c, TagStackEscape, "escape:store")
+                case _ => ()
+          case _ => ()
+    }
+
     // one leak fact per allocation: the earliest exit where it settled as still live
     val settledLeaks = leakFacts.toList.collect { case ((site, _, name), (exit, StAllocated)) =>
         (site, exit, name)
@@ -625,7 +717,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         val anchor = exit match
           case _: MethodReturn => callNodes.get(site).getOrElse(exit)
           case other           => other
-        record(anchor, TagLeak, s"leak:$name")
+        // the overwrite arm's report at the same (name, line) already carries this leak
+        val restatedByOverwrite =
+            overwriteLeakLines.getOrElse(name, Set.empty).contains(lineOf(anchor))
+        if !restatedByOverwrite then record(anchor, TagLeak, s"leak:$name")
     }
     // one null-use fact per nullable producer: the FIRST use the pointer reaches without a
     // narrowing guard in between - the site a reader adds the missing check to. A use under a
@@ -654,6 +749,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     callFacts: mutable.LongMap[CallFacts],
     effectsByName: mutable.HashMap[String, Set[String]],
     leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
+    escFacts: mutable.LinkedHashMap[(Long, String), (StoredNode, Map[String, Tracked])],
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
     ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
@@ -662,7 +758,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case c: Call =>
             callFacts.get(c.id()) match
               case Some(cf) =>
-                  transferCall(c, cf, callFacts, effectsByName, in, nullUseFacts, ctx, record)
+                  transferCall(c, cf, callFacts, effectsByName, in, escFacts, nullUseFacts, ctx, record)
               case None => in
         case r: Return =>
             var out = in
@@ -678,23 +774,23 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                       out = out.updated(name, t.copy(state = StEscaped))
                   }
               }
-              val refToLocale = ctx.refReturn && (e match
-                case i: Identifier =>
-                    ctx.locals.contains(i.name) && !ctx.arrayLocals.contains(i.name)
-                case _ => false
-              )
-              if holdsStackAddress(e, ctx) || viaTracked || refToLocale then
-                record(r, TagStackEscape, "escape:return")
+              // the escape CLAIM settles: recorded after the drain from the joined state, not
+              // on whichever visit happened to see it (part 10, task 0). The INCOMING state is
+              // what the claim reads - the escape-marking below would erase it.
+              escFacts.updateWith((r.id, "escape:return")) {
+                  case Some((_, prev)) => Some((r, joinPoints(prev, in)))
+                  case None            => Some((r, in))
+              }
             }
             out.foreach { case (name, t) =>
                 if !ctx.staticLocals.contains(name) && !isFieldName(name)
-                then leakFacts.update((t.site, r.id, name), (r, t.state))
+                then noteLeak(leakFacts, (t.site, r.id, name), (r, t.state))
             }
             out
         case mr: MethodReturn =>
             in.foreach { case (name, t) =>
                 if !ctx.staticLocals.contains(name) && !isFieldName(name)
-                then leakFacts.update((t.site, mr.id, name), (mr, t.state))
+                then noteLeak(leakFacts, (t.site, mr.id, name), (mr, t.state))
             }
             in
         case _ => in
@@ -838,6 +934,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     callFacts: mutable.LongMap[CallFacts],
     effectsByName: mutable.HashMap[String, Set[String]],
     in: Map[String, Tracked],
+    escFacts: mutable.LinkedHashMap[(Long, String), (StoredNode, Map[String, Tracked])],
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
     ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
@@ -904,22 +1001,32 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       val fieldLhs = argAt(cf.args, 1).flatMap(trackedNameOf).filter(isFieldName)
       (argAt(cf.args, 1).flatMap(trackedNameOf).filterNot(isFieldName), argAt(cf.args, 2)) match
         case (Some(lhs), Some(rhs)) =>
-            val rhsIsAlloc = rhs match
-              case rc: Call => callFacts.get(rc.id()).exists(_.isAllocCall)
-              case _        => false
-            // `p = tmp` where tmp is realloc(p, n)'s result: the block moved, not leaked
-            val rhsIsReallocOfLhs = trackedNameOf(rhs).flatMap(out.get).exists { r =>
-                callFacts.get(r.site).exists(f =>
-                    f.reallocFamilies.nonEmpty && argAt(f.args, 1).flatMap(trackedNameOf)
-                        .contains(lhs)
+            // `p = tmp` where tmp is realloc(p, n)'s result: the block moved, not leaked.
+            // Resolved through casts: `p = (T *)realloc(p, n)` consumed p just the same.
+            val rhsIsReallocOfLhs =
+                val reallocCallOf: Expression => Option[Call] =
+                    case rc: Call if callFacts.get(rc.id()).exists(_.reallocFamilies.nonEmpty) =>
+                        Some(rc)
+                    case _ => None
+                trackedNameOf(rhs).flatMap(out.get).exists { r =>
+                    callFacts.get(r.site).exists(f =>
+                        f.reallocFamilies.nonEmpty && argAt(f.args, 1).flatMap(trackedNameOf)
+                            .contains(lhs)
+                    )
+                } || unwrapCast(rhs).flatMap(reallocCallOf).exists(rc =>
+                    argAt(rc.argument.l, 1).flatMap(trackedNameOf).contains(lhs)
                 )
-            }
+            // the rhs still names the handle itself (`p = p + 4`): pointer arithmetic MOVES the
+            // handle inside the block, it does not lose the block - the overwrite-leak claim
+            // would be false (part 10: the cwe761 fixture's `p = p + 4` before `free(p)`)
+            val rhsReadsLhs = readsVar(rhs, lhs)
             out.get(lhs).foreach { t =>
                 // overwriting a live allocation loses the only handle: the overwrite IS the leak
-                // (a realloc is not an overwrite - it consumed the old block and produced this;
-                // and an aliased block still has its other handles)
-                if t.state == StAllocated && !rhsIsAlloc && !rhsIsReallocOfLhs &&
-                  !t.aliases.exists(out.contains)
+                // (a fresh allocation on the rhs loses the old block exactly as any other
+                // rebinding does; a realloc consumed the old block and produced this; and an
+                // aliased block still has its other handles)
+                if t.state == StAllocated && !rhsIsReallocOfLhs &&
+                  !t.aliases.exists(out.contains) && !rhsReadsLhs
                 then record(c, TagLeak, s"leak:$lhs")
             }
             // lhs is rebound: it leaves its alias group, and its fields are someone else's now
@@ -1025,8 +1132,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 dst match
                   case i: Identifier
                       if !ctx.locals.contains(i.name) && !ctx.params.contains(i.name) =>
-                      if rhsHoldsStackAddress(rhs, useState, ctx) then
-                        record(c, TagStackEscape, "escape:global")
+                      escFacts.updateWith((c.id(), "escape:global")) {
+                          case Some((_, prev)) => Some((c, joinPoints(prev, in)))
+                          case None            => Some((c, in))
+                      }
                   case _ => ()
             }
         case (None, Some(rhs)) =>
@@ -1056,16 +1165,25 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             }
             // ... and a stack address stored there escapes the frame with it (E4) - unless
             // "there" is itself frame storage: a member or element of a by-value local
-            if !argAt(cf.args, 1).exists(isFrameStorage(_, ctx)) &&
-              rhsHoldsStackAddress(rhs, useState, ctx)
-            then
-              record(c, TagStackEscape, "escape:store")
+            if !argAt(cf.args, 1).exists(isFrameStorage(_, ctx)) then
+              escFacts.updateWith((c.id(), "escape:store")) {
+                  case Some((_, prev)) => Some((c, joinPoints(prev, in)))
+                  case None            => Some((c, in))
+              }
         case _ => ()
     end if
 
     // 4. index and field accesses through a tracked base are uses - as an operator's operand,
     //    and as any call's argument: `printf("%c", p[0])` reads through p as surely as `p[0] = 1`
     //    writes through it (a loop that frees p after that printf was never reported)
+    // Part 10: a call into a method that may throw adds an UNWIND exit to the frame - every
+    // allocation still live here is lost on that path, however dutifully the normal path frees
+    // it. A call inside the frame's own try block does not unwind through this frame's storage.
+    if effectsByName.get(cf.name).exists(_.contains(EffectMayThrow)) && !insideTry(c) then
+      in.foreach { case (name, t) =>
+          if t.state == StAllocated && !isFieldName(name) && !ctx.staticLocals.contains(name) then
+            record(c, TagLeak, s"leak:$name")
+      }
     cf.args.foreach { arg =>
         arg match
           case access: Call if isAccessThroughPointer(access) =>
@@ -1297,6 +1415,20 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           }
           .toMap
 
+  /** The leak fact an exit carries: the JOIN of the state over every visit of that exit, not the
+    * latest visit's - the join is commutative, so the claim no longer depends on the order the
+    * worklist happened to deliver paths in (part 10, task 0).
+    */
+  private def noteLeak(
+    leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
+    key: (Long, Long, String),
+    value: (StoredNode, AllocState)
+  ): Unit =
+    leakFacts.updateWith(key) {
+        case Some((prevExit, prevState)) => Some((prevExit, joinStates(prevState, value._2)))
+        case None                        => Some(value)
+    }
+
   private def joinStates(s1: AllocState, s2: AllocState): AllocState =
       if s1 == s2 then s1
       else if s1 == StEscaped || s2 == StEscaped then StEscaped
@@ -1333,6 +1465,34 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               Some(s"${b.name}$sep${f.canonicalName}")
           case _ => None
     case _ => None
+
+  /** Does the expression's subtree read the variable `name`? `p = p + 4` moves the handle inside
+    * the block; it does not lose the block the way `p = malloc(128)` does.
+    */
+  private def readsVar(e: AstNode, name: String): Boolean = e match
+    case i: Identifier => i.name == name
+    case c: Call       => c.argument.l.exists(readsVar(_, name))
+    case _             => false
+
+  private def unwrapCast(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCast).getOrElse(e)
+    case other                                  => other
+
+  /** Is this call nested inside the method's own try block? An unwind there is handled before it
+    * leaves the frame, so the frame's live allocations survive it.
+    */
+  private def insideTry(c: Call): Boolean =
+    var cursor: Option[StoredNode] = c._astIn.nextOption()
+    var found                      = false
+    var walking                    = true
+    while walking && cursor.isDefined do
+      cursor.get match
+        case cs: ControlStructure if cs.controlStructureType.equalsIgnoreCase("TRY") =>
+            found = true
+            walking = false
+        case _: Method => walking = false
+        case other     => cursor = other._astIn.nextOption()
+    found
 
   /** A tracked field path: its block is owned by the struct, so it never leaks from the frame. */
   private def isFieldName(name: String): Boolean = name.contains("->") || name.contains(".")
@@ -1572,6 +1732,11 @@ object AllocationStatePass:
     */
   final val TagEffect = "mem-effect"
 
+  /** the effect tag marking a method whose body contains a throw: calls into it add an unwind
+    * exit to the calling frame (part 10, the exception-path leak)
+    */
+  val EffectMayThrow = "effect:may-throw"
+
   /** the method's own locals, the array-typed ones, its parameters - the frame's storage and the
     * names that rebind locally - and whether it returns by reference (a C++ `T&` return binds the
     * returned local itself, no addressOf anywhere) (E4)
@@ -1621,8 +1786,13 @@ object AllocationStatePass:
   /** allocation families whose handle IS an integer (a descriptor), unlike a heap block */
   private val IntHandleFamilies = Set("file", "socket")
 
-  /** worklist visit cap per CFG node */
-  private val VisitCap = 8
+  /** worklist visit cap per CFG node. States settle within a handful of revisits on real code;
+    * 8 was tight enough that the settle point itself depended on the order the frontend's
+    * parallel parse left the CFG edges in - whole MS-ESC-001/MS-ALLOC-003 groups flipped per
+    * file between identical runs (part 10, task 0). At 64 every method observed on the corpus
+    * and on libavformat converges long before the cap, so the settled state is the join over
+    * every path and no longer a function of the visit order. */
+  private val VisitCap = 64
 
   /** hop rounds for the `derefs-param` fixpoint: each round lets a wrapper inherit the conclusion
     * of a wrapper concluded in the round before. Three is already deeper than any wrapper layer

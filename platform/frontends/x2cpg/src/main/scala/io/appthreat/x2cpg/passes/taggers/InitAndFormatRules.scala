@@ -113,9 +113,18 @@ object InitAndFormatRules:
   /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own. */
   private def isPodStruct(atom: Cpg, t: String): Boolean =
     val name = t.trim.stripPrefix("struct ").trim
-    atom.typeDecl.fullNameExact(name).l.headOption.orElse(
-      atom.typeDecl.nameExact(name.split("[.:]").last).l.headOption
-    ).exists(td => td.member.nonEmpty && td.method.isEmpty && !td.isExternal)
+    podCandidates(atom, name).exists(td =>
+        OverlayFacts.membersOfTypeDecl(td).nonEmpty && td.method.isEmpty && !td.isExternal
+    )
+
+  /** The type declarations `name` may denote: a full-name match when one exists, else the bare
+    * name. Read over ALL of them - a same-named pair (definition + stub, or two files' structs)
+    * answered differently depending on which node a traversal returned first (part 10 task 0).
+    */
+  private def podCandidates(atom: Cpg, name: String): List[TypeDecl] =
+    val byFull = atom.typeDecl.fullNameExact(name).l
+    if byFull.nonEmpty then byFull
+    else atom.typeDecl.nameExact(name.split("[.:]").last).l
 
   /** A `struct S { ... } s;` declared INSIDE the function: the frontend keeps no members for it
     * (only a bare external stub, or nothing), so [[isPodStruct]] cannot see the body. The local's
@@ -127,9 +136,9 @@ object InitAndFormatRules:
   private def isLocalStructDefinition(atom: Cpg, t: String, localCode: String): Boolean =
     localCode.trim.startsWith("struct ") && {
         val name = t.trim.stripPrefix("struct ").trim
-        atom.typeDecl.fullNameExact(name).l.headOption.orElse(
-          atom.typeDecl.nameExact(name.split("[.:]").last).l.headOption
-        ).forall(td => td.member.isEmpty && td.method.isEmpty)
+        podCandidates(atom, name).forall(td =>
+            OverlayFacts.membersOfTypeDecl(td).isEmpty && td.method.isEmpty
+        )
     }
 
   private def candidateType(atom: Cpg, t: String, localCode: String = ""): Boolean =

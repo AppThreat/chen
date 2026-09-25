@@ -218,14 +218,25 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
               case _ => None
         case _ => None
       typeName = baseType.stripSuffix("*").trim
-      memberType <- memberTypes.get((typeName, fi.canonicalName))
+      memberType <- memberTypes.get((typeName, fi.canonicalName)).flatMap { candidates =>
+        // same-named structs in different files are different structs (part 10 task 0): the
+        // definition in the file that reads it is the one in scope; the rest answer in a
+        // content-stable order so the run-to-run parse order cannot choose for us
+        val inFile = fieldAccess.method.filename
+        candidates.collect { case (f, t) if f == inFile => t }.headOption.orElse(
+          candidates.map(_._2).sortBy(identity).headOption
+        )
+      }
     yield memberType
 
-  private lazy val memberTypes: Map[(String, String), String] =
-    val types = mutable.HashMap.empty[(String, String), String]
+  private lazy val memberTypes: Map[(String, String), List[(String, String)]] =
+    val types = mutable.HashMap.empty[(String, String), List[(String, String)]]
     atom.typeDecl.foreach { td =>
-        td.member.foreach { m =>
-            if !types.contains((td.name, m.name)) then types((td.name, m.name)) = m.typeFullName
+        OverlayFacts.membersOfTypeDecl(td).foreach { m =>
+            types.updateWith((td.name, m.name)) {
+                case Some(existing) => Some(existing :+ (td.filename, m.typeFullName))
+                case None           => Some(List((td.filename, m.typeFullName)))
+            }
         }
     }
     types.toMap
