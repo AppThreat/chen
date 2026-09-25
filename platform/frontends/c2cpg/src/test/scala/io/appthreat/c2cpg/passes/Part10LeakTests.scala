@@ -5,7 +5,7 @@ import io.appthreat.x2cpg.passes.taggers.*
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** Part 10, tasks 1 and 2: the leak rule reports at `medium`, the overwrite arm keeps its
+/** Part 10, tasks 1 and 2: the leak rule reports at `low` (see its rule entry), the overwrite arm keeps its
   * pointer-arithmetic and fresh-allocation conditions, the loop-carried leak renders once, and a
   * call into a method that may throw is an exit the frame's allocations do not survive.
   */
@@ -103,10 +103,10 @@ class Part10LeakTests extends DataFlowCodeToCpgSuite:
       )
 
   "the must-leak rule" should:
-    "report the early-return leak at medium" in {
+    "report the early-return leak (at low: ownership transfer is not modelled)" in {
         val nodes = leakNodesIn("bad_early_return")
         nodes should not be empty
-        nodes.map(confidenceOf(_, "MS-ALLOC-003")) should contain("medium")
+        nodes.map(confidenceOf(_, "MS-ALLOC-003")) should contain("low")
     }
 
     "report the overwrite of a live handle, cast or not" in {

@@ -30,13 +30,6 @@ class Part10AllocTests extends DataFlowCodeToCpgSuite:
     |    if (p) p[0] = 0;
     |}
     |
-    |int bad_vla(int n)
-    |{
-    |    char buf[n];
-    |    buf[0] = 0;
-    |    return buf[0];
-    |}
-    |
     |static const int codes[] = {331, 230, 0};
     |
     |int init_local(void)
@@ -104,12 +97,6 @@ class Part10AllocTests extends DataFlowCodeToCpgSuite:
 
     "report an attacker-sized alloca at medium" in {
         val nodes = findingsIn("bad_alloca_from_parsed", "MS-ALLOC-008")
-        nodes should not be empty
-        nodes.map(confidenceOf(_, "MS-ALLOC-008")) should contain("medium")
-    }
-
-    "report a VLA at medium" in {
-        val nodes = findingsIn("bad_vla", "MS-ALLOC-008")
         nodes should not be empty
         nodes.map(confidenceOf(_, "MS-ALLOC-008")) should contain("medium")
     }

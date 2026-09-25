@@ -35,7 +35,7 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
     |    return -1;
     |}
     |
-    |int bad_unsigned_compare_of_signed(struct fragment *fragments, unsigned count, int seq_no)
+    |int good_unsigned_compare_of_signed(struct fragment *fragments, unsigned count, int seq_no)
     |{
     |    if ((unsigned)seq_no < count)
     |    {
@@ -136,33 +136,6 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
       cpg.method.nameExact(method).ast.collectAll[StoredNode]
           .filter(n => n.tag.name("ms-finding").value.l.contains(rule)).l
 
-  "debug" should:
-    "print the cast comparison shape" in {
-        List("bad_upper_only", "bad_lower_only", "bad_unsigned_compare_of_signed").foreach { mn =>
-            cpg.method.nameExact(mn).ast.isCall
-                .name("<operator>.indexAccess|<operator>.indirectIndexAccess").l
-                .take(1)
-                .foreach { access =>
-                    val idx = access.argumentOption(2).head
-                    val base = access.argumentOption(1).head
-                    println(s"DBG2 $mn idx=${idx.code} tags=${idx.tag.l.map(t => t.name + "=" + t.value).mkString(",")} | base tags=${base.tag.l.map(t => t.name + "=" + t.value).mkString(",")}")
-                }
-            cpg.method.nameExact(mn).parameter.l.foreach(p =>
-                println(s"DBG2 $mn param ${p.name}:${p.typeFullName} idx=${p.index}"))
-        }
-        cpg.method.nameExact("bad_unsigned_compare_of_signed").ast.isCall
-            .name("<operator>.indexAccess|<operator>.indirectIndexAccess").l.foreach { access =>
-                println(s"DBG idxaccess=<${access.code}> cdgIn=${access._cdgIn.l.map(n => s"${n.id}:${n.getClass.getSimpleName}:${n.property(io.shiftleft.codepropertygraph.generated.PropertyNames.CODE).toString.take(24)}").mkString(",")}")
-                access._astIn.nextOption().foreach { p1 =>
-                    println(s"DBG parent1=<${p1.getClass.getSimpleName}:${p1.property(io.shiftleft.codepropertygraph.generated.PropertyNames.CODE).toString.take(24)}> cdgIn=${p1._cdgIn.l.map(n => n.getClass.getSimpleName + ":" + n.property(io.shiftleft.codepropertygraph.generated.PropertyNames.CODE).toString.take(24)).mkString(",")}")
-                }
-                val idx = access.argumentOption(2).head
-                println(s"DBG idx tags=${idx.tag.l.map(t => t.name + "=" + t.value).mkString(",")} type=<${idx.property(io.shiftleft.codepropertygraph.generated.PropertyNames.TYPE_FULL_NAME)}>")
-                val base = access.argumentOption(1).head
-                println(s"DBG base tags=${base.tag.l.map(t => t.name + "=" + t.value).mkString(",")}")
-            }
-    }
-
   "the one-sided bounds arm" should:
     "report an index bounded only above" in {
         findingsIn("bad_upper_only", "MS-BOUND-003") should not be empty
@@ -172,8 +145,8 @@ class Part10BoundsTests extends DataFlowCodeToCpgSuite:
         findingsIn("bad_lower_only", "MS-BOUND-003") should not be empty
     }
 
-    "report a check that sees the index only through a sign-converting cast" in {
-        findingsIn("bad_unsigned_compare_of_signed", "MS-BOUND-003") should not be empty
+    "stay silent on `(unsigned)i < count`: the conversion sends every negative past the count" in {
+        findingsIn("good_unsigned_compare_of_signed", "MS-BOUND-003") shouldBe empty
     }
 
     "stay silent on a two-sided check" in {

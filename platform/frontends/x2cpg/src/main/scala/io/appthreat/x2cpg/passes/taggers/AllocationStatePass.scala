@@ -648,22 +648,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             case None     => out
           enqueue(succ, succState)
       }
-    // CHEN_STATE_DEBUG=<method-name>: dump the settled state at the escapes/leaks, to check
-    // what a run concluded without guessing (part 10 determinism hunt)
-    sys.env.get("CHEN_STATE_DEBUG").foreach { needle =>
-        if method.name.contains(needle) then
-            escFacts.foreach { case ((_, kind), (node, settled)) =>
-                System.err.println(
-                    s"statedbg ${lineOf(node)} $kind settled=${settled.map { case (k, t) => s"$k:${stateName(t.state)}" }.mkString(",")}"
-                )
-            }
-            leakFacts.foreach { case ((site, exitId, name), (node, st)) =>
-                System.err.println(
-                    s"statedbg leak ${lineOf(node)} exitId=$exitId $name=${stateName(st)}"
-                )
-            }
-    }
-
     // the settled escape claims, read the way the leak facts are read: the predicates are the
     // ones the transfer used, evaluated against the state the exit JOINED over every visit
     escFacts.foreach { case (_, (node, settled)) =>
@@ -756,6 +740,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   ): Map[String, Tracked] =
       node match
         case c: Call =>
+            // a call into a method that may throw is an UNWIND exit of this frame: an allocation
+            // still live here is lost on that path however dutifully the normal path frees it. It
+            // is an exit like a return, so its fact settles the same way (joined over every
+            // visit, read after the drain). A call inside the frame's own try block unwinds into
+            // this frame's handler, not out of it.
+            if effectsByName.get(c.name).exists(_.contains(EffectMayThrow)) && !insideTry(c) then
+              in.foreach { case (name, t) =>
+                  if !isFieldName(name) && !ctx.staticLocals.contains(name) then
+                    noteLeak(leakFacts, (t.site, c.id(), name), (c, t.state))
+              }
             callFacts.get(c.id()) match
               case Some(cf) =>
                   transferCall(c, cf, callFacts, effectsByName, in, escFacts, nullUseFacts, ctx, record)
@@ -1019,7 +1013,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // the rhs still names the handle itself (`p = p + 4`): pointer arithmetic MOVES the
             // handle inside the block, it does not lose the block - the overwrite-leak claim
             // would be false (part 10: the cwe761 fixture's `p = p + 4` before `free(p)`)
-            val rhsReadsLhs = readsVar(rhs, lhs)
+            val rhsReadsLhs = movesHandle(rhs, lhs)
             out.get(lhs).foreach { t =>
                 // overwriting a live allocation loses the only handle: the overwrite IS the leak
                 // (a fresh allocation on the rhs loses the old block exactly as any other
@@ -1176,14 +1170,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // 4. index and field accesses through a tracked base are uses - as an operator's operand,
     //    and as any call's argument: `printf("%c", p[0])` reads through p as surely as `p[0] = 1`
     //    writes through it (a loop that frees p after that printf was never reported)
-    // Part 10: a call into a method that may throw adds an UNWIND exit to the frame - every
-    // allocation still live here is lost on that path, however dutifully the normal path frees
-    // it. A call inside the frame's own try block does not unwind through this frame's storage.
-    if effectsByName.get(cf.name).exists(_.contains(EffectMayThrow)) && !insideTry(c) then
-      in.foreach { case (name, t) =>
-          if t.state == StAllocated && !isFieldName(name) && !ctx.staticLocals.contains(name) then
-            record(c, TagLeak, s"leak:$name")
-      }
     cf.args.foreach { arg =>
         arg match
           case access: Call if isAccessThroughPointer(access) =>
@@ -1466,13 +1452,22 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => None
     case _ => None
 
-  /** Does the expression's subtree read the variable `name`? `p = p + 4` moves the handle inside
-    * the block; it does not lose the block the way `p = malloc(128)` does.
+  /** Is the rhs the handle `name` moved inside its own block - `p + 4`, `p - k`, `&p[i]`, through
+    * casts? That keeps the block reachable. Any other rhs that merely mentions p
+    * (`p = strdup(p)`, `p = f(p)`) produces a different value and loses the old block.
     */
-  private def readsVar(e: AstNode, name: String): Boolean = e match
+  private def movesHandle(e: Expression, name: String): Boolean = unwrapCast(e) match
     case i: Identifier => i.name == name
-    case c: Call       => c.argument.l.exists(readsVar(_, name))
-    case _             => false
+    case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+        argAt(c.argument.l, 1).exists(movesHandle(_, name)) ||
+            (c.name == "<operator>.addition" && argAt(c.argument.l, 2).exists(movesHandle(_, name)))
+    case c: Call if c.name == "<operator>.addressOf" =>
+        argAt(c.argument.l, 1).exists {
+            case ia: Call if ia.name == "<operator>.indexAccess" =>
+                argAt(ia.argument.l, 1).exists(movesHandle(_, name))
+            case _ => false
+        }
+    case _ => false
 
   private def unwrapCast(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCast).getOrElse(e)

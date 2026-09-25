@@ -703,9 +703,9 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
             // part 10, the one-sided arm: an ATTACKER-ORIGIN SIGNED index into a buffer of
             // known-ish capacity whose enforced guard bounds it on exactly ONE side - the other
             // side is the bug (CVE-2026-75146's `cur_seq_no < n_fragments`, one_sided_bounds_check.c).
-            // Or the check exists but sees the index only through a SIGN-CONVERTING cast
-            // (`(unsigned)seq_no < count`): no directional fact can honestly follow, and the
-            // conversion is the defect. An unsigned index checked above needs no lower bound and
+            // `(unsigned)seq_no < count` is NOT this shape: the conversion sends every negative
+            // index past any real count, so it is a complete two-sided check (FFmpeg's idiom for
+            // exactly that). An unsigned index checked above needs no lower bound and
             // stays silent; a two-sided check bounds both ways and stays silent; a check whose
             // rejection path does not return establishes no fact at the access and stays silent
             // (the rule speaks only where a fact provably holds).
@@ -713,9 +713,6 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                 extent.startsWith(ExtentPass.ValueParam + ":")
             if attackerIndex && signedIndex && knownishExtent &&
               (boundedAbove ^ boundedBelow)
-            then record(idx, ruleIdFor(access))
-            else if attackerIndex && signedIndex && knownishExtent && !boundedAbove &&
-              !boundedBelow && isGuardedBySignConversion(access, idx)
             then record(idx, ruleIdFor(access))
             // part 10, the container arm: an attacker-controlled index into a std:: container
             // with no upper bound - `v[atol(input)]` on a std::vector answers to at() and bounds
@@ -747,23 +744,6 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
   private def isCppContainer(t: String): Boolean =
     val n = t.trim.stripPrefix("const ").trim.stripSuffix("&").trim
     CppContainerPrefixes.exists(n.startsWith)
-
-  /** Is the access controlled by a comparison whose operand sees the index only through a
-    * sign-converting cast (`(unsigned)seq_no < count`)? The comparison controls the statement
-    * the access sits in; the cast's unwrapped key is the index's own.
-    */
-  private def isGuardedBySignConversion(access: Call, idx: Expression): Boolean =
-      OverlayFacts.variableKey(idx).exists { key =>
-          GuardPass.statementRootOf(access).controlledBy.collect { case c: Call => c }.exists {
-              controller =>
-                  GuardPass.comparisonOps.contains(controller.name) && controller.argument.l
-                      .exists {
-                          case cast: Call if cast.name == "<operator>.cast" =>
-                              castOperand(cast).flatMap(OverlayFacts.variableKey).contains(key)
-                          case _ => false
-                      }
-          }
-      }
 
   /** part 10, the pointer-walk arm (CWE-125, the CVE-2026-75147 loop-bound wraparound): inside a
     * loop, `p += k` with an attacker-derived k and reads through p - the walk moves p past the
@@ -941,9 +921,13 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     // per-method re-scan of either was measurable across a tree of a thousand methods (part 10)
     val globalNames  = atom.method.nameExact("<global>").flatMap(_.local.name).toSet
     val lockedMethodIds = atom.call.l
-        .filter(c => c.name.toLowerCase.contains("lock"))
+        .filter(c => LockCall.matches(c.name))
         .map(_.method.id)
         .toSet
+    // a check-then-act race needs a second thread: `if (!inited) inited = 1;` in a program that
+    // never starts one is the ordinary lazy-init idiom
+    val startsThreads = atom.call.name(ThreadStartCalls).nonEmpty ||
+        atom.local.typeFullName(ThreadTypes).nonEmpty || atom.member.typeFullName(ThreadTypes).nonEmpty
     atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
         val rebindLines = method.ast.collectAll[Call].l
             .flatMap { c =>
@@ -995,7 +979,7 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                   }
           }
         // the shared-global check-then-act arm
-        if !lockedMethodIds.contains(method.id) then
+        if startsThreads && !lockedMethodIds.contains(method.id) then
           method.ast.collectAll[ControlStructure].l.foreach { cs =>
               val conditionGlobals = cs.condition.toList.flatMap(_.ast.collectAll[Identifier].l)
                   .map(_.name)
@@ -1015,6 +999,12 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
           }
     }
 
+  private val LockCall =
+      """(?i)(.*[_.])?(lock|mutex_lock|lock_guard|unique_lock|scoped_lock|lock_shared|enter)""".r
+  private val ThreadStartCalls =
+      "pthread_create|thrd_create|CreateThread|_beginthreadex|std\\.thread.*|thread|async|std\\.async"
+  private val ThreadTypes =
+      """.*(std\.thread|std\.jthread|pthread_t|thrd_t|std\.mutex|pthread_mutex_t|std\.atomic).*"""
   private val ToctouCheckApis = Set("access", "stat", "lstat")
   private val ToctouUseApis   = Set("open", "fopen", "unlink", "chmod", "rename")
 
@@ -1427,9 +1417,10 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     *   - a HEAP size parsed out of attacker input by a conversion call (`atol`/`strtol` of a
     *     caller's string) reports at `medium`: the size is the attacker's literal number, not a
     *     derived bound.
-    *   - a VLA (`char buf[n]`) is its own arm: the frontend drops the size expression entirely,
-    *     so there is no origin to check and no allocation call to read - an unknown-bound local
-    *     array is a runtime-sized frame allocation by construction. Reported at the first use.
+    *   - no VLA arm: the frontend types `char b[n]` and an unresolved-macro `uint8_t f[MAX_N]`
+    *     identically (`char[]`, the size expression dropped), so a runtime-sized frame array is
+    *     not distinguishable in the graph (part 10 review: 15 of 15 libavformat reports were
+    *     string-literal initialisers and macro-sized tables).
     *
     * Returns the (node, rule) pairs whose finding reports at `medium` despite the rule's own
     * `low` confidence.
@@ -1467,41 +1458,6 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                 if stackFamily || conversionParsedSize(lenArg) then
                   promoted += (lenArg -> RuleUncontrolledSize)
         }
-    // the VLA arm. An unknown-bound local array is a runtime-sized frame allocation - but the
-    // frontend also spells every initialized `T x[] = {...}` that way, so the arm needs the
-    // facts that separate them: a VLA is never static (a static table is the cache idiom) and
-    // never carries a braced initializer (the frontend lowers `x[] = {..}` to an assignment
-    // whose right side is an <operator>.arrayInitializer - a VLA's size expression is dropped
-    // entirely). Reported at the first use.
-    atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
-        val unknownBound = method.local.l
-            .filter(l => l.typeFullName.trim.endsWith("[]"))
-            .filterNot(l =>
-                l.tag.name(io.appthreat.x2cpg.Defines.StorageClassTag)
-                    .value(io.appthreat.x2cpg.Defines.StorageClassStatic).nonEmpty
-            )
-            .map(_.name)
-            .toSet
-        if unknownBound.nonEmpty then
-          val initialised = method.ast.collectAll[Call].l.exists { a =>
-              a.name == "<operator>.assignment" &&
-              a.argumentOption(1).collect { case i: Identifier => i.name }
-                  .exists(unknownBound.contains) &&
-              a.argumentOption(2).exists {
-                  case rc: Call if rc.name == "<operator>.arrayInitializer" => true
-                  case _                                                    => false
-              }
-          }
-          if !initialised then
-            method.ast.isIdentifier.l
-                .filter(i => unknownBound.contains(i.name))
-                .sortBy(i => i.lineNumber.map(_.toInt).getOrElse(Int.MaxValue))
-                .headOption
-                .foreach { firstUse =>
-                  record(firstUse, RuleUncontrolledSize)
-                  promoted += (firstUse -> RuleUncontrolledSize)
-                }
-    }
     promoted.toList
   end ruleUncontrolledAllocationSize
 
@@ -1840,7 +1796,14 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
     */
   private def ruleResignAcrossGuard(record: (StoredNode, String) => Unit): Unit =
       atom.call.name("<operator>.cast").l.foreach { cast =>
-          if cast.tag.name(IntegerWidthPass.TagResign).value.l.nonEmpty then
+          // `(unsigned)len > INT_MAX / 2` rejects the negatives along with the too-large: the
+          // conversion to unsigned IS the lower bound. Only a cast to a SIGNED type bounded above
+          // (CVE-2026-75145's `(long)obu_size > remaining`) lets values through the guard that
+          // the unconverted operand would not have passed.
+          val toSigned = cast.tag.name(IntegerWidthPass.TagResign).value.l.exists { v =>
+              v.split("->to:").lift(1).map(_.split(":").head).exists(OverlayFacts.isSignedIntegral)
+          }
+          if toSigned then
             enclosingComparison(cast).foreach { cmp =>
                 castOperand(cast).flatMap(castUnwrappingKey).foreach { key =>
                   val crossed = usesOfKey(cast.method, key).exists { stmt =>
@@ -2234,15 +2197,13 @@ object MemorySafetyFindingPass:
       cwe = "CWE-401",
       kind = "memory-leak",
       severity = "medium",
-      // `medium` as of part 10. Part 4 shipped it at `low` after a 4-true/9-false corpus
-      // reading taken through the renderer's dropped-exit-finding defect, with the unbraced-if
-      // narrowing still to land. Both causes are gone: the state pass's converged must-leak
-      // facts (part 9), the renderer's METHOD_RETURN arm (part 4), the unbraced-if branch
-      // placement (part 5), the overwrite arm's pointer-arithmetic and fresh-allocation
-      // conditions and the loop-carried double render (part 10). The corpus's leak rows all
-      // fire on correctly labelled lines, the negative controls stay quiet, and what remains
-      // is the claim the must-leak semantics make: live on every path to the exit.
-      confidence = "medium",
+      // `low`. Part 10 promoted it to medium on the corpus alone; on libavformat 8 of 9
+      // sampled medium leaks were ownership the state pass cannot see - a buffer handed to
+      // avio_alloc_context or through an out-parameter, `return &s->pub`, a chained
+      // `a = b = av_strdup()` checked through `a`, an allocation inside a `||` guard. The
+      // must-leak claim is sound on the paths the pass models; it does not yet model ownership
+      // transfer into a callee, so a leak remains a hypothesis at library scale.
+      confidence = "low",
       message = "an allocation is still live, un-freed and un-escaped at this exit - no path " +
           "from it reaches a free or hands ownership on"
     ),
