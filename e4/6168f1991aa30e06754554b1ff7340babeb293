@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part10BoundsTests.scala
+  s_5994d752519150::t_75718833b42c74 88-109,192-195,204-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e46168f1991aa30e06754554b1ff7340babeb293",
+  "prompts": {},
+  "sessions": {
+    "s_5994d752519150": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bc039659-1311-4f26-82f7-874e84df3812",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
