@@ -128,6 +128,7 @@ object MemorySemanticsPass:
             entry.dst.map(i => s"dst:$i") ++
             entry.src.map(i => s"src:$i") ++
             entry.untrustedRead.map(i => s"untrusted-read:$i") ++
+            entry.increments.map((i, f) => s"grow:$i:$f") ++
             Option.when(entry.nullableReturn && !nonnullReturn)("nullable-return") ++
             Option.when(nonnullReturn)("nonnull-return") ++
             nonnullParams.toList.sorted.map(i => s"nonnull-param:$i")
@@ -192,9 +193,15 @@ object MemorySemanticsPass:
       free = fam("free:"),
       realloc = fam("realloc:"),
       untrustedRead = idx("untrusted-read:"),
-      nullableReturn = vs.contains("nullable-return")
+      nullableReturn = vs.contains("nullable-return"),
+      increments = vs.collectFirst { case v if v.startsWith("grow:") => v.stripPrefix("grow:") }
+          .flatMap(_.split(":", 2) match
+            case Array(a, f) => a.toIntOption.filter(_ >= 1).filter(_ => f.nonEmpty).map(_ -> f)
+            case _           => None
+          )
     )
     Option.when(entry != MemApiVocab.MemApiEntry(name))(entry)
+  end entryFromValues
 
   // --------------------------------------------------------------------------------------------
   // inference
@@ -282,24 +289,28 @@ object MemorySemanticsPass:
     // 4. a deallocator or reallocator whose body is not in scope and whose declaration says
     // nothing, guessed from its name and signature. Last, so no body conclusion builds on a guess.
     cpg.method.name.dedup.l.foreach { name =>
-        val lower = name.toLowerCase
-        if (lower.contains("free") || lower.contains("realloc")) && !declared.contains(name) &&
-          !defined.contains(name) && !out.get(name).exists(s =>
-              s.entry.alloc.isDefined || s.entry.realloc.isDefined || s.entry.free.isDefined
-          )
-        then
-          val shape = declaredShape(cpg, name)
-          val guess =
-              if looksLikeDeallocator(name, shape) then
-                Some(MemApiVocab.MemApiEntry(name, free = Some(FamilyHeap)))
-              else reallocatorGuess(name, shape)
-          guess.foreach { g =>
-              out.updateWith(name) {
-                  case Some(s) =>
-                      Some(s.copy(entry = fillEmpty(g, s.entry), evidence = s.evidence + EvidenceHeuristic))
-                  case None => Some(Summary(g, evidence = Set(EvidenceHeuristic)))
-              }
-          }
+      val lower = name.toLowerCase
+      if (lower.contains("free") || lower.contains("realloc")) && !declared.contains(name) &&
+        !defined.contains(name) && !out.get(name).exists(s =>
+            s.entry.alloc.isDefined || s.entry.realloc.isDefined || s.entry.free.isDefined
+        )
+      then
+        val shape = declaredShape(cpg, name)
+        val guess =
+            if looksLikeDeallocator(name, shape) then
+              Some(MemApiVocab.MemApiEntry(name, free = Some(FamilyHeap)))
+            else reallocatorGuess(name, shape)
+        guess.foreach { g =>
+            out.updateWith(name) {
+                case Some(s) =>
+                    Some(s.copy(
+                      entry = fillEmpty(g, s.entry),
+                      evidence = s.evidence + EvidenceHeuristic
+                    ))
+                case None => Some(Summary(g, evidence = Set(EvidenceHeuristic)))
+            }
+        }
+      end if
     }
 
     Result(out.filterNot { case (name, s) => declared.contains(name) || s.isEmpty }.toMap)
@@ -352,8 +363,10 @@ object MemorySemanticsPass:
     // traversal returned first was parse order - run-to-run nondeterministic (part 10 task 0)
     val methods = cpg.method.nameExact(name).l
     val typed = methods
-        .filter(m => !isUnknownType(Option(m.methodReturn.typeFullName).getOrElse("").trim) &&
-            m.parameter.nonEmpty && m.parameter.forall(p => !isUnknownType(p.typeFullName.trim)))
+        .filter(m =>
+            !isUnknownType(Option(m.methodReturn.typeFullName).getOrElse("").trim) &&
+                m.parameter.nonEmpty && m.parameter.forall(p => !isUnknownType(p.typeFullName.trim))
+        )
         .sortBy(m => (m.filename, m.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)))
         .headOption
         .map(m =>
@@ -387,24 +400,28 @@ object MemorySemanticsPass:
     * by one size, or by a count and a size - the size is the last argument, the count the one
     * before it. The result is `realloc`, not `alloc`: it may hand back (or free) its input.
     */
-  private def reallocatorGuess(name: String, shape: Option[Shape]): Option[MemApiVocab.MemApiEntry] =
+  private def reallocatorGuess(
+    name: String,
+    shape: Option[Shape]
+  ): Option[MemApiVocab.MemApiEntry] =
       if !name.toLowerCase.contains("realloc") then None
       else
         shape.flatMap { s =>
-            val ps = s.params.map(normalisedType)
-            val firstUntyped = ps.headOption.exists(p => p == "void*" || p == "void**")
-            if !firstUntyped || !ps.tail.forall(isSizeType) then None
-            else
-              ps.size match
-                case 2 => Some(MemApiVocab.MemApiEntry(name, len = Some(2), realloc = Some(FamilyHeap)))
-                case 3 =>
-                    Some(MemApiVocab.MemApiEntry(
-                      name,
-                      count = Some(2),
-                      len = Some(3),
-                      realloc = Some(FamilyHeap)
-                    ))
-                case _ => None
+          val ps           = s.params.map(normalisedType)
+          val firstUntyped = ps.headOption.exists(p => p == "void*" || p == "void**")
+          if !firstUntyped || !ps.tail.forall(isSizeType) then None
+          else
+            ps.size match
+              case 2 =>
+                  Some(MemApiVocab.MemApiEntry(name, len = Some(2), realloc = Some(FamilyHeap)))
+              case 3 =>
+                  Some(MemApiVocab.MemApiEntry(
+                    name,
+                    count = Some(2),
+                    len = Some(3),
+                    realloc = Some(FamilyHeap)
+                  ))
+              case _ => None
         }
 
   /** A free of memory in general: `free` after at most a library prefix (`av_free`, `av_freep`,
@@ -445,6 +462,7 @@ object MemorySemanticsPass:
           extra.realloc
         ).flatten),
         untrustedRead = base.untrustedRead.orElse(extra.untrustedRead),
+        increments = base.increments.orElse(extra.increments),
         nullableReturn = base.nullableReturn || extra.nullableReturn
       )
 
@@ -463,7 +481,7 @@ object MemorySemanticsPass:
     }
     def ints(args: List[String]): List[Int] = args.flatMap(_.toIntOption)
     val isMalloc                            = parsed.exists(_._1 == "malloc")
-    val allocSize = parsed.collectFirst { case ("alloc_size", args) => ints(args) }
+    val allocSize      = parsed.collectFirst { case ("alloc_size", args) => ints(args) }
     val firstIsPointer = shape.exists(_.isPointerParam(1))
     val returnsPointer = shape.exists(_.returnsPointer)
     parsed.collect {
@@ -480,7 +498,7 @@ object MemorySemanticsPass:
     val isAlloc       = isMalloc || (allocSize.isDefined && !isRealloc && returnsPointer)
     val nonnullReturn = parsed.exists(_._1 == "returns_nonnull")
     val nonnullParams = parsed.collect {
-        case ("nonnull", Nil) => shape.map(_.pointerParams).getOrElse(Nil)
+        case ("nonnull", Nil)  => shape.map(_.pointerParams).getOrElse(Nil)
         case ("nonnull", args) => ints(args)
     }.flatten.toSet
     // access(mode, ptr-index[, size-index])
@@ -515,7 +533,7 @@ object MemorySemanticsPass:
       case c: Call if c.name == "<operator>.cast" =>
           c.argument.l.lastOption.flatMap(root)
       case c: Call if c.name == "<operator>.indirection" => c.argumentOption(1).flatMap(root)
-      case _ => None
+      case _                                             => None
     free.argumentOption(1).flatMap(root).exists(first.contains)
 
   private def fromBody(
@@ -542,12 +560,115 @@ object MemorySemanticsPass:
     val nullable = returnsPointer(method) && !wrapper.exists(_.alloc.isDefined) &&
         valueReturns(method).exists(e => mayBeNull(e, known))
     val roles = inheritedRoles(method, real, known)
-    val entry = fillEmpty(
-      wrapper.getOrElse(MemApiVocab.MemApiEntry(method.name)),
-      roles.copy(nullableReturn = nullable)
+    // part 11: a callee that READS through one pointer parameter and STORES through another
+    // fills that out-parameter with bytes from the caller's buffer - the parse_leb shape, where
+    // obu_size is written from the bytes parse_leb() reads and no in-method def of it exists
+    val inferred = roles.copy(
+      nullableReturn = nullable,
+      untrustedRead = roles.untrustedRead.orElse(untrustedOutParamIndex(method)),
+      increments = counterIncrementOf(method)
     )
+    val entry = fillEmpty(wrapper.getOrElse(MemApiVocab.MemApiEntry(method.name)), inferred)
     Option.when(entry != MemApiVocab.MemApiEntry(method.name))(entry)
   end fromBody
+
+  /** The parameter a method stores through while reading through a different pointer parameter:
+    * `int parse_leb(const uint8_t *buf, int n, uint32_t *out) { ... *out = v; }` fills `out` with a
+    * value derived from the bytes it read out of `buf`. The stored bytes are the caller's buffer's
+    * contents, so the out-param joins the untrusted-read family: a value the caller cannot bound
+    * without a guard. Plain setter shapes store a computed constant or a caller value and read
+    * nothing, and stay what they were.
+    */
+  private def untrustedOutParamIndex(method: Method): Option[Int] =
+    def paramName(e: Expression): Option[String] = unwrapCasts(e) match
+      case i: Identifier => Option.when(method.parameter.nameExact(i.name).nonEmpty)(i.name)
+      case _             => None
+    // the parameter a dereference reads or writes through: p[i], *p, *p++
+    def through(e: Expression): Option[String] = unwrapCasts(e) match
+      case c: Call if c.name.matches("<operator>\\.(pre|post)Increment") =>
+          c.argumentOption(1).collect { case x: Expression => x }.flatMap(through)
+      case other => paramName(other)
+    // the dereferences that READ: an element access or deref anywhere except the TARGET side
+    // of an assignment (`*out = v` writes through the parameter, it does not read it)
+    val isStoreTarget: Call => Boolean = c =>
+        c._astIn.collectFirst { case a: Call => a }.exists { a =>
+            (a.name.startsWith("<operator>.assignment") || a.name.startsWith(
+              "<operators>.assignment"
+            )) &&
+            a.argumentOption(1).exists(_.id == c.id)
+        }
+    val readParams = method.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess|<operator>.indirection").l
+        .filterNot(isStoreTarget)
+        .flatMap(c => c.argumentOption(1).collect { case e: Expression => e }.flatMap(through))
+        .toSet
+    if readParams.isEmpty then None
+    else
+      val stored = mutable.LinkedHashSet.empty[Int]
+      method.call
+          .filter(a =>
+              a.name.startsWith("<operator>.assignment") ||
+                  a.name.startsWith("<operators>.assignment")
+          )
+          .l.foreach { a =>
+              // `*out = v` and the compound `*out |= v` both store through the parameter
+              a.argumentOption(1).collect { case e: Expression => e }.foreach { lhs =>
+                  lhs match
+                    case c: Call if c.name == "<operator>.indirection" =>
+                        c.argumentOption(1).collect { case e: Expression => e }
+                            .flatMap(through)
+                            .filterNot(readParams.contains)
+                            .foreach(name => stored += method.parameter.nameExact(name).head.index)
+                    case _ => ()
+              }
+          }
+      stored.toList match
+        case List(i) => Some(i) // two out-params would make the role ambiguous
+        case _       => None
+    end if
+  end untrustedOutParamIndex
+
+  /** The (argument index, field) a method's body increments by one - `p->count++`, `++p->count`,
+    * `p->count += k`, `p->count = p->count + k` and the `a[p->count++] = v` embedding - where `p`
+    * is the method's own parameter. The counter's definition is hidden from the caller
+    * (avformat_new_stream increments s->nb_streams), which is what makes a loop-carried index on
+    * the field invisible to every in-method walk. One (index, field): a body that grows two
+    * counters concludes nothing about either.
+    */
+  private def counterIncrementOf(method: Method): Option[(Int, String)] =
+    def fieldOf(e: Expression): Option[(String, String)] = e match
+      case c: Call
+          if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
+          for
+            base   <- c.argumentOption(1).collect { case i: Identifier => i }
+            member <- OverlayFacts.memberOf(c)
+          yield (base.name, member)
+      case _ => None
+    val paramFields = mutable.LinkedHashSet.empty[(Int, String)]
+    def note(e: Expression): Unit = fieldOf(e).foreach { (base, member) =>
+        method.parameter.nameExact(base).headOption.foreach(p => paramFields += ((p.index, member)))
+    }
+    method.call.nameExact("<operator>.postIncrement", "<operator>.preIncrement").l
+        .foreach(c => c.argumentOption(1).collect { case e: Expression => e }.foreach(note))
+    method.call.nameExact("<operator>.assignmentPlus").l.foreach { c =>
+      // p->f += k grows the counter only for a non-negative literal k
+      val growsByLiteral = c.argumentOption(2).flatMap(IndexRange.literal).exists(_ >= 0)
+      if growsByLiteral then c.argumentOption(1).collect { case e: Expression => e }.foreach(note)
+    }
+    method.call.nameExact("<operator>.assignment").l.foreach { a =>
+        (a.argumentOption(1), a.argumentOption(2)) match
+          case (Some(lhs: Expression), Some(rhs: Call)) if rhs.name == "<operator>.addition" =>
+              val operands = rhs.argument.l.collect { case e: Expression => e }
+              val literal  = operands.exists(x => IndexRange.literal(x).exists(_ >= 0))
+              fieldOf(lhs).foreach { key =>
+                  if literal && operands.flatMap(fieldOf).contains(key) then note(lhs)
+              }
+          case _ => ()
+    }
+    paramFields.toList match
+      case List(one) => Some(one)
+      case _         => None
+  end counterIncrementOf
 
   private def valueReturns(method: Method): List[Expression] =
       method.ast.collectAll[Return].l.flatMap(_.astChildren.collectFirst { case e: Expression =>

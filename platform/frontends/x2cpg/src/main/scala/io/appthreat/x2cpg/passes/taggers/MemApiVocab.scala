@@ -18,6 +18,16 @@ object MemApiVocab:
 
   final val ResourcePath = "memory-apis.json"
 
+  /** A (buffer member, capacity member) pair of one struct type: reads through `type *p`'s member
+    * `buffer` are bounded by `p->capacity`. AVPacket's data/size is the canonical pair; a type
+    * whose definition is outside the analysed tree cannot resolve its members on the graph, so the
+    * pair is declared instead. External config only, next to the API entries:
+    * {{{
+    * "bufferExtents": [{"type": "AVPacket", "buffer": "data", "capacity": "size"}]
+    * }}}
+    */
+  final case class BufferExtent(typeName: String, buffer: String, capacity: String)
+
   /** A memory API and the roles of its arguments. Indices are 1-based argument positions.
     *
     * @param dst
@@ -63,6 +73,11 @@ object MemApiVocab:
     * @param returnBits
     *   the argument whose integer literal is the result's width in bits: `get_bits(gb, 4)` is `[0,
     *   15]` with `"returnBits": 2`. A call whose width argument is not a literal gets no range.
+    * @param increments
+    *   the argument and struct field a call grows by one: `avformat_new_stream(s, c)` increments
+    *   `s->nb_streams`. JSON `"increments": {"arg": 1, "field": "nb_streams"}`. The counter's
+    *   definitions sit inside the callee, so no in-method walk can find them; a callee whose body
+    *   is in the tree is inferred instead ([[MemorySemanticsPass]]).
     */
   final case class MemApiEntry(
     name: String,
@@ -78,7 +93,8 @@ object MemApiVocab:
     clamp: Option[String] = None,
     nullableReturn: Boolean = false,
     returnRange: Option[(BigInt, BigInt)] = None,
-    returnBits: Option[Int] = None
+    returnBits: Option[Int] = None,
+    increments: Option[(Int, String)] = None
   )
 
   private def decodeEntry(json: io.circe.Json): Option[MemApiEntry] =
@@ -100,7 +116,14 @@ object MemApiVocab:
         returnRange = json.hcursor.get[List[BigInt]]("returnRange").toOption.collect {
             case List(lo, hi) if lo <= hi => (lo, hi)
         },
-        returnBits = json.hcursor.get[Int]("returnBits").toOption
+        returnBits = json.hcursor.get[Int]("returnBits").toOption,
+        increments =
+            for
+              obj <- json.hcursor.downField("increments").as[Map[String, io.circe.Json]].toOption
+              arg <- obj.get("arg").flatMap(_.as[Int].toOption)
+              fld <- obj.get("field").flatMap(_.as[String].toOption)
+              if arg >= 1 && fld.nonEmpty
+            yield (arg, fld)
       )
 
   /** @return
@@ -138,4 +161,24 @@ object MemApiVocab:
 
   /** The built-in vocabulary, for tests and diagnostics. */
   def builtInInventory: List[MemApiEntry] = builtin
+
+  /** The declared (buffer member, capacity member) pairs, by struct type name. The built-in
+    * resource declares none - a project's types are the external config's to name.
+    */
+  def bufferExtents(externalConfig: Option[String]): Map[String, (String, String)] =
+      externalConfig match
+        case Some(jsonStr) =>
+            parse(jsonStr) match
+              case Right(json) =>
+                  json.hcursor.downField("bufferExtents").as[List[io.circe.Json]].toOption
+                      .getOrElse(Nil).flatMap { e =>
+                          for
+                            t <- e.hcursor.get[String]("type").toOption
+                            b <- e.hcursor.get[String]("buffer").toOption
+                            c <- e.hcursor.get[String]("capacity").toOption
+                            if t.nonEmpty && b.nonEmpty && c.nonEmpty
+                          yield t -> ((b, c))
+                      }.toMap
+              case Left(_) => Map.empty
+        case None => Map.empty
 end MemApiVocab
