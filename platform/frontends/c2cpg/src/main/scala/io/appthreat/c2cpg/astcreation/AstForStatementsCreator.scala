@@ -190,14 +190,17 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     val code    = s"for ($codeInit$codeCond;$codeIter)"
     val forNode = controlStructureNode(forStmt, ControlStructureTypes.FOR, code)
 
+    // A declaration in the init (`for (int i = 0; ...)`) is in scope for the whole statement -
+    // the condition, the update and the body all read it (C11 6.8.5p5). Popping the init's scope
+    // before them left every later `i` unresolved: no REF to the LOCAL, type ANY, and nothing for
+    // a definition-keyed data-flow engine to connect (517 of libavformat's 586 such loops).
     val initAstBlock = blockNode(forStmt, Defines.empty, registerType(Defines.voidTypeName))
     scope.pushNewScope(initAstBlock)
     val initAst = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
-    scope.popScope()
-
     val compareAst = astForConditionExpression(forStmt.getConditionExpression, Some(2))
     val updateAst  = nullSafeAst(forStmt.getIterationExpression, 3)
     val bodyAsts   = nullSafeAst(forStmt.getBody, 4)
+    scope.popScope()
     forAst(forNode, Seq(), Seq(initAst), Seq(compareAst), Seq(updateAst), bodyAsts)
 
   private def astForRangedFor(forStmt: ICPPASTRangeBasedForStatement): Ast =
@@ -225,6 +228,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     )
 
   private def astForIf(ifStmt: IASTIfStatement): Ast =
+    // a condition declaration (`if (T x = f())`) is in scope in both branches: its scope stays
+    // open until they are built
+    var conditionScopeOpen = false
     val (code, conditionAst) = ifStmt match
       case s @ (_: CASTIfStatement | _: CPPASTIfStatement)
           if s.getConditionExpression != null =>
@@ -236,9 +242,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           val exprBlock =
               blockNode(s.getConditionDeclaration, Defines.empty, Defines.voidTypeName)
           scope.pushNewScope(exprBlock)
+          conditionScopeOpen = true
           val a = astsForDeclaration(s.getConditionDeclaration)
           setArgumentIndices(a)
-          scope.popScope()
           (c, blockAst(exprBlock, a.toList))
 
     val ifNode = controlStructureNode(ifStmt, ControlStructureTypes.IF, code)
@@ -270,6 +276,7 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           scope.popScope()
           Ast(elseNode).withChild(blockAst(elseBlock, a.toList))
       case _ => Ast()
+    if conditionScopeOpen then scope.popScope()
     controlStructureAst(ifNode, Some(conditionAst), Seq(thenAst, elseAst))
   end astForIf
 end AstForStatementsCreator

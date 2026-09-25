@@ -34,6 +34,35 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   /** The stub METHOD each declared-only function got, so a redeclaration can add its attributes. */
   private val declarationStubs = mutable.HashMap.empty[String, NewMethod]
 
+  /** Full names this file declared `static` - a later definition without the keyword keeps the
+    * internal linkage the first declaration gave it (C11 6.2.2p3/4).
+    */
+  private val internalLinkageNames = mutable.HashSet.empty[String]
+
+  /** A `static` modifier for a function with internal linkage: a non-member function declared
+    * `static`. Its name is visible only in its own translation unit, and the call and method-ref
+    * linkers read the modifier so another file's call to a same-named function never lands on it -
+    * libavformat alone defines 706 function names in more than one file (`get_tag`,
+    * `write_adaptation_set`). A static MEMBER function (declared inside a class body) is ordinary
+    * external linkage under its class-qualified name and gets nothing here. Read off the syntax,
+    * not the binding: resolving a C++ function's binding here changes how CDT later resolves an
+    * overloaded `using` synonym at a call.
+    */
+  private def internalLinkageModifiers(
+    declSpecifier: IASTDeclSpecifier,
+    node: IASTNode,
+    fullName: String
+  ): List[NewModifier] =
+    val insideClass = Iterator.iterate(node.getParent)(_.getParent).takeWhile(_ != null)
+        .exists(_.isInstanceOf[IASTCompositeTypeSpecifier])
+    val declaredStatic = declSpecifier != null &&
+        declSpecifier.getStorageClass == IASTDeclSpecifier.sc_static
+    if insideClass then Nil
+    else if declaredStatic || internalLinkageNames.contains(fullName) then
+      internalLinkageNames += fullName
+      List(newModifierNode(ModifierTypes.STATIC))
+    else Nil
+
   protected def astForMethodRefForLambda(lambdaExpression: ICPPASTLambdaExpression): Ast =
     val filename = fileName(lambdaExpression)
 
@@ -226,7 +255,12 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                 methodStubAst(
                   methodNode_,
                   parameterNodes,
-                  newMethodReturnNode(funcDecl, registerType(returnType))
+                  newMethodReturnNode(funcDecl, registerType(returnType)),
+                  internalLinkageModifiers(
+                    funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier,
+                    funcDecl,
+                    fixedFullName
+                  )
                 )
             val typeDeclAst = createFunctionTypeAndTypeDecl(
               funcDecl,
@@ -311,9 +345,14 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         parameterNode(p, i)
     }
     setVariadic(parameterNodes, funcDef)
-    val modifiers = if isCppConstructor(funcDef) then
-      List(newModifierNode(ModifierTypes.CONSTRUCTOR), newModifierNode(ModifierTypes.PUBLIC))
-    else Nil
+    val modifiers =
+        (if isCppConstructor(funcDef) then
+           List(
+             newModifierNode(ModifierTypes.CONSTRUCTOR),
+             newModifierNode(ModifierTypes.PUBLIC)
+           )
+         else Nil) ++
+            internalLinkageModifiers(funcDef.getDeclSpecifier, funcDef, fullname)
     val astForMethod = methodAst(
       methodNode_,
       parameterNodes.map(Ast(_)),

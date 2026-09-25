@@ -11,6 +11,8 @@ import io.shiftleft.semanticcpg.language.*
   */
 class IndexRangeTests extends DataFlowCodeToCpgSuite:
 
+  import IndexRangeTests.ReaderConfig
+
   private val cpg = code(
     """
     |typedef struct AVIOContext AVIOContext;
@@ -104,7 +106,19 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     |        inject(nut, i);
     |}
     |
-    |/* tiertexseq.c: checked above in the helper; the caller passes an unsigned array element */
+    |/* hevc.c's shape: the caller's counter is declared in the for init and checked against a
+    |   non-constant limit; the callee takes it unsigned */
+    |static void add_nal(struct nut *nut, unsigned idx) { use_ptr(nut->st[idx]); }
+    |void parse_nal(struct nut *nut, int type, const unsigned char *types, int n_arrays)
+    |{
+    |    for (unsigned i = 0; i < n_arrays; i++) {
+    |        if (type == types[i])
+    |            add_nal(nut, i);
+    |    }
+    |}
+    |
+    |/* tiertexseq.c's shape: checked above in the helper; the caller passes a byte element, which
+    |   stays non-negative in the helper's int */
     |struct seq { void *frame_buffers[30]; };
     |static int fill_buffer(struct seq *seq, int buffer_num)
     |{
@@ -115,11 +129,27 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     |}
     |int parse_frame(struct seq *seq, AVIOContext *pb)
     |{
-    |    unsigned int buffer_num[4];
+    |    unsigned char buffer_num[4];
     |    int i;
     |    for (i = 0; i < 4; i++)
     |        buffer_num[i] = avio_r8(pb);
     |    return fill_buffer(seq, buffer_num[1]);
+    |}
+    |/* ... and an unsigned int element, which can arrive negative there (the one-sided shape) */
+    |static int fill_wide(struct seq *seq, int buffer_num)
+    |{
+    |    if (buffer_num >= 30)
+    |        return -1;
+    |    use_ptr(seq->frame_buffers[buffer_num]);
+    |    return 0;
+    |}
+    |int parse_wide(struct seq *seq, AVIOContext *pb)
+    |{
+    |    unsigned int buffer_num[4];
+    |    int i;
+    |    for (i = 0; i < 4; i++)
+    |        buffer_num[i] = avio_rb32(pb);
+    |    return fill_wide(seq, buffer_num[1]);
     |}
     |
     |/* a counter no comparison bounds: constant-origin, and unbounded */
@@ -188,7 +218,7 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
   )
 
   new MemorySemanticsPass(cpg).createAndApply()
-  new MemoryApiPass(cpg).createAndApply()
+  new MemoryApiPass(cpg, Some(ReaderConfig)).createAndApply()
   new ExtentPass(cpg).createAndApply()
   new GuardPass(cpg).createAndApply()
   new ValueOriginPass(cpg).createAndApply()
@@ -238,8 +268,14 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     "not report a loop counter passed directly or two frames up" in {
         boundFindingsIn("deinterleave") shouldBe empty
     }
-    "not report a signed parameter checked above whose callers pass an unsigned element" in {
+    "not report a counter declared in its for init and bounded by the loop condition" in {
+        boundFindingsIn("add_nal") shouldBe empty
+    }
+    "not report a signed parameter checked above whose callers pass a byte element" in {
         boundFindingsIn("fill_buffer") shouldBe empty
+    }
+    "report it when the element is an unsigned int, which converts to a negative int" in {
+        boundFindingsIn("fill_wide") should not be empty
     }
     "not report literal arguments" in {
         boundFindingsIn("pick_fixed") shouldBe empty
@@ -254,3 +290,15 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
         boundFindingsIn("api_get") should not be empty
     }
 end IndexRangeTests
+
+object IndexRangeTests:
+
+  /** The FFmpeg reader widths the corpus config declares (`configs/ffmpeg-memory-apis.json`): the
+    * value ranges come from the vocabulary, never from names built into chen.
+    */
+  val ReaderConfig: String =
+      """{"apis": [
+        |  {"name": "avio_r8", "returnRange": [0, 255]},
+        |  {"name": "avio_rb16", "returnRange": [0, 65535]},
+        |  {"name": "get_bits", "returnBits": 2}
+        |]}""".stripMargin
