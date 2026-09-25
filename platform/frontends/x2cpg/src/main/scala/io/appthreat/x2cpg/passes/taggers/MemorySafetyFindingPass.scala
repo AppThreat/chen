@@ -646,10 +646,12 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
   /** MS-BOUND-003/004 (C4): index out of bounds, over facts that already exist on the graph.
     * `ValueOriginPass` tags array indices with their origin and nobody read them. Two arms:
     *
-    *   - **unchecked attacker index**: an index whose origin is `caller-param` or `untrusted-read`,
-    *     on a base whose extent is a known capacity (`const:N` / `alloc:`), with no `bounded-above`
-    *     \- and no `bounded-below` either, since a signed index that can go negative can also go
-    *     above.
+    *   - **unchecked attacker index**: an index whose origin is `untrusted-read`, or
+    *     `caller-param` that some caller leaves unbounded ([[callersBoundIndex]]), on a base whose
+    *     extent is a known capacity (`const:N` / `alloc:`), with no upper bound - from a guard,
+    *     from the access's own short-circuit expression, from its range by construction
+    *     ([[IndexRange]]: a byte read cannot reach index 256), or from an enum sized by its own
+    *     count sentinel. A lower bound does not excuse it: `i >= 0` still lets i run past the end.
     *   - **half-bounded signed index** (the CVE-2026-75146 shape): the author bounded the index
     *     ABOVE (`cur_seq_no < n_fragments`) but not below, and the index is a signed value read out
     *     of a struct - someone else set it, it can be negative, and the comparison that is there
@@ -677,55 +679,237 @@ class MemorySafetyFindingPass(atom: Cpg) extends CpgPass(atom):
                 .getOrElse(ExtentPass.ValueUnknown)
             val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
                 extent.startsWith(ExtentPass.ValueAlloc + ":")
-            val boundedAbove = tags.contains(GuardPass.TagAbove) ||
-                tags.contains(GuardPass.TagByExtent)
-            val boundedBelow = tags.contains(GuardPass.TagBelow)
-            val attackerIndex = tags.contains(ValueOriginPass.OriginCallerParam) ||
-                tags.contains(ValueOriginPass.OriginUntrustedRead)
+            val capacity    = constCapacity(extent)
             val signedIndex = signednessOf(idx).contains(true)
             val halfBounded = tags.contains(ValueOriginPass.OriginStructField) && signedIndex
-            // The two arms are separate rules because they know different amounts. The attacker
-            // arm has a capacity and an origin and no bound: evidence. The half-bounded arm has
-            // a HYPOTHESIS - this signed counter could be negative - which is true of most
-            // signed counters and wrong about almost all of them (76 of libavformat's index
-            // findings, against one CVE shape). It reports at `low`, so a default run at
-            // `--min-confidence medium` does not drown in it, and looking for the shape
-            // deliberately still works.
-            if attackerIndex && knownExtent && !boundedAbove && !boundedBelow then
-              record(idx, ruleIdFor(access))
-            else if halfBounded && boundedAbove && !boundedBelow then
-              val key  = (idx.method.id, OverlayFacts.variableKey(idx).getOrElse(s"n:${idx.id}"))
-              val line = idx.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
-              halfBoundedFirst.get(key) match
-                case Some(prev) if prev.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= line =>
-                case _ => halfBoundedFirst(key) = idx
-            // (the signedness for both part-10 arms was computed once above)
-            // part 10, the one-sided arm: an ATTACKER-ORIGIN SIGNED index into a buffer of
-            // known-ish capacity whose enforced guard bounds it on exactly ONE side - the other
-            // side is the bug (CVE-2026-75146's `cur_seq_no < n_fragments`, one_sided_bounds_check.c).
-            // `(unsigned)seq_no < count` is NOT this shape: the conversion sends every negative
-            // index past any real count, so it is a complete two-sided check (FFmpeg's idiom for
-            // exactly that). An unsigned index checked above needs no lower bound and
-            // stays silent; a two-sided check bounds both ways and stays silent; a check whose
-            // rejection path does not return establishes no fact at the access and stays silent
-            // (the rule speaks only where a fact provably holds).
-            val knownishExtent = knownExtent ||
-                extent.startsWith(ExtentPass.ValueParam + ":")
-            if attackerIndex && signedIndex && knownishExtent &&
-              (boundedAbove ^ boundedBelow)
-            then record(idx, ruleIdFor(access))
-            // part 10, the container arm: an attacker-controlled index into a std:: container
-            // with no upper bound - `v[atol(input)]` on a std::vector answers to at() and bounds
-            // checks, not to a capacity the graph can read. C code carries no such types, so the
-            // arm is silent on trees like libavformat by construction.
-            if attackerIndex && !boundedAbove && (!signedIndex || !boundedBelow) &&
-              isCppContainer(typeOfExpr(base))
-            then record(idx, ruleIdFor(access))
+            val hasAttackerTag = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                tags.contains(ValueOriginPass.OriginCallerParam)
+            val knownishExtent = knownExtent || extent.startsWith(ExtentPass.ValueParam + ":")
+            // the attacker arms need a capacity (or a C++ container) to overrun; the
+            // half-bounded arm asks only about the missing lower side, whatever the base
+            if halfBounded ||
+              (hasAttackerTag && (knownishExtent || isCppContainer(typeOfExpr(base))))
+            then
+              // bounds by construction: a byte read cannot reach index 256 and an unsigned value
+              // is never negative (IndexRange); and the short-circuit guard in the access's own
+              // expression, `pid >= NB_PID_MAX || ts->pids[pid]`
+              val range        = IndexRange.of(idx, typeOfExpr)
+              val inExpression = shortCircuitBounds(access, idx)
+              val enumFits = capacity.exists(n => enumIndexFits(typeOfExpr(idx), n))
+              val boundedAbove = tags.contains(GuardPass.TagAbove) ||
+                  tags.contains(GuardPass.TagByExtent) || inExpression._1 ||
+                  capacity.exists(n => range.exists(_.hi < n)) || enumFits
+              val boundedBelow = tags.contains(GuardPass.TagBelow) || inExpression._2 ||
+                  range.exists(_.nonNegative) || enumFits
+              // a caller-param index is the attacker's only when some caller passes it an
+              // attacker value that caller did not bound on the side this method leaves open
+              // (asfdec_o's `asf_deinterleave(s, pkt, i)` from a stream loop, mxfdec's enum
+              // constants, dvenc's channel loop two frames up)
+              val attackerIndex = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                  (tags.contains(ValueOriginPass.OriginCallerParam) &&
+                      !callersBoundIndex(
+                        access.method,
+                        idx,
+                        needAbove = !boundedAbove,
+                        needBelow = signedIndex && !boundedBelow,
+                        capacity,
+                        depth = 3
+                      ))
+              // The two arms are separate rules because they know different amounts. The
+              // attacker arm has a capacity and an origin and no upper bound: evidence (a lower
+              // bound does not help it - `i >= 0` still lets i run past the end). The
+              // half-bounded arm has a HYPOTHESIS - this signed counter could be negative - which
+              // is true of most signed counters and wrong about almost all of them (76 of
+              // libavformat's index findings, against one CVE shape). It reports at `low`.
+              if attackerIndex && knownExtent && !boundedAbove then record(idx, ruleIdFor(access))
+              else if halfBounded && boundedAbove && !boundedBelow then
+                val key = (idx.method.id, OverlayFacts.variableKey(idx).getOrElse(s"n:${idx.id}"))
+                val line = idx.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                halfBoundedFirst.get(key) match
+                  case Some(prev) if prev.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= line =>
+                  case _ => halfBoundedFirst(key) = idx
+              // part 10, the one-sided arm: an ATTACKER-ORIGIN SIGNED index into a buffer of
+              // known-ish capacity whose guard bounds it on exactly ONE side - the other side is
+              // the bug (CVE-2026-75146's `cur_seq_no < n_fragments`, one_sided_bounds_check.c).
+              // `(unsigned)seq_no < count` is NOT this shape: the conversion sends every negative
+              // index past any real count, a complete two-sided check (FFmpeg's idiom for it).
+              if attackerIndex && signedIndex && knownishExtent && (boundedAbove ^ boundedBelow)
+              then record(idx, ruleIdFor(access))
+              // part 10, the container arm: an attacker-controlled index into a std:: container
+              // with no upper bound - C code carries no such types, so the arm is silent on
+              // trees like libavformat by construction.
+              if attackerIndex && !boundedAbove && (!signedIndex || !boundedBelow) &&
+                isCppContainer(typeOfExpr(base))
+              then record(idx, ruleIdFor(access))
+            end if
           end for
         }
     halfBoundedFirst.values.foreach(idx => record(idx, RuleNegativeIndexHazard))
     pointerWalkWraparound(record)
   end ruleIndexBounds
+
+  /** An enum-typed index into an array sized by that enum's own count: every enumerator but the
+    * last is in `[0, n)`, and the last is at most `n` - the `MetadataSetTypeNB` sentinel the
+    * array is declared with, which names the count and is never an element (mxfdec's
+    * `metadata_set_groups[type]`, wtvenc's `file[index]`). The declared type is the contract;
+    * an enumerator whose value cannot be read makes the answer no.
+    */
+  private def enumIndexFits(typeName: String, capacity: BigInt): Boolean =
+      enumValues.get(typeName.trim.stripPrefix("enum ").trim).exists { values =>
+          values.nonEmpty && values.init.forall(v => v >= 0 && v < capacity) &&
+          values.last >= 0 && values.last <= capacity
+      }
+
+  /** Enumerator values per enum name, in declaration order: an explicit literal initialiser, a
+    * reference to an earlier enumerator, or one more than the previous. Same-named enums that
+    * disagree are dropped - which one a use sees is not something to guess.
+    */
+  private lazy val enumValues: Map[String, List[BigInt]] =
+    def literal(code: String): Option[BigInt] =
+        val c = code.trim.toLowerCase.replaceAll("[ul]+$", "")
+        scala.util.Try(if c.startsWith("0x") then BigInt(c.drop(2), 16) else BigInt(c)).toOption
+    val parsed = atom.typeDecl.l.filter(_.code.trim.startsWith("enum")).flatMap { td =>
+        val members = td.astChildren.collectAll[Member].l.sortBy(_.order)
+        val known   = mutable.LinkedHashMap.empty[String, BigInt]
+        var next    = BigInt(0)
+        val ok = members.forall { m =>
+            val init = m.code.split("=", 2).lift(1).map(_.trim)
+            val value = init match
+              case None       => Some(next)
+              case Some(expr) => literal(expr).orElse(known.get(expr))
+            value.foreach { v =>
+                known(m.name) = v
+                next = v + 1
+            }
+            value.isDefined
+        }
+        Option.when(ok && known.nonEmpty)(td.name -> known.values.toList)
+    }
+    parsed.groupBy(_._1).collect { case (name, defs) if defs.map(_._2).distinct.size == 1 =>
+        name -> defs.head._2
+    }
+
+  /** The element capacity a `const:N` extent names. */
+  private def constCapacity(extent: String): Option[BigInt] =
+      Option.when(extent.startsWith(ExtentPass.ValueConst + ":"))(
+        extent.stripPrefix(ExtentPass.ValueConst + ":")
+      ).flatMap(v => scala.util.Try(BigInt(v)).toOption)
+
+  /** The bounds a short-circuit operator in the access's own expression establishes: the right
+    * operand of `a || b` runs only where `a` is false, of `a && b` only where `a` is true, and
+    * the branches of `c ? x : y` where `c` is true and false. Returns (above, below) for the
+    * index's variable.
+    */
+  private def shortCircuitBounds(access: Call, idx: Expression): (Boolean, Boolean) =
+    val key = castUnwrappingKey(idx)
+    if key.isEmpty then (false, false)
+    else
+      var above = false
+      var below = false
+      var child: StoredNode          = access
+      var cursor: Option[StoredNode] = access._astIn.nextOption()
+      while cursor.isDefined do
+        cursor.get match
+          case c: Call =>
+              val holds: Option[Boolean] = c.name match
+                case "<operator>.logicalOr" if c.argumentOption(2).exists(_.id == child.id)  => Some(false)
+                case "<operator>.logicalAnd" if c.argumentOption(2).exists(_.id == child.id) => Some(true)
+                case "<operator>.conditional" if c.argumentOption(2).exists(_.id == child.id) => Some(true)
+                case "<operator>.conditional" if c.argumentOption(3).exists(_.id == child.id) => Some(false)
+                case _                                                                       => None
+              holds.foreach { h =>
+                  c.argumentOption(1).collect { case cond: Call => cond }.foreach { cond =>
+                      GuardPass.conjuncts(cond, h).getOrElse(Nil).foreach { case (cmp, ch) =>
+                          GuardPass.directionalFacts(cmp, ch).foreach { case (bounded, isAbove, _) =>
+                              if castUnwrappingKey(bounded) == key then
+                                if isAbove then above = true else below = true
+                          }
+                      }
+                  }
+              }
+              child = c
+              cursor = c._astIn.nextOption()
+          case _ => cursor = None
+      (above, below)
+
+  /** Do the callers bound a caller-param index on the sides the method leaves open? Every
+    * intra-tree call site must pass, at each parameter the index derives from, a value built
+    * from constants alone, or one the site bounds (a guard there, or a range by construction
+    * that fits the capacity), or - when it is itself only the caller's own parameter - one the
+    * caller's callers bound in turn. No callers at all is an entry point: unbounded.
+    */
+  private def callersBoundIndex(
+    method: Method,
+    idx: Expression,
+    needAbove: Boolean,
+    needBelow: Boolean,
+    capacity: Option[BigInt],
+    depth: Int
+  ): Boolean =
+    val attackers = Set(ValueOriginPass.OriginUntrustedRead, ValueOriginPass.OriginCallerParam)
+    val sites     = method._callIn.collectAll[Call].l.distinct
+    // the parameters the index derives from: its origin tags, or - for a call-site argument
+    // one frame up, which carries no index tags - the parameters it names directly
+    val tagged = (idx +: idx.ast.collectAll[Expression].l)
+        .flatMap(_.tag.name(ValueOriginPass.OriginCallerParam).value.l)
+        .distinct
+    val names =
+        if tagged.nonEmpty then tagged
+        else idx.ast.isIdentifier.name.l.distinct.filter(n => method.parameter.nameExact(n).nonEmpty)
+    val params = names.flatMap(name => method.parameter.nameExact(name).headOption)
+    depth > 0 && sites.nonEmpty && params.nonEmpty && sites.forall { site =>
+        params.forall { param =>
+            site.argumentOption(param.index).collect { case a: Expression => a }.exists { arg =>
+                val origins = ValueOriginPass.originNamesOf(arg)
+                lazy val argTags  = arg.tag.name.l
+                lazy val argRange = IndexRange.of(arg, typeOfExpr)
+                lazy val atSite   = guardedAtSite(site, arg)
+                lazy val aboveOk = !needAbove || argTags.contains(GuardPass.TagAbove) ||
+                    argTags.contains(GuardPass.TagByExtent) || atSite._1 ||
+                    capacity.exists(n => argRange.exists(_.hi < n))
+                lazy val belowOk = !needBelow || argTags.contains(GuardPass.TagBelow) ||
+                    atSite._2 || argRange.exists(_.nonNegative)
+                // positive evidence only: a literal expression, a guard at the site (a loop
+                // counter under its loop condition), or a range that fits. An argument whose
+                // origin is merely NOT tagged attacker proves nothing - flvdec's
+                // `multitrack ? track_idx : stream_type` is a byte read through a struct field,
+                // and a counter built from constants (`i = 0; ... i++`) with no comparison is
+                // unbounded
+                isLiteralOnly(arg) || (aboveOk && belowOk) || (
+                    origins.intersect(attackers) == Set(ValueOriginPass.OriginCallerParam) &&
+                        callersBoundIndex(site.method, arg, !aboveOk, !belowOk, capacity, depth - 1)
+                )
+            }
+        }
+    }
+  end callersBoundIndex
+
+  /** The bounds the call site's own controlling conditions put on an argument: the loop or if
+    * condition the call runs under (`for (i = 0; i < 4; i++) f(c, i)` bounds i above at the
+    * call). Returns (above, below) for the argument's variable.
+    */
+  private def guardedAtSite(site: Call, arg: Expression): (Boolean, Boolean) =
+    val key = castUnwrappingKey(arg)
+    if key.isEmpty then (false, false)
+    else
+      val facts = GuardPass.statementRootOf(site).controlledBy.collect { case c: Call => c }.l
+          .flatMap { cond =>
+              GuardPass.conjuncts(cond, GuardPass.holdsAt(cond, site)).getOrElse(Nil)
+                  .flatMap { case (cmp, holds) => GuardPass.directionalFacts(cmp, holds) }
+          }
+          .collect { case (bounded, isAbove, _) if castUnwrappingKey(bounded) == key => isAbove }
+      (facts.contains(true), facts.contains(false))
+
+  /** A literal, or arithmetic and casts over literals and sizeofs only. */
+  private def isLiteralOnly(e: Expression): Boolean = e match
+    case _: Literal                                        => true
+    case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+    case c: Call
+        if c.name.startsWith("<operator>.") && !isFieldAccess(c) &&
+            c.name != "<operator>.indirection" && c.name != "<operator>.indexAccess" &&
+            c.name != "<operator>.indirectIndexAccess" =>
+        c.argument.l.collect { case x: Expression => x }.forall(isLiteralOnly)
+    case _ => false
 
   /** Is the expression's type a C++ standard container the graph can treat as a buffer? c2cpg
     * writes nested names with dots (`std.vector<int>`).
