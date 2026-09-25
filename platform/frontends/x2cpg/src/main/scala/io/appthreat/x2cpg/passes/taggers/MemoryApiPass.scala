@@ -88,7 +88,8 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     matchesByTag.foreach { case (tag, tagged) =>
         tagged.groupMap(_._2)(_._1).foreach { case (value, nodes) =>
             nodes.iterator.newTagNodePair(tag, value).store()(using dstGraph)
-            umbrella ++= nodes
+            // a result range is a value fact, not a memory role: a byte reader is no memory API
+            if tag != TagReturnRange then umbrella ++= nodes
         }
     }
     umbrella.iterator.newTagNode(UmbrellaTag).store()(using dstGraph)
@@ -127,6 +128,13 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     }
     if entry.untrustedCall then
       record(TagUntrustedRead, entry.name, call)
+
+    entry.returnRange.foreach { case (lo, hi) => record(TagReturnRange, s"$lo:$hi", call) }
+    entry.returnBits.foreach { i =>
+        call.argumentOption(i).collect { case l: Literal => l.code.trim }.flatMap(_.toIntOption)
+            .filter(n => n > 0 && n <= 64)
+            .foreach(n => record(TagReturnRange, s"0:${(BigInt(1) << n) - 1}", call))
+    }
   end tagCall
 
 end MemoryApiPass
@@ -153,6 +161,12 @@ object MemoryApiPass:
     * On the call node, for MS-NULL-001.
     */
   final val TagNullableReturn = "nullable-return"
+
+  /** The closed range the call's result lies in by construction, valued `lo:hi` (`avio_r8` is
+    * `0:255`, `get_bits(gb, 4)` `0:15`): the vocabulary's `returnRange`/`returnBits`. On the call
+    * node, for the index rules' value ranges ([[IndexRange]]).
+    */
+  final val TagReturnRange = "mem-return-range"
 
   /** The family inferred wrappers emit; the inventory's own families are unchanged. */
   private final val FamilyHeap = "heap"

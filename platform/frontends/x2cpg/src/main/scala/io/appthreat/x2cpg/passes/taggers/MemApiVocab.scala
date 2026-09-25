@@ -55,6 +55,14 @@ object MemApiVocab:
     *   `strchr`/`strstr` family's no-match NULL. Declared per entry, never implied by the family -
     *   an fd-returning allocator fails with -1, not NULL. [[MemoryApiPass]] emits `nullable-return`
     *   for it.
+    * @param returnRange
+    *   the closed range the call's result always lies in, `[lo, hi]` - `fgetc` is `[-1, 255]`,
+    *   FFmpeg's `avio_r8` `[0, 255]`. JSON `"returnRange": [0, 255]`. The index rules' value ranges
+    *   read it ([[MemoryApiPass.TagReturnRange]]); a reader that can return a negative error code
+    *   must say so in its range or not be declared.
+    * @param returnBits
+    *   the argument whose integer literal is the result's width in bits: `get_bits(gb, 4)` is `[0,
+    *   15]` with `"returnBits": 2`. A call whose width argument is not a literal gets no range.
     */
   final case class MemApiEntry(
     name: String,
@@ -68,7 +76,9 @@ object MemApiVocab:
     untrustedRead: Option[Int] = None,
     untrustedCall: Boolean = false,
     clamp: Option[String] = None,
-    nullableReturn: Boolean = false
+    nullableReturn: Boolean = false,
+    returnRange: Option[(BigInt, BigInt)] = None,
+    returnBits: Option[Int] = None
   )
 
   private def decodeEntry(json: io.circe.Json): Option[MemApiEntry] =
@@ -86,7 +96,11 @@ object MemApiVocab:
         untrustedRead = json.hcursor.get[Int]("untrustedRead").toOption,
         untrustedCall = json.hcursor.get[Boolean]("untrustedCall").toOption.getOrElse(false),
         clamp = json.hcursor.get[String]("clamp").toOption,
-        nullableReturn = json.hcursor.get[Boolean]("nullableReturn").toOption.getOrElse(false)
+        nullableReturn = json.hcursor.get[Boolean]("nullableReturn").toOption.getOrElse(false),
+        returnRange = json.hcursor.get[List[BigInt]]("returnRange").toOption.collect {
+            case List(lo, hi) if lo <= hi => (lo, hi)
+        },
+        returnBits = json.hcursor.get[Int]("returnBits").toOption
       )
 
   /** @return

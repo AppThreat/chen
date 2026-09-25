@@ -43,7 +43,10 @@ trait LinkingUtil:
 
   /** For all nodes `n` with a label in `srcLabels`, determine the value of `n.\$dstFullNameKey`,
     * use that to lookup the destination node in `dstNodeMap`, and create an edge of type `edgeType`
-    * between `n` and the destination node.
+    * between `n` and the destination node. `dstNodeFor`, when given, replaces `dstNodeMap` with a
+    * lookup that also sees the source node - which of several same-named `static` functions a
+    * reference means depends on the file it sits in
+    * ([[io.appthreat.x2cpg.passes.linking.InternalLinkage]]).
     */
   def linkToSingle(
     cpg: Cpg,
@@ -53,7 +56,8 @@ trait LinkingUtil:
     dstNodeMap: String => Option[StoredNode],
     dstFullNameKey: String,
     dstGraph: DiffGraphBuilder,
-    dstNotExistsHandler: Option[(StoredNode, String) => Unit]
+    dstNotExistsHandler: Option[(StoredNode, String) => Unit],
+    dstNodeFor: Option[(StoredNode, String) => Option[StoredNode]] = None
   ): Unit =
     var loggedDeprecationWarning = false
     val dereference              = Dereference(cpg)
@@ -74,13 +78,15 @@ trait LinkingUtil:
                 val srcStoredNode = srcNode.asInstanceOf[StoredNode]
                 val dereferenceDstFullName =
                     dereference.dereferenceTypeFullName(dstFullName)
-                dstNodeMap(dereferenceDstFullName) match
+                val lookup: String => Option[StoredNode] =
+                    dstNodeFor.map(f => f(srcStoredNode, _)).getOrElse(dstNodeMap)
+                lookup(dereferenceDstFullName) match
                   case Some(dstNode) =>
                       dstGraph.addEdge(srcStoredNode, dstNode, edgeType)
-                  case None if dstNodeMap(dstFullName).isDefined =>
+                  case None if lookup(dstFullName).isDefined =>
                       dstGraph.addEdge(
                         srcStoredNode,
-                        dstNodeMap(dstFullName).get,
+                        lookup(dstFullName).get,
                         edgeType
                       )
                   case None if dstNotExistsHandler.isDefined =>

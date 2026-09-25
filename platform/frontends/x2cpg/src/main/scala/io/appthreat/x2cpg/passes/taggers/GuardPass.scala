@@ -95,18 +95,21 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               // bounding one summand bounds nothing.
               scaledKeyOf(a).orElse(variableKey(a)).map(k => k -> a)
           }.toMap
-          controllerOf(call).controlledBy.collect { case c: Call => c }.foreach { controller =>
+          guardingControllers(controllerOf(call)).foreach { controller =>
               conjuncts(controller, holdsAt(controller, call)).getOrElse(Nil).foreach {
                   case (cmp, cmpHolds) =>
                       directionalFacts(cmp, cmpHolds).foreach { case (bounded, above, bound) =>
-                          variableKey(bounded).flatMap(argKeys.get).foreach { arg =>
-                            add(
-                              arg,
-                              if above then TagAbove else TagBelow,
-                              s"${bound.id}:${bound.code}"
-                            )
-                            extentValueOf(bound).foreach(ev => add(arg, TagByExtent, ev))
-                          }
+                          // the value tested must be the value used: `while (n < 4) { n =
+                          // read(); a[n]; }` tests an older n
+                          variableKey(bounded).flatMap(argKeys.get)
+                              .filter(arg => unchangedSince(bounded, arg)).foreach { arg =>
+                                add(
+                                  arg,
+                                  if above then TagAbove else TagBelow,
+                                  s"${bound.id}:${bound.code}"
+                                )
+                                extentValueOf(bound).foreach(ev => add(arg, TagByExtent, ev))
+                              }
                       }
               }
           }
@@ -310,6 +313,99 @@ object GuardPass:
         case Some(parent: CfgNode)                            => cursor = parent
         case _                                                => walking = false
     cursor
+
+  /** The conditions that establish facts at `node`: its control-dependence controllers that also
+    * DOMINATE it. Control dependence alone is not a guard. Through a loop's back edge a statement
+    * depends on every exit in the loop body, so a sibling `case`'s `if (size > 1000000) goto fail`,
+    * on an EARLIER iteration's value, read as bounding the `avi_read_tag(..., size)` of another
+    * case (avidec.c:1043, where `size` is re-read every iteration); and a do-while body runs once
+    * before its condition is tested. A dominating condition was evaluated on every path to the
+    * node.
+    */
+  private[taggers] def guardingControllers(node: CfgNode): List[Call] =
+    val controllers = node.controlledBy.collect { case c: Call => c }.l
+    if controllers.isEmpty then Nil
+    else
+      val dominators = node.dominatedBy.map(_.id()).toSet
+      controllers.filter(c => dominators.contains(c.id()))
+
+  /** Is the value `use` reads the one the comparison operand `guarded` tested, with no definition
+    * of the variable between them? The walk back from `use` stops at the operand (every call
+    * argument is a reaching definition, the comparison's too); a definition it reaches another way
+    * is a newer value when the guard DOMINATES it - it runs after the test (`while (n < 4) { n =
+    * read(); a[n]; }`). One the guard does not dominate ran before the test, and since the guard
+    * dominates the use, its value went through the test: the reaching definitions are
+    * path-insensitive, so `if (i >= 0 && i < n) a[i]` also delivers the parameter through the
+    * short-circuit path on which the `&&` is false and the access never runs. Plain variables only
+    *   - a field access has no per-variable definitions to walk and is matched by its key alone, as
+    *     before.
+    */
+  private[taggers] def unchangedSince(guarded: Expression, use: Expression): Boolean =
+      (withoutCasts(guarded), withoutCasts(use)) match
+        case (g: Identifier, u: Identifier) if g.name == u.name =>
+            valueSources(u, stopAt = Some(g.id())).exists(_.forall {
+                case d: CfgNode => !d.dominatedBy.exists(_.id() == g.id())
+                case _          => true
+            })
+        case _ => true
+
+  private def withoutCasts(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
+            .map(withoutCasts).getOrElse(e)
+    case other => other
+
+  /** The definitions of `use`'s variable that its value can come from: parameters, assignment,
+    * increment and address-taken targets. A by-value argument of any other call (`f(i)`, `i < n`)
+    * is also a reaching definition on the graph but does not change the value, and the walk passes
+    * through it; `stopAt` ends the walk at one node without counting it. None when the walk runs
+    * past its budget.
+    */
+  private[taggers] def valueSources(
+    use: Identifier,
+    stopAt: Option[Long] = None,
+    budget: Int = 512
+  ): Option[Set[StoredNode]] =
+    val found                      = mutable.LinkedHashSet.empty[StoredNode]
+    val seen                       = mutable.HashSet.empty[Long]
+    var frontier: List[Identifier] = List(use)
+    var left                       = budget
+    while frontier.nonEmpty && left > 0 do
+      val next = mutable.ListBuffer.empty[Identifier]
+      frontier.foreach { n =>
+        val exclude = OverlayFacts.expansionExclusionOf(n)
+        n._reachingDefIn.foreach { d =>
+            if !exclude.contains(d.id()) && seen.add(d.id()) then
+              left -= 1
+              d match
+                case _ if stopAt.contains(d.id())               => ()
+                case p: MethodParameterIn if p.name == use.name => found += p
+                case i: Identifier if i.name == use.name =>
+                    if isDefinitionSite(i) then found += i else next += i
+                // the method entry, and the argument-to-argument plumbing of the flow semantics
+                case _ => ()
+        }
+      }
+      frontier = next.toList
+    if frontier.nonEmpty then None else Some(found.toSet)
+  end valueSources
+
+  /** Does this occurrence of a variable give it a new value? */
+  private[taggers] def isDefinitionSite(i: Identifier): Boolean =
+      i._astIn.collectFirst { case c: Call => c }.exists { c =>
+        val isTarget = c.argumentOption(1).exists(_.id() == i.id())
+        (isTarget && (c.name.startsWith("<operator>.assignment") ||
+            c.name.matches("<operator>\\.(pre|post)(In|De)crement"))) ||
+        c.name == "<operator>.addressOf"
+      }
+
+  /** Is the directional fact `cmp` gives at `holds` strict? `i < n` holding, or `i >= n` failing,
+    * puts i strictly below n; `i <= n` holding allows i == n.
+    */
+  private[taggers] def isStrict(cmp: Call, holds: Boolean): Boolean = (cmp.name, holds) match
+    case ("<operator>.lessThan" | "<operator>.greaterThan", true)              => true
+    case ("<operator>.lessEqualsThan" | "<operator>.greaterEqualsThan", false) => true
+    case _                                                                     => false
 
   private[taggers] def conjuncts(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
       expr.name match

@@ -156,12 +156,15 @@ object StitchPass:
 
     var realizedEdges: Int = 0
 
+    // same-named functions with internal linkage in other files are not a reference's target
+    private lazy val linkage = InternalLinkage(cpg)
+
     override def run(dstGraph: DiffGraphBuilder): Unit =
       // Static / inlined dispatch (replaces StaticCallLinker).
       callsToConsider(cpg, dirtyUnits).foreach { call =>
           call.dispatchType match
             case DispatchTypes.STATIC_DISPATCH | DispatchTypes.INLINED =>
-                index.methods(call.methodFullName).foreach { dst =>
+                linkage.visibleFrom(call, index.methods(call.methodFullName)).foreach { dst =>
                   dstGraph.addEdge(call, dst, EdgeTypes.CALL)
                   realizedEdges += 1
                 }
@@ -186,7 +189,10 @@ object StitchPass:
         dstNodeMap = index.methodNode,
         dstFullNameKey = PropertyNames.METHOD_FULL_NAME,
         dstGraph,
-        None
+        None,
+        dstNodeFor = Some((src, fullName) =>
+            linkage.visibleFrom(src, index.methods(fullName)).headOption
+        )
       )
 
       // TYPE_DECL -> TYPE INHERITS_FROM (replaces TypeHierarchyPass).
@@ -229,9 +235,10 @@ object StitchPass:
           if mr.out(EdgeTypes.REF).isEmpty && unitOf(mr).exists(dirty.contains) then
             val raw   = mr.methodFullName
             val deref = dereference.dereferenceTypeFullName(raw)
-            index.methods(deref).headOption.orElse(index.methods(raw).headOption).foreach { m =>
-                dstGraph.addEdge(mr, m, EdgeTypes.REF)
-            }
+            linkage.visibleFrom(mr, index.methods(deref)).headOption
+                .orElse(linkage.visibleFrom(mr, index.methods(raw)).headOption).foreach { m =>
+                    dstGraph.addEdge(mr, m, EdgeTypes.REF)
+                }
       }
 
       cpg.typeDecl.foreach { td =>
