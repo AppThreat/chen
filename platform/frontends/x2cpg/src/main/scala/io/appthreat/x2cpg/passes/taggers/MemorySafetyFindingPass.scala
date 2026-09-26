@@ -1316,11 +1316,23 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           case c: Call if c.name == "<operator>.cast" =>
               castTargetsOf(castOperand(c).getOrElse(c)) :+ castTargetName(c)
           case other => Nil
+        // The wrap hazard is a CONVERSION hazard: an unsigned step compared against a
+        // negative-capable signed remainder converts the remainder and never fires. An
+        // explicit unsigned cast (the fix's form), two unsigned operands, or two SIGNED
+        // operands (the comparison is then exact - `size <= left` with both int) all bound.
+        def signedOf(t: String): Option[Boolean] =
+            if OverlayFacts.isUnsignedIntegral(t) then Some(false)
+            else if OverlayFacts.isSignedIntegral(t) then Some(true)
+            else None
+        // a cast's type is its first argument's code; the operand's signedness is the cast's
+        def operandSignedness(e: Expression): Option[Boolean] =
+            castTargetsOf(e).lastOption.flatMap(signedOf).orElse(signednessOf(e))
         def unsignedCompare(bounded: Expression, bound: Expression): Boolean =
             (castTargetsOf(bound) ++ castTargetsOf(bounded)).exists(
               OverlayFacts.isUnsignedIntegral
             ) ||
-                (signednessOf(bounded).contains(false) && signednessOf(bound).contains(false))
+                (operandSignedness(bounded).contains(false) && operandSignedness(bound).contains(false)) ||
+                (operandSignedness(bounded).contains(true) && operandSignedness(bound).contains(true))
         def admits(cond: Call, holds: Boolean): Boolean =
             GuardPass.conjuncts(cond, holds).getOrElse(Nil).exists { case (cmp, h) =>
                 GuardPass.directionalFacts(cmp, h).exists { case (bounded, above, bound) =>
@@ -1387,7 +1399,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * walkers are the shape.
     */
   private lazy val minClampNames: Set[String] =
-      MemApiVocab.inventory(None).collect { case (n, e) if e.clamp.contains("min") => n }.toSet
+      // the declared config's clamps too: FFMIN arrives by config, not by the builtin inventory
+      MemApiVocab.inventory(externalConfig).collect { case (n, e) if e.clamp.contains("min") => n }.toSet
 
   private def mentionsKey(e: AstNode, key: String, depth: Int): Boolean =
       if depth < 0 then false
@@ -1466,29 +1479,66 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
   /** Is `walk` nested inside a while/for/do loop? */
   private def insideLoop(walk: Call): Boolean = enclosingLoopOf(walk).isDefined
 
-  /** The innermost while/for/do loop `node` sits in. */
+  /** The innermost while/for/do loop `node` sits in. The walk is cycle-safe: a macro
+    * expansion wired under its own argument gives a node two AST parents, and a plain parent
+    * walk can then chase that re-joining edge forever.
+    */
   private def enclosingLoopOf(node: AstNode): Option[ControlStructure] =
+    val seen = mutable.HashSet.empty[Long]
     var cursor: Option[StoredNode]      = node._astIn.nextOption()
     var found: Option[ControlStructure] = None
     while found.isEmpty && cursor.isDefined do
-      cursor.get match
-        case cs: ControlStructure =>
-            val t = cs.controlStructureType.toUpperCase
-            if t == "WHILE" || t == "FOR" || t == "DO" then found = Some(cs)
-            else cursor = cs._astIn.nextOption()
-        case _: Method => cursor = None
-        case other     => cursor = other._astIn.nextOption()
+      val current = cursor.get
+      if !seen.add(current.id()) then cursor = None
+      else
+        current match
+            case cs: ControlStructure =>
+                val t = cs.controlStructureType.toUpperCase
+                if t == "WHILE" || t == "FOR" || t == "DO" then found = Some(cs)
+                else cursor = cs._astIn.nextOption()
+            case _: Method => cursor = None
+            case other     => cursor = other._astIn.nextOption()
     found
 
-  /** Is `inner` nested inside `outer`'s subtree? */
+  /** The ids of `outer`'s subtree, memoised: the expansion DAG re-joins, so a recursive
+    * containment check explodes on it.
+    */
+  private val subtreeIdsByCs = mutable.HashMap.empty[Long, Set[Long]]
+  private def subtreeIdsOf(outer: ControlStructure): Set[Long] =
+    def compute(): Set[Long] =
+        val seen    = mutable.HashSet.empty[Long]
+        val out     = mutable.HashSet.empty[Long]
+        var frontier: List[AstNode] = outer :: Nil
+        while frontier.nonEmpty do
+            val next = mutable.ListBuffer.empty[AstNode]
+            frontier.foreach { n =>
+                if seen.add(n.id()) then
+                    out += n.id()
+                    n.astChildren.foreach(next += _)
+            }
+            frontier = next.toList
+        out.toSet
+    subtreeIdsByCs.getOrElseUpdate(outer.id, compute())
+
+  /** Is `inner` nested inside `outer`'s subtree? A cycle-safe parent walk against that set. */
   private def isWithin(inner: AstNode, outer: ControlStructure): Boolean =
-    var cursor: Option[StoredNode] = inner._astIn.nextOption()
-    var found                      = false
-    while !found && cursor.isDefined do
-      cursor.get match
-        case cs: ControlStructure => found = cs == outer || isWithin(cs, outer)
-        case _: Method            => cursor = None
-        case other                => cursor = other._astIn.nextOption()
+    val ids   = subtreeIdsOf(outer)
+    val seen  = mutable.HashSet.empty[Long]
+    var cursor: AstNode = inner
+    var found = false
+    var walking = true
+    while walking && !found do
+      if seen.contains(cursor.id()) || ids.contains(cursor.id()) then
+          found = ids.contains(cursor.id())
+          walking = false
+      else
+          seen.add(cursor.id())
+          cursor match
+              case _: Method => walking = false
+              case other     =>
+                  other._astIn.nextOption() match
+                      case Some(p: AstNode) => cursor = p
+                      case _                => walking = false
     found
 
   /** Does the block of `cs` leave the loop or the function - break, continue, return or goto? Only
@@ -1512,7 +1562,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case i: Identifier => OverlayFacts.variableKey(i)
       case c: Call =>
           for
-            args <- c.argument.l.filterNot(_.isFieldIdentifier) match
+            // the argument step yields the call itself at index 0; it is not its own operand
+            args <- c.argument.l.filterNot(a => a.isFieldIdentifier || a.id == c.id) match
               case Nil => Some(Nil)
               case xs => xs.foldLeft(Option(List.empty[String]))((acc, a) =>
                       acc.flatMap(l => go(a).map(l :+ _))
@@ -1856,42 +1907,18 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                   .flatMap(l => OverlayFacts.arrayExtent(l.typeFullName))
                   .map(n => (Some(BigInt(n)), None))
           case _ => None
-    def extentDerived(e: Expression, cap: Option[(String, String)]): Boolean = e match
-      case fa: Call
-          if fa.name == "<operator>.fieldAccess" ||
-              fa.name == "<operator>.indirectFieldAccess" =>
-          cap.exists { case (baseKey, member) =>
-              OverlayFacts.variableKey(fa).contains(s"$baseKey.$member")
-          }
-      case c: Call if c.name == "<operator>.subtraction" =>
-          c.argument.l.collect { case x: Expression => x }
-              .exists(x => extentDerived(x, cap))
-      case c: Call if c.name == "<operator>.cast" =>
-          castOperand(c).exists(x => extentDerived(x, cap))
-      // `n = payload_len < size ? payload_len : size` is the min clamp: the result never
-      // exceeds payload_len. The MAX shape bounds it only from below and derives nothing
-      case c: Call if c.name == "<operator>.conditional" =>
-          isMinClampOverExtent(c, cap)
-      case _ => false
     OverlayFacts.memoryArgumentSites(atom)
         .groupBy { case (c, _, _) => c }
         .foreach { case (call, rows) =>
             val srcArgs = rows.collect { case (_, e, MemoryApiPass.TagSrc) => e }
             val lenArgs = rows.collect { case (_, e, MemoryApiPass.TagLen) => e }
             for
-              src                   <- srcArgs.headOption
-              len                   <- lenArgs.headOption
+              src <- srcArgs.headOption
+              len <- lenArgs.headOption
               (constCap, capMember) <- srcExtent(src)
             do
-              val srcKey   = OverlayFacts.variableKey(withoutCasts(src)._1)
+              val srcKey = OverlayFacts.variableKey(withoutCasts(src)._1)
               val lenRange = ranges.of(withoutCasts(len)._1)
-              // the smallest extent the source is KNOWN to have: a constant one. Against it,
-              // only a proven range can exceed - an absent range proves nothing (rule 3).
-              // With no constant extent (a paired size member, an unknown buffer), nothing
-              // bounds the read and every decoded length can run past it.
-              val exceeds = constCap match
-                case Some(n) => lenRange.exists(_.hi > n)
-                case None    => true
               val controlled = ValueOriginPass.originNamesOf(withoutCasts(len)._1)
                   .exists(Set(
                     ValueOriginPass.OriginCallerParam,
@@ -1904,66 +1931,241 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               // this arm's; only a computed inline length carries its own expression as a site
               val defs = lengthDefinitions(len)
               val sites: List[(StoredNode, Option[Expression], Boolean)] = defs match
-                case Nil =>
-                    withoutCasts(len)._1 match
-                      case c: Call => List((len, Some(c), false))
-                      case _       => Nil
-                case ds => ds.map((node, rhs) => (node, rhs, true))
+                  case Nil =>
+                      withoutCasts(len)._1 match
+                          case c: Call => List((len, Some(c), false))
+                          case _       => Nil
+                  case ds => ds.map((node, rhs) => (node, rhs, true))
               sites.foreach { case (node, rhsOpt, isDefinition) =>
                   val rhs = rhsOpt.getOrElse(len)
                   // route i: the length is decoded from the source's own bytes - the def's own
                   // expression, or one definition level back through the identifier it names
                   val rhsReadsSource = srcKey.exists { k =>
-                      readsThroughKey(rhs, k) || (withoutCasts(rhs)._1 match
-                        case i: Identifier =>
-                            OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
-                                .flatMap(_._astIn.collectFirst {
-                                    case a: Call if a.name == "<operator>.assignment" => a
-                                })
-                                .flatMap(_.argumentOption(2).collect { case x: Expression => x })
-                                .exists(r => readsThroughKey(r, k))
-                        case _ => false
-                      )
+                      readsThroughKey(rhs, k) ||
+                      (withoutCasts(rhs)._1 match
+                          case i: Identifier =>
+                              OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                                  .flatMap(_._astIn.collectFirst {
+                                      case a: Call if a.name == "<operator>.assignment" => a
+                                  })
+                                  .flatMap(_.argumentOption(2).collect { case x: Expression => x })
+                                  .exists(r => readsThroughKey(r, k))
+                          case _ => false)
                   }
                   val derived = extentDerived(rhs, capMember)
                   // route ii: a caller parameter whose computed range the extent cannot hold,
-                  // at the definition that binds it - never on the bare parameter itself
+                  // at the definition that binds it - never on the bare parameter itself. The
+                  // range judged is THIS definition's own (a literal or masked rhs may be the
+                  // whole answer even when the variable's merged range is wide)
+                  val rhsRange = ranges.of(rhs)
+                  val rhsControlled = ValueOriginPass.originNamesOf(rhs).exists(Set(
+                    ValueOriginPass.OriginCallerParam,
+                    ValueOriginPass.OriginUntrustedRead
+                  ).contains)
                   val evidence = rhsReadsSource ||
-                      (isDefinition && controlled && lenRange.isDefined)
+                      (isDefinition && (controlled || rhsControlled) &&
+                          (lenRange.isDefined || rhsRange.isDefined))
+                  val defExceeds = constCap match
+                      case Some(n) => rhsRange.orElse(lenRange).exists(_.hi > n)
+                      case None    => true
                   val guarded = lenBoundByExtent(call, len, src, capMember, constCap) ||
                       (node match
                         case d: Call if isDefinition =>
-                            lenBoundByExtent(d, rhs, src, capMember, constCap)
+                            lenBoundByExtent(d, rhs, src, capMember, constCap) ||
+                              readerFilledTheSource(d, src, capMember, constCap) ||
+                              guardNarrowedTheDefinition(d, len, constCap)
                         case _ => false
                       )
-                  if !derived && evidence && exceeds && !guarded then
-                    record(node, RuleSourceOverread)
+                  if !derived && evidence && defExceeds && !guarded then
+                      record(node, RuleSourceOverread)
               }
-            end for
         }
   end sourceOverread
 
-  /** Is `conditional` the min macro shape (GuardPass.conditionalClamp's) with the extent's member
-    * as one of the compared operands?
+  /** The length's definition is a READER whose filled buffer is this copy's source
+    * (`n = avio_read(pb, buf, sizeof(buf)); ... memcpy(dst, buf, n)`): the return counts the
+    * bytes the reader wrote into that buffer, and the copy reads only that prefix - bounded
+    * whenever the reader's own length argument was (the buffer's sizeof, or within its range).
     */
-  private def isMinClampOverExtent(c: Call, cap: Option[(String, String)]): Boolean =
-    val operands =
-        for
-          cond <- c.argumentOption(1).collect { case x: Call => x }
-          t    <- c.argumentOption(2)
-          f    <- c.argumentOption(3)
-          kL   <- OverlayFacts.variableKey(cond.argumentOption(1).getOrElse(cond))
-          kR   <- OverlayFacts.variableKey(cond.argumentOption(2).getOrElse(cond))
-          kT   <- OverlayFacts.variableKey(t)
-          kF   <- OverlayFacts.variableKey(f)
-          if Set(kL, kR) == Set(kT, kF)
-          lessThan = cond.name == "<operator>.lessThan" || cond.name == "<operator>.lessEqualsThan"
-          isMin    = if lessThan then kT == kL else kT == kR
-          (base, member) <- cap
-          extKey = s"$base.$member"
-          if isMin && (kL == extKey || kR == extKey)
-        yield true
-    operands.isDefined
+  private def readerFilledTheSource(
+    d: Call,
+    src: Expression,
+    capMember: Option[(String, String)],
+    constCap: Option[BigInt]
+  ): Boolean =
+    val rhs = withoutCasts(
+      d.argumentOption(2).collect { case e: Expression => e }.getOrElse(d)
+    )._1
+    rhs match
+        case reader: Call =>
+            val srcKey = OverlayFacts.variableKey(withoutCasts(src)._1)
+            untrustedFillIndexOf(reader).exists { j =>
+                reader.argumentOption(j).collect { case e: Expression => e }.exists { bufArg =>
+                    val bufKey = readThroughKey(bufArg)
+                    bufKey.isDefined && bufKey == srcKey && {
+                        val lenArg = reader.argument.l
+                            .filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                            .collectFirst { case e: Expression => e }
+                        lenArg.exists { l =>
+                            extentDerived(l, capMember) ||
+                              sizeOfSourceBounded(l, bufKey.get) || {
+                                val r = ranges.of(l)
+                                constCap.exists(n => r.exists(_.hi <= n))
+                              }
+                        }
+                    }
+                }
+            }
+        case _ => false
+  end readerFilledTheSource
+
+  /** A reader's length argument bounded by the buffer it fills: `sizeof(buf)` itself, or
+    * arithmetic over a local defined from such a sizeof (`sizeofhead - 2`, where sizeofhead
+    * came from sizeof(head) minus a constant padding).
+    */
+  private def sizeOfSourceBounded(l: Expression, bufKey: String): Boolean =
+    def sizeOfSrc(e: Expression): Boolean = e match
+        case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+            c.argument.l.exists(a => OverlayFacts.variableKey(a).contains(bufKey))
+        case c: Call if c.name == "<operator>.subtraction" ||
+            c.name == "<operator>.addition" =>
+            c.argument.l.collect { case x: Expression => x }.exists(sizeOfSrc)
+        case i: Identifier =>
+            OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                .flatMap(_._astIn.collectFirst {
+                    case a: Call if a.name == "<operator>.assignment" => a
+                })
+                .flatMap(_.argumentOption(2).collect { case x: Expression => x })
+                .exists(sizeOfSrc)
+        case _ => false
+    sizeOfSrc(l)
+  end sizeOfSourceBounded
+
+  /** A guard between the plain definition and the copy whose body REDEFINES the length
+    * variable and whose failure bounds it above (`if (s >= 4) { ...; s &= 3; } ... memcpy(d, t,
+    * s)`): the plain definition's value reaches the copy only on the paths where the guard
+    * failed, so it arrived already below that bound. Sound only against a constant extent the
+    * bound admits.
+    */
+  private def guardNarrowedTheDefinition(
+    d: Call,
+    len: Expression,
+    constCap: Option[BigInt]
+  ): Boolean =
+    constCap.exists { cap =>
+        withoutCasts(len)._1 match
+            case v: Identifier =>
+                val defLine  = d.lineNumber.map(_.toInt).getOrElse(Int.MinValue)
+                val callLine = len.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                d.method.ast.collectAll[ControlStructure].l.exists { cs =>
+                    val gLine     = cs.lineNumber.map(_.toInt).getOrElse(Int.MinValue)
+                    val between   = defLine < gLine && gLine < callLine
+                    val redefines = cs.whenTrue.ast.isCall
+                        .l
+                        .filter(c =>
+                          c.name.startsWith("<operator>.assignment") ||
+                              c.name.startsWith("<operators>.assignment")
+                        )
+                        .exists(a => a.argumentOption(1).exists(t => t.code.trim == v.name))
+                    val bounds = cs.condition.collect { case c: Call => c }.exists { cond =>
+                        GuardPass.conjuncts(cond, holds = false).getOrElse(Nil).exists {
+                            case (cmp, holds) =>
+                                GuardPass.directionalFacts(cmp, holds).exists {
+                                    case (bounded, above, bound) =>
+                                        above &&
+                                        castUnwrappingKey(bounded).contains(s"v:${v.name}") &&
+                                        IndexRange.literal(bound).exists(_ <= cap)
+                                }
+                        }
+                    }
+                    between && redefines && bounds
+                }
+            case _ => false
+    }
+  end guardNarrowedTheDefinition
+
+  /** The extent-derived shapes: the extent member itself, `extent - k`, a cast over either,
+    * or a min clamp over any of them.
+    */
+  private def extentDerived(e: Expression, cap: Option[(String, String)]): Boolean = e match
+        case fa: Call
+            if fa.name == "<operator>.fieldAccess" ||
+                fa.name == "<operator>.indirectFieldAccess" =>
+            cap.exists { case (baseKey, member) =>
+                OverlayFacts.variableKey(fa).contains(s"$baseKey.$member")
+            }
+        case c: Call if c.name == "<operator>.subtraction" =>
+            c.argument.l.collect { case x: Expression => x }
+                .exists(x => extentDerived(x, cap))
+        case c: Call if c.name == "<operator>.cast" =>
+            castOperand(c).exists(x => extentDerived(x, cap))
+        // `n = payload_len < size ? payload_len : size` is the min clamp: the result never
+        // exceeds payload_len. The MAX shape bounds it only from below and derives nothing
+        case c: Call if c.name == "<operator>.conditional" =>
+            isMinClampOverExtent(c, familyKeysOf(e, cap))
+        case c: Call =>
+            // an unexpanded clamp macro (FFMIN) or a conditional wired inside an expansion
+            minClampNames.contains(c.name) && isMinClampOverExtent(c, familyKeysOf(e, cap))
+        case _ => false
+
+  /** The keys that name a quantity OF the source buffer: its paired capacity member, and
+    * every `_len`/`_size`/`_offset` sibling on the same base (the convention ExtentPass's own
+    * sibling search uses - a fill level never exceeds the allocation its writer sized).
+    */
+  private def familyKeysOf(e: Expression, cap: Option[(String, String)]): Set[String] =
+    val pairKey = cap.map((b, m) => s"$b.$m").toSet
+    val baseKey = cap.map(_._1)
+    val siblings = (e +: e.ast.collectAll[Expression].l).flatMap { y =>
+        y match
+            case fa: Call
+                if fa.name == "<operator>.fieldAccess" ||
+                    fa.name == "<operator>.indirectFieldAccess" =>
+                for
+                  bk <- OverlayFacts.variableKey(fa.argumentOption(1).getOrElse(fa))
+                  m  <- OverlayFacts.memberOf(fa)
+                  if baseKey.contains(bk) &&
+                      (m.endsWith("_len") || m.endsWith("_size") || m.endsWith("_offset"))
+                yield s"$bk.$m"
+            case _ => None
+    }.toSet
+    pairKey ++ siblings
+
+  /** Is `e` a MIN over the extent - the shape every clamp macro expands to? The clamped
+    * operand may be the extent member itself or derived from it (`extent - offset`): the min
+    * of anything with an extent-bounded operand never exceeds the extent. A MAX bounds only
+    * from below and derives nothing. The inlined conditional (`cond ? a : b` with {a,b} =
+    * cond's operands), the vocabulary min (FFMIN) and a conditional wired inside an unexpanded
+    * macro's expansion all count.
+    */
+  private def isMinClampOverExtent(e: Expression, familyKeys: Set[String]): Boolean =
+    def mentionsExtent(x: Expression): Boolean =
+        (x +: x.ast.collectAll[Expression].l).exists { y =>
+            castUnwrappingKey(y).exists(familyKeys.contains)
+        }
+
+    def minOf(c: Call): Boolean =
+        val args = c.argument.l.collect { case x: Expression => x }
+        if minClampNames.contains(c.name) then args.exists(mentionsExtent)
+        else if c.name == "<operator>.conditional" then
+            val conditional =
+                for
+                  cond <- c.argumentOption(1).collect { case x: Call => x }
+                  t    <- c.argumentOption(2)
+                  f    <- c.argumentOption(3)
+                  kL   <- OverlayFacts.variableKey(cond.argumentOption(1).getOrElse(cond))
+                  kR   <- OverlayFacts.variableKey(cond.argumentOption(2).getOrElse(cond))
+                  kT   <- OverlayFacts.variableKey(t)
+                  kF   <- OverlayFacts.variableKey(f)
+                  if Set(kL, kR) == Set(kT, kF)
+                  lessThan = cond.name == "<operator>.lessThan" ||
+                      cond.name == "<operator>.lessEqualsThan"
+                  isMin    = if lessThan then kT == kL else kT == kR
+                yield isMin && (mentionsExtent(t) || mentionsExtent(f))
+            conditional.contains(true)
+        else false
+    e match
+        case c: Call => minOf(c) || c.ast.collectAll[Call].l.exists(minOf)
+        case other   => false
 
   /** The (report node, rhs) pairs that define a length argument: its own identifier's value
     * definitions, or nothing when the length is computed inline.

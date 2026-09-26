@@ -525,7 +525,31 @@ class Part11PairedAdvanceTests extends DataFlowCodeToCpgSuite:
     |    return 0;
     |}
     |
-    |int bad_advance_by_bytes_read_inline(const uint8_t *frame, int frame_size)
+    |int good_ac4dec_shape(const uint8_t *buf0, int left0)
+{
+    const uint8_t *buf = buf0;
+    int left = left0;
+    while (left > 7)
+    {
+        int size;
+        if (buf[0] == 0xAC)
+        {
+            size = (buf[2] << 8) | buf[3];
+            size += 4;
+            if (left < size)
+                break;
+            left -= size;
+            buf += size;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return 0;
+}
+
+int bad_advance_by_bytes_read_inline(const uint8_t *frame, int frame_size)
     |{
     |    const uint8_t *p = frame;
     |    int rem = frame_size;
@@ -567,6 +591,14 @@ class Part11PairedAdvanceTests extends DataFlowCodeToCpgSuite:
 
     "stand down on the fixed tree's split shape (the num_lebs half carries no decoded term)" in {
         findingsIn("good_advance_split_after_guard", "MS-BOUND-003") shouldBe empty
+    }
+
+    "stand down on an exact signed compare of two signed operands (size <= left)" in {
+        findingsIn("good_advance_guarded_signed_spelling", "MS-BOUND-003") shouldBe empty
+    }
+
+    "stand down on `if (left < size) break` (ac4dec's exact shape)" in {
+        findingsIn("good_ac4dec_shape", "MS-BOUND-003") shouldBe empty
     }
 
     "stand down on a step whose whole range fits the loop's minimum remainder" in {
@@ -633,3 +665,130 @@ class Part11SummaryTests extends DataFlowCodeToCpgSuite:
         valuesOf("new_stream") should contain("grow:1:nb_streams")
     }
 end Part11SummaryTests
+
+
+/** The vividas decode_block shape as the tree run hit it: the length is a parameter copied to
+  * a local and narrowed by compound assignments and masks before the copy out of a 4-byte
+  * local array.
+  */
+class Part11VividasShapeTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+    |#include <stdint.h>
+    |#include <string.h>
+    |
+    |static void xor_block(uint8_t *dst, const uint8_t *src, unsigned length)
+    |{
+    |    unsigned i;
+    |    for (i = 0; i < length; i++)
+    |        dst[i] ^= src[i];
+    |}
+    |
+    |static void decode_block(uint8_t *src, uint8_t *dest, unsigned size)
+    |{
+    |    unsigned s = size;
+    |    char tmp[4];
+    |    int a2;
+    |
+    |    int align = 0;
+    |    if (!size)
+    |        return;
+    |    a2 = (4 - align) & 3;
+    |    if (a2 > s)
+    |        a2 = s;
+    |    memcpy(tmp + align, src, a2);
+    |    xor_block(tmp + align, tmp + align, 4);
+    |    memcpy(dest, tmp + align, a2);
+    |    s -= a2;
+    |
+    |    if (s >= 4)
+    |    {
+    |        xor_block(src + a2, dest + a2, s & ~3u);
+    |        s &= 3;
+    |    }
+    |    if (s)
+    |    {
+    |        size -= s;
+    |        memcpy(tmp, src + size, s);
+    |        xor_block(tmp, tmp, 4);
+    |        memcpy(dest + size, tmp, s);
+    |    }
+    |}
+    |""".stripMargin,
+    "vividas.c"
+  )
+
+  new MemorySemanticsPass(cpg).createAndApply()
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new IntegerWidthPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  private def findingsIn(method: String, rule: String): List[StoredNode] =
+      cpg.method.nameExact(method).ast.collectAll[StoredNode]
+          .filter(n => n.tag.name("ms-finding").value.l.contains(rule)).l
+
+  "the source-overread arm on narrowed lengths" should:
+    "stay silent when the length is masked down before the copy out of the small buffer" in {
+        findingsIn("decode_block", "MS-BOUND-008") shouldBe empty
+    }
+end Part11VividasShapeTests
+
+
+/** The dashdec/hls shape: copy_size = FFMIN(extent - offset, buf_size) out of the paired
+  * buffer, with FFMIN arriving from the external config the way the corpus passes it.
+  */
+class Part11FfminShapeTests extends DataFlowCodeToCpgSuite:
+
+  private val config =
+    """{"apis": [{"name": "FFMIN", "clamp": "min"}]}"""
+
+  private val cpg = code(
+    """
+    |#include <stdint.h>
+    |#include <string.h>
+    |
+    |struct playlist {
+    |    uint8_t *init_sec_buf;
+    |    unsigned int init_sec_buf_size;
+    |    unsigned int init_sec_data_len;
+    |    unsigned int init_sec_buf_read_offset;
+    |};
+    |
+    |int read_data(struct playlist *v, unsigned char *buf, int buf_size)
+    |{
+    |    int copy_size;
+    |    if (v->init_sec_buf_read_offset < v->init_sec_data_len) {
+    |        copy_size = FFMIN(v->init_sec_data_len - v->init_sec_buf_read_offset, buf_size);
+    |        memcpy(buf, v->init_sec_buf, copy_size);
+    |        v->init_sec_buf_read_offset += copy_size;
+    |        return copy_size;
+    |    }
+    |    return 0;
+    |}
+    |""".stripMargin,
+    "hls.c"
+  )
+
+  new MemorySemanticsPass(cpg, Some(config)).createAndApply()
+  new MemoryApiPass(cpg, Some(config)).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg, Some(config)).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new IntegerWidthPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg, Some(config)).createAndApply()
+
+  private def findingsIn(method: String, rule: String): List[StoredNode] =
+      cpg.method.nameExact(method).ast.collectAll[StoredNode]
+          .filter(n => n.tag.name("ms-finding").value.l.contains(rule)).l
+
+  "the source-overread arm on clamped lengths" should:
+    "stay silent on FFMIN(extent - offset, buf_size) out of the paired buffer" in {
+        findingsIn("read_data", "MS-BOUND-008") shouldBe empty
+    }
+end Part11FfminShapeTests
