@@ -557,7 +557,15 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val typeId = newExpression.getTypeId
     if newExpression.isArrayAllocation then
       val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
-      Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
+      // the array size IS part of the allocation's meaning: `new char[need]` allocates
+      // `need` bytes, and the self-sized-copy reading needs that size on the graph - it
+      // was dropped here, leaving every sized new[] copy unprovable (part 12)
+      val sizeArgs = Option(typeId.getAbstractDeclarator).toList.collect {
+          case ad: ast.IASTArrayDeclarator => ad.getArrayModifiers.toList
+      }.flatten.map(astForNode)
+      if sizeArgs.isEmpty then
+        Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
+      else callAst(cpgNewExpression, List(cpgTypeId) ++ sizeArgs)
     else
       val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
       val args = astsForConstructorInitializer(newExpression.getInitializer) ++

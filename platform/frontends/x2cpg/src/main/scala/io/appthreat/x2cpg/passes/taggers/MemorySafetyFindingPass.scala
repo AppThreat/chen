@@ -340,7 +340,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       val guards = mutable.LinkedHashMap.empty[String, (Int, ControlStructure)]
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
           cs.condition.foreach { cond =>
-              OverlayFacts.nullGuardKeyOf(cond, pointerNames).foreach { key =>
+              OverlayFacts.nullGuardKeysOf(cond, pointerNames).foreach { key =>
                 val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
                 guards.update(
                   key,
@@ -351,6 +351,35 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               }
           }
       }
+      // a conditional EXPRESSION narrows its own arms: `p == 0 ? d : p->v` proves p non-null
+      // in the else arm, a bare `p ? p->v : d` in the then arm. A use under such a narrowing
+      // is guarded by the expression it sits in - a later guard on the same variable belongs
+      // to its own statement, not to this use (part 12: the ternary check-after-use FP)
+      val ternaryNarrowings = method.ast.collectAll[Call].l
+          .filter(_.name == "<operator>.conditional")
+          .flatMap { c =>
+              c.argumentOption(1).toList.flatMap { cond =>
+                  val thenSafe = cond match
+                    case cmp: Call
+                        if cmp.name == "<operator>.equals" &&
+                          OverlayFacts.nullGuardKeysOf(cmp, pointerNames).nonEmpty =>
+                        false
+                    case not: Call
+                        if not.name == "<operator>.logicalNot" &&
+                          OverlayFacts.nullGuardKeysOf(not, pointerNames).nonEmpty =>
+                        false
+                    case _ => true
+                  OverlayFacts.nullGuardKeysOf(cond, pointerNames).map(k => (k, c, thenSafe))
+              }
+          }
+      def narrowedByTernary(use: AstNode, key: String): Boolean =
+        ternaryNarrowings.exists { case (k, c, thenSafe) =>
+            k == key && {
+              val inThen = c.argumentOption(2).exists(a => isWithinSubtree(use, a))
+              val inElse = c.argumentOption(3).exists(a => isWithinSubtree(use, a))
+              (inThen && thenSafe) || (inElse && !thenSafe)
+            }
+        }
       // the redefinitions of each variable, by line: a guard that follows one speaks about a
       // different value than the one the use read
       val redefinitions: Map[String, Seq[Int]] =
@@ -403,7 +432,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                         redefinitions.get(key.stripPrefix("v:")).exists(lines =>
                             lines.exists(l => l > line && l < guardLine)
                         )
-                    if !insideGuard && !redefinedInBetween then
+                    if !insideGuard && !redefinedInBetween && !narrowedByTernary(use, key) then
                       record(use, RuleNullDeref)
                 case None
                     if paramNames.contains(use.name) && isTraversalChainBase(use) =>
@@ -426,13 +455,21 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   /** Is `node` nested inside `cs`'s subtree? */
   private def isNestedWithin(node: AstNode, cs: ControlStructure): Boolean =
-    var cursor: Option[StoredNode] = node._astIn.nextOption()
+      isWithin(node, cs)
+
+  /** Is `node` inside `root`'s subtree, root itself included? The parent walk is bounded the
+    * way the structure walk is: a method boundary stops it.
+    */
+  private def isWithinSubtree(node: AstNode, root: AstNode): Boolean =
+    var cursor: Option[StoredNode] = node match
+      case s: StoredNode => Some(s)
+      case _             => None
     var found                      = false
     var walking                    = true
     while walking do
       cursor match
         case Some(n) =>
-            if n.id == cs.id then
+            if n.id == root.id then
               found = true
               walking = false
             else
@@ -499,11 +536,109 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 (tags.contains(ValueOriginPass.OriginCallerParam) &&
                     unboundedAtCallSites(call.method, lenArg))
             val honoursCapacity = capParam.exists(reaches(lenArg, _)) ||
-                dstArg.exists(d => selfSizedDestination(d, srcArg, lenArg))
+                dstArg.exists(d => selfSizedDestination(d, srcArg, lenArg)) ||
+                dstArg.exists(d => lenClampedToDestination(d, lenArg))
             if writesBuffer && controlled && !isBounded(tags) && !honoursCapacity then
               record(lenArg, RuleUnboundedCopy)
           }
       }
+
+  /** Part 12: the length is defined as a min whose one arm can never exceed the destination's
+    * own capacity - `copy_size = std::min(write_size, kBufSize - pos_)` before
+    * `memcpy(buf_ + pos_, data, copy_size)`. The arm's bound is matched against the declared
+    * extent of the member the dst is written into, by literal or by the constant identifier
+    * the declaration spells (`char buf_[kBufSize]` declares the same `kBufSize` the min
+    * subtracts); a subtraction arm must subtract the very operand the dst is offset by, or an
+    * offset the min does not know about could push the write past the buffer. A dst with no
+    * offset accepts any subtrahend (the arm only gets smaller). Anything unprovable stays a
+    * finding.
+    */
+  private def lenClampedToDestination(dst: Expression, lenArg: Expression): Boolean =
+    def stripCasts(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).map(stripCasts).getOrElse(e)
+      case other => other
+    // the buffer a pointer expression addresses: offsets and casts dropped, fields kept
+    def bufferOf(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => stripCasts(c)
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collectFirst { case x: Expression => x }.map(bufferOf).getOrElse(c)
+      case other => other
+    def literalOrIdentCode(e: Expression): Option[String] = stripCasts(e) match
+      case l: Literal    => Some(l.code.trim)
+      case i: Identifier => Some(i.code.trim)
+      case _             => None
+    // the declared extent token of the member the dst is written into: `65536` from
+    // `char buf_[65536]`, `kBufSize` from `char buf_[kBufSize]`
+    def extentToken(typeFullName: Option[String]): Option[String] =
+        typeFullName.flatMap { t =>
+            """\[(.+?)\]\s*$""".r.findFirstMatchIn(t).map(_.group(1).trim)
+        }
+    val declaredExtent = bufferOf(dst) match
+      case fa: Call if isFieldAccess(fa) =>
+          extentToken(OverlayFacts.memberRefOf(atom, fa).map(_.typeFullName))
+      case i: Identifier =>
+          // c2cpg spells an implicit-this member read as an identifier typed with the OWNER
+          // class (`leveldb..PosixWritableFile`): resolve the member through that type
+          // declaration, preferring the same file (same-named structs differ per file)
+          val owner = i.property("TYPE_FULL_NAME") match
+            case s: String => s.trim.replace("::", ".")
+            case _         => ""
+          if owner.isEmpty || OverlayFacts.isPointer(owner) then None
+          else
+              val simple = owner.split('.').lastOption.getOrElse("")
+              val candidates =
+                  (atom.typeDecl.nameExact(owner).l ++ atom.typeDecl.nameExact(simple).l)
+                      .distinctBy(_.id)
+              val memberType = candidates
+                  .find(_.filename == i.method.filename)
+                  .orElse(candidates.headOption)
+                  .flatMap(td => td.member.nameExact(i.name).headOption)
+                  .map(_.typeFullName)
+              extentToken(memberType)
+      case _ => None
+    val dstOffsetKey = dst match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case e: Expression => e }
+              .find(_.argumentIndex == 2)
+              .flatMap(OverlayFacts.variableKey)
+      case _ => None
+    // the declaration may spell the constant's NAME where the min uses its VALUE, or the
+    // reverse (`constexpr kBigSize = 65536` folded into the member's type): resolve one
+    // through the other over the atom's single-valued literal assignments
+    val constantAssignments: Map[String, String] =
+        atom.assignment.l.flatMap { a =>
+            (a.argumentOption(1), a.argumentOption(2)) match
+              case (Some(i: Identifier), Some(l: Literal)) =>
+                  Some(i.name -> l.code.trim)
+              case _ => None
+        }.groupMap(_._1)(_._2).collect { case (k, vs) if vs.distinct.size == 1 => k -> vs.head }
+    def boundMatches(minuend: Expression): Boolean =
+        declaredExtent.exists { d =>
+            literalOrIdentCode(minuend).exists {
+                case code if code == d             => true
+                case code if code.nonEmpty && d.nonEmpty =>
+                    constantAssignments.get(code).contains(d) ||
+                        constantAssignments.get(d).contains(code)
+                case _ => false
+            }
+        }
+    def armSound(arm: Expression): Boolean = arm match
+      case sub: Call if sub.name == "<operator>.subtraction" =>
+          val ops           = sub.argument.l.collect { case e: Expression => e }
+          val subtrahend    = ops.find(_.argumentIndex == 2)
+          val offsetMatches = dstOffsetKey.forall(k =>
+              subtrahend.flatMap(OverlayFacts.variableKey).contains(k)
+          )
+          offsetMatches && ops.find(_.argumentIndex == 1).exists(boundMatches)
+      case other =>
+          dstOffsetKey.isEmpty && boundMatches(other)
+    def armsOf(e: Expression): List[Expression] = e match
+      case c: Call if minClampNames.contains(c.name) || c.name == "min" =>
+          c.argument.l.collect { case x: Expression => x }
+      case _ => Nil
+    val lenExprs = withoutCasts(lenArg)._1 :: lengthDefinitions(lenArg).flatMap(_._2)
+    lenExprs.exists(armsOf(_).exists(armSound))
 
   /** Part 9: the destination was sized FROM this copy's length. FFmpeg's dominant correct shape:
     * `tmp = av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer that
@@ -583,6 +718,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     val len = unwrapCast(lenArg)
     def matches(term: Expression): Boolean = (len, term) match
       case (a: Identifier, b: Identifier) => a.name == b.name && valueDefs(a) == valueDefs(b)
+      // a method-call length (`key.size()`) carries no variable key; the two spellings of
+      // the same call in one method talk about the same value
+      case (a: Call, b: Call) => a.code == b.code
       case _ =>
           OverlayFacts.variableKey(len).exists(k => OverlayFacts.variableKey(term).contains(k))
     // the destination is the data member of a packet the SAME function sized through the
@@ -604,14 +742,39 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               }
           }
       case _ => false
+    // the length arguments of an allocation: the inventoried `mem-len` positions, and for a
+    // C++ array construction the size expression the frontend wires in after the type
+    def allocLenArgs(alloc: Call): List[Expression] =
+        alloc.argument.l.collect { case e: Expression => e }.filter { a =>
+            a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
+            (alloc.name == "<operator>.new" && a.argumentIndex > 1)
+        }
     val sizedByAllocation = bufferOf(dst) match
       case base: Identifier =>
           rhsOfDefs(base)
               .flatMap(allocCallOf)
-              .flatMap(_.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).nonEmpty))
-              .collect { case e: Expression => e }
+              .flatMap(allocLenArgs)
               .flatMap(termsOf(_, expand = true))
               .exists(matches)
+      case fa: Call if isFieldAccess(fa) =>
+          // a copy into a member of a sized allocation: `e = malloc(sizeof(H) - 1 + n)`
+          // then `memcpy(e->data, ..., n)` - the flexible trailing member takes the same
+          // length the allocation added (part 12). Restricted to a single-element array
+          // member, the flexible idiom: a wholesale "any member of a sized allocation"
+          // reading would excuse real intra-object overruns
+          val flexibleMember = OverlayFacts.memberRefOf(atom, fa)
+              .flatMap(m => OverlayFacts.arrayExtent(m.typeFullName))
+              .contains(1)
+          flexibleMember && fa.argumentOption(1).collect { case e: Expression => e }
+              .map(unwrapCast)
+              .collect { case i: Identifier => i }
+              .exists { base =>
+                  rhsOfDefs(base)
+                      .flatMap(allocCallOf)
+                      .flatMap(allocLenArgs)
+                      .flatMap(termsOf(_, expand = true))
+                      .exists(matches)
+              }
       case _ => false
     inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi
   end selfSizedDestination
