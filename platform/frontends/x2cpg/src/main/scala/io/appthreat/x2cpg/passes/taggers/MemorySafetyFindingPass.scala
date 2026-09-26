@@ -761,19 +761,85 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
             (alloc.name == "<operator>.new" && a.argumentIndex > 1)
         }
+    // Every value the pointer can hold at the copy, as (assignment, rhs): None when one of them
+    // is not an assignment the method wrote (a parameter, a def the graph does not resolve).
+    // A call argument is a reaching definition to the graph (`memset(d, 0, n)` "redefines"
+    // d) but hands the same pointer back: the walk goes through it to the values before.
+    def assignedValues(use: Identifier, depth: Int = 0): Option[List[(Call, Expression)]] =
+      val direct = OverlayFacts.reachingDefsIn(use, maxHops = 1)
+      val own = direct.filter {
+          case i: Identifier        => i.name == use.name
+          case p: MethodParameterIn => p.name == use.name
+          case _                    => false
+      }
+      if own.isEmpty || depth > 4 then None
+      else
+        own.foldLeft(Option(List.empty[(Call, Expression)])) { (acc, d) =>
+            acc.flatMap { xs =>
+                d match
+                  case i: Identifier =>
+                      i._astIn.collectFirst {
+                          case a: Call
+                              if a.name == "<operator>.assignment" &&
+                                  a.argumentOption(1).exists(_.id == i.id) => a
+                      } match
+                        case Some(a) =>
+                            a.argumentOption(2).collect { case e: Expression => (a, e) }
+                                .map(xs :+ _)
+                        case None => assignedValues(i, depth + 1).map(xs ++ _)
+                  case _ => None
+            }
+        }
+    end assignedValues
+    def sizedFrom(rhs: Expression, lenArgs: Call => List[Expression]): Boolean =
+        allocCallOf(rhs).exists(a => lenArgs(a).flatMap(termsOf(_, expand = true)).exists(matches))
+    // `if (need <= sizeof(k->space_)) dst = k->space_;` with `need = n + 8` and a copy of n:
+    // a guard that dominates the assignment and holds there bounds a value that is the copy's
+    // length plus non-negative terms by the sizeof of the very buffer assigned
+    def coveredByGuard(assignment: Call, rhs: Expression): Boolean =
+      val buffer = unwrapCast(rhs).code
+      def atLeastLen(x: Expression): Boolean =
+        def nonNegative(t: Expression): Boolean = unwrapCast(t) match
+          case l: Literal => l.code.trim.takeWhile(_.isDigit).nonEmpty
+          case c: Call    => c.name.startsWith("<operator>.sizeOf")
+          case _          => false
+        def sumCovers(e: Expression): Boolean = unwrapCast(e) match
+          case c: Call if c.name == "<operator>.addition" =>
+              val ops = c.argument.l.collect { case o: Expression => o }
+              ops.exists(o => matches(unwrapCast(o))) &&
+              ops.forall(o => matches(unwrapCast(o)) || nonNegative(o))
+          case other => matches(other)
+        unwrapCast(x) match
+          case i: Identifier if matches(i) => true
+          case i: Identifier =>
+              assignedValues(i).exists(vs => vs.nonEmpty && vs.forall((_, v) => sumCovers(v)))
+          case other => sumCovers(other)
+      GuardPass.guardingControllers(assignment).exists { cond =>
+        val holds = GuardPass.holdsAt(cond, assignment)
+        GuardPass.conjuncts(cond, holds).exists(_.exists { (cmp, h) =>
+            GuardPass.directionalFacts(cmp, h).exists { (bounded, above, bound) =>
+                above && (unwrapCast(bound) match
+                  case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                      sz.argumentOption(1).exists(_.code == buffer)
+                  case _ => false
+                ) && atLeastLen(bounded)
+            }
+        })
+      }
+    end coveredByGuard
+    // part 13: EVERY value the destination can hold must be sized from the copy's length - an
+    // allocation of it, or a buffer a dominating guard proved large enough. One matching
+    // allocation among several definitions said nothing about the others
+    // (`d = fixed; if (c) d = malloc(n); memcpy(d, s, n)`)
     val sizedByAllocation = bufferOf(dst) match
       case base: Identifier =>
-          rhsOfDefs(base)
-              .flatMap(allocCallOf)
-              .flatMap(allocLenArgs)
-              .flatMap(termsOf(_, expand = true))
-              .exists(matches)
+          assignedValues(base).exists(vs =>
+              vs.nonEmpty && vs.forall((a, v) => sizedFrom(v, allocLenArgs) || coveredByGuard(a, v))
+          )
       case fa: Call if isFieldAccess(fa) =>
           // a copy into a member of a sized allocation: `e = malloc(sizeof(H) - 1 + n)`
           // then `memcpy(e->data, ..., n)` - the flexible trailing member takes the same
           // length the allocation added (part 12). Restricted to a single-element array
-          // member, the flexible idiom: a wholesale "any member of a sized allocation"
-          // reading would excuse real intra-object overruns
           // member, the flexible idiom, and the LAST one declared: a one-element array with
           // members after it is a fixed field. The allocation must also add a sizeof for the
           // header the member follows - `malloc(n)` then `memcpy(e->data, .., n)` overruns by
@@ -788,12 +854,11 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               .map(unwrapCast)
               .collect { case i: Identifier => i }
               .exists { base =>
-                  rhsOfDefs(base)
-                      .flatMap(allocCallOf)
-                      .flatMap(allocLenArgs)
-                      .filter(addsHeader)
-                      .flatMap(termsOf(_, expand = true))
-                      .exists(matches)
+                  assignedValues(base).exists(vs =>
+                      vs.nonEmpty && vs.forall((_, v) =>
+                          sizedFrom(v, a => allocLenArgs(a).filter(addsHeader))
+                      )
+                  )
               }
       case _ => false
     inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi
