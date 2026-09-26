@@ -344,29 +344,37 @@ private[taggers] object OverlayFacts:
         }
     out.view.mapValues(_.toSet).toMap
 
-  /** The POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
+  /** Every POINTER variable a null guard's condition tests: `p == NULL` / `NULL != p`, `!p`, or the
     * truth of `p` itself. Every shape is restricted to pointer-typed locals and parameters: FFmpeg
     * tests ints the same three ways (`size == 0`, `!ret`, `if (n)`), and `0` is also how the
     * frontend spells NULL, so an unrestricted shape reads every earlier use of an int counter as a
     * check-after-use. Shared by the null-deref rule and the derefs-param summary, which must agree
     * on what a guard is or a summary would contradict the rule that consumes it.
+    *
+    * A conjunction guards EVERY conjunct when it holds - `while (n && !n->marked)` narrows the
+    * body's use of `n` exactly as a bare `if (n)` would - so the conjuncts are walked
+    * recursively (part 12).
     */
-  def nullGuardKeyOf(cond: AstNode, pointerNames: Set[String]): Option[String] =
+  def nullGuardKeysOf(cond: AstNode, pointerNames: Set[String]): List[String] =
     def pointerKey(e: AstNode): Option[String] = e match
       case i: Identifier if pointerNames.contains(i.name) => variableKey(i)
       case c: Call if c.name == "<operator>.cast" =>
           c.argumentOption(2).orElse(c.argumentOption(1)).flatMap(pointerKey)
       case _ => None
     cond match
+      case and: Call if and.name == "<operator>.logicalAnd" =>
+          and.argument.l.collect { case e: AstNode => e }
+              .flatMap(nullGuardKeysOf(_, pointerNames))
+              .distinct
       case cmp: Call
           if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
           val operands = Seq(1, 2).flatMap(cmp.argumentOption)
           if operands.exists(isNullLiteralNode) then
-            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption
-          else None
+            operands.filterNot(isNullLiteralNode).flatMap(pointerKey).headOption.toList
+          else Nil
       case not: Call if not.name == "<operator>.logicalNot" =>
-          not.argumentOption(1).flatMap(pointerKey)
-      case other => pointerKey(other)
+          not.argumentOption(1).flatMap(pointerKey).toList
+      case other => pointerKey(other).toList
 
   private def isNullLiteralNode(e: AstNode): Boolean =
       AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
@@ -384,7 +392,7 @@ private[taggers] object OverlayFacts:
         .collectAll[ControlStructure]
         .l
         .flatMap { cs =>
-            cs.condition.flatMap(cond => nullGuardKeyOf(cond, pointerNames)).map(key => (key, cs))
+            cs.condition.flatMap(cond => nullGuardKeysOf(cond, pointerNames)).map(key => (key, cs))
         }
         .toMap
 end OverlayFacts

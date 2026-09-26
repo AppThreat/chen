@@ -574,7 +574,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       staticLocals = method.local.l.filter(isStaticLocal).map(_.name).toSet,
       refReturn = !isFileScope && Option(method.methodReturn.typeFullName).exists(t =>
           t.endsWith("&") || t.endsWith("&&")
-      )
+      ),
+      // a reference return is the pointer itself escaping; only the BY-VALUE string return
+      // copies. An unknown or empty return type stays an escape - silence needs evidence
+      stringReturn = !isFileScope &&
+        Option(method.methodReturn.typeFullName).exists { t =>
+          !t.trim.endsWith("&") && !t.trim.endsWith("*") && isCppStringType(t)
+        }
     )
     val hasAddressOfLocal = callFacts.values.exists(cf =>
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
@@ -661,8 +667,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               r.astChildren.collect { case e: Expression => e }.foreach { e =>
                   val viaTracked =
                       trackedNameOf(e).flatMap(settled.get).exists(_.state == StStackAddr)
-                  if holdsStackAddress(e, ctx) || viaTracked || refToLocale then
-                    record(r, TagStackEscape, "escape:return")
+                  // a by-value string return copies the characters out of the frame; a
+                  // char[] flowing to it is not an escape (part 12, std::string owns
+                  // its buffer)
+                  if !ctx.stringReturn &&
+                    (holdsStackAddress(e, ctx) || viaTracked || refToLocale)
+                  then record(r, TagStackEscape, "escape:return")
               }
           case c: Call if c.name == "<operator>.assignment" =>
               (argAt(c.argument.l, 1), argAt(c.argument.l, 2)) match
@@ -671,11 +681,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     dst match
                       case i: Identifier =>
                           if !ctx.locals.contains(i.name) && !ctx.params.contains(i.name) &&
-                            stackRhs
+                            stackRhs && !isStringDestination(dst)
                           then record(c, TagStackEscape, "escape:global")
                       case _ =>
-                          if !isFrameStorage(dst, ctx) && stackRhs then
-                            record(c, TagStackEscape, "escape:store")
+                          if !isFrameStorage(dst, ctx) && stackRhs &&
+                            !isStringDestination(dst)
+                          then record(c, TagStackEscape, "escape:store")
                 case _ => ()
           case _ => ()
     }
@@ -1134,17 +1145,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             }
         case (None, Some(rhs)) =>
             // stored into a struct member or through another non-trackable destination: the
-            // pointer escapes - ownership left this method's variable space
+            // pointer escapes - ownership left this method's variable space. A string
+            // destination is the exception: std::string's operator= copies the characters,
+            // so a heap block assigned through it is still exactly where it was (part 12)
+            val stringDst = argAt(cf.args, 1).exists(isStringDestination)
             val rhsTracked = rhs match
               case rc: Call if rc.name == "<operator>.cast" =>
                   castOperand(rc).flatMap(trackedNameOf)
               case _ => trackedNameOf(rhs)
-            rhsTracked.foreach { name =>
-                out.get(name).foreach { t =>
-                    out = withGroup(out, name, t.aliases, StEscaped)
-                    out = out.updated(name, t.copy(state = StEscaped))
-                }
-            }
+            if !stringDst then
+              rhsTracked.foreach { name =>
+                  out.get(name).foreach { t =>
+                      out = withGroup(out, name, t.aliases, StEscaped)
+                      out = out.updated(name, t.copy(state = StEscaped))
+                  }
+              }
             // ... and the field itself is tracked from here: a fresh block, a reset, or unknown
             fieldLhs.foreach { f =>
                 val alloc = rhs match
@@ -1184,8 +1199,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               }
           case _ => ()
     }
-    if isOperatorCall(cf.name) then ()
-    else if cf.isMemoryCall then
+    // a C++ construction (`new T(args)`) is an operator call whose arguments are handed to
+    // the constructor: a tracked fd or pointer argument is owned by the new object from here
+    // on. It falls through to the generic argument escape below - leaving it tracked-live
+    // reported every later exit as a leak of a resource the object now owns (part 12: the
+    // env-wrapper shape, 8 findings per leveldb tree)
+    if isOperatorCall(cf.name) && cf.name != "<operator>.new" then ()
+    else if cf.isMemoryCall && cf.name != "<operator>.new" then
       // 5. an inventoried memory call USES its pointer arguments; ownership unchanged. F1: only
       //    the positions the inventory says the call READS THROUGH (dst/src) are uses for the
       //    null question - the freed argument of a free-family call never is (free(NULL) is a
@@ -1227,7 +1247,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               }
       cf.args.foreach { arg =>
         val viaAddress       = addressOfOperand(arg)
-        val operand          = viaAddress.getOrElse(arg)
+        val operand          = unwrapCastOperand(viaAddress.getOrElse(arg))
         val summaryFreesThis = summaryFreedArgs.contains(arg.argumentIndex)
         trackedNameOf(operand).foreach { name =>
             useState.get(name).foreach { t =>
@@ -1572,6 +1592,43 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           .value(io.appthreat.x2cpg.Defines.StorageClassStatic)
           .nonEmpty
 
+  /** The C++ string types that copy on by-value assignment, construction and return:
+    * std::string and its wide/utf specialisations. `std::string_view` is deliberately absent -
+    * a view really does borrow the pointer it is built from. Namespace and template spellings
+    * are normalised away; the last name component decides.
+    */
+  private def isCppStringType(t: String): Boolean =
+    val last = t.trim
+        .stripPrefix("const ")
+        .trim
+        .takeWhile(_ != '<')
+        .trim
+        .stripSuffix("&")
+        .trim
+        .replace("::", ".")
+        .split('.')
+        .lastOption
+        .getOrElse("")
+    CppStringTypes.contains(last)
+
+  private val CppStringTypes = Set("string", "basic_string", "wstring", "u16string", "u32string")
+
+  /** Is this assignment destination a C++ string that would COPY the rhs characters rather
+    * than store a pointer into it: a global or local `std::string` variable, or the deref of
+    * a `std::string*` (`*value = buf` copies). The referent type decides: an `std::string`
+    * member read through a pointer is one too. Anything unresolvable stays an escape.
+    */
+  private def isStringDestination(dst: Expression): Boolean =
+    def typeOf(e: Expression): String = e.property("TYPE_FULL_NAME") match
+      case s: String => s
+      case _         => ""
+    val referent = dst match
+      case c: Call if c.name == "<operator>.indirection" =>
+          // the pointee of the dereferenced pointer: `std::string *` -> `std::string`
+          c.argumentOption(1).map(typeOf).getOrElse("").stripSuffix("*").trim
+      case _ => typeOf(dst)
+    isCppStringType(referent)
+
   /** Does this rhs put a stack address into the destination it feeds (E4): directly, or through a
     * local that currently holds one?
     */
@@ -1593,6 +1650,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def addressOfOperand(e: AstNode): Option[Expression] = e match
     case c: Call if c.name == "<operator>.addressOf" => c.argumentOption(1)
     case _                                           => None
+
+  /** The tracked value an argument names, casts unwrapped: `new X((char *)mmap_base)` hands
+    * the mapping to the constructor exactly as a bare argument would (part 12).
+    */
+  private def unwrapCastOperand(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).map(unwrapCastOperand).getOrElse(e)
+      case other => other
 
   private def castOperand(c: Call): Option[Expression] =
       c.argumentOption(2).orElse(c.argumentOption(1))
@@ -1742,7 +1807,10 @@ object AllocationStatePass:
     valueLocals: Set[String],
     params: Set[String],
     staticLocals: Set[String],
-    refReturn: Boolean
+    refReturn: Boolean,
+    // part 12: a by-value C++ string return copies the characters out of the frame - a
+    // char[] or char* that flows to it is a copy, not an escape (std::string owns its buffer)
+    stringReturn: Boolean
   )
 
   /** the `alloc-state` value a summary-free records (E5): the ENCLOSING call is the free - a
