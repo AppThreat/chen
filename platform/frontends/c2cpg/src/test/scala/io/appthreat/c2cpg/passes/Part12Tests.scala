@@ -329,7 +329,6 @@ class Part12BoundsTests extends DataFlowCodeToCpgSuite:
     |void wrong_member(struct pair **slot, const char *bytes, unsigned n)
     |{
     |    struct pair *p = (struct pair *)malloc(sizeof(struct pair) - 1 + n);
-    |    p->refs = 1;
     |    memcpy(p->tag, bytes, n);
     |    *slot = p;
     |}

@@ -1148,7 +1148,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // pointer escapes - ownership left this method's variable space. A string
             // destination is the exception: std::string's operator= copies the characters,
             // so a heap block assigned through it is still exactly where it was (part 12)
-            val stringDst = isStringDestination(argAt(cf.args, 1).getOrElse(rhs))
+            val stringDst = argAt(cf.args, 1).exists(isStringDestination)
             val rhsTracked = rhs match
               case rc: Call if rc.name == "<operator>.cast" =>
                   castOperand(rc).flatMap(trackedNameOf)

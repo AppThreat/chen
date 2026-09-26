@@ -355,31 +355,36 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       // in the else arm, a bare `p ? p->v : d` in the then arm. A use under such a narrowing
       // is guarded by the expression it sits in - a later guard on the same variable belongs
       // to its own statement, not to this use (part 12: the ternary check-after-use FP)
+      // The polarity is per key: `(!p && q) ? p->v : d` names p but proves it NULL on the then
+      // arm, and `p || q` proves nothing on either arm about p.
+      def nonNullWhen(cond: AstNode, truth: Boolean): List[String] = cond match
+        case c: Call if c.name == "<operator>.logicalAnd" =>
+            if truth then c.argument.l.flatMap(nonNullWhen(_, true)) else Nil
+        case c: Call if c.name == "<operator>.logicalOr" =>
+            if truth then Nil else c.argument.l.flatMap(nonNullWhen(_, false))
+        case c: Call if c.name == "<operator>.logicalNot" =>
+            c.argumentOption(1).toList.flatMap(nonNullWhen(_, !truth))
+        case c: Call if c.name == "<operator>.equals" =>
+            if truth then Nil else OverlayFacts.nullGuardKeysOf(c, pointerNames)
+        case other =>
+            // `p != NULL` and the truth of `p` itself
+            if truth then OverlayFacts.nullGuardKeysOf(other, pointerNames) else Nil
       val ternaryNarrowings = method.ast.collectAll[Call].l
           .filter(_.name == "<operator>.conditional")
           .flatMap { c =>
               c.argumentOption(1).toList.flatMap { cond =>
-                  val thenSafe = cond match
-                    case cmp: Call
-                        if cmp.name == "<operator>.equals" &&
-                          OverlayFacts.nullGuardKeysOf(cmp, pointerNames).nonEmpty =>
-                        false
-                    case not: Call
-                        if not.name == "<operator>.logicalNot" &&
-                          OverlayFacts.nullGuardKeysOf(not, pointerNames).nonEmpty =>
-                        false
-                    case _ => true
-                  OverlayFacts.nullGuardKeysOf(cond, pointerNames).map(k => (k, c, thenSafe))
+                  nonNullWhen(cond, truth = true).map(k => (k, c, true)) ++
+                      nonNullWhen(cond, truth = false).map(k => (k, c, false))
               }
           }
       def narrowedByTernary(use: AstNode, key: String): Boolean =
-        ternaryNarrowings.exists { case (k, c, thenSafe) =>
-            k == key && {
-              val inThen = c.argumentOption(2).exists(a => isWithinSubtree(use, a))
-              val inElse = c.argumentOption(3).exists(a => isWithinSubtree(use, a))
-              (inThen && thenSafe) || (inElse && !thenSafe)
-            }
-        }
+          ternaryNarrowings.exists { case (k, c, thenSafe) =>
+              k == key && {
+                  val inThen = c.argumentOption(2).exists(a => isWithinSubtree(use, a))
+                  val inElse = c.argumentOption(3).exists(a => isWithinSubtree(use, a))
+                  (inThen && thenSafe) || (inElse && !thenSafe)
+              }
+          }
       // the redefinitions of each variable, by line: a guard that follows one speaks about a
       // different value than the one the use read
       val redefinitions: Map[String, Seq[Int]] =
@@ -457,15 +462,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
   private def isNestedWithin(node: AstNode, cs: ControlStructure): Boolean =
       isWithin(node, cs)
 
-  /** Is `node` inside `root`'s subtree, root itself included? The parent walk is bounded the
-    * way the structure walk is: a method boundary stops it.
+  /** Is `node` inside `root`'s subtree, root itself included? The parent walk is bounded the way
+    * the structure walk is: a method boundary stops it.
     */
   private def isWithinSubtree(node: AstNode, root: AstNode): Boolean =
     var cursor: Option[StoredNode] = node match
       case s: StoredNode => Some(s)
       case _             => None
-    var found                      = false
-    var walking                    = true
+    var found   = false
+    var walking = true
     while walking do
       cursor match
         case Some(n) =>
@@ -543,15 +548,25 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           }
       }
 
-  /** Part 12: the length is defined as a min whose one arm can never exceed the destination's
-    * own capacity - `copy_size = std::min(write_size, kBufSize - pos_)` before
-    * `memcpy(buf_ + pos_, data, copy_size)`. The arm's bound is matched against the declared
-    * extent of the member the dst is written into, by literal or by the constant identifier
-    * the declaration spells (`char buf_[kBufSize]` declares the same `kBufSize` the min
-    * subtracts); a subtraction arm must subtract the very operand the dst is offset by, or an
-    * offset the min does not know about could push the write past the buffer. A dst with no
-    * offset accepts any subtrahend (the arm only gets smaller). Anything unprovable stays a
-    * finding.
+  /** The declaration may spell a constant's NAME where the min uses its VALUE, or the reverse
+    * (`constexpr kBigSize = 65536` folded into the member's type): one resolves through the other
+    * over the atom's single-valued literal assignments. Built once, on first use.
+    */
+  private lazy val constantAssignments: Map[String, String] =
+      atom.assignment.l.flatMap { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(i: Identifier), Some(l: Literal)) => Some(i.name -> l.code.trim)
+            case _                                       => None
+      }.groupMap(_._1)(_._2).collect { case (k, vs) if vs.distinct.size == 1 => k -> vs.head }
+
+  /** Part 12: the length is defined as a min whose one arm can never exceed the destination's own
+    * capacity - `copy_size = std::min(write_size, kBufSize - pos_)` before `memcpy(buf_ + pos_,
+    * data, copy_size)`. The arm's bound is matched against the declared extent of the member the
+    * dst is written into, by literal or by the constant identifier the declaration spells (`char
+    * buf_[kBufSize]` declares the same `kBufSize` the min subtracts); a subtraction arm must
+    * subtract the very operand the dst is offset by, or an offset the min does not know about could
+    * push the write past the buffer. A dst with no offset accepts any subtrahend (the arm only gets
+    * smaller). Anything unprovable stays a finding.
     */
   private def lenClampedToDestination(dst: Expression, lenArg: Expression): Boolean =
     def stripCasts(e: Expression): Expression = e match
@@ -586,16 +601,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             case _         => ""
           if owner.isEmpty || OverlayFacts.isPointer(owner) then None
           else
-              val simple = owner.split('.').lastOption.getOrElse("")
-              val candidates =
-                  (atom.typeDecl.nameExact(owner).l ++ atom.typeDecl.nameExact(simple).l)
-                      .distinctBy(_.id)
-              val memberType = candidates
-                  .find(_.filename == i.method.filename)
-                  .orElse(candidates.headOption)
-                  .flatMap(td => td.member.nameExact(i.name).headOption)
-                  .map(_.typeFullName)
-              extentToken(memberType)
+            val simple = owner.split('.').lastOption.getOrElse("")
+            val candidates =
+                (atom.typeDecl.nameExact(owner).l ++ atom.typeDecl.nameExact(simple).l)
+                    .distinctBy(_.id)
+            val memberType = candidates
+                .find(_.filename == i.method.filename)
+                .orElse(candidates.headOption)
+                .flatMap(td => td.member.nameExact(i.name).headOption)
+                .map(_.typeFullName)
+            extentToken(memberType)
       case _ => None
     val dstOffsetKey = dst match
       case c: Call if c.name == "<operator>.addition" =>
@@ -603,30 +618,20 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               .find(_.argumentIndex == 2)
               .flatMap(OverlayFacts.variableKey)
       case _ => None
-    // the declaration may spell the constant's NAME where the min uses its VALUE, or the
-    // reverse (`constexpr kBigSize = 65536` folded into the member's type): resolve one
-    // through the other over the atom's single-valued literal assignments
-    val constantAssignments: Map[String, String] =
-        atom.assignment.l.flatMap { a =>
-            (a.argumentOption(1), a.argumentOption(2)) match
-              case (Some(i: Identifier), Some(l: Literal)) =>
-                  Some(i.name -> l.code.trim)
-              case _ => None
-        }.groupMap(_._1)(_._2).collect { case (k, vs) if vs.distinct.size == 1 => k -> vs.head }
     def boundMatches(minuend: Expression): Boolean =
         declaredExtent.exists { d =>
             literalOrIdentCode(minuend).exists {
-                case code if code == d             => true
+                case code if code == d => true
                 case code if code.nonEmpty && d.nonEmpty =>
                     constantAssignments.get(code).contains(d) ||
-                        constantAssignments.get(d).contains(code)
+                    constantAssignments.get(d).contains(code)
                 case _ => false
             }
         }
     def armSound(arm: Expression): Boolean = arm match
       case sub: Call if sub.name == "<operator>.subtraction" =>
-          val ops           = sub.argument.l.collect { case e: Expression => e }
-          val subtrahend    = ops.find(_.argumentIndex == 2)
+          val ops        = sub.argument.l.collect { case e: Expression => e }
+          val subtrahend = ops.find(_.argumentIndex == 2)
           val offsetMatches = dstOffsetKey.forall(k =>
               subtrahend.flatMap(OverlayFacts.variableKey).contains(k)
           )
@@ -639,6 +644,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case _ => Nil
     val lenExprs = withoutCasts(lenArg)._1 :: lengthDefinitions(lenArg).flatMap(_._2)
     lenExprs.exists(armsOf(_).exists(armSound))
+  end lenClampedToDestination
 
   /** Part 9: the destination was sized FROM this copy's length. FFmpeg's dominant correct shape:
     * `tmp = av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer that
@@ -720,7 +726,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case (a: Identifier, b: Identifier) => a.name == b.name && valueDefs(a) == valueDefs(b)
       // a method-call length (`key.size()`) carries no variable key; the two spellings of
       // the same call in one method talk about the same value
-      case (a: Call, b: Call) => a.code == b.code
+      // - and only while every operand the call reads is the same value in both spellings
+      case (a: Call, b: Call) =>
+          val ai = a.ast.isIdentifier.l.sortBy(_.order)
+          val bi = b.ast.isIdentifier.l.sortBy(_.order)
+          a.code == b.code && ai.size == bi.size && ai.zip(bi).forall { case (x, y) =>
+              x.name == y.name && valueDefs(x) == valueDefs(y)
+          }
       case _ =>
           OverlayFacts.variableKey(len).exists(k => OverlayFacts.variableKey(term).contains(k))
     // the destination is the data member of a packet the SAME function sized through the
@@ -762,9 +774,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           // length the allocation added (part 12). Restricted to a single-element array
           // member, the flexible idiom: a wholesale "any member of a sized allocation"
           // reading would excuse real intra-object overruns
-          val flexibleMember = OverlayFacts.memberRefOf(atom, fa)
-              .flatMap(m => OverlayFacts.arrayExtent(m.typeFullName))
-              .contains(1)
+          // member, the flexible idiom, and the LAST one declared: a one-element array with
+          // members after it is a fixed field. The allocation must also add a sizeof for the
+          // header the member follows - `malloc(n)` then `memcpy(e->data, .., n)` overruns by
+          // the header's size
+          val flexibleMember = OverlayFacts.memberRefOf(atom, fa).exists { m =>
+              OverlayFacts.arrayExtent(m.typeFullName).contains(1) &&
+              m._astIn.collectAll[TypeDecl].l.flatMap(_.member.l).forall(_.order <= m.order)
+          }
+          def addsHeader(len: Expression): Boolean =
+              len.ast.isCall.name("<operator>\\.sizeOf.*").nonEmpty
           flexibleMember && fa.argumentOption(1).collect { case e: Expression => e }
               .map(unwrapCast)
               .collect { case i: Identifier => i }
@@ -772,6 +791,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                   rhsOfDefs(base)
                       .flatMap(allocCallOf)
                       .flatMap(allocLenArgs)
+                      .filter(addsHeader)
                       .flatMap(termsOf(_, expand = true))
                       .exists(matches)
               }

@@ -562,7 +562,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       // was dropped here, leaving every sized new[] copy unprovable (part 12)
       val sizeArgs = Option(typeId.getAbstractDeclarator).toList.collect {
           case ad: ast.IASTArrayDeclarator => ad.getArrayModifiers.toList
-      }.flatten.map(astForNode)
+      }.flatten.filter(_.getConstantExpression != null).map(astForNode)
       if sizeArgs.isEmpty then
         Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
       else callAst(cpgNewExpression, List(cpgTypeId) ++ sizeArgs)
