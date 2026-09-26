@@ -1,0 +1,36 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_4b70c6697bebd0::t_d2bfb239d4a683 29-35,73-78,151-161,178
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/MacroCensusTests.scala
+  s_4b70c6697bebd0::t_05fbe5289a8793 147-156
+  s_4b70c6697bebd0::t_2062bb34655275 1-25,27-80,82-96,98-100,102-106,108-117,119-146,157
+  s_4b70c6697bebd0::t_7457ecb12da78d 26
+  s_4b70c6697bebd0::t_4ddc7de3784a4f 81,97,107
+  s_4b70c6697bebd0::t_027c5d77dbab78 101,118
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ParserConfig.scala
+  s_4b70c6697bebd0::t_f3790efbb99790 29,31-33
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/MacroCensus.scala
+  s_4b70c6697bebd0::t_111f27246fcb6f 1-19,22-28,30,33-39,41-55,57-65,69-81,83-85,87-101,103-123,126,128-146,149-210,213-218,230-231,233-299,301-346,348-355,358-397
+  s_4b70c6697bebd0::t_4ddc7de3784a4f 40,56,82,86,102,219-229,232
+  s_4b70c6697bebd0::t_7457ecb12da78d 124-125,211-212
+  s_4b70c6697bebd0::t_36b9056eeb0ddb 20-21,29,31-32,66-68,127,147-148,300,347,356-357
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  s_4b70c6697bebd0::t_4ddc7de3784a4f 92
+  s_4b70c6697bebd0::t_d2bfb239d4a683 19-21,37,39-40,79-91,93-106
+  s_4b70c6697bebd0::t_64928bd65f4a55 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5d975ddd946462580d83dc2f9ad2f4b1f7d5f299",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
