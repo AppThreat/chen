@@ -526,30 +526,30 @@ class Part11PairedAdvanceTests extends DataFlowCodeToCpgSuite:
     |}
     |
     |int good_ac4dec_shape(const uint8_t *buf0, int left0)
-{
-    const uint8_t *buf = buf0;
-    int left = left0;
-    while (left > 7)
-    {
-        int size;
-        if (buf[0] == 0xAC)
-        {
-            size = (buf[2] << 8) | buf[3];
-            size += 4;
-            if (left < size)
-                break;
-            left -= size;
-            buf += size;
-        }
-        else
-        {
-            break;
-        }
-    }
-    return 0;
-}
-
-int bad_advance_by_bytes_read_inline(const uint8_t *frame, int frame_size)
+    |{
+    |    const uint8_t *buf = buf0;
+    |    int left = left0;
+    |    while (left > 7)
+    |    {
+    |        int size;
+    |        if (buf[0] == 0xAC)
+    |        {
+    |            size = (buf[2] << 8) | buf[3];
+    |            size += 4;
+    |            if (left < size)
+    |                break;
+    |            left -= size;
+    |            buf += size;
+    |        }
+    |        else
+    |        {
+    |            break;
+    |        }
+    |    }
+    |    return 0;
+    |}
+    |
+    |int bad_advance_by_bytes_read_inline(const uint8_t *frame, int frame_size)
     |{
     |    const uint8_t *p = frame;
     |    int rem = frame_size;
