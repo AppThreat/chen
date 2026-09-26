@@ -16,7 +16,9 @@ import io.appthreat.x2cpg.passes.linking.FragmentSplicePass
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 
-import java.nio.file.Paths
+import io.appthreat.c2cpg.parser.MacroCensus
+
+import java.nio.file.{Files, Paths}
 import scala.util.Try
 
 class C2Cpg extends X2CpgFrontend[Config]:
@@ -32,9 +34,10 @@ class C2Cpg extends X2CpgFrontend[Config]:
           config.withIncludePaths(config.includePaths ++ projectIncludes.map(_.toString))
         else
           config
+        val censusConfig = withCensusDefines(updatedConfig)
 
-        if !warmRestoreFromFragments(cpg, updatedConfig) then
-          new AstCreationPass(cpg, updatedConfig).createAndApply()
+        if !warmRestoreFromFragments(cpg, censusConfig) then
+          new AstCreationPass(cpg, censusConfig).createAndApply()
 
         if !config.onlyAstCache then
           new ConfigFileCreationPass(cpg).createAndApply()
@@ -72,6 +75,35 @@ class C2Cpg extends X2CpgFrontend[Config]:
               ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
             ).createAndApply()
             true
+
+  /** The census (opt-in): with `--auto-defines` its auto tier joins the user's defines - a user
+    * `--define` of the same name wins, the census never overrides one. The report is written
+    * whenever a path is given.
+    */
+  private def withCensusDefines(config: Config): Config =
+      if !config.autoDefines && config.macroCensusReport.isEmpty then config
+      else
+        val report = MacroCensus.run(config)
+        writeReport(config, report)
+        if !config.autoDefines then config
+        else
+          println(report.summary())
+          if report.auto.nonEmpty then
+            println(s"Auto-defines: ${report.auto.map(_.name).mkString(" ")}")
+          config.withDefines(config.defines ++ report.autoDefines)
+
+  /** `--macro-census` alone: write the report and a reviewable `--macro-files` header, no CPG. */
+  def writeMacroCensus(config: Config): Unit =
+    val report = MacroCensus.run(config)
+    writeReport(config, report)
+    println(report.summary())
+
+  private def writeReport(config: Config, report: MacroCensus.Report): Unit =
+      if config.macroCensusReport.nonEmpty then
+        val base = config.macroCensusReport.stripSuffix(".json")
+        Files.writeString(Paths.get(s"$base.json"), report.toJson)
+        Files.writeString(Paths.get(s"$base.h"), report.toMacroHeader)
+        println(s"Macro census written to $base.json and $base.h (use --macro-files $base.h)")
 
   def printIfDefsOnly(config: Config): Unit =
     val stmts = new PreprocessorPass(config).run().mkString(",")
