@@ -1247,7 +1247,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               }
       cf.args.foreach { arg =>
         val viaAddress       = addressOfOperand(arg)
-        val operand          = viaAddress.getOrElse(arg)
+        val operand          = unwrapCastOperand(viaAddress.getOrElse(arg))
         val summaryFreesThis = summaryFreedArgs.contains(arg.argumentIndex)
         trackedNameOf(operand).foreach { name =>
             useState.get(name).foreach { t =>
@@ -1650,6 +1650,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def addressOfOperand(e: AstNode): Option[Expression] = e match
     case c: Call if c.name == "<operator>.addressOf" => c.argumentOption(1)
     case _                                           => None
+
+  /** The tracked value an argument names, casts unwrapped: `new X((char *)mmap_base)` hands
+    * the mapping to the constructor exactly as a bare argument would (part 12).
+    */
+  private def unwrapCastOperand(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).map(unwrapCastOperand).getOrElse(e)
+      case other => other
 
   private def castOperand(c: Call): Option[Expression] =
       c.argumentOption(2).orElse(c.argumentOption(1))
