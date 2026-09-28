@@ -158,9 +158,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     *
     * The callee's half: `free(p->f); return <failure>;` (the free is the statement before a
     * negative or non-zero literal return, or an `AVERROR(...)`), with no `p->f = NULL` anywhere in
-    * the method. The caller's half: the call sits in an `if` condition (or its result in a
-    * variable the condition tests), and the release is inside that `if`'s THEN branch - the
-    * failure branch of `if (f(&s) < 0)`. The report is the callee's free: the one the fix removes.
+    * the method. The caller's half: the call sits in an `if` condition (or its result in a variable
+    * the condition tests), and the release is inside that `if`'s THEN branch - the failure branch
+    * of `if (f(&s) < 0)`. The report is the callee's free: the one the fix removes.
     */
   private def failurePathFieldDoubleFrees(
     methods: List[Method],
@@ -174,10 +174,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       m.ast.collectAll[Call].filter(isFree).l.flatMap { c =>
           c.argumentOption(1).collect { case e: Expression => e }.flatMap { arg =>
               trackedNameOf(addressOfOperand(arg).getOrElse(arg)).flatMap { n =>
-                  val (base, field) = n.split("->|\\.", 2) match
-                    case Array(b, f) => (b, f)
-                    case _           => ("", "")
-                  params.get(base).filter(_ => field.nonEmpty).map(i => (i, field, arg))
+                val (base, field) = n.split("->|\\.", 2) match
+                  case Array(b, f) => (b, f)
+                  case _           => ("", "")
+                params.get(base).filter(_ => field.nonEmpty).map(i => (i, field, arg))
               }
           }
       }
@@ -186,7 +186,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             case l: Literal => l.code.trim.startsWith("-") || l.code.trim.toIntOption.exists(_ != 0)
             case c: Call =>
                 c.name == "<operator>.minus" || c.code.startsWith("AVERROR") ||
-                    c.code.trim.startsWith("-")
+                c.code.trim.startsWith("-")
             case _ => false
         }
     def nextStatement(e: Expression): Option[AstNode] =
@@ -219,33 +219,33 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       case _             => None
     failureFrees.foreach { case (calleeName, frees) =>
         methods.flatMap(_.ast.collectAll[Call].nameExact(calleeName).l).foreach { site =>
-            val caller = site.method
-            // the `if` whose condition holds the call or the variable it was stored into
-            val stored = assignedTarget(site).toSet
-            val guard = caller.ast.collectAll[ControlStructure].l.find { cs =>
-                cs.condition.exists(cond =>
-                    cond.ast.exists(_.id == site.id) || cond.ast.collectAll[Identifier].exists(i =>
-                        stored.contains(i.name)
-                    )
-                )
-            }
-            val failureBranch = guard.toList.flatMap(_.whenTrue.ast.collectAll[Call].l)
-            frees.foreach { case (idx, field, freedArg) =>
-                site.argumentOption(idx).collect { case e: Expression => e }.flatMap(baseOf).foreach {
-                    base =>
-                      val releasedAgain = failureBranch.exists { c =>
-                          val direct = isFree(c) &&
-                              c.argumentOption(1).flatMap(trackedNameOf).exists(n =>
-                                  n == s"$base.$field" || n == s"$base->$field"
-                              )
-                          direct || releases.getOrElse(c.name, Set.empty).exists { case (j, f) =>
-                              f == field && c.argumentOption(j).collect { case e: Expression => e }
-                                  .flatMap(baseOf).contains(base)
-                          }
+          val caller = site.method
+          // the `if` whose condition holds the call or the variable it was stored into
+          val stored = assignedTarget(site).toSet
+          val guard = caller.ast.collectAll[ControlStructure].l.find { cs =>
+              cs.condition.exists(cond =>
+                  cond.ast.exists(_.id == site.id) || cond.ast.collectAll[Identifier].exists(i =>
+                      stored.contains(i.name)
+                  )
+              )
+          }
+          val failureBranch = guard.toList.flatMap(_.whenTrue.ast.collectAll[Call].l)
+          frees.foreach { case (idx, field, freedArg) =>
+              site.argumentOption(idx).collect { case e: Expression => e }.flatMap(baseOf).foreach {
+                  base =>
+                    val releasedAgain = failureBranch.exists { c =>
+                      val direct = isFree(c) &&
+                          c.argumentOption(1).flatMap(trackedNameOf).exists(n =>
+                              n == s"$base.$field" || n == s"$base->$field"
+                          )
+                      direct || releases.getOrElse(c.name, Set.empty).exists { case (j, f) =>
+                          f == field && c.argumentOption(j).collect { case e: Expression => e }
+                              .flatMap(baseOf).contains(base)
                       }
-                      if releasedAgain then record(freedArg, TagState, stateName(StFreed))
-                }
-            }
+                    }
+                    if releasedAgain then record(freedArg, TagState, stateName(StFreed))
+              }
+          }
         }
     }
   end failurePathFieldDoubleFrees
@@ -504,14 +504,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     val escFacts = mutable.LinkedHashMap.empty[(Long, String), (StoredNode, Map[String, Tracked])]
     val overwriteLeakLines = mutable.HashMap.empty[String, Set[Int]]
     def recordAndNote(node: StoredNode, tag: String, value: String): Unit =
-        node match
-          case c: Call if tag == TagLeak && value.startsWith("leak:") =>
-              val line = c.lineNumber.map(_.toInt).getOrElse(-1)
-              overwriteLeakLines.updateWith(value.stripPrefix("leak:")) { prev =>
-                  Some(prev.getOrElse(Set.empty) + line)
-              }
-          case _ => ()
-        record(node, tag, value)
+      node match
+        case c: Call if tag == TagLeak && value.startsWith("leak:") =>
+            val line = c.lineNumber.map(_.toInt).getOrElse(-1)
+            overwriteLeakLines.updateWith(value.stripPrefix("leak:")) { prev =>
+                Some(prev.getOrElse(Set.empty) + line)
+            }
+        case _ => ()
+      record(node, tag, value)
     val nullUseFacts =
         mutable.ListBuffer.empty[(Long, StoredNode, String, String)] // (site, use, name, kind)
 
@@ -578,9 +578,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       // a reference return is the pointer itself escaping; only the BY-VALUE string return
       // copies. An unknown or empty return type stays an escape - silence needs evidence
       stringReturn = !isFileScope &&
-        Option(method.methodReturn.typeFullName).exists { t =>
-          !t.trim.endsWith("&") && !t.trim.endsWith("*") && isCppStringType(t)
-        }
+          Option(method.methodReturn.typeFullName).exists { t =>
+              !t.trim.endsWith("&") && !t.trim.endsWith("*") && isCppStringType(t)
+          }
     )
     val hasAddressOfLocal = callFacts.values.exists(cf =>
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
@@ -630,8 +630,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     while queued.nonEmpty do
       val node = queued.head
       queued.remove(node)
-      val in  = inStates.getOrElse(node.id(), Map.empty)
-      val out = transfer(node, in, callFacts, effectsByName, leakFacts, escFacts, nullUseFacts, ctx, recordAndNote)
+      val in = inStates.getOrElse(node.id(), Map.empty)
+      val out = transfer(
+        node,
+        in,
+        callFacts,
+        effectsByName,
+        leakFacts,
+        escFacts,
+        nullUseFacts,
+        ctx,
+        recordAndNote
+      )
 
       // successors enqueue in a CONTENT-stable order: line, then code, then which side of the
       // controlling condition the edge leaves by (then before else). overflowdb iterates a
@@ -643,17 +653,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       val cs = guards.get(node.id())
       val successors = node._cfgOut.iterator.collect { case succ: CfgNode => succ }.toList
           .sortBy { succ =>
-              (succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue), succ.code,
-                  cs.flatMap(branchOf(succ, _)).map(b => if b then 0 else 1).getOrElse(2))
+              (
+                succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue),
+                succ.code,
+                cs.flatMap(branchOf(succ, _)).map(b => if b then 0 else 1).getOrElse(2)
+              )
           }
       successors.foreach { succ =>
-          // branch edges leave from the CONDITION CALL of a guard, not from the control
-          // structure node, so the narrowing rides on the condition's out-edges
-          val succState = guards.get(node.id()) match
-            case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
-            case None     => out
-          enqueue(succ, succState)
+        // branch edges leave from the CONDITION CALL of a guard, not from the control
+        // structure node, so the narrowing rides on the condition's out-edges
+        val succState = guards.get(node.id()) match
+          case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
+          case None     => out
+        enqueue(succ, succState)
       }
+    end while
     // the settled escape claims, read the way the leak facts are read: the predicates are the
     // ones the transfer used, evaluated against the state the exit JOINED over every visit
     escFacts.foreach { case (_, (node, settled)) =>
@@ -665,14 +679,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   case _ => false
               }
               r.astChildren.collect { case e: Expression => e }.foreach { e =>
-                  val viaTracked =
-                      trackedNameOf(e).flatMap(settled.get).exists(_.state == StStackAddr)
-                  // a by-value string return copies the characters out of the frame; a
-                  // char[] flowing to it is not an escape (part 12, std::string owns
-                  // its buffer)
-                  if !ctx.stringReturn &&
-                    (holdsStackAddress(e, ctx) || viaTracked || refToLocale)
-                  then record(r, TagStackEscape, "escape:return")
+                val viaTracked =
+                    trackedNameOf(e).flatMap(settled.get).exists(_.state == StStackAddr)
+                // a by-value string return copies the characters out of the frame; a
+                // char[] flowing to it is not an escape (part 12, std::string owns
+                // its buffer)
+                if !ctx.stringReturn &&
+                  (holdsStackAddress(e, ctx) || viaTracked || refToLocale)
+                then record(r, TagStackEscape, "escape:return")
               }
           case c: Call if c.name == "<operator>.assignment" =>
               (argAt(c.argument.l, 1), argAt(c.argument.l, 2)) match
@@ -763,7 +777,17 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               }
             callFacts.get(c.id()) match
               case Some(cf) =>
-                  transferCall(c, cf, callFacts, effectsByName, in, escFacts, nullUseFacts, ctx, record)
+                  transferCall(
+                    c,
+                    cf,
+                    callFacts,
+                    effectsByName,
+                    in,
+                    escFacts,
+                    nullUseFacts,
+                    ctx,
+                    record
+                  )
               case None => in
         case r: Return =>
             var out = in
@@ -775,8 +799,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               val viaTracked = trackedNameOf(e).flatMap(in.get).exists(_.state == StStackAddr)
               trackedNameOf(e).foreach { name =>
                   out.get(name).foreach { t =>
-                      out = withGroup(out, name, t.aliases, StEscaped)
-                      out = out.updated(name, t.copy(state = StEscaped))
+                    out = withGroup(out, name, t.aliases, StEscaped)
+                    out = out.updated(name, t.copy(state = StEscaped))
                   }
               }
               // the escape CLAIM settles: recorded after the drain from the joined state, not
@@ -840,11 +864,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case _ => Nil
 
   /** The int-handle failure check (part 9): a comparison of a tracked fd-returning allocation
-    * against the failure boundary, naming the side on which the acquisition FAILED. With the
-    * handle on the left, `fd < 0`, `fd <= -1` and `fd == -1` fail where they hold; `fd >= 0`,
-    * `fd > -1` and `fd != -1` fail where they do not; a handle on the right mirrors the operator.
-    * Any other threshold (`fd >= 5`, `fd > 0`) puts a legal descriptor on the "failed" side and
-    * narrows nothing. `-1` reaches here as a unary minus over the literal `1`.
+    * against the failure boundary, naming the side on which the acquisition FAILED. With the handle
+    * on the left, `fd < 0`, `fd <= -1` and `fd == -1` fail where they hold; `fd >= 0`, `fd > -1`
+    * and `fd != -1` fail where they do not; a handle on the right mirrors the operator. Any other
+    * threshold (`fd >= 5`, `fd > 0`) puts a legal descriptor on the "failed" side and narrows
+    * nothing. `-1` reaches here as a unary minus over the literal `1`.
     */
   private def handleFailureSides(
     cond: AstNode,
@@ -852,19 +876,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     isHandleSite: Long => Boolean
   ): List[(String, Boolean)] =
     def lit(e: AstNode): Option[Long] = e match
-      case l: Literal => l.code.trim.toLongOption
+      case l: Literal                              => l.code.trim.toLongOption
       case c: Call if c.name == "<operator>.minus" => c.argumentOption(1).flatMap(lit).map(-_)
-      case _ => None
+      case _                                       => None
     def trackedHandle(e: AstNode): Option[String] = e match
       case i: Identifier => out.get(i.name).filter(t => isHandleSite(t.site)).map(_ => i.name)
       case _             => None
     val mirrored = Map(
-      "<operator>.lessThan"           -> "<operator>.greaterThan",
-      "<operator>.greaterThan"        -> "<operator>.lessThan",
-      "<operator>.lessEqualsThan"     -> "<operator>.greaterEqualsThan",
-      "<operator>.greaterEqualsThan"  -> "<operator>.lessEqualsThan",
-      "<operator>.equals"             -> "<operator>.equals",
-      "<operator>.notEquals"          -> "<operator>.notEquals"
+      "<operator>.lessThan"          -> "<operator>.greaterThan",
+      "<operator>.greaterThan"       -> "<operator>.lessThan",
+      "<operator>.lessEqualsThan"    -> "<operator>.greaterEqualsThan",
+      "<operator>.greaterEqualsThan" -> "<operator>.lessEqualsThan",
+      "<operator>.equals"            -> "<operator>.equals",
+      "<operator>.notEquals"         -> "<operator>.notEquals"
     )
     cond match
       case c: Call if mirrored.contains(c.name) =>
@@ -874,15 +898,16 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     .orElse(trackedHandle(r).zip(lit(l)).map((mirrored(c.name), _)))
             case _ => None
           oriented.toList.flatMap {
-            case ("<operator>.lessThan", (n, 0L))           => List((n, true))
-            case ("<operator>.lessEqualsThan", (n, -1L))    => List((n, true))
-            case ("<operator>.equals", (n, -1L))            => List((n, true))
-            case ("<operator>.greaterEqualsThan", (n, 0L))  => List((n, false))
-            case ("<operator>.greaterThan", (n, -1L))       => List((n, false))
-            case ("<operator>.notEquals", (n, -1L))         => List((n, false))
-            case _                                          => Nil
+              case ("<operator>.lessThan", (n, 0L))          => List((n, true))
+              case ("<operator>.lessEqualsThan", (n, -1L))   => List((n, true))
+              case ("<operator>.equals", (n, -1L))           => List((n, true))
+              case ("<operator>.greaterEqualsThan", (n, 0L)) => List((n, false))
+              case ("<operator>.greaterThan", (n, -1L))      => List((n, false))
+              case ("<operator>.notEquals", (n, -1L))        => List((n, false))
+              case _                                         => Nil
           }
       case _ => Nil
+  end handleFailureSides
 
   /** Is this use protected by a null test of `name` in its OWN expression - `p && p->x`, `!p ||
     * p->x`, `p ? p->x : d`? Short-circuit guards are not control structures, so the worklist never
@@ -1009,18 +1034,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // `p = tmp` where tmp is realloc(p, n)'s result: the block moved, not leaked.
             // Resolved through casts: `p = (T *)realloc(p, n)` consumed p just the same.
             val rhsIsReallocOfLhs =
-                val reallocCallOf: Expression => Option[Call] =
-                    case rc: Call if callFacts.get(rc.id()).exists(_.reallocFamilies.nonEmpty) =>
-                        Some(rc)
-                    case _ => None
-                trackedNameOf(rhs).flatMap(out.get).exists { r =>
-                    callFacts.get(r.site).exists(f =>
-                        f.reallocFamilies.nonEmpty && argAt(f.args, 1).flatMap(trackedNameOf)
-                            .contains(lhs)
-                    )
-                } || unwrapCast(rhs).flatMap(reallocCallOf).exists(rc =>
-                    argAt(rc.argument.l, 1).flatMap(trackedNameOf).contains(lhs)
-                )
+              val reallocCallOf: Expression => Option[Call] =
+                case rc: Call if callFacts.get(rc.id()).exists(_.reallocFamilies.nonEmpty) =>
+                    Some(rc)
+                case _ => None
+              trackedNameOf(rhs).flatMap(out.get).exists { r =>
+                  callFacts.get(r.site).exists(f =>
+                      f.reallocFamilies.nonEmpty && argAt(f.args, 1).flatMap(trackedNameOf)
+                          .contains(lhs)
+                  )
+              } || unwrapCast(rhs).flatMap(reallocCallOf).exists(rc =>
+                  argAt(rc.argument.l, 1).flatMap(trackedNameOf).contains(lhs)
+              )
             // the rhs still names the handle itself (`p = p + 4`): pointer arithmetic MOVES the
             // handle inside the block, it does not lose the block - the overwrite-leak claim
             // would be false (part 10: the cwe761 fixture's `p = p + 4` before `free(p)`)
@@ -1124,8 +1149,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   out = out.updated(lhs, Tracked(StStackAddr, other.id))
               case other =>
                   trackedNameOf(other).flatMap(useState.get).foreach { t =>
-                      out = out.updated(lhs, t.copy(aliases = Set.empty))
-                      out = linkAlias(out, lhs, trackedNameOf(other).get)
+                    out = out.updated(lhs, t.copy(aliases = Set.empty))
+                    out = linkAlias(out, lhs, trackedNameOf(other).get)
                   }
                   // `p = tmp` after `tmp = realloc(p, n)`: the block moved back into p, and
                   // tmp no longer owns it - else tmp leaks when p is returned
@@ -1156,21 +1181,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             if !stringDst then
               rhsTracked.foreach { name =>
                   out.get(name).foreach { t =>
-                      out = withGroup(out, name, t.aliases, StEscaped)
-                      out = out.updated(name, t.copy(state = StEscaped))
+                    out = withGroup(out, name, t.aliases, StEscaped)
+                    out = out.updated(name, t.copy(state = StEscaped))
                   }
               }
             // ... and the field itself is tracked from here: a fresh block, a reset, or unknown
             fieldLhs.foreach { f =>
-                val alloc = rhs match
-                  case rc: Call if rc.name == "<operator>.cast" =>
-                      castOperand(rc).collect { case ic: Call => ic }
-                  case rc: Call => Some(rc)
-                  case _        => None
-                if alloc.exists(a => callFacts.get(a.id()).exists(_.isAllocCall)) then
-                  out = out.updated(f, Tracked(StAllocated, alloc.get.id))
-                else if isNullLiteral(rhs) then out = out.updated(f, Tracked(StNullReset, 0L))
-                else out = out - f
+              val alloc = rhs match
+                case rc: Call if rc.name == "<operator>.cast" =>
+                    castOperand(rc).collect { case ic: Call => ic }
+                case rc: Call => Some(rc)
+                case _        => None
+              if alloc.exists(a => callFacts.get(a.id()).exists(_.isAllocCall)) then
+                out = out.updated(f, Tracked(StAllocated, alloc.get.id))
+              else if isNullLiteral(rhs) then out = out.updated(f, Tracked(StNullReset, 0L))
+              else out = out - f
             }
             // ... and a stack address stored there escapes the frame with it (E4) - unless
             // "there" is itself frame storage: a member or element of a by-value local
@@ -1180,6 +1205,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   case None            => Some((c, in))
               }
         case _ => ()
+      end match
     end if
 
     // 4. index and field accesses through a tracked base are uses - as an operator's operand,
@@ -1299,9 +1325,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * where `p != NULL` (or the negation) holds, a nulled p is live again. Which side a successor
     * sits on is decided by [[branchOf]].
     *
-    * Part 9 adds the int-handle failure check to the same fold: an fd-returning family's
-    * sentinel is -1, not NULL, and the exit under `fd < 0` holds no descriptor - narrowing it
-    * the way a NULL check narrows a pointer keeps the failure path from reporting a leak.
+    * Part 9 adds the int-handle failure check to the same fold: an fd-returning family's sentinel
+    * is -1, not NULL, and the exit under `fd < 0` holds no descriptor - narrowing it the way a NULL
+    * check narrows a pointer keeps the failure path from reporting a leak.
     */
   private def branchNarrowing(
     cond: CfgNode,
@@ -1430,10 +1456,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     key: (Long, Long, String),
     value: (StoredNode, AllocState)
   ): Unit =
-    leakFacts.updateWith(key) {
-        case Some((prevExit, prevState)) => Some((prevExit, joinStates(prevState, value._2)))
-        case None                        => Some(value)
-    }
+      leakFacts.updateWith(key) {
+          case Some((prevExit, prevState)) => Some((prevExit, joinStates(prevState, value._2)))
+          case None                        => Some(value)
+      }
 
   private def joinStates(s1: AllocState, s2: AllocState): AllocState =
       if s1 == s2 then s1
@@ -1473,14 +1499,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case _ => None
 
   /** Is the rhs the handle `name` moved inside its own block - `p + 4`, `p - k`, `&p[i]`, through
-    * casts? That keeps the block reachable. Any other rhs that merely mentions p
-    * (`p = strdup(p)`, `p = f(p)`) produces a different value and loses the old block.
+    * casts? That keeps the block reachable. Any other rhs that merely mentions p (`p = strdup(p)`,
+    * `p = f(p)`) produces a different value and loses the old block.
     */
   private def movesHandle(e: Expression, name: String): Boolean = unwrapCast(e) match
     case i: Identifier => i.name == name
     case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
         argAt(c.argument.l, 1).exists(movesHandle(_, name)) ||
-            (c.name == "<operator>.addition" && argAt(c.argument.l, 2).exists(movesHandle(_, name)))
+        (c.name == "<operator>.addition" && argAt(c.argument.l, 2).exists(movesHandle(_, name)))
     case c: Call if c.name == "<operator>.addressOf" =>
         argAt(c.argument.l, 1).exists {
             case ia: Call if ia.name == "<operator>.indexAccess" =>
@@ -1592,10 +1618,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           .value(io.appthreat.x2cpg.Defines.StorageClassStatic)
           .nonEmpty
 
-  /** The C++ string types that copy on by-value assignment, construction and return:
-    * std::string and its wide/utf specialisations. `std::string_view` is deliberately absent -
-    * a view really does borrow the pointer it is built from. Namespace and template spellings
-    * are normalised away; the last name component decides.
+  /** The C++ string types that copy on by-value assignment, construction and return: std::string
+    * and its wide/utf specialisations. `std::string_view` is deliberately absent - a view really
+    * does borrow the pointer it is built from. Namespace and template spellings are normalised
+    * away; the last name component decides.
     */
   private def isCppStringType(t: String): Boolean =
     val last = t.trim
@@ -1613,10 +1639,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
   private val CppStringTypes = Set("string", "basic_string", "wstring", "u16string", "u32string")
 
-  /** Is this assignment destination a C++ string that would COPY the rhs characters rather
-    * than store a pointer into it: a global or local `std::string` variable, or the deref of
-    * a `std::string*` (`*value = buf` copies). The referent type decides: an `std::string`
-    * member read through a pointer is one too. Anything unresolvable stays an escape.
+  /** Is this assignment destination a C++ string that would COPY the rhs characters rather than
+    * store a pointer into it: a global or local `std::string` variable, or the deref of a
+    * `std::string*` (`*value = buf` copies). The referent type decides: an `std::string` member
+    * read through a pointer is one too. Anything unresolvable stays an escape.
     */
   private def isStringDestination(dst: Expression): Boolean =
     def typeOf(e: Expression): String = e.property("TYPE_FULL_NAME") match
@@ -1651,13 +1677,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     case c: Call if c.name == "<operator>.addressOf" => c.argumentOption(1)
     case _                                           => None
 
-  /** The tracked value an argument names, casts unwrapped: `new X((char *)mmap_base)` hands
-    * the mapping to the constructor exactly as a bare argument would (part 12).
+  /** The tracked value an argument names, casts unwrapped: `new X((char *)mmap_base)` hands the
+    * mapping to the constructor exactly as a bare argument would (part 12).
     */
   private def unwrapCastOperand(e: Expression): Expression = e match
-      case c: Call if c.name == "<operator>.cast" =>
-          castOperand(c).map(unwrapCastOperand).getOrElse(e)
-      case other => other
+    case c: Call if c.name == "<operator>.cast" =>
+        castOperand(c).map(unwrapCastOperand).getOrElse(e)
+    case other => other
 
   private def castOperand(c: Call): Option[Expression] =
       c.argumentOption(2).orElse(c.argumentOption(1))
@@ -1792,8 +1818,8 @@ object AllocationStatePass:
     */
   final val TagEffect = "mem-effect"
 
-  /** the effect tag marking a method whose body contains a throw: calls into it add an unwind
-    * exit to the calling frame (part 10, the exception-path leak)
+  /** the effect tag marking a method whose body contains a throw: calls into it add an unwind exit
+    * to the calling frame (part 10, the exception-path leak)
     */
   val EffectMayThrow = "effect:may-throw"
 
@@ -1849,12 +1875,13 @@ object AllocationStatePass:
   /** allocation families whose handle IS an integer (a descriptor), unlike a heap block */
   private val IntHandleFamilies = Set("file", "socket")
 
-  /** worklist visit cap per CFG node. States settle within a handful of revisits on real code;
-    * 8 was tight enough that the settle point itself depended on the order the frontend's
-    * parallel parse left the CFG edges in - whole MS-ESC-001/MS-ALLOC-003 groups flipped per
-    * file between identical runs (part 10, task 0). At 64 every method observed on the corpus
-    * and on libavformat converges long before the cap, so the settled state is the join over
-    * every path and no longer a function of the visit order. */
+  /** worklist visit cap per CFG node. States settle within a handful of revisits on real code; 8
+    * was tight enough that the settle point itself depended on the order the frontend's parallel
+    * parse left the CFG edges in - whole MS-ESC-001/MS-ALLOC-003 groups flipped per file between
+    * identical runs (part 10, task 0). At 64 every method observed on the corpus and on libavformat
+    * converges long before the cap, so the settled state is the join over every path and no longer
+    * a function of the visit order.
+    */
   private val VisitCap = 64
 
   /** hop rounds for the `derefs-param` fixpoint: each round lets a wrapper inherit the conclusion

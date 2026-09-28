@@ -196,12 +196,13 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     // a definition-keyed data-flow engine to connect (517 of libavformat's 586 such loops).
     val initAstBlock = blockNode(forStmt, Defines.empty, registerType(Defines.voidTypeName))
     scope.pushNewScope(initAstBlock)
-    val initAst = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
+    val initAst    = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
     val compareAst = astForConditionExpression(forStmt.getConditionExpression, Some(2))
     val updateAst  = nullSafeAst(forStmt.getIterationExpression, 3)
     val bodyAsts   = nullSafeAst(forStmt.getBody, 4)
     scope.popScope()
     forAst(forNode, Seq(), Seq(initAst), Seq(compareAst), Seq(updateAst), bodyAsts)
+  end astForFor
 
   private def astForRangedFor(forStmt: ICPPASTRangeBasedForStatement): Ast =
     val codeDecl = nullSafeCode(forStmt.getDeclaration)

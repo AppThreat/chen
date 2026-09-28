@@ -382,9 +382,15 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
           // FFmpeg's dominant correct shape - 9 of one tree's 38 findings, all false: the
           // allocation's own argument (or a sum containing it, one def level away) IS the
           // length, and an in-place compaction cannot cross the buffer it already holds
-          Seq("good_self_sized_alloc", "good_self_sized_sum", "good_self_sized_terms",
-            "good_in_place_strip", "good_in_place_deref_len", "good_in_place_loop",
-            "good_strlen_of_dst").foreach { m =>
+          Seq(
+            "good_self_sized_alloc",
+            "good_self_sized_sum",
+            "good_self_sized_terms",
+            "good_in_place_strip",
+            "good_in_place_deref_len",
+            "good_in_place_loop",
+            "good_strlen_of_dst"
+          ).foreach { m =>
               withClue(m) { lenFinding(m) shouldBe empty }
           }
       }

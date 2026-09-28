@@ -559,6 +559,25 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             case _                                       => None
       }.groupMap(_._1)(_._2).collect { case (k, vs) if vs.distinct.size == 1 => k -> vs.head }
 
+  /** The declared type of the storage an expression names: a member through a field access, a local
+    * or parameter, or an implicit-this member ([[OverlayFacts.implicitMemberOf]]).
+    */
+  private def storageTypeOf(e: Expression): Option[String] = e match
+    case fa: Call if isFieldAccess(fa) => OverlayFacts.memberRefOf(atom, fa).map(_.typeFullName)
+    case i: Identifier =>
+        (i.method.local.nameExact(i.name).map(_.typeFullName).l ++
+            i.method.parameter.nameExact(i.name).map(_.typeFullName).l).headOption
+            .orElse(OverlayFacts.implicitMemberOf(atom, i).map(_.typeFullName))
+    case _ => None
+
+  /** Is this an array whose sizeof is its capacity (`char space_[24]`), not a pointer? */
+  private def isArrayStorage(e: Expression): Boolean =
+    val parameter = e match
+      case i: Identifier => i.method.parameter.nameExact(i.name).nonEmpty
+      case _             => false
+    // an array parameter is a pointer: its sizeof is the pointer's
+    !parameter && storageTypeOf(e).exists(t => t.contains('[') && !t.trim.endsWith("*"))
+
   /** Part 12: the length is defined as a min whose one arm can never exceed the destination's own
     * capacity - `copy_size = std::min(write_size, kBufSize - pos_)` before `memcpy(buf_ + pos_,
     * data, copy_size)`. The arm's bound is matched against the declared extent of the member the
@@ -593,24 +612,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case fa: Call if isFieldAccess(fa) =>
           extentToken(OverlayFacts.memberRefOf(atom, fa).map(_.typeFullName))
       case i: Identifier =>
-          // c2cpg spells an implicit-this member read as an identifier typed with the OWNER
-          // class (`leveldb..PosixWritableFile`): resolve the member through that type
-          // declaration, preferring the same file (same-named structs differ per file)
-          val owner = i.property("TYPE_FULL_NAME") match
-            case s: String => s.trim.replace("::", ".")
-            case _         => ""
-          if owner.isEmpty || OverlayFacts.isPointer(owner) then None
-          else
-            val simple = owner.split('.').lastOption.getOrElse("")
-            val candidates =
-                (atom.typeDecl.nameExact(owner).l ++ atom.typeDecl.nameExact(simple).l)
-                    .distinctBy(_.id)
-            val memberType = candidates
-                .find(_.filename == i.method.filename)
-                .orElse(candidates.headOption)
-                .flatMap(td => td.member.nameExact(i.name).headOption)
-                .map(_.typeFullName)
-            extentToken(memberType)
+          extentToken(OverlayFacts.implicitMemberOf(atom, i).map(_.typeFullName))
       case _ => None
     val dstOffsetKey = dst match
       case c: Call if c.name == "<operator>.addition" =>
@@ -671,89 +673,276 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case c: Call if c.name == "<operator>.addition" =>
           c.argument.l.collectFirst { case x: Expression => x }.map(bufferOf).getOrElse(c)
       case other => other
+    // the offsets a pointer expression adds to that buffer: `d + k`, `(char *)d + k + 4`
+    def offsetsOf(e: Expression): List[Expression] = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(offsetsOf).getOrElse(Nil)
+      case c: Call if c.name == "<operator>.addition" =>
+          val ops = c.argument.l.collect { case x: Expression => x }
+          ops.headOption.map(offsetsOf).getOrElse(Nil) ++ ops.drop(1)
+      case _ => Nil
     def sameBuffer(a: Expression, b: Expression): Boolean =
         (OverlayFacts.variableKey(bufferOf(a)), OverlayFacts.variableKey(bufferOf(b))) match
           case (Some(x), Some(y)) => x == y && a.method.id == b.method.id
           case _                  => false
-    val inPlace = src.exists(sameBuffer(dst, _))
-    // dashdec.c's clear-the-tail idiom: `memset(tmp_str, 0, strlen(tmp_str))`
-    val clearsOwnLength = lenArg match
-      case c: Call if c.name == "strlen" || c.name == "strnlen" =>
-          c.argumentOption(1).collect { case e: Expression => e }.exists(sameBuffer(dst, _))
-      case _ => false
     def unwrapCast(e: Expression): Expression = e match
       case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCast).getOrElse(c)
       case other                                  => other
-    // the ASSIGNMENTS and parameters that reach a use: a call argument is a definition to the
-    // reaching-def graph (`malloc(len)` "redefines" len), which says nothing about its value
+    val copyCall = lenArg._astIn.collectFirst { case c: Call => c }
+    // strncat and friends append at strlen(dst): the length says nothing about where the write
+    // ends
+    val appending = copyCall.exists(c => AppendingCopies.contains(c.name))
+    // the ASSIGNMENTS, address-takings and parameters that reach a use: a by-value call argument
+    // is a definition to the reaching-def graph (`malloc(len)` "redefines" len), which says
+    // nothing about its value; `get_len(&len)` does
     def valueDefs(i: Identifier): Set[Long] =
         OverlayFacts.reachingDefsIn(i).collect {
             case p: MethodParameterIn => p.id
             case d: Identifier
                 if d._astIn.exists {
                     case a: Call =>
-                        (a.name.startsWith("<operator>.assignment") ||
+                        ((a.name.startsWith("<operator>.assignment") ||
                             a.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")) &&
-                        a.argumentOption(1).exists(_.id == d.id)
+                            a.argumentOption(1).exists(_.id == d.id)) ||
+                        (a.name == "<operator>.addressOf" && !OverlayFacts.readOnlyAddress(a))
                     case _ => false
                 } => d.id
+            case c: Call if c.name == "<operator>.addressOf" && !OverlayFacts.readOnlyAddress(c) =>
+                c.id
         }.toSet
-    def rhsOfDefs(i: Identifier): List[Expression] =
-        OverlayFacts
-            .reachingDefsIn(i)
-            .collect { case d: Identifier => d }
-            .flatMap(_._astIn.collectFirst {
-                case a: Call if a.name == "<operator>.assignment" => a
+    // the field stores of the method: a field-access length (`m->len`) stored to between two
+    // spellings is not the same value at both
+    lazy val fieldStores: List[Call] =
+        dst.method.ast.isCall
+            .filter(c =>
+                c.name.startsWith("<operator>.assignment") ||
+                    c.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")
+            )
+            .filter(_.argumentOption(1).exists {
+                case t: Call => isFieldAccess(t)
+                case _       => false
             })
-            .flatMap(_.argumentOption(2))
-            .collect { case e: Expression => e }
-    // the terms of a size: itself, its addition operands, and (once) the operands' definitions
-    def termsOf(e: Expression, expand: Boolean): List[Expression] =
+            .l
+    // `later` (at the copy) holds the value `earlier` (at the allocation, guard or definition)
+    // had: the same definitions reach both, and no definition of the variable lies on a path from
+    // the earlier occurrence to the later one (`n = read_len()` in a loop between them)
+    def sameValue(later0: Expression, earlier0: Expression): Boolean =
+        (unwrapCast(later0), unwrapCast(earlier0)) match
+          case (a: Identifier, b: Identifier) =>
+              a.name == b.name && valueDefs(a) == valueDefs(b) && unchangedBetween(b, a)
+          case (a: Literal, b: Literal) => a.code.trim == b.code.trim
+          // a method-call or field length (`key.size()`, `m->len`) carries no variable key; two
+          // spellings in one method are the same value while every operand they read is, and no
+          // field they read is stored to
+          case (a: Call, b: Call) =>
+              val ai = a.ast.isIdentifier.l.sortBy(_.order)
+              val bi = b.ast.isIdentifier.l.sortBy(_.order)
+              val fields =
+                  a.ast.isCall.filter(isFieldAccess).code.map(_.replaceAll("\\s+", "")).toSet
+              // a store to a field it reads, on a path from the earlier spelling to the later one
+              val rewritten = fieldStores.exists { w =>
+                  w.argumentOption(1).exists(t => fields.contains(t.code.replaceAll("\\s+", ""))) &&
+                  GuardPass.cfgReaches(b._cfgOut.collectAll[CfgNode].l, w.id(), avoid = b.id()) &&
+                  GuardPass.cfgReaches(w._cfgOut.collectAll[CfgNode].l, a.id(), avoid = b.id())
+              }
+              a.code == b.code && !rewritten && ai.size == bi.size &&
+              ai.zip(bi).forall { case (x, y) =>
+                  x.name == y.name && valueDefs(x) == valueDefs(y) && unchangedBetween(y, x)
+              }
+          case (a, b) =>
+              OverlayFacts.variableKey(a).exists(k => OverlayFacts.variableKey(b).contains(k))
+    val len                                = unwrapCast(lenArg)
+    def matches(term: Expression): Boolean = sameValue(len, term)
+    def positiveConstant(e: Expression): Boolean = unwrapCast(e) match
+      case l: Literal => l.code.trim.replaceAll("(?i)[ul]+$", "").toIntOption.exists(_ > 0)
+      case c: Call    => c.name.startsWith("<operator>.sizeOf")
+      case _          => false
+
+    // Every value a local pointer can hold at a use (see [[SVal]]). None when the variable is not
+    // a plain local of the method (a parameter, a global, a static or member keeps a value from
+    // before the method on paths without an assignment), when its address is taken or a
+    // reference is bound to it (a store through the alias is invisible here), or when a
+    // definition replaces it in a way the walk cannot follow. Definitions are matched by the
+    // local they refer to, so an inner block's `char *d` is another variable.
+    //   - A use that does not change the variable is a reaching definition to the graph
+    //     (`memset(d, 0, n)`, `d[n - 1] = 0` "redefine" d); the walk passes through it to the
+    //     values before. A non-operator call receives it by value when the argument is an
+    //     inventoried memory role, the resolved callee's parameter is not a reference, or the
+    //     file is C; an unresolved C++ callee may take `char *&`.
+    //   - A copy of another local pointer (`d = p`) holds p's values; `x ? a : b` holds both, each
+    //     under its arm's truth.
+    //   - A byte pointer moved by a constant (`d++`, `d += 4`, `d = p + 4`) or through a helper
+    //     that returns its argument moved by at most K bytes ([[returnAdvance]]) holds the values
+    //     before, advanced.
+    //   - A definition already visited adds no value (the loop back edge) - unless it advances the
+    //     pointer, which a loop can do without bound.
+    def assignedValues(use: Identifier): Option[List[SVal]] =
+      val seen = mutable.HashSet.empty[Long]
+      def walk(
+        u: Identifier,
+        advance: Int,
+        guard: Option[(Call, Boolean)],
+        depth: Int
+      ): Option[List[SVal]] =
+          plainLocalOf(u) match
+            case None => None
+            case Some(local) =>
+                val bytePointer = isBytePointer(local.typeFullName)
+                val defs = OverlayFacts.reachingDefsIn(u, maxHops = 1).collect {
+                    case i: Identifier if localOf(i).exists(_.id == local.id) => i
+                }
+                if defs.isEmpty || depth > 12 || advance > MaxAdvance then None
+                else
+                  defs.foldLeft(Option(List.empty[SVal])) { (acc, d) =>
+                      acc.flatMap { xs =>
+                        val parent   = d._astIn.collectFirst { case c: Call => c }
+                        val isTarget = parent.exists(_.argumentOption(1).exists(_.id == d.id))
+                        val stepped = parent.filter(_ => isTarget && bytePointer).flatMap {
+                            case c if c.name.matches("<operator>\\.(pre|post)Increment") => Some(1)
+                            case c if c.name == "<operator>.assignmentPlus" =>
+                                c.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(literalValue).filter(_ >= 0)
+                            case _ => None
+                        }
+                        val advancing = stepped.nonEmpty || parent.exists(a =>
+                            a.name == "<operator>.assignment" && isTarget &&
+                                a.argumentOption(2).exists(_.ast.isIdentifier.l.exists(r =>
+                                    localOf(r).exists(_.id == local.id)
+                                ))
+                        )
+                        // an advance inside a loop has no bound: the reaching definitions do
+                        // not carry the back edge, the CFG does
+                        if advancing && inCycle(d) then None
+                        else if !seen.add(d.id) then if advancing then None else Some(xs)
+                        else
+                          parent match
+                            case Some(a) if a.name == "<operator>.assignment" && isTarget =>
+                                a.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(valuesOfRhs(a, _, advance, guard, depth))
+                                    .map(xs ++ _)
+                            case _ if stepped.nonEmpty =>
+                                walk(d, advance + stepped.get, guard, depth + 1).map(xs ++ _)
+                            case _ if GuardPass.isDefinitionSite(d) => None
+                            case _ if leavesValue(d) =>
+                                walk(d, advance, guard, depth + 1).map(xs ++ _)
+                            case _ => None
+                      }
+                  }
+                end if
+      // the values an assignment's right-hand side gives the pointer
+      def valuesOfRhs(
+        a: Call,
+        rhs: Expression,
+        advance: Int,
+        guard: Option[(Call, Boolean)],
+        depth: Int
+      ): Option[List[SVal]] =
+        def leaf = Some(List(SVal(a, rhs, advance, guard)))
+        unwrapCast(rhs) match
+          case c: Call if c.name == "<operator>.conditional" =>
+              (c.argumentOption(1), c.argumentOption(2), c.argumentOption(3)) match
+                case (Some(cond: Call), Some(t: Expression), Some(f: Expression)) =>
+                    for
+                      tv <- valuesOfRhs(a, t, advance, Some((cond, true)), depth)
+                      fv <- valuesOfRhs(a, f, advance, Some((cond, false)), depth)
+                    yield tv ++ fv
+                case _ => leaf
+          case c: Call if c.name == "<operator>.addition" =>
+              val ops = c.argument.l.collect { case x: Expression => x }
+              (ops.flatMap(pointerLocal), ops.flatMap(literalValue)) match
+                case (List(p), List(k))
+                    if k >= 0 && ops.size == 2 &&
+                        localOf(p).exists(l => isBytePointer(l.typeFullName)) =>
+                    walk(p, advance + k, guard, depth + 1).orElse(leaf)
+                case _ => leaf
+          case c: Call if !c.name.startsWith("<operator>") =>
+              returnAdvance(c) match
+                case Some((index, bytes)) =>
+                    c.argument.l.find(_.argumentIndex == index)
+                        .collect { case e: Expression => e }
+                        .flatMap(pointerLocal)
+                        .flatMap(walk(_, advance + bytes, guard, depth + 1))
+                        .orElse(leaf)
+                case None => leaf
+          case _ =>
+              pointerLocal(rhs).flatMap(walk(_, advance, guard, depth + 1)).orElse(leaf)
+        end match
+      end valuesOfRhs
+      walk(use, 0, None, 0)
+    end assignedValues
+    // the plain values of a scalar local (no advances, no guards): the size arithmetic's view
+    def scalarValues(i: Identifier): Option[List[Expression]] =
+        assignedValues(i).map(_.map(_.rhs))
+    def pointerLocal(e: Expression): Option[Identifier] = unwrapCast(e) match
+      case r: Identifier
+          if localOf(r).exists(l =>
+              OverlayFacts.isPointer(l.typeFullName.trim) && !l.typeFullName.contains('[')
+          ) => Some(r)
+      case _ => None
+    // does this occurrence leave the variable's value as it was?
+    def leavesValue(i: Identifier): Boolean = i._astIn.headOption match
+      case Some(c: Call) if c.name.startsWith("<operator>") => true
+      case Some(c: Call) =>
+          val inventoried = i.tag.name("mem-.*").nonEmpty
+          val resolvedByValue = calleeDefinition(c).toList
+              .flatMap(_.parameter.l)
+              .find(_.index == i.argumentIndex)
+              .exists(p => !p.typeFullName.trim.endsWith("&"))
+          inventoried || resolvedByValue || i.method.filename.endsWith(".c")
+      case _ => true
+
+    val dstOffsets = offsetsOf(dst)
+    // the length terms of an allocation, its addition operands, and up to three levels of
+    // definitions - EVERY value of a local must hold the term (`total = n; if (c) total = 4;
+    // malloc(total)` does not)
+    def covers(e: Expression, depth: Int): Boolean =
       val here = unwrapCast(e)
-      here :: (here match
+      matches(here) || (here match
         case c: Call if c.name == "<operator>.addition" =>
-            c.argument.l.collect { case x: Expression => x }.flatMap(termsOf(_, expand))
-        case i: Identifier if expand => rhsOfDefs(i).flatMap(termsOf(_, expand = false))
-        case _                       => Nil
+            c.argument.l.collect { case x: Expression => x }.exists(covers(_, depth))
+        case i: Identifier if depth < 3 =>
+            scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(covers(_, depth + 1)))
+        case _ => false
       )
+    // the addends of a size, through single-valued locals: `hdr + n` when `total = hdr + n`
+    // (a local that already is the length or an offset stays as it is)
+    def addendsOf(e: Expression, depth: Int): List[Expression] = unwrapCast(e) match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case x: Expression => x }.flatMap(addendsOf(_, depth))
+      case i: Identifier if depth < 3 && !matches(i) && !dstOffsets.exists(sameValue(_, i)) =>
+          scalarValues(i) match
+            case Some(List(v)) => addendsOf(v, depth + 1)
+            case _             => List(i)
+      case other => List(other)
+    // the constant bytes a sum adds beyond its symbolic terms: its integer literals, and 1 for
+    // each sizeof (no object is smaller)
+    def constantPart(terms: Seq[Expression]): Int =
+        terms.map(t => literalValue(t).getOrElse(if isSizeof(t) then 1 else 0)).sum
+    // a size the copy fits in: the length itself or a sum holding it - and, for a copy at an
+    // offset (`memcpy(buf + hdr, s, n)`) or through a pointer advanced from the buffer's start,
+    // a sum holding the length, every symbolic offset as a separate addend, and constants
+    // covering the constant offsets plus the advance
+    def sizeHolds(size: Expression, advance: Int): Boolean =
+        if dstOffsets.isEmpty && advance == 0 then covers(size, 0)
+        else
+          val adds                 = addendsOf(size, 0).toIndexedSeq
+          val (constOffs, symOffs) = dstOffsets.partition(o => literalValue(o).isDefined)
+          val needed               = advance + constOffs.flatMap(literalValue).sum
+          adds.indices.exists { i =>
+              matches(adds(i)) && {
+                  val used = mutable.Set(i)
+                  symOffs.forall { o =>
+                      adds.indices.find(j => !used(j) && sameValue(o, adds(j))).exists { j =>
+                        used += j
+                        true
+                      }
+                  } && constantPart(adds.indices.filterNot(used).map(adds)) >= needed
+              }
+          }
     def allocCallOf(e: Expression): Option[Call] = unwrapCast(e) match
       case c: Call
           if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
               tagValues(c, MemoryApiPass.TagRealloc).nonEmpty => Some(c)
       case _ => None
-    val len = unwrapCast(lenArg)
-    def matches(term: Expression): Boolean = (len, term) match
-      case (a: Identifier, b: Identifier) => a.name == b.name && valueDefs(a) == valueDefs(b)
-      // a method-call length (`key.size()`) carries no variable key; the two spellings of
-      // the same call in one method talk about the same value
-      // - and only while every operand the call reads is the same value in both spellings
-      case (a: Call, b: Call) =>
-          val ai = a.ast.isIdentifier.l.sortBy(_.order)
-          val bi = b.ast.isIdentifier.l.sortBy(_.order)
-          a.code == b.code && ai.size == bi.size && ai.zip(bi).forall { case (x, y) =>
-              x.name == y.name && valueDefs(x) == valueDefs(y)
-          }
-      case _ =>
-          OverlayFacts.variableKey(len).exists(k => OverlayFacts.variableKey(term).contains(k))
-    // the destination is the data member of a packet the SAME function sized through the
-    // library boundary: av_new_packet(pkt, len) / av_grow_packet(pkt, len) before
-    // memcpy(pkt->data, ..., len). The base the field is read through must be the very
-    // argument the boundary call sized, and the lengths must be the same value (through the
-    // addition operands the boundary's own padding arithmetic introduces). Part 10, the
-    // second self-sized pattern measured on libavformat.
-    val sizedByPacketApi = bufferOf(dst) match
-      case fa: Call if isFieldAccess(fa) =>
-          fa.argumentOption(1).flatMap(OverlayFacts.variableKey).exists { baseKey =>
-              dst.method.ast.collectAll[Call].l.exists { c =>
-                  PacketAllocApis.contains(c.name) &&
-                  c.argumentOption(1).flatMap(OverlayFacts.variableKey).contains(baseKey) &&
-                  // the boundary sizes with the copy's length plus its own header/padding
-                  // arithmetic: av_new_packet(pkt, len + sizeof(start_sequence))
-                  c.argumentOption(2).toList.flatMap(termsOf(_, expand = true))
-                      .exists(matches)
-              }
-          }
-      case _ => false
     // the length arguments of an allocation: the inventoried `mem-len` positions, and for a
     // C++ array construction the size expression the frontend wires in after the type
     def allocLenArgs(alloc: Call): List[Expression] =
@@ -761,19 +950,217 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
             (alloc.name == "<operator>.new" && a.argumentIndex > 1)
         }
+    // an allocation sized from the copy: a copying allocator (`strndup`) allocates what it
+    // copies, not its length argument; a count-by-size allocator (`calloc(count, size)`) is a
+    // product, sized when one factor holds the length and every other is a positive constant
+    def sizedFrom(value: SVal, header: Boolean): Boolean =
+        allocCallOf(value.rhs).exists { a =>
+          val copying = a.argument.exists(_.tag.name(MemoryApiPass.TagSrc).nonEmpty)
+          val lens = allocLenArgs(a).filter(l =>
+              !header || l.ast.isCall.name("<operator>\\.sizeOf.*").nonEmpty
+          )
+          !copying && (lens match
+            case Nil => false
+            case one :: Nil =>
+                sizeHolds(one, value.advance) || copyCall.exists(cc =>
+                    pathSizedCopy(a, one, cc, lenArg, dstOffsets, value.advance)
+                )
+            case factors =>
+                factors.exists(f =>
+                    sizeHolds(f, value.advance) &&
+                        factors.filterNot(_.id == f.id).forall(positiveConstant)
+                )
+          )
+        }
+
+    // integer facts for the guard arm
+    def declaredType(e: Expression): Option[String] = e match
+      case i: Identifier =>
+          localOf(i).map(_.typeFullName).orElse(
+            i.method.parameter.nameExact(i.name).typeFullName.headOption
+          )
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argumentOption(1).filter(_ => c.argument.size > 1).map(_.code.trim)
+      case c: Call if c.name.startsWith("<operator>.sizeOf") => Some("size_t")
+      case l: Literal =>
+          val s = l.code.trim.toLowerCase
+          Some(
+            (if s.contains('u') then "unsigned " else "") + (if s.contains('l') then "long"
+                                                             else "int")
+          )
+      case _ => None
+    def widthOf(e: Expression): Option[Int] =
+        declaredType(e).flatMap(t => OverlayFacts.integralWidth(t.stripPrefix("const ").trim))
+    def isUnsigned(e: Expression): Boolean = declaredType(e).exists { t =>
+      val n = t.stripPrefix("const ").trim
+      n.startsWith("unsigned") || n == "size_t" || n.matches("uint(8|16|32|64|ptr)?_t")
+    }
+    // the length is the size of an object that exists (`key.size()`, `strlen(s)`, through the
+    // locals holding it): no object reaches SIZE_MAX, so a small constant added to it cannot wrap
+    def objectSized(e: Expression, depth: Int = 0): Boolean = unwrapCast(e) match
+      case c: Call =>
+          ObjectSizeCalls.contains(c.name)
+      case i: Identifier if depth < 3 =>
+          isUnsigned(i) &&
+          scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(objectSized(_, depth + 1)))
+      case _ => false
+    // casts that cannot change the value: to a type at least as wide as the operand's
+    def strippedWidening(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c) match
+            case Some(op) if widthOf(c).exists(w => widthOf(op).exists(w >= _)) =>
+                strippedWidening(op)
+            case _ => e
+      case other => other
+    // `if (need <= sizeof(k->space_)) dst = k->space_;` with `need = (size_t)n + 8` and a copy of
+    // n: a guard - dominating the assignment with its truth there decided by the CFG, or the arm
+    // condition of a `c ? a : b` the value came from - bounds a value that is at least the copy's
+    // length (plus the constant offset and advance the copy lands at) by the sizeof of the very
+    // array assigned. "At least" is the length itself, or the length plus non-negative constants
+    // that cannot wrap: computed in a type wider than the unsigned length, or added to the size of
+    // an existing object, and stored without truncation - `n + 8` in n's own type wraps.
+    def coveredByGuard(value: SVal): Boolean =
+      val buffer    = unwrapCast(value.rhs).code
+      val lenWidth  = widthOf(len)
+      val constOffs = dstOffsets.flatMap(literalValue)
+      val needed    = value.advance + constOffs.sum
+      def sumCovers(e: Expression, stored: Option[Int]): Boolean = strippedWidening(e) match
+        case c: Call if c.name == "<operator>.addition" =>
+            val ops    = c.argument.l.collect { case o: Expression => o }
+            val arith  = ops.flatMap(widthOf(_).map(math.max(_, 32)))
+            val lenOps = ops.filter(o => matches(strippedWidening(o)))
+            val rest   = ops.filterNot(lenOps.contains)
+            val noWrap = lenWidth.exists(arith.max > _) || objectSized(len)
+            lenOps.size == 1 && arith.size == ops.size && isUnsigned(len) &&
+            lenOps.forall(o => widthOf(o).exists(w => lenWidth.exists(w >= _))) &&
+            rest.forall(positiveConstant) && constantPart(rest) >= needed &&
+            noWrap && stored.forall(_ >= arith.max)
+        case other =>
+            needed == 0 && matches(other) && stored.forall(s => lenWidth.exists(s >= _))
+      def atLeastLen(bounded: Expression): Boolean = strippedWidening(bounded) match
+        case i: Identifier if matches(i) => needed == 0
+        case i: Identifier =>
+            val stored = widthOf(i)
+            stored.nonEmpty &&
+            scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(sumCovers(_, stored)))
+        case other => sumCovers(other, None)
+      def arrayCapacity(bound: Expression): Boolean = strippedWidening(bound) match
+        case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+            // the sizeof of an ARRAY is its capacity; of a pointer, only the pointer's
+            sz.argumentOption(1).collect { case e: Expression => e }
+                .exists(e => e.code == buffer && isArrayStorage(e))
+        case _ => false
+      def bounds(cond: Call, facts: List[(Call, Boolean)]): Boolean =
+          facts.exists { (cmp, h) =>
+              GuardPass.directionalFacts(cmp, h).exists { (bounded, above, bound) =>
+                  above && arrayCapacity(bound) && atLeastLen(bounded)
+              }
+          }
+      dstOffsets.forall(o => literalValue(o).isDefined) && (
+        value.guard.exists { (cond, holds) =>
+            bounds(cond, GuardPass.conjuncts(cond, holds).getOrElse(Nil))
+        } ||
+            GuardPass.guardingControllers(value.assignment).exists(cond =>
+                bounds(cond, GuardPass.conjunctsAt(cond, value.assignment))
+            )
+      )
+    end coveredByGuard
+
+    // the in-place strip `memmove(buf, buf + k, len - k)`: the move stays inside what the buffer
+    // holds only when it moves the length less the very offset it reads from, or a string's own
+    // length (`strlen(p + 1) + 1` from `p + 1`)
+    val inPlace = src.exists { s =>
+        sameBuffer(dst, s) && dstOffsets.isEmpty && {
+            val srcOffsets = offsetsOf(s)
+            val stripsOffset = (srcOffsets, unwrapCast(lenArg)) match
+              case (List(k), sub: Call) if sub.name == "<operator>.subtraction" =>
+                  sub.argumentOption(2).collect { case e: Expression => e }.exists(sameValue(_, k))
+              case _ => false
+            // the same strip spelled `*len -= k; memmove(buf, buf + k, *len)`
+            val strippedBefore = srcOffsets match
+              case List(k) =>
+                  dst.method.ast.isCall.nameExact("<operator>.assignmentMinus").exists { a =>
+                      a.argumentOption(1).exists(_.code.trim == unwrapCast(lenArg).code.trim) &&
+                      a.argumentOption(2).collect { case e: Expression => e }.exists(sameValue(
+                        k,
+                        _
+                      )) &&
+                      copyCall.exists(_.dominatedBy.exists(_.id == a.id))
+                  }
+              case _ => false
+            val ownString =
+                lenArg.ast.isCall.name("strn?len").argument.order(1).code.l.contains(s.code)
+            stripsOffset || strippedBefore || ownString
+        }
+    }
+    // dashdec.c's clear-the-tail idiom: `memset(tmp_str, 0, strlen(tmp_str))`
+    val clearsOwnLength = lenArg match
+      case c: Call if c.name == "strlen" || c.name == "strnlen" =>
+          c.argumentOption(1).collect { case e: Expression => e }.exists(sameBuffer(dst, _))
+      case _ => false
+    // the destination is the data member of a packet the SAME function sized through the
+    // library boundary: av_new_packet(pkt, len) / av_grow_packet(pkt, len) before
+    // memcpy(pkt->data, ..., len). The base the field is read through must be the very
+    // argument the boundary call sized, the boundary must dominate the copy, the copy must
+    // start at the member, and the lengths must be the same value (through the addition
+    // operands the boundary's own padding arithmetic introduces). Part 10, the second
+    // self-sized pattern measured on libavformat.
+    val sizedByPacketApi = bufferOf(dst) match
+      case fa: Call if isFieldAccess(fa) =>
+          fa.argumentOption(1).collect { case e: Expression => e }.exists { base =>
+              OverlayFacts.variableKey(base).exists { baseKey =>
+                  dst.method.ast.collectAll[Call].l.exists { c =>
+                      PacketAllocApis.contains(c.name) &&
+                      c.argumentOption(1).flatMap(OverlayFacts.variableKey).contains(baseKey) &&
+                      copyCall.exists(_.dominatedBy.exists(_.id == c.id)) &&
+                      // the boundary sizes with the copy's length plus its own header/padding
+                      // arithmetic - `av_new_packet(pkt, len + sizeof(start_sequence))`, and a
+                      // copy after the header holds the header as an addend; a grow appends
+                      // at the size the packet had before it
+                      c.argumentOption(2).collect { case e: Expression => e }.exists { size =>
+                          if c.name == "av_grow_packet" && dstOffsets.nonEmpty then
+                            covers(size, 0) && (dstOffsets match
+                              case List(o: Identifier) =>
+                                  assignedValues(o).exists {
+                                      case List(v) =>
+                                          unwrapCast(v.rhs).code.replace(" ", "") ==
+                                              s"${base.code}->size".replace(" ", "") &&
+                                              c.dominatedBy.exists(_.id == v.assignment.id)
+                                      case _ => false
+                                  }
+                              case _ => false
+                            )
+                          else
+                            sizeHolds(size, 0) || copyCall.exists(cc =>
+                                pathSizedCopy(c, size, cc, lenArg, dstOffsets, 0)
+                            )
+                      }
+                  }
+              }
+          }
+      case _ => false
+    // part 13: EVERY value the destination can hold must be sized from the copy's length - an
+    // allocation of it, or an array a guard proved large enough. One matching allocation among
+    // several definitions said nothing about the others (`d = fixed; if (c) d = malloc(n);
+    // memcpy(d, s, n)`)
     val sizedByAllocation = bufferOf(dst) match
       case base: Identifier =>
-          rhsOfDefs(base)
-              .flatMap(allocCallOf)
-              .flatMap(allocLenArgs)
-              .flatMap(termsOf(_, expand = true))
-              .exists(matches)
+          assignedValues(base).exists(vs =>
+              vs.nonEmpty && vs.forall(v => sizedFrom(v, header = false) || coveredByGuard(v))
+          )
+      // a field destination the method stored once, on every path, and nothing rewrote since:
+      // that store's value (`data->split_buf = av_malloc(data->split_buf_size)`)
+      case fa: Call
+          if isFieldAccess(fa) && OverlayFacts.fieldStoresReaching(fa).single.exists { st =>
+              st.argumentOption(2).collect { case e: Expression => e }.exists { rhs =>
+                val v = SVal(st, rhs, 0, None)
+                sizedFrom(v, header = false) || coveredByGuard(v)
+              }
+          } => true
       case fa: Call if isFieldAccess(fa) =>
           // a copy into a member of a sized allocation: `e = malloc(sizeof(H) - 1 + n)`
           // then `memcpy(e->data, ..., n)` - the flexible trailing member takes the same
           // length the allocation added (part 12). Restricted to a single-element array
-          // member, the flexible idiom: a wholesale "any member of a sized allocation"
-          // reading would excuse real intra-object overruns
           // member, the flexible idiom, and the LAST one declared: a one-element array with
           // members after it is a fixed field. The allocation must also add a sizeof for the
           // header the member follows - `malloc(n)` then `memcpy(e->data, .., n)` overruns by
@@ -782,21 +1169,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               OverlayFacts.arrayExtent(m.typeFullName).contains(1) &&
               m._astIn.collectAll[TypeDecl].l.flatMap(_.member.l).forall(_.order <= m.order)
           }
-          def addsHeader(len: Expression): Boolean =
-              len.ast.isCall.name("<operator>\\.sizeOf.*").nonEmpty
           flexibleMember && fa.argumentOption(1).collect { case e: Expression => e }
               .map(unwrapCast)
               .collect { case i: Identifier => i }
               .exists { base =>
-                  rhsOfDefs(base)
-                      .flatMap(allocCallOf)
-                      .flatMap(allocLenArgs)
-                      .filter(addsHeader)
-                      .flatMap(termsOf(_, expand = true))
-                      .exists(matches)
+                  assignedValues(base).exists(vs =>
+                      vs.nonEmpty && vs.forall(v => v.advance == 0 && sizedFrom(v, header = true))
+                  )
               }
       case _ => false
-    inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi
+    !appending && (inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi)
   end selfSizedDestination
 
   /** The packet-buffer boundary the corpus's own demuxers write through: these two library calls
@@ -805,6 +1187,374 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * would excuse real overruns.
     */
   private val PacketAllocApis = Set("av_new_packet", "av_grow_packet")
+
+  /** One value a local pointer can hold at a use: the assignment that gave it, the right-hand side,
+    * the constant bytes it was advanced by since (`d++`, `d += 4`, a helper that returns its
+    * argument moved), and the arm condition when it came out of a `c ? a : b`.
+    */
+  private final case class SVal(
+    assignment: Call,
+    rhs: Expression,
+    advance: Int,
+    guard: Option[(Call, Boolean)]
+  )
+
+  private val MaxAdvance = 1 << 16
+
+  /** calls whose result is the size of an object that exists */
+  private val ObjectSizeCalls = Set("size", "length", "strlen", "strnlen", "wcslen", "wcsnlen")
+
+  private val BytePointees =
+      Set("char", "signedchar", "unsignedchar", "uint8_t", "int8_t", "std.byte", "byte", "u_char")
+
+  /** A pointer to single bytes: `d++` moves it by one byte. */
+  private def isBytePointer(typeFullName: String): Boolean =
+    val t = typeFullName.replaceAll("\\bconst\\b", "").replaceAll("\\s+", "").replace("::", ".")
+    t.endsWith("*") && !t.dropRight(1).contains('*') && BytePointees.contains(t.dropRight(1))
+
+  private def stripCasts(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" => castOperand(c).map(stripCasts).getOrElse(e)
+    case other                                  => other
+
+  /** The value of an integer literal (`8`, `0x10`, `4u`), through casts. */
+  private def literalValue(e: Expression): Option[Int] = stripCasts(e) match
+    case l: Literal =>
+        val d = l.code.trim.replaceAll("(?i)[ul]+$", "")
+        scala.util.Try {
+            if d.matches("(?i)0x[0-9a-f]+") then Integer.parseInt(d.drop(2), 16)
+            else if d.matches("0[0-7]+") then Integer.parseInt(d.drop(1), 8)
+            else d.toInt
+        }.toOption
+    case _ => None
+
+  private def isSizeof(e: Expression): Boolean = stripCasts(e) match
+    case c: Call => c.name.startsWith("<operator>.sizeOf")
+    case _       => false
+
+  /** A sum of symbolic terms (counted) and a constant: `len + sizeof(start) + 4`. None = unknown.
+    */
+  private final case class Linear(terms: Map[String, Int], const: Int):
+    def +(o: Linear): Linear =
+        Linear(
+          o.terms.foldLeft(terms)((m, kv) => m.updated(kv._1, m.getOrElse(kv._1, 0) + kv._2)),
+          const + o.const
+        )
+
+    /** every term and the constant at least as large as in `need` */
+    def covers(need: Linear): Boolean =
+        need.terms.forall((k, n) => terms.getOrElse(k, 0) >= n) && const >= need.const
+
+  private val MaxPaths = 64
+  private val MaxSteps = 20000
+
+  /** Path by path, is the allocation at `sizeCall` (sized by `size`) at least the offset the copy
+    * writes at plus its length? The CFG is walked from the method's entry over every acyclic path
+    * to the copy; the variables the size, the offsets and the length read are evaluated as linear
+    * sums along each path, and a condition over variables the method never assigns takes the same
+    * branch every time the path meets it. `if (start_bit) tot_len += hdr; ... av_new_packet(pkt,
+    * tot_len); ... if (start_bit) pos += hdr; memcpy(pkt->data + pos, buf, len)` holds on both
+    * paths though neither branch alone says so. Anything the walk cannot evaluate - a variable
+    * assigned in a loop, an unstable operand, an exhausted budget - is a failure.
+    */
+  private def pathSizedCopy(
+    sizeCall: Call,
+    size: Expression,
+    copy: Call,
+    len: Expression,
+    offsets: List[Expression],
+    advance: Int
+  ): Boolean =
+    val m = copy.method
+    if sizeCall.method.id != m.id || inCycle(sizeCall) || inCycle(copy) then return false
+    val exprs   = size :: len :: offsets
+    val idents  = exprs.flatMap(_.ast.isIdentifier.l)
+    val tracked = idents.flatMap(OverlayFacts.declOf).map(_.id()).toSet
+    // every definition of a tracked variable, with the variable it defines
+    val defSites: Map[Long, Long] = m.ast.isIdentifier.l.flatMap { i =>
+        OverlayFacts.declOf(i).filter(d => tracked.contains(d.id()))
+            .filter(_ => GuardPass.isDefinitionSite(i)).map(d => i.id() -> d.id())
+    }.toMap
+    val defCalls = defSites.keySet.flatMap(id =>
+        m.ast.isIdentifier.id(id).l.flatMap(_._astIn.collectFirst { case c: Call => c })
+    )
+    // the walk is for values that differ by path: a variable with one definition the simple
+    // checks already read
+    if defCalls.exists(inCycle) || defSites.values.groupBy(identity).forall(_._2.size < 2) then
+      return false
+    def stable(i: Identifier): Boolean =
+        OverlayFacts.declOf(i).exists(d => !defSites.valuesIterator.contains(d.id())) &&
+            OverlayFacts.definitionSitesOf(i).isEmpty
+    def eval(e: Expression, env: Map[Long, Option[Linear]]): Option[Linear] = stripCasts(e) match
+      case l: Literal => literalValue(l).map(v => Linear(Map.empty, v))
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case x: Expression => x }
+              .foldLeft(Option(Linear(Map.empty, 0)))((acc, x) =>
+                  acc.flatMap(a => eval(x, env).map(a + _))
+              )
+      case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+          Some(Linear(Map(s"sizeof:${c.code.replaceAll("\\s+", "")}" -> 1), 0))
+      case i: Identifier =>
+          OverlayFacts.declOf(i) match
+            case Some(d) if tracked.contains(d.id()) && env.contains(d.id()) => env(d.id())
+            case Some(d) if stable(i) => Some(Linear(Map(s"v:${d.id()}" -> 1), 0))
+            case _                    => None
+      case _ => None
+    var paths   = 0
+    var steps   = 0
+    var failed  = false
+    var reached = 0
+    // an explicit stack: (node, env, decided conditions, allocation size, nodes on the path)
+    val stack = mutable.Stack[(
+      CfgNode,
+      Map[Long, Option[Linear]],
+      Map[String, Boolean],
+      Option[Linear],
+      Set[Long]
+    )](
+      (m, Map.empty, Map.empty, None, Set.empty)
+    )
+    while stack.nonEmpty && !failed do
+      val (node, env0, decided, sized0, onPath) = stack.pop()
+      steps += 1
+      if steps > MaxSteps || paths > MaxPaths then failed = true
+      else if !onPath.contains(node.id()) then
+        var env   = env0
+        var sized = sized0
+        node match
+          case c: Call if defCalls.exists(_.id == c.id) =>
+              c.argumentOption(1).collect { case t: Identifier => t }.flatMap(OverlayFacts.declOf).foreach {
+                  d =>
+                    val rhs = c.argumentOption(2).collect { case e: Expression => e }
+                    val cur = env.getOrElse(d.id(), None)
+                    env = env.updated(
+                      d.id(),
+                      c.name match
+                        case "<operator>.assignment" => rhs.flatMap(eval(_, env))
+                        case "<operator>.assignmentPlus" =>
+                            for a <- cur; b <- rhs.flatMap(eval(_, env)) yield a + b
+                        case n if n.matches("<operator>\\.(pre|post)Increment") =>
+                            cur.map(_ + Linear(Map.empty, 1))
+                        case _ => None
+                    )
+              }
+          case _ => ()
+        if node.id() == sizeCall.id() then sized = eval(size, env)
+        if node.id() == copy.id() then
+          reached += 1
+          paths += 1
+          val need =
+              offsets.foldLeft(eval(len, env).map(_ + Linear(Map.empty, advance)))((acc, o) =>
+                  acc.flatMap(a => eval(o, env).map(a + _))
+              )
+          if !(sized.nonEmpty && need.nonEmpty && sized.get.covers(need.get)) then failed = true
+        else
+          val next = node match
+            case cond: Expression if cond._astIn.headOption.exists {
+                    case cs: ControlStructure => cs.condition.l.exists(_.id == cond.id)
+                    case _                    => false
+                } =>
+                val key = cond.code.replaceAll("\\s+", "")
+                val stableCond = cond.ast.isCall.forall(_.name.startsWith("<operator>")) &&
+                    cond.ast.isIdentifier.l.forall(stable)
+                GuardPass.branchSuccessors(cond) match
+                  case Some((onTrue, onFalse)) if stableCond =>
+                      decided.get(key) match
+                        case Some(true)  => onTrue.map(n => (n, decided))
+                        case Some(false) => onFalse.map(n => (n, decided))
+                        case None =>
+                            onTrue.map(n => (n, decided.updated(key, true))) ++
+                                onFalse.map(n => (n, decided.updated(key, false)))
+                  case _ => node._cfgOut.collectAll[CfgNode].l.map(n => (n, decided))
+            case _ => node._cfgOut.collectAll[CfgNode].l.map(n => (n, decided))
+          if next.isEmpty then paths += 1
+          next.foreach((n, dec) => stack.push((n, env, dec, sized, onPath + node.id())))
+        end if
+      end if
+    end while
+    !failed && reached > 0
+  end pathSizedCopy
+
+  /** Does this CFG node lie on a cycle (a loop body)? */
+  private def inCycle(n: CfgNode): Boolean =
+      GuardPass.cfgReaches(n._cfgOut.collectAll[CfgNode].l, n.id(), avoid = -1L)
+
+  private val advanceSummaries =
+      new java.util.concurrent.ConcurrentHashMap[Long, Option[(Int, Int)]]()
+
+  /** The call's callee returns its byte-pointer parameter `index` moved forward by at most `bytes`
+    * along every path - leveldb's `EncodeVarint32(dst, v)` returns `dst` advanced by 1 to 5.
+    */
+  private def returnAdvance(call: Call): Option[(Int, Int)] =
+      calleeDefinition(call).flatMap(m =>
+          advanceSummaries.computeIfAbsent(m.id(), _ => advanceSummary(m))
+      )
+
+  /** The one method definition a call reaches. A header declaration and its definition are two
+    * method nodes with one full name: the definition is the one with a body. When the parser left
+    * the call unresolved (`<unresolvedNamespace>.f:<unresolvedSignature>(2)` - CDT gives up on some
+    * overload sets), the definition is taken by name and arity, preferring the caller's own
+    * namespace - and only when exactly one remains.
+    */
+  private def calleeDefinition(call: Call): Option[Method] =
+    def withBody(ms: List[Method]) = ms.filterNot(_.isExternal).filter(_.block.astChildren.nonEmpty)
+    withBody(atom.method.fullNameExact(call.methodFullName).l) match
+      case List(m) => Some(m)
+      case Nil if call.methodFullName.startsWith("<unresolved") =>
+          val arity = call.argument.l.count(_.argumentIndex > 0)
+          val byName = withBody(atom.method.nameExact(call.name).l)
+              .filter(_.parameter.l.count(_.index > 0) == arity)
+          // the caller's enclosing scopes, innermost first: `leveldb.LookupKey`, then `leveldb`
+          val scopes = call.method.fullName.takeWhile(_ != ':').split('.').dropRight(1)
+          val nearest = (scopes.length to 1 by -1).iterator
+              .map(k => scopes.take(k).mkString("."))
+              .map(p => byName.filter(_.fullName.startsWith(s"$p.")))
+              .find(_.nonEmpty)
+          nearest.getOrElse(byName) match
+            case List(m) => Some(m)
+            case _       => None
+      case _ => None
+
+  /** Every `return` gives the same byte-pointer parameter, moved by constants only: its defs are
+    * walked back through casts, copies, `p++`, `p += k` and `p = q + k`, the maximum taken over
+    * every definition that reaches. A loop that advances the pointer has no bound, and none is
+    * claimed.
+    */
+  private def advanceSummary(m: Method): Option[(Int, Int)] =
+    // a definition reached along two paths is evaluated once; one reached again while it is
+    // still being evaluated is a cycle
+    val memo       = mutable.HashMap.empty[Long, Option[(Int, Int)]]
+    val inProgress = mutable.HashSet.empty[Long]
+    def combine(xs: List[Option[(Int, Int)]]): Option[(Int, Int)] =
+        if xs.isEmpty || xs.exists(_.isEmpty) then None
+        else
+          val ys = xs.flatten
+          if ys.map(_._1).distinct.size == 1 then Some((ys.head._1, ys.map(_._2).max)) else None
+    def ofExpr(e: Expression, depth: Int): Option[(Int, Int)] =
+        if depth > 32 then None
+        else
+          stripCasts(e) match
+            case i: Identifier => ofUse(i, depth)
+            case c: Call if c.name == "<operator>.addition" =>
+                val ops = c.argument.l.collect { case x: Expression => x }
+                (ops.filter(o => literalValue(o).isEmpty), ops.flatMap(literalValue)) match
+                  case (List(p), List(k)) if k >= 0 =>
+                      ofExpr(p, depth + 1).map((i, b) => (i, b + k))
+                  case _ => None
+            case _ => None
+    def ofUse(u: Identifier, depth: Int): Option[(Int, Int)] =
+        OverlayFacts.declOf(u) match
+          case Some(decl) if isBytePointer(decl.property("TYPE_FULL_NAME").toString) =>
+              val defs = OverlayFacts.reachingDefsIn(u, maxHops = 1).filter {
+                  case i: Identifier        => OverlayFacts.declOf(i).exists(_.id() == decl.id())
+                  case p: MethodParameterIn => p.id() == decl.id()
+                  case _                    => false
+              }
+              if defs.isEmpty then
+                decl match
+                  case p: MethodParameterIn => Some((p.index, 0))
+                  case _                    => None
+              else
+                combine(defs.map {
+                    case p: MethodParameterIn => Some((p.index, 0))
+                    case d: Identifier =>
+                        val parent   = d._astIn.collectFirst { case c: Call => c }
+                        val isTarget = parent.exists(_.argumentOption(1).exists(_.id == d.id))
+                        val advancing = isTarget && parent.exists(c =>
+                            c.name.matches("<operator>\\.(pre|post)Increment") ||
+                                c.name == "<operator>.assignmentPlus" ||
+                                (c.name == "<operator>.assignment" &&
+                                    c.argumentOption(2).exists(_.ast.isIdentifier.l.exists(r =>
+                                        OverlayFacts.declOf(r).exists(_.id() == decl.id())
+                                    )))
+                        )
+                        if memo.contains(d.id) then memo(d.id)
+                        else if advancing && inCycle(d) then None
+                        else if !inProgress.add(d.id) then None
+                        else
+                          val r = parent match
+                            case Some(a) if a.name == "<operator>.assignment" && isTarget =>
+                                a.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(ofExpr(_, depth + 1))
+                            case Some(c)
+                                if isTarget &&
+                                    c.name.matches("<operator>\\.(pre|post)Increment") =>
+                                ofUse(d, depth + 1).map((i, b) => (i, b + 1))
+                            case Some(c) if isTarget && c.name == "<operator>.assignmentPlus" =>
+                                c.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(literalValue).filter(_ >= 0)
+                                    .flatMap(k => ofUse(d, depth + 1).map((i, b) => (i, b + k)))
+                            case _ if GuardPass.isDefinitionSite(d) => None
+                            // a use that leaves the pointer as it was
+                            case Some(c) if c.name.startsWith("<operator>") => ofUse(d, depth + 1)
+                            case _                                          => None
+                          inProgress -= d.id
+                          memo(d.id) = r
+                          r
+                        end if
+                    case _ => None
+                })
+              end if
+          case _ => None
+    val returns = m.ast.isReturn.l
+    combine(returns.map(r =>
+        r.astChildren.collectFirst { case e: Expression => e }.flatMap(ofExpr(_, 0))
+    ))
+        .filter(_._2 <= MaxAdvance)
+  end advanceSummary
+
+  /** libc copies that append at `strlen(dst)`: their length bounds the appended part only */
+  private val AppendingCopies = Set("strncat", "strlcat", "wcsncat", "strcat", "wcscat")
+
+  private val unchangedMemo = new java.util.concurrent.ConcurrentHashMap[(Long, Long), Boolean]()
+
+  /** No definition of `earlier`'s variable on a CFG path from `earlier` to `later` that does not
+    * pass `earlier` again: the value read at `later` is the one `earlier` read. A loop that
+    * re-reads the variable before reaching `later` without going back through `earlier` changes it;
+    * one that reassigns it and comes back through `earlier` does not.
+    */
+  private def unchangedBetween(earlier: Identifier, later: Identifier): Boolean =
+      unchangedMemo.computeIfAbsent(
+        (earlier.id(), later.id()),
+        _ => OverlayFacts.unchangedBetween(earlier, later)
+      )
+
+  /** The local a variable occurrence refers to: declaration identity, not name. */
+  private def localOf(i: Identifier): Option[Local] = i._refOut.collectFirst { case l: Local => l }
+
+  /** The local, when this occurrence's variable is a plain one of its method: not static, its
+    * address never taken, no reference bound to it. Anything else can change behind the method's
+    * own definitions.
+    */
+  private def plainLocalOf(i: Identifier): Option[Local] =
+      localOf(i).filter { l =>
+        val static = l.tag.name(io.appthreat.x2cpg.Defines.StorageClassTag)
+            .value(io.appthreat.x2cpg.Defines.StorageClassStatic).nonEmpty
+        !static && !aliasedLocals(i.method).contains(l.id)
+      }
+
+  private val aliasedByMethod = new java.util.concurrent.ConcurrentHashMap[Long, Set[Long]]()
+
+  /** The locals of a method whose address is taken (`&d`) or that a reference is bound to (`char
+    * *&r = d`).
+    */
+  private def aliasedLocals(m: Method): Set[Long] =
+      aliasedByMethod.computeIfAbsent(
+        m.id,
+        _ =>
+          // `memcpy(dst, &size, sizeof(size))` only reads through the address: an inventoried
+          // source role is not an alias
+          val addressed = m.ast.isCall.nameExact("<operator>.addressOf")
+              .filterNot(OverlayFacts.readOnlyAddress)
+              .argument.isIdentifier
+              .flatMap(localOf).id.l
+          val referenced = m.ast.isCall.nameExact("<operator>.assignment").l.flatMap { a =>
+              (a.argumentOption(1), a.argumentOption(2)) match
+                case (Some(l: Identifier), Some(r: Identifier))
+                    if localOf(l).exists(_.typeFullName.trim.endsWith("&")) => localOf(r).map(_.id)
+                case _ => None
+          }
+          (addressed ++ referenced).toSet
+      )
 
   /** Does some caller leave this caller-param length unbounded? Report when the method has no
     * intra-tree callers (externally reachable - framework callbacks and exports), when the length
@@ -1252,7 +2002,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     if key.isEmpty then Nil
     else
       GuardPass.guardingControllers(GuardPass.statementRootOf(site)).flatMap { cond =>
-          GuardPass.conjuncts(cond, GuardPass.holdsAt(cond, site)).getOrElse(Nil).flatMap {
+          GuardPass.conjunctsAt(cond, site).flatMap {
               case (cmp, holds) =>
                   GuardPass.directionalFacts(cmp, holds).collect {
                       case (bounded, isAbove, bound)
@@ -1539,7 +2289,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         def inLoop(cs: ControlStructure): Boolean = loop.forall(l => isWithin(cs, l))
         val byNesting = GuardPass.guardingControllers(advance).exists { cond =>
             cond._astIn.collectFirst { case cs: ControlStructure => cs }.exists { cs =>
-                inLoop(cs) && admits(cond, GuardPass.holdsAt(cond, advance))
+                inLoop(cs) && GuardPass.holdsAtOpt(cond, advance).exists(h => admits(cond, h))
             }
         }
         val byEarlyExit = advance.method.ast.collectAll[ControlStructure].l.exists { cs =>
@@ -1984,7 +2734,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         }
     val byNesting = GuardPass.guardingControllers(node).exists { cond =>
         cond._astIn.collectFirst { case cs: ControlStructure => cs }.exists { cs =>
-            inScope(cs) && admits(cond, GuardPass.holdsAt(cond, node))
+            inScope(cs) && GuardPass.holdsAtOpt(cond, node).exists(h => admits(cond, h))
         }
     }
     val byEarlyExit = node.method.ast.collectAll[ControlStructure].l.exists { cs =>
@@ -2432,17 +3182,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       ) ||
       constCap.exists(n => IndexRange.literal(bound).exists(_ <= n))
     val r1 = GuardPass.guardingControllers(call).exists { cond =>
-      val hs = GuardPass.holdsAt(cond, call)
-      GuardPass.conjuncts(cond, hs).getOrElse(Nil).exists {
-          case (cmp, holds) =>
-              GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
-                  above && castUnwrappingKey(bounded).exists(lenKeys.contains) &&
-                  boundIsExtent(bound) && GuardPass.unchangedSince(bounded, len)
-              }
-      }
+        GuardPass.conjunctsAt(cond, call).exists {
+            case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
+                    above && castUnwrappingKey(bounded).exists(lenKeys.contains) &&
+                    boundIsExtent(bound) && GuardPass.unchangedSince(bounded, len)
+                }
+        }
     }
     r1 || GuardPass.guardingControllers(GuardPass.statementRootOf(len)).exists { cond =>
-        GuardPass.conjuncts(cond, GuardPass.holdsAt(cond, call)).getOrElse(Nil).exists {
+        GuardPass.conjunctsAt(cond, call).exists {
             case (cmp, holds) =>
                 GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
                     above && castUnwrappingKey(bounded).exists(lenKeys.contains) &&
@@ -2726,6 +3475,14 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             (method.local.name(i.name).l.isEmpty && method.parameter.name(i.name).l.isEmpty) ||
             OverlayFacts.reachingDefsIn(i).forall(_.isInstanceOf[Method])
         case _ => false
+      // the count's own value range already fits the declared extent: `sub_packet_cnt =
+      // (avio_rb16(pb) & 0xf0) >> 4` is at most 15, and `i < 15`-bounded writes into [16] stay
+      // inside whatever the stream says (the index stays below the count's maximum)
+      def rangeFits(base: Expression, bound: Expression): Boolean =
+          base.tag.name(ExtentPass.TagExtent).value.l.headOption
+              .filter(_.startsWith(s"${ExtentPass.ValueConst}:"))
+              .flatMap(v => IndexRange.literalValue(v.stripPrefix(s"${ExtentPass.ValueConst}:")))
+              .exists(extent => ranges.of(bound).exists(r => r.hi < extent))
       // a count is capped when some early-exit comparison (read at its NOT-holding polarity -
       // the side an in-block successor runs on, which no CDG edge reaches) bounds it above
       // against a constant
@@ -2742,13 +3499,19 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       def selfSizedLoop(base: Expression, loopBound: Expression): Boolean =
           base.tag.name(ExtentPass.TagExtent).value.l.headOption.exists {
               case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
-                  OverlayFacts
+                  // the buffer's allocation: a local's definitions, or the one store a field
+                  // read sees (`b->adpc = av_mallocz(asize)`)
+                  val stored = base match
+                    case fa: Call if isFieldAccess(fa) =>
+                        OverlayFacts.fieldStoresReaching(fa).single.flatMap(_.argumentOption(2)).toList
+                    case _ => Nil
+                  (OverlayFacts
                       .reachingDefsIn(base)
                       .collect { case d: Identifier => d }
                       .flatMap(_._astIn.collectFirst {
                           case a: Call if a.name == "<operator>.assignment" => a
                       })
-                      .flatMap(_.argumentOption(2))
+                      .flatMap(_.argumentOption(2)) ++ stored)
                       .flatMap(allocCallOf)
                       .exists(alloc =>
                           alloc.argument.l
@@ -2784,7 +3547,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     above && keyOf(bounded).contains(idxKey) &&
                     ValueOriginPass.originNamesOf(bound).exists(attackers.contains) &&
                     !isConstantish(bound) && !cappedAbove(bound) &&
-                    !selfSizedLoop(base, bound)
+                    !selfSizedLoop(base, bound) && !rangeFits(base, bound)
                 }
                 if attackerCount
               do record(idx, rule)
@@ -2817,8 +3580,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       OverlayFacts.variableKey(content).exists { contentKey =>
           GuardPass.guardingControllers(call).exists { controller =>
               GuardPass
-                  .conjuncts(controller, GuardPass.holdsAt(controller, call))
-                  .getOrElse(Nil)
+                  .conjunctsAt(controller, call)
                   .exists { case (cmp, holds) =>
                       GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
                           above && (bounded match
@@ -3345,8 +4107,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .toSet
     GuardPass.guardingControllers(memCall).exists { controller =>
         GuardPass
-            .conjuncts(controller, GuardPass.holdsAt(controller, memCall))
-            .getOrElse(Nil)
+            .conjunctsAt(controller, memCall)
             .exists { case (cmp, holds) =>
                 GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
                     above && (bounded.id == arith.id ||
@@ -3377,8 +4138,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               castOperand(cast).flatMap(castUnwrappingKey).foreach { key =>
                 val crossed = usesOfKey(cast.method, key).exists { stmt =>
                     GuardPass.guardingControllers(stmt).exists(_.id == cmp.id) &&
-                    GuardPass
-                        .directionalFacts(cmp, GuardPass.holdsAt(cmp, stmt))
+                    GuardPass.holdsAtOpt(cmp, stmt).toList
+                        .flatMap(GuardPass.directionalFacts(cmp, _))
                         .exists { case (bounded, above, _) =>
                             // an UPPER bound is the crossing: the guard rejected the too-large
                             // values in the cast's signedness. A bound FROM below - what the

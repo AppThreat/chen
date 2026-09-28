@@ -160,7 +160,9 @@ object ValueOriginPass:
     if depth < 0 then return Set.empty
     c.name match
       case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" =>
-          Set((OriginStructField, c.code))
+          untrustedFill(c).map(api => Set((OriginUntrustedRead, api)))
+              .orElse(storedOrigins(c, depth))
+              .getOrElse(Set((OriginStructField, c.code)))
       case n if n.startsWith("<operator>.sizeOf") =>
           // sizeof never varies with its operand's provenance: it is a constant, whatever flows
           // into the pointer it measures
@@ -173,6 +175,88 @@ object ValueOriginPass:
                 .filterNot(_.isFieldIdentifier)
                 .flatMap(originsOf(_, depth))
                 .toSet
+
+  /** The field's base expression: `m` in `m.len`, `hdr` in `hdr->len`. */
+  private def baseOf(field: Call): Option[Expression] =
+      field.argumentOption(1).collect { case e: Expression => e }
+
+  private def withoutCasts(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
+            .map(withoutCasts).getOrElse(e)
+    case other => other
+
+  /** The declarations a pointer or struct expression names: itself, through casts, `&x` and `buf +
+    * off`, and through a pointer local's single definition (`hdr = (struct h *)buf`).
+    */
+  private def bufferDecls(e: Expression, depth: Int = 0): Set[Long] = withoutCasts(e) match
+    case c: Call if c.name == "<operator>.addressOf" || c.name == "<operator>.addition" =>
+        c.argumentOption(1).collect { case x: Expression => x }
+            .map(bufferDecls(_, depth)).getOrElse(Set.empty)
+    case i: Identifier =>
+        val own = OverlayFacts.declOf(i).map(_.id()).toSet
+        val defs = OverlayFacts.reachingDefsIn(i, maxHops = 1).collect {
+            case d: Identifier if d.name == i.name =>
+                d._astIn.collectFirst {
+                    case a: Call
+                        if a.name == "<operator>.assignment" &&
+                            a.argumentOption(1).exists(_.id == d.id) => a
+                }
+        }.flatten
+        val through =
+            if depth >= 3 || defs.size != 1 then Set.empty[Long]
+            else
+              defs.flatMap(_.argumentOption(2).collect { case x: Expression => x })
+                  .flatMap(bufferDecls(_, depth + 1)).toSet
+        own ++ through
+    case _ => Set.empty
+
+  /** A field read out of bytes an untrusted read filled first: `read(fd, buf, n)` then `((struct
+    * hdr *)buf)->len`, or `fread(&h, sizeof h, 1, f)` then `h.len`. The filling call must dominate
+    * the read. The API's name is the evidence.
+    */
+  private def untrustedFill(field: Call): Option[String] =
+      baseOf(field).flatMap { base =>
+        val wanted = bufferDecls(base)
+        if wanted.isEmpty then None
+        else
+          field.method.ast.isCall.l.iterator
+              .filter(_.tag.name(MemoryApiPass.TagUntrustedRead).nonEmpty)
+              .filter(fill => field.dominatedBy.exists(_.id == fill.id))
+              .find(fill =>
+                  fill.argument.l.exists(a =>
+                      a.tag.name(MemoryApiPass.TagUntrustedRead).nonEmpty &&
+                          bufferDecls(a).intersect(wanted).nonEmpty
+                  )
+              )
+              .map(_.name)
+      }
+
+  /** The origins of a field read that the method itself stored to (`m.len = n; ... m.len`): the
+    * stored values of every store that reaches the read with its base unchanged. The field's own
+    * earlier value (`struct-field`) joins them when some path reaches the read without a store, or
+    * a call handed the base could have rewritten it in between. None when no store reaches.
+    */
+  private def storedOrigins(field: Call, depth: Int): Option[Set[(String, String)]] =
+    if depth < 0 then return None
+    val fs = OverlayFacts.fieldStoresReaching(field)
+    if fs.reaching.isEmpty then None
+    else
+      val stored = fs.reaching.flatMap { st =>
+        val rhs = st.argumentOption(2).collect { case e: Expression => e }.toSet
+            .flatMap(originsOf(_, depth - 1))
+        // a compound store (`m.len *= 2`) keeps part of the value before it
+        if st.name == "<operator>.assignment" then rhs
+        else
+          rhs ++ st.argumentOption(1).collect { case lhs: Call => lhs }
+              .flatMap(storedOrigins(_, depth - 1))
+              .getOrElse(Set((OriginStructField, field.code)))
+      }.toSet
+      Some(
+        if fs.dominated && !fs.rewritable then stored
+        else stored + ((OriginStructField, field.code))
+      )
+  end storedOrigins
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
 end ValueOriginPass

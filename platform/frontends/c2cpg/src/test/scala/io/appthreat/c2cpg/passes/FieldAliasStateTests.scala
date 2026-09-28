@@ -6,8 +6,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
 /** Allocation state through struct fields and aliases: `s->p` is tracked as its own variable, a
-  * copy of a pointer shares its block's fate, and a callee that frees a field of its argument on
-  * a failure path double-frees with a caller that releases it after that failure.
+  * copy of a pointer shares its block's fate, and a callee that frees a field of its argument on a
+  * failure path double-frees with a caller that releases it after that failure.
   */
 class FieldAliasStateTests extends DataFlowCodeToCpgSuite:
 

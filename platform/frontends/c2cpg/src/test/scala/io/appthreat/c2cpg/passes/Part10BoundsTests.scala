@@ -5,8 +5,8 @@ import io.appthreat.x2cpg.passes.taggers.*
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** Part 10, task 3: the one-sided bounds check, the sign-converting check, the unbounded
-  * container index, and the pointer-walk wraparound - with the negative shapes the task names.
+/** Part 10, task 3: the one-sided bounds check, the sign-converting check, the unbounded container
+  * index, and the pointer-walk wraparound - with the negative shapes the task names.
   */
 class Part10BoundsTests extends DataFlowCodeToCpgSuite:
 

@@ -169,8 +169,9 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         findingsIn("init_bad_local_struct") should contain("MS-INIT-001")
     }
     "leave a fully-written in-function struct, an address-taken one and whole-value reads alone" in {
-        Seq("init_ok_local_struct", "init_ok_local_struct_addr", "init_ok_local_whole_read").foreach { m =>
-            withClue(m) { findingsIn(m) should not contain "MS-INIT-001" }
+        Seq("init_ok_local_struct", "init_ok_local_struct_addr", "init_ok_local_whole_read").foreach {
+            m =>
+                withClue(m) { findingsIn(m) should not contain "MS-INIT-001" }
         }
     }
     "leave initialised, out-param, static, sizeof, loop-carried and maybe-initialised reads alone" in {

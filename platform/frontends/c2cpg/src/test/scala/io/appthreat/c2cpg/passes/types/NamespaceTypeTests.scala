@@ -386,5 +386,42 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
           )
       }
 
+      "spell a class or enum written by its plain name inside its namespace with its full name" in {
+          val cpg = code("""
+        |namespace kv {
+        |class Key { public: char space_[8]; };
+        |class Outer {
+        | public:
+        |  class Inner { public: char c_[4]; };
+        |  int g(Inner &i);
+        |};
+        |int Outer::g(Inner &i) { return sizeof(i.c_); }
+        |enum Color { Red, Green };
+        |Color pick(Color c) { Color d = c; return d; }
+        |int get(const Key &key, Key *other) { Key local = key; return sizeof(local.space_); }
+        |template <typename T> struct Box { T v; };
+        |int unbox(Box<int> b) { return b.v; }
+        |typedef Outer Alias;
+        |int via(Alias *a) { return 0; }
+        |}
+        |""".stripMargin)
+          // a declaration and its definition both carry the parameters: read them once
+          def params(m: String) =
+              cpg.method.nameExact(m).parameter.l.map(p => p.name -> p.typeFullName).distinct
+          params("get") shouldBe List("key" -> "kv.Key", "other" -> "kv.Key*")
+          cpg.method.nameExact("get").local.nameExact("local").typeFullName.l shouldBe List(
+            "kv.Key"
+          )
+          params("g") shouldBe List("i" -> "kv.Outer.Inner")
+          params("pick") shouldBe List("c" -> "kv.Color")
+          cpg.method.nameExact("pick").methodReturn.typeFullName.l shouldBe List("kv.Color")
+          // one declaration per class: no member-less stub under the plain spelling
+          cpg.typeDecl.nameExact("Key").fullName.l shouldBe List("kv.Key")
+          cpg.typeDecl.nameExact("Inner").fullName.l shouldBe List("kv.Outer.Inner")
+          // template ids and typedef names keep the spelling they are written with
+          params("unbox") shouldBe List("b" -> "Box<int>")
+          params("via") shouldBe List("a" -> "Alias*")
+      }
+
   }
 end NamespaceTypeTests

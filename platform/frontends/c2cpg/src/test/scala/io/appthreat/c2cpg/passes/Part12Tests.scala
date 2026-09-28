@@ -297,7 +297,7 @@ class Part12BoundsTests extends DataFlowCodeToCpgSuite:
     |   when it fits, a new[] of the exact need otherwise (part 12 cause 2) */
     |void store(struct key *k, const char *bytes, unsigned n)
     |{
-    |    size_t need = n + 8;
+    |    size_t need = (size_t)n + 8; // widened: `n + 8` in unsigned int wraps
     |    char *dst;
     |    if (need <= sizeof(k->space_))
     |        dst = k->space_;

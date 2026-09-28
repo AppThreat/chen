@@ -68,15 +68,25 @@ object AstCreationPass:
     * older frontend is otherwise replayed as-is (the September 2026 `.chen` fragments carried no
     * call-site `fn-attr` tags, so a warm run silently lost every header attribute).
     */
-  private val AstFormatVersion = "c2cpg-ast-2"
+  // 3: member layouts of header-defined types ride the used types (part 13)
+  private val AstFormatVersion = "c2cpg-ast-3"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
-    * format, the include paths a header is resolved through, and the defines that gate it. (A
-    * header's own content is not covered.)
+    * format, the include paths a header is resolved through, the defines that gate it, and the
+    * macro and include files every file is preprocessed with. (A header's own content is not
+    * covered.)
     */
   def cacheFingerprint(config: Config): String =
-      (AstFormatVersion +: (config.includePaths.toList.sorted ++ config.defines.toList.sorted))
-          .mkString("\u0000")
+    // a macro or include file changes what every file preprocesses to: its path AND content
+    // key the cache, or editing a `--macro-files` header replays the ASTs parsed without it
+    def contentOf(kind: String)(p: String): String =
+      val crc = new java.util.zip.CRC32()
+      Try(Files.readAllBytes(Paths.get(p))).foreach(b => crc.update(b))
+      s"$kind:$p:${crc.getValue}"
+    (AstFormatVersion +: (config.includePaths.toList.sorted ++ config.defines.toList.sorted ++
+        config.macroFiles.toList.sorted.map(contentOf("macro")) ++
+        config.includeFiles.toList.sorted.map(contentOf("include"))))
+        .mkString("\u0000")
 
   /** The AST cache key for a file: absolute path identity + file content (matches what the AST pass
     * uses, so warm-restore finds the same `.frag`).

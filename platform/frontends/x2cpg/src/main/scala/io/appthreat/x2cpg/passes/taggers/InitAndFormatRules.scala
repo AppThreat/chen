@@ -12,11 +12,12 @@ import scala.collection.mutable
   *     (some caller passes a non-literal for it) or a local with a non-literal definition. A
   *     variadic or `va_list` forwarder passing its own format parameter on is the wrapper idiom,
   *     not the bug: its callers' formats are what matters.
-  *   - **MS-INIT-001** (CWE-457) - a read of a local that NO path from the method entry initialises:
-  *     a forward maybe-initialised dataflow over the CFG, per variable and per struct field (`s.a =
-  *     1; use(s.b)` reads an uninitialised member). Taking the address (`&x`, an out-parameter) or
-  *     writing any part counts as initialising it; static locals are zero-initialised. Arrays and
-  *     class types are left alone - a constructor or a fill loop initialises what this cannot see.
+  *   - **MS-INIT-001** (CWE-457) - a read of a local that NO path from the method entry
+  *     initialises: a forward maybe-initialised dataflow over the CFG, per variable and per struct
+  *     field (`s.a = 1; use(s.b)` reads an uninitialised member). Taking the address (`&x`, an
+  *     out-parameter) or writing any part counts as initialising it; static locals are
+  *     zero-initialised. Arrays and class types are left alone - a constructor or a fill loop
+  *     initialises what this cannot see.
   */
 object InitAndFormatRules:
 
@@ -77,7 +78,10 @@ object InitAndFormatRules:
                       val method = call.method
                       method.parameter.nameExact(i.name).l.headOption match
                         case Some(param) =>
-                            if !isForwarder(method) && someCallerPassesNonLiteral(method, param.index)
+                            if !isForwarder(method) && someCallerPassesNonLiteral(
+                                method,
+                                param.index
+                              )
                             then record(i, MemorySafetyFindingPass.RuleFormatString)
                         case None if method.local.nameExact(i.name).nonEmpty =>
                             val defs = OverlayFacts.reachingDefsIn(i)
@@ -126,20 +130,21 @@ object InitAndFormatRules:
     if byFull.nonEmpty then byFull
     else atom.typeDecl.nameExact(name.split("[.:]").last).l
 
-  /** A `struct S { ... } s;` declared INSIDE the function: the frontend keeps no members for it
-    * (only a bare external stub, or nothing), so [[isPodStruct]] cannot see the body. The local's
-    * own `struct` keyword is the evidence this is a C struct defined right here - no constructor,
-    * no fill loop the analysis cannot see - and the per-field question is askable from the field
-    * accesses the function itself makes. An unknown non-struct type (a C++ class through the C
-    * frontend, a header type the tree does not carry) keeps no such keyword and stays out.
+  /** A `struct S { ... } s;` declared INSIDE the function: the frontend keeps only an external stub
+    * for it (bare, or carrying the member layout the AST pass recorded), so [[isPodStruct]], which
+    * reads parsed definitions only, cannot see the body. The local's own `struct` keyword is the
+    * evidence this is a C struct defined right here - no constructor, no fill loop the analysis
+    * cannot see - and the per-field question is askable from the field accesses the function itself
+    * makes. An unknown non-struct type (a C++ class through the C frontend, a header type the tree
+    * does not carry) keeps no such keyword and stays out.
     */
   private def isLocalStructDefinition(atom: Cpg, t: String, localCode: String): Boolean =
-    localCode.trim.startsWith("struct ") && {
-        val name = t.trim.stripPrefix("struct ").trim
-        podCandidates(atom, name).forall(td =>
-            OverlayFacts.membersOfTypeDecl(td).isEmpty && td.method.isEmpty
-        )
-    }
+      localCode.trim.startsWith("struct ") && {
+          val name = t.trim.stripPrefix("struct ").trim
+          podCandidates(atom, name).forall(td =>
+              (OverlayFacts.membersOfTypeDecl(td).isEmpty || td.isExternal) && td.method.isEmpty
+          )
+      }
 
   private def candidateType(atom: Cpg, t: String, localCode: String = ""): Boolean =
     val n = t.trim
@@ -175,7 +180,9 @@ object InitAndFormatRules:
 
   /** The outermost access of a member chain `f` is the base of: `s.f` inside `s.f.g.h`. */
   private def outermostAccess(f: Call): Call =
-      parentCall(f).filter(p => p.name == "<operator>.fieldAccess" && p.argumentOption(1).exists(_.id == f.id))
+      parentCall(f).filter(p =>
+          p.name == "<operator>.fieldAccess" && p.argumentOption(1).exists(_.id == f.id)
+      )
           .map(outermostAccess).getOrElse(f)
 
   private def insideUnevaluated(n: AstNode): Boolean =
@@ -193,7 +200,8 @@ object InitAndFormatRules:
   private def insideMacroArgument(n: AstNode): Boolean =
       n.inAst.collectAll[Call].exists(_.dispatchType == "INLINED")
 
-  /** `x = x` - FFmpeg's `av_uninit(x)`, the compiler-warning silencer: a declaration, not a read. */
+  /** `x = x` - FFmpeg's `av_uninit(x)`, the compiler-warning silencer: a declaration, not a read.
+    */
   private def isSelfAssignmentRhs(i: Identifier, parent: Option[Call]): Boolean =
       parent.exists(p =>
           p.name == "<operator>.assignment" && p.argumentOption(2).exists(_.id == i.id) &&
@@ -205,24 +213,25 @@ object InitAndFormatRules:
 
   def uninitialisedReads(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
       atom.method.isExternal(false).foreach { method =>
-          val locals = method.local.l
-          // a macro may assign what it is handed (`GET_V(count, ...)`, `bn_hex2bn(p, hex, ret)`)
-          // and its expansion's CFG is stitched, not built: a name a macro invocation mentions,
-          // or a local its body declares, is out of reach. So is a name declared twice (an inner
-          // scope's `int i` shadowing another) or shadowing a parameter - a name is the key here
-          val inlined = method.ast.collectAll[Call].filter(_.dispatchType == "INLINED").l
-          val macroNames = inlined.flatMap(_.ast.collectAll[Identifier].name.l).toSet
-          val params     = method.parameter.name.toSet
-          val declaredTwice = locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
-          val candidates = locals
-              .filter(l => !isStatic(l) && candidateType(atom, l.typeFullName, l.code))
-              .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
-              .map(_.name)
-              .toSet -- macroNames -- params -- declaredTwice
-          // declared on the line it is read on: hand-written C does not do that, a macro that
-          // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
-          val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap
-          if candidates.nonEmpty then analyse(method, candidates, declLine, record)
+        val locals = method.local.l
+        // a macro may assign what it is handed (`GET_V(count, ...)`, `bn_hex2bn(p, hex, ret)`)
+        // and its expansion's CFG is stitched, not built: a name a macro invocation mentions,
+        // or a local its body declares, is out of reach. So is a name declared twice (an inner
+        // scope's `int i` shadowing another) or shadowing a parameter - a name is the key here
+        val inlined    = method.ast.collectAll[Call].filter(_.dispatchType == "INLINED").l
+        val macroNames = inlined.flatMap(_.ast.collectAll[Identifier].name.l).toSet
+        val params     = method.parameter.name.toSet
+        val declaredTwice =
+            locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
+        val candidates = locals
+            .filter(l => !isStatic(l) && candidateType(atom, l.typeFullName, l.code))
+            .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
+            .map(_.name)
+            .toSet -- macroNames -- params -- declaredTwice
+        // declared on the line it is read on: hand-written C does not do that, a macro that
+        // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
+        val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap
+        if candidates.nonEmpty then analyse(method, candidates, declLine, record)
       }
 
   private def analyse(
@@ -243,8 +252,9 @@ object InitAndFormatRules:
                     gen(c.id()) = Set(i.name)
                 // `s.f.g = x` initialises (part of) s.f: partly initialised is not uninitialised
                 case f: Call =>
-                    rootFieldPath(f).filter(p => candidates.contains(p._1)).foreach { case (b, fl) =>
-                        gen(c.id()) = Set(s"$b.$fl")
+                    rootFieldPath(f).filter(p => candidates.contains(p._1)).foreach {
+                        case (b, fl) =>
+                            gen(c.id()) = Set(s"$b.$fl")
                     }
                 case _ => ()
             }
@@ -272,10 +282,12 @@ object InitAndFormatRules:
               reads += ((i, i.name, Set(i.name, s"${i.name}.*")))
         case f: Call if f.name == "<operator>.fieldAccess" =>
             fieldPath(f).filter(p => candidates.contains(p._1)).foreach { case (b, fl) =>
-                val top     = outermostAccess(f)
-                val parent  = parentCall(top)
-                val isWrite = parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
-                if !isWrite && !insideUnevaluated(f) then reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
+                val top    = outermostAccess(f)
+                val parent = parentCall(top)
+                val isWrite =
+                    parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
+                if !isWrite && !insideUnevaluated(f) then
+                  reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
             }
         case _ => ()
     }
@@ -296,7 +308,8 @@ object InitAndFormatRules:
       val n = worklist.dequeue()
       queued -= n.id()
       val preds = n._cfgIn.collectAll[CfgNode].l
-      val inSet = preds.foldLeft(Set.empty[String])((acc, p) => acc ++ out.getOrElse(p.id(), Set.empty))
+      val inSet =
+          preds.foldLeft(Set.empty[String])((acc, p) => acc ++ out.getOrElse(p.id(), Set.empty))
       in(n.id()) = inSet
       val o = inSet ++ genOf(n)
       if !out.get(n.id()).contains(o) then
@@ -314,9 +327,10 @@ object InitAndFormatRules:
       if reachable.add(n.id()) then n._cfgOut.collectAll[CfgNode].foreach(frontier.push)
     reads.foreach { case (node, shown, accepted) =>
         in.get(node.id()).foreach { s =>
-            val sameLine = node.lineNumber.exists(n => declLine.get(shown.takeWhile(_ != '.')).contains(n.toInt))
-            if reachable.contains(node.id()) && !sameLine && !accepted.exists(s.contains) then
-              record(node, MemorySafetyFindingPass.RuleUninitialisedRead)
+          val sameLine =
+              node.lineNumber.exists(n => declLine.get(shown.takeWhile(_ != '.')).contains(n.toInt))
+          if reachable.contains(node.id()) && !sameLine && !accepted.exists(s.contains) then
+            record(node, MemorySafetyFindingPass.RuleUninitialisedRead)
         }
     }
   end analyse

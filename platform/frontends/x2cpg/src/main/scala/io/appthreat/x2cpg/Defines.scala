@@ -17,7 +17,13 @@ object Defines:
 
   // A frontend-recorded storage class on a LOCAL that has static storage duration (C/C++
   // `static` inside a function): the schema has no property or MODIFIER child for it on a LOCAL.
-  val StorageClassTag    = "storage-class"
+  val StorageClassTag = "storage-class"
+
+  /** The compile-time value of a constant a frontend could not show as a literal (a `const` or
+    * `constexpr` integral defined in a header the tree does not parse), on the identifiers that
+    * name it.
+    */
+  val ConstValueTag      = "const-value"
   val StorageClassStatic = "static"
 
   /** A GCC/Clang function attribute written on a declaration or definition, normalised

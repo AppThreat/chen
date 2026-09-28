@@ -4,6 +4,7 @@ import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.passes.{
     AstCreationPass,
     ConfigFileCreationPass,
+    ConstantTagPass,
     PreprocessorPass,
     TypeDeclNodePass
 }
@@ -16,7 +17,9 @@ import io.appthreat.x2cpg.passes.linking.FragmentSplicePass
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 
-import java.nio.file.Paths
+import io.appthreat.c2cpg.parser.MacroCensus
+
+import java.nio.file.{Files, Paths}
 import scala.util.Try
 
 class C2Cpg extends X2CpgFrontend[Config]:
@@ -32,14 +35,17 @@ class C2Cpg extends X2CpgFrontend[Config]:
           config.withIncludePaths(config.includePaths ++ projectIncludes.map(_.toString))
         else
           config
+        val censusConfig = C2Cpg.withCensusDefines(updatedConfig)
 
-        if !warmRestoreFromFragments(cpg, updatedConfig) then
-          new AstCreationPass(cpg, updatedConfig).createAndApply()
+        if !warmRestoreFromFragments(cpg, censusConfig) then
+          new AstCreationPass(cpg, censusConfig).createAndApply()
 
         if !config.onlyAstCache then
           new ConfigFileCreationPass(cpg).createAndApply()
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
-          new TypeDeclNodePass(cpg)(using config.schemaValidation).createAndApply()
+          new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)
+              .createAndApply()
+          new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
       }
 
   /** Fastest-splice warm restore (CHEN3_PLAN §3.4): when fragment caching is enabled (atom
@@ -60,10 +66,12 @@ class C2Cpg extends X2CpgFrontend[Config]:
             config.onlyAstCache
           )
           val fragments =
-              files.toSeq.map(f => store.fragmentFor(
-                AstCreationPass.fileCacheKey(f),
-                AstCreationPass.cacheFingerprint(config)
-              ))
+              files.toSeq.map(f =>
+                  store.fragmentFor(
+                    AstCreationPass.fileCacheKey(f),
+                    AstCreationPass.cacheFingerprint(config)
+                  )
+              )
           if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse
           else
             new FragmentSplicePass(
@@ -72,8 +80,50 @@ class C2Cpg extends X2CpgFrontend[Config]:
               ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
             ).createAndApply()
             true
+        end if
+
+  /** `--macro-census` alone: write the report and a reviewable `--macro-files` header, no CPG. */
+  def writeMacroCensus(config: Config): Unit =
+    val report = MacroCensus.run(config)
+    C2Cpg.writeReport(config, report)
+    println(report.summary())
 
   def printIfDefsOnly(config: Config): Unit =
     val stmts = new PreprocessorPass(config).run().mkString(",")
     println(stmts)
+end C2Cpg
+
+object C2Cpg:
+
+  /** The census (opt-in): with `--auto-defines` its auto tier joins the user's defines - a name the
+    * user defined, undefined or left in a `--macro-files`/`--include-files` file is never
+    * overridden. The report is written whenever a path is given. Shared by every C frontend entry.
+    */
+  def withCensusDefines(config: Config): Config =
+      if !config.autoDefines && config.macroCensusReport.isEmpty then config
+      else
+        val report = MacroCensus.run(config)
+        writeReport(config, report)
+        if !config.autoDefines then config
+        else
+          println(report.summary())
+          if report.auto.nonEmpty then
+            println(s"Auto-defines: ${report.auto.map(_.name).mkString(" ")}")
+          config.withDefines(config.defines ++ report.autoDefines)
+
+  /** Write `<base>.json` and `<base>.h`, creating the directory; a failure is reported, never fatal
+    * to the analysis.
+    */
+  def writeReport(config: Config, report: MacroCensus.Report): Unit =
+      MacroCensus.reportPaths(config) match
+        case List(json, header) =>
+            try
+              Option(json.toAbsolutePath.getParent).foreach(Files.createDirectories(_))
+              Files.writeString(json, report.toJson)
+              Files.writeString(header, report.toMacroHeader)
+              println(s"Macro census written to $json and $header (use --macro-files $header)")
+            catch
+              case e: java.io.IOException =>
+                  System.err.println(s"Macro census: cannot write $json / $header: ${e.getMessage}")
+        case _ => ()
 end C2Cpg

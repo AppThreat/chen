@@ -26,7 +26,13 @@ final case class Config(
   includeTrivialExpressions: Boolean = false,
   enableAstCache: Boolean = true,
   cacheDir: String = "",
-  onlyAstCache: Boolean = false
+  onlyAstCache: Boolean = false,
+  // opt-in: run the macro census first and define its auto tier (see parser.MacroCensus)
+  autoDefines: Boolean = false,
+  // where to write the census report (JSON) and its `--macro-files` header; empty = none
+  macroCensusReport: String = "",
+  // run the census, write the report and stop: no CPG
+  macroCensusOnly: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -64,6 +70,12 @@ final case class Config(
       this.copy(cacheDir = value).withInheritedFields(this)
   def withOnlyAstCache(value: Boolean): Config =
       this.copy(onlyAstCache = value).withInheritedFields(this)
+  def withAutoDefines(value: Boolean): Config =
+      this.copy(autoDefines = value).withInheritedFields(this)
+  def withMacroCensusReport(value: String): Config =
+      this.copy(macroCensusReport = value).withInheritedFields(this)
+  def withMacroCensusOnly(value: Boolean): Config =
+      this.copy(macroCensusOnly = value).withInheritedFields(this)
 end Config
 
 private object Frontend:
@@ -136,7 +148,17 @@ private object Frontend:
           .action((d, c) => c.withCacheDir(d)),
       opt[Unit]("only-ast-cache")
           .text("Generates AST cache only and skips CPG creation.")
-          .action((_, c) => c.withOnlyAstCache(true).withAstCache(true))
+          .action((_, c) => c.withOnlyAstCache(true).withAstCache(true)),
+      opt[Unit]("auto-defines")
+          .text(
+            "runs a macro census first and defines the build-option macros (CONFIG_*, template-declared) that hide #if code"
+          )
+          .action((_, c) => c.withAutoDefines(true)),
+      opt[String]("macro-census")
+          .text(
+            "writes the macro census to <file>.json and a --macro-files header to <file>.h; does not create a CPG unless --auto-defines is also set"
+          )
+          .action((f, c) => c.withMacroCensusReport(f).withMacroCensusOnly(!c.autoDefines))
     )
   end cmdLineParser
 end Frontend
@@ -153,5 +175,6 @@ object Main extends X2CpgMain(cmdLineParser, new C2Cpg()):
           case NonFatal(ex) =>
               logger.debug("Failed to print preprocessor statements.", ex)
               throw ex
+      else if config.macroCensusOnly && !config.autoDefines then c2cpg.writeMacroCensus(config)
       else
         c2cpg.run(config)

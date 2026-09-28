@@ -122,6 +122,21 @@ private[taggers] final class IndexRange(
                 if persistsAcrossCalls(i) then None
                 else ofIdentifier(i, depth).flatMap(r => convert(Some(r), typeOf(i)))
             fromDefinitions.orElse(ofType(typeOf(i)))
+        // a field the method stored once, on every path, and nothing rewrote since: the stored
+        // value's range (`ast->sub_packet_cnt = (avio_rb16(pb) & 0xf0) >> 4` is at most 15)
+        case c: Call
+            if (c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess") &&
+                depth > 0 &&
+                OverlayFacts.fieldStoresReaching(c).single.isDefined =>
+            OverlayFacts.fieldStoresReaching(c).single
+                .flatMap(_.argumentOption(2).collect { case e: Expression => e })
+                .flatMap(of(_, depth - 1))
+                // stored into the field's type; with that type unknown, a range inside [0, 127]
+                // survives every integer type unchanged
+                .flatMap(r =>
+                    convert(Some(r), typeOf(c)).orElse(Option.when(r.lo >= 0 && r.hi <= 127)(r))
+                )
+                .orElse(ofType(typeOf(c)))
         // an element read: the element type of the array (`unsigned int buffer_num[4]`), which
         // the frontend leaves off the access itself
         case c: Call
@@ -179,7 +194,7 @@ private[taggers] final class IndexRange(
                 case n
                     if isTarget && (n.startsWith("<operator>.assignment") ||
                         n.matches("<operator>\\.(pre|post)Decrement")) =>
-                      List(None)
+                    List(None)
                 case "<operator>.addressOf" => List(None)
                 case _                      => Nil
             }
@@ -312,7 +327,11 @@ private[taggers] object IndexRange:
   def literal(e: AstNode): Option[BigInt] = e match
     case l: Literal                              => literalValue(l.code)
     case c: Call if c.name == "<operator>.minus" => c.argumentOption(1).flatMap(literal).map(-_)
-    case _                                       => None
+    // a header constant the frontend folded: `config::kNumLevels` is 7
+    case i: Identifier =>
+        i.tag.name(io.appthreat.x2cpg.Defines.ConstValueTag).value.headOption
+            .flatMap(v => scala.util.Try(BigInt(v)).toOption)
+    case _ => None
 
   def literalValue(code: String): Option[BigInt] =
     val c = code.trim.toLowerCase.replaceAll("[ul]+$", "")

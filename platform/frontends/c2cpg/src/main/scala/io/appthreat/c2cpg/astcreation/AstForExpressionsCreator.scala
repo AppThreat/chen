@@ -571,6 +571,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       val args = astsForConstructorInitializer(newExpression.getInitializer) ++
           astsForInitializerPlacements(newExpression.getPlacementArguments)
       callAst(cpgNewExpression, List(cpgTypeId) ++ args)
+  end astForNewExpression
 
   private def astForDeleteExpression(delExpression: ICPPASTDeleteExpression): Ast =
     val name = Operators.delete

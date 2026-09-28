@@ -46,14 +46,14 @@ private[taggers] object OverlayFacts:
     * member is resolved through the base expression's type (`blk*` -> typeDecl `blk`) and the
     * canonical member name; identifiers without a recovered type resolve nothing.
     *
-    * Same-named structs in different files are different structs: libavformat defines an
-    * ASFContext per asfdec variant, and their `asf_st` members are `ASFStream*` in one and
-    * `ASFStream*[128]` in another. C's visibility answers which one a read sees - the struct
-    * defined in the file that reads it - and that preference is also what makes the answer
-    * deterministic: the typeDecl a traversal returns first is parse order, which run-to-run
-    * parallelism reorders (part 10 task 0: whole MS-BOUND-003 groups flipped per file on this).
-    * Without a same-file definition the candidates are read in a content-stable order and the
-    * first is taken - arbitrary, but the same arbitrary one every run.
+    * Same-named structs in different files are different structs: libavformat defines an ASFContext
+    * per asfdec variant, and their `asf_st` members are `ASFStream*` in one and `ASFStream*[128]`
+    * in another. C's visibility answers which one a read sees - the struct defined in the file that
+    * reads it - and that preference is also what makes the answer deterministic: the typeDecl a
+    * traversal returns first is parse order, which run-to-run parallelism reorders (part 10 task 0:
+    * whole MS-BOUND-003 groups flipped per file on this). Without a same-file definition the
+    * candidates are read in a content-stable order and the first is taken - arbitrary, but the same
+    * arbitrary one every run.
     */
   def memberRefOf(cpg: Cpg, fieldAccess: Call): Option[Member] =
       for
@@ -72,22 +72,46 @@ private[taggers] object OverlayFacts:
             .headOption
       yield member
 
-  /** The member `memberName` of the type declarations named `typeName`, preferring the
-    * definition in `inFile`, then a content-stable order. See [[memberRefOf]].
+  /** The member `memberName` of the type declarations named `typeName`, preferring the definition
+    * in `inFile`, then a content-stable order. See [[memberRefOf]].
     */
   def membersOfNamedType(
     cpg: Cpg,
     typeName: String,
     memberName: String,
     inFile: String
-  ): List[Member] =
-      val candidates = cpg.typeDecl.nameExact(typeName).l
-          .flatMap(td => membersOfTypeDecl(td).map(m => (td.filename, m)))
-          .filter { case (_, m) => m.name == memberName }
-      val sameFile = candidates.collect { case (f, m) if f == inFile => m }
-      val ordered  = if sameFile.nonEmpty then sameFile
-                     else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
-      ordered.distinctBy(_.id)
+  ): List[Member] = membersAmong(cpg.typeDecl.nameExact(typeName).l, memberName, inFile)
+
+  /** The member `memberName` of `decls`, preferring the definition in `inFile`, then a
+    * content-stable order. Only declarations that declare the member count: a same-named
+    * `<includes>` stub carries none.
+    */
+  def membersAmong(decls: List[TypeDecl], memberName: String, inFile: String): List[Member] =
+    val candidates = decls
+        .flatMap(td => membersOfTypeDecl(td).map(m => (td.filename, m)))
+        .filter { case (_, m) => m.name == memberName }
+    val sameFile = candidates.collect { case (f, m) if f == inFile => m }
+    val ordered = if sameFile.nonEmpty then sameFile
+    else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
+    ordered.distinctBy(_.id)
+
+  /** The member an implicit-this read names (`space_` inside a method). c2cpg types that identifier
+    * with the OWNER class (`leveldb.LookupKey`, `leveldb..PosixWritableFile` in an anonymous
+    * namespace), so the member is looked up in the owner's declaration by full name, and by its
+    * simple name only when no full-name match declares it. A header class is known only as
+    * `<includes>` stubs, and a stub of the same simple name with no members (another translation
+    * unit's unqualified spelling) must not hide the one that carries the layout.
+    */
+  def implicitMemberOf(cpg: Cpg, i: Identifier): Option[Member] =
+    val owner = i.typeFullName.trim.replace("::", ".")
+    if owner.isEmpty || isPointer(owner) then None
+    else
+      val inFile = i.method.filename
+      val exact  = membersAmong(cpg.typeDecl.fullNameExact(owner).l, i.name, inFile)
+      val found =
+          if exact.nonEmpty then exact
+          else membersOfNamedType(cpg, owner.split('.').lastOption.getOrElse(""), i.name, inFile)
+      found.headOption
 
   /** The members of one type declaration, read through the AST edge.
     *
@@ -99,9 +123,8 @@ private[taggers] object OverlayFacts:
     * the schema step is only the fallback for a declaration whose edge was never built.
     */
   def membersOfTypeDecl(td: TypeDecl): List[Member] =
-      val viaAst = td.astChildren.collectAll[Member].l
-      if viaAst.nonEmpty then viaAst else td.member.l
-
+    val viaAst = td.astChildren.collectAll[Member].l
+    if viaAst.nonEmpty then viaAst else td.member.l
 
   /** Declared array size from a type full name (`char[64]`, `int[16]` through a #define). */
   def arrayExtent(typeFullName: String): Option[Int] =
@@ -162,15 +185,15 @@ private[taggers] object OverlayFacts:
 
   /** GCC writes compound type names with the sign word last (`short unsigned`); every lookup in
     * this object normalises to the canonical order first. The bare spellings `unsigned` and
-    * `signed` are `unsigned int` and `int` in C - libavformat's `unsigned count` parameters
-    * carried the bare word, and every integral lookup on them concluded nothing (part 10: the
-    * one-sided bounds arm's `param:` extent and the unsigned-index negative both read it).
+    * `signed` are `unsigned int` and `int` in C - libavformat's `unsigned count` parameters carried
+    * the bare word, and every integral lookup on them concluded nothing (part 10: the one-sided
+    * bounds arm's `param:` extent and the unsigned-index negative both read it).
     */
   def normalizeTypeName(t: String): String =
-    val words   = t.stripPrefix("const ").trim.split("\\s+").toList
-    val sign    = words.find(w => w == "unsigned" || w == "signed")
-    val rest    = words.filterNot(w => sign.contains(w))
-    val norm    = (sign.toList ::: rest).mkString(" ")
+    val words = t.stripPrefix("const ").trim.split("\\s+").toList
+    val sign  = words.find(w => w == "unsigned" || w == "signed")
+    val rest  = words.filterNot(w => sign.contains(w))
+    val norm  = (sign.toList ::: rest).mkString(" ")
     norm match
       case "unsigned" => "unsigned int"
       case "signed"   => "int"
@@ -352,8 +375,8 @@ private[taggers] object OverlayFacts:
     * on what a guard is or a summary would contradict the rule that consumes it.
     *
     * A conjunction guards EVERY conjunct when it holds - `while (n && !n->marked)` narrows the
-    * body's use of `n` exactly as a bare `if (n)` would - so the conjuncts are walked
-    * recursively (part 12).
+    * body's use of `n` exactly as a bare `if (n)` would - so the conjuncts are walked recursively
+    * (part 12).
     */
   def nullGuardKeysOf(cond: AstNode, pointerNames: Set[String]): List[String] =
     def pointerKey(e: AstNode): Option[String] = e match
@@ -375,6 +398,7 @@ private[taggers] object OverlayFacts:
       case not: Call if not.name == "<operator>.logicalNot" =>
           not.argumentOption(1).flatMap(pointerKey).toList
       case other => pointerKey(other).toList
+  end nullGuardKeysOf
 
   private def isNullLiteralNode(e: AstNode): Boolean =
       AllocationStatePass.isNullLiteral(e, c => c.argumentOption(2).orElse(c.argumentOption(1)))
@@ -395,4 +419,112 @@ private[taggers] object OverlayFacts:
             cs.condition.flatMap(cond => nullGuardKeysOf(cond, pointerNames)).map(key => (key, cs))
         }
         .toMap
+
+  /** The stores to a field that reach one read of it in the same method. `reaching`: each store of
+    * the same field spelling, with its base the same unchanged variable, from which some CFG path
+    * reaches the read without passing another such store. `dominated`: one of them runs on every
+    * path to the read. `rewritable`: a call between a store and the read is handed the base pointer
+    * or an address into the struct (a call handed a field's value cannot rewrite it).
+    */
+  final case class FieldStores(reaching: List[Call], dominated: Boolean, rewritable: Boolean):
+    /** the one value the read sees: a single plain store, on every path, not rewritten since */
+    def single: Option[Call] = reaching match
+      case List(st) if dominated && !rewritable && st.name == "<operator>.assignment" => Some(st)
+      case _                                                                          => None
+
+  private def withoutCastsE(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
+            .map(withoutCastsE).getOrElse(e)
+    case other => other
+
+  def fieldStoresReaching(field: Call): FieldStores =
+    def spelled(e: AstNode): String = e.code.replaceAll("\\s+", "")
+    def baseOf(f: Call): Option[Identifier] =
+        f.argumentOption(1).collect { case e: Expression => e }.map(withoutCastsE)
+            .collect { case i: Identifier => i }
+    val code   = spelled(field)
+    val baseId = baseOf(field)
+    val stores = field.method.ast.isCall.l.filter { a =>
+        a.name.startsWith("<operator>.assignment") &&
+        a.argumentOption(1).exists {
+            case lhs: Call =>
+                (lhs.name == "<operator>.fieldAccess" || lhs
+                    .name == "<operator>.indirectFieldAccess") &&
+                lhs.id != field.id && spelled(lhs) == code
+            case _ => false
+        }
+    }
+    val storeIds = stores.map(_.id()).toSet
+    val reaching = stores.filter { st =>
+        GuardPass.cfgReachesAvoiding(st._cfgOut.collectAll[CfgNode].l, field.id(), storeIds) &&
+        baseId.exists(b =>
+            st.argumentOption(1).collect { case lhs: Call => lhs }.flatMap(baseOf)
+                .exists(sb => unchangedBetween(sb, b))
+        )
+    }
+    val dominated = reaching.exists(st => field.dominatedBy.exists(_.id == st.id))
+    val baseDecls = baseId.toList.flatMap(declOf).map(_.id()).toSet
+    def namesBase(e: Expression): Boolean = withoutCastsE(e) match
+      case i: Identifier => declOf(i).exists(d => baseDecls.contains(d.id()))
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argumentOption(1).collect { case x: Expression => x }.exists(namesBase)
+      case c: Call if c.name == "<operator>.addressOf" =>
+          c.argumentOption(1).collect { case x: Expression => x }.exists(x =>
+              x.ast.isIdentifier.l.exists(i => declOf(i).exists(d => baseDecls.contains(d.id())))
+          )
+      case _ => false
+    val rewritable = reaching.nonEmpty && field.method.ast.isCall.l.exists { c =>
+        !c.name.startsWith("<operator>") && c.argument.l.exists(namesBase) &&
+        reaching.exists(st =>
+            GuardPass.cfgReaches(st._cfgOut.collectAll[CfgNode].l, c.id(), avoid = st.id())
+        ) && GuardPass.cfgReaches(c._cfgOut.collectAll[CfgNode].l, field.id(), avoid = c.id())
+    }
+    FieldStores(reaching, dominated, rewritable)
+  end fieldStoresReaching
+
+  /** `&x` handed to an inventoried memory call as its source: read through, never written. */
+  def readOnlyAddress(addressOf: Call): Boolean =
+      addressOf.tag.name(MemoryApiPass.TagSrc).nonEmpty &&
+          addressOf.tag.name(MemoryApiPass.TagDst).isEmpty
+
+  /** The declaration an occurrence refers to: a local or a parameter. */
+  def declOf(i: Identifier): Option[StoredNode] =
+      i._refOut.collectFirst { case d @ (_: Local | _: MethodParameterIn) => d }
+
+  /** Every occurrence in its method that gives the variable a new value: assignment and increment
+    * targets, and a written-through address (`get_len(&n)`; `memcpy(d, &n, sizeof n)` only reads).
+    */
+  def definitionSitesOf(i: Identifier): List[CfgNode] =
+      declOf(i) match
+        case None => Nil
+        case Some(decl) =>
+            i.method.ast.isIdentifier.l.filter { o =>
+                declOf(o).exists(_.id() == decl.id()) && GuardPass.isDefinitionSite(o) &&
+                !o._astIn.headOption.exists {
+                    case c: Call => c.name == "<operator>.addressOf" && readOnlyAddress(c)
+                    case _       => false
+                }
+            }
+
+  /** No definition of `earlier`'s variable on a CFG path from `earlier` to `later` that does not
+    * pass `earlier` again: the value read at `later` is the one `earlier` read. A loop that
+    * re-reads the variable and reaches `later` without going back through `earlier` changes it; one
+    * that reassigns it and comes back through `earlier` does not.
+    */
+  def unchangedBetween(earlier: Identifier, later: Identifier): Boolean =
+      earlier.id() == later.id() ||
+          GuardPass.statementRootOf(earlier).id() == GuardPass.statementRootOf(later).id() || {
+              val start = earlier._cfgOut.collectAll[CfgNode].l
+              !definitionSitesOf(earlier).exists { d =>
+                  d.id() != earlier.id() &&
+                  GuardPass.cfgReaches(start, d.id(), avoid = earlier.id()) &&
+                  GuardPass.cfgReaches(
+                    d._cfgOut.collectAll[CfgNode].l,
+                    later.id(),
+                    avoid = earlier.id()
+                  )
+              }
+          }
+
 end OverlayFacts

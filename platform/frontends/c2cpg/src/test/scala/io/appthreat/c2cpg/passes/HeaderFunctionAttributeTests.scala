@@ -65,6 +65,7 @@ class HeaderFunctionAttributeTests extends AnyWordSpec with Matchers:
       try f(cpg)
       finally cpg.close()
     finally root.delete(swallowIOExceptions = true)
+    end try
   end withScopedRun
 
   private def callAttrs(cpg: Cpg, name: String): Set[String] =
@@ -72,12 +73,12 @@ class HeaderFunctionAttributeTests extends AnyWordSpec with Matchers:
 
   "a header outside the analysed input" should:
     "put its declared attributes on every call" in withScopedRun { cpg =>
-        callAttrs(cpg, "av_malloc") shouldBe Set("malloc", "alloc_size(1)")
-        cpg.call.nameExact("av_malloc").l.map(
-          _.tag.nameExact(Defines.FunctionAttributeTag).value.toSet
-        ) shouldBe List.fill(2)(Set("malloc", "alloc_size(1)"))
-        callAttrs(cpg, "av_realloc_array") shouldBe Set("alloc_size(2,3)")
-        callAttrs(cpg, "av_strndup") shouldBe Set("malloc")
+      callAttrs(cpg, "av_malloc") shouldBe Set("malloc", "alloc_size(1)")
+      cpg.call.nameExact("av_malloc").l.map(
+        _.tag.nameExact(Defines.FunctionAttributeTag).value.toSet
+      ) shouldBe List.fill(2)(Set("malloc", "alloc_size(1)"))
+      callAttrs(cpg, "av_realloc_array") shouldBe Set("alloc_size(2,3)")
+      callAttrs(cpg, "av_strndup") shouldBe Set("malloc")
     }
     "leave a call to an unattributed declaration untagged" in withScopedRun { cpg =>
         callAttrs(cpg, "av_free") shouldBe empty
@@ -118,7 +119,8 @@ class RedeclaredFunctionAttributeTests extends CCodeToCpgSuite:
     }
 end RedeclaredFunctionAttributeTests
 
-/** A cached AST is only replayed for the frontend format and include configuration that built it. */
+/** A cached AST is only replayed for the frontend format and include configuration that built it.
+  */
 class AstCacheFingerprintTests extends AnyWordSpec with Matchers:
   "the AST cache fingerprint" should:
     "differ by include path and define, and be stable otherwise" in {

@@ -228,6 +228,8 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
         )
       }
     yield memberType
+    end for
+  end memberTypeOf
 
   private lazy val memberTypes: Map[(String, String), List[(String, String)]] =
     val types = mutable.HashMap.empty[(String, String), List[(String, String)]]

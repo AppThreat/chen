@@ -666,10 +666,9 @@ class Part11SummaryTests extends DataFlowCodeToCpgSuite:
     }
 end Part11SummaryTests
 
-
-/** The vividas decode_block shape as the tree run hit it: the length is a parameter copied to
-  * a local and narrowed by compound assignments and masks before the copy out of a 4-byte
-  * local array.
+/** The vividas decode_block shape as the tree run hit it: the length is a parameter copied to a
+  * local and narrowed by compound assignments and masks before the copy out of a 4-byte local
+  * array.
   */
 class Part11VividasShapeTests extends DataFlowCodeToCpgSuite:
 
@@ -738,14 +737,13 @@ class Part11VividasShapeTests extends DataFlowCodeToCpgSuite:
     }
 end Part11VividasShapeTests
 
-
-/** The dashdec/hls shape: copy_size = FFMIN(extent - offset, buf_size) out of the paired
-  * buffer, with FFMIN arriving from the external config the way the corpus passes it.
+/** The dashdec/hls shape: copy_size = FFMIN(extent - offset, buf_size) out of the paired buffer,
+  * with FFMIN arriving from the external config the way the corpus passes it.
   */
 class Part11FfminShapeTests extends DataFlowCodeToCpgSuite:
 
   private val config =
-    """{"apis": [{"name": "FFMIN", "clamp": "min"}]}"""
+      """{"apis": [{"name": "FFMIN", "clamp": "min"}]}"""
 
   private val cpg = code(
     """

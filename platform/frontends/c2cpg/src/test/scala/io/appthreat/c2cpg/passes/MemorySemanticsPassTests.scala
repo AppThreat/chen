@@ -286,6 +286,7 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
     new MemorySafetyFindingPass(cpg).createAndApply()
     root.delete(swallowIOExceptions = true)
     cpg
+  end cpg
 
   private def semanticsOf(name: String): Set[String] =
       cpg.method.nameExact(name).tag.nameExact(MemorySemanticsPass.TagSemantic).value.l.toSet
@@ -312,8 +313,8 @@ class ScopedHeaderMemorySemanticsTests extends AnyWordSpec with Matchers:
   "the deallocator heuristic" should:
     "make a void function of one void* or void** named free a heuristic free" in {
         Seq("av_free", "av_freep", "av_freep2").foreach { n =>
-            semanticsOf(n) shouldBe Set("free:heap")
-            evidenceOf(n) shouldBe Set(MemorySemanticsPass.EvidenceHeuristic)
+          semanticsOf(n) shouldBe Set("free:heap")
+          evidenceOf(n) shouldBe Set(MemorySemanticsPass.EvidenceHeuristic)
         }
     }
     "leave other shapes alone" in {

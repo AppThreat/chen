@@ -68,6 +68,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                   uniqueName("name", "", "")._1
               case _ => code(ident)
             val variableOption = scope.lookupVariable(identifierName)
+            if variableOption.isEmpty then registerConstantRead(ident)
             val identifierTypeName = variableOption match
               case Some((_, variableTypeName)) => variableTypeName
               case None =>
@@ -88,7 +89,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                             case other => other.getName
                         else
                           typeFor(ident.getParent)
-                    case _ => typeFor(ident)
+                    case _ =>
+                        registerImplicitMemberOwner(ident)
+                        typeFor(ident)
 
             val node = identifierNode(
               ident,
@@ -113,12 +116,16 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       else DispatchTypes.STATIC_DISPATCH
     )
     val owner = astForExpression(fieldRef.getFieldOwner)
+    Try(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
+        .flatMap(f => Option(f.getCompositeTypeOwner))
+        .foreach(registerMembersOf)
     val member = fieldIdentifierNode(
       fieldRef,
       fieldRef.getFieldName.toString,
       fieldRef.getFieldName.toString
     )
     callAst(ma, List(owner, Ast(member)))
+  end astForFieldReference
 
   protected def astForArrayModifier(arrMod: IASTArrayModifier): Ast =
       astForNode(arrMod.getConstantExpression)

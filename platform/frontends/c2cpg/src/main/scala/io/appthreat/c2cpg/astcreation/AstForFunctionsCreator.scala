@@ -142,10 +142,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     }.distinct.toList
   end gccAttributes
 
-  /** The declarator and declaration specifier of every declaration and the definition of
-    * `function` the translation unit has seen - the included headers' ones among them. A function
-    * declared twice keeps the attributes of both (`seenFunctionFullnames` builds one METHOD, from
-    * the first), and a definition inherits those of its prototype.
+  /** The declarator and declaration specifier of every declaration and the definition of `function`
+    * the translation unit has seen - the included headers' ones among them. A function declared
+    * twice keeps the attributes of both (`seenFunctionFullnames` builds one METHOD, from the
+    * first), and a definition inherits those of its prototype.
     */
   private def declarationOwners(function: IBinding): Seq[IASTNode] =
     val nodes: Seq[IASTNode] = function match
@@ -155,17 +155,17 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
           Option(c.getDeclarations).toSeq.flatten ++ Option(c.getDefinition)
       case _ => Nil
     nodes.flatMap { n =>
-        val declarator = n match
-          case name: IASTName => name.getParent
-          case other          => other
-        declarator match
-          case d: IASTFunctionDeclarator =>
-              val spec = d.getParent match
-                case s: IASTSimpleDeclaration   => Option(s.getDeclSpecifier)
-                case f: IASTFunctionDefinition  => Option(f.getDeclSpecifier)
-                case _                          => None
-              d +: spec.toSeq
-          case _ => Nil
+      val declarator = n match
+        case name: IASTName => name.getParent
+        case other          => other
+      declarator match
+        case d: IASTFunctionDeclarator =>
+            val spec = d.getParent match
+              case s: IASTSimpleDeclaration  => Option(s.getDeclSpecifier)
+              case f: IASTFunctionDefinition => Option(f.getDeclSpecifier)
+              case _                         => None
+            d +: spec.toSeq
+        case _ => Nil
     }.distinct
   end declarationOwners
 
@@ -183,7 +183,6 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
             EdgeTypes.TAGGED_BY
           )
     }
-  end tagFunctionAttributes
 
   /** The attributes already on each METHOD (by full name), so none is tagged twice. */
   private val methodAttributes = mutable.HashMap.empty[String, mutable.HashSet[String]]
@@ -197,11 +196,11 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     */
   protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
       gccAttributes(declarationOwners(function)).foreach { attr =>
-          val tag = callAttributeTags.getOrElseUpdate(
-            attr,
-            NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
-          )
-          diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
+        val tag = callAttributeTags.getOrElseUpdate(
+          attr,
+          NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
+        )
+        diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
       }
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
@@ -238,7 +237,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
             tagFunctionAttributes(
               methodNode_,
-              Seq(funcDecl, funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier),
+              Seq(
+                funcDecl,
+                funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+              ),
               function
             )
             declarationStubs(fullname) = methodNode_

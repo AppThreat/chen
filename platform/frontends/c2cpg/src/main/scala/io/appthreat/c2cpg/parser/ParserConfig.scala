@@ -26,9 +26,11 @@ object ParserConfig:
     IncludeAutoDiscovery.discoverIncludePathsCPP(config),
     DefaultDefines.GNU_COMPILER ++ config.defines.map {
         case define if define.contains("=") =>
-            val s = define.split("=")
+            val s = define.split("=", 2)
             s.head -> s(1)
-        case define => define -> "true"
+        // gcc's `-DNAME` is `NAME=1`: `true` is not a keyword to the C preprocessor, so
+        // `#if NAME` evaluated to 0 and a bare --define never enabled the code it gates
+        case define => define -> "1"
     }.toMap ++ DefaultDefines.DEFAULT_CALL_CONVENTIONS,
     config.macroFiles.map(Paths.get(_).toAbsolutePath),
     config.logProblems,

@@ -6,9 +6,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
 /** MS-INVAL-001 (CWE-416): a view into a std container - iterator, reference or pointer - used
-  * after a call that may reallocate or restructure the same container, with no re-take in
-  * between.
- */
+  * after a call that may reallocate or restructure the same container, with no re-take in between.
+  */
 class ContainerInvalidationRulesTests extends DataFlowCodeToCpgSuite:
 
   private val cpg = code(
@@ -136,7 +135,9 @@ class ContainerInvalidationRulesTests extends DataFlowCodeToCpgSuite:
         lowConfidenceIn("bad_reference_invalidation") shouldBe empty
     }
     "leave a re-taken view, a reserve-protected growth, another container and earlier uses alone" in {
-        Seq("good_retaken", "good_reserved", "good_other_container", "good_use_before").foreach { m =>
-            withClue(m) { findingsIn(m) should not contain "MS-INVAL-001" }
+        Seq("good_retaken", "good_reserved", "good_other_container", "good_use_before").foreach {
+            m =>
+                withClue(m) { findingsIn(m) should not contain "MS-INVAL-001" }
         }
     }
+end ContainerInvalidationRulesTests

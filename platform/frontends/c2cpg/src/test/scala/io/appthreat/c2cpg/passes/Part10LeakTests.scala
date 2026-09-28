@@ -5,9 +5,9 @@ import io.appthreat.x2cpg.passes.taggers.*
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** Part 10, tasks 1 and 2: the leak rule reports at `low` (see its rule entry), the overwrite arm keeps its
-  * pointer-arithmetic and fresh-allocation conditions, the loop-carried leak renders once, and a
-  * call into a method that may throw is an exit the frame's allocations do not survive.
+/** Part 10, tasks 1 and 2: the leak rule reports at `low` (see its rule entry), the overwrite arm
+  * keeps its pointer-arithmetic and fresh-allocation conditions, the loop-carried leak renders
+  * once, and a call into a method that may throw is an exit the frame's allocations do not survive.
   */
 class Part10LeakTests extends DataFlowCodeToCpgSuite:
 

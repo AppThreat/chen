@@ -96,7 +96,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
               scaledKeyOf(a).orElse(variableKey(a)).map(k => k -> a)
           }.toMap
           guardingControllers(controllerOf(call)).foreach { controller =>
-              conjuncts(controller, holdsAt(controller, call)).getOrElse(Nil).foreach {
+              conjunctsAt(controller, call).foreach {
                   case (cmp, cmpHolds) =>
                       directionalFacts(cmp, cmpHolds).foreach { case (bounded, above, bound) =>
                           // the value tested must be the value used: `while (n < 4) { n =
@@ -259,8 +259,6 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     * does not hold after an early-exit if (the only way a following node stays control-dependent on
     * the condition).
     */
-  private def holdsAt(condition: Call, target: Call): Boolean =
-      GuardPass.holdsAt(condition, target)
 
   /** The extent fact a bounding expression carries, when it is a buffer's capacity: a sizeof call,
     * or a variable whose declaration ExtentPass tagged.
@@ -422,13 +420,14 @@ object GuardPass:
     // facts of the sibling disjuncts: `!(a > 1 || b > 2U || roll)` still bounds a and b. A
     // whole-conjunct None (a nested disjunction at the holding polarity) still voids the split.
     def side(e: Option[AstNode]): Option[List[(Call, Boolean)]] = e match
-        case Some(c: Call) if comparisonOps.contains(c.name) ||
-            c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
-            c.name == "<operator>.logicalOr" => conjuncts(c, holds)
-        // any other operand - an integer's truthiness, a field read - yields no comparison
-        // facts of its own and does not block the sibling's
-        case Some(_) => Some(Nil)
-        case None    => None
+      case Some(c: Call)
+          if comparisonOps.contains(c.name) ||
+              c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
+              c.name == "<operator>.logicalOr" => conjuncts(c, holds)
+      // any other operand - an integer's truthiness, a field read - yields no comparison
+      // facts of its own and does not block the sibling's
+      case Some(_) => Some(Nil)
+      case None    => None
     (side(expr.argumentOption(1)), side(expr.argumentOption(2))) match
       case (Some(ls), Some(rs)) => Some(ls ++ rs)
       case _                    => None
@@ -449,34 +448,110 @@ object GuardPass:
               case _ => Nil
         case _ => Nil
 
-  private[taggers] def holdsAt(condition: Call, target: Call): Boolean =
-      ownerOf(condition) match
-        case Some(owner) =>
-            var cursor: Option[StoredNode] = Some(target)
-            var result                     = false
-            var resolved                   = false
-            while cursor.isDefined && !resolved do
-              cursor match
-                case Some(cs: ControlStructure) =>
-                    if cs == owner then
-                      result = true
-                      resolved = true
-                    else if isElse(cs) && cs._astIn
-                          .collectFirst { case p: ControlStructure => p }
-                          .exists(_ == owner)
-                    then
-                      result = false
-                      resolved = true
-                    else cursor = cs._astIn.nextOption()
-                case Some(_: Method) =>
-                    resolved = true
-                case Some(other) =>
-                    cursor = other._astIn.nextOption()
-                case None => resolved = true
-            result
-        case None => false
+  /** Does `condition` (as written) hold at `target`? `Some(true)` inside its own then-subtree or
+    * loop body, `Some(false)` inside its else. After the structure, the CFG decides: the target is
+    * reached only through the true branch (the else exits) - it holds; only through the false
+    * branch (the then exits, or a loop left by its condition) - it does not; through both - `None`,
+    * and no fact may be drawn from the condition. (Part 13: the old "after the structure means
+    * false" read an `if (c) {...} else { return; }` backwards.)
+    */
+  private[taggers] def holdsAtOpt(condition: Call, target: StoredNode): Option[Boolean] =
+      ownerOf(condition).flatMap { owner =>
+        var cursor: Option[StoredNode] = Some(target)
+        var result: Option[Boolean]    = None
+        var resolved                   = false
+        while cursor.isDefined && !resolved do
+          cursor match
+            case Some(cs: ControlStructure) =>
+                if cs == owner then
+                  result = Some(true)
+                  resolved = true
+                else if isElse(cs) && cs._astIn
+                      .collectFirst { case p: ControlStructure => p }
+                      .exists(_ == owner)
+                then
+                  result = Some(false)
+                  resolved = true
+                else cursor = cs._astIn.nextOption()
+            case Some(_: Method) => resolved = true
+            case Some(other)     => cursor = other._astIn.nextOption()
+            case None            => resolved = true
+        result.orElse(branchReaching(condition, owner, target))
+      }
 
-  private def ownerOf(condition: Call): Option[ControlStructure] =
+  /** The branch of `condition` through which `target` (outside the structure) is reached. */
+  private def branchReaching(
+    condition: Call,
+    owner: ControlStructure,
+    target: StoredNode
+  ): Option[Boolean] =
+      target match
+        case t: CfgNode =>
+            val (onTrue, onFalse) = branchSuccessors(condition).getOrElse((Nil, Nil))
+            def reaches(from: List[CfgNode]): Boolean =
+                cfgReaches(from, t.id(), avoid = condition.id())
+            (reaches(onTrue), reaches(onFalse)) match
+              case (true, false) => Some(true)
+              case (false, true) => Some(false)
+              case _             => None
+        case _ => None
+
+  /** The condition's CFG successors split into the branch taken when it holds and the one taken
+    * when it does not: the true branch starts inside the structure (its then or body), the false
+    * one in its else or after it.
+    */
+  private[taggers] def branchSuccessors(condition: Expression)
+    : Option[(List[CfgNode], List[CfgNode])] =
+      ownerOf(condition).map { owner =>
+        val elseIds = owner.astChildren.collect {
+            case e: ControlStructure if isElse(e) => e
+        }.ast.id.toSet
+        val condIds  = condition.ast.id.toSet
+        val ownerIds = owner.ast.id.toSet
+        condition._cfgOut.collectAll[CfgNode].l.partition(s =>
+            ownerIds.contains(s.id()) && !elseIds.contains(s.id()) && !condIds.contains(s.id())
+        )
+      }
+
+  /** Is `targetId` reachable from `from` along the CFG without passing `avoid`? An exhausted budget
+    * answers yes: an unknown path may exist.
+    */
+  private[taggers] def cfgReaches(
+    from: List[CfgNode],
+    targetId: Long,
+    avoid: Long,
+    budget: Int
+  ): Boolean = cfgReachesAvoiding(from, targetId, Set(avoid), budget)
+
+  private[taggers] def cfgReaches(from: List[CfgNode], targetId: Long, avoid: Long): Boolean =
+      cfgReachesAvoiding(from, targetId, Set(avoid), 20000)
+
+  /** [[cfgReaches]] around several nodes: a path through any of `avoid` does not count. */
+  private[taggers] def cfgReachesAvoiding(
+    from: List[CfgNode],
+    targetId: Long,
+    avoid: Set[Long],
+    budget: Int = 20000
+  ): Boolean =
+    val seen     = mutable.HashSet.empty[Long]
+    val frontier = mutable.Stack.from(from)
+    var left     = budget
+    var found    = false
+    while !found && frontier.nonEmpty && left > 0 do
+      val n = frontier.pop()
+      if n.id() == targetId then found = true
+      else if !avoid.contains(n.id()) && seen.add(n.id()) then
+        left -= 1
+        n._cfgOut.collectAll[CfgNode].foreach(frontier.push)
+    found || left <= 0
+
+  /** The (comparison, holds) conjuncts of a controller at a target, or none when the controller's
+    * truth there is not known.
+    */
+  private[taggers] def conjunctsAt(condition: Call, target: StoredNode): List[(Call, Boolean)] =
+      holdsAtOpt(condition, target).flatMap(h => conjuncts(condition, h)).getOrElse(Nil)
+
+  private def ownerOf(condition: Expression): Option[ControlStructure] =
     var cursor: Option[StoredNode]      = condition._astIn.nextOption()
     var owner: Option[ControlStructure] = None
     while owner.isEmpty && cursor.isDefined do
