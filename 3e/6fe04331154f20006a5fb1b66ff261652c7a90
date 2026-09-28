@@ -1,0 +1,190 @@
+platform/frontends/pysrc2cpg/src/test/resources/corpus/grammar/g314_tstring.py
+  s_4b70c6697bebd0::t_eaba4177d9e52b 1
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/ProvenanceAndFallbackTests.scala
+  s_4b70c6697bebd0::t_5ff1f6428f6642 7-8
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonModuleName.scala
+  s_4b70c6697bebd0::t_6750b260974fc1 3-4
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/astcreation/AstCreator.scala
+  s_4b70c6697bebd0::t_266cd1a21a438f 1048
+  s_4b70c6697bebd0::t_9d6abb6e204339 231-232,1021
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/FlowSummaryTagsTests.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 12
+  s_4b70c6697bebd0::t_19f9fd75eb9c55 13-14
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/EasyTagsPassTests.scala
+  s_4b70c6697bebd0::t_41bf9118fe1b57 9-10,20,38,56,76,94,106,116
+  s_4b70c6697bebd0::t_4198872a322bad 180,267-268,278
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyJsonToNodeCreator.scala
+  s_4b70c6697bebd0::t_82e43018725997 549,739-740,869-870,910,1070,1159,1196
+  s_4b70c6697bebd0::t_a94ceaf4011476 527,546,1056,1187,1344,1367
+  s_4b70c6697bebd0::t_fc54ad3adb4e66 1071-1072
+  s_4b70c6697bebd0::t_22e6e91e2e2842 1160-1161
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonArchiveHandler.scala
+  s_4b70c6697bebd0::t_4198872a322bad 260
+  s_4b70c6697bebd0::t_0acc75902fb337 13
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/DecodedShapeContractSpec.scala
+  s_4b70c6697bebd0::t_92217c2e15b2a6 7,13,36,216
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/FragmentBoundary.scala
+  s_4b70c6697bebd0::t_19f9fd75eb9c55 11-12
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/Domain.scala
+  s_4b70c6697bebd0::t_9d6abb6e204339 133,737,758,808,1211
+  s_4b70c6697bebd0::t_266cd1a21a438f 145
+  s_4b70c6697bebd0::t_17d816b26d6fdf 146,1212
+  s_4b70c6697bebd0::t_d2c1ca810c5900 147-149,1213-1214
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/DottedFullNamesTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 7-9
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/cpg/DjangoSourceCallTests.scala
+  s_4b70c6697bebd0::t_4198872a322bad 81
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/dataflow/FrameworkTaintDataflowTests.scala
+  s_4b70c6697bebd0::t_76bf3680d1e484 93
+  s_4b70c6697bebd0::t_c436731b14dad4 9
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/DataCarrierRecognizers.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 118-122,129
+  s_4b70c6697bebd0::t_49be9c80d0e841 130-131
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummaryBuilder.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 12
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/ComplexTypeTests.scala
+  s_4b70c6697bebd0::t_c436731b14dad4 11,16,82
+  s_4b70c6697bebd0::t_3dfba66b8844dd 17-18
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/Py314TemplateStringTests.scala
+  s_4b70c6697bebd0::t_41bf9118fe1b57 9-11
+  s_4b70c6697bebd0::t_4198872a322bad 97
+  s_4b70c6697bebd0::t_f3b58296385893 90
+  s_4b70c6697bebd0::t_cc07eeda83b35f 7-8
+  s_4b70c6697bebd0::t_bb9a234d6058c1 12-13
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyStubsTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 262
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/StitchPass.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 24,54
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyTypeTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 12
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyFullTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 179,230-232,277
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/SigTypeTests.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 75
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/DefaultSemantics.scala
+  s_4b70c6697bebd0::t_76bf3680d1e484 135,397
+  s_4b70c6697bebd0::t_add2781f63452d 392
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonDependencyStubs.scala
+  s_4b70c6697bebd0::t_1bb8ccc7b861a3 296-297
+  s_4b70c6697bebd0::t_2c7e251f0b32dd 295
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/linking/FragmentStitchTests.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 18
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPass.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 369
+  s_4b70c6697bebd0::t_11a626786c262a 370
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/NodeAttributeRoundtripTests.scala
+  s_4b70c6697bebd0::t_5ff1f6428f6642 9,79
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/Py2CpgEmptyInputTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 7-10
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPassTests.scala
+  s_4b70c6697bebd0::t_b2f29e4e725c8f 7-8
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/cpg/PythonTypeInferenceTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 8-9
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/LiteralTests.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 6
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/cpg/DjangoPatternsCallTests.scala
+  s_4b70c6697bebd0::t_4198872a322bad 23,59
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/linking/StitchPassTests.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 19-20
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/UnknownTypeReportTests.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 7,11,13
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_4b70c6697bebd0::t_fe3267c5db6234 41-42,48-49,350,414-415,478,514,611,648,657,661,689,700,717,723,734,748,755,763,771,775,805-807,810-811,819,821-822
+  s_4b70c6697bebd0::t_af6108a0dbc8f5 43-46
+  s_4b70c6697bebd0::t_6ce86d3b19d497 47
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/PythonFrameworkRecognizerTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 7,95-96
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pythonparser/Py314GrammarTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 7,14-16
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PySrc2CpgFixture.scala
+  s_4b70c6697bebd0::t_f3b58296385893 130
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/PhpParser.scala
+  s_4b70c6697bebd0::t_9d6abb6e204339 62,93,97,101,192,211-212
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/CloudQueueRecognizers.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 9,11-13,57-58,92,119,139,172
+  s_4b70c6697bebd0::t_a78c211de19c43 173-174
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/FrameworkEntrypointTaggingTests.scala
+  s_4b70c6697bebd0::t_c436731b14dad4 7
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonRealArchiveIngestionTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 9-10,15-16
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/StitchValidation.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 19-20
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonArchiveIngestionTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 13
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/AiLlmRecognizers.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 10,25-27,102
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonRecognizers.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 15,25,27,29,32,34
+platform/frontends/pysrc2cpg/src/test/resources/corpus/grammar/g315_misc.py
+  s_4b70c6697bebd0::t_eaba4177d9e52b 18
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/dataflow/PythonContainerFlowTests.scala
+  s_4b70c6697bebd0::t_f3b58296385893 7-8
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2CpgOnFileSystem.scala
+  s_4b70c6697bebd0::t_0acc75902fb337 155,182-185,253
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/PropertyHookTests.scala
+  s_4b70c6697bebd0::t_c436731b14dad4 8,15
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/Ruby2Atom.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 64
+platform/frontends/ruby2atom/src/test/resources/ruby/regenerate_fixtures.sh
+  s_4b70c6697bebd0::t_94d932de9e688d 20-21
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/ContractAdditivityTests.scala
+  s_4b70c6697bebd0::t_5ff1f6428f6642 9,14,16-17,112
+  s_4b70c6697bebd0::t_b2f29e4e725c8f 11-12
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/CallSyntaxFactTests.scala
+  s_4b70c6697bebd0::t_a94ceaf4011476 8
+  s_4b70c6697bebd0::t_94d932de9e688d 14
+  s_4b70c6697bebd0::t_fe7b581a4e00b2 15-17
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPass.scala
+  s_4b70c6697bebd0::t_9d6abb6e204339 15,17-20
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/SymbolIndex.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 34
+  s_4b70c6697bebd0::t_4d7e37d2e4a55e 35-36
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTemplateRenderPass.scala
+  s_4b70c6697bebd0::t_0acc75902fb337 10
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/AttributeGroupTests.scala
+  s_4b70c6697bebd0::t_c436731b14dad4 9
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/CrossVersionDecodeTests.scala
+  s_4b70c6697bebd0::t_92217c2e15b2a6 7,9,54,124,188
+  s_4b70c6697bebd0::t_29d6b7f5145025 10-11
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/ProbeGatedIngestionTests.scala
+  s_4b70c6697bebd0::t_92217c2e15b2a6 13-14
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 1605,1620
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonFrameworkRecognizer.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 12-13,15
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/RpcRecognizers.scala
+  s_4b70c6697bebd0::t_b1f9993aac1685 9
+  s_4b70c6697bebd0::t_19f9fd75eb9c55 14-16
+docs/FLOW_ENGINE_COMPARISON.md
+  s_4b70c6697bebd0::t_e57a9358fe6a58 258
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStoreFragmentTests.scala
+  s_4b70c6697bebd0::t_0b89311c23f3e2 16
+  s_4b70c6697bebd0::t_5a7f9b84d240d3 17-18
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PyCorpusRegressionTests.scala
+  s_4b70c6697bebd0::t_26149536c7df88 14-15,17-18
+  s_4b70c6697bebd0::t_14c2b46eb8e53a 19-20
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
+  s_4b70c6697bebd0::t_1d84709af108f0 105-107
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/SourcesToStartingPoints.scala
+  s_4b70c6697bebd0::t_ce675099fdf4ab 49-52
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/MethodFlowSummary.scala
+  s_4b70c6697bebd0::t_8d11e8f574cb27 17
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/semantics/PhpFrameworkSemantics.scala
+  s_4b70c6697bebd0::t_e09a633bdc8c8d 5-7,86,158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3e6fe04331154f20006a5fb1b66ff261652c7a90",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
