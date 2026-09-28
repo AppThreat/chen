@@ -20,7 +20,7 @@ class DjangoPatternsCallTests extends PySrc2CpgFixture(withOssDataflow = false):
         |""".stripMargin,
         "registry.py"
       )
-      // TODO(task #4): recover the type of self-attributes assigned in __init__
+      // TODO: recover the type of self-attributes assigned in __init__
       // (self.app_configs = {} -> dict) so attribute-method calls resolve.
       "resolve app_configs.values() to the builtin dict method" ignore {
           val call = cpg.call.name("values").head
@@ -56,7 +56,7 @@ class DjangoPatternsCallTests extends PySrc2CpgFixture(withOssDataflow = false):
         |""".stripMargin,
         "models.py"
       )
-      // TODO(task #4): resolve super() to the MRO base so super().__init__()
+      // TODO: resolve super() to the MRO base so super().__init__()
       // binds to Base.__init__ instead of __builtin.super.<returnValue>.__init__.
       "resolve the super().__init__() call to Base.__init__" ignore {
           val call = cpg.call.name("__init__").l

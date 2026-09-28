@@ -59,7 +59,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
   private def batchCommand(inputDir: String, outputDir: String): Seq[String] =
       generatorCommand(Seq("-i", inputDir, "-o", outputDir))
 
-  /** Capability probe (Task 14.1 / Requirement 3.6).
+  /** Capability probe.
     *
     * Invokes the generator's `--parser-info` and returns `true` ONLY when the output contains a
     * `Generator version:` line. The probe is treated as FAILED (returns `false`) on any of:
@@ -90,15 +90,15 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
           logger.debug(s"Capability probe failed: ${exception.getMessage}")
           false
 
-  /** Directory-batch ingestion with per-file isolation (Task 14.2 / Requirements 3.7, 3.9).
+  /** Directory-batch ingestion with per-file isolation.
     *
     * Runs the generator once in batch mode (`<bin> -i <inputDir> -o <outputDir>`), then reads every
     * `*.json` document under `outputDir`. `*.jsonl` files (side-records such as
-    * `phpastgen_manifest.jsonl`) are SKIPPED — they are not AST documents (invariant 2).
+    * `phpastgen_manifest.jsonl`) are SKIPPED — they are not AST documents.
     *
     * Each AST json is decoded independently via [[Domain.fromJson]]. On an INDIVIDUAL decode
     * failure the offending file is excluded from the result and a diagnostic naming the file and
-    * the reason is logged, but the directory as a whole is never aborted (Requirement 3.9).
+    * the reason is logged, but the directory as a whole is never aborted.
     *
     * @return
     *   the successfully decoded files paired with their resolved source paths. When the batch
@@ -189,7 +189,7 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     // The generator emits either a bare JSON array (older passthrough) or the new wrapper object
     // `{ "ast": [...], ...provenance }`. Skip any leading non-JSON banner lines and start at the
     // first line that opens either shape, so chen stays compatible with both generators
-    // (backward + forward compatible, Requirement 4.1/4.2). `Domain.fromJson` then unwraps `ast`.
+    // (backward + forward compatible). `Domain.fromJson` then unwraps `ast`.
     val jsonLines = lines.dropWhile(line => !line.startsWith("[") && !line.startsWith("{"))
 
     if jsonLines.isEmpty then
@@ -208,8 +208,8 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
         case Failure(e) =>
             None
 
-  /** Top-level ingestion entry that chooses batch vs. legacy per-file based on the capability probe
-    * (Task 14.3 / Requirement 3.8, invariant 4).
+  /** Top-level ingestion entry that chooses batch vs. legacy per-file based on the capability
+    * probe.
     *
     * When [[supportsBatch]] returns `true` the whole input directory is parsed in one batch pass
     * via [[parseDirectory]]. Otherwise — probe failure/timeout, or a batch that produced no
@@ -345,9 +345,9 @@ object PhpParser:
 
   /** Construct a parser directly from an explicit binary + ini pair.
     *
-    * Primarily a testing seam for the batch/probe/fallback paths (Tasks 14.1-14.3): it lets tests
-    * point the parser at a stub generator without going through [[Config]] resolution. The public
-    * behaviour of [[getParser]] is unchanged.
+    * Primarily a testing seam for the batch/probe/fallback paths: it lets tests point the parser at
+    * a stub generator without going through [[Config]] resolution. The public behaviour of
+    * [[getParser]] is unchanged.
     */
   def fromPaths(phpParserPath: String, phpIniPath: String): PhpParser =
       new PhpParser(phpParserPath, phpIniPath)

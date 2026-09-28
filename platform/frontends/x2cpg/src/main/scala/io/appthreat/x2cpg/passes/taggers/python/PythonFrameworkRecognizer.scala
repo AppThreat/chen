@@ -9,9 +9,10 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
   * decorator `ANNOTATION` nodes (with `ANNOTATION_PARAMETER_ASSIGN` children carrying route paths
   * and keyword arguments), `INHERITS_FROM` full names, parameter type annotations and the type
   * graph. Where a recognizer must still fall back to matching a `code`/`name` string, the missing
-  * type fact is noted in a comment - those notes are the input for Task 5 (type inference).
+  * type fact is noted in a comment - those notes mark where type inference would allow a tighter
+  * rule.
   *
-  * Design constraints (Task 4, Part A):
+  * Design constraints:
   *   - Everything a recognizer tags is scoped to Python. The driving pass dispatches on
   *     `metaData.language` exactly like `EasyTagsPass.tagPythonPatterns`, so Java, JS, PHP, Ruby
   *     and C tagging is untouched.

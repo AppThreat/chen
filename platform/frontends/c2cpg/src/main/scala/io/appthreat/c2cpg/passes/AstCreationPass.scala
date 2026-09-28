@@ -64,6 +64,30 @@ object AstCreationPass:
           .sortWith(_.compareToIgnoreCase(_) > 0)
           .toArray
 
+  /** Bump whenever AST creation changes what it emits for unchanged source: a cached AST from an
+    * older frontend is otherwise replayed as-is (a fragment cached before call-site `fn-attr` tags
+    * existed would make a warm run silently lose every header attribute).
+    */
+  // 3: member layouts of header-defined types ride the used types
+  private val AstFormatVersion = "c2cpg-ast-3"
+
+  /** Everything outside a file that shapes its AST and is known up front: the frontend's output
+    * format, the include paths a header is resolved through, the defines that gate it, and the
+    * macro and include files every file is preprocessed with. (A header's own content is not
+    * covered.)
+    */
+  def cacheFingerprint(config: Config): String =
+    // a macro or include file changes what every file preprocesses to: its path AND content
+    // key the cache, or editing a `--macro-files` header replays the ASTs parsed without it
+    def contentOf(kind: String)(p: String): String =
+      val crc = new java.util.zip.CRC32()
+      Try(Files.readAllBytes(Paths.get(p))).foreach(b => crc.update(b))
+      s"$kind:$p:${crc.getValue}"
+    (AstFormatVersion +: (config.includePaths.toList.sorted ++ config.defines.toList.sorted ++
+        config.macroFiles.toList.sorted.map(contentOf("macro")) ++
+        config.includeFiles.toList.sorted.map(contentOf("include"))))
+        .mkString("\u0000")
+
   /** The AST cache key for a file: absolute path identity + file content (matches what the AST pass
     * uses, so warm-restore finds the same `.frag`).
     */
@@ -108,7 +132,7 @@ class AstCreationPass(
         diffGraph,
         filename,
         cacheKey = AstCreationPass.fileCacheKey(filename),
-        fingerprint = "",
+        fingerprint = AstCreationPass.cacheFingerprint(config),
         registerUsedTypes = registerUsedTypes,
         createAst = createAst(filename)
       )

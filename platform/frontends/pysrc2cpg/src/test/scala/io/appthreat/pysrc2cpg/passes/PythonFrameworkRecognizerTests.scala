@@ -4,7 +4,7 @@ import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.appthreat.x2cpg.passes.taggers.python.{PythonFrameworkRecognizersPass, PythonRecognizers}
 import io.shiftleft.semanticcpg.language.*
 
-/** Unit tests for the Task-4 framework recognizers: the `applies` gates (import-keyed and required
+/** Unit tests for the Python framework recognizers: the `applies` gates (import-keyed and required
   * to say NO on projects that don't use a framework) and the structural tagging each recognizer
   * emits. Tags are asserted through the same `cpg.tag` traversals reachables uses.
   */
@@ -92,8 +92,8 @@ class PythonFrameworkRecognizerTests extends PySrc2CpgFixture(withOssDataflow = 
       // Regression guard. Tagging every method with a `request` parameter as a route made
       // helpers, predicates and middleware into entry points whose EVERY parameter was
       // attacker-controlled - `framework-route` is itself a source tag, so this fed reachables
-      // directly. It is the same false-positive shape as the filename-keyed PY_REQUEST_PATTERNS
-      // that Part C of this task deleted, keyed on a parameter name instead of a file name.
+      // directly. It is the same false-positive shape as a filename-keyed request pattern,
+      // keyed on a parameter name instead of a file name.
       val cpg = code("""from flask import Flask, request
             |app = Flask(__name__)
             |def log_request(request, level):

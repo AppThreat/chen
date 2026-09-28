@@ -4,10 +4,10 @@ import better.files.File
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Task 12 A.1 - the silent empty atom is a bug in its own right. Before archive extraction
-  * existed, `atom -l python -o out.atom dir/` on a directory holding only archives (or nothing at
-  * all) exited 0 and wrote a ~12 KB meta-only atom with no diagnostic: indistinguishable from a
-  * successful analysis of a project with no code. The frontend must fail loudly instead.
+/** The silent empty atom is a bug in its own right. `atom -l python -o out.atom dir/` on a
+  * directory that yields no Python files must not exit 0 with a meta-only atom and no diagnostic:
+  * that is indistinguishable from a successful analysis of a project with no code. The frontend
+  * must fail loudly instead.
   */
 class Py2CpgEmptyInputTests extends AnyWordSpec with Matchers:
 

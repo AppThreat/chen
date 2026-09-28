@@ -11,12 +11,12 @@ import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-/** Task 12 Part A - the archive handler's security posture. Every adversarial case here is an
-  * attack a malicious wheel/sdist can actually carry (crafted names, absolute paths, links out of
-  * the tree, nesting/size bombs, truncation), and each asserts BOTH the loud failure and that
-  * nothing was written outside the extraction root. The tar fixtures are written with a minimal
-  * spec-conformant tar writer so the parser is exercised against real 512-byte headers, checksums
-  * included - not against fixtures produced by the same code under test.
+/** The archive handler's security posture. Every adversarial case here is an attack a malicious
+  * wheel/sdist can actually carry (crafted names, absolute paths, links out of the tree,
+  * nesting/size bombs, truncation), and each asserts BOTH the loud failure and that nothing was
+  * written outside the extraction root. The tar fixtures are written with a minimal spec-conformant
+  * tar writer so the parser is exercised against real 512-byte headers, checksums included - not
+  * against fixtures produced by the same code under test.
   */
 class PythonArchiveHandlerTests extends AnyWordSpec with Matchers:
 

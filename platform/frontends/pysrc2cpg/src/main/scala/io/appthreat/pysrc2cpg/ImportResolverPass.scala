@@ -34,9 +34,8 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
   /** All `import(...)` calls of the graph, grouped by file name - the same reduction
     * [[PythonDependencyStubs.importsOf]] performs, but ONCE per pass instead of once per re-export
     * hop. On a `python-deps=full` graph the per-hop scan made this pass the most expensive python
-    * stage after the frontend itself (task 12 D.2: ~22s wall on the flask + typeshed fixture, an
-    * O(imports x resolved-imports) full-graph scan); the index turns the per-hop cost into a map
-    * lookup.
+    * stage after the frontend itself (an O(imports x resolved-imports) full-graph scan); the index
+    * turns the per-hop cost into a map lookup.
     */
   private lazy val importsByFile: Map[String, Seq[PythonDependencyStubs.DepImport]] =
       PythonDependencyStubs.importsByFile(cpg)

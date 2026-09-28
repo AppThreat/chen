@@ -12,7 +12,7 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 object PythonRecognizers:
 
   val all: Seq[PythonFrameworkRecognizer] = Seq(
-    // B1 - web/HTTP routes
+    // Web/HTTP routes
     FlaskRecognizer,
     FastAPIRecognizer,
     StarletteRecognizer,
@@ -22,16 +22,16 @@ object PythonRecognizers:
     TornadoRecognizer,
     FalconRecognizer,
     DjangoRecognizer,
-    // B2 - models as taint carriers
+    // Models as taint carriers
     ModelTaintRecognizer,
-    // B3 - request objects
+    // Request objects
     RequestObjectRecognizer,
-    // B4 - RPC and MCP
+    // RPC and MCP
     GrpcRecognizer,
     McpRecognizer,
-    // B5 - AI/LLM
+    // AI/LLM
     AiLlmRecognizer,
-    // B6 - cloud, queues, ORM
+    // Cloud, queues, ORM
     Boto3Recognizer,
     LambdaHandlerRecognizer,
     AzureFunctionsRecognizer,

@@ -4,16 +4,16 @@ import io.appthreat.pythonparser.ast.iast
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Python 3.14 syntax probes (Task 10 / version-matrix completion).
+/** Python 3.14 syntax probes.
   *
-  * Oracle for every expectation here: CPython 3.14.6 (`python3 --version`), transcripts in the task
-  * write-up - notably that `except A, B as e:` is a SyntaxError in 3.14 ("multiple exception types
-  * must be parenthesized when using 'as'"; the unparenthesised `as` form is 3.15 material), while
-  * `except A, B:`, `except A, B,:` and `except* A, B:` are legal.
+  * Oracle for every expectation here: CPython 3.14.6 (`python3 --version`) - notably that `except
+  * A, B as e:` is a SyntaxError in 3.14 ("multiple exception types must be parenthesized when using
+  * 'as'"; the unparenthesised `as` form is 3.15 material), while `except A, B:`, `except A, B,:`
+  * and `except* A, B:` are legal.
   *
-  * Every probe asserts AST SHAPE through the printer, not just absence of a parse error: the
-  * pre-fix grammar accepted `except A, B:` by silently reusing the Python 2 `except E, name:` arm
-  * and BINDING B - a parses-but-wrong-AST failure mode a naive error check misses.
+  * Every probe asserts AST SHAPE through the printer, not just absence of a parse error: a grammar
+  * that accepts `except A, B:` by silently reusing the Python 2 `except E, name:` arm ends up
+  * BINDING B - a parses-but-wrong-AST failure mode a naive error check misses.
   */
 class Py314GrammarTests extends AnyFreeSpec with Matchers:
 

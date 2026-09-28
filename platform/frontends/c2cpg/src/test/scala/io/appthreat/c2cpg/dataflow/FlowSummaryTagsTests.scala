@@ -9,8 +9,9 @@ import _root_.io.appthreat.dataflowengineoss.queryengine.summaries.{
 }
 import _root_.io.shiftleft.semanticcpg.language.*
 
-/** Proves G-5: flow summaries persist as CPG-native `flow-summary` tags on METHOD nodes and reload
-  * losslessly, so the query engine can be primed from a cached `.atom` without recomputation.
+/** Validates that flow summaries persist as CPG-native `flow-summary` tags on METHOD nodes and
+  * reload losslessly, so the query engine can be primed from a cached `.atom` without
+  * recomputation.
   */
 class FlowSummaryTagsTests extends DataFlowCodeToCpgSuite:
 

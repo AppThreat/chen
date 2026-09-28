@@ -5,8 +5,8 @@ import io.shiftleft.codepropertygraph.generated.PropertyNames
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** Task 5: annotation-driven typing, container element types, and the guarantee that operator names
-  * never surface as types. Alongside each presence assertion live the near-misses: the unannotated
+/** Annotation-driven typing, container element types, and the guarantee that operator names never
+  * surface as types. Alongside each presence assertion live the near-misses: the unannotated
   * variable that must stay untyped, and the heuristic an annotation must override.
   */
 class PythonTypeInferenceTests extends PySrc2CpgFixture(withOssDataflow = false):

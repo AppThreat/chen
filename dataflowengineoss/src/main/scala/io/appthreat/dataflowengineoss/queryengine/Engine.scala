@@ -102,10 +102,9 @@ class Engine(context: EngineContext):
             case Failure(exception) =>
                 numberOfTasksRunning -= 1
                 // A task that fails twice has still failed: its results are lost, which is why
-                // this is logged rather than swallowed. Historically this branch was silent, and
-                // transient adjacency-read races under the virtual-thread pool were quietly
-                // dropping a different handful of tasks per run - a measured 2888-2937
-                // reachables spread on one fixture from task loss alone (task 12 part B).
+                // this is logged rather than swallowed. Transient adjacency-read races under the
+                // virtual-thread pool can drop a different handful of tasks per run, which would
+                // otherwise show up only as unexplained run-to-run variation in the reachables.
                 logger.warn(
                   s"Data flow task failed (its results are not in the analysis): $exception"
                 )
@@ -212,7 +211,7 @@ object Engine:
   ): Option[PathElement] =
     val curNode  = e.inNode().asInstanceOf[CfgNode]
     val parNode  = e.outNode().asInstanceOf[CfgNode]
-    val outLabel = Some(e.property(Properties.VARIABLE)).getOrElse("")
+    val outLabel = e.property(Properties.VARIABLE)
 
     if !EdgeValidator.isValidEdge(curNode, parNode) then
       return None
@@ -221,15 +220,23 @@ object Engine:
       case childNode: Expression =>
           parNode match
             case parentNode: Expression =>
-                val parentNodeCall = parentNode.inCall.l
-                val sameCallSite   = parentNode.inCall.l == childNode.start.inCall.l
+                // This runs once per candidate DDG edge of every repeat step; an argument has
+                // at most one incoming ARGUMENT edge in practice, so the call-site comparison
+                // works on the single options rather than materialising two lists per edge.
+                // NB both-absent must compare equal, as two empty lists would:
+                // when neither node is an argument the walk falls into the semantic/callee
+                // branch below, where an absent call yields no semantics and no explorable
+                // callee, hence a visible element. Requiring the parent call to be present
+                // here would silently turn those elements invisible.
+                val parentCallOpt = parentNode.inCall.nextOption()
+                val sameCallSite  = parentCallOpt == childNode.inCall.nextOption()
                 val visible = if sameCallSite then
-                  val semanticExists = parentNode.semanticsForCallByArg.nonEmpty
+                  val semanticExists = parentNode.semanticsForCallByArg.hasNext
                   // Methods the walk treats as a descendable callee (internal, or external
                   // with a body): the call site is a boundary the walk reports at, rather than
                   // an opaque call whose permissive in-edges are followed.
                   val internalMethodsForCall =
-                      parentNodeCall.flatMap(methodsForCall)
+                      parentCallOpt.map(methodsForCall).getOrElse(Nil)
                           .filter(MethodExplorability.stopsWalkAtCallSite)
                   (semanticExists && parentNode.isDefined) || internalMethodsForCall.isEmpty
                 else
@@ -325,7 +332,7 @@ end Engine
   *   additional configurations for the data flow engine.
   */
 case class EngineContext(
-  semantics: Semantics = DefaultSemantics(),
+  semantics: Semantics = DefaultSemantics.memoised,
   config: EngineConfig = EngineConfig()
 )
 

@@ -16,8 +16,8 @@ import scala.jdk.CollectionConverters.*
 
 /** Proves the modular link phase ([[StitchPass]]) produces the same graph as the whole-graph
   * linking it replaces (`MethodStubCreator` + `StaticCallLinker` + `MethodRefLinker` +
-  * `TypeHierarchyPass` + `AliasLinkerPass`) - the graph-equivalence oracle of CHEN3_PLAN §8 - and
-  * that it can be scoped to dirty units for incremental re-stitch.
+  * `TypeHierarchyPass` + `AliasLinkerPass`), using that whole-graph linking as the equivalence
+  * oracle, and that it can be scoped to dirty units for incremental re-stitch.
   */
 class StitchPassTests extends AnyWordSpec with Matchers:
 

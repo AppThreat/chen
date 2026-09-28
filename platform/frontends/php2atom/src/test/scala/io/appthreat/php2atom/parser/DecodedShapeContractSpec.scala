@@ -4,13 +4,13 @@ import io.appthreat.php2atom.parser.Domain.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** ==Cross-repo decoded-shape contract guard (Design Decision 4)==
+/** ==Cross-repo decoded-shape contract guard==
   *
   * This is the CHEN side of the contract-evolution discipline. A companion JSON shape snapshot
   * lives in `atom-parsetools` (the generator side). Together they pin the JSON contract the PHP AST
   * generator (`phpastgen`) emits and the [[Domain]] decoder consumes, so that a BREAKING
   * (non-additive) change — a removed or renamed contract key, or a removed/renamed Domain field —
-  * fails CI in BOTH repositories. (Requirements 4.3, 4.4.)
+  * fails CI in BOTH repositories.
   *
   * ==How this guards the contract (and why it is not a restatement)==
   *
@@ -33,8 +33,7 @@ import org.scalatest.wordspec.AnyWordSpec
   * Growing the contract (new optional keys, new node types, new Domain fields with defaults) must
   * NOT break this spec — the additive-tolerance assertions below encode that. If a change to this
   * spec is required to make CI pass, that change is by definition NON-ADDITIVE: stop and treat it
-  * as a coordinated breaking change across `chen` and `atom-parsetools` (Decision 4), not a local
-  * test fix.
+  * as a coordinated breaking change across `chen` and `atom-parsetools`, not a local test fix.
   *
   * Kept hermetic (JSON fed straight into [[Domain.fromJson]], no PHP runtime) to match the sibling
   * specs in this package (`ProvenanceAndFallbackTests`, `PropertyHookTests`, `AttributeGroupTests`,
@@ -214,7 +213,7 @@ class DecodedShapeContractSpec extends AnyWordSpec with Matchers:
       "expose EXACTLY the expected field names on the PhpProvenance case class" in {
           // Reflection guard: a renamed or removed provenance field flips this set. This is the
           // non-additive tripwire — adding a new field to the list here is the ONLY change allowed,
-          // and only alongside a coordinated contract bump (Decision 4).
+          // and only alongside a coordinated contract bump.
           val actualFields = classOf[PhpProvenance].getDeclaredFields.map(_.getName).toList
           actualFields should contain theSameElementsAs ExpectedProvenanceFields
       }

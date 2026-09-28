@@ -8,19 +8,17 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import ujson.Value
 
-/** Unit tests for the PHP 8.1-8.3 complex-type decode landed by task 11.1.
+/** Unit tests for the PHP 8.1-8.3 complex-type decode.
   *
   * These exercise `Domain.fromJson` directly with representative nikic php-parser JSON for
   * `UnionType`, `IntersectionType`, `NullableType` and their Disjunctive Normal Form (DNF)
   * combination, without depending on a PHP runtime or the vendored parser being able to emit every
-  * 8.x grammar. The decode is where task 11.1's precedence-preserving `renderTypeName` runs, and
-  * where Requirement 3.4 ("retain every constituent type ... rather than flattening the
-  * constituents to a single type or dropping the construct") is enforced.
+  * 8.x grammar. The decode is where the precedence-preserving `renderTypeName` runs, and where
+  * every constituent type is retained rather than the constituents being flattened to a single type
+  * or the construct being dropped.
   *
   * The rendered type surfaces on the decoded [[Domain.PhpNameExpr]] `.name`, which AstCreator later
   * copies onto the parameter's / method's `typeFullName`.
-  *
-  * _Requirements: 3.4_
   */
 class ComplexTypeTests extends AnyWordSpec with Matchers:
 
@@ -81,7 +79,7 @@ class ComplexTypeTests extends AnyWordSpec with Matchers:
           .getOrElse(fail("expected a decoded parameter type"))
           .name
 
-  "Complex-type decode (Requirement 3.4)" should {
+  "Complex-type decode" should {
 
       "render an intersection type A&B distinctly, retaining both constituents" in {
           paramTypeName(intersection(name("A"), name("B"))) shouldEqual "A&B"

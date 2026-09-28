@@ -152,7 +152,7 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                 val inputPath = Path.of(config.inputPath)
                 val extracted = PythonArchiveHandler.extractArchives(inputPath, tempDir)
 
-                // Placement rule (task 12 A.5), stated once and applied here only:
+                // Placement rule, stated once and applied here only:
                 //   - an archive given AS the input path is the code under analysis - internal;
                 //   - an application container found INSIDE the input tree (.pyz/.pex - a program the
                 //     user placed there) is also internal;
@@ -179,10 +179,10 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                             Files.isRegularFile(e.root.resolve(config.requirementsTxt))
                         )
 
-                // No silent empty atom (Task 12 A.1): an input that yields zero Python files is a
-                // failure a script can detect, not an empty analysis. Measured shape of the bug: a
-                // directory holding only `.whl`/`.tar.gz` archives produced exit 0 and a ~12 KB
-                // meta-only atom, indistinguishable from a successful analysis of a codeless project.
+                // No silent empty atom: an input that yields zero Python files is a failure a
+                // script can detect, not an empty analysis. Otherwise such an input would exit 0
+                // with a meta-only atom, indistinguishable from a successful analysis of a codeless
+                // project.
                 // A `requirements.txt`-only input IS analysable (ConfigFileCreationPass).
                 if files.isEmpty && !hasRequirementsTxt then
                   throw RuntimeException(
@@ -250,7 +250,7 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                     archiveDependencyRels
                   ).createAndApply()
 
-                // Package identity (task 12 A.4): anything unpacked from an archive states its own
+                // Package identity: anything unpacked from an archive states its own
                 // distribution name, version and top-level import names (RECORD / top_level.txt /
                 // PKG-INFO) - no SBOM required. Tagging the mapped modules' methods with the purl is
                 // the same shape `PythonDependencyPurlPass` writes for venv code and `CdxPass` writes

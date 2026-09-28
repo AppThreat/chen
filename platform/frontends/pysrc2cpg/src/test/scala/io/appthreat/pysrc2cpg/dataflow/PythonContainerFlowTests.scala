@@ -4,8 +4,8 @@ import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.appthreat.pysrc2cpg.PySrc2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
-/** Task 5 / item 3: container element typing must carry taint through iteration and subscripts, not
-  * only produce pretty TYPE_FULL_NAMEs.
+/** Container element typing must carry taint through iteration and subscripts, not only produce
+  * pretty TYPE_FULL_NAMEs.
   */
 class PythonContainerFlowTests extends PySrc2CpgFixture(withOssDataflow = true):
 

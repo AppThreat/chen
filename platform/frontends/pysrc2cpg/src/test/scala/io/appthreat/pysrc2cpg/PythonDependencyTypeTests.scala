@@ -5,11 +5,11 @@ import io.shiftleft.semanticcpg.language.*
 
 import java.nio.file.Files
 
-/** Task 8: the ingested signatures must pay off for TYPES. Every mechanism is asserted together
-  * with its near-miss: the type that must NOT be invented (a bare name the graph cannot back stays
-  * bare), and the `python-deps=none` graph where none of this may appear.
+/** The ingested signatures must pay off for TYPES. Every mechanism is asserted together with its
+  * near-miss: the type that must NOT be invented (a bare name the graph cannot back stays bare),
+  * and the `python-deps=none` graph where none of this may appear.
   *
-  * The fake distribution is shaped so each failure mode of the pre-task graph has one test:
+  * The fake distribution is shaped so each failure mode of a signature-only graph has one test:
   *   - `url_for` names BOTH a module-level function (re-exported from `__init__.py`) and a method
   *     of the ingested `Flask` class - the class member must not shadow the module function.
   *   - `request` is a module-level annotated binding (`request: Flask = ...`) - the member's bare

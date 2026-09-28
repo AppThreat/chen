@@ -37,7 +37,8 @@ import scala.util.{Failure, Success, Try, Using}
   *   - One loader, two inputs: an installed `site-packages` (preferred - it is what the code will
   *     really call) and a typeshed `stdlib/` checkout of `.pyi` stubs (`typeshed-dir` /
   *     `CHEN_TYPESHED_DIR`). Where `top_level.txt` would have mapped wheel names to import names,
-  *     module-name == directory-name is the approximation; the real mapping is Task 9.
+  *     module-name == directory-name is the approximation; a full wheel-name-to-import-name mapping
+  *     is not attempted.
   *   - Dependency files are parsed by the production [[CodeToCpg]] with a site-packages-relative
   *     file name, so every METHOD/TYPE_DECL full name lands in exactly the shape the import
   *     resolver and type recovery generate as call candidates
@@ -291,9 +292,9 @@ object PythonDependencyStubs:
       return ()
 
     // Package identity per top-level entry: distribution name and version from `.dist-info`,
-    // mapped to import names as far as `top_level.txt` allows (the full wheel-name-vs-import
-    // mapping is Task 9). A directory without any `.dist-info` (vendored code, a bare checkout)
-    // is ingested all the same; it just carries no purl.
+    // mapped to import names as far as `top_level.txt` allows (a full wheel-name-vs-import
+    // mapping is not attempted). A directory without any `.dist-info` (vendored code, a bare
+    // checkout) is ingested all the same; it just carries no purl.
     val purlsByOrigin = origins.map(o => o -> packageIndex(o)).toMap
     val purlByRel     = mutable.HashMap.empty[String, String]
     ingested.values.toSeq.foreach { f =>
@@ -1343,9 +1344,9 @@ class PythonDependencyPurlPass(cpg: Cpg, purlByRel: Map[String, String]) extends
   * internal (only directory segments are matched), and a dependency method marked here remains
   * fully traversable.
   *
-  * `archiveDependencyRels` names files unpacked from in-tree distribution archives (task 12 A.5):
-  * those live in a per-run temp directory no path-prefix rule can know, so they are attributed by
-  * their package-relative name directly.
+  * `archiveDependencyRels` names files unpacked from in-tree distribution archives: those live in a
+  * per-run temp directory no path-prefix rule can know, so they are attributed by their
+  * package-relative name directly.
   */
 class PythonDependencyExternalityPass(
   cpg: Cpg,

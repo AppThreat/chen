@@ -524,7 +524,7 @@ class RubyJsonToNodeCreator(
   end attachBodyToCall
 
   /** `x.each { _1 + _2 }` - the block carries numbered parameters; chen synthesizes the
-    * conventional `_1.._n` parameter names (plan 04 §3).
+    * conventional `_1.._n` parameter names.
     */
   private def visitBlockWithNumberedParams(obj: Obj): RubyExpression =
     val paramIdx = obj(ParserKeys.ParamIdx) match
@@ -543,10 +543,10 @@ class RubyJsonToNodeCreator(
 
   /** Ruby 3.4 `it` block (`items.select { it.even? }`): lowers to a block with one synthetic `it`
     * parameter. Body references arrive as `lvar it` under the prism backend, which become regular
-    * identifier references to that parameter (plan 04 §3, plan 01 §1).
+    * identifier references to that parameter.
     *
     * Note the parser-gem backend has no `itblock` at all - there, bare `it` parses as a plain
-    * `send(nil, :it)`, i.e. a method call, and is left as one (README fact #7).
+    * `send(nil, :it)`, i.e. a method call, and is left as one.
     */
   private def visitItBlock(obj: Obj): RubyExpression =
     val parameters = MandatoryParameter("it")(obj.toTextSpan.spanStart("it")) :: Nil
@@ -736,8 +736,8 @@ class RubyJsonToNodeCreator(
 
     ForExpression(forVariable, iterableVariable, doBlock)(obj.toTextSpan)
 
-  /** Never emitted by the generator (`emit_forward_arg=false`, README fact #10); kept
-    * forward-compatible with `forward_args`.
+  /** Never emitted (the generator sets `emit_forward_arg=false`); kept forward-compatible with
+    * `forward_args`.
     */
   private def visitForwardArg(obj: Obj): RubyExpression =
       MandatoryParameter("...")(obj.toTextSpan)
@@ -866,8 +866,8 @@ class RubyJsonToNodeCreator(
     StatementList(stmts)(obj.toTextSpan)
 
   /** `def foo(**nil)` - declares that the method accepts no keyword arguments. The generator emits
-    * `{key: null, value: null}` for it (README fact #11); lower it to a hash parameter with the
-    * syntactic name so the parameter list keeps its shape.
+    * `{key: null, value: null}` for it; lower it to a hash parameter with the syntactic name so the
+    * parameter list keeps its shape.
     */
   private def visitKwNilArg(obj: Obj): RubyExpression =
       HashParameter("**nil")(obj.toTextSpan)
@@ -907,7 +907,7 @@ class RubyJsonToNodeCreator(
       )
 
   /** `expr in pattern` - one-line pattern match evaluating to the match result. Also used for
-    * `in_match`, the ruby27-grammar spelling of the same construct (README fact #14).
+    * `in_match`, the ruby27-grammar spelling of the same construct.
     */
   private def visitMatchPatternP(obj: Obj): RubyExpression =
       RightwardMatch(
@@ -1038,8 +1038,8 @@ class RubyJsonToNodeCreator(
     StaticLiteral(getBuiltInType(Defines.Integer))(obj.toTextSpan.spanStart(text))
 
   /** `index`/`indexasgn` are only emitted when the parser's `emit_index` builder flag is on, which
-    * is off on every backend chen supports (README fact #10): `a[1]` arrives as a `send` of `[]`.
-    * These visitors exist for forward compatibility.
+    * is off on every backend chen supports: `a[1]` arrives as a `send` of `[]`. These visitors
+    * exist for forward compatibility.
     */
   private def visitIndexAssignment(obj: Obj): RubyExpression =
     val lhsBase = visit(obj(ParserKeys.Receiver))
@@ -1053,7 +1053,7 @@ class RubyJsonToNodeCreator(
     SingleAssignment(lhs, "=", rhs)(obj.toTextSpan)
 
   /** `itarg` is the 3.4 `it` parameter marker; the prism translation emits a bare `:it` symbol as
-    * the `itblock` param instead (plan 01 §1), so this is forward compatibility.
+    * the `itblock` param instead, so this is forward compatibility.
     */
   private def visitItArg(obj: Obj): RubyExpression =
       MandatoryParameter(obj.getAsString(ParserKeys.Value).getOrElse("it"))(obj.toTextSpan)
@@ -1067,9 +1067,9 @@ class RubyJsonToNodeCreator(
         procParamGen.fresh.value
       ))(obj.toTextSpan)
 
-  /** `kwargs` is the keyword-arguments wrapper node, only emitted with `emit_kwargs` on (off today,
-    * README fact #10). Lowering to an association list lets `visitSend` treat it like any other
-    * named-argument hash.
+  /** `kwargs` is the keyword-arguments wrapper node, only emitted with `emit_kwargs` on (the
+    * generator leaves it off). Lowering to an association list lets `visitSend` treat it like any
+    * other named-argument hash.
     */
   private def visitKwargs(obj: Obj): RubyExpression =
       HashLiteral(obj.visitArray(ParserKeys.Children))(obj.toTextSpan)
@@ -1156,7 +1156,9 @@ class RubyJsonToNodeCreator(
   private def visitNot(obj: Obj): RubyExpression =
       UnaryExpression("!", visit(obj(ParserKeys.Arguments).arr.head))(obj.toTextSpan)
 
-  /** Anonymous `*` / `**` inside a forwarded-args parameter list. Latent (README fact #10). */
+  /** Anonymous `*` / `**` inside a forwarded-args parameter list. Latent: not emitted under the
+    * generator's builder flags.
+    */
   private def visitForwardedRestArg(obj: Obj): RubyExpression =
       ArrayParameter("*")(obj.toTextSpan)
 
@@ -1182,7 +1184,7 @@ class RubyJsonToNodeCreator(
             defaultResult(Option(paramsNode.toTextSpan)) :: Nil
 
   /** `END { ... }` - the phase timing is control flow chen does not model; the body's statements
-    * are preserved (plan 04 §4).
+    * are preserved.
     */
   private def visitPostExpression(obj: Obj): RubyExpression =
       visitBodyStatements(obj)
@@ -1191,7 +1193,7 @@ class RubyJsonToNodeCreator(
   private def visitPreExpression(obj: Obj): RubyExpression =
       visitBodyStatements(obj)
 
-  /** Latent today (`emit_procarg0=false`, README fact #10): the whole `|x, y|` list as one node.
+  /** Latent (the generator sets `emit_procarg0=false`): the whole `|x, y|` list as one node.
     * Lowered with the existing grouped-parameter machinery.
     */
   private def visitProcArgument(obj: Obj): RubyExpression =
@@ -1339,7 +1341,7 @@ class RubyJsonToNodeCreator(
           val objSpan      = obj.toTextSpan
           val hasArguments = arguments.nonEmpty
           // The generator records whether the call was written with parentheses and which
-          // operator it used (call_operator/has_parentheses, plan 02 §4). The text checks are
+          // operator it used (call_operator/has_parentheses). The text checks are
           // only a fallback for JSON emitted by generators older than 2.0.
           val usesParenthesis =
               booleanFact(obj, ParserKeys.HasParentheses, objSpan.text.endsWith(")"))
@@ -1362,7 +1364,7 @@ class RubyJsonToNodeCreator(
   end visitSend
 
   /** Block-local variable declaration (`proc { |x; y| }`); it is a real binding, so it becomes a
-    * parameter-like node instead of being dropped (plan 04 §4).
+    * parameter-like node instead of being dropped.
     */
   private def visitShadowArg(obj: Obj): RubyExpression =
       MandatoryParameter(obj.getAsString(ParserKeys.Value).getOrElse(obj.toTextSpan.text))(

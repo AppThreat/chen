@@ -27,9 +27,9 @@ class DynamicTypeHintFullNamePass(
   /** Materialised once per run: every type decl as (fullName, decl) in graph order. The per-lookup
     * alternative - `cpg.typeDecl.fullName(".*<quoted name>")` - is a regex scan over the whole
     * typeDecl population FOR EVERY typed node, and on annotation-dense graphs (typeshed stubs) that
-    * dominated this pass's wall (task 12 D.2: 128s of a 260s typeshed run). `.*<Pattern.quote(x)>`
-    * is exactly `fullName.endsWith(x)`, so scanning this array preserves both the matched SET and
-    * its order while dropping the per-node regex work.
+    * dominated this pass's run time on large stub sets. `.*<Pattern.quote(x)>` is exactly
+    * `fullName.endsWith(x)`, so scanning this array preserves both the matched SET and its order
+    * while dropping the per-node regex work.
     */
   private val allTypeDecls: Array[(String, TypeDecl)] =
       cpg.typeDecl.map(td => td.fullName -> td).toArray
@@ -99,10 +99,10 @@ class DynamicTypeHintFullNamePass(
             }
       }
 
-  /** The combined import path already IS the full name (`foo.bar.Baz`) since task 09 made dotted
-    * the only representation, so there is nothing to rewrite: the file form's alias-driven `a.b.C`
-    * -> `a/b.py:<module>.C` translation is what the removed `alias` parameter existed for, and both
-    * call sites now ask the same question.
+  /** The combined import path already IS the full name (`foo.bar.Baz`) because dotted names are the
+    * only representation, so there is nothing to rewrite: no alias-driven `a.b.C` ->
+    * `a/b.py:<module>.C` translation (and so no `alias` parameter) is needed, and both call sites
+    * ask the same question.
     */
   private def setTypeHints(
     diffGraph: BatchedUpdate.DiffGraphBuilder,

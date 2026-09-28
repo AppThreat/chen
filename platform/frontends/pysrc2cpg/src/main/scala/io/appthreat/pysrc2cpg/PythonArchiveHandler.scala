@@ -10,14 +10,14 @@ import java.util.zip.ZipFile
 import scala.jdk.CollectionConverters.*
 import scala.util.{Try, Using}
 
-/** Task 12 Part A - ingestion of published Python package archives.
+/** Ingestion of published Python package archives.
   *
   * A `.whl`/`.egg`/sdist dropped into the input directory (or given as the input itself) is
   * unpacked into a temp directory before [[io.appthreat.x2cpg.SourceFiles]] runs, so the file walk
   * sees the package's real layout and every existing rule (module naming, `src/` and `build/`
   * shadow handling, dependency attribution) applies to unpacked code unchanged.
   *
-  * Formats, per the PyPA packaging specs and the real archives in the corpus:
+  * Formats, per the PyPA packaging specs and real published archives:
   *   - `.whl` (PEP 427): zip container, `<pkg>/` + `<pkg>-<ver>.dist-info/` at the zip root
   *   - `.egg`: legacy zip container, `EGG-INFO/` at the root
   *   - sdist `.tar.gz` / `.tgz` and sdist `.zip`: a single `<pkg>-<ver>/` root, `PKG-INFO`, often a
@@ -257,7 +257,7 @@ object PythonArchiveHandler:
   private def sanitisedName(archive: Path): String =
       archive.getFileName.toString.replaceAll("[^A-Za-z0-9._-]", "_")
 
-  // ------------------------------------------------------------------ package identity (A.4)
+  // ------------------------------------------------------------------ package identity
 
   /** The authoritative distribution identity of an unpacked archive: distribution name, version,
     * and the top-level import names it provides. This is what a `.whl`'s RECORD (or an older

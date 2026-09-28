@@ -20,14 +20,16 @@ import scala.collection.parallel.CollectionConverters.*
   */
 class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
 
-  def ddgIn(implicit semantics: Semantics = DefaultSemantics()): Iterator[CfgNode] =
+  def ddgIn(implicit semantics: Semantics = DefaultSemantics.memoised): Iterator[CfgNode] =
     val cache = mutable.HashMap[CfgNode, Vector[PathElement]]()
     val result =
         traversal.flatMap(x => x.ddgIn(Vector(PathElement(x)), withInvisible = false, cache))
     cache.clear()
     result
 
-  def ddgInPathElem(implicit semantics: Semantics = DefaultSemantics()): Iterator[PathElement] =
+  def ddgInPathElem(implicit semantics: Semantics = DefaultSemantics.memoised): Iterator[
+    PathElement
+  ] =
     val cache = mutable.HashMap[CfgNode, Vector[PathElement]]()
     val result = traversal.flatMap(x =>
         x.ddgInPathElem(Vector(PathElement(x)), withInvisible = false, cache)

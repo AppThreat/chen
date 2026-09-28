@@ -157,6 +157,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                     Some(signature),
                     Some(registerType(cleanType(safeGetType(call.getExpressionType))))
                   )
+                  tagCallAttributes(callCpgNode, function)
                   val args = call.getArguments.toList.map(a => astForNode(a))
 
                   createCallAst(callCpgNode, args)
@@ -392,6 +393,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       Some(signature),
       Some(callTypeFullName)
     )
+    idExpr.getName.getBinding match
+      case function: IFunction => tagCallAttributes(callCpgNode, function)
+      case _                   => ()
     val args = call.getArguments.toList.map(a => astForNode(a))
 
     createCallAst(callCpgNode, args)
@@ -553,12 +557,21 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val typeId = newExpression.getTypeId
     if newExpression.isArrayAllocation then
       val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
-      Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
+      // the array size IS part of the allocation's meaning: `new char[need]` allocates
+      // `need` bytes, and the self-sized-copy reading needs that size on the graph - it
+      // must not be dropped here, or every sized new[] copy is unprovable
+      val sizeArgs = Option(typeId.getAbstractDeclarator).toList.collect {
+          case ad: ast.IASTArrayDeclarator => ad.getArrayModifiers.toList
+      }.flatten.filter(_.getConstantExpression != null).map(astForNode)
+      if sizeArgs.isEmpty then
+        Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
+      else callAst(cpgNewExpression, List(cpgTypeId) ++ sizeArgs)
     else
       val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
       val args = astsForConstructorInitializer(newExpression.getInitializer) ++
           astsForInitializerPlacements(newExpression.getPlacementArguments)
       callAst(cpgNewExpression, List(cpgTypeId) ++ args)
+  end astForNewExpression
 
   private def astForDeleteExpression(delExpression: ICPPASTDeleteExpression): Ast =
     val name = Operators.delete

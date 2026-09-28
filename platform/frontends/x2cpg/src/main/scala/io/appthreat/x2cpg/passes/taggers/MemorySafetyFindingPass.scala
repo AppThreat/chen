@@ -1,0 +1,4617 @@
+package io.appthreat.x2cpg.passes.taggers
+
+import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.passes.CpgPass
+import io.shiftleft.semanticcpg.language.*
+
+import scala.collection.mutable
+
+/** Rules as tag algebra. The only overlay pass that emits findings.
+  *
+  * Each rule is a conjunction over the tags the fact passes left on the graph, and carries a rule
+  * id, a CWE, a confidence and the message a renderer shows. A finding is itself a tag -
+  * `ms-finding` valued with the rule id, alongside the `memory-safety` umbrella - so `atom
+  * reachables --sink-tag memory-safety` and a chennai session see it with no second output path.
+  *
+  * The copy rules:
+  *
+  *   - **MS-BOUND-002** - unbounded attacker-controlled copy (CWE-787): the length argument is
+  *     caller- or reader-controlled (`caller-param` / `untrusted-read`) and nothing bounds it from
+  *     above (`bounded-above` / `bounded-by-extent`). Three tag lookups - no regex, no argument
+  *     indices, no API name list. The interprocedural half: a `caller-param`-only length reports
+  *     only when the call graph shows no caller establishing the bound - the method has no
+  *     intra-tree callers, or some call site passes a non-constant for the feeding parameter.
+  *     Without it most findings in a library read "this function copies as many bytes as its caller
+  *     asked for", which is what a correct helper looks like from inside.
+  *   - **MS-BOUND-001** - size-parameter contract violation (CWE-787): the destination is a buffer
+  *     parameter whose extent is an adjacent capacity parameter (`extent` `param:<name>`), and that
+  *     capacity reaches no bound on the write - neither as the copy's own length (REACHING_DEF path
+  *     to the length argument) nor as a guard on it. The shape behind CVE-2026-75143: `size =
+  *     payload_len` destroys the caller's capacity before `memcpy(buf, payload, size)`.
+  *
+  * The index family, over facts the earlier passes already leave on the graph:
+  *
+  *   - **MS-BOUND-003** (CWE-125, read) / **MS-BOUND-004** (CWE-787, write) - the index is
+  *     attacker-controlled (`caller-param` / `untrusted-read`) into a base of known capacity with
+  *     no upper bound; or it is a signed struct-field read bounded only ABOVE (CVE-2026-75146's
+  *     negative-index shape, which the fix's `>= 0` conjunct silences). `bounded-below` is the fact
+  *     that separates the bug from the guard that fixes it.
+  *
+  * `unknown` extents never satisfy a rule that needs an extent: MS-BOUND-001 fires only on an
+  * explicit `param:` extent, MS-BOUND-002 needs no extent at all, and the index rules accept only
+  * `const:`/`alloc:` capacities. The integer family, over the IntegerWidth facts:
+  *
+  *   - **MS-INT-001** (CWE-190) - an allocation/copy length computed by attacker-influenced
+  *     arithmetic (`int-arith-len`), no guard bounding an operand above, no widened operand;
+  *   - **MS-INT-002** (CWE-197, `high`) - a sign-changing cast that a guard bounds, with the
+  *     guarded uses reading the declared view. A resign that merely exists is not a finding.
+  *
+  * Runs last in the overlay, after MemoryApi, Extent, Guard, ValueOrigin and IntegerWidth. C/C++
+  * graphs only.
+  */
+class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
+    extends CpgPass(atom):
+
+  import MemorySafetyFindingPass.*
+  import OverlayFacts.*
+
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+    if !MemoryApiPass.appliesTo(atom) then return
+
+    val findings = mutable.LinkedHashMap.empty[StoredNode, mutable.LinkedHashSet[String]]
+    def record(node: StoredNode, ruleId: String): Unit =
+        findings.getOrElseUpdate(node, mutable.LinkedHashSet.empty) += ruleId
+
+    val sites = OverlayFacts.memoryArgumentSites(atom)
+    val argsByCall = sites.groupBy { case (call, _, _) => call }
+        .map { case (call, rows) => call -> rows.map { case (_, arg, _) => arg }.distinct }
+    // the promoted tiers: arms whose evidence earns MORE than their rule's own default
+    // confidence (the stack-allocation and input-parsed-size arms of the
+    // uncontrolled-allocation rule)
+    val mediumConfidence = mutable.ListBuffer.empty[(StoredNode, String)]
+
+    ruleUnboundedCopy(argsByCall, record)
+    ruleSizeParameterContract(argsByCall, record)
+    ruleIndexBounds(record)
+    counterIndexedArray(record)
+    sourceOverread(record)
+    pairedAdvanceWalk(record)
+    ruleCapacityOverrun(record)
+    ruleWrongDeallocation(record)
+    mediumConfidence ++= ruleUncontrolledAllocationSize(record)
+    ruleIntegerArithmeticLength(record)
+    ruleResignAcrossGuard(record)
+    ruleAllocationState(record)
+    InitAndFormatRules.formatString(atom, record)
+    InitAndFormatRules.uninitialisedReads(atom, record)
+    ruleToctou(record)
+    // the hypothesis tiers: a finding whose own arm is a may-claim reports below its rule's
+    // confidence - the null-deref chained-parameter arm, and the invalidation rule's
+    // reference-parameter arm
+    val lowConfidence = mutable.ListBuffer.empty[(StoredNode, String)]
+    lowConfidence ++= ruleNullDereference(record).map(_ -> RuleNullDeref)
+    lowConfidence ++= ContainerInvalidationRules
+        .containerInvalidation(atom, record)
+        .map(_ -> RuleContainerInvalidation)
+
+    // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
+    // computed by attacker arithmetic; most ALLOC-009 findings would otherwise share an INT-001
+    // line. One report per site, under the CWE the arithmetic names: a PRODUCT sizing an
+    // allocation is the overflow-to-undersized-buffer shape (CWE-680, the classic
+    // `malloc(count * sizeof(int))`), a SUM is the plain wrap (CWE-190, `malloc(len + 1)`)
+    def isProduct(node: StoredNode): Boolean = node match
+      case c: Call => c.name == "<operator>.multiplication"
+      case _       => false
+    val sizeSites = findings.collect {
+        case (node, rules) if rules.contains(RuleUncontrolledSizeOverflow) =>
+            siteOf(node) -> isProduct(node)
+    }.toMap
+    val intSites = findings.collect {
+        case (node, rules) if rules.contains(RuleIntegerOverflow) => siteOf(node)
+    }.toSet
+    findings.foreach { case (node, rules) =>
+        val site = siteOf(node)
+        if rules.contains(RuleUncontrolledSizeOverflow) && intSites.contains(site) &&
+          !sizeSites.getOrElse(site, false)
+        then rules -= RuleUncontrolledSizeOverflow
+        if rules.contains(RuleIntegerOverflow) && sizeSites.getOrElse(site, false) then
+          rules -= RuleIntegerOverflow
+    }
+
+    // a copy whose length is the value an MS-INT-002 lossy-cast guard finding already
+    // covers is the same defect seen twice - the guard checked the wrong signedness and the copy
+    // ran with whatever it let through (the OOB write IS the CVE's impact, but the root
+    // cause is at the guard). The cast reports (CWE-197); the copy findings stand down.
+    val resignCovered = findings.collect {
+        case (node, rules) if rules.contains(RuleResignAcrossGuard) =>
+            node match
+              case e: Expression => castUnwrappingKey(e).map(k => e.method.id -> k)
+              case _             => None
+    }.flatten.toSet
+    findings.foreach { case (node, rules) =>
+        if rules.contains(RuleUnboundedCopy) || rules.contains(RuleSizeParamContract) then
+          node match
+            case e: Expression =>
+                castUnwrappingKey(e).foreach { key =>
+                    if resignCovered.contains(e.method.id -> key) then
+                      rules -= RuleUnboundedCopy
+                      rules -= RuleSizeParamContract
+                }
+            case _ => ()
+    }
+
+    OverlayFacts.emitTags(
+      dstGraph,
+      findings.toList.filter(_._2.nonEmpty).flatMap { case (node, ruleIds) =>
+          ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
+      } ++ lowConfidence.map { case (node, rule) => (node, TagConfidence, s"$rule=low") } ++
+          mediumConfidence.map { case (node, rule) => (node, TagConfidence, s"$rule=medium") } ++
+          heuristicFindings(findings).map { case (node, rule) =>
+              (node, TagConfidence, s"$rule=low")
+          }
+    )
+  end run
+
+  /** The rules a free call triggers: the double free and use-after-free the free's state enables,
+    * and the wrong-deallocation checks of the free's own argument.
+    */
+  private val FreeTriggeredRules =
+      Set(RuleDoubleFree, RuleUseAfterFree, RuleNonHeapFree, RuleOffsetFree, RuleMismatchedFree)
+
+  /** Findings that rest on a HEURISTIC summary (MemorySemanticsPass: a `void f(void *)` named
+    * `free`, an `int f(void *, size_t)` named `realloc`, with no body in scope): a finding on the
+    * guessed call or inside one of its arguments, and a free-triggered finding over a pointer a
+    * guessed free releases in the same method. The role is a guess, so the finding reports at
+    * `low`, whatever its rule's confidence.
+    */
+  private def heuristicFindings(
+    findings: mutable.LinkedHashMap[StoredNode, mutable.LinkedHashSet[String]]
+  ): List[(StoredNode, String)] =
+    val heuristic = MemorySemanticsPass.heuristicSummaries(atom)
+    if heuristic.isEmpty then return Nil
+    def insideGuessedCall(e: Expression): Boolean =
+        (e +: e.inAst.collectAll[Expression].l).exists {
+            case c: Call => heuristic.contains(c.name)
+            case _       => false
+        }
+    def rootName(e: Expression): Option[String] = e match
+      case i: Identifier => Some(i.name)
+      case c: Call
+          if c.name == "<operator>.cast" || c.name == "<operator>.addressOf" ||
+              c.name == "<operator>.indirection" =>
+          c.argument.l.collect { case x: Expression => x }.lastOption.flatMap(rootName)
+      case _ => None
+    val freedByMethod = heuristic.toList
+        .flatMap(n => atom.call.nameExact(n).l)
+        .flatMap(c =>
+            c.argumentOption(1).flatMap(rootName)
+                .map(n => c.method.id -> (n, c.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)))
+        )
+        .groupMap(_._1)(_._2)
+    findings.toList.flatMap { case (node, rules) =>
+        node match
+          case e: Expression if insideGuessedCall(e) => rules.toList.map(node -> _)
+          case e: Expression                         =>
+              // only a guessed free BEFORE the finding can be what triggered it: a real
+              // `free(p); free(p);` keeps its confidence though `av_free(p)` follows
+              val line  = e.lineNumber.map(_.toInt).getOrElse(-1)
+              val names = (e +: e.ast.collectAll[Expression].l).flatMap(rootName).toSet
+              if freedByMethod.get(e.method.id).exists(_.exists { case (n, l) =>
+                    l < line && names.contains(n)
+                })
+              then
+                rules.toList.filter(FreeTriggeredRules.contains).map(node -> _)
+              else Nil
+          case _ => Nil
+    }
+  end heuristicFindings
+
+  /** (method id, line) - the granularity a reader sees a finding at */
+  private def siteOf(node: StoredNode): (Long, Int) = node match
+    case e: Expression => (e.method.id, e.lineNumber.map(_.toInt).getOrElse(-1))
+    case other         => (other.id, -1)
+
+  /** MS-ALLOC-001/002/003: double-free, use-after-free and leak, over the states
+    * [[AllocationStatePass]] put on the graph. The rules are pure readers of those facts - the pass
+    * decides WHAT the state at a program point is, the rules decide WHAT IT MEANS:
+    *
+    *   - **MS-ALLOC-001** (CWE-415): a free of a pointer that is `freed` (must-freed, every path)
+    *     or `maybe-freed` (freed on some path reaching it - the conditional-double-free shape). A
+    *     double CLOSE of a `file`-family handle is CWE-1341 (**MS-ALLOC-004**), the same state fact
+    *     over a different family.
+    *   - **MS-ALLOC-002** (CWE-416): a use of a `freed`/`maybe-freed` pointer - through a memory
+    *     call's arguments, another call's arguments, or an index/field access base.
+    *   - **MS-ALLOC-003** (CWE-401): the `alloc-leak` fact on an exit node - an allocation still
+    *     live, un-freed and un-escaped there.
+    *
+    * A pointer that is `null` (the free-and-reset idiom), `escaped`, or untracked is silent: the
+    * pass says `escaped` when it genuinely does not know, and a rule must not turn on that silence.
+    */
+  private def ruleAllocationState(record: (StoredNode, String) => Unit): Unit =
+    atom.tag
+        .name(AllocationStatePass.TagState)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l.map(n => (n, t.value)))
+        .foreach { case (node, state) =>
+            state match
+              case "freed" | "maybe-freed" | AllocationStatePass.ValueSummaryFreed =>
+                  // the SAME fact means two things by site: a free of an already-freed
+                  // pointer is a double-free, any other use is a use-after-free
+                  val enclosing = node._astIn.collectFirst { case c: Call => c }
+                  // a summary-freed value names the call that freed it: the ENCLOSING
+                  // call is the free even though it carries no inventory tag of its own
+                  val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
+                      enclosing.exists(c =>
+                          tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
+                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                      )
+                  if isFreeSite then
+                    val family = enclosing.flatMap(c =>
+                        tagValues(c, MemoryApiPass.TagFree).headOption
+                    )
+                    record(
+                      node,
+                      if family.contains("file") then RuleDoubleClose else RuleDoubleFree
+                    )
+                  else record(node, RuleUseAfterFree)
+              case _ => ()
+        }
+    atom.tag
+        .name(AllocationStatePass.TagLeak)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleLeak))
+    // MS-ESC-001 (CWE-562): a stack address that left its frame - returned, or
+    // stored into a member, a global, or through a pointer parameter. The state pass tracks the
+    // frame's storage through the SAME worklist and escape analysis it tracks the heap's: the
+    // rule is the reader, exactly as for the leak.
+    atom.tag
+        .name(AllocationStatePass.TagStackEscape)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleStackEscape))
+  end ruleAllocationState
+
+  /** MS-NULL-001 (CWE-476): a dereference of a value that may be null, three arms over two fact
+    * sources. Returns the nodes whose finding is a HYPOTHESIS tier - the renderer lowers those
+    * below the rule's own confidence, the same way a whole rule ships at `low` when its evidence
+    * does not earn `medium`.
+    *
+    *   - **unchecked nullable return** (the state pass's `null-use` facts): a use of a pointer
+    *     whose producing call may return NULL - every allocation, or the inventory's
+    *     `nullable-return` role (the strchr family, av_dict_get) - with no narrowing guard between
+    *     the call and the use. The imfdec.c:258 shape: `uri = xmlNodeGetContent(...)`;
+    *     `imf_uri_is_url(uri)` dereferences what the library may have handed back NULL.
+    *   - **check-after-use** (rule-side): a use of a variable whose null guard appears LATER in the
+    *     method - the author knew it could be null, one statement too late: `strlen(s); if (s ==
+    *     NULL) return;`. The ordering is structural: a use nested inside the structure whose
+    *     condition is the guard is protected (a loop body under its own trailer), and a guard that
+    *     follows a REDEFINITION of the variable speaks about a different value - neither is a
+    *     check-after-use.
+    *   - **unvalidated parameter** (rule-side, the hypothesis tier): a pointer parameter
+    *     dereferenced with no null guard anywhere in the method, through a SELF-REFERENTIAL field
+    *     chain (`head->next->v`, where `next` has `head`'s own pointee type - a traversal hop
+    *     nothing validated). Keeping the whole field chain would flood a library like libavformat,
+    *     because a cross-type chain (`s->priv_data->x`) is FFmpeg's idiom for an owned sub-object
+    *     initialised with its parent. The type relation is the fact that separates the traversal
+    *     hop from the owned sub-object; an unresolvable member type says nothing and stays silent.
+    *
+    * A use under a guard that proved the pointer NON-NULL is not a finding; an escaped pointer is
+    * not one either - the state pass says so, not this rule's silence. A call argument is a use
+    * only at a position the callee READS THROUGH - an inventoried dst/src role, or the callee's own
+    * `derefs-param` summary - exactly the evidence the state pass's arm 1 turns on, so the two arms
+    * cannot disagree about what a dereference is.
+    */
+  private def ruleNullDereference(
+    record: (StoredNode, String) => Unit
+  ): Set[StoredNode] =
+    // arm 1: the state pass already asked the flow question
+    val stateFacts = atom.tag
+        .name(AllocationStatePass.TagNullUse)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .distinct
+    stateFacts.foreach(node => record(node, RuleNullDeref))
+
+    // the call positions that read through their argument: inventoried roles, and the callee
+    // summaries the state pass concluded - one scan each, not a traversal per use
+    val derefsByName  = AllocationStatePass.derefsParamsByName(atom)
+    val readPositions = OverlayFacts.memoryReadPositions(atom)
+
+    // arms 2 and 3: per method, the null guards the author wrote and the uses that precede (or
+    // never meet) them. `<global>` is skipped: its AST nests every function of the file, so its
+    // "uses" and "guards" would be every function's at once - one function's guard reaching
+    // another function's use through it is not a check-after-use, it is an aggregation artefact
+    val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
+    atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
+      // a bare `if (x)` is a null guard only for POINTER x: FFmpeg truthiness-checks ints
+      // everywhere (`if (ret)`, `if (size)`), and counting those made arm 2 fire on every
+      // earlier use of the int
+      val pointerNames = (method.local.l ++ method.parameter.l)
+          .map(d => d.name -> d.property("TYPE_FULL_NAME"))
+          .collect { case (n, t: String) if OverlayFacts.isPointer(t) => n }
+          .toSet
+      // the guard's LINE (the earliest, when the author wrote several) and the structure it
+      // belongs to - nesting inside that structure is protection, not lateness
+      val guards = mutable.LinkedHashMap.empty[String, (Int, ControlStructure)]
+      method.ast.collectAll[ControlStructure].l.foreach { cs =>
+          cs.condition.foreach { cond =>
+              OverlayFacts.nullGuardKeysOf(cond, pointerNames).foreach { key =>
+                val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                guards.update(
+                  key,
+                  guards.get(key) match
+                    case Some((prevLine, prevCs)) if prevLine <= line => (prevLine, prevCs)
+                    case _                                            => (line, cs)
+                )
+              }
+          }
+      }
+      // a conditional EXPRESSION narrows its own arms: `p == 0 ? d : p->v` proves p non-null
+      // in the else arm, a bare `p ? p->v : d` in the then arm. A use under such a narrowing
+      // is guarded by the expression it sits in - a later guard on the same variable belongs
+      // to its own statement, not to this use (otherwise the ternary reads as a check-after-use)
+      // The polarity is per key: `(!p && q) ? p->v : d` names p but proves it NULL on the then
+      // arm, and `p || q` proves nothing on either arm about p.
+      def nonNullWhen(cond: AstNode, truth: Boolean): List[String] = cond match
+        case c: Call if c.name == "<operator>.logicalAnd" =>
+            if truth then c.argument.l.flatMap(nonNullWhen(_, true)) else Nil
+        case c: Call if c.name == "<operator>.logicalOr" =>
+            if truth then Nil else c.argument.l.flatMap(nonNullWhen(_, false))
+        case c: Call if c.name == "<operator>.logicalNot" =>
+            c.argumentOption(1).toList.flatMap(nonNullWhen(_, !truth))
+        case c: Call if c.name == "<operator>.equals" =>
+            if truth then Nil else OverlayFacts.nullGuardKeysOf(c, pointerNames)
+        case other =>
+            // `p != NULL` and the truth of `p` itself
+            if truth then OverlayFacts.nullGuardKeysOf(other, pointerNames) else Nil
+      val ternaryNarrowings = method.ast.collectAll[Call].l
+          .filter(_.name == "<operator>.conditional")
+          .flatMap { c =>
+              c.argumentOption(1).toList.flatMap { cond =>
+                  nonNullWhen(cond, truth = true).map(k => (k, c, true)) ++
+                      nonNullWhen(cond, truth = false).map(k => (k, c, false))
+              }
+          }
+      def narrowedByTernary(use: AstNode, key: String): Boolean =
+          ternaryNarrowings.exists { case (k, c, thenSafe) =>
+              k == key && {
+                  val inThen = c.argumentOption(2).exists(a => isWithinSubtree(use, a))
+                  val inElse = c.argumentOption(3).exists(a => isWithinSubtree(use, a))
+                  (inThen && thenSafe) || (inElse && !thenSafe)
+              }
+          }
+      // the redefinitions of each variable, by line: a guard that follows one speaks about a
+      // different value than the one the use read
+      val redefinitions: Map[String, Seq[Int]] =
+          method.ast
+              .collectAll[Call]
+              .l
+              .flatMap(c =>
+                  c.name match
+                    case "<operator>.assignment" | "<operator>.assignmentPlus" |
+                        "<operator>.assignmentMinus" | "<operator>.postIncrement" |
+                        "<operator>.preIncrement" =>
+                        c.argumentOption(1).collect { case i: Identifier => i }
+                    case _ => None
+              )
+              .groupMap(_.name)(i => i.lineNumber.map(_.toInt).getOrElse(Int.MaxValue))
+              .view
+              .mapValues(_.toSeq.sorted)
+              .toMap
+      val paramNames = method.parameter.name.l.toSet
+      if guards.nonEmpty || method.parameter.exists(p => OverlayFacts.isPointer(p.typeFullName))
+      then
+        // the uses a null guard would have protected: a dereference base, or an argument handed
+        // to a call at a position that reads through it
+        val uses = method.ast.collectAll[Call].l.flatMap { c =>
+          val derefBases = c.name match
+            case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" |
+                "<operator>.indexAccess" | "<operator>.indirectIndexAccess" =>
+                c.argumentOption(1).toList
+            case _ => Nil
+          val callArgs =
+              if c.name.startsWith("<operator>") then Nil
+              else
+                val readsThrough = readPositions.getOrElse(c.id, Set.empty) ++
+                    derefsByName.getOrElse(c.name, Set.empty)
+                c.argument.l.filter(a => readsThrough.contains(a.argumentIndex))
+          (derefBases ++ callArgs).collect { case i: Identifier => i }
+        }
+        uses.foreach { use =>
+            castUnwrappingKey(use).foreach { key =>
+              val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+              guards.get(key) match
+                case Some((guardLine, cs)) if guardLine > line =>
+                    // the guard exists but comes AFTER the use: check-after-use, unless the
+                    // use sits inside the guard's own structure (a loop body under its
+                    // trailer is guarded from the second iteration on and the author wrote
+                    // the check where the loop could see it), or the variable was
+                    // redefined in between (the guard speaks about a different value)
+                    val insideGuard = isNestedWithin(use, cs)
+                    val redefinedInBetween =
+                        redefinitions.get(key.stripPrefix("v:")).exists(lines =>
+                            lines.exists(l => l > line && l < guardLine)
+                        )
+                    if !insideGuard && !redefinedInBetween && !narrowedByTernary(use, key) then
+                      record(use, RuleNullDeref)
+                case None
+                    if paramNames.contains(use.name) && isTraversalChainBase(use) =>
+                    // a parameter dereferenced with no guard on it anywhere, through a
+                    // self-referential field chain (`head->next->v`): every hop is a fresh,
+                    // independently-nullable traversal pointer. Any pure field chain would
+                    // also match the FFmpeg context idiom (`s->priv_data->x`), thousands of
+                    // times per library; the member's type equal to the parameter's own
+                    // pointee type is the fact that separates the two.
+                    record(use, RuleNullDeref)
+                    hypothesis += use
+                case _ => ()
+              end match
+            }
+        }
+      end if
+    }
+    hypothesis.toSet
+  end ruleNullDereference
+
+  /** Is `node` nested inside `cs`'s subtree? */
+  private def isNestedWithin(node: AstNode, cs: ControlStructure): Boolean =
+      isWithin(node, cs)
+
+  /** Is `node` inside `root`'s subtree, root itself included? The parent walk is bounded the way
+    * the structure walk is: a method boundary stops it.
+    */
+  private def isWithinSubtree(node: AstNode, root: AstNode): Boolean =
+    var cursor: Option[StoredNode] = node match
+      case s: StoredNode => Some(s)
+      case _             => None
+    var found   = false
+    var walking = true
+    while walking do
+      cursor match
+        case Some(n) =>
+            if n.id == root.id then
+              found = true
+              walking = false
+            else
+              n match
+                case _: Method => walking = false
+                case _         => cursor = n._astIn.nextOption()
+        case None => walking = false
+    found
+
+  /** Is this identifier the base of the inner access of a SELF-REFERENTIAL field chain
+    * (`head->next->v`, where `next` is a pointer of `head`'s own pointee type)? The inner member is
+    * resolved through the graph's type table; an unresolvable member type concludes nothing. Index
+    * accesses in the chain are deliberately excluded: the field-through-index form is mostly
+    * correct code, while the pure field chain keeps the true shape.
+    */
+  private def isTraversalChainBase(use: Identifier): Boolean =
+      use._astIn.collectFirst { case c: Call => c }.exists { access =>
+          isFieldAccess(access) && OverlayFacts.memberRefOf(atom, access).exists { member =>
+            val paramType = use.method.parameter
+                .name(use.name)
+                .l
+                .headOption
+                .map(_.typeFullName)
+                .getOrElse("")
+            OverlayFacts.isPointer(member.typeFullName) &&
+            member.typeFullName.trim == paramType.trim
+          } && access._astIn.collectFirst { case outer: Call => outer }
+              .exists(outer =>
+                  isFieldAccess(outer) && outer.argumentOption(1).exists(_.id == access.id)
+              )
+      }
+
+  private def isFieldAccess(c: Call): Boolean =
+      c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess"
+
+  private def tagValues(node: StoredNode, tag: String): Set[String] =
+      node.tag.name(tag).value.l.toSet
+
+  /** MS-BOUND-002: attacker-controlled length, no upper bound, into a buffer the call actually
+    * writes (CWE-787 is about a destination; an allocation-size argument creates a buffer, it does
+    * not overrun one). A length that flows from the destination's own paired capacity parameter is
+    * NOT unbounded - it honours the buffer/capacity contract, and only MS-BOUND-001 (which fires
+    * when that contract is broken) has any business reporting at such a site.
+    *
+    * A caller-param-only length is the signature of a correctly written helper - the bound lives at
+    * its callers - so it reports only when the call graph says the callers do NOT establish the
+    * bound: the method has no intra-tree callers at all (framework-reachable), or some call site
+    * passes a value for the feeding parameter that is not provably a constant or a sizeof. An
+    * untrusted-read length always reports: the function read it itself.
+    */
+  private def ruleUnboundedCopy(
+    argsByCall: Map[Call, List[Expression]],
+    record: (StoredNode, String) => Unit
+  ): Unit =
+      argsByCall.foreach { case (call, args) =>
+          val capParam     = capacityParamOf(call, args)
+          val dstArg       = args.find(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+          val srcArg       = args.find(a => a.tag.name(MemoryApiPass.TagSrc).l.nonEmpty)
+          val writesBuffer = dstArg.isDefined
+          lengthArgsOf(args).foreach { lenArg =>
+            val tags = lenArg.tag.name.l
+            val controlled = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                (tags.contains(ValueOriginPass.OriginCallerParam) &&
+                    unboundedAtCallSites(call.method, lenArg))
+            val honoursCapacity = capParam.exists(reaches(lenArg, _)) ||
+                dstArg.exists(d => selfSizedDestination(d, srcArg, lenArg)) ||
+                dstArg.exists(d => lenClampedToDestination(d, lenArg))
+            if writesBuffer && controlled && !isBounded(tags) && !honoursCapacity then
+              record(lenArg, RuleUnboundedCopy)
+          }
+      }
+
+  /** The declaration may spell a constant's NAME where the min uses its VALUE, or the reverse
+    * (`constexpr kBigSize = 65536` folded into the member's type): one resolves through the other
+    * over the atom's single-valued literal assignments. Built once, on first use.
+    */
+  private lazy val constantAssignments: Map[String, String] =
+      atom.assignment.l.flatMap { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(i: Identifier), Some(l: Literal)) => Some(i.name -> l.code.trim)
+            case _                                       => None
+      }.groupMap(_._1)(_._2).collect { case (k, vs) if vs.distinct.size == 1 => k -> vs.head }
+
+  /** The declared type of the storage an expression names: a member through a field access, a local
+    * or parameter, or an implicit-this member ([[OverlayFacts.implicitMemberOf]]).
+    */
+  private def storageTypeOf(e: Expression): Option[String] = e match
+    case fa: Call if isFieldAccess(fa) => OverlayFacts.memberRefOf(atom, fa).map(_.typeFullName)
+    case i: Identifier =>
+        (i.method.local.nameExact(i.name).map(_.typeFullName).l ++
+            i.method.parameter.nameExact(i.name).map(_.typeFullName).l).headOption
+            .orElse(OverlayFacts.implicitMemberOf(atom, i).map(_.typeFullName))
+    case _ => None
+
+  /** Is this an array whose sizeof is its capacity (`char space_[24]`), not a pointer? */
+  private def isArrayStorage(e: Expression): Boolean =
+    val parameter = e match
+      case i: Identifier => i.method.parameter.nameExact(i.name).nonEmpty
+      case _             => false
+    // an array parameter is a pointer: its sizeof is the pointer's
+    !parameter && storageTypeOf(e).exists(t => t.contains('[') && !t.trim.endsWith("*"))
+
+  /** The length is defined as a min whose one arm can never exceed the destination's own capacity -
+    * `copy_size = std::min(write_size, kBufSize - pos_)` before `memcpy(buf_ + pos_, data,
+    * copy_size)`. The arm's bound is matched against the declared extent of the member the dst is
+    * written into, by literal or by the constant identifier the declaration spells (`char
+    * buf_[kBufSize]` declares the same `kBufSize` the min subtracts); a subtraction arm must
+    * subtract the very operand the dst is offset by, or an offset the min does not know about could
+    * push the write past the buffer. A dst with no offset accepts any subtrahend (the arm only gets
+    * smaller). Anything unprovable stays a finding.
+    */
+  private def lenClampedToDestination(dst: Expression, lenArg: Expression): Boolean =
+    def stripCasts(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).map(stripCasts).getOrElse(e)
+      case other => other
+    // the buffer a pointer expression addresses: offsets and casts dropped, fields kept
+    def bufferOf(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => stripCasts(c)
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collectFirst { case x: Expression => x }.map(bufferOf).getOrElse(c)
+      case other => other
+    def literalOrIdentCode(e: Expression): Option[String] = stripCasts(e) match
+      case l: Literal    => Some(l.code.trim)
+      case i: Identifier => Some(i.code.trim)
+      case _             => None
+    // the declared extent token of the member the dst is written into: `65536` from
+    // `char buf_[65536]`, `kBufSize` from `char buf_[kBufSize]`
+    def extentToken(typeFullName: Option[String]): Option[String] =
+        typeFullName.flatMap { t =>
+            """\[(.+?)\]\s*$""".r.findFirstMatchIn(t).map(_.group(1).trim)
+        }
+    val declaredExtent = bufferOf(dst) match
+      case fa: Call if isFieldAccess(fa) =>
+          extentToken(OverlayFacts.memberRefOf(atom, fa).map(_.typeFullName))
+      case i: Identifier =>
+          extentToken(OverlayFacts.implicitMemberOf(atom, i).map(_.typeFullName))
+      case _ => None
+    val dstOffsetKey = dst match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case e: Expression => e }
+              .find(_.argumentIndex == 2)
+              .flatMap(OverlayFacts.variableKey)
+      case _ => None
+    def boundMatches(minuend: Expression): Boolean =
+        declaredExtent.exists { d =>
+            literalOrIdentCode(minuend).exists {
+                case code if code == d => true
+                case code if code.nonEmpty && d.nonEmpty =>
+                    constantAssignments.get(code).contains(d) ||
+                    constantAssignments.get(d).contains(code)
+                case _ => false
+            }
+        }
+    def armSound(arm: Expression): Boolean = arm match
+      case sub: Call if sub.name == "<operator>.subtraction" =>
+          val ops        = sub.argument.l.collect { case e: Expression => e }
+          val subtrahend = ops.find(_.argumentIndex == 2)
+          val offsetMatches = dstOffsetKey.forall(k =>
+              subtrahend.flatMap(OverlayFacts.variableKey).contains(k)
+          )
+          offsetMatches && ops.find(_.argumentIndex == 1).exists(boundMatches)
+      case other =>
+          dstOffsetKey.isEmpty && boundMatches(other)
+    def armsOf(e: Expression): List[Expression] = e match
+      case c: Call if minClampNames.contains(c.name) || c.name == "min" =>
+          c.argument.l.collect { case x: Expression => x }
+      case _ => Nil
+    val lenExprs = withoutCasts(lenArg)._1 :: lengthDefinitions(lenArg).flatMap(_._2)
+    lenExprs.exists(armsOf(_).exists(armSound))
+  end lenClampedToDestination
+
+  /** The destination was sized FROM this copy's length. A common correct shape in FFmpeg: `tmp =
+    * av_mallocz(max_url_size); memcpy(tmp, url, max_url_size)`, the packet writer that
+    * `av_malloc(sz + aud_size + extra_size)`s before copying each fragment, and the in-place strip
+    * `memmove(buf, buf + k, len - k)`. The allocation's size argument, the addition operands inside
+    * it, and one further definition level of those operands (a local holding `isize + header_size`)
+    * are the terms searched for the length. A term matches only when the length reaches the copy
+    * with the same definitions it had in the size: `len += 16` between the two is the overflow, not
+    * the excuse.
+    *
+    * The allocation arm reads a destination that IS a local pointer (through casts and offsets); a
+    * struct-member destination (`pkt->data`, sized by av_new_packet in the library) resolves no
+    * allocation here and stays a finding. The in-place and `strlen(dst)` arms compare whole buffer
+    * keys, so `s->a` and `s->b` are two buffers.
+    */
+  private def selfSizedDestination(
+    dst: Expression,
+    src: Option[Expression],
+    lenArg: Expression
+  ): Boolean =
+    // the buffer a pointer expression addresses: offsets and casts dropped, fields kept
+    def bufferOf(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(bufferOf).getOrElse(c)
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collectFirst { case x: Expression => x }.map(bufferOf).getOrElse(c)
+      case other => other
+    // the offsets a pointer expression adds to that buffer: `d + k`, `(char *)d + k + 4`
+    def offsetsOf(e: Expression): List[Expression] = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(offsetsOf).getOrElse(Nil)
+      case c: Call if c.name == "<operator>.addition" =>
+          val ops = c.argument.l.collect { case x: Expression => x }
+          ops.headOption.map(offsetsOf).getOrElse(Nil) ++ ops.drop(1)
+      case _ => Nil
+    def sameBuffer(a: Expression, b: Expression): Boolean =
+        (OverlayFacts.variableKey(bufferOf(a)), OverlayFacts.variableKey(bufferOf(b))) match
+          case (Some(x), Some(y)) => x == y && a.method.id == b.method.id
+          case _                  => false
+    def unwrapCast(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCast).getOrElse(c)
+      case other                                  => other
+    val copyCall = lenArg._astIn.collectFirst { case c: Call => c }
+    // strncat and friends append at strlen(dst): the length says nothing about where the write
+    // ends
+    val appending = copyCall.exists(c => AppendingCopies.contains(c.name))
+    // the ASSIGNMENTS, address-takings and parameters that reach a use: a by-value call argument
+    // is a definition to the reaching-def graph (`malloc(len)` "redefines" len), which says
+    // nothing about its value; `get_len(&len)` does
+    def valueDefs(i: Identifier): Set[Long] =
+        OverlayFacts.reachingDefsIn(i).collect {
+            case p: MethodParameterIn => p.id
+            case d: Identifier
+                if d._astIn.exists {
+                    case a: Call =>
+                        ((a.name.startsWith("<operator>.assignment") ||
+                            a.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")) &&
+                            a.argumentOption(1).exists(_.id == d.id)) ||
+                        (a.name == "<operator>.addressOf" && !OverlayFacts.readOnlyAddress(a))
+                    case _ => false
+                } => d.id
+            case c: Call if c.name == "<operator>.addressOf" && !OverlayFacts.readOnlyAddress(c) =>
+                c.id
+        }.toSet
+    // the field stores of the method: a field-access length (`m->len`) stored to between two
+    // spellings is not the same value at both
+    lazy val fieldStores: List[Call] =
+        dst.method.ast.isCall
+            .filter(c =>
+                c.name.startsWith("<operator>.assignment") ||
+                    c.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")
+            )
+            .filter(_.argumentOption(1).exists {
+                case t: Call => isFieldAccess(t)
+                case _       => false
+            })
+            .l
+    // `later` (at the copy) holds the value `earlier` (at the allocation, guard or definition)
+    // had: the same definitions reach both, and no definition of the variable lies on a path from
+    // the earlier occurrence to the later one (`n = read_len()` in a loop between them)
+    def sameValue(later0: Expression, earlier0: Expression): Boolean =
+        (unwrapCast(later0), unwrapCast(earlier0)) match
+          case (a: Identifier, b: Identifier) =>
+              a.name == b.name && valueDefs(a) == valueDefs(b) && unchangedBetween(b, a)
+          case (a: Literal, b: Literal) => a.code.trim == b.code.trim
+          // a method-call or field length (`key.size()`, `m->len`) carries no variable key; two
+          // spellings in one method are the same value while every operand they read is, and no
+          // field they read is stored to
+          case (a: Call, b: Call) =>
+              val ai = a.ast.isIdentifier.l.sortBy(_.order)
+              val bi = b.ast.isIdentifier.l.sortBy(_.order)
+              val fields =
+                  a.ast.isCall.filter(isFieldAccess).code.map(_.replaceAll("\\s+", "")).toSet
+              // a store to a field it reads, on a path from the earlier spelling to the later one
+              val rewritten = fieldStores.exists { w =>
+                  w.argumentOption(1).exists(t => fields.contains(t.code.replaceAll("\\s+", ""))) &&
+                  GuardPass.cfgReaches(b._cfgOut.collectAll[CfgNode].l, w.id(), avoid = b.id()) &&
+                  GuardPass.cfgReaches(w._cfgOut.collectAll[CfgNode].l, a.id(), avoid = b.id())
+              }
+              a.code == b.code && !rewritten && ai.size == bi.size &&
+              ai.zip(bi).forall { case (x, y) =>
+                  x.name == y.name && valueDefs(x) == valueDefs(y) && unchangedBetween(y, x)
+              }
+          case (a, b) =>
+              OverlayFacts.variableKey(a).exists(k => OverlayFacts.variableKey(b).contains(k))
+    val len                                = unwrapCast(lenArg)
+    def matches(term: Expression): Boolean = sameValue(len, term)
+    def positiveConstant(e: Expression): Boolean = unwrapCast(e) match
+      case l: Literal => l.code.trim.replaceAll("(?i)[ul]+$", "").toIntOption.exists(_ > 0)
+      case c: Call    => c.name.startsWith("<operator>.sizeOf")
+      case _          => false
+
+    // Every value a local pointer can hold at a use (see [[SVal]]). None when the variable is not
+    // a plain local of the method (a parameter, a global, a static or member keeps a value from
+    // before the method on paths without an assignment), when its address is taken or a
+    // reference is bound to it (a store through the alias is invisible here), or when a
+    // definition replaces it in a way the walk cannot follow. Definitions are matched by the
+    // local they refer to, so an inner block's `char *d` is another variable.
+    //   - A use that does not change the variable is a reaching definition to the graph
+    //     (`memset(d, 0, n)`, `d[n - 1] = 0` "redefine" d); the walk passes through it to the
+    //     values before. A non-operator call receives it by value when the argument is an
+    //     inventoried memory role, the resolved callee's parameter is not a reference, or the
+    //     file is C; an unresolved C++ callee may take `char *&`.
+    //   - A copy of another local pointer (`d = p`) holds p's values; `x ? a : b` holds both, each
+    //     under its arm's truth.
+    //   - A byte pointer moved by a constant (`d++`, `d += 4`, `d = p + 4`) or through a helper
+    //     that returns its argument moved by at most K bytes ([[returnAdvance]]) holds the values
+    //     before, advanced.
+    //   - A definition already visited adds no value (the loop back edge) - unless it advances the
+    //     pointer, which a loop can do without bound.
+    def assignedValues(use: Identifier): Option[List[SVal]] =
+      val seen = mutable.HashSet.empty[Long]
+      def walk(
+        u: Identifier,
+        advance: Int,
+        guard: Option[(Call, Boolean)],
+        depth: Int
+      ): Option[List[SVal]] =
+          plainLocalOf(u) match
+            case None => None
+            case Some(local) =>
+                val bytePointer = isBytePointer(local.typeFullName)
+                val defs = OverlayFacts.reachingDefsIn(u, maxHops = 1).collect {
+                    case i: Identifier if localOf(i).exists(_.id == local.id) => i
+                }
+                if defs.isEmpty || depth > 12 || advance > MaxAdvance then None
+                else
+                  defs.foldLeft(Option(List.empty[SVal])) { (acc, d) =>
+                      acc.flatMap { xs =>
+                        val parent   = d._astIn.collectFirst { case c: Call => c }
+                        val isTarget = parent.exists(_.argumentOption(1).exists(_.id == d.id))
+                        val stepped = parent.filter(_ => isTarget && bytePointer).flatMap {
+                            case c if c.name.matches("<operator>\\.(pre|post)Increment") => Some(1)
+                            case c if c.name == "<operator>.assignmentPlus" =>
+                                c.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(literalValue).filter(_ >= 0)
+                            case _ => None
+                        }
+                        val advancing = stepped.nonEmpty || parent.exists(a =>
+                            a.name == "<operator>.assignment" && isTarget &&
+                                a.argumentOption(2).exists(_.ast.isIdentifier.l.exists(r =>
+                                    localOf(r).exists(_.id == local.id)
+                                ))
+                        )
+                        // an advance inside a loop has no bound: the reaching definitions do
+                        // not carry the back edge, the CFG does
+                        if advancing && inCycle(d) then None
+                        else if !seen.add(d.id) then if advancing then None else Some(xs)
+                        else
+                          parent match
+                            case Some(a) if a.name == "<operator>.assignment" && isTarget =>
+                                a.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(valuesOfRhs(a, _, advance, guard, depth))
+                                    .map(xs ++ _)
+                            case _ if stepped.nonEmpty =>
+                                walk(d, advance + stepped.get, guard, depth + 1).map(xs ++ _)
+                            case _ if GuardPass.isDefinitionSite(d) => None
+                            case _ if leavesValue(d) =>
+                                walk(d, advance, guard, depth + 1).map(xs ++ _)
+                            case _ => None
+                      }
+                  }
+                end if
+      // the values an assignment's right-hand side gives the pointer
+      def valuesOfRhs(
+        a: Call,
+        rhs: Expression,
+        advance: Int,
+        guard: Option[(Call, Boolean)],
+        depth: Int
+      ): Option[List[SVal]] =
+        def leaf = Some(List(SVal(a, rhs, advance, guard)))
+        unwrapCast(rhs) match
+          case c: Call if c.name == "<operator>.conditional" =>
+              (c.argumentOption(1), c.argumentOption(2), c.argumentOption(3)) match
+                case (Some(cond: Call), Some(t: Expression), Some(f: Expression)) =>
+                    for
+                      tv <- valuesOfRhs(a, t, advance, Some((cond, true)), depth)
+                      fv <- valuesOfRhs(a, f, advance, Some((cond, false)), depth)
+                    yield tv ++ fv
+                case _ => leaf
+          case c: Call if c.name == "<operator>.addition" =>
+              val ops = c.argument.l.collect { case x: Expression => x }
+              (ops.flatMap(pointerLocal), ops.flatMap(literalValue)) match
+                case (List(p), List(k))
+                    if k >= 0 && ops.size == 2 &&
+                        localOf(p).exists(l => isBytePointer(l.typeFullName)) =>
+                    walk(p, advance + k, guard, depth + 1).orElse(leaf)
+                case _ => leaf
+          case c: Call if !c.name.startsWith("<operator>") =>
+              returnAdvance(c) match
+                case Some((index, bytes)) =>
+                    c.argument.l.find(_.argumentIndex == index)
+                        .collect { case e: Expression => e }
+                        .flatMap(pointerLocal)
+                        .flatMap(walk(_, advance + bytes, guard, depth + 1))
+                        .orElse(leaf)
+                case None => leaf
+          case _ =>
+              pointerLocal(rhs).flatMap(walk(_, advance, guard, depth + 1)).orElse(leaf)
+        end match
+      end valuesOfRhs
+      walk(use, 0, None, 0)
+    end assignedValues
+    // the plain values of a scalar local (no advances, no guards): the size arithmetic's view
+    def scalarValues(i: Identifier): Option[List[Expression]] =
+        assignedValues(i).map(_.map(_.rhs))
+    def pointerLocal(e: Expression): Option[Identifier] = unwrapCast(e) match
+      case r: Identifier
+          if localOf(r).exists(l =>
+              OverlayFacts.isPointer(l.typeFullName.trim) && !l.typeFullName.contains('[')
+          ) => Some(r)
+      case _ => None
+    // does this occurrence leave the variable's value as it was?
+    def leavesValue(i: Identifier): Boolean = i._astIn.headOption match
+      case Some(c: Call) if c.name.startsWith("<operator>") => true
+      case Some(c: Call) =>
+          val inventoried = i.tag.name("mem-.*").nonEmpty
+          val resolvedByValue = calleeDefinition(c).toList
+              .flatMap(_.parameter.l)
+              .find(_.index == i.argumentIndex)
+              .exists(p => !p.typeFullName.trim.endsWith("&"))
+          inventoried || resolvedByValue || i.method.filename.endsWith(".c")
+      case _ => true
+
+    val dstOffsets = offsetsOf(dst)
+    // the length terms of an allocation, its addition operands, and up to three levels of
+    // definitions - EVERY value of a local must hold the term (`total = n; if (c) total = 4;
+    // malloc(total)` does not)
+    def covers(e: Expression, depth: Int): Boolean =
+      val here = unwrapCast(e)
+      matches(here) || (here match
+        case c: Call if c.name == "<operator>.addition" =>
+            c.argument.l.collect { case x: Expression => x }.exists(covers(_, depth))
+        case i: Identifier if depth < 3 =>
+            scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(covers(_, depth + 1)))
+        case _ => false
+      )
+    // the addends of a size, through single-valued locals: `hdr + n` when `total = hdr + n`
+    // (a local that already is the length or an offset stays as it is)
+    def addendsOf(e: Expression, depth: Int): List[Expression] = unwrapCast(e) match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case x: Expression => x }.flatMap(addendsOf(_, depth))
+      case i: Identifier if depth < 3 && !matches(i) && !dstOffsets.exists(sameValue(_, i)) =>
+          scalarValues(i) match
+            case Some(List(v)) => addendsOf(v, depth + 1)
+            case _             => List(i)
+      case other => List(other)
+    // the constant bytes a sum adds beyond its symbolic terms: its integer literals, and 1 for
+    // each sizeof (no object is smaller)
+    def constantPart(terms: Seq[Expression]): Int =
+        terms.map(t => literalValue(t).getOrElse(if isSizeof(t) then 1 else 0)).sum
+    // a size the copy fits in: the length itself or a sum holding it - and, for a copy at an
+    // offset (`memcpy(buf + hdr, s, n)`) or through a pointer advanced from the buffer's start,
+    // a sum holding the length, every symbolic offset as a separate addend, and constants
+    // covering the constant offsets plus the advance
+    def sizeHolds(size: Expression, advance: Int): Boolean =
+        if dstOffsets.isEmpty && advance == 0 then covers(size, 0)
+        else
+          val adds                 = addendsOf(size, 0).toIndexedSeq
+          val (constOffs, symOffs) = dstOffsets.partition(o => literalValue(o).isDefined)
+          val needed               = advance + constOffs.flatMap(literalValue).sum
+          adds.indices.exists { i =>
+              matches(adds(i)) && {
+                  val used = mutable.Set(i)
+                  symOffs.forall { o =>
+                      adds.indices.find(j => !used(j) && sameValue(o, adds(j))).exists { j =>
+                        used += j
+                        true
+                      }
+                  } && constantPart(adds.indices.filterNot(used).map(adds)) >= needed
+              }
+          }
+    def allocCallOf(e: Expression): Option[Call] = unwrapCast(e) match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty => Some(c)
+      case _ => None
+    // the length arguments of an allocation: the inventoried `mem-len` positions, and for a
+    // C++ array construction the size expression the frontend wires in after the type
+    def allocLenArgs(alloc: Call): List[Expression] =
+        alloc.argument.l.collect { case e: Expression => e }.filter { a =>
+            a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
+            (alloc.name == "<operator>.new" && a.argumentIndex > 1)
+        }
+    // an allocation sized from the copy: a copying allocator (`strndup`) allocates what it
+    // copies, not its length argument; a count-by-size allocator (`calloc(count, size)`) is a
+    // product, sized when one factor holds the length and every other is a positive constant
+    def sizedFrom(value: SVal, header: Boolean): Boolean =
+        allocCallOf(value.rhs).exists { a =>
+          val copying = a.argument.exists(_.tag.name(MemoryApiPass.TagSrc).nonEmpty)
+          val lens = allocLenArgs(a).filter(l =>
+              !header || l.ast.isCall.name("<operator>\\.sizeOf.*").nonEmpty
+          )
+          !copying && (lens match
+            case Nil => false
+            case one :: Nil =>
+                sizeHolds(one, value.advance) || copyCall.exists(cc =>
+                    pathSizedCopy(a, one, cc, lenArg, dstOffsets, value.advance)
+                )
+            case factors =>
+                factors.exists(f =>
+                    sizeHolds(f, value.advance) &&
+                        factors.filterNot(_.id == f.id).forall(positiveConstant)
+                )
+          )
+        }
+
+    // integer facts for the guard arm
+    def declaredType(e: Expression): Option[String] = e match
+      case i: Identifier =>
+          localOf(i).map(_.typeFullName).orElse(
+            i.method.parameter.nameExact(i.name).typeFullName.headOption
+          )
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argumentOption(1).filter(_ => c.argument.size > 1).map(_.code.trim)
+      case c: Call if c.name.startsWith("<operator>.sizeOf") => Some("size_t")
+      case l: Literal =>
+          val s = l.code.trim.toLowerCase
+          Some(
+            (if s.contains('u') then "unsigned " else "") + (if s.contains('l') then "long"
+                                                             else "int")
+          )
+      case _ => None
+    def widthOf(e: Expression): Option[Int] =
+        declaredType(e).flatMap(t => OverlayFacts.integralWidth(t.stripPrefix("const ").trim))
+    def isUnsigned(e: Expression): Boolean = declaredType(e).exists { t =>
+      val n = t.stripPrefix("const ").trim
+      n.startsWith("unsigned") || n == "size_t" || n.matches("uint(8|16|32|64|ptr)?_t")
+    }
+    // the length is the size of an object that exists (`key.size()`, `strlen(s)`, through the
+    // locals holding it): no object reaches SIZE_MAX, so a small constant added to it cannot wrap
+    def objectSized(e: Expression, depth: Int = 0): Boolean = unwrapCast(e) match
+      case c: Call =>
+          ObjectSizeCalls.contains(c.name)
+      case i: Identifier if depth < 3 =>
+          isUnsigned(i) &&
+          scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(objectSized(_, depth + 1)))
+      case _ => false
+    // casts that cannot change the value: to a type at least as wide as the operand's
+    def strippedWidening(e: Expression): Expression = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c) match
+            case Some(op) if widthOf(c).exists(w => widthOf(op).exists(w >= _)) =>
+                strippedWidening(op)
+            case _ => e
+      case other => other
+    // `if (need <= sizeof(k->space_)) dst = k->space_;` with `need = (size_t)n + 8` and a copy of
+    // n: a guard - dominating the assignment with its truth there decided by the CFG, or the arm
+    // condition of a `c ? a : b` the value came from - bounds a value that is at least the copy's
+    // length (plus the constant offset and advance the copy lands at) by the sizeof of the very
+    // array assigned. "At least" is the length itself, or the length plus non-negative constants
+    // that cannot wrap: computed in a type wider than the unsigned length, or added to the size of
+    // an existing object, and stored without truncation - `n + 8` in n's own type wraps.
+    def coveredByGuard(value: SVal): Boolean =
+      val buffer    = unwrapCast(value.rhs).code
+      val lenWidth  = widthOf(len)
+      val constOffs = dstOffsets.flatMap(literalValue)
+      val needed    = value.advance + constOffs.sum
+      def sumCovers(e: Expression, stored: Option[Int]): Boolean = strippedWidening(e) match
+        case c: Call if c.name == "<operator>.addition" =>
+            val ops    = c.argument.l.collect { case o: Expression => o }
+            val arith  = ops.flatMap(widthOf(_).map(math.max(_, 32)))
+            val lenOps = ops.filter(o => matches(strippedWidening(o)))
+            val rest   = ops.filterNot(lenOps.contains)
+            val noWrap = lenWidth.exists(arith.max > _) || objectSized(len)
+            lenOps.size == 1 && arith.size == ops.size && isUnsigned(len) &&
+            lenOps.forall(o => widthOf(o).exists(w => lenWidth.exists(w >= _))) &&
+            rest.forall(positiveConstant) && constantPart(rest) >= needed &&
+            noWrap && stored.forall(_ >= arith.max)
+        case other =>
+            needed == 0 && matches(other) && stored.forall(s => lenWidth.exists(s >= _))
+      def atLeastLen(bounded: Expression): Boolean = strippedWidening(bounded) match
+        case i: Identifier if matches(i) => needed == 0
+        case i: Identifier =>
+            val stored = widthOf(i)
+            stored.nonEmpty &&
+            scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(sumCovers(_, stored)))
+        case other => sumCovers(other, None)
+      def arrayCapacity(bound: Expression): Boolean = strippedWidening(bound) match
+        case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+            // the sizeof of an ARRAY is its capacity; of a pointer, only the pointer's
+            sz.argumentOption(1).collect { case e: Expression => e }
+                .exists(e => e.code == buffer && isArrayStorage(e))
+        case _ => false
+      def bounds(cond: Call, facts: List[(Call, Boolean)]): Boolean =
+          facts.exists { (cmp, h) =>
+              GuardPass.directionalFacts(cmp, h).exists { (bounded, above, bound) =>
+                  above && arrayCapacity(bound) && atLeastLen(bounded)
+              }
+          }
+      dstOffsets.forall(o => literalValue(o).isDefined) && (
+        value.guard.exists { (cond, holds) =>
+            bounds(cond, GuardPass.conjuncts(cond, holds).getOrElse(Nil))
+        } ||
+            GuardPass.guardingControllers(value.assignment).exists(cond =>
+                bounds(cond, GuardPass.conjunctsAt(cond, value.assignment))
+            )
+      )
+    end coveredByGuard
+
+    // the in-place strip `memmove(buf, buf + k, len - k)`: the move stays inside what the buffer
+    // holds only when it moves the length less the very offset it reads from, or a string's own
+    // length (`strlen(p + 1) + 1` from `p + 1`)
+    val inPlace = src.exists { s =>
+        sameBuffer(dst, s) && dstOffsets.isEmpty && {
+            val srcOffsets = offsetsOf(s)
+            val stripsOffset = (srcOffsets, unwrapCast(lenArg)) match
+              case (List(k), sub: Call) if sub.name == "<operator>.subtraction" =>
+                  sub.argumentOption(2).collect { case e: Expression => e }.exists(sameValue(_, k))
+              case _ => false
+            // the same strip spelled `*len -= k; memmove(buf, buf + k, *len)`
+            val strippedBefore = srcOffsets match
+              case List(k) =>
+                  dst.method.ast.isCall.nameExact("<operator>.assignmentMinus").exists { a =>
+                      a.argumentOption(1).exists(_.code.trim == unwrapCast(lenArg).code.trim) &&
+                      a.argumentOption(2).collect { case e: Expression => e }.exists(sameValue(
+                        k,
+                        _
+                      )) &&
+                      copyCall.exists(_.dominatedBy.exists(_.id == a.id))
+                  }
+              case _ => false
+            val ownString =
+                lenArg.ast.isCall.name("strn?len").argument.order(1).code.l.contains(s.code)
+            stripsOffset || strippedBefore || ownString
+        }
+    }
+    // dashdec.c's clear-the-tail idiom: `memset(tmp_str, 0, strlen(tmp_str))`
+    val clearsOwnLength = lenArg match
+      case c: Call if c.name == "strlen" || c.name == "strnlen" =>
+          c.argumentOption(1).collect { case e: Expression => e }.exists(sameBuffer(dst, _))
+      case _ => false
+    // the destination is the data member of a packet the SAME function sized through the
+    // library boundary: av_new_packet(pkt, len) / av_grow_packet(pkt, len) before
+    // memcpy(pkt->data, ..., len). The base the field is read through must be the very
+    // argument the boundary call sized, the boundary must dominate the copy, the copy must
+    // start at the member, and the lengths must be the same value (through the addition
+    // operands the boundary's own padding arithmetic introduces). The second most common
+    // self-sized pattern in FFmpeg's demuxers.
+    val sizedByPacketApi = bufferOf(dst) match
+      case fa: Call if isFieldAccess(fa) =>
+          fa.argumentOption(1).collect { case e: Expression => e }.exists { base =>
+              OverlayFacts.variableKey(base).exists { baseKey =>
+                  dst.method.ast.collectAll[Call].l.exists { c =>
+                      PacketAllocApis.contains(c.name) &&
+                      c.argumentOption(1).flatMap(OverlayFacts.variableKey).contains(baseKey) &&
+                      copyCall.exists(_.dominatedBy.exists(_.id == c.id)) &&
+                      // the boundary sizes with the copy's length plus its own header/padding
+                      // arithmetic - `av_new_packet(pkt, len + sizeof(start_sequence))`, and a
+                      // copy after the header holds the header as an addend; a grow appends
+                      // at the size the packet had before it
+                      c.argumentOption(2).collect { case e: Expression => e }.exists { size =>
+                          if c.name == "av_grow_packet" && dstOffsets.nonEmpty then
+                            covers(size, 0) && (dstOffsets match
+                              case List(o: Identifier) =>
+                                  assignedValues(o).exists {
+                                      case List(v) =>
+                                          unwrapCast(v.rhs).code.replace(" ", "") ==
+                                              s"${base.code}->size".replace(" ", "") &&
+                                              c.dominatedBy.exists(_.id == v.assignment.id)
+                                      case _ => false
+                                  }
+                              case _ => false
+                            )
+                          else
+                            sizeHolds(size, 0) || copyCall.exists(cc =>
+                                pathSizedCopy(c, size, cc, lenArg, dstOffsets, 0)
+                            )
+                      }
+                  }
+              }
+          }
+      case _ => false
+    // EVERY value the destination can hold must be sized from the copy's length - an
+    // allocation of it, or an array a guard proved large enough. One matching allocation among
+    // several definitions said nothing about the others (`d = fixed; if (c) d = malloc(n);
+    // memcpy(d, s, n)`)
+    val sizedByAllocation = bufferOf(dst) match
+      case base: Identifier =>
+          assignedValues(base).exists(vs =>
+              vs.nonEmpty && vs.forall(v => sizedFrom(v, header = false) || coveredByGuard(v))
+          )
+      // a field destination the method stored once, on every path, and nothing rewrote since:
+      // that store's value (`data->split_buf = av_malloc(data->split_buf_size)`)
+      case fa: Call
+          if isFieldAccess(fa) && OverlayFacts.fieldStoresReaching(fa).single.exists { st =>
+              st.argumentOption(2).collect { case e: Expression => e }.exists { rhs =>
+                val v = SVal(st, rhs, 0, None)
+                sizedFrom(v, header = false) || coveredByGuard(v)
+              }
+          } => true
+      case fa: Call if isFieldAccess(fa) =>
+          // a copy into a member of a sized allocation: `e = malloc(sizeof(H) - 1 + n)`
+          // then `memcpy(e->data, ..., n)` - the flexible trailing member takes the same
+          // length the allocation added. Restricted to a single-element array
+          // member, the flexible idiom, and the LAST one declared: a one-element array with
+          // members after it is a fixed field. The allocation must also add a sizeof for the
+          // header the member follows - `malloc(n)` then `memcpy(e->data, .., n)` overruns by
+          // the header's size
+          val flexibleMember = OverlayFacts.memberRefOf(atom, fa).exists { m =>
+              OverlayFacts.arrayExtent(m.typeFullName).contains(1) &&
+              m._astIn.collectAll[TypeDecl].l.flatMap(_.member.l).forall(_.order <= m.order)
+          }
+          flexibleMember && fa.argumentOption(1).collect { case e: Expression => e }
+              .map(unwrapCast)
+              .collect { case i: Identifier => i }
+              .exists { base =>
+                  assignedValues(base).exists(vs =>
+                      vs.nonEmpty && vs.forall(v => v.advance == 0 && sizedFrom(v, header = true))
+                  )
+              }
+      case _ => false
+    !appending && (inPlace || clearsOwnLength || sizedByAllocation || sizedByPacketApi)
+  end selfSizedDestination
+
+  /** The packet-buffer boundary FFmpeg's demuxers write through: these two library calls size the
+    * packet's data member, and a copy into that member with the same length is bounded by
+    * construction. Deliberately closed and small - a wholesale "anything that allocates" reading
+    * would excuse real overruns.
+    */
+  private val PacketAllocApis = Set("av_new_packet", "av_grow_packet")
+
+  /** One value a local pointer can hold at a use: the assignment that gave it, the right-hand side,
+    * the constant bytes it was advanced by since (`d++`, `d += 4`, a helper that returns its
+    * argument moved), and the arm condition when it came out of a `c ? a : b`.
+    */
+  private final case class SVal(
+    assignment: Call,
+    rhs: Expression,
+    advance: Int,
+    guard: Option[(Call, Boolean)]
+  )
+
+  private val MaxAdvance = 1 << 16
+
+  /** calls whose result is the size of an object that exists */
+  private val ObjectSizeCalls = Set("size", "length", "strlen", "strnlen", "wcslen", "wcsnlen")
+
+  private val BytePointees =
+      Set("char", "signedchar", "unsignedchar", "uint8_t", "int8_t", "std.byte", "byte", "u_char")
+
+  /** A pointer to single bytes: `d++` moves it by one byte. */
+  private def isBytePointer(typeFullName: String): Boolean =
+    val t = typeFullName.replaceAll("\\bconst\\b", "").replaceAll("\\s+", "").replace("::", ".")
+    t.endsWith("*") && !t.dropRight(1).contains('*') && BytePointees.contains(t.dropRight(1))
+
+  private def stripCasts(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" => castOperand(c).map(stripCasts).getOrElse(e)
+    case other                                  => other
+
+  /** The value of an integer literal (`8`, `0x10`, `4u`), through casts. */
+  private def literalValue(e: Expression): Option[Int] = stripCasts(e) match
+    case l: Literal =>
+        val d = l.code.trim.replaceAll("(?i)[ul]+$", "")
+        scala.util.Try {
+            if d.matches("(?i)0x[0-9a-f]+") then Integer.parseInt(d.drop(2), 16)
+            else if d.matches("0[0-7]+") then Integer.parseInt(d.drop(1), 8)
+            else d.toInt
+        }.toOption
+    case _ => None
+
+  private def isSizeof(e: Expression): Boolean = stripCasts(e) match
+    case c: Call => c.name.startsWith("<operator>.sizeOf")
+    case _       => false
+
+  /** A sum of symbolic terms (counted) and a constant: `len + sizeof(start) + 4`. None = unknown.
+    */
+  private final case class Linear(terms: Map[String, Int], const: Int):
+    def +(o: Linear): Linear =
+        Linear(
+          o.terms.foldLeft(terms)((m, kv) => m.updated(kv._1, m.getOrElse(kv._1, 0) + kv._2)),
+          const + o.const
+        )
+
+    /** every term and the constant at least as large as in `need` */
+    def covers(need: Linear): Boolean =
+        need.terms.forall((k, n) => terms.getOrElse(k, 0) >= n) && const >= need.const
+
+  private val MaxPaths = 64
+  private val MaxSteps = 20000
+
+  /** Path by path, is the allocation at `sizeCall` (sized by `size`) at least the offset the copy
+    * writes at plus its length? The CFG is walked from the method's entry over every acyclic path
+    * to the copy; the variables the size, the offsets and the length read are evaluated as linear
+    * sums along each path, and a condition over variables the method never assigns takes the same
+    * branch every time the path meets it. `if (start_bit) tot_len += hdr; ... av_new_packet(pkt,
+    * tot_len); ... if (start_bit) pos += hdr; memcpy(pkt->data + pos, buf, len)` holds on both
+    * paths though neither branch alone says so. Anything the walk cannot evaluate - a variable
+    * assigned in a loop, an unstable operand, an exhausted budget - is a failure.
+    */
+  private def pathSizedCopy(
+    sizeCall: Call,
+    size: Expression,
+    copy: Call,
+    len: Expression,
+    offsets: List[Expression],
+    advance: Int
+  ): Boolean =
+    val m = copy.method
+    if sizeCall.method.id != m.id || inCycle(sizeCall) || inCycle(copy) then return false
+    val exprs   = size :: len :: offsets
+    val idents  = exprs.flatMap(_.ast.isIdentifier.l)
+    val tracked = idents.flatMap(OverlayFacts.declOf).map(_.id()).toSet
+    // every definition of a tracked variable, with the variable it defines
+    val defSites: Map[Long, Long] = m.ast.isIdentifier.l.flatMap { i =>
+        OverlayFacts.declOf(i).filter(d => tracked.contains(d.id()))
+            .filter(_ => GuardPass.isDefinitionSite(i)).map(d => i.id() -> d.id())
+    }.toMap
+    val defCalls = defSites.keySet.flatMap(id =>
+        m.ast.isIdentifier.id(id).l.flatMap(_._astIn.collectFirst { case c: Call => c })
+    )
+    // the walk is for values that differ by path: a variable with one definition the simple
+    // checks already read
+    if defCalls.exists(inCycle) || defSites.values.groupBy(identity).forall(_._2.size < 2) then
+      return false
+    def stable(i: Identifier): Boolean =
+        OverlayFacts.declOf(i).exists(d => !defSites.valuesIterator.contains(d.id())) &&
+            OverlayFacts.definitionSitesOf(i).isEmpty
+    def eval(e: Expression, env: Map[Long, Option[Linear]]): Option[Linear] = stripCasts(e) match
+      case l: Literal => literalValue(l).map(v => Linear(Map.empty, v))
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l.collect { case x: Expression => x }
+              .foldLeft(Option(Linear(Map.empty, 0)))((acc, x) =>
+                  acc.flatMap(a => eval(x, env).map(a + _))
+              )
+      case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+          Some(Linear(Map(s"sizeof:${c.code.replaceAll("\\s+", "")}" -> 1), 0))
+      case i: Identifier =>
+          OverlayFacts.declOf(i) match
+            case Some(d) if tracked.contains(d.id()) && env.contains(d.id()) => env(d.id())
+            case Some(d) if stable(i) => Some(Linear(Map(s"v:${d.id()}" -> 1), 0))
+            case _                    => None
+      case _ => None
+    var paths   = 0
+    var steps   = 0
+    var failed  = false
+    var reached = 0
+    // an explicit stack: (node, env, decided conditions, allocation size, nodes on the path)
+    val stack = mutable.Stack[(
+      CfgNode,
+      Map[Long, Option[Linear]],
+      Map[String, Boolean],
+      Option[Linear],
+      Set[Long]
+    )](
+      (m, Map.empty, Map.empty, None, Set.empty)
+    )
+    while stack.nonEmpty && !failed do
+      val (node, env0, decided, sized0, onPath) = stack.pop()
+      steps += 1
+      if steps > MaxSteps || paths > MaxPaths then failed = true
+      else if !onPath.contains(node.id()) then
+        var env   = env0
+        var sized = sized0
+        node match
+          case c: Call if defCalls.exists(_.id == c.id) =>
+              c.argumentOption(1).collect { case t: Identifier => t }.flatMap(OverlayFacts.declOf).foreach {
+                  d =>
+                    val rhs = c.argumentOption(2).collect { case e: Expression => e }
+                    val cur = env.getOrElse(d.id(), None)
+                    env = env.updated(
+                      d.id(),
+                      c.name match
+                        case "<operator>.assignment" => rhs.flatMap(eval(_, env))
+                        case "<operator>.assignmentPlus" =>
+                            for a <- cur; b <- rhs.flatMap(eval(_, env)) yield a + b
+                        case n if n.matches("<operator>\\.(pre|post)Increment") =>
+                            cur.map(_ + Linear(Map.empty, 1))
+                        case _ => None
+                    )
+              }
+          case _ => ()
+        if node.id() == sizeCall.id() then sized = eval(size, env)
+        if node.id() == copy.id() then
+          reached += 1
+          paths += 1
+          val need =
+              offsets.foldLeft(eval(len, env).map(_ + Linear(Map.empty, advance)))((acc, o) =>
+                  acc.flatMap(a => eval(o, env).map(a + _))
+              )
+          if !(sized.nonEmpty && need.nonEmpty && sized.get.covers(need.get)) then failed = true
+        else
+          val next = node match
+            case cond: Expression if cond._astIn.headOption.exists {
+                    case cs: ControlStructure => cs.condition.l.exists(_.id == cond.id)
+                    case _                    => false
+                } =>
+                val key = cond.code.replaceAll("\\s+", "")
+                val stableCond = cond.ast.isCall.forall(_.name.startsWith("<operator>")) &&
+                    cond.ast.isIdentifier.l.forall(stable)
+                GuardPass.branchSuccessors(cond) match
+                  case Some((onTrue, onFalse)) if stableCond =>
+                      decided.get(key) match
+                        case Some(true)  => onTrue.map(n => (n, decided))
+                        case Some(false) => onFalse.map(n => (n, decided))
+                        case None =>
+                            onTrue.map(n => (n, decided.updated(key, true))) ++
+                                onFalse.map(n => (n, decided.updated(key, false)))
+                  case _ => node._cfgOut.collectAll[CfgNode].l.map(n => (n, decided))
+            case _ => node._cfgOut.collectAll[CfgNode].l.map(n => (n, decided))
+          if next.isEmpty then paths += 1
+          next.foreach((n, dec) => stack.push((n, env, dec, sized, onPath + node.id())))
+        end if
+      end if
+    end while
+    !failed && reached > 0
+  end pathSizedCopy
+
+  /** Does this CFG node lie on a cycle (a loop body)? */
+  private def inCycle(n: CfgNode): Boolean =
+      GuardPass.cfgReaches(n._cfgOut.collectAll[CfgNode].l, n.id(), avoid = -1L)
+
+  private val advanceSummaries =
+      new java.util.concurrent.ConcurrentHashMap[Long, Option[(Int, Int)]]()
+
+  /** The call's callee returns its byte-pointer parameter `index` moved forward by at most `bytes`
+    * along every path - leveldb's `EncodeVarint32(dst, v)` returns `dst` advanced by 1 to 5.
+    */
+  private def returnAdvance(call: Call): Option[(Int, Int)] =
+      calleeDefinition(call).flatMap(m =>
+          advanceSummaries.computeIfAbsent(m.id(), _ => advanceSummary(m))
+      )
+
+  /** The one method definition a call reaches. A header declaration and its definition are two
+    * method nodes with one full name: the definition is the one with a body. When the parser left
+    * the call unresolved (`<unresolvedNamespace>.f:<unresolvedSignature>(2)` - CDT gives up on some
+    * overload sets), the definition is taken by name and arity, preferring the caller's own
+    * namespace - and only when exactly one remains.
+    */
+  private def calleeDefinition(call: Call): Option[Method] =
+    def withBody(ms: List[Method]) = ms.filterNot(_.isExternal).filter(_.block.astChildren.nonEmpty)
+    withBody(atom.method.fullNameExact(call.methodFullName).l) match
+      case List(m) => Some(m)
+      case Nil if call.methodFullName.startsWith("<unresolved") =>
+          val arity = call.argument.l.count(_.argumentIndex > 0)
+          val byName = withBody(atom.method.nameExact(call.name).l)
+              .filter(_.parameter.l.count(_.index > 0) == arity)
+          // the caller's enclosing scopes, innermost first: `leveldb.LookupKey`, then `leveldb`
+          val scopes = call.method.fullName.takeWhile(_ != ':').split('.').dropRight(1)
+          val nearest = (scopes.length to 1 by -1).iterator
+              .map(k => scopes.take(k).mkString("."))
+              .map(p => byName.filter(_.fullName.startsWith(s"$p.")))
+              .find(_.nonEmpty)
+          nearest.getOrElse(byName) match
+            case List(m) => Some(m)
+            case _       => None
+      case _ => None
+
+  /** Every `return` gives the same byte-pointer parameter, moved by constants only: its defs are
+    * walked back through casts, copies, `p++`, `p += k` and `p = q + k`, the maximum taken over
+    * every definition that reaches. A loop that advances the pointer has no bound, and none is
+    * claimed.
+    */
+  private def advanceSummary(m: Method): Option[(Int, Int)] =
+    // a definition reached along two paths is evaluated once; one reached again while it is
+    // still being evaluated is a cycle
+    val memo       = mutable.HashMap.empty[Long, Option[(Int, Int)]]
+    val inProgress = mutable.HashSet.empty[Long]
+    def combine(xs: List[Option[(Int, Int)]]): Option[(Int, Int)] =
+        if xs.isEmpty || xs.exists(_.isEmpty) then None
+        else
+          val ys = xs.flatten
+          if ys.map(_._1).distinct.size == 1 then Some((ys.head._1, ys.map(_._2).max)) else None
+    def ofExpr(e: Expression, depth: Int): Option[(Int, Int)] =
+        if depth > 32 then None
+        else
+          stripCasts(e) match
+            case i: Identifier => ofUse(i, depth)
+            case c: Call if c.name == "<operator>.addition" =>
+                val ops = c.argument.l.collect { case x: Expression => x }
+                (ops.filter(o => literalValue(o).isEmpty), ops.flatMap(literalValue)) match
+                  case (List(p), List(k)) if k >= 0 =>
+                      ofExpr(p, depth + 1).map((i, b) => (i, b + k))
+                  case _ => None
+            case _ => None
+    def ofUse(u: Identifier, depth: Int): Option[(Int, Int)] =
+        OverlayFacts.declOf(u) match
+          case Some(decl) if isBytePointer(decl.property("TYPE_FULL_NAME").toString) =>
+              val defs = OverlayFacts.reachingDefsIn(u, maxHops = 1).filter {
+                  case i: Identifier        => OverlayFacts.declOf(i).exists(_.id() == decl.id())
+                  case p: MethodParameterIn => p.id() == decl.id()
+                  case _                    => false
+              }
+              if defs.isEmpty then
+                decl match
+                  case p: MethodParameterIn => Some((p.index, 0))
+                  case _                    => None
+              else
+                combine(defs.map {
+                    case p: MethodParameterIn => Some((p.index, 0))
+                    case d: Identifier =>
+                        val parent   = d._astIn.collectFirst { case c: Call => c }
+                        val isTarget = parent.exists(_.argumentOption(1).exists(_.id == d.id))
+                        val advancing = isTarget && parent.exists(c =>
+                            c.name.matches("<operator>\\.(pre|post)Increment") ||
+                                c.name == "<operator>.assignmentPlus" ||
+                                (c.name == "<operator>.assignment" &&
+                                    c.argumentOption(2).exists(_.ast.isIdentifier.l.exists(r =>
+                                        OverlayFacts.declOf(r).exists(_.id() == decl.id())
+                                    )))
+                        )
+                        if memo.contains(d.id) then memo(d.id)
+                        else if advancing && inCycle(d) then None
+                        else if !inProgress.add(d.id) then None
+                        else
+                          val r = parent match
+                            case Some(a) if a.name == "<operator>.assignment" && isTarget =>
+                                a.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(ofExpr(_, depth + 1))
+                            case Some(c)
+                                if isTarget &&
+                                    c.name.matches("<operator>\\.(pre|post)Increment") =>
+                                ofUse(d, depth + 1).map((i, b) => (i, b + 1))
+                            case Some(c) if isTarget && c.name == "<operator>.assignmentPlus" =>
+                                c.argumentOption(2).collect { case e: Expression => e }
+                                    .flatMap(literalValue).filter(_ >= 0)
+                                    .flatMap(k => ofUse(d, depth + 1).map((i, b) => (i, b + k)))
+                            case _ if GuardPass.isDefinitionSite(d) => None
+                            // a use that leaves the pointer as it was
+                            case Some(c) if c.name.startsWith("<operator>") => ofUse(d, depth + 1)
+                            case _                                          => None
+                          inProgress -= d.id
+                          memo(d.id) = r
+                          r
+                        end if
+                    case _ => None
+                })
+              end if
+          case _ => None
+    val returns = m.ast.isReturn.l
+    combine(returns.map(r =>
+        r.astChildren.collectFirst { case e: Expression => e }.flatMap(ofExpr(_, 0))
+    ))
+        .filter(_._2 <= MaxAdvance)
+  end advanceSummary
+
+  /** libc copies that append at `strlen(dst)`: their length bounds the appended part only */
+  private val AppendingCopies = Set("strncat", "strlcat", "wcsncat", "strcat", "wcscat")
+
+  private val unchangedMemo = new java.util.concurrent.ConcurrentHashMap[(Long, Long), Boolean]()
+
+  /** No definition of `earlier`'s variable on a CFG path from `earlier` to `later` that does not
+    * pass `earlier` again: the value read at `later` is the one `earlier` read. A loop that
+    * re-reads the variable before reaching `later` without going back through `earlier` changes it;
+    * one that reassigns it and comes back through `earlier` does not.
+    */
+  private def unchangedBetween(earlier: Identifier, later: Identifier): Boolean =
+      unchangedMemo.computeIfAbsent(
+        (earlier.id(), later.id()),
+        _ => OverlayFacts.unchangedBetween(earlier, later)
+      )
+
+  /** The local a variable occurrence refers to: declaration identity, not name. */
+  private def localOf(i: Identifier): Option[Local] = i._refOut.collectFirst { case l: Local => l }
+
+  /** The local, when this occurrence's variable is a plain one of its method: not static, its
+    * address never taken, no reference bound to it. Anything else can change behind the method's
+    * own definitions.
+    */
+  private def plainLocalOf(i: Identifier): Option[Local] =
+      localOf(i).filter { l =>
+        val static = l.tag.name(io.appthreat.x2cpg.Defines.StorageClassTag)
+            .value(io.appthreat.x2cpg.Defines.StorageClassStatic).nonEmpty
+        !static && !aliasedLocals(i.method).contains(l.id)
+      }
+
+  private val aliasedByMethod = new java.util.concurrent.ConcurrentHashMap[Long, Set[Long]]()
+
+  /** The locals of a method whose address is taken (`&d`) or that a reference is bound to (`char
+    * *&r = d`).
+    */
+  private def aliasedLocals(m: Method): Set[Long] =
+      aliasedByMethod.computeIfAbsent(
+        m.id,
+        _ =>
+          // `memcpy(dst, &size, sizeof(size))` only reads through the address: an inventoried
+          // source role is not an alias
+          val addressed = m.ast.isCall.nameExact("<operator>.addressOf")
+              .filterNot(OverlayFacts.readOnlyAddress)
+              .argument.isIdentifier
+              .flatMap(localOf).id.l
+          val referenced = m.ast.isCall.nameExact("<operator>.assignment").l.flatMap { a =>
+              (a.argumentOption(1), a.argumentOption(2)) match
+                case (Some(l: Identifier), Some(r: Identifier))
+                    if localOf(l).exists(_.typeFullName.trim.endsWith("&")) => localOf(r).map(_.id)
+                case _ => None
+          }
+          (addressed ++ referenced).toSet
+      )
+
+  /** Does some caller leave this caller-param length unbounded? Report when the method has no
+    * intra-tree callers (externally reachable - framework callbacks and exports), when the length
+    * cannot be attributed to a parameter, or when any resolved call site passes a value whose
+    * origin is not purely constant (literals and sizeofs). Every call site passing a provable
+    * constant is the helper whose bound lives at its callers, and stays silent.
+    */
+  private def unboundedAtCallSites(method: Method, lenArg: Expression): Boolean =
+    val callers = directCallers(method).getOrElse(Nil)
+    if callers.isEmpty then true
+    else
+      val params = lenArg.tag.name(ValueOriginPass.OriginCallerParam).value.l
+          .flatMap(name => method.parameter.name(name).headOption)
+      if params.isEmpty then true
+      else
+        val siteArgs =
+            for
+              site  <- callers
+              param <- params
+              arg   <- site.argumentOption(param.index)
+            yield arg
+        if siteArgs.isEmpty then true
+        else
+          siteArgs.exists(arg =>
+              ValueOriginPass.originNamesOf(arg) != Set(ValueOriginPass.OriginConstant)
+          )
+  end unboundedAtCallSites
+
+  /** MS-BOUND-003/004: index out of bounds, over facts that already exist on the graph.
+    * `ValueOriginPass` tags array indices with their origin and nobody read them. Two arms:
+    *
+    *   - **unchecked attacker index**: an index whose origin is `untrusted-read`, or `caller-param`
+    *     that some caller leaves unbounded ([[callersBoundIndex]]), on a base whose extent is a
+    *     known capacity (`const:N` / `alloc:`), with no upper bound - from a guard, from the
+    *     access's own short-circuit expression, from its range by construction ([[IndexRange]]: a
+    *     byte read cannot reach index 256), or from an enum sized by its own count sentinel. A
+    *     lower bound does not excuse it: `i >= 0` still lets i run past the end.
+    *   - **half-bounded signed index** (the CVE-2026-75146 shape): the author bounded the index
+    *     ABOVE (`cur_seq_no < n_fragments`) but not below, and the index is a signed value read out
+    *     of a struct - someone else set it, it can be negative, and the comparison that is there
+    *     does not stop it. `bounded-below` is what separates them: the fix adds the `>= 0` conjunct
+    *     and the arm goes quiet.
+    *
+    * CWE-125 for a read, CWE-787 for a write - the distinction is which side of an assignment the
+    * index access sits on.
+    */
+  private def ruleIndexBounds(record: (StoredNode, String) => Unit): Unit =
+    // the half-bounded arm reports once per (method, index variable): the missing `>= 0` is one
+    // fix however many accesses the counter indexes - movenc.c wrote `trk->cluster[trk->entry]`
+    // five times in one function, five findings of one hypothesis
+    val halfBoundedFirst = mutable.LinkedHashMap.empty[(Long, String), Expression]
+    atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .foreach { access =>
+          for
+            idx  <- access.argumentOption(2)
+            base <- access.argumentOption(1)
+          do
+            val tags = idx.tag.name.l
+            val extent = base.tag.name(ExtentPass.TagExtent).value.l.headOption
+                .getOrElse(ExtentPass.ValueUnknown)
+            val knownExtent = extent.startsWith(ExtentPass.ValueConst + ":") ||
+                extent.startsWith(ExtentPass.ValueAlloc + ":")
+            val capacity    = constCapacity(extent)
+            val signedIndex = signednessOf(idx).contains(true)
+            val halfBounded = tags.contains(ValueOriginPass.OriginStructField) && signedIndex
+            val hasAttackerTag = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                tags.contains(ValueOriginPass.OriginCallerParam)
+            val knownishExtent = knownExtent || extent.startsWith(ExtentPass.ValueParam + ":")
+            // the attacker arms need a capacity (or a C++ container) to overrun; the
+            // half-bounded arm asks only about the missing lower side, whatever the base
+            if halfBounded ||
+              (hasAttackerTag && (knownishExtent || isCppContainer(typeOfExpr(base))))
+            then
+              // bounds by construction: a byte read cannot reach index 256 and an unsigned value
+              // is never negative (IndexRange); and the short-circuit guard in the access's own
+              // expression, `pid >= NB_PID_MAX || ts->pids[pid]`
+              val range        = ranges.of(idx)
+              val inExpression = shortCircuitBounds(access, idx)
+              // the declared enum is trusted only where nothing sizes the value: a byte read
+              // stored into an enum variable (C converts implicitly) is judged by its range
+              val enumFits = range.isEmpty && capacity.exists(n =>
+                  enumIndexFits(typeOfExpr(idx), n, declaredArrayText(base))
+              )
+              val boundedAbove = tags.contains(GuardPass.TagAbove) ||
+                  tags.contains(GuardPass.TagByExtent) || inExpression._1 ||
+                  capacity.exists(n => range.exists(_.hi < n)) || enumFits
+              val boundedBelow = tags.contains(GuardPass.TagBelow) || inExpression._2 ||
+                  range.exists(_.nonNegative) || enumFits
+              // a caller-param index is the attacker's only when some caller passes it an
+              // attacker value that caller did not bound on the side this method leaves open
+              // (asfdec_o's `asf_deinterleave(s, pkt, i)` from a stream loop, mxfdec's enum
+              // constants, dvenc's channel loop two frames up)
+              val attackerIndex = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
+                  (tags.contains(ValueOriginPass.OriginCallerParam) &&
+                      !callersBoundIndex(
+                        access.method,
+                        idx,
+                        needAbove = !boundedAbove,
+                        needBelow = signedIndex && !boundedBelow,
+                        capacity,
+                        depth = 3
+                      ))
+              // The two arms are separate rules because they know different amounts. The
+              // attacker arm has a capacity and an origin and no upper bound: evidence (a lower
+              // bound does not help it - `i >= 0` still lets i run past the end). The
+              // half-bounded arm has a HYPOTHESIS - this signed counter could be negative - which
+              // is true of most signed counters and wrong about almost all of them (in a large
+              // C library nearly every such finding is a correct counter). It reports at `low`.
+              if attackerIndex && knownExtent && !boundedAbove then record(idx, ruleIdFor(access))
+              else if halfBounded && boundedAbove && !boundedBelow then
+                val key  = (idx.method.id, OverlayFacts.variableKey(idx).getOrElse(s"n:${idx.id}"))
+                val line = idx.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                halfBoundedFirst.get(key) match
+                  case Some(prev) if prev.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= line =>
+                  case _ => halfBoundedFirst(key) = idx
+              // the one-sided arm: an ATTACKER-ORIGIN SIGNED index into a buffer of
+              // known-ish capacity whose guard bounds it on exactly ONE side - the other side is
+              // the bug (CVE-2026-75146's `cur_seq_no < n_fragments`).
+              // `(unsigned)seq_no < count` is NOT this shape: the conversion sends every negative
+              // index past any real count, a complete two-sided check (FFmpeg's idiom for it).
+              if attackerIndex && signedIndex && knownishExtent && (boundedAbove ^ boundedBelow)
+              then record(idx, ruleIdFor(access))
+              // the container arm: an attacker-controlled index into a std:: container
+              // with no upper bound - C code carries no such types, so the arm is silent on
+              // C code like libavformat by construction.
+              if attackerIndex && !boundedAbove && (!signedIndex || !boundedBelow) &&
+                isCppContainer(typeOfExpr(base))
+              then record(idx, ruleIdFor(access))
+            end if
+          end for
+        }
+    halfBoundedFirst.values.foreach(idx => record(idx, RuleNegativeIndexHazard))
+    pointerWalkWraparound(record)
+  end ruleIndexBounds
+
+  /** An enum-typed index into an array sized by that enum: every enumerator is in `[0, n)`; or
+    * every one but the last is, and the last IS `n` and names the array's declared size - the
+    * `MetadataSetTypeNB` count sentinel, which is never an element (mxfdec's
+    * `metadata_set_groups[type]`, wtvenc's `file[index]`). A last enumerator equal to the capacity
+    * that the array is NOT declared with is a real member one past the end: `enum { RED, GREEN,
+    * BLUE }` into `v[2]` is the classic off-by-one. The declared type is the contract; an
+    * enumerator whose value cannot be read makes the answer no.
+    */
+  private def enumIndexFits(typeName: String, capacity: BigInt, declared: Option[String]): Boolean =
+      enumValues.get(typeName.trim.stripPrefix("enum ").trim).exists { values =>
+          values.nonEmpty && values.forall(_._2 >= 0) && (
+            values.forall(_._2 < capacity) || (
+              values.init.forall(_._2 < capacity) && values.last._2 == capacity &&
+                  declared.exists(d =>
+                      d.matches(
+                        s".*\\[\\s*${java.util.regex.Pattern.quote(values.last._1)}\\s*\\].*"
+                      )
+                  )
+            )
+          )
+      }
+
+  /** The array declaration an access's base names, as written - `g[SetTypeNB]` - when it is a
+    * struct member (the frontend keeps a member's declarator; a local's type is already folded to
+    * `int[3]`).
+    */
+  private def declaredArrayText(base: Expression): Option[String] = base match
+    case c: Call if isFieldAccess(c) => OverlayFacts.memberRefOf(atom, c).map(_.code)
+    case _                           => None
+
+  /** Enumerators per enum name, in declaration order: an explicit literal initialiser, a reference
+    * to an earlier enumerator, or one more than the previous. Same-named enums that disagree are
+    * dropped - which one a use sees is not something to guess.
+    */
+  private lazy val enumValues: Map[String, List[(String, BigInt)]] =
+    val parsed = atom.typeDecl.l.filter(_.code.trim.startsWith("enum")).flatMap { td =>
+      val members = td.astChildren.collectAll[Member].l.sortBy(_.order)
+      val known   = mutable.LinkedHashMap.empty[String, BigInt]
+      var next    = BigInt(0)
+      val ok = members.forall { m =>
+        val init = m.code.split("=", 2).lift(1).map(_.trim)
+        val value = init match
+          case None       => Some(next)
+          case Some(expr) => IndexRange.literalValue(expr).orElse(known.get(expr))
+        value.foreach { v =>
+          known(m.name) = v
+          next = v + 1
+        }
+        value.isDefined
+      }
+      Option.when(ok && known.nonEmpty)(td.name -> known.toList)
+    }
+    parsed.groupBy(_._1).collect {
+        case (name, defs) if defs.map(_._2).distinct.size == 1 =>
+            name -> defs.head._2
+    }
+  end enumValues
+
+  /** Every enum's name, parseable or not: an integer stored in one keeps its value. */
+  private lazy val enumTypeNames: Set[String] =
+      atom.typeDecl.filter(_.code.trim.startsWith("enum")).name.toSet
+
+  /** Every caller of a method, or None when not all of them can be seen: an address-taken method (a
+    * METHOD_REF - a function pointer, a callback table entry) is also called through the pointer,
+    * and those calls have no CALL edge. Such a method is an entry point.
+    */
+  private def directCallers(m: Method): Option[List[Call]] =
+      if m._refIn.collectFirst { case r: MethodRef => r }.isDefined then None
+      else Some(m._callIn.collectAll[Call].l.distinct)
+
+  /** The value ranges of the index rules, memoised for the pass. */
+  private lazy val ranges = IndexRange(typeOfExpr, enumTypeNames.contains, directCallers)
+
+  /** The element capacity a `const:N` extent names. */
+  private def constCapacity(extent: String): Option[BigInt] =
+      Option.when(extent.startsWith(ExtentPass.ValueConst + ":"))(
+        extent.stripPrefix(ExtentPass.ValueConst + ":")
+      ).flatMap(v => scala.util.Try(BigInt(v)).toOption)
+
+  /** The bounds a short-circuit operator in the access's own expression establishes: the right
+    * operand of `a || b` runs only where `a` is false, of `a && b` only where `a` is true, and the
+    * branches of `c ? x : y` where `c` is true and false. Returns (above, below) for the index's
+    * variable.
+    */
+  private def shortCircuitBounds(access: Call, idx: Expression): (Boolean, Boolean) =
+    val key = castUnwrappingKey(idx)
+    if key.isEmpty then (false, false)
+    else
+      var above                      = false
+      var below                      = false
+      var child: StoredNode          = access
+      var cursor: Option[StoredNode] = access._astIn.nextOption()
+      while cursor.isDefined do
+        cursor.get match
+          case c: Call =>
+              val holds: Option[Boolean] = c.name match
+                case "<operator>.logicalOr" if c.argumentOption(2).exists(_.id == child.id) =>
+                    Some(false)
+                case "<operator>.logicalAnd" if c.argumentOption(2).exists(_.id == child.id) =>
+                    Some(true)
+                case "<operator>.conditional" if c.argumentOption(2).exists(_.id == child.id) =>
+                    Some(true)
+                case "<operator>.conditional" if c.argumentOption(3).exists(_.id == child.id) =>
+                    Some(false)
+                case _ => None
+              holds.foreach { h =>
+                  c.argumentOption(1).collect { case cond: Call => cond }.foreach { cond =>
+                      GuardPass.conjuncts(cond, h).getOrElse(Nil).foreach { case (cmp, ch) =>
+                          GuardPass.directionalFacts(cmp, ch).foreach {
+                              case (bounded, isAbove, _) =>
+                                  if castUnwrappingKey(bounded) == key then
+                                    if isAbove then above = true else below = true
+                          }
+                      }
+                  }
+              }
+              child = c
+              cursor = c._astIn.nextOption()
+          case _ => cursor = None
+      end while
+      (above, below)
+    end if
+  end shortCircuitBounds
+
+  /** Do the callers bound a caller-param index on the sides the method leaves open? Only an index
+    * whose value IS the parameter's takes its callers' evidence - no assignment, increment or
+    * arithmetic between the parameter and the access: `idx++; a[idx]` is not bounded by the
+    * caller's `idx < 4`. (An index DERIVED from the parameter is sized by [[IndexRange]], which
+    * follows the definitions back to the callers' arguments on its own.) Every call site must
+    * supply the evidence, and an address-taken method has callers the graph cannot see.
+    */
+  private def callersBoundIndex(
+    method: Method,
+    idx: Expression,
+    needAbove: Boolean,
+    needBelow: Boolean,
+    capacity: Option[BigInt],
+    depth: Int
+  ): Boolean =
+      parameterValueOf(idx, method).exists { case (param, casts) =>
+          parameterBoundByCallers(param, casts, needAbove, needBelow, capacity, depth)
+      }
+
+  /** The parameter whose unchanged value `e` is, with the casts applied to it on the way (in the
+    * order they apply). The walk back from the identifier must reach the parameter and no other
+    * definition: a frame-2 argument named like its method's parameter but reassigned first (`ch =
+    * avio_rb32(pb); f(nut, ch)`) is not that parameter.
+    */
+  private def parameterValueOf(
+    e: Expression,
+    method: Method
+  ): Option[(MethodParameterIn, List[String])] =
+    val (core, casts) = withoutCasts(e)
+    core match
+      case i: Identifier =>
+          method.parameter.nameExact(i.name).headOption.filter { p =>
+              GuardPass.valueSources(i).exists(defs =>
+                  defs.nonEmpty && defs.forall(_.id() == p.id())
+              )
+          }.map(p => (p, casts))
+      case _ => None
+
+  /** An expression without its casts, and the cast target types in the order they apply. */
+  private def withoutCasts(e: Expression): (Expression, List[String]) = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        castOperand(c) match
+          case Some(inner) =>
+              val (core, casts) = withoutCasts(inner)
+              (core, casts :+ c.typeFullName)
+          case None => (e, Nil)
+    case other => (other, Nil)
+
+  private val callerBoundMemo =
+      mutable.HashMap.empty[(Long, List[String], Boolean, Boolean, Option[BigInt], Int), Boolean]
+
+  /** Does every caller bind `param` to a value bounded on the needed sides, once converted into the
+    * parameter's type and then through `conversions` (the casts between the parameter and the
+    * index)? A caller that passes its own unchanged parameter hands the question to ITS callers, at
+    * most `depth` frames up.
+    */
+  private def parameterBoundByCallers(
+    param: MethodParameterIn,
+    conversions: List[String],
+    needAbove: Boolean,
+    needBelow: Boolean,
+    capacity: Option[BigInt],
+    depth: Int
+  ): Boolean =
+    val key = (param.id(), conversions, needAbove, needBelow, capacity, depth)
+    callerBoundMemo.get(key) match
+      case Some(known) => known
+      case None =>
+          val convs = param.typeFullName :: conversions
+          val answer = depth > 0 && directCallers(param.method).exists { sites =>
+              sites.nonEmpty && sites.forall { site =>
+                  site.argumentOption(param.index).collect { case a: Expression => a }.exists {
+                      arg =>
+                        val (aboveOk, belowOk) =
+                            siteEvidence(site, arg, convs, needAbove, needBelow, capacity)
+                        (aboveOk && belowOk) ||
+                        parameterValueOf(arg, site.method).exists { case (outer, casts) =>
+                            parameterBoundByCallers(
+                              outer,
+                              casts ++ convs,
+                              !aboveOk,
+                              !belowOk,
+                              capacity,
+                              depth - 1
+                            )
+                        }
+                  }
+              }
+          }
+          callerBoundMemo(key) = answer
+          answer
+    end match
+  end parameterBoundByCallers
+
+  /** What a call site proves about the value it binds: (above, below) on the sides needed.
+    *
+    * Positive evidence only. The value's range - by construction ([[IndexRange]]), narrowed by the
+    * literal bounds of the guards that dominate the call and test the value it passes - is
+    * converted into the parameter's type and then through the index's casts, and compared with the
+    * capacity: `for (i = 0; i < 8; i++) f(i)` into `st[4]` is not bounded, and a literal 7 or -1 is
+    * judged by its value. A guard whose bound is not a constant counts as a bound, as the in-method
+    * `bounded-above` tag always has, unless a conversion changes the value on the way (an unsigned
+    * value checked against a limit can still arrive negative in an `int`). An argument merely NOT
+    * tagged attacker proves nothing - flvdec's `multitrack ? track_idx : stream_type` is a byte
+    * read through a struct field.
+    */
+  private def siteEvidence(
+    site: Call,
+    arg: Expression,
+    conversions: List[String],
+    needAbove: Boolean,
+    needBelow: Boolean,
+    capacity: Option[BigInt]
+  ): (Boolean, Boolean) =
+    val (core, argCasts) = withoutCasts(arg)
+    val convs            = argCasts ++ conversions
+    val construction     = ranges.of(core)
+    var lo               = construction.map(_.lo)
+    var hi               = construction.map(_.hi)
+    var hiFromGuard      = false
+    var aboveByGuard     = false
+    var belowByGuard     = false
+    siteFacts(site, core).foreach { case (isAbove, strict, bound, viaUnsigned) =>
+        // a constant bound: a literal, or constant arithmetic the ranges fold to one value
+        IndexRange.literal(bound).orElse(ranges.of(bound).collect {
+            case r if r.lo == r.hi => r.lo
+        }) match
+          case Some(v) =>
+              if isAbove then
+                val h = if strict then v - 1 else v
+                hi = Some(hi.fold(h)(_.min(h)))
+                hiFromGuard = true
+                // `(unsigned)i < n` rejects every negative i too
+                if viaUnsigned then lo = Some(lo.fold(BigInt(0))(_.max(0)))
+              else
+                val l = if strict then v + 1 else v
+                lo = Some(lo.fold(l)(_.max(l)))
+          case None =>
+              if isAbove then
+                aboveByGuard = true
+                if viaUnsigned then lo = Some(lo.fold(BigInt(0))(_.max(0)))
+              else belowByGuard = true
+    }
+    val atSite = (lo, hi) match
+      case (Some(l), Some(h)) if l <= h => Some(IndexRange.Range(l, h))
+      case _                            => None
+    // the value once bound and cast; a conversion that changes it voids the non-constant guards
+    val converted = convs.foldLeft(atSite)((r, t) => ranges.convert(r, t))
+    val preserved = atSite match
+      case Some(r) =>
+          convs.foldLeft(Option(r))((acc, t) =>
+              acc.flatMap(x => ranges.convert(Some(x), t).filter(_ == x))
+          ).isDefined
+      case None =>
+          IndexRange.ofType(typeOfExpr(core)).exists(r =>
+              convs.foldLeft(Option(r))((acc, t) =>
+                  acc.flatMap(x => ranges.convert(Some(x), t).filter(_ == x))
+              ).isDefined
+          )
+    val constant = isLiteralOnly(arg)
+    // a constant expression the ranges cannot fold (a sizeof) is no attacker's value, and nothing
+    // here can judge it against the capacity
+    val unevaluatedConstant = constant && !construction.exists(r => r.lo == r.hi)
+    val aboveOk =
+        !needAbove || unevaluatedConstant || (aboveByGuard && preserved) || (capacity match
+          case Some(n) => converted.exists(_.hi < n)
+          case None    => constant || (hiFromGuard && preserved)
+        )
+    val belowOk = !needBelow || unevaluatedConstant || (belowByGuard && preserved) ||
+        converted.exists(_.nonNegative)
+    (aboveOk, belowOk)
+  end siteEvidence
+
+  /** The comparisons that DOMINATE a call site and test the unchanged value of `value`'s variable:
+    * (bounds above, strict, bound, through an unsigned conversion). A condition the call is merely
+    * control-dependent on - a sibling `case`'s early exit on an earlier iteration's value - or one
+    * that tested an older value (`while (n < 4) { n = read(); f(n); }`) bounds nothing here.
+    */
+  private def siteFacts(
+    site: Call,
+    value: Expression
+  ): List[(Boolean, Boolean, Expression, Boolean)] =
+    val key = castUnwrappingKey(value)
+    if key.isEmpty then Nil
+    else
+      GuardPass.guardingControllers(GuardPass.statementRootOf(site)).flatMap { cond =>
+          GuardPass.conjunctsAt(cond, site).flatMap {
+              case (cmp, holds) =>
+                  GuardPass.directionalFacts(cmp, holds).collect {
+                      case (bounded, isAbove, bound)
+                          if castUnwrappingKey(bounded) == key &&
+                              GuardPass.unchangedSince(bounded, value) &&
+                              castsOnlyToUnsignedOrNothing(bounded) =>
+                          (
+                            isAbove,
+                            GuardPass.isStrict(cmp, holds),
+                            bound,
+                            withoutCasts(bounded)._2.nonEmpty
+                          )
+                  }
+          }
+      }
+  end siteFacts
+
+  /** A guard on `(unsigned)i` bounds i when the cast is to an unsigned type (FFmpeg's two-sided
+    * idiom); a cast to anything else tested a different value.
+    */
+  private def castsOnlyToUnsignedOrNothing(bounded: Expression): Boolean =
+      withoutCasts(bounded)._2.forall(OverlayFacts.isUnsignedIntegral)
+
+  /** A literal, or arithmetic and casts over literals and sizeofs only. */
+  private def isLiteralOnly(e: Expression): Boolean = e match
+    case _: Literal                                        => true
+    case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+    case c: Call
+        if c.name.startsWith("<operator>.") && !isFieldAccess(c) &&
+            c.name != "<operator>.indirection" && c.name != "<operator>.indexAccess" &&
+            c.name != "<operator>.indirectIndexAccess" =>
+        c.argument.l.collect { case x: Expression => x }.forall(isLiteralOnly)
+    case _ => false
+
+  /** Is the expression's type a C++ standard container the graph can treat as a buffer? c2cpg
+    * writes nested names with dots (`std.vector<int>`).
+    */
+  private val CppContainerPrefixes = List(
+    "std.vector",
+    "std.array",
+    "std.span",
+    "std.string",
+    "std.basic_string",
+    "std.wstring",
+    "std.deque",
+    "std.list"
+  )
+
+  private def isCppContainer(t: String): Boolean =
+    val n = t.trim.stripPrefix("const ").trim.stripSuffix("&").trim
+    CppContainerPrefixes.exists(n.startsWith)
+
+  /** The pointer-walk arm (CWE-125, the CVE-2026-75147 loop-bound wraparound): inside a loop, `p +=
+    * k` with an attacker-derived k and reads through p - the walk moves p past the buffer and the
+    * next read is out of bounds. A comparison bounding the walked pointer or the step above (the
+    * check the correct walker writes - `if (obu_size > rem) return;`) stands the arm down; so does
+    * a pointer the method never reads through, or a step nothing attacker-like flows into.
+    */
+  private def pointerWalkWraparound(record: (StoredNode, String) => Unit): Unit =
+    val attackers = Set(ValueOriginPass.OriginCallerParam, ValueOriginPass.OriginUntrustedRead)
+    atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+      val readsThrough = method.ast.isCall
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .flatMap(_.argumentOption(1).collect { case i: Identifier => i.name })
+          .toSet
+      val pointerLocals = method.local.l
+          .filter(l => OverlayFacts.isPointer(l.typeFullName.trim))
+          .map(_.name)
+          .toSet
+      if readsThrough.nonEmpty && pointerLocals.nonEmpty then
+        // the comparisons the method's guards carry, collected ONCE: a walk's guard question
+        // is then a set lookup, not a conjunct walk per candidate step (a per-walk version
+        // is measurably slow on a large library)
+        val boundedKeysByLine = method.ast.collectAll[ControlStructure].l
+            .flatMap(_.condition.collect { case c: Call => c })
+            .map { cond =>
+              val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+              val keys = Seq(true, false).flatMap { holds =>
+                  GuardPass.conjuncts(cond, holds).getOrElse(Nil).flatMap { case (cmp, h) =>
+                      GuardPass.directionalFacts(cmp, h).collect {
+                          case (bounded, above, _) if above => castUnwrappingKey(bounded)
+                      }.flatten
+                  }
+              }.toSet
+              (line, keys)
+            }
+            .filter(_._2.nonEmpty)
+        def guardedAbove(key: String, walkLine: Int): Boolean =
+            boundedKeysByLine.exists { case (line, keys) =>
+                line <= walkLine && keys.contains(key)
+            }
+        method.ast.collectAll[Call].l.foreach { walk =>
+            walkTargetOf(walk).foreach { case (lhs, step) =>
+                val walkLine = walk.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                // cheap structural checks first; the attacker-origin def walk runs only for
+                // walks that survived them and carry no bound
+                if pointerLocals.contains(lhs.name) && readsThrough.contains(lhs.name) &&
+                  insideLoop(walk) &&
+                  !guardedAbove(s"v:${lhs.name}", walkLine) &&
+                  !OverlayFacts.variableKey(step).exists(guardedAbove(_, walkLine)) &&
+                  !clampedStep(step, s"v:${lhs.name}") &&
+                  !pairedStepFitsRemainder(walk, lhs, step)
+                then
+                  if ValueOriginPass.originNamesOf(step).exists(attackers.contains) then
+                    record(walk, RuleIndexRead)
+            }
+        }
+      end if
+    }
+  end pointerWalkWraparound
+
+  /** The pointer-walk arm's remainder exemption: a step whose whole known range fits the loop's
+    * minimum REMAINDER - the paired `rem -= e` shrink names the remainder, and the loop condition
+    * bounds it below. `while (rem > 4) { p += 1 + (p[0] & 3); rem -= 1 + (p[0] & 3); }` cannot walk
+    * past the buffer, whatever the bytes hold.
+    */
+  private def pairedStepFitsRemainder(
+    walk: Call,
+    lhs: Identifier,
+    step: Expression
+  ): Boolean =
+      enclosingLoopOf(walk).exists { loop =>
+          pairedRemainderOf(walk, lhs, step, loop).exists(rem =>
+              stepFitsMinimumRemainder(step, loop, Some(rem))
+          )
+      }
+
+  /** The remainder variable a walk's step is subtracted from inside `loop`: `rem -= e` for the same
+    * expression fingerprint `e`, on a variable that is not the walked pointer.
+    */
+  private def pairedRemainderOf(
+    walk: Call,
+    lhs: Identifier,
+    step: Expression,
+    loop: ControlStructure
+  ): Option[Identifier] =
+    val ePrint     = fingerprintOf(step)
+    val pointerKey = OverlayFacts.variableKey(lhs)
+    walk.method.ast.collectAll[Call].nameExact("<operator>.assignmentMinus").l.flatMap { s =>
+        s.argumentOption(1).collect { case i: Identifier => i }
+            .filter(rem => !pointerKey.contains(s"v:${rem.name}") && isWithin(s, loop))
+            .filter(rem => s.argumentOption(2).exists(arg => fingerprintOf(arg) == ePrint))
+    }.headOption
+
+  /** The paired-advance walk (CVE-2026-75147): a pointer `p` and a remaining count `rem` that move
+    * TOGETHER through a loop - `p += e; rem -= e;` - where `e` carries a term decoded from the
+    * walked bytes (an out-param a reader fills, `parse_leb(ctx, p, rem, &obu_size)`, or a read
+    * through p itself), and p is dereferenced in the loop. Nothing bounds `e` by `rem`, so a
+    * crafted size wraps the signed remainder positive and the next `*p++` leaves the buffer.
+    * MS-BOUND-003 at the advance.
+    *
+    * Stands down on the pointer-walk arm's exemptions (a step clamped against the walked pointer),
+    * on a dominating `step <= rem` guard whose comparison is honestly unsigned (the fix's `obu_size
+    * > (uint32_t) rem_size` - a signed-looking compare of a uint32_t step against a
+    * negative-capable int does not reject the wrapping values), and on a step whose whole known
+    * range fits the loop's minimum remainder.
+    */
+  private def pairedAdvanceWalk(record: (StoredNode, String) => Unit): Unit =
+      atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+          method.ast.collectAll[Call].nameExact("<operator>.assignmentPlus").l.foreach { advance =>
+              walkTargetOf(advance).foreach { case (p, e) =>
+                  enclosingLoopOf(advance).foreach { loop =>
+                    val pKey = OverlayFacts.variableKey(p)
+                    // a dereference of p inside the same loop: p[i] or *p (through increments and casts)
+                    val derefed = loop.ast.isCall
+                        .name(
+                          "<operator>.indexAccess|<operator>.indirectIndexAccess|<operator>.indirection"
+                        ).l
+                        .exists(c =>
+                            c.argumentOption(1).collect { case x: Expression => x }
+                                .exists(b => readThroughKey(b).exists(k => pKey.contains(k)))
+                        )
+                    if derefed then
+                      pairedRemainderOf(advance, p, e, loop).foreach { rem =>
+                        val attacker = sumTermsOf(e).exists(t => decodedTerm(t, pKey))
+                        if attacker && !clampedStep(e, pKey.getOrElse("")) &&
+                          !remGuardBoundsStep(advance, e, Some(rem)) &&
+                          !stepFitsMinimumRemainder(e, loop, Some(rem))
+                        then record(advance, RuleIndexRead)
+                      }
+                  }
+              }
+          }
+      }
+  end pairedAdvanceWalk
+
+  /** Is this term of a step a value DECODED from the walked bytes: filled through its address by a
+    * call that reads and is handed the walked pointer (the parse_leb out-param), or read out of the
+    * walked buffer itself? A call's plain return value is deliberately not one: the fixed code's
+    * `buf_ptr += num_lebs` advances by the reader's own byte count, which the reader bounds
+    * internally. Neither is an out-param filled from something else - a lookup table's entry.
+    */
+  private def decodedTerm(t: Expression, pKey: Option[String]): Boolean =
+    def handedWalkedPointer(c: Call): Boolean =
+        c.argument.l.collect { case x: Expression => x }
+            .exists(a => readThroughKey(a).exists(k => pKey.contains(k)))
+    val filledThroughAddress = t match
+      case i: Identifier =>
+          t.method.ast.collectAll[Call].l.exists { c =>
+              handedWalkedPointer(c) && untrustedFillIndexOf(c).exists { idx =>
+                  c.argumentOption(idx).collect { case x: Expression => x }
+                      .exists(a =>
+                          withoutCasts(a)._1 match
+                            case addr: Call if addr.name == "<operator>.addressOf" =>
+                                addr.argumentOption(1).collect { case y: Expression => y }
+                                    .exists(y =>
+                                        OverlayFacts.variableKey(y) == OverlayFacts.variableKey(i)
+                                    )
+                            case _ => false
+                      )
+              }
+          }
+      case _ => false
+    val readFromWalked = pKey.exists(k => readsThroughKey(t, k)) || (t match
+      case i: Identifier =>
+          OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+              .flatMap(_._astIn.collectFirst {
+                  case a: Call if a.name == "<operator>.assignment" => a
+              })
+              .flatMap(_.argumentOption(2).collect { case x: Expression => x })
+              .exists(r => pKey.exists(k => readsThroughKey(r, k)))
+      case _ => false
+    )
+    filledThroughAddress || readFromWalked
+  end decodedTerm
+
+  /** A guard that bounds the step (or one of its terms) above by the remaining count, in a
+    * comparison that is honestly unsigned: the fix's `if (obu_size > (uint32_t) rem_size) break;`
+    * rejects every value that would wrap, but a signed-looking compare of a uint32_t step against a
+    * negative-capable int does not - the int converts to a huge unsigned value and the guard never
+    * fires. An explicit unsigned cast on either operand (or both operands unsigned by declaration)
+    * must be there for the stand-down.
+    */
+  private def remGuardBoundsStep(
+    advance: Call,
+    e: Expression,
+    remKey: Option[Identifier]
+  ): Boolean =
+      remKey.exists { rem =>
+        val remKeyStr = s"v:${rem.name}"
+        val stepKeys =
+            (castUnwrappingKey(e).toSet ++ sumTermsOf(e).flatMap(castUnwrappingKey)).toSet
+        // the cast targets as written: c2cpg renders a cast's type in its first argument's
+        // code, so typeFullName alone says nothing here (castTargetName reads the code)
+        def castTargetsOf(e: Expression): List[String] = e match
+          case c: Call if c.name == "<operator>.cast" =>
+              castTargetsOf(castOperand(c).getOrElse(c)) :+ castTargetName(c)
+          case other => Nil
+        // The wrap hazard is a CONVERSION hazard: an unsigned step compared against a
+        // negative-capable signed remainder converts the remainder and never fires. An
+        // explicit unsigned cast (the fix's form), two unsigned operands, or two SIGNED
+        // operands (the comparison is then exact - `size <= left` with both int) all bound.
+        def signedOf(t: String): Option[Boolean] =
+            if OverlayFacts.isUnsignedIntegral(t) then Some(false)
+            else if OverlayFacts.isSignedIntegral(t) then Some(true)
+            else None
+        // a cast's type is its first argument's code; the operand's signedness is the cast's
+        def operandSignedness(e: Expression): Option[Boolean] =
+            castTargetsOf(e).lastOption.flatMap(signedOf).orElse(signednessOf(e))
+        def unsignedCompare(bounded: Expression, bound: Expression): Boolean =
+            (castTargetsOf(bound) ++ castTargetsOf(bounded)).exists(
+              OverlayFacts.isUnsignedIntegral
+            ) ||
+                (operandSignedness(bounded).contains(false) && operandSignedness(bound).contains(
+                  false
+                )) ||
+                (operandSignedness(bounded).contains(true) && operandSignedness(bound).contains(
+                  true
+                ))
+        def admits(cond: Call, holds: Boolean): Boolean =
+            GuardPass.conjuncts(cond, holds).getOrElse(Nil).exists { case (cmp, h) =>
+                GuardPass.directionalFacts(cmp, h).exists { case (bounded, above, bound) =>
+                    val a1 = above
+                    val a2 = castUnwrappingKey(bounded).exists(stepKeys.contains)
+                    val a3 = castUnwrappingKey(bound).contains(remKeyStr)
+                    val a4 = unsignedCompare(bounded, bound)
+                    a1 && a2 && a3 && a4
+                }
+            }
+        val nodeLine = advance.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+        val loop     = enclosingLoopOf(advance)
+        def inLoop(cs: ControlStructure): Boolean = loop.forall(l => isWithin(cs, l))
+        val byNesting = GuardPass.guardingControllers(advance).exists { cond =>
+            cond._astIn.collectFirst { case cs: ControlStructure => cs }.exists { cs =>
+                inLoop(cs) && GuardPass.holdsAtOpt(cond, advance).exists(h => admits(cond, h))
+            }
+        }
+        val byEarlyExit = advance.method.ast.collectAll[ControlStructure].l.exists { cs =>
+          val before = cs.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) < nodeLine
+          val inL    = inLoop(cs)
+          val exits  = earlyExits(cs)
+          val adm    = cs.condition.collect { case c: Call => c }.exists(admits(_, false))
+          val domi =
+              advance.dominatedBy.exists(d => d.id == cs.id || cs.condition.exists(_.id == d.id))
+          before && inL && exits && adm && domi
+        }
+        byNesting || byEarlyExit
+      }
+  end remGuardBoundsStep
+
+  /** The step's whole known range fits the loop's minimum remainder: the loop condition bounds
+    * `rem` below by L, the step never exceeds L - 1, and the walk cannot run past the buffer
+    * (`p_new - base = base_size - rem_old + step <= base_size - 1`, since rem_old >= L). This is
+    * the correct walker whose step is a small masked constant, and it silences both arms.
+    */
+  private def stepFitsMinimumRemainder(
+    e: Expression,
+    loop: ControlStructure,
+    remKey: Option[Identifier]
+  ): Boolean =
+    val minRem = loop.condition.collect { case c: Call => c }.flatMap { cond =>
+        GuardPass.conjuncts(cond, holds = true).getOrElse(Nil).flatMap { case (cmp, holds) =>
+            GuardPass.directionalFacts(cmp, holds).collect {
+                // rem bounded FROM BELOW by a literal: `while (rem > 4)` puts rem >= 5
+                case (bounded, false, bound)
+                    if remKey.forall(r => castUnwrappingKey(bounded).contains(s"v:${r.name}")) =>
+                    IndexRange.literal(bound).map(v =>
+                        if GuardPass.isStrict(cmp, holds) then v + 1 else v
+                    )
+            }.flatten
+        }
+    }
+    (for
+      l   <- minRem.headOption
+      rng <- ranges.of(e)
+    yield rng.hi < l).getOrElse(false)
+  end stepFitsMinimumRemainder
+
+  /** The step of a walk is CLAMPED against the walked pointer itself - `len = FFMIN(AV_RB32(buf),
+    * end - buf - 4)` before `buf += len` - so the walk cannot leave the buffer. The clamp is a
+    * vocabulary min (the inventory's `clamp: min` family) or the conditional shape every min macro
+    * expands to, one of whose operands still mentions the walked pointer. hevc.c's and vvc.c's NAL
+    * walkers are the shape.
+    */
+  private lazy val minClampNames: Set[String] =
+      // the declared config's clamps too: FFMIN arrives by config, not by the builtin inventory
+      MemApiVocab.inventory(externalConfig).collect { case (n, e) if e.clamp.contains("min") => n }.toSet
+
+  private def mentionsKey(e: AstNode, key: String, depth: Int): Boolean =
+      if depth < 0 then false
+      else
+        e match
+          case i: Identifier => OverlayFacts.variableKey(i).contains(key)
+          case c: Call =>
+              OverlayFacts.variableKey(c).contains(key) ||
+              c.argument.l.exists(a => mentionsKey(a, key, depth - 1))
+          case _ => false
+
+  private def clampedStep(step: Expression, pointerKey: String): Boolean =
+    def clampOf(e: Expression): Boolean = e match
+      case c: Call if minClampNames.contains(c.name) =>
+          c.argument.l.exists(a => mentionsKey(a, pointerKey, 3))
+      case c: Call if c.name == "<operator>.conditional" =>
+          // cond ? a : b where cond compares a and b (the min/max macro shape) and one
+          // operand mentions the walked pointer
+          val operandKeys = Seq(2, 3).flatMap(i =>
+              c.argumentOption(i).flatMap(OverlayFacts.variableKey)
+          ).toSet
+          val condKeys = c.argumentOption(1).toList.flatMap(_.ast.collectAll[Call].l)
+              .filter(cmp => GuardPass.comparisonOps.contains(cmp.name))
+              .flatMap(cmp => cmp.argument.l.collect { case x: Expression => x })
+              .flatMap(OverlayFacts.variableKey).toSet
+          operandKeys.size == 2 && operandKeys.subsetOf(condKeys) &&
+          c.argument.l.exists(a => mentionsKey(a, pointerKey, 3))
+      case _ => false
+    def go(e: Expression, depth: Int): Boolean =
+        if depth < 0 then false
+        else
+          clampOf(e) || (e match
+            case i: Identifier =>
+                OverlayFacts
+                    .reachingDefsIn(i)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                    .exists(go(_, depth - 1))
+            case _ => false
+          )
+    go(step, 2)
+  end clampedStep
+
+  /** The (walked pointer, step) of an in-place pointer advance: `p += k`, or `p = p + k`. */
+  private def walkTargetOf(walk: Call): Option[(Identifier, Expression)] =
+    def plainOperands(add: Call): List[Expression] = add.argument.l.collect { case e: Expression =>
+        e
+    }
+    walk.name match
+      case "<operator>.assignmentPlus" =>
+          for
+            lhs  <- walk.argumentOption(1).collect { case i: Identifier => i }
+            step <- walk.argumentOption(2)
+          yield (lhs, step)
+      case "<operator>.assignment" =>
+          walk.argumentOption(2).collect {
+              case add: Call if add.name == "<operator>.addition" =>
+                  add
+          }.flatMap { add =>
+              for
+                lhs <- walk.argumentOption(1).collect { case i: Identifier => i }
+                operands = plainOperands(add)
+                if operands.exists(OverlayFacts.variableKey(_).contains(s"v:${lhs.name}"))
+                step <- operands.find(a =>
+                    OverlayFacts.variableKey(a) != Some(s"v:${lhs.name}")
+                )
+              yield (lhs, step)
+          }
+      case _ => None
+    end match
+  end walkTargetOf
+
+  /** Is `walk` nested inside a while/for/do loop? */
+  private def insideLoop(walk: Call): Boolean = enclosingLoopOf(walk).isDefined
+
+  /** The innermost while/for/do loop `node` sits in. The walk is cycle-safe: a macro expansion
+    * wired under its own argument gives a node two AST parents, and a plain parent walk can then
+    * chase that re-joining edge forever.
+    */
+  private def enclosingLoopOf(node: AstNode): Option[ControlStructure] =
+    val seen                            = mutable.HashSet.empty[Long]
+    var cursor: Option[StoredNode]      = node._astIn.nextOption()
+    var found: Option[ControlStructure] = None
+    while found.isEmpty && cursor.isDefined do
+      val current = cursor.get
+      if !seen.add(current.id()) then cursor = None
+      else
+        current match
+          case cs: ControlStructure =>
+              val t = cs.controlStructureType.toUpperCase
+              if t == "WHILE" || t == "FOR" || t == "DO" then found = Some(cs)
+              else cursor = cs._astIn.nextOption()
+          case _: Method => cursor = None
+          case other     => cursor = other._astIn.nextOption()
+    found
+
+  /** The ids of `outer`'s subtree, memoised: the expansion DAG re-joins, so a recursive containment
+    * check explodes on it.
+    */
+  private val subtreeIdsByCs = mutable.HashMap.empty[Long, Set[Long]]
+  private def subtreeIdsOf(outer: ControlStructure): Set[Long] =
+    def compute(): Set[Long] =
+      val seen                    = mutable.HashSet.empty[Long]
+      val out                     = mutable.HashSet.empty[Long]
+      var frontier: List[AstNode] = outer :: Nil
+      while frontier.nonEmpty do
+        val next = mutable.ListBuffer.empty[AstNode]
+        frontier.foreach { n =>
+            if seen.add(n.id()) then
+              out += n.id()
+              n.astChildren.foreach(next += _)
+        }
+        frontier = next.toList
+      out.toSet
+    subtreeIdsByCs.getOrElseUpdate(outer.id, compute())
+
+  /** Is `inner` nested inside `outer`'s subtree? A cycle-safe parent walk against that set. */
+  private def isWithin(inner: AstNode, outer: ControlStructure): Boolean =
+    val ids             = subtreeIdsOf(outer)
+    val seen            = mutable.HashSet.empty[Long]
+    var cursor: AstNode = inner
+    var found           = false
+    var walking         = true
+    while walking && !found do
+      if seen.contains(cursor.id()) || ids.contains(cursor.id()) then
+        found = ids.contains(cursor.id())
+        walking = false
+      else
+        seen.add(cursor.id())
+        cursor match
+          case _: Method => walking = false
+          case other =>
+              other._astIn.nextOption() match
+                case Some(p: AstNode) => cursor = p
+                case _                => walking = false
+    found
+
+  /** Does the block of `cs` leave the loop or the function - break, continue, return or goto? Only
+    * such an if DOMINATES what follows it: a plain `if (x) { log(); }` bounds nothing on the path
+    * that continues past it.
+    */
+  private def earlyExits(cs: ControlStructure): Boolean =
+      cs.whenTrue.ast.isControlStructure.exists { inner =>
+        val t = inner.controlStructureType.toUpperCase
+        t == "BREAK" || t == "CONTINUE" || t == "GOTO" || t == "RETURN"
+      } || cs.whenTrue.ast.isReturn.nonEmpty
+
+  /** A structural fingerprint of an expression: the same operator over the same variables and
+    * literals - the two `num_lebs + obu_size` of a paired advance are two AST nodes with one
+    * fingerprint. None when any leaf is something the fingerprint cannot name.
+    */
+  private def fingerprintOf(e: Expression): Option[String] =
+    def go(x: AstNode): Option[String] = x match
+      case l: Literal =>
+          IndexRange.literalValue(l.code).map(v => s"L$v").orElse(Some(s"L:${l.code}"))
+      case i: Identifier => OverlayFacts.variableKey(i)
+      case c: Call =>
+          for
+            // the argument step yields the call itself at index 0; it is not its own operand
+            args <- c.argument.l.filterNot(a => a.isFieldIdentifier || a.id == c.id) match
+              case Nil => Some(Nil)
+              case xs => xs.foldLeft(Option(List.empty[String]))((acc, a) =>
+                      acc.flatMap(l => go(a).map(l :+ _))
+                  )
+            argStr = args.mkString(",")
+          yield s"${c.name}($argStr)"
+      case other => OverlayFacts.variableKey(other)
+    go(e)
+
+  /** An expression and the operands of its top-level sums: the terms a guard could bound. */
+  private def sumTermsOf(e: Expression): List[Expression] = e match
+    case c: Call if c.name == "<operator>.addition" =>
+        c.argument.l.collect { case x: Expression => x }.flatMap(sumTermsOf)
+    case other => List(other)
+
+  /** The parameter key a dereference or element read goes through, casts and pointer arithmetic (`p
+    * + k`, `p++`) unwrapped: `p[i]`, `*p` and `*p++` all read through `p`.
+    */
+  private def readThroughKey(e: Expression): Option[String] =
+    // pointerCall is how the preprocessor renders a parenthesised cast inside an expansion
+    def unwrap(x: Expression): Expression = x match
+      case c: Call
+          if c.name == "<operator>.cast" || c.name == "<operator>.pointerCall" =>
+          c.argument.l.collect { case y: Expression => y }.headOption.map(unwrap).getOrElse(c)
+      case other => other
+    unwrap(withoutCasts(e)._1) match
+      case c: Call if c.name.matches("<operator>\\.(pre|post)Increment") =>
+          c.argumentOption(1).collect { case x: Expression => x }.flatMap(readThroughKey)
+      case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+          c.argument.l.collectFirst { case x: Expression => x }.flatMap(readThroughKey)
+      case other => OverlayFacts.variableKey(other)
+
+  /** Does `e`'s subtree read through the buffer `key` - an element access or a dereference whose
+    * base is that buffer? `AV_RB24(p->data + 5)` reads through `p->data`.
+    */
+  private def readsThroughKey(e: AstNode, key: String, depth: Int = 10): Boolean =
+      if depth < 0 then false
+      else
+        e match
+          case c: Call
+              if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" ||
+                  c.name == "<operator>.indirection" =>
+              c.argumentOption(1).collect { case x: Expression => x }
+                  .exists(b => readThroughKey(b).contains(key)) ||
+              c.astChildren.iterator.exists(a => readsThroughKey(a, key, depth - 1))
+          // a call's subtree is its arguments AND any expansion the preprocessor left wired under
+          // it (an unexpanded reader macro whose expansion reads through the buffer)
+          case c: Call => c.astChildren.iterator.exists(a => readsThroughKey(a, key, depth - 1))
+          case _       => false
+
+  // ----------------------------------------------------------------------------------------------
+  // callee-grown counters and source-side over-reads
+  // ----------------------------------------------------------------------------------------------
+
+  /** The call-name inventory the declared config supplies, for the rules below (an API fact is
+    * vocabulary data, not code).
+    */
+  private lazy val declaredInventory: Map[String, MemApiVocab.MemApiEntry] =
+      MemApiVocab.inventory(externalConfig)
+
+  /** The (argument, field) each summarized method increments, by method id - the graph's own
+    * MemorySemanticsPass conclusions, read back the way entriesFor does.
+    */
+  private lazy val growByMethodId: Map[Long, (Int, String)] =
+    def parse(v: String): Option[(Int, String)] = v.stripPrefix("grow:").split(":", 2) match
+      case Array(a, f) => a.toIntOption.filter(_ >= 1).filter(_ => f.nonEmpty).map(_ -> f)
+      case _           => None
+    atom.method.where(_.tag.nameExact(MemorySemanticsPass.TagSemantic)).l.flatMap { m =>
+        m.tag.nameExact(MemorySemanticsPass.TagSemantic).value.l.flatMap(parse).map(m.id -> _)
+    }.toMap
+
+  /** The argument each summarized method fills with bytes it reads - the out-param family. */
+  private lazy val untrustedFillByMethodId: Map[Long, Int] =
+      atom.method.where(_.tag.nameExact(MemorySemanticsPass.TagSemantic)).l.flatMap { m =>
+          m.tag.nameExact(MemorySemanticsPass.TagSemantic).value.l.collectFirst {
+              case v if v.startsWith("untrusted-read:") => v.stripPrefix("untrusted-read:").toInt
+          }.map(m.id -> _)
+      }.toMap
+
+  /** The method a call resolves to over its CALLEE edge - the linker's answer, not a name lookup,
+    * so a static callee in another file never borrows another file's same-named body.
+    */
+  private def calleeOf(c: Call): Option[Method] =
+    import io.shiftleft.semanticcpg.language.NoResolve
+    c.callee(using NoResolve).collectFirst { case m: Method => m }
+
+  /** The (argument, field) a call grows by one: the declared entry wins, else the callee's own body
+    * summary.
+    */
+  private def incrementEffectOf(c: Call): Option[(Int, String)] =
+      declaredInventory.get(c.name).flatMap(_.increments).orElse(
+        calleeOf(c).flatMap(m => growByMethodId.get(m.id))
+      )
+
+  /** The argument a call fills with the bytes it reads (the parse_leb shape). */
+  private def untrustedFillIndexOf(c: Call): Option[Int] =
+      declaredInventory.get(c.name).flatMap(_.untrustedRead).orElse(
+        calleeOf(c).flatMap(m => untrustedFillByMethodId.get(m.id))
+      )
+
+  /** The callee-grown counter (CVE-2026-64830): the index is a struct count only a CALLEE
+    * increments (avformat_new_stream grows s->nb_streams - no in-method definition exists to walk),
+    * the growing call sits inside a loop, and the base is a fixed-extent array. The count's range
+    * at the index is [entry value, unbounded): each iteration adds one, and nothing bounds the
+    * iterations. MS-BOUND-003/004 at the index; the address of an element handed to a callee is a
+    * WRITE through it (`ff_subtitles_queue_insert(&vobsub->q[nb - 1], ...)`), which the CVE's
+    * CWE-787 names.
+    *
+    * Stands down only on bounds compared WITH THE CAPACITY: a dominating `count >= capacity` exit
+    * before the growing call (the fix), or a loop condition that bounds the count above by a
+    * constant the capacity admits (`while (count < N)`, N <= capacity). A guard mentioning the
+    * field but bounding it past the capacity proves nothing, and neither does any guard that runs
+    * once outside the loop the growth rides on.
+    */
+  private def counterIndexedArray(record: (StoredNode, String) => Unit): Unit =
+      atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+        // the growing call sites here: (call, base key of the grown object, field)
+        val growSites = method.ast.collectAll[Call].l.flatMap { c =>
+            incrementEffectOf(c).flatMap { case (i, field) =>
+                c.argumentOption(i).collect { case e: Expression => e }
+                    .flatMap(OverlayFacts.variableKey).map(k => (c, k, field))
+            }
+        }
+        if growSites.nonEmpty then
+          method.ast.isCall
+              .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+              .l
+              .foreach { access =>
+                  for
+                    idx  <- access.argumentOption(2)
+                    base <- access.argumentOption(1)
+                    cap <- constCapacity(
+                      base.tag.name(ExtentPass.TagExtent).value.l.headOption.getOrElse("")
+                    )
+                    (fieldKey, offset) <- counterIndexShape(idx)
+                    (grower, growBase, field) <- growSites.find { case (_, k, f) =>
+                        fieldKey == s"$k.$f"
+                    }
+                    growerArg = grower.argument(1)
+                    loop      = enclosingLoopOf(grower)
+                    if loop.isDefined
+                    // the loop's own condition may bound the count: `while (count < N)`, N admitted
+                    if !loopBoundsFieldAbove(loop.get, fieldKey, cap, offset)
+                    // a dominating exit compared with the capacity: the fix's guard, which
+                    // must be re-evaluated every iteration that grows the count
+                    if !dominatingCapacityBound(grower, grower, fieldKey, cap, offset, base)
+                    if !dominatingCapacityBound(access, grower, fieldKey, cap, offset, base)
+                  do record(idx, escapeRuleIdFor(access))
+              }
+        end if
+      }
+  end counterIndexedArray
+
+  /** The (field key, literal offset) of a counter index: `f - 1` or the bare field `f`, through
+    * casts. Only those shapes - an arbitrary arithmetic index is IndexRange's question.
+    */
+  private def counterIndexShape(idx: Expression): Option[(String, BigInt)] =
+      withoutCasts(idx)._1 match
+        case c: Call if c.name == "<operator>.subtraction" =>
+            (c.argumentOption(1), c.argumentOption(2)) match
+              case (Some(f: Expression), Some(k)) =>
+                  for
+                    key <- OverlayFacts.variableKey(f)
+                    off <- IndexRange.literal(k) if off >= 0
+                  yield (key, off)
+              case _ => None
+        case f: Expression => OverlayFacts.variableKey(f).map(_ -> BigInt(0))
+        case _             => None
+
+  /** Does the loop's own condition bound the field above by a constant the capacity admits? The
+    * bound is re-read every iteration, so `while (count < N)` really does stop the count at N. It
+    * is tested BEFORE the iteration's growth, so the count at the index is one more than it allows.
+    */
+  private def loopBoundsFieldAbove(
+    loop: ControlStructure,
+    fieldKey: String,
+    cap: BigInt,
+    offset: BigInt
+  ): Boolean =
+      loop.condition.collect { case c: Call => c }.exists { cond =>
+          GuardPass.conjuncts(cond, holds = true).getOrElse(Nil).exists { case (cmp, holds) =>
+              GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
+                  above && castUnwrappingKey(bounded).contains(fieldKey) &&
+                  boundAdmitsCapacity(
+                    bound,
+                    GuardPass.isStrict(cmp, holds),
+                    beforeGrowth = true,
+                    cap,
+                    offset,
+                    None
+                  )
+              }
+          }
+      }
+
+  /** A dominating guard that bounds the field above by a value the capacity admits: either the
+    * guarded node is nested inside the guard, or an early-exit if before it (both must sit inside
+    * the loop that carries the growth, or outside any loop - a guard outside the loop is evaluated
+    * once and bounds nothing the loop adds afterwards).
+    */
+  private def dominatingCapacityBound(
+    node: Call,
+    grower: Call,
+    fieldKey: String,
+    cap: BigInt,
+    offset: BigInt,
+    arrayBase: Expression
+  ): Boolean =
+    val nodeLine = node.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+    val loop     = enclosingLoopOf(node)
+    def inScope(cs: ControlStructure): Boolean = loop.forall(l => isWithin(cs, l))
+    // a guard the growing call comes after tested the count before it grew
+    def beforeGrowth(cond: Call): Boolean = grower.dominatedBy.exists(_.id == cond.id)
+    def admits(cond: Call, holds: Boolean): Boolean =
+        GuardPass.conjuncts(cond, holds).getOrElse(Nil).exists { case (cmp, h) =>
+            GuardPass.directionalFacts(cmp, h).exists { case (bounded, above, bound) =>
+                above && castUnwrappingKey(bounded).contains(fieldKey) &&
+                boundAdmitsCapacity(
+                  bound,
+                  GuardPass.isStrict(cmp, h),
+                  beforeGrowth(cond),
+                  cap,
+                  offset,
+                  Some(arrayBase)
+                )
+            }
+        }
+    val byNesting = GuardPass.guardingControllers(node).exists { cond =>
+        cond._astIn.collectFirst { case cs: ControlStructure => cs }.exists { cs =>
+            inScope(cs) && GuardPass.holdsAtOpt(cond, node).exists(h => admits(cond, h))
+        }
+    }
+    val byEarlyExit = node.method.ast.collectAll[ControlStructure].l.exists { cs =>
+        cs.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) < nodeLine &&
+        inScope(cs) && earlyExits(cs) &&
+        cs.condition.collect { case c: Call => c }.exists(admits(_, holds = false)) &&
+        // and the exit really is on every path to the node
+        node.dominatedBy.exists(d =>
+            d.id == cs.id ||
+                cs.condition.exists(_.id == d.id)
+        )
+    }
+    byNesting || byEarlyExit
+  end dominatingCapacityBound
+
+  /** The value a guard's bound compares the capacity against, when it is knowable: a literal or
+    * constant-foldable expression, or the element count of the indexed array itself
+    * (`FF_ARRAY_ELEMS(q)` - sizeof(q)/sizeof(q[0]) - which IS the capacity). The largest count the
+    * guard lets through is `bound - 1` for a strict comparison and `bound` otherwise, one more when
+    * the guard tested the count before it grew; the bound admits the capacity when that count less
+    * the offset is still an index inside `[0, capacity)`. The fix's `nb >= 32` exit before the
+    * growth, over `q[nb - 1]`, is 31 + 1 - 1 = 31: inside `q[32]`.
+    */
+  private def boundAdmitsCapacity(
+    bound: Expression,
+    strict: Boolean,
+    beforeGrowth: Boolean,
+    cap: BigInt,
+    offset: BigInt,
+    arrayBase: Option[Expression]
+  ): Boolean =
+    val value = IndexRange.literal(bound)
+        .orElse(ranges.of(bound).collect { case r if r.lo == r.hi => r.lo })
+        .orElse(arrayBase.flatMap(OverlayFacts.variableKey).filter(key =>
+            elementCountOfArray(bound, key)
+        ).map(_ => cap))
+    value.exists { b =>
+      val maxCount = (if strict then b - 1 else b) + (if beforeGrowth then 1 else 0)
+      maxCount - offset < cap
+    }
+
+  /** Is `bound` the element count of the array keyed `key`: a division of two sizeofs over the
+    * array (the FF_ARRAY_ELEMS expansion), expanded or left as a macro call with the expansion
+    * wired underneath it?
+    */
+  private def elementCountOfArray(bound: Expression, key: String): Boolean =
+    def sizeOfKey(e: AstNode): Boolean = e match
+      case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+          c.argument.l.exists(a => OverlayFacts.variableKey(a).contains(key)) ||
+          c.argument.l.exists(a => readsThroughKey(a, key))
+      case _ => false
+    val divisions =
+        (bound match
+          case c: Call if c.name == "<operator>.division" => List(c)
+          case _                                          => Nil
+        ) ++ bound.ast.collectAll[Call].name("<operator>.division").l
+    divisions.exists { d =>
+        d.argument.l.collect { case e: Expression => e } match
+          case List(a, b) => sizeOfKey(a) && sizeOfKey(b)
+          case _          => false
+    }
+
+  /** The rule id an index access reports when its element's ADDRESS escapes into a callee: the
+    * callee receives a writable pointer to the element (a non-const parameter), so the access is a
+    * write - `queue_insert(&q[n], ...)` writes through `&q[n]` (CWE-787, as in CVE-2026-64830).
+    */
+  private def escapeRuleIdFor(access: Call): String =
+    val escapes = access._astIn.collectFirst { case c: Call => c }.exists { addr =>
+        addr.name == "<operator>.addressOf" && addr._astIn.collectFirst {
+            case user: Call => user
+        }.exists { user =>
+            user.name != "<operator>.assignment" &&
+            (user.name.startsWith("<operator>") || !readsThroughConst(user, addr))
+        }
+    }
+    if escapes then RuleIndexWrite else ruleIdFor(access)
+
+  /** Does the callee read its argument through a const-qualified parameter? An unresolved parameter
+    * type leaves the write claim standing - documented as a small over-claim.
+    */
+  private def readsThroughConst(user: Call, arg: Expression): Boolean =
+      arg.argumentIndex match
+        case i if i >= 1 =>
+            calleeOf(user).exists { m =>
+                m.parameter.l.find(_.index == i).exists(p =>
+                    p.typeFullName.trim.startsWith("const")
+                )
+            }
+        case _ => false
+
+  /** MS-BOUND-008 (CVE-2026-64833): the SOURCE side of a copy. The length is a value decoded out of
+    * the source's own bytes (or a caller-param with a range), the source is a buffer whose extent
+    * the graph can name - a declared array, a paired size member (AVPacket's data/size, declared in
+    * the config; an in-file `_len` sibling), an allocation's literal size - and no dominating guard
+    * relates the length to that extent. Reported at the definition that gives the length its
+    * unbounded value (spdifenc.c:229's `pkt_size = core_size`, the line the fix guards); a length
+    * derived from the extent itself (`pkt->size`, `pkt->size - k`) is the correct shape and never
+    * reports.
+    */
+  private def sourceOverread(record: (StoredNode, String) => Unit): Unit =
+    val pairs = MemApiVocab.bufferExtents(externalConfig)
+    // the capacity member naming of a field-access source: the config's pair for the base's
+    // type, else the in-file `_len`/`_size` sibling ExtentPass's convention resolves
+    def capacityMemberOfField(fa: Call): Option[(String, String)] =
+        for
+          base    <- fa.argumentOption(1).collect { case e: Expression => e }
+          baseKey <- OverlayFacts.variableKey(base)
+          typeName <- base match
+            case i: Identifier =>
+                Option.when(i.typeFullName.nonEmpty && i.typeFullName != "ANY")(i.typeFullName)
+            case _ => None
+          tName = typeName.stripSuffix("*").trim.stripPrefix("struct ").trim
+          member   <- OverlayFacts.memberOf(fa)
+          capacity <- pairs.get(tName).collect { case (b, c) if b == member => c }
+        yield (baseKey, capacity)
+    def siblingCapacityOfField(fa: Call): Option[(String, String)] =
+        for
+          base    <- fa.argumentOption(1).collect { case e: Expression => e }
+          baseKey <- OverlayFacts.variableKey(base)
+          member  <- OverlayFacts.memberOf(fa)
+          m <- OverlayFacts.memberRefOf(atom, fa).flatMap { declared =>
+              OverlayFacts.membersOfTypeDecl(declared.typeDecl)
+                  .filter(m => m != declared && OverlayFacts.isIntegral(m.typeFullName))
+                  .find(m => m.name == s"${member}_len" || m.name == s"${member}_size")
+          }
+        yield (baseKey, m.name)
+    def srcExtent(src: Expression): Option[(Option[BigInt], Option[(String, String)])] =
+        withoutCasts(src)._1 match
+          case fa: Call
+              if fa.name == "<operator>.fieldAccess" ||
+                  fa.name == "<operator>.indirectFieldAccess" =>
+              capacityMemberOfField(fa).orElse(siblingCapacityOfField(fa))
+                  .map { case (baseKey, cap) => (None, Some((baseKey, cap))) }
+          case i: Identifier =>
+              i.method.local.nameExact(i.name).headOption
+                  .flatMap(l => OverlayFacts.arrayExtent(l.typeFullName))
+                  .map(n => (Some(BigInt(n)), None))
+          case _ => None
+    OverlayFacts.memoryArgumentSites(atom)
+        .groupBy { case (c, _, _) => c }
+        .foreach { case (call, rows) =>
+            val srcArgs = rows.collect { case (_, e, MemoryApiPass.TagSrc) => e }
+            val lenArgs = rows.collect { case (_, e, MemoryApiPass.TagLen) => e }
+            for
+              src                   <- srcArgs.headOption
+              len                   <- lenArgs.headOption
+              (constCap, capMember) <- srcExtent(src)
+            do
+              val srcKey   = OverlayFacts.variableKey(withoutCasts(src)._1)
+              val lenRange = ranges.of(withoutCasts(len)._1)
+              val controlled = ValueOriginPass.originNamesOf(withoutCasts(len)._1)
+                  .exists(Set(
+                    ValueOriginPass.OriginCallerParam,
+                    ValueOriginPass.OriginUntrustedRead
+                  ).contains)
+              // the definitions that give the length its value, at the granularity the CVE
+              // anchors on: the assignment that replaces the extent with the decoded bytes.
+              // A bare parameter length with no in-method definition is the helper contract
+              // ("copy as many bytes as the caller asked") - MS-BOUND-001/002's question, not
+              // this arm's; only a computed inline length carries its own expression as a site
+              val defs = lengthDefinitions(len)
+              val sites: List[(StoredNode, Option[Expression], Boolean)] = defs match
+                case Nil =>
+                    withoutCasts(len)._1 match
+                      case c: Call => List((len, Some(c), false))
+                      case _       => Nil
+                case ds => ds.map((node, rhs) => (node, rhs, true))
+              sites.foreach { case (node, rhsOpt, isDefinition) =>
+                  val rhs = rhsOpt.getOrElse(len)
+                  // route i: the length is decoded from the source's own bytes - the def's own
+                  // expression, or one definition level back through the identifier it names
+                  val rhsReadsSource = srcKey.exists { k =>
+                      readsThroughKey(rhs, k) ||
+                      (withoutCasts(rhs)._1 match
+                        case i: Identifier =>
+                            OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                                .flatMap(_._astIn.collectFirst {
+                                    case a: Call if a.name == "<operator>.assignment" => a
+                                })
+                                .flatMap(_.argumentOption(2).collect { case x: Expression => x })
+                                .exists(r => readsThroughKey(r, k))
+                        case _ => false
+                      )
+                  }
+                  val derived = extentDerived(rhs, capMember)
+                  // route ii: a caller parameter whose computed range the extent cannot hold,
+                  // at the definition that binds it - never on the bare parameter itself. The
+                  // range judged is THIS definition's own (a literal or masked rhs may be the
+                  // whole answer even when the variable's merged range is wide)
+                  val rhsRange = ranges.of(rhs)
+                  val rhsControlled = ValueOriginPass.originNamesOf(rhs).exists(Set(
+                    ValueOriginPass.OriginCallerParam,
+                    ValueOriginPass.OriginUntrustedRead
+                  ).contains)
+                  val evidence = rhsReadsSource ||
+                      (isDefinition && (controlled || rhsControlled) &&
+                          (lenRange.isDefined || rhsRange.isDefined))
+                  val defExceeds = constCap match
+                    case Some(n) => rhsRange.orElse(lenRange).exists(_.hi > n)
+                    case None    => true
+                  val guarded = lenBoundByExtent(call, len, src, capMember, constCap) ||
+                      (node match
+                        case d: Call if isDefinition =>
+                            lenBoundByExtent(d, rhs, src, capMember, constCap) ||
+                            readerFilledTheSource(d, src, capMember, constCap) ||
+                            guardNarrowedTheDefinition(d, len, constCap)
+                        case _ => false
+                      )
+                  if !derived && evidence && defExceeds && !guarded then
+                    record(node, RuleSourceOverread)
+              }
+            end for
+        }
+  end sourceOverread
+
+  /** The length's definition is a READER whose filled buffer is this copy's source (`n =
+    * avio_read(pb, buf, sizeof(buf)); ... memcpy(dst, buf, n)`): the return counts the bytes the
+    * reader wrote into that buffer, and the copy reads only that prefix - bounded whenever the
+    * reader's own length argument was (the buffer's sizeof, or within its range).
+    */
+  private def readerFilledTheSource(
+    d: Call,
+    src: Expression,
+    capMember: Option[(String, String)],
+    constCap: Option[BigInt]
+  ): Boolean =
+    val rhs = withoutCasts(
+      d.argumentOption(2).collect { case e: Expression => e }.getOrElse(d)
+    )._1
+    rhs match
+      case reader: Call =>
+          val srcKey = OverlayFacts.variableKey(withoutCasts(src)._1)
+          untrustedFillIndexOf(reader).exists { j =>
+              reader.argumentOption(j).collect { case e: Expression => e }.exists { bufArg =>
+                val bufKey = readThroughKey(bufArg)
+                bufKey.isDefined && bufKey == srcKey && {
+                    val lenArg = reader.argument.l
+                        .filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                        .collectFirst { case e: Expression => e }
+                    lenArg.exists { l =>
+                        extentDerived(l, capMember) ||
+                        sizeOfSourceBounded(l, bufKey.get) || {
+                            val r = ranges.of(l)
+                            constCap.exists(n => r.exists(_.hi <= n))
+                        }
+                    }
+                }
+              }
+          }
+      case _ => false
+    end match
+  end readerFilledTheSource
+
+  /** A reader's length argument bounded by the buffer it fills: `sizeof(buf)` itself, or arithmetic
+    * over a local defined from such a sizeof (`sizeofhead - 2`, where sizeofhead came from
+    * sizeof(head) minus a constant padding).
+    */
+  private def sizeOfSourceBounded(l: Expression, bufKey: String): Boolean =
+    def sizeOfSrc(e: Expression): Boolean = e match
+      case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+          c.argument.l.exists(a => OverlayFacts.variableKey(a).contains(bufKey))
+      case c: Call
+          if c.name == "<operator>.subtraction" ||
+              c.name == "<operator>.addition" =>
+          c.argument.l.collect { case x: Expression => x }.exists(sizeOfSrc)
+      case i: Identifier =>
+          OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+              .flatMap(_._astIn.collectFirst {
+                  case a: Call if a.name == "<operator>.assignment" => a
+              })
+              .flatMap(_.argumentOption(2).collect { case x: Expression => x })
+              .exists(sizeOfSrc)
+      case _ => false
+    sizeOfSrc(l)
+
+  /** A guard between the plain definition and the copy whose body REDEFINES the length variable and
+    * whose failure bounds it above (`if (s >= 4) { ...; s &= 3; } ... memcpy(d, t, s)`): the plain
+    * definition's value reaches the copy only on the paths where the guard failed, so it arrived
+    * already below that bound. Sound only against a constant extent the bound admits.
+    */
+  private def guardNarrowedTheDefinition(
+    d: Call,
+    len: Expression,
+    constCap: Option[BigInt]
+  ): Boolean =
+      constCap.exists { cap =>
+          withoutCasts(len)._1 match
+            case v: Identifier =>
+                val defLine  = d.lineNumber.map(_.toInt).getOrElse(Int.MinValue)
+                val callLine = len.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                d.method.ast.collectAll[ControlStructure].l.exists { cs =>
+                  val gLine   = cs.lineNumber.map(_.toInt).getOrElse(Int.MinValue)
+                  val between = defLine < gLine && gLine < callLine
+                  val redefines = cs.whenTrue.ast.isCall
+                      .l
+                      .filter(c =>
+                          c.name.startsWith("<operator>.assignment") ||
+                              c.name.startsWith("<operators>.assignment")
+                      )
+                      .exists(a => a.argumentOption(1).exists(t => t.code.trim == v.name))
+                  val bounds = cs.condition.collect { case c: Call => c }.exists { cond =>
+                      GuardPass.conjuncts(cond, holds = false).getOrElse(Nil).exists {
+                          case (cmp, holds) =>
+                              GuardPass.directionalFacts(cmp, holds).exists {
+                                  case (bounded, above, bound) =>
+                                      above &&
+                                      castUnwrappingKey(bounded).contains(s"v:${v.name}") &&
+                                      IndexRange.literal(bound).exists(_ <= cap)
+                              }
+                      }
+                  }
+                  between && redefines && bounds
+                }
+            case _ => false
+      }
+  end guardNarrowedTheDefinition
+
+  /** The extent-derived shapes: the extent member itself, `extent - k`, a cast over either, or a
+    * min clamp over any of them.
+    */
+  private def extentDerived(e: Expression, cap: Option[(String, String)]): Boolean = e match
+    case fa: Call
+        if fa.name == "<operator>.fieldAccess" ||
+            fa.name == "<operator>.indirectFieldAccess" =>
+        cap.exists { case (baseKey, member) =>
+            OverlayFacts.variableKey(fa).contains(s"$baseKey.$member")
+        }
+    case c: Call if c.name == "<operator>.subtraction" =>
+        c.argument.l.collect { case x: Expression => x }
+            .exists(x => extentDerived(x, cap))
+    case c: Call if c.name == "<operator>.cast" =>
+        castOperand(c).exists(x => extentDerived(x, cap))
+    // `n = payload_len < size ? payload_len : size` is the min clamp: the result never
+    // exceeds payload_len. The MAX shape bounds it only from below and derives nothing
+    case c: Call if c.name == "<operator>.conditional" =>
+        isMinClampOverExtent(c, familyKeysOf(e, cap))
+    case c: Call =>
+        // an unexpanded clamp macro (FFMIN) or a conditional wired inside an expansion
+        minClampNames.contains(c.name) && isMinClampOverExtent(c, familyKeysOf(e, cap))
+    case _ => false
+
+  /** The keys that name a quantity OF the source buffer: its paired capacity member, and every
+    * `_len`/`_size`/`_offset` sibling on the same base (the convention ExtentPass's own sibling
+    * search uses - a fill level never exceeds the allocation its writer sized).
+    */
+  private def familyKeysOf(e: Expression, cap: Option[(String, String)]): Set[String] =
+    val pairKey = cap.map((b, m) => s"$b.$m").toSet
+    val baseKey = cap.map(_._1)
+    val siblings = (e +: e.ast.collectAll[Expression].l).flatMap { y =>
+        y match
+          case fa: Call
+              if fa.name == "<operator>.fieldAccess" ||
+                  fa.name == "<operator>.indirectFieldAccess" =>
+              for
+                bk <- OverlayFacts.variableKey(fa.argumentOption(1).getOrElse(fa))
+                m  <- OverlayFacts.memberOf(fa)
+                if baseKey.contains(bk) &&
+                    (m.endsWith("_len") || m.endsWith("_size") || m.endsWith("_offset"))
+              yield s"$bk.$m"
+          case _ => None
+    }.toSet
+    pairKey ++ siblings
+
+  /** Is `e` a MIN over the extent - the shape every clamp macro expands to? The clamped operand may
+    * be the extent member itself or derived from it (`extent - offset`): the min of anything with
+    * an extent-bounded operand never exceeds the extent. A MAX bounds only from below and derives
+    * nothing. The inlined conditional (`cond ? a : b` with {a,b} = cond's operands), the vocabulary
+    * min (FFMIN) and a conditional wired inside an unexpanded macro's expansion all count.
+    */
+  private def isMinClampOverExtent(e: Expression, familyKeys: Set[String]): Boolean =
+    def mentionsExtent(x: Expression): Boolean =
+        (x +: x.ast.collectAll[Expression].l).exists { y =>
+            castUnwrappingKey(y).exists(familyKeys.contains)
+        }
+
+    def minOf(c: Call): Boolean =
+      val args = c.argument.l.collect { case x: Expression => x }
+      if minClampNames.contains(c.name) then args.exists(mentionsExtent)
+      else if c.name == "<operator>.conditional" then
+        val conditional =
+            for
+              cond <- c.argumentOption(1).collect { case x: Call => x }
+              t    <- c.argumentOption(2)
+              f    <- c.argumentOption(3)
+              kL   <- OverlayFacts.variableKey(cond.argumentOption(1).getOrElse(cond))
+              kR   <- OverlayFacts.variableKey(cond.argumentOption(2).getOrElse(cond))
+              kT   <- OverlayFacts.variableKey(t)
+              kF   <- OverlayFacts.variableKey(f)
+              if Set(kL, kR) == Set(kT, kF)
+              lessThan = cond.name == "<operator>.lessThan" ||
+                  cond.name == "<operator>.lessEqualsThan"
+              isMin = if lessThan then kT == kL else kT == kR
+            yield isMin && (mentionsExtent(t) || mentionsExtent(f))
+        conditional.contains(true)
+      else false
+    end minOf
+    e match
+      case c: Call => minOf(c) || c.ast.collectAll[Call].l.exists(minOf)
+      case other   => false
+  end isMinClampOverExtent
+
+  /** The (report node, rhs) pairs that define a length argument: its own identifier's value
+    * definitions, or nothing when the length is computed inline.
+    */
+  private def lengthDefinitions(len: Expression): List[(Call, Option[Expression])] =
+      withoutCasts(len)._1 match
+        case i: Identifier =>
+            // only the assignments TO the length's own variable: the reaching-def walk chains
+            // through an assignment's RHS into the RHS variable's definitions, and core's init
+            // is not a definition of pkt_size
+            OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                .filter(d => d.name == i.name)
+                .flatMap(_._astIn.collectFirst {
+                    case a: Call if a.name == "<operator>.assignment" => a
+                })
+                .map(a => (a, a.argumentOption(2).collect { case e: Expression => e }))
+                .distinctBy(_._1.id)
+        case other => Nil
+
+  /** A dominating guard that bounds the copy's length above by the source's own extent: the bound
+    * operand is the paired capacity member on the same base, a sizeof of the source, or a literal
+    * inside a constant extent. The guard must have tested the value the copy reads: a length
+    * redefined after it is a new, unchecked value.
+    */
+  private def lenBoundByExtent(
+    call: Call,
+    len: Expression,
+    src: Expression,
+    capMember: Option[(String, String)],
+    constCap: Option[BigInt]
+  ): Boolean =
+    val lenKeys = (castUnwrappingKey(len).toSet ++ sumTermsOf(withoutCasts(len)._1)
+        .flatMap(castUnwrappingKey)).toSet
+    def boundIsExtent(bound: Expression): Boolean =
+      val boundKey = castUnwrappingKey(bound)
+      capMember.exists { case (baseKey, member) =>
+          boundKey.contains(s"$baseKey.$member")
+      } ||
+      (bound match
+        case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+            castUnwrappingKey(src).exists(k =>
+                c.argument.l.exists(a => OverlayFacts.variableKey(a).contains(k))
+            )
+        case _ => false
+      ) ||
+      constCap.exists(n => IndexRange.literal(bound).exists(_ <= n))
+    val r1 = GuardPass.guardingControllers(call).exists { cond =>
+        GuardPass.conjunctsAt(cond, call).exists {
+            case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
+                    above && castUnwrappingKey(bounded).exists(lenKeys.contains) &&
+                    boundIsExtent(bound) && GuardPass.unchangedSince(bounded, len)
+                }
+        }
+    }
+    r1 || GuardPass.guardingControllers(GuardPass.statementRootOf(len)).exists { cond =>
+        GuardPass.conjunctsAt(cond, call).exists {
+            case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, bound) =>
+                    above && castUnwrappingKey(bounded).exists(lenKeys.contains) &&
+                    boundIsExtent(bound) && GuardPass.unchangedSince(bounded, len)
+                }
+        }
+    }
+  end lenBoundByExtent
+
+  /** MS-TOCTOU-001 (CWE-367): time-of-check to time-of-use, two arms over one question - a fact
+    * established on a path and an action taken on the assumption it still holds:
+    *
+    *   - **path TOCTOU**: a check of a path (`access`, `stat`, `lstat`) followed by a use of the
+    *     SAME path variable (`open`, `fopen`, `unlink`, `chmod`, `rename`) with no rebind of the
+    *     variable in between - another process can change what the name refers to between the two.
+    *     Reported at the check and at the use: the fix is to open first and check the descriptor
+    *     (`openat`/`fstat`), and both sites are where a reader looks.
+    *   - **check-then-act on a shared global**: a guard whose condition reads a file-scope variable
+    *     and whose taken branch writes it, with no lock anywhere in the method - the check says
+    *     nothing about the value the act runs on.
+    *
+    * The descriptor form is the negative shape by construction: `fstat` checks an already-open
+    * descriptor, not a name, and `write(fd, ...)` uses no path at all.
+    */
+  private def ruleToctou(record: (StoredNode, String) => Unit): Unit =
+    // whole-graph inputs, collected once: the file-scope names and the methods that lock - a
+    // per-method re-scan of either was measurable across a tree of a thousand methods
+    val globalNames = atom.method.nameExact("<global>").flatMap(_.local.name).toSet
+    val lockedMethodIds = atom.call.l
+        .filter(c => LockCall.matches(c.name))
+        .map(_.method.id)
+        .toSet
+    // a check-then-act race needs a second thread: `if (!inited) inited = 1;` in a program that
+    // never starts one is the ordinary lazy-init idiom
+    val startsThreads = atom.call.name(ThreadStartCalls).nonEmpty ||
+        atom.local.typeFullName(ThreadTypes).nonEmpty || atom.member.typeFullName(ThreadTypes).nonEmpty
+    atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+      val rebindLines = method.ast.collectAll[Call].l
+          .flatMap { c =>
+            val isRebind = c.name == "<operator>.assignment" ||
+                c.name == "<operator>.assignmentPlus" ||
+                c.name == "<operator>.assignmentMinus" ||
+                c.name == "<operator>.preIncrement" || c.name == "<operator>.postIncrement" ||
+                c.name == "<operator>.preDecrement" || c.name == "<operator>.postDecrement"
+            if isRebind then
+              c.argumentOption(1).collect { case i: Identifier => i.name }
+                  .map(n =>
+                      n -> c.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                  )
+            else None
+          }
+          .groupBy(_._1)
+          .view
+          .mapValues(_.map(_._2).sorted)
+          .toMap
+      val pathChecks = method.ast.isCall.nameExact(ToctouCheckApis.toList*).l
+      if pathChecks.nonEmpty then
+        method.ast.isCall.nameExact(ToctouUseApis.toList*).l.foreach { use =>
+            use.argumentOption(1).collect { case e: Expression => e }
+                .flatMap(OverlayFacts.variableKey)
+                .foreach { pathKey =>
+                  val name    = pathKey.stripPrefix("v:")
+                  val useLine = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                  // the LAST check of this path before the use is the one whose fact the use
+                  // runs on; a rebind of the path variable between the two voids the pair
+                  pathChecks
+                      .filter { check =>
+                        val checkLine =
+                            check.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                        checkLine <= useLine &&
+                        check.argumentOption(1).flatMap(OverlayFacts.variableKey)
+                            .contains(pathKey)
+                      }
+                      .sortBy(_.lineNumber.map(_.toInt).getOrElse(Int.MaxValue))
+                      .lastOption
+                      .foreach { check =>
+                        val checkLine =
+                            check.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                        val rebindsInBetween = rebindLines.getOrElse(name, Nil)
+                            .exists(l => l > checkLine && l < useLine)
+                        if !rebindsInBetween then
+                          record(use, RuleToctou)
+                          record(check, RuleToctou)
+                      }
+                }
+        }
+      end if
+      // the shared-global check-then-act arm
+      if startsThreads && !lockedMethodIds.contains(method.id) then
+        method.ast.collectAll[ControlStructure].l.foreach { cs =>
+          val conditionGlobals = cs.condition.toList.flatMap(_.ast.collectAll[Identifier].l)
+              .map(_.name)
+              .filter(g =>
+                  globalNames.contains(g) && method.local.name(g).l.isEmpty &&
+                      method.parameter.name(g).l.isEmpty
+              )
+              .distinct
+          val writes = cs.whenTrue.ast.collectAll[Call].l
+              .filter(c =>
+                  c.name.startsWith("<operator>.assignment") ||
+                      c.name.endsWith("Increment") || c.name.endsWith("Decrement")
+              )
+              .flatMap(_.argumentOption(1).collect { case i: Identifier => i.name })
+              .toSet
+          val actedOn = conditionGlobals.exists(writes.contains)
+          if actedOn then
+            cs.condition.foreach(cond => record(cond, RuleToctou))
+        }
+      end if
+    }
+  end ruleToctou
+
+  private val LockCall =
+      """(?i)(.*[_.])?(lock|mutex_lock|lock_guard|unique_lock|scoped_lock|lock_shared|enter)""".r
+  private val ThreadStartCalls =
+      "pthread_create|thrd_create|CreateThread|_beginthreadex|std\\.thread.*|thread|async|std\\.async"
+  private val ThreadTypes =
+      """.*(std\.thread|std\.jthread|pthread_t|thrd_t|std\.mutex|pthread_mutex_t|std\.atomic).*"""
+  private val ToctouCheckApis = Set("access", "stat", "lstat")
+  private val ToctouUseApis   = Set("open", "fopen", "unlink", "chmod", "rename")
+
+  /** A read through the index is CWE-125, a write through it CWE-787. */
+  private def ruleIdFor(access: Call): String =
+    val isWrite = access._astIn.collectFirst { case c: Call => c }.exists(c =>
+        c.name.startsWith("<operator>.assignment") &&
+            c.argumentOption(1).exists(_.id == access.id)
+    )
+    if isWrite then RuleIndexWrite else RuleIndexRead
+
+  /** MS-BOUND-006/007: a write or copy overruns a buffer whose capacity the graph KNOWS. The CWE is
+    * the storage family the extent names - CWE-121 for a declared array (`const:`, stack or struct
+    * member alike), CWE-122 for an allocator-sized buffer (`alloc:`). Three arms, over facts the
+    * earlier passes already leave on the graph:
+    *
+    *   - **a constant length past the extent**: `memcpy(buf, s, 100)` into `malloc(10)`, the
+    *     classic CWE-122 heap overflow. ExtentPass sees the allocation under its cast, and this is
+    *     the constant-vs-capacity question - MS-BOUND-002 needs an attacker, and this arm needs
+    *     only arithmetic.
+    *   - **an unbounded string copy into a fixed buffer** (the CWE-121 strcpy/sprintf shape): the
+    *     copy family with NO length argument - strcpy/strcat/sprintf - where the content argument's
+    *     origin is attacker-controlled and no guard bounds the source's length against anything. A
+    *     call is of this family exactly when the inventory gives it a dst and no len - data, not a
+    *     name list. Restricted to `const:` extents: `strcpy` into an allocator-sized buffer is
+    *     CWE-131's off-by-one question (needs the strlen arithmetic), not this rule's.
+    *   - **a loop write bounded by an unvalidated count** (a struct array, CVE-2026-64831's shape):
+    *     the index is an induction variable a loop comparison bounds above by an attacker-origin
+    *     COUNT, the base has a known extent, and nothing bounds the count itself - `for (i = 0; i <
+    *     count; i++) vps->hrd[i] = src[i]`. The fixed code caps the count (`if (count > MAX_HRD)
+    *     return;`) and stands down: the cap is a NOT-holding comparison of an early-exit guard,
+    *     which no CDG edge reaches.
+    */
+  private def ruleCapacityOverrun(record: (StoredNode, String) => Unit): Unit =
+    val attackers = Set(ValueOriginPass.OriginCallerParam, ValueOriginPass.OriginUntrustedRead)
+    val sitesByCall = OverlayFacts.memoryArgumentSites(atom)
+        .groupBy { case (c, _, _) => c }
+        .map { case (c, rows) => c -> rows.map { case (_, arg, _) => arg }.distinct }
+
+    def literalNumberOf(e: Expression): Option[Long] = e match
+      case l: Literal => l.code.trim.toLongOption
+      case _          => None
+
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+          Some(c)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
+      case _ => None
+
+    /** The capacity in BYTES the dst's extent names, when it is knowable - a copy length counts
+      * bytes. `const:N` counts ELEMENTS, so it converts only for a byte-sized element type (`int
+      * a[10]` cleared with `memset(a, 0, 40)` is exact, not an overrun); any other element type
+      * concludes nothing. `alloc:<size-arg>` needs every size argument literal - calloc's capacity
+      * is count * size.
+      */
+    def extentCapacity(dst: Expression): Option[Long] =
+        dst.tag.name(ExtentPass.TagExtent).value.l.headOption.flatMap {
+            case v if v.startsWith(s"${ExtentPass.ValueConst}:") =>
+                v.stripPrefix(s"${ExtentPass.ValueConst}:").toLongOption
+                    .filter(_ => hasByteElements(dst))
+            case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
+                OverlayFacts
+                    .reachingDefsIn(dst)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                    .flatMap(allocCallOf)
+                    .flatMap { alloc =>
+                      // the count role is tagged `mem-len` too: calloc's two arguments
+                      val sizeArgs =
+                          alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                      val literals = sizeArgs.flatMap(literalNumberOf)
+                      Option.when(sizeArgs.nonEmpty && literals.size == sizeArgs.size)(
+                        literals.product
+                      )
+                    }
+                    .headOption
+            case _ => None
+        }
+
+    /** The rule id an extent family selects: declared array -> CWE-121, allocation -> CWE-122. */
+    def extentRule(dst: Expression): Option[String] =
+        dst.tag.name(ExtentPass.TagExtent).value.l.headOption.flatMap {
+            case v if v.startsWith(s"${ExtentPass.ValueConst}:") => Some(RuleFixedExtentOverrun)
+            case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") => Some(RuleHeapExtentOverrun)
+            case _                                               => None
+        }
+
+    // arm 1: a constant length past the extent
+    sitesByCall.foreach { case (call, args) =>
+        val dstArgs = args.filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+        val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+        for
+          dst  <- dstArgs.headOption
+          len  <- lenArgs.collectFirst(Function.unlift(literalNumberOfAs))
+          cap  <- extentCapacity(dst)
+          rule <- extentRule(dst)
+          if len._2 > cap
+        do record(len._1, rule)
+    }
+
+    // arm 2: the implicit-length copy family (dst role, no len role) into a FIXED buffer
+    sitesByCall.foreach { case (call, args) =>
+        val dstArgs = args.filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+        val srcArgs = args.filter(a => a.tag.name(MemoryApiPass.TagSrc).l.nonEmpty)
+        val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+        if dstArgs.nonEmpty && srcArgs.nonEmpty && lenArgs.isEmpty then
+          dstArgs.headOption.foreach { dst =>
+              extentRule(dst).filter(_ == RuleFixedExtentOverrun).foreach { rule =>
+                // the content: a src argument, or (sprintf's variadic %s) an argument the
+                // inventory gave no role at all
+                val rolePositions = (dstArgs ++ srcArgs).map(_.argumentIndex).toSet
+                val extras = call.argument.l
+                    .filter(a => !rolePositions.contains(a.argumentIndex))
+                    .filterNot(_.isFieldIdentifier)
+                // only a STRING grows with the attacker: `sprintf(buf, "%d", n)` formats an
+                // integer of bounded width, whatever n's origin
+                (srcArgs ++ extras).find(a =>
+                    OverlayFacts.isPointer(a.property("TYPE_FULL_NAME") match
+                      case t: String => t.trim
+                      case _         => ""
+                    ) && ValueOriginPass.originNamesOf(a).exists(attackers.contains)
+                ).foreach { content =>
+                    if !lengthGuardedCopy(call, content) then record(content, rule)
+                }
+              }
+          }
+        end if
+    }
+
+    // arm 3: a loop write bounded by an unvalidated count
+    atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+      val conds = method.ast.collectAll[ControlStructure].l
+          .flatMap(_.condition.collect { case c: Call => c })
+      def factsAt(holds: Boolean) =
+          conds.flatMap(c => GuardPass.conjuncts(c, holds).getOrElse(Nil)).flatMap {
+              case (cmp, h) => GuardPass.directionalFacts(cmp, h)
+          }
+      val holdsFacts                           = factsAt(holds = true)
+      val rejectsFacts                         = factsAt(holds = false)
+      def keyOf(e: Expression): Option[String] = OverlayFacts.variableKey(e)
+      def isConstantish(e: Expression): Boolean = e match
+        case _: Literal                                        => true
+        case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+        case c: Call
+            if !c.name.startsWith("<operator>") && c.ast.isLiteral.l.nonEmpty &&
+                c.ast.isIdentifier.l.isEmpty && c.ast.isCall.l.forall(_.id == c.id) =>
+            // an unexpanded macro the frontend left as a call, carrying its expansion as a
+            // subtree of literals - a #define'd bound, read from the graph rather than
+            // guessed from the name (MAX_HRD is 16 because the expansion says so)
+            true
+        // a #define constant: an identifier that is neither a local nor a parameter here -
+        // or one the frontend gave a local but no definition (macro constants get locals),
+        // the same def-less-external-constant reading ValueOriginPass uses for NULL
+        case i: Identifier =>
+            (method.local.name(i.name).l.isEmpty && method.parameter.name(i.name).l.isEmpty) ||
+            OverlayFacts.reachingDefsIn(i).forall(_.isInstanceOf[Method])
+        case _ => false
+      // the count's own value range already fits the declared extent: `sub_packet_cnt =
+      // (avio_rb16(pb) & 0xf0) >> 4` is at most 15, and `i < 15`-bounded writes into [16] stay
+      // inside whatever the stream says (the index stays below the count's maximum)
+      def rangeFits(base: Expression, bound: Expression): Boolean =
+          base.tag.name(ExtentPass.TagExtent).value.l.headOption
+              .filter(_.startsWith(s"${ExtentPass.ValueConst}:"))
+              .flatMap(v => IndexRange.literalValue(v.stripPrefix(s"${ExtentPass.ValueConst}:")))
+              .exists(extent => ranges.of(bound).exists(r => r.hi < extent))
+      // a count is capped when some early-exit comparison (read at its NOT-holding polarity -
+      // the side an in-block successor runs on, which no CDG edge reaches) bounds it above
+      // against a constant
+      def cappedAbove(bound: Expression): Boolean =
+        val boundKey = keyOf(bound)
+        boundKey.exists(k =>
+            rejectsFacts.exists { case (bounded, above, cap) =>
+                above && keyOf(bounded).contains(k) && isConstantish(cap)
+            }
+        )
+      // a loop bounded by the SAME variable that sizes the allocation writes exactly the
+      // buffer's capacity: `malloc(count * sizeof(int)); for (i < count) arr[i]` is bounded
+      // by construction, whatever count is - the rule stands down
+      def selfSizedLoop(base: Expression, loopBound: Expression): Boolean =
+          base.tag.name(ExtentPass.TagExtent).value.l.headOption.exists {
+              case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
+                  // the buffer's allocation: a local's definitions, or the one store a field
+                  // read sees (`b->adpc = av_mallocz(asize)`)
+                  val stored = base match
+                    case fa: Call if isFieldAccess(fa) =>
+                        OverlayFacts.fieldStoresReaching(fa).single.flatMap(_.argumentOption(2)).toList
+                    case _ => Nil
+                  (OverlayFacts
+                      .reachingDefsIn(base)
+                      .collect { case d: Identifier => d }
+                      .flatMap(_._astIn.collectFirst {
+                          case a: Call if a.name == "<operator>.assignment" => a
+                      })
+                      .flatMap(_.argumentOption(2)) ++ stored)
+                      .flatMap(allocCallOf)
+                      .exists(alloc =>
+                          alloc.argument.l
+                              .filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                              .exists { sz =>
+                                // the size may be the count scaled (`count * sizeof(T)`):
+                                // the bound's key on the size or one of its factors
+                                val szKeys = keyOf(sz).toSet ++ (sz match
+                                  case c: Call
+                                      if c.name == "<operator>.multiplication" ||
+                                          c.name == "<operator>.division" =>
+                                      c.argument.l.flatMap(a => keyOf(a)).toSet
+                                  case _ => Set.empty
+                                )
+                                keyOf(loopBound).exists(szKeys.contains)
+                              }
+                      )
+              case _ => false
+          }
+      method.ast
+          .isCall
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .foreach { access =>
+              for
+                idx    <- access.argumentOption(2)
+                base   <- access.argumentOption(1)
+                rule   <- extentRule(base)
+                idxKey <- keyOf(idx)
+                if ruleIdFor(access) == RuleIndexWrite
+                if idx.tag.name(GuardPass.TagByExtent).l.isEmpty
+                attackerCount = holdsFacts.exists { case (bounded, above, bound) =>
+                    above && keyOf(bounded).contains(idxKey) &&
+                    ValueOriginPass.originNamesOf(bound).exists(attackers.contains) &&
+                    !isConstantish(bound) && !cappedAbove(bound) &&
+                    !selfSizedLoop(base, bound) && !rangeFits(base, bound)
+                }
+                if attackerCount
+              do record(idx, rule)
+          }
+    }
+  end ruleCapacityOverrun
+
+  /** Is the declared element type of this array expression one byte wide? The type is read off the
+    * expression (`char[16]`, `uint8_t[4]`); an unresolved type is not assumed to be bytes.
+    */
+  private def hasByteElements(dst: Expression): Boolean =
+    val t = Option(dst.property("TYPE_FULL_NAME")).collect { case s: String => s }.getOrElse("")
+    val element = t.replaceAll("""\[[^\]]*\]""", "").replace("const ", "").trim
+    MemorySafetyFindingPass.ByteTypes.contains(element)
+
+  /** The (literal, node) pair of an expression when it is a plain literal - Function.unlift keeps
+    * the for-comprehension shape of the arm-1 loop.
+    */
+  private def literalNumberOfAs(e: Expression): Option[(Expression, Long)] =
+      e match
+        case l: Literal => l.code.trim.toLongOption.map(v => (l, v))
+        case _          => None
+
+  /** Is the copy guarded by a comparison bounding some call over the content variable above - `if
+    * (strlen(userInput) < sizeof(dest)) strcpy(dest, userInput)`? The guard bounds the source's
+    * LENGTH (a call of the variable), not the variable itself, so the structural question is
+    * whether a controller's bounded operand is a call reading that variable.
+    */
+  private def lengthGuardedCopy(call: Call, content: Expression): Boolean =
+      OverlayFacts.variableKey(content).exists { contentKey =>
+          GuardPass.guardingControllers(call).exists { controller =>
+              GuardPass
+                  .conjunctsAt(controller, call)
+                  .exists { case (cmp, holds) =>
+                      GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
+                          above && (bounded match
+                            case bc: Call =>
+                                bc.argument.l.exists(a =>
+                                    OverlayFacts.variableKey(a).contains(contentKey)
+                                )
+                            case _ => false
+                          )
+                      }
+                  }
+          }
+      }
+
+  /** MS-ALLOC-005/006: the deallocation of the wrong thing, over the state and inventory facts. One
+    * implementation, two CWE families by shape:
+    *
+    *   - **CWE-590** - a free of storage that is not the heap's: the argument holds this frame's
+    *     storage (the state pass's `stack-addr` fact, or an array/static LOCAL directly - the
+    *     `storage-class=static` tag c2cpg writes), or is a string literal.
+    *   - **CWE-761** - a free of a pointer not at the start of its buffer: the argument is pointer
+    *     arithmetic (`p + 4`, `p += n`), or an identifier whose definition is such arithmetic on a
+    *     tracked allocation.
+    *
+    * and **MS-ALLOC-007 (CWE-762)** - the release family does not match the acquisition family. The
+    * graph cannot distinguish `new[]`/`delete[]` from `new`/`delete` (the frontend models both
+    * alike), so the reachable mismatches are the cross-family ones: `new` released by `free`,
+    * `malloc` released by `delete`. The array/scalar confusion inside one family is out of reach
+    * and is said so rather than guessed.
+    */
+  private def ruleWrongDeallocation(record: (StoredNode, String) => Unit): Unit =
+    def allocCallOf(e: Expression): Option[Call] = e match
+      case c: Call
+          if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+          Some(c)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
+      case _ => None
+
+    atom.call.l.foreach { c =>
+      val freeFamilies = tagValues(c, MemoryApiPass.TagFree)
+      if freeFamilies.nonEmpty then
+        c.argumentOption(1).foreach { arg =>
+            // CWE-590: non-heap storage
+            arg match
+              case lit: Literal if lit.code.startsWith("\"") =>
+                  record(lit, RuleNonHeapFree)
+              case i: Identifier =>
+                  // an ARRAY local (automatic or static) is not heap storage. A static POINTER
+                  // local is the cache idiom - it holds heap storage and freeing it is correct -
+                  // so the storage class alone decides nothing
+                  i.method.local.nameExact(i.name).l.headOption.foreach { local =>
+                      if OverlayFacts.arrayExtent(local.typeFullName).isDefined ||
+                        local.typeFullName.trim.endsWith("[]")
+                      then record(i, RuleNonHeapFree)
+                  }
+                  // the state pass's frame-storage fact (q = &x; free(q)), and a
+                  // definition that is a string literal (p = "literal"; free(p))
+                  if i.tag.name(AllocationStatePass.TagState).value.l
+                        .contains("stack-addr") ||
+                    OverlayFacts
+                        .reachingDefsIn(i)
+                        .collect { case d: Identifier => d }
+                        .flatMap(d =>
+                            d._astIn.collectFirst {
+                                case a: Call if a.name == "<operator>.assignment" => a
+                            }
+                        )
+                        .flatMap(_.argumentOption(2))
+                        .exists {
+                            case lit: Literal => lit.code.startsWith("\"")
+                            case _            => false
+                        }
+                  then record(i, RuleNonHeapFree)
+                  // CWE-761: the identifier's definition is pointer arithmetic over a
+                  // tracked allocation
+                  val defsAreOffsetArith = OverlayFacts
+                      .reachingDefsIn(i)
+                      .collect { case d: Identifier => d }
+                      .flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call if a.name == "<operator>.assignment" => a
+                          }
+                      )
+                      .flatMap(_.argumentOption(2))
+                      .exists {
+                          case arith: Call
+                              if arith.name == "<operator>.addition" ||
+                                  arith.name == "<operator>.subtraction" =>
+                              arith.argument.l.collect { case x: Expression => x }
+                                  .exists(op =>
+                                      // one operand is the allocation, the other the offset
+                                      allocCallOf(op).isDefined ||
+                                          OverlayFacts.reachingDefsIn(op)
+                                              .collect { case d: Identifier => d }
+                                              .flatMap(d =>
+                                                  d._astIn.collectFirst {
+                                                      case a: Call
+                                                          if a.name == "<operator>.assignment" => a
+                                                  }
+                                              )
+                                              .flatMap(_.argumentOption(2))
+                                              .exists(x => allocCallOf(x).isDefined)
+                                  )
+                          case _ => false
+                      }
+                  if defsAreOffsetArith then record(i, RuleOffsetFree)
+                  // CWE-762: family mismatch against the allocation that produced the pointer
+                  val allocFamily = OverlayFacts
+                      .reachingDefsIn(i)
+                      .collect { case d: Identifier => d }
+                      .flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call if a.name == "<operator>.assignment" => a
+                          }
+                      )
+                      .flatMap(_.argumentOption(2))
+                      .flatMap(allocCallOf)
+                      .flatMap(alloc => tagValues(alloc, MemoryApiPass.TagAlloc).headOption)
+                      .headOption
+                  allocFamily.foreach { acquired =>
+                      if freeFamilies.exists(_ != acquired) then
+                        record(i, RuleMismatchedFree)
+                  }
+              case arith: Call
+                  if arith.name == "<operator>.addition" || arith.name == "<operator>.subtraction" =>
+                  record(arith, RuleOffsetFree)
+              case _ => ()
+        }
+      end if
+    }
+  end ruleWrongDeallocation
+
+  /** MS-ALLOC-008/009: an allocation whose size is attacker-controlled with no bound above -
+    * MS-INT-001's question without requiring the arithmetic. The constraint is deliberate: a plain
+    * `struct-field` origin is NOT an attacker here (most of MS-INT-001's noise turns on
+    * struct-field arithmetic - every correctly written FFmpeg counter). CWE-789 for a plain
+    * unbounded size; CWE-680 when the size is attacker-influenced ARITHMETIC (the
+    * integer-overflow-to-buffer question, which MS-INT-001 asks at `low` with CWE-190 - this rule
+    * names the CWE the defect actually is). The caller-param arm reuses MS-BOUND-002's call-site
+    * check: a helper whose every intra-tree caller passes a constant is bounded at its callers.
+    *
+    * Tiers and exemptions:
+    *   - a size derived from `strlen()`/`strnlen()` of strings that already exist is NOT
+    *     uncontrolled - it is the allocate-then-copy idiom (`malloc(strlen(s) + 1)`), bounded by
+    *     the string's own content. A CWE-131 length mismatch is a different rule's question, and
+    *     every `av_malloc(strlen(url) + 1)` in libavformat stays quiet.
+    *   - the STACK family (alloca) sized by the attacker reports at `medium`: exhausting the frame
+    *     is the bug, and correct alloca use is audited into rarity.
+    *   - a HEAP size parsed out of attacker input by a conversion call (`atol`/`strtol` of a
+    *     caller's string) reports at `medium`: the size is the attacker's literal number, not a
+    *     derived bound.
+    *   - no VLA arm: the frontend types `char b[n]` and an unresolved-macro `uint8_t f[MAX_N]`
+    *     identically (`char[]`, the size expression dropped), so a runtime-sized frame array is not
+    *     distinguishable in the graph (in practice such reports are string-literal initialisers and
+    *     macro-sized tables).
+    *
+    * Returns the (node, rule) pairs whose finding reports at `medium` despite the rule's own `low`
+    * confidence.
+    */
+  private def ruleUncontrolledAllocationSize(
+    record: (StoredNode, String) => Unit
+  ): List[(StoredNode, String)] =
+    val attackers = Set(ValueOriginPass.OriginUntrustedRead, ValueOriginPass.OriginCallerParam)
+    val promoted  = mutable.ListBuffer.empty[(StoredNode, String)]
+    OverlayFacts
+        .memoryArgumentSites(atom)
+        .collect { case (call, arg, MemoryApiPass.TagLen) => (call, arg) }
+        .foreach { case (call, lenArg) =>
+            val allocates = tagValues(call, MemoryApiPass.TagAlloc).nonEmpty ||
+                tagValues(call, MemoryApiPass.TagRealloc).nonEmpty
+            if allocates then
+              val tags    = lenArg.tag.name.l
+              val origins = ValueOriginPass.originNamesOf(lenArg).filter(attackers.contains)
+              val bounded =
+                  tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
+              def unboundedAtCallers: Boolean = callerParamUnbounded(call.method, lenArg)
+              val controlled = origins.contains(ValueOriginPass.OriginUntrustedRead) ||
+                  (origins.contains(ValueOriginPass.OriginCallerParam) && unboundedAtCallers)
+              if controlled && !bounded && !strlenDerivedSize(lenArg) then
+                val arithmetic = lenArg match
+                  case c: Call =>
+                      c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
+                  case _ => false
+                record(
+                  lenArg,
+                  if arithmetic then RuleUncontrolledSizeOverflow else RuleUncontrolledSize
+                )
+                val stackFamily =
+                    tagValues(call, MemoryApiPass.TagAlloc).contains("stack")
+                if stackFamily || conversionParsedSize(lenArg) then
+                  promoted += (lenArg -> RuleUncontrolledSize)
+            end if
+        }
+    promoted.toList
+  end ruleUncontrolledAllocationSize
+
+  /** A size whose every term is the length of a string that already exists in memory: `strlen(s)`,
+    * `strlen(s) + 1`, a local defined so. Such an allocation is bounded by the string's own
+    * content, not by an attacker's raw number.
+    */
+  private def strlenDerivedSize(lenArg: Expression): Boolean =
+    def go(e: Expression, depth: Int): Boolean =
+        if depth < 0 then false
+        else
+          e match
+            case l: Literal                                           => true
+            case c: Call if c.name == "strlen" || c.name == "strnlen" => true
+            case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
+            case c: Call if c.name == "<operator>.cast" => castOperand(c).exists(go(_, depth))
+            case c: Call
+                if c.name == "<operator>.addition" || c.name == "<operator>.multiplication" =>
+                c.argument.l.collect { case x: Expression => x }.forall(go(_, depth - 1))
+            case i: Identifier =>
+                val defs = OverlayFacts
+                    .reachingDefsIn(i)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                defs.nonEmpty && defs.forall(go(_, depth - 1))
+            case _ => false
+    go(lenArg, 3)
+  end strlenDerivedSize
+
+  /** A size whose definition chain contains a conversion call parsing an attacker-origin string (`n
+    * \= (size_t)atol(userInput)`): the size is the attacker's literal number.
+    */
+  private val SizeConversionApis =
+      Set(
+        "atol",
+        "atoi",
+        "atoll",
+        "atof",
+        "strtol",
+        "strtoul",
+        "strtoll",
+        "strtoull",
+        "strtod",
+        "strtof"
+      )
+
+  private def conversionParsedSize(lenArg: Expression): Boolean =
+    val attackers = Set(ValueOriginPass.OriginCallerParam, ValueOriginPass.OriginUntrustedRead)
+    def go(e: Expression, depth: Int): Boolean =
+        if depth < 0 then false
+        else
+          e match
+            case c: Call if SizeConversionApis.contains(c.name) =>
+                c.argumentOption(1).exists(a =>
+                    ValueOriginPass.originNamesOf(a).exists(attackers.contains)
+                )
+            case c: Call if c.name == "<operator>.cast" => castOperand(c).exists(go(_, depth))
+            case c: Call
+                if c.name == "<operator>.addition" || c.name == "<operator>.multiplication" =>
+                c.argument.l.collect { case x: Expression => x }.exists(go(_, depth))
+            case i: Identifier =>
+                OverlayFacts
+                    .reachingDefsIn(i)
+                    .collect { case d: Identifier => d }
+                    .flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    })
+                    .flatMap(_.argumentOption(2))
+                    .exists(go(_, depth - 1))
+            case _ => false
+    go(lenArg, 3)
+  end conversionParsedSize
+
+  /** Is the caller-param origin of `expr` (inside `method`) attacker-controlled one hop up? True
+    * when the method has no intra-tree caller (an API or callback entry - nothing bounds it), or
+    * when some caller passes, at a parameter `expr` derives from, a value that is itself
+    * attacker-origin and unbounded at that site. A caller passing its own struct's field or a
+    * length it already checked is the helper's contract being met, not an uncontrolled size.
+    */
+  private def callerParamUnbounded(method: Method, expr: Expression): Boolean =
+    val attackers = Set(ValueOriginPass.OriginUntrustedRead, ValueOriginPass.OriginCallerParam)
+    val callers   = directCallers(method).getOrElse(Nil)
+    callers.isEmpty || {
+        val params = (expr +: expr.ast.collectAll[Expression].l)
+            .flatMap(_.tag.name(ValueOriginPass.OriginCallerParam).value.l)
+            .distinct
+            .flatMap(name => method.parameter.nameExact(name).headOption)
+        params.isEmpty || {
+            val siteArgs =
+                for
+                  site  <- callers
+                  param <- params
+                  arg   <- site.argumentOption(param.index)
+                yield arg
+            siteArgs.isEmpty || siteArgs.exists { arg =>
+              val argTags = arg.tag.name.l
+              ValueOriginPass.originNamesOf(arg).exists(attackers.contains) &&
+              !argTags.contains(GuardPass.TagAbove) && !argTags.contains(GuardPass.TagByExtent)
+            }
+        }
+    }
+  end callerParamUnbounded
+
+  /** A length arithmetic whose ONLY attacker origin is a caller parameter the callers bound (see
+    * [[callerParamUnbounded]]): `size + AV_INPUT_BUFFER_PADDING_SIZE` in a helper every caller
+    * hands a checked size is the padding idiom, not a wrap.
+    */
+  private def callerBoundedArithmetic(memCall: Call, arith: Call): Boolean =
+    val origins = arith.tag.name(IntegerWidthPass.TagArithLen).value.l
+        .flatMap(_.split("\\+"))
+        .filter(attackerOrigins)
+        .toSet
+    origins == Set(ValueOriginPass.OriginCallerParam) && !callerParamUnbounded(
+      memCall.method,
+      arith
+    )
+
+  /** MS-INT-001 (CWE-190): an allocation or copy length computed by arithmetic whose operands are
+    * attacker-influenced, with no guard bounding an operand from above and no widened operand. The
+    * facts come from IntegerWidthPass: `int-arith-len` names the arithmetic AND its attacker
+    * origins (the evidence the rule turns on - never a type's absence), and the inventory's count
+    * role is what makes the attacker-influenced factor of a count-by-size allocator visible at all
+    * (hevc.c:847's `numNalus + 1` carries no length fact without it).
+    *
+    * The guard conjunct reuses GuardPass's comparison semantics at OPERAND level: a guard bounds
+    * `numNalus`, not `numNalus + 1`, so the tag-level bound lookup (which keys on the argument)
+    * never sees it. An operand bounded above - `count > UINT_MAX / sizeof(int)` - is exactly the
+    * guard that makes the overflow impossible, and the rule stands down; the fix for CVE-2026-75141
+    * adds precisely that guard. A widened operand - `(size_t) a * b` - means the arithmetic already
+    * computes at the wider width, so there is nothing to overflow; standing down there is
+    * evidence-based (a widening cast exists), not silence-based.
+    *
+    * The capacity conjunct: the arithmetic must bound a buffer that does not already have one. An
+    * allocator's size/count argument BECOMES the new buffer's capacity, so it is always in scope
+    * (the CVE-2026-75141 shape); a copy into a destination that already carries an extent
+    * (`const:`, `param:`, `field:`, `alloc:`, `sizeof:`) is bounded by a fact the MS-BOUND rules
+    * own, whatever this arithmetic does to the length. The def walk that finds the arithmetic is
+    * [[OverlayFacts.reachingDefsIn]], which does not cross argument-to-argument plumbing edges -
+    * through them the pointer arithmetic in a copy's DESTINATION would read as a length
+    * computation.
+    */
+  private def ruleIntegerArithmeticLength(record: (StoredNode, String) => Unit): Unit =
+      OverlayFacts.memoryArgumentSites(atom)
+          .collect { case (call, arg, MemoryApiPass.TagLen) => (call, arg) }
+          .foreach { case (memCall, lenArg) =>
+              // the first length arithmetic along the def chain that satisfies every conjunct: a
+              // product nested in another product reports once, at the node nearest the length
+              (lenArg +: OverlayFacts.reachingDefsIn(lenArg)).collectFirst {
+                  case arith: Call
+                      if isLengthArithmetic(arith) && attackerArithmetic(arith)
+                          && !widenedOperandOf(arith)
+                          && !guardBoundsAnOperand(memCall, arith)
+                          && !earlyExitBoundsAnOperand(memCall, arith)
+                          && !stringLengthSum(arith)
+                          && !wideCounterGrowth(arith)
+                          && !pointerArithmetic(arith)
+                          && !callerBoundedArithmetic(memCall, arith)
+                          && lengthBecomesCapacity(memCall) =>
+                      record(arith, RuleIntegerOverflow)
+              }
+          }
+
+  /** An early-exit bound: `if (n > MAX) return AVERROR(EINVAL);` earlier in the method bounds n
+    * above on every path that reaches the allocation, yet the allocation is not control-dependent
+    * on it (it post-dominates the check), so [[guardBoundsAnOperand]] never sees it. FFmpeg writes
+    * almost every size check this way. A comparison read at either polarity counts - the side that
+    * continues is the one the author allowed - as long as it precedes the call in the method and
+    * bounds an operand from above.
+    */
+  private def earlyExitBoundsAnOperand(memCall: Call, arith: Call): Boolean =
+    val operandKeys = arith.argument.l
+        .collect { case e: Expression => e }
+        .flatMap(castUnwrappingKey)
+        .toSet
+    val callLine = memCall.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+    operandKeys.nonEmpty && memCall.method.ast
+        .collectAll[ControlStructure]
+        .l
+        .filter(_.lineNumber.exists(_.toInt < callLine))
+        .flatMap(_.condition.collect { case c: Call => c })
+        .exists { cond =>
+            Seq(true, false).exists { holds =>
+                GuardPass.conjuncts(cond, holds).getOrElse(Nil).exists { case (cmp, h) =>
+                    GuardPass.directionalFacts(cmp, h).exists { case (bounded, above, _) =>
+                        above && castUnwrappingKey(bounded).exists(operandKeys.contains)
+                    }
+                }
+            }
+        }
+  end earlyExitBoundsAnOperand
+
+  /** `count + k` (optionally scaled, `(count + 1) * sizeof(T)`) where every operand origin is a
+    * struct field and k a small literal: the growth-by-one of an array that already holds `count`
+    * elements in memory. It can only wrap when the counter is NARROW - hevc.c's `uint16_t numNalus
+    * + 1` (CVE-2026-75141) wraps at 65,535 entries, which a file can ask for - so the arm reports
+    * it only when the counter's width is KNOWN to be under 32 bits. An int-width counter, or one
+    * whose member type the graph cannot resolve (most FFmpeg members: their structs live in headers
+    * outside the analysed tree), stands down: the hypothesis tier turns on evidence of the narrow
+    * width, not on its absence.
+    */
+  private def wideCounterGrowth(arith: Call): Boolean =
+    def smallLiteral(e: Expression): Boolean = e match
+      case l: Literal => l.code.trim.toLongOption.exists(v => v >= 0 && v <= 64)
+      case _          => false
+    def wideStructCounter(e: Expression): Boolean =
+      val origins = ValueOriginPass.originNamesOf(e)
+      origins.nonEmpty &&
+      origins.subsetOf(Set(ValueOriginPass.OriginStructField, ValueOriginPass.OriginConstant)) &&
+      !OverlayFacts.integralWidth(typeOfExpr(e)).exists(_ < 32)
+    def growth(e: Expression): Boolean = e match
+      case c: Call if c.name == "<operator>.addition" =>
+          c.argument.l match
+            case List(a, b) =>
+                (smallLiteral(a) && wideStructCounter(b)) || (smallLiteral(b) && wideStructCounter(
+                  a
+                ))
+            case _ => false
+      case _ => false
+    arith.name match
+      case "<operator>.addition" => growth(arith)
+      case "<operator>.multiplication" =>
+          arith.argument.l match
+            case List(a, b) =>
+                def scale(e: Expression) = e match
+                  case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+                  case l: Literal                                        => true
+                  case _                                                 => false
+                (growth(a) && scale(b)) || (growth(b) && scale(a))
+            case _ => false
+      case _ => false
+  end wideCounterGrowth
+
+  /** `pkt->data + pkt->size`, `buf + 2`: an operand is a POINTER, so the sum is an address, not a
+    * length - it reached the rule through a def chain that ends in a destination, and wrapping an
+    * address is the bounds rules' question.
+    */
+  private def pointerArithmetic(arith: Call): Boolean =
+      arith.argument.l.exists(a => OverlayFacts.isPointer(typeOfExpr(a).trim))
+
+  /** `strlen(s) + 1` and its kin: every non-constant operand is the length of a string that already
+    * exists in memory (or a sizeof), so the sum cannot wrap a size_t on a real address space - the
+    * terminator arithmetic correct code writes everywhere.
+    */
+  private def stringLengthSum(arith: Call): Boolean =
+    def smallLiteral(e: Expression) = e match
+      case l: Literal => l.code.trim.toLongOption.exists(v => v >= 0 && v <= 16)
+      case _          => false
+    def stringLength(e: Expression): Boolean = e match
+      case _: Literal                                           => true
+      case c: Call if c.name == "strlen" || c.name == "strnlen" => true
+      case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
+      case c: Call if c.name == "<operator>.addition"           => c.argument.l.forall(stringLength)
+      // a string's length scaled by a small constant (`strlen(s) * 4`, a wide-char buffer)
+      case c: Call if c.name == "<operator>.multiplication" =>
+          c.argument.l match
+            case List(x, y) =>
+                (stringLength(x) && smallLiteral(y)) || (smallLiteral(x) && stringLength(y))
+            case _ => false
+      case _ => false
+    (arith.name == "<operator>.addition" || arith.name == "<operator>.multiplication") &&
+    stringLength(arith)
+
+  /** Does the length this call consumes become a buffer's capacity? An allocator produces a fresh
+    * buffer whose size IS this argument; a copy into a destination with a recorded extent writes
+    * into a capacity that exists independently of the arithmetic, and the wrap question is the
+    * BOUND rules' to ask.
+    */
+  private def lengthBecomesCapacity(memCall: Call): Boolean =
+    val allocates = tagValues(memCall, MemoryApiPass.TagAlloc).nonEmpty ||
+        tagValues(memCall, MemoryApiPass.TagRealloc).nonEmpty
+    if allocates then true
+    else
+      val dstExtents = memCall.argument.l
+          .filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
+          .flatMap(_.tag.name(ExtentPass.TagExtent).value.l)
+      dstExtents.isEmpty || dstExtents.forall(_ == ExtentPass.ValueUnknown)
+
+  private def isLengthArithmetic(c: Call): Boolean =
+      c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
+
+  /** The arithmetic's `int-arith-len` fact names its operand origins (`struct-field+constant`); the
+    * rule fires only when at least one of them is a rule-relevant attacker origin.
+    */
+  private def attackerArithmetic(arith: Call): Boolean =
+      arith.tag.name(IntegerWidthPass.TagArithLen).value.l.exists(
+        _.split("\\+").exists(attackerOrigins)
+      )
+
+  private val attackerOrigins = Set(
+    ValueOriginPass.OriginCallerParam,
+    ValueOriginPass.OriginUntrustedRead,
+    ValueOriginPass.OriginStructField,
+    ValueOriginPass.OriginMixed
+  )
+
+  /** True when some operand of the arithmetic is cast to a WIDER type than the operand itself: the
+    * author already widened before the multiply, and a 64-bit product is a different question.
+    */
+  private def widenedOperandOf(arith: Call): Boolean =
+      arith.argument.l.collect { case e: Expression => e }.exists {
+          case c: Call if c.name == "<operator>.cast" =>
+              val operand = c.argumentOption(2).orElse(c.argumentOption(1))
+              integralWidth(castTargetName(c)).exists { tw =>
+                  operand.exists(o => integralWidth(typeOfExpr(o)).exists(_ < tw))
+              }
+          case _ => false
+      }
+
+  /** The target type of a cast, as written: c2cpg lays a cast out as (type placeholder, operand),
+    * the target type being the FIRST argument's rendered name - the same convention
+    * [[IntegerWidthPass]] reads its width facts with.
+    */
+  private def castTargetName(c: Call): String =
+      if c.argumentOption(2).isDefined then
+        c.argumentOption(1).map(_.code).getOrElse(typeOfExpr(c))
+      else typeOfExpr(c)
+
+  /** Does some comparison controlling the memory call bound one of the arithmetic's operands (or
+    * the arithmetic itself) from ABOVE? Only an upper bound makes the overflow impossible.
+    */
+  private def guardBoundsAnOperand(memCall: Call, arith: Call): Boolean =
+    val operandKeys = arith.argument.l
+        .collect { case e: Expression => e }
+        .flatMap(castUnwrappingKey)
+        .toSet
+    GuardPass.guardingControllers(memCall).exists { controller =>
+        GuardPass
+            .conjunctsAt(controller, memCall)
+            .exists { case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).exists { case (bounded, above, _) =>
+                    above && (bounded.id == arith.id ||
+                        castUnwrappingKey(bounded).exists(operandKeys.contains))
+                }
+            }
+    }
+
+  /** MS-INT-002 (CWE-197): a value whose guard ran at one signedness and whose use happens at
+    * another. The `int-resign` fact on `(long) obu_size` says the cast reinterprets the value; the
+    * rule adds the crossing: the cast is a comparison's BOUNDED operand (the guard tested the
+    * re-signed view) and the same variable is used elsewhere under that comparison's control (the
+    * use reads the declared view). A narrowing that merely exists is not a finding - and a cast on
+    * the guard's OTHER operand (`obu_size > (unsigned) frame_size`, the fixed form of rtpenc_av1's
+    * guard) does not cross anything: the bounded value never changed width.
+    */
+  private def ruleResignAcrossGuard(record: (StoredNode, String) => Unit): Unit =
+      atom.call.name("<operator>.cast").l.foreach { cast =>
+        // `(unsigned)len > INT_MAX / 2` rejects the negatives along with the too-large: the
+        // conversion to unsigned IS the lower bound. Only a cast to a SIGNED type bounded above
+        // (CVE-2026-75145's `(long)obu_size > remaining`) lets values through the guard that
+        // the unconverted operand would not have passed.
+        val toSigned = cast.tag.name(IntegerWidthPass.TagResign).value.l.exists { v =>
+            v.split("->to:").lift(1).map(_.split(":").head).exists(OverlayFacts.isSignedIntegral)
+        }
+        if toSigned then
+          enclosingComparison(cast).foreach { cmp =>
+              castOperand(cast).flatMap(castUnwrappingKey).foreach { key =>
+                val crossed = usesOfKey(cast.method, key).exists { stmt =>
+                    GuardPass.guardingControllers(stmt).exists(_.id == cmp.id) &&
+                    GuardPass.holdsAtOpt(cmp, stmt).toList
+                        .flatMap(GuardPass.directionalFacts(cmp, _))
+                        .exists { case (bounded, above, _) =>
+                            // an UPPER bound is the crossing: the guard rejected the too-large
+                            // values in the cast's signedness. A bound FROM below - what the
+                            // fixed `obu_size > (unsigned) frame_size` produces, where the
+                            // cast is the bound and not the bounded value - crosses nothing.
+                            above && bounded.id == cast.id
+                        }
+                }
+                if crossed then record(cast, RuleResignAcrossGuard)
+              }
+          }
+      }
+
+  /** The comparison the cast sits in, walking up through expression calls only. */
+  private def enclosingComparison(node: AstNode): Option[Call] =
+    var cursor: Option[StoredNode] = node._astIn.nextOption()
+    var found: Option[Call]        = None
+    while found.isEmpty && cursor.isDefined do
+      cursor.get match
+        case c: Call =>
+            if GuardPass.comparisonOps.contains(c.name) then found = Some(c)
+            else cursor = c._astIn.nextOption()
+        case _ => cursor = None
+    found
+
+  private def castOperand(cast: Call): Option[Expression] =
+      cast.argumentOption(2).orElse(cast.argumentOption(1))
+
+  /** The statements of `method` whose expression tree reads the variable `key`, as statement roots
+    * (the nodes CDG edges reach). Collected per method, not per graph.
+    */
+  private def usesOfKey(method: Method, key: String): Set[Call] =
+      method.ast
+          .collectAll[Expression]
+          .filter(e => castUnwrappingKey(e).contains(key))
+          .map(e => GuardPass.statementRootOf(e))
+          .collect { case c: Call => c }
+          .l
+          .toSet
+
+  /** The variable a comparison bounds, through the casts the frontend leaves in the comparison:
+    * `(long) x` talks about `x`.
+    */
+  private def castUnwrappingKey(e: Expression): Option[String] = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        castOperand(c).flatMap(castUnwrappingKey)
+    case other => OverlayFacts.variableKey(other)
+
+  /** The declared type of an index expression, when the frontend recorded one. */
+  private def typeOfExpr(e: Expression): String = e match
+    case i: Identifier => i.typeFullName
+    // c2cpg leaves a field access's own type empty; the member it reads has one
+    case c: Call
+        if isFieldAccess(c) && Option(c.typeFullName).forall(t => t.isEmpty || t == "ANY") =>
+        OverlayFacts.memberRefOf(atom, c).map(_.typeFullName).getOrElse("")
+    case c: Call    => c.typeFullName
+    case l: Literal => l.typeFullName
+    case _          => ""
+
+  /** Can this index go negative, and do we actually know? c2cpg often leaves the TYPE of a
+    * field-access expression empty, so a `pls->cur_seq_no` index resolves its type through the
+    * member it reads; when neither records a type, the answer is None - we do not know.
+    *
+    * The distinction is load-bearing. Treating "no type recorded" as signed would make the rule
+    * fire mostly on indices whose type the frontend simply never wrote down: an absent fact quietly
+    * satisfying a rule, which is what `unknown` extents are forbidden to do. A negative-index claim
+    * needs evidence that the index CAN be negative, and the frontend's silence is not that
+    * evidence.
+    */
+  private def signednessOf(idx: Expression): Option[Boolean] =
+    val declared = typeOfExpr(idx) match
+      // c2cpg writes the placeholder type "<empty>" rather than an empty string
+      case t if t.nonEmpty && t != "<empty>" => Some(t)
+      case _ =>
+          idx match
+            case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName)
+            case _       => None
+    declared.collect {
+        case t if OverlayFacts.isSignedIntegral(t)   => true
+        case t if OverlayFacts.isUnsignedIntegral(t) => false
+    }
+
+  /** MS-BOUND-001: the destination's extent is an adjacent capacity parameter, and that parameter
+    * reaches neither the copy's length nor a bound on it.
+    */
+  private def ruleSizeParameterContract(
+    argsByCall: Map[Call, List[Expression]],
+    record: (StoredNode, String) => Unit
+  ): Unit =
+      argsByCall.foreach { case (call, args) =>
+          for
+            cap    <- capacityParamOf(call, args)
+            lenArg <- lengthArgsOf(args).headOption
+            if !isBounded(lenArg.tag.name.l) && !reaches(lenArg, cap)
+          do record(lenArg, RuleSizeParamContract)
+      }
+
+  /** The destination's paired capacity parameter, when [[ExtentPass]] resolved its extent to one.
+    * Both rules turn on this: 001 fires when the contract it states is broken, 002 stands down when
+    * it is honoured.
+    */
+  private def capacityParamOf(call: Call, args: List[Expression]): Option[MethodParameterIn] =
+      args
+          .flatMap(a => a.tag.name(ExtentPass.TagExtent).value.l)
+          .collectFirst { case v if v.startsWith(ExtentPass.ValueParam + ":") => v }
+          .flatMap { extent =>
+              call.method.parameter
+                  .name(extent.stripPrefix(ExtentPass.ValueParam + ":"))
+                  .headOption
+          }
+
+  private def lengthArgsOf(args: List[Expression]): List[Expression] =
+      args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+
+  /** An upper bound from either GuardPass family. `bounded-below` is deliberately not one: a length
+    * known to be non-negative is still free to be enormous.
+    */
+  private def isBounded(tags: List[String]): Boolean =
+      tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
+
+  private def reaches(value: Expression, param: MethodParameterIn): Boolean =
+      OverlayFacts.reachingDefsIn(value).contains(param)
+end MemorySafetyFindingPass
+
+object MemorySafetyFindingPass:
+
+  final val TagFinding = "ms-finding"
+
+  /** A finding-level confidence override, emitted when one arm of a rule is a hypothesis tier the
+    * rule's own confidence does not describe. Valued `<rule-id>=<confidence>`: the override is
+    * SCOPED to its rule, because one node can carry several findings - a null-deref hypothesis on
+    * the same identifier as a high-confidence use-after-free must not demote the use-after-free. A
+    * renderer reads it INSTEAD of the rule's default, never in addition.
+    */
+  final val TagConfidence = "ms-confidence"
+
+  /** The confidence a finding of `ruleId` on `node` reports: its scoped override, else the rule's.
+    */
+  def confidenceOf(node: StoredNode, rule: MemorySafetyRule): String =
+      node.tag
+          .name(TagConfidence)
+          .value
+          .l
+          .collectFirst { case v if v.startsWith(s"${rule.id}=") => v.stripPrefix(s"${rule.id}=") }
+          .getOrElse(rule.confidence)
+
+  final val RuleUnboundedCopy     = "MS-BOUND-002"
+  final val RuleSizeParamContract = "MS-BOUND-001"
+  final val RuleIndexRead         = "MS-BOUND-003"
+  final val RuleIndexWrite        = "MS-BOUND-004"
+
+  /** The half-bounded signed-index arm: a hypothesis, reported at `low`. */
+  final val RuleNegativeIndexHazard = "MS-BOUND-005"
+
+  /** A write or copy overruns a buffer with a KNOWN capacity - the CWE is the storage family the
+    * extent names.
+    */
+  /** the one-byte element types a declared array's element count converts to bytes through */
+  private[taggers] val ByteTypes =
+      Set("char", "signed char", "unsigned char", "uint8_t", "int8_t", "u_char", "u_int8_t")
+
+  final val RuleFixedExtentOverrun = "MS-BOUND-006"
+  final val RuleHeapExtentOverrun  = "MS-BOUND-007"
+
+  /** CVE-2026-64833's shape: the SOURCE side of a length-bounded copy - a read that runs off the
+    * end of the buffer it copies from.
+    */
+  final val RuleSourceOverread = "MS-BOUND-008"
+
+  /** The deallocation of the wrong thing, and the uncontrolled allocation size.
+    */
+  final val RuleNonHeapFree              = "MS-ALLOC-005"
+  final val RuleOffsetFree               = "MS-ALLOC-006"
+  final val RuleMismatchedFree           = "MS-ALLOC-007"
+  final val RuleUncontrolledSize         = "MS-ALLOC-008"
+  final val RuleUncontrolledSizeOverflow = "MS-ALLOC-009"
+
+  final val RuleIntegerOverflow   = "MS-INT-001"
+  final val RuleResignAcrossGuard = "MS-INT-002"
+
+  final val RuleDoubleFree   = "MS-ALLOC-001"
+  final val RuleUseAfterFree = "MS-ALLOC-002"
+  final val RuleLeak         = "MS-ALLOC-003"
+
+  /** A double CLOSE of a file-family handle: the same state fact as MS-ALLOC-001 over a different
+    * family, and a different CWE.
+    */
+  final val RuleDoubleClose = "MS-ALLOC-004"
+
+  /** A dereference of a value that may be NULL (CWE-476). */
+  final val RuleNullDeref = "MS-NULL-001"
+
+  /** A stack address that left its frame (CWE-562). */
+  final val RuleStackEscape = "MS-ESC-001"
+
+  /** A printf-family format that is not a constant (CWE-134). */
+  final val RuleFormatString = "MS-FMT-001"
+
+  /** A read of a local no path initialises (CWE-457). */
+  final val RuleUninitialisedRead = "MS-INIT-001"
+
+  /** A view into a container used after the container may have reallocated it (CWE-416). */
+  final val RuleContainerInvalidation = "MS-INVAL-001"
+
+  /** Time-of-check to time-of-use (CWE-367): a path checked then used by name, and the
+    * shared-global check-then-act.
+    */
+  final val RuleToctou = "MS-TOCTOU-001"
+
+  /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
+    * back from the tags on the offending node at render time.
+    */
+  final case class MemorySafetyRule(
+    id: String,
+    cwe: String,
+    kind: String,
+    severity: String,
+    confidence: String,
+    message: String
+  )
+
+  val rules: Map[String, MemorySafetyRule] = List(
+    MemorySafetyRule(
+      id = RuleSizeParamContract,
+      cwe = "CWE-787",
+      kind = "size-param-contract-violation",
+      severity = "high",
+      confidence = "high",
+      message = "the capacity parameter is overwritten or unused while a write into its " +
+          "buffer parameter is bounded by another value"
+    ),
+    MemorySafetyRule(
+      id = RuleUnboundedCopy,
+      cwe = "CWE-787",
+      kind = "unbounded-copy",
+      severity = "high",
+      confidence = "medium",
+      message = "attacker-controlled copy length with no guard bounding it against the " +
+          "destination's capacity"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexRead,
+      cwe = "CWE-125",
+      kind = "oob-index-read",
+      severity = "high",
+      confidence = "medium",
+      message = "array read at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleIndexWrite,
+      cwe = "CWE-787",
+      kind = "oob-index-write",
+      severity = "high",
+      confidence = "medium",
+      message = "array write at an index that can leave the buffer: attacker-controlled and " +
+          "unbounded above, or signed and bounded only above - a negative index passes"
+    ),
+    MemorySafetyRule(
+      id = RuleNegativeIndexHazard,
+      cwe = "CWE-125",
+      kind = "negative-index-hazard",
+      severity = "medium",
+      confidence = "low",
+      message = "signed index bounded above but not below, so a negative value passes the " +
+          "check - the CVE-2026-75146 shape, and also what most correct counters look like"
+    ),
+    MemorySafetyRule(
+      id = RuleFixedExtentOverrun,
+      cwe = "CWE-121",
+      kind = "fixed-extent-overrun",
+      severity = "high",
+      confidence = "medium",
+      message = "a write or copy overruns a fixed buffer's declared capacity - a constant " +
+          "length past the extent, an unbounded string copy into it, or a loop bounded by an " +
+          "unvalidated count"
+    ),
+    MemorySafetyRule(
+      id = RuleSourceOverread,
+      cwe = "CWE-125",
+      kind = "source-overread",
+      severity = "high",
+      confidence = "medium",
+      message = "a copy whose length is decoded from the source buffer's own bytes (or arrives " +
+          "as a caller's parameter) with no guard relating it to the source's extent - the read " +
+          "runs off the end of the buffer whenever the length exceeds it (CVE-2026-64833 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleHeapExtentOverrun,
+      cwe = "CWE-122",
+      kind = "heap-extent-overrun",
+      severity = "high",
+      confidence = "medium",
+      message = "a write or copy overruns an allocated buffer's capacity - a constant length " +
+          "past the allocation's size, or a loop bounded by an unvalidated count"
+    ),
+    MemorySafetyRule(
+      id = RuleIntegerOverflow,
+      cwe = "CWE-190",
+      kind = "integer-overflow-length",
+      severity = "high",
+      // `low`, on the MS-BOUND-005 / MS-ALLOC-003 precedent. At medium the rule dominates the
+      // output on a library like libavformat and fires about as often in patched code as in
+      // vulnerable code - it does not distinguish the two. Pointer arithmetic of a copy's
+      // DESTINATION read as "the length" through argument-to-argument REACHING_DEF plumbing is
+      // cut in OverlayFacts.reachingDefsIn; most of what remains turns on `struct-field`
+      // arithmetic - `track->entry + 1`, `os->bufsize + PADDING` - the shape of every correctly
+      // written FFmpeg counter, because a struct field that some other function validated looks
+      // identical to one nobody did. The true shape among them (hevc.c:847's uint16_t counter)
+      // is NOT separable from that noise by any fact the graph carries: it fires here, at `low`,
+      // exactly as the widening and guard conjuncts leave it.
+      confidence = "low",
+      message = "allocation or copy length computed by attacker-influenced arithmetic with no " +
+          "guard bounding an operand from above and no widened accumulator - the product or " +
+          "sum can wrap before it bounds the buffer (CVE-2026-75141 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleResignAcrossGuard,
+      cwe = "CWE-197",
+      kind = "lossy-cast-in-guard",
+      severity = "high",
+      confidence = "high",
+      message = "a sign-changing cast is the value a comparison bounds, while the guarded uses " +
+          "read it at its declared width - the guard checked one signedness, the use happens at " +
+          "another (CVE-2026-75145 shape)"
+    ),
+    MemorySafetyRule(
+      id = RuleNonHeapFree,
+      cwe = "CWE-590",
+      kind = "free-of-non-heap",
+      severity = "high",
+      confidence = "high",
+      message = "storage that is not the heap's is released - a stack buffer, a static, or a " +
+          "string literal; the heap's ownership language does not apply to it"
+    ),
+    MemorySafetyRule(
+      id = RuleOffsetFree,
+      cwe = "CWE-761",
+      kind = "free-of-offset-pointer",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer not at the start of its buffer is released - pointer arithmetic " +
+          "moved it into the allocation, and only the original base is freeable"
+    ),
+    MemorySafetyRule(
+      id = RuleMismatchedFree,
+      cwe = "CWE-762",
+      kind = "mismatched-deallocation",
+      severity = "high",
+      confidence = "high",
+      message = "the release family does not match the acquisition family - a new-ed pointer " +
+          "released with free, or a malloc-ed one with delete; the allocator's metadata " +
+          "disagrees with the release"
+    ),
+    MemorySafetyRule(
+      id = RuleUncontrolledSize,
+      cwe = "CWE-789",
+      kind = "uncontrolled-allocation-size",
+      severity = "medium",
+      // `low` on the MS-INT-001/MS-BOUND-005 precedent: an unguarded param-sized allocation
+      // is also how every correctly written FFmpeg helper looks, and the caller-site check
+      // cannot separate them at one level
+      confidence = "low",
+      message = "an allocation size controlled by the attacker with no guard bounding it - a " +
+          "hostile value exhausts memory or hands back a buffer sized by the request"
+    ),
+    MemorySafetyRule(
+      id = RuleUncontrolledSizeOverflow,
+      cwe = "CWE-680",
+      kind = "overflow-sized-allocation",
+      severity = "high",
+      confidence = "low",
+      message = "an allocation size computed from attacker-influenced arithmetic with no " +
+          "guard bounding an operand - the product can wrap before it sizes the buffer"
+    ),
+    MemorySafetyRule(
+      id = RuleDoubleFree,
+      cwe = "CWE-415",
+      kind = "double-free",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer already freed on some path reaching this point is freed again - " +
+          "the free-and-reset idiom (p = NULL) is what makes the second free safe"
+    ),
+    MemorySafetyRule(
+      id = RuleUseAfterFree,
+      cwe = "CWE-416",
+      kind = "use-after-free",
+      severity = "high",
+      confidence = "high",
+      message = "a pointer that is already freed on some path reaching this point is read or " +
+          "written - freed memory must not be used before it is replaced"
+    ),
+    MemorySafetyRule(
+      id = RuleLeak,
+      cwe = "CWE-401",
+      kind = "memory-leak",
+      severity = "medium",
+      // `low`. On a library like libavformat most leaks it reports are ownership the state
+      // pass cannot see - a buffer handed to
+      // avio_alloc_context or through an out-parameter, `return &s->pub`, a chained
+      // `a = b = av_strdup()` checked through `a`, an allocation inside a `||` guard. The
+      // must-leak claim is sound on the paths the pass models; it does not yet model ownership
+      // transfer into a callee, so a leak remains a hypothesis at library scale.
+      confidence = "low",
+      message = "an allocation is still live, un-freed and un-escaped at this exit - no path " +
+          "from it reaches a free or hands ownership on"
+    ),
+    MemorySafetyRule(
+      id = RuleDoubleClose,
+      cwe = "CWE-1341",
+      kind = "double-close",
+      severity = "high",
+      confidence = "high",
+      message = "a file handle already closed on some path reaching this point is closed again"
+    ),
+    MemorySafetyRule(
+      id = RuleNullDeref,
+      cwe = "CWE-476",
+      kind = "null-deref",
+      severity = "high",
+      // `low`: on a library like libavformat the nullable-producer arms fire on nearly every
+      // function - an av_dict_get result passed to av_log, a stream-pointer read before the
+      // error path, the FFmpeg idiom itself. The true shapes (imfdec.c:258) are not separable
+      // from the style findings by a fact the graph carries, so the whole rule reports at low
+      // and a medium-confidence run stays quiet. The chained-parameter arm additionally
+      // carries a per-finding `low` (ms-confidence).
+      confidence = "low",
+      message = "a value that may be NULL is dereferenced with no narrowing guard between the " +
+          "producing call and the use - or the author's own null check comes one statement " +
+          "too late"
+    ),
+    MemorySafetyRule(
+      id = RuleStackEscape,
+      cwe = "CWE-562",
+      kind = "stack-address-escape",
+      severity = "high",
+      confidence = "medium",
+      message = "the address of a stack local leaves its frame - returned, or stored into " +
+          "storage that outlives the function - and any later use of it reads dead storage"
+    ),
+    MemorySafetyRule(
+      id = RuleFormatString,
+      cwe = "CWE-134",
+      kind = "format-string",
+      severity = "high",
+      confidence = "medium",
+      message = "the format argument is not a constant: a caller-supplied or computed string " +
+          "is interpreted as a format, and its conversions read or write the stack"
+    ),
+    MemorySafetyRule(
+      id = RuleUninitialisedRead,
+      cwe = "CWE-457",
+      kind = "uninitialised-read",
+      severity = "medium",
+      confidence = "high",
+      message = "no path from the function entry initialises this local (or this member of " +
+          "it) before it is read"
+    ),
+    MemorySafetyRule(
+      id = RuleContainerInvalidation,
+      cwe = "CWE-416",
+      kind = "container-view-invalidation",
+      severity = "high",
+      confidence = "medium",
+      message = "an iterator, reference or pointer taken from this container is used after a " +
+          "call that may have reallocated or restructured it - push_back, resize, erase and " +
+          "kin invalidate every view into the container"
+    ),
+    MemorySafetyRule(
+      id = RuleToctou,
+      cwe = "CWE-367",
+      kind = "time-of-check-time-of-use",
+      severity = "high",
+      confidence = "medium",
+      message = "a check and a later use assume the same state holds at both - a path verified " +
+          "by name and then opened by name, or a shared global read in a guard and written in " +
+          "its branch - and another thread or process can change it in between"
+    )
+  ).map(r => r.id -> r).toMap
+
+  def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end MemorySafetyFindingPass

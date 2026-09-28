@@ -4,8 +4,7 @@ import io.appthreat.php2atom.testfixtures.PhpCode2CpgFixture
 import io.appthreat.x2cpg.passes.taggers.ChennaiTagsPass
 import io.shiftleft.semanticcpg.language.*
 
-/** Framework-entrypoint tagging tests for PHP (php-support-upgrade task 22.1, Requirement 6.5 /
-  * design Decision 3).
+/** Framework-entrypoint tagging tests for PHP.
   *
   * `ChennaiTagsPass.tagPhpRoutes` maps two additional PHP entrypoint shapes to the tag-driven
   * "policy" atom consumes:

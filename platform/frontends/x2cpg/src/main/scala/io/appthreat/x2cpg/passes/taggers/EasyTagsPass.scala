@@ -38,15 +38,15 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
-  // NB(py-upgrade P1.4): the filename-keyed PY_REQUEST_PATTERNS heuristic
-  // (".*(views|engine|api|base|http).py:<module>.*") was removed once the Task-4 framework
-  // recognizers landed (see passes/taggers/python/): they tag handler parameters and request
-  // accesses structurally (decorators, inheritance, parameter names/types), which covers Django
-  // views and Flask apps regardless of the file they live in. The request-ACCESS expression
-  // tagging below (step 3b) remains: it is framework-agnostic and keyed on the expression.
+  // NB: there is no filename-keyed PY_REQUEST_PATTERNS heuristic
+  // (".*(views|engine|api|base|http).py:<module>.*"). The framework recognizers in
+  // passes/taggers/python/ tag handler parameters and request accesses structurally
+  // (decorators, inheritance, parameter names/types), which covers Django views and Flask apps
+  // regardless of the file they live in. The request-ACCESS expression tagging below (step 3b)
+  // is framework-agnostic and keyed on the expression.
 
-  // NB: get_object_* helpers are ORM reads, not response outputs - they are handled as `db-read`
-  // (G1), not framework-output, so they are intentionally absent here.
+  // NB: get_object_* helpers are ORM reads, not response outputs - they are handled as `db-read`,
+  // not framework-output, so they are intentionally absent here.
   private val PY_RESPONSE_PATTERNS = Array(
     ".*\\.(views|engine|api|base|http)\\..*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*",
     ".*(HttpResponse|render|Response|jsonify|make_response|render_template|abort).*"
@@ -347,7 +347,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         Set("get_object_or_404", "get_list_or_404", "get_object", "get_queryset")
     val ormAccessorNames =
         Set("get", "filter", "first", "last", "all", "get_or_create", "earliest", "latest")
-    // G6+: well-known Django/DRF/stdlib neutralisers. A flow passing through one of these is
+    // Well-known Django/DRF/stdlib neutralisers. A flow passing through one of these is
     // considered sanitised for the relevant category (open-redirect guards, HTML/JS escapers,
     // tag strippers). Tagged `sanitization` so the appsec profile drops the flow.
     val sanitizerCallNames =
@@ -411,8 +411,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     )
     val cryptoAlgoNameRegex = "^[A-Z0-9]+$".r
 
-    // P1.1: code-execution sinks. Only `eval`/`exec` were covered before, which killed
-    // most realistic Python taint results. Matched on methodFullName first (cross-module
+    // Code-execution sinks. Covering only `eval`/`exec` would miss most realistic Python
+    // taint results. Matched on methodFullName first (cross-module
     // call resolution is good: `subprocess.getoutput` resolves to `subprocess.getoutput`), with
     // a `code` fallback for unresolved calls.
     //
@@ -475,7 +475,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       codeExecutionCallPrefilter*
     )
 
-    // P1.2: the subset of code-execution sinks that runs the command through a shell.
+    // The subset of code-execution sinks that runs the command through a shell.
     // `subprocess.run(["ls", x])` and `subprocess.run("ls " + x, shell=True)` are not
     // the same risk and must not rank the same. The argv-list APIs (os.exec*, spawn*,
     // posix_spawn) are excluded: they never invoke a shell.
@@ -511,7 +511,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       shellCapableCallPrefilter*
     )
 
-    // P1.3: sink families completed for Python parity with the Java tagger.
+    // Sink families for Python parity with the Java tagger.
     val ssrfFullNameRegex = PrefilteredRegex(
       ".*(?<![\\w.])(requests|httpx|urllib|aiohttp|httplib)(\\.\\w+)*\\.(get|post|put|patch|delete|head|options|request|urlopen|open)$",
       Seq("requests.", "httpx.", "urllib.", "aiohttp.", "httplib.")
@@ -608,7 +608,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       val methodFullName = call.methodFullName
       val code           = call.code
 
-      // G3/G4: a render/redirect whose dynamic argument is a constant is not an
+      // A render/redirect whose dynamic argument is a constant is not an
       // attacker-influenced output (template name is a literal, redirect target is a
       // url-name literal or `reverse(...)`). Skip framework-output for these benign sinks.
       val benignOutput =
@@ -645,7 +645,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         if pyResponseFileRegex.matches(filename) then
           addTag("framework-output", call)
 
-      // G1: ORM read accessor - return value is persisted data, a distinct trust level
+      // ORM read accessor - return value is persisted data, a distinct trust level
       // from live request input. Tagged so profiles can use it as a declassification barrier.
       if dbReadHelperNames.contains(name) ||
         dbReadHelperRegex.matches(name) ||
@@ -654,11 +654,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       then
         addTag("db-read", call)
 
-      // G6: DRF/serializer validation entrypoint.
+      // DRF/serializer validation entrypoint.
       if name == "is_valid" then
         addTag("validation", call)
 
-      // G6+: Django/DRF/stdlib security neutralisers (open-redirect guards, HTML escapers, ...).
+      // Django/DRF/stdlib security neutralisers (open-redirect guards, HTML escapers, ...).
       if sanitizerCallNames.contains(name) then
         addTag("sanitization", call)
 
@@ -686,7 +686,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if serializationRegex.matches(methodFullName) then
         addTag("serialization", call)
 
-      // G5: unsafe deserialisation is a true code-exec-class sink, kept distinct from safe
+      // Unsafe deserialisation is a true code-exec-class sink, kept distinct from safe
       // (de)serialisation above.
       if deserializationRegex.matches(methodFullName) || deserializationRegex.matches(code) then
         addTag("unsafe-deserialization", call)
@@ -697,7 +697,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if importlibRegex.matches(methodFullName) then
         addTag("reflection", call)
 
-      // G2: getattr/setattr/delattr is only reflection-as-a-sink when the attribute name is
+      // getattr/setattr/delattr is only reflection-as-a-sink when the attribute name is
       // dynamic. A string-literal attribute (e.g. getattr(user, "is_anonymous")) is an ordinary
       // field access and must not be flagged.
       if name == "getattr" || name == "delattr" || name == "setattr" then
@@ -714,13 +714,13 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if sqlRegex.matches(methodFullName) then
         addTag("sql", call)
 
-      // P1.1: the code-execution sink family (previously only eval/exec).
+      // The code-execution sink family.
       if name == "eval" || name == "exec" ||
         codeExecutionFullNameRegex.matches(methodFullName) ||
         codeExecutionCodeRegex.matches(code)
       then
         addTag("code-execution", call)
-        // P1.2: shell-execution risk rank. shell=True, or a single string command
+        // Shell-execution risk rank. shell=True, or a single string command
         // rather than an argv list, means the command line reaches a shell.
         val argvListArg = call.argument.argumentIndex(1).exists { a =>
             a.code.startsWith("[") || a.code.startsWith("(")
@@ -731,7 +731,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         then
           addTag("shell-exec", call)
 
-      // P1.3: sql sinks beyond the receiver-keyed sqlRegex above. `.execute` on any
+      // SQL sinks beyond the receiver-keyed sqlRegex above. `.execute` on any
       // receiver is a SQL entrypoint (Django `cursor.execute(...)` resolves through a
       // temporary and carries no receiver hint), and `.raw()`/`.extra()` are true SQLi
       // sinks. `text()` is constrained to SQLAlchemy to avoid colliding with other
@@ -745,14 +745,14 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       then
         addTag("sql", call)
 
-      // P1.3: ssrf - HTTP client calls whose URL is not a literal.
+      // SSRF - HTTP client calls whose URL is not a literal.
       if ssrfFullNameRegex.matches(methodFullName) || ssrfCodeRegex.matches(code) then
         if hasDynamicArgument(call) then
           addTag("ssrf", call)
         else
           addTag("http-client", call)
 
-      // P1.3: path traversal - open/os.path.join/pathlib.Path/glob with a dynamic
+      // Path traversal - open/os.path.join/pathlib.Path/glob with a dynamic
       // (non-literal) path component.
       if !isOperatorCall(call) &&
         ((name == "open" && hasDynamicArgument(call)) ||
@@ -760,7 +760,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       then
         addTag("path-traversal", call)
 
-      // P1.3: template injection.
+      // Template injection.
       if !isOperatorCall(call) &&
         (name == "render_template_string" || templateInjectionFullNameRegex.matches(
           methodFullName
@@ -768,11 +768,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       then
         addTag("template-injection", call)
 
-      // P1.3: ldap injection.
+      // LDAP injection.
       if ldapFullNameRegex.matches(methodFullName) || ldapCodeRegex.matches(code) then
         addTag("ldap", call)
 
-      // P1.3: xxe - XML parsers of the lxml/ElementTree families. lxml resolves
+      // XXE - XML parsers of the lxml/ElementTree families. lxml resolves
       // entities by default, so the parse entrypoints themselves carry the risk.
       if xxeFullNameRegex.matches(methodFullName) || xxeCodeRegex.matches(code) then
         addTag("xxe", call)
@@ -802,15 +802,13 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
     // 3b. Request-access EXPRESSIONS as framework-input.
     //
-    // Previously a request source was only tagged when it was assigned to a local
-    // (ChennaiTagsPass tagged the assignment's LHS identifier), so an inline use --
-    // `sink(request.args["v"])` -- had no tagged source at all and produced no flow.
-    // That looked like "reachables only finds intra-method flows"; it was really a
-    // missing source. Tag the access expression itself and both forms work.
+    // Tagging a request source only where it is assigned to a local (the assignment's LHS
+    // identifier) would leave an inline use -- `sink(request.args["v"])` -- with no tagged
+    // source at all and no flow. Tag the access expression itself so both forms work.
     //
     // Framework-agnostic on purpose: matched on the expression, not on the file name,
-    // so Flask in app.py is covered as well as Django in views.py. Task 3's framework
-    // recognizers will subsume this with proper proxy/parameter typing.
+    // so Flask in app.py is covered as well as Django in views.py. The framework
+    // recognizers (passes/taggers/python/) add proxy/parameter tagging on top of this.
     // ANCHORED at the head of the expression on purpose. Matching `request.args` as a
     // substring anywhere would also match every *enclosing* expression -- the code of
     // `sink(request.args["v"])` contains it too -- and the outermost-wins rule below
@@ -818,11 +816,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     // `self.request.args` (Django CBVs) and `flask.request.args` while still excluding
     // anything with a `(` before the accessor.
     //
-    // The `session` arm preserves the coverage of ChennaiTagsPass's now-removed
-    // HTTP_METHODS_REGEX (`(request|session)\.(args|get|post|put|form)`): Flask's
+    // The `session` arm covers `session.(args|get|post|put|form)` accesses: Flask's
     // session is client-supplied signed-cookie data.
-    // `query`/`query_params`/`match_info` were added by Task 4 (B3): aiohttp/Starlette-style
-    // request-proxy accessors, tagged the same way as the Flask/Django ones.
+    // `query`/`query_params`/`match_info` are aiohttp/Starlette-style request-proxy
+    // accessors, tagged the same way as the Flask/Django ones.
     val requestAccessRegex =
         ("""(?s)(\w+\.)*(request\.(form|args|values|json|data|files|headers|cookies|""" +
             """query_string|query_params|query|match_info|remote_addr|host|method|full_path|url|""" +
@@ -881,12 +878,9 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     atom.method.internal.name("main").parameter.newTagNode("cli-source").store()(using dstGraph)
     atom.method.internal.name("wmain").parameter.newTagNode("cli-source").store()(using dstGraph)
 
-    // Event patterns
-    atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("event").store()(
-      using dstGraph
-    )
-    atom.method.internal.name(".*(ucm_|ucbuf_|event).*").parameter.newTagNode("framework-input")
-        .store()(using dstGraph)
+    // No `.*(ucm_|ucbuf_|event).*` method-name heuristic here: untrusted input for C is
+    // tagged from the memory-API inventory (MemoryApiPass's untrusted-read), a list with
+    // named sources rather than a name regex that fires on any function mentioning "event".
 
     val eventVerbs   = Seq("call", "handle", "emit", "invoke", "store")
     val eventPattern = raw".*(?:${eventVerbs.mkString("|")})[_A-Z].*"
@@ -897,17 +891,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
           using dstGraph
         )
 
-    // Validation patterns
-    val validationVerbs   = Seq("validate", "check", "verify")
-    val validationPattern = raw".*(?:${validationVerbs.mkString("|")})[_A-Z].*"
-
-    atom.method.internal.name(validationPattern).parameter.newTagNode("validation").store()(
-      using dstGraph
-    )
-    atom.method.internal.name(validationPattern).callIn(using NoResolve).argument.newTagNode(
-      "validation"
-    )
-        .store()(using dstGraph)
+    // Likewise no `.*(validate|check|verify)[_A-Z].*` method-name heuristic for C: a sanitiser is something declared in a validation config or an
+    // inventory entry, not any function whose name happens to start with "check_".
 
     atom.method.internal.name(".*(parse[_A-Z]).*").parameter.newTagNode("parse").store()(using
     dstGraph)

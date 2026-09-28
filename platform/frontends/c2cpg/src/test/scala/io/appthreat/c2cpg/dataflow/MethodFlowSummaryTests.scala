@@ -6,9 +6,9 @@ import _root_.io.appthreat.dataflowengineoss.queryengine.summaries.MethodFlowSum
 import _root_.io.shiftleft.codepropertygraph.generated.nodes.Method
 import _root_.io.shiftleft.semanticcpg.language.*
 
-/** Validates the context-independent [[MethodFlowSummary]] (CHEN3_PLAN §5 foundation) against the
-  * classic engine: the parameter-to-return facts in the summary must match what `reachableByFlows`
-  * reports for that method in isolation.
+/** Validates the context-independent [[MethodFlowSummary]] against the classic engine: the
+  * parameter-to-return facts in the summary must match what `reachableByFlows` reports for that
+  * method in isolation.
   */
 class MethodFlowSummaryTests extends DataFlowCodeToCpgSuite:
 

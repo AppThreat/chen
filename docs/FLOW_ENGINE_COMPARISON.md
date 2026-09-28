@@ -255,7 +255,7 @@ which solver built the DDG.
 
 Method flow summaries are an interprocedural pruning mechanism that lives in the _query_ layer. They
 are part of the default Flux bundle in atom (on whenever the Flux engine is, disabled together with
-it by `--legacy-dataflow`; there is no separate flag). Despite the shared "flux/CHEN3" lineage the
+it by `--legacy-dataflow`; there is no separate flag). Despite shipping in the same bundle, the
 mechanism is distinct from the `FluxSolver`: Flux speeds up DDG _construction_, while summaries prune
 the Source to Sink _search_.
 

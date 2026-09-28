@@ -176,7 +176,7 @@ class PythonDependencyFullTests extends PySrc2CpgFixture(withOssDataflow = true)
       )
 
     "refute no less than summaries mode does, without needing summaries" in:
-      // The Task 7.1 win, achieved by exploration instead of declaration: the same matched
+      // The `summaries` result, achieved by exploration instead of declaration: the same matched
       // triple on a `summaries` build of the SAME venv agrees on every case.
       val summariesCpg = code(userApp, "app.py")
           .withPythonDeps(PythonDepsMode.Summaries)
@@ -227,9 +227,9 @@ class PythonDependencyFullTests extends PySrc2CpgFixture(withOssDataflow = true)
       call.callee(using NoResolve).fullName.l should contain("flask.helpers.passthrough")
 
     "ingest an out-of-tree venv given an absolute venv-dir" in:
-      // The common real-world layout the legacy walk could not see: the venv lives outside
-      // the project directory.
-      val outside = Files.createTempDirectory("task085-oov-venv")
+      // The common real-world layout a project-relative walk cannot see: the venv lives
+      // outside the project directory.
+      val outside = Files.createTempDirectory("deps-oov-venv")
       try
         val sp = outside.resolve("lib/python3.14/site-packages/flask")
         Files.createDirectories(sp)
@@ -274,7 +274,7 @@ class PythonDependencyFullTests extends PySrc2CpgFixture(withOssDataflow = true)
       cpg.method.fullNameExact("pdmpkg.value").l should not be empty
 
     "ingest typeshed stdlib signatures when configured" in:
-      val typeshed = Files.createTempDirectory("task085-typeshed")
+      val typeshed = Files.createTempDirectory("deps-typeshed")
       try
         Files.createDirectories(typeshed.resolve("stdlib/versions/3.14"))
         Files.createDirectories(typeshed.resolve("stdlib/os"))

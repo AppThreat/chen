@@ -8,8 +8,8 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import PythonRecognizerUtil.*
 
-/** B2 - models as taint carriers. A pydantic `BaseModel`, dataclass, attrs class or TypedDict bound
-  * to a handler parameter makes EVERY FIELD a source:
+/** Models as taint carriers. A pydantic `BaseModel`, dataclass, attrs class or TypedDict bound to a
+  * handler parameter makes EVERY FIELD a source:
   *
   * {{{
   * class Item(BaseModel):
@@ -25,10 +25,10 @@ import PythonRecognizerUtil.*
   * declared fields), and the handler parameter's declared type annotation (surfaced as
   * `TYPE_FULL_NAME` on the parameter).
   *
-  * NB (Task 5 input): field accesses are matched on the receiver's source name (`item.cmd` ->
-  * receiver identifier `item`) because identifier typing is still ANY - a proper join would use the
-  * receiver's recovered type. Multi-level accesses (`item.meta.cmd`) match by the `item.` code
-  * prefix and the final field name.
+  * NB: field accesses are matched on the receiver's source name (`item.cmd` -> receiver identifier
+  * `item`) because identifier typing is still ANY; receiver type inference would let this join on
+  * the receiver's recovered type instead. Multi-level accesses (`item.meta.cmd`) match by the
+  * `item.` code prefix and the final field name.
   */
 object ModelTaintRecognizer extends PythonFrameworkRecognizer:
 
@@ -102,8 +102,8 @@ object ModelTaintRecognizer extends PythonFrameworkRecognizer:
     yield (receiver, field)
 end ModelTaintRecognizer
 
-/** B3 - request objects as handler parameters (`async def search(q, request: Request)`, aiohttp's
-  * `async def handle(request)`, Django's `def profile(request)`). This is the parameter form,
+/** Request objects as handler parameters (`async def search(q, request: Request)`, aiohttp's `async
+  * def handle(request)`, Django's `def profile(request)`). This is the parameter form,
   * complementing the module-level proxy access tagging in EasyTagsPass. Django function views are
   * the case that needs it: they carry no decorator and inherit nothing, so the parameter is the
   * only signal there is.
@@ -115,20 +115,20 @@ end ModelTaintRecognizer
   *   - The method is only tagged `framework-route` - and its OTHER parameters only become sources
   *     - when something corroborates that it is a registered handler. Without that second tier
   *       every `def log_request(request, level)`, `def is_admin(request)` and `def process(self,
-  *       request, response)` became an entry point whose every parameter was attacker-controlled,
-  *       which put `framework-input` on a response object and made `framework-route` (itself a
-  *       source tag) fire on middleware and helpers. That is the same false-positive shape as the
-  *       filename-keyed PY_REQUEST_PATTERNS this task deleted, keyed on a parameter name instead of
-  *       a file name.
+  *       request, response)` would become an entry point whose every parameter is
+  *       attacker-controlled, which puts `framework-input` on a response object and makes
+  *       `framework-route` (itself a source tag) fire on middleware and helpers. That is the same
+  *       false-positive shape as a filename-keyed request heuristic, keyed on a parameter name
+  *       instead of a file name.
   *
   * Corroboration is structural and cheap: a decorator of any kind, a URL registration naming the
   * method (`path("x/", views.search)`), or a framework response constructor in the body. Every
   * genuine view satisfies at least one - a view that returns no response is not a view.
   *
   * Typed parameters (`request: Request`) carry the type in TYPE_FULL_NAME; untyped parameters are
-  * recognized by the framework-wide `request` naming convention. NB (Task 5 input): untyped
-  * parameters force a name-based rule - a real type join would use the proxy class of the gating
-  * framework, and would also let the second tier drop the response-constructor heuristic.
+  * recognized by the framework-wide `request` naming convention. NB: untyped parameters force a
+  * name-based rule - a real type join would use the proxy class of the gating framework, and would
+  * also let the second tier drop the response-constructor heuristic.
   */
 object RequestObjectRecognizer extends PythonFrameworkRecognizer:
 

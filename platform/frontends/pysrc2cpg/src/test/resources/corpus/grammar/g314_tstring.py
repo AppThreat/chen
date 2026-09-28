@@ -1,4 +1,4 @@
-# CHEN-EXPECT: no-parse-errors  # t-strings (PEP 750) + PEP 758 unparenthesised except parse since task 10
+# CHEN-EXPECT: no-parse-errors  # t-strings (PEP 750) + PEP 758 unparenthesised except parse
 
 from string.templatelib import Template
 name = "world"

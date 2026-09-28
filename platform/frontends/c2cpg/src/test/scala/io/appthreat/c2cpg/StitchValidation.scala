@@ -16,8 +16,8 @@ import overflowdb.util.DiffTool
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import scala.jdk.CollectionConverters.*
 
-/** End-to-end validation harness for the modular link phase (CHEN3_PLAN §3 / §8) on a real C
-  * codebase (openssl by default).
+/** End-to-end validation harness for the modular link phase on a real C codebase (openssl by
+  * default).
   *
   * It demonstrates, on the same persisted base graph (so node IDs are stable and comparable):
   *   - '''AST-cache benefit''' - cold vs warm frontend build time.

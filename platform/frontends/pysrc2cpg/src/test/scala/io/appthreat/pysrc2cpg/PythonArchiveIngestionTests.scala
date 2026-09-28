@@ -10,7 +10,7 @@ import java.nio.file.{Files, Path}
 import java.util.zip.{ZipEntry, ZipOutputStream}
 import scala.util.Using
 
-/** Task 12 Part A, end to end: archives dropped into the project directory are unpacked, parsed
+/** Archive ingestion, end to end: archives dropped into the project directory are unpacked, parsed
   * with their real package layout, attributed as dependency code (the placement rule), named by
   * their own package root, and tagged with the package identity their RECORD/METADATA states - no
   * SBOM anywhere in sight. Every assertion has its near-miss: the project's own file must not flip

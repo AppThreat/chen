@@ -78,7 +78,7 @@ class DjangoSourceCallTests extends PySrc2CpgFixture(withOssDataflow = false):
           cpg.method.name("clear_cache").caller.name.toSet should contain("populate")
           cpg.method.name("populate").caller.name.toSet should contain("__init__")
       }
-      // TODO(task #4): `app_config = AppConfig.create(entry)` is a factory, so
+      // TODO: `app_config = AppConfig.create(entry)` is a factory, so
       // app_config.label / app_config should resolve to AppConfig members.
       "resolve app_config to AppConfig (factory return propagated to local)" in {
           cpg.call.name("create").methodFullName.toSet should

@@ -1,6 +1,15 @@
 package io.appthreat.c2cpg.parser
 
 object DefaultDefines:
+
+  /** The compiler identity every GCC-compatible compiler (gcc, clang) predefines. Headers gate
+    * their function attributes on it - FFmpeg's `av_malloc_attrib`/`av_alloc_size`, glibc's
+    * `__attribute_malloc__` - so without it the declared memory semantics preprocess to nothing.
+    * 4.9 is the oldest version every attribute the memory passes read exists in. A user `-D`
+    * overrides it.
+    */
+  val GNU_COMPILER: Map[String, String] =
+      Map("__GNUC__" -> "4", "__GNUC_MINOR__" -> "9", "__GNUC_PATCHLEVEL__" -> "0")
   val DEFAULT_CALL_CONVENTIONS: Map[String, String] = Map(
     "__fastcall"   -> "__attribute((fastcall))",
     "__cdecl"      -> "__attribute((cdecl))",

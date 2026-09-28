@@ -6,7 +6,7 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Parser-level unit tests for PHP 8.0+ attribute-group decoding (task 9.1, Requirement 3.2).
+/** Parser-level unit tests for PHP 8.0+ attribute-group decoding.
   *
   * These exercise `Domain.fromJson` directly against synthesised nikic-shaped JSON so the tests are
   * hermetic (no PHP generator required). They assert that `#[Route(...)]`, `#[\Override]`, and

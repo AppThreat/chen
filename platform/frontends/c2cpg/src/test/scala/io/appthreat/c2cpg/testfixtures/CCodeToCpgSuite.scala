@@ -19,6 +19,7 @@ trait C2CpgFrontend extends LanguageFrontend:
         .withInputPath(sourceCodePath.getAbsolutePath)
         .withOutputPath(cpgOutFile.pathAsString)
         .withFunctionBodies(true)
+        .withAstCache(false)
 
     c2cpg.createCpg(config).get
 

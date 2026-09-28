@@ -61,8 +61,8 @@ object CacheControl:
   def enable(kind: String): Unit = overrides.put(kind, true)
 
   /** Whether the per-file AST cache should serialize mini-graphs with the overflowdb2
-    * `GraphFragmentCodec` ([[io.appthreat.x2cpg.AstFragment]], CHEN3_PLAN §3/§4) instead of the
-    * classic upickle bitcode. Off by default; enabled in code (`enableFragments()`) or via
+    * `GraphFragmentCodec` ([[io.appthreat.x2cpg.AstFragment]]) instead of the classic upickle
+    * bitcode. Off by default; enabled in code (`enableFragments()`) or via
     * `-Dchen.cache.fragments=true`. atom turns this on under `--flux`.
     */
   @volatile private var fragmentsEnabled: Boolean = boolProp("chen.cache.fragments")

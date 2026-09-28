@@ -72,7 +72,7 @@ class SigTypeTests extends AnyWordSpec with Matchers:
   "pre-2.1 JSON without the fact key keeps methods untyped even when a sig block precedes" in {
       // The generator's `has_sig` is what authorizes the attachment. JSON from an older generator
       // has no fact, and reading it with an adjacency heuristic would silently type those defs -
-      // the exact getOrElse(<heuristic>) defect plan 04 §5 records.
+      // a getOrElse(<heuristic>) fallback that guesses where the fact is absent.
       val tmpDir = Files.createTempDirectory("ruby2atomLegacySig")
       val source = tmpDir.resolve("sorbet_types.rb")
       Files.copy(getClass.getResourceAsStream("/ruby/sorbet_types.rb"), source)

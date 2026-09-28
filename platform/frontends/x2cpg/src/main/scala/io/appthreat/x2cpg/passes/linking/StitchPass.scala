@@ -21,7 +21,7 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.mutable
 
-/** The link phase (CHEN3_PLAN §3.2) for the in-memory CPG.
+/** The link phase for the in-memory CPG.
   *
   * A single, [[SymbolIndex]]-backed orchestrator that resolves the cross-unit references whose cost
   * is dominated by FQN lookups into real edges, and synthesizes external stubs for unresolved
@@ -51,7 +51,7 @@ import scala.collection.mutable
   *
   * '''Incremental mode.''' When `dirtyUnits` is given, only call sites whose enclosing unit (source
   * file) is dirty are (re)stitched, and the whole-graph type/ref relinking is skipped - the work is
-  * then proportional to the change (CHEN3_PLAN §4). Leave it `None` for a full stitch.
+  * then proportional to the change. Leave it `None` for a full stitch.
   */
 class StitchPass(cpg: Cpg, dirtyUnits: Option[Set[String]] = None):
 
@@ -156,12 +156,15 @@ object StitchPass:
 
     var realizedEdges: Int = 0
 
+    // same-named functions with internal linkage in other files are not a reference's target
+    private lazy val linkage = InternalLinkage(cpg)
+
     override def run(dstGraph: DiffGraphBuilder): Unit =
       // Static / inlined dispatch (replaces StaticCallLinker).
       callsToConsider(cpg, dirtyUnits).foreach { call =>
           call.dispatchType match
             case DispatchTypes.STATIC_DISPATCH | DispatchTypes.INLINED =>
-                index.methods(call.methodFullName).foreach { dst =>
+                linkage.visibleFrom(call, index.methods(call.methodFullName)).foreach { dst =>
                   dstGraph.addEdge(call, dst, EdgeTypes.CALL)
                   realizedEdges += 1
                 }
@@ -186,7 +189,10 @@ object StitchPass:
         dstNodeMap = index.methodNode,
         dstFullNameKey = PropertyNames.METHOD_FULL_NAME,
         dstGraph,
-        None
+        None,
+        dstNodeFor = Some((src, fullName) =>
+            linkage.visibleFrom(src, index.methods(fullName)).headOption
+        )
       )
 
       // TYPE_DECL -> TYPE INHERITS_FROM (replaces TypeHierarchyPass).
@@ -229,9 +235,10 @@ object StitchPass:
           if mr.out(EdgeTypes.REF).isEmpty && unitOf(mr).exists(dirty.contains) then
             val raw   = mr.methodFullName
             val deref = dereference.dereferenceTypeFullName(raw)
-            index.methods(deref).headOption.orElse(index.methods(raw).headOption).foreach { m =>
-                dstGraph.addEdge(mr, m, EdgeTypes.REF)
-            }
+            linkage.visibleFrom(mr, index.methods(deref)).headOption
+                .orElse(linkage.visibleFrom(mr, index.methods(raw)).headOption).foreach { m =>
+                    dstGraph.addEdge(mr, m, EdgeTypes.REF)
+                }
       }
 
       cpg.typeDecl.foreach { td =>

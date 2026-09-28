@@ -7,7 +7,7 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import PythonRecognizerUtil.*
 
-/** B5 - AI/LLM frameworks (LangChain, LlamaIndex, OpenAI, Anthropic, litellm).
+/** AI/LLM frameworks (LangChain, LlamaIndex, OpenAI, Anthropic, litellm).
   *
   * Tags:
   *   - `ai-prompt` on prompt-construction calls (`PromptTemplate.from_template(...)`,
@@ -22,10 +22,9 @@ import PythonRecognizerUtil.*
   * result -> `code-execution` (agent escape). Both run through atom's reachables once
   * `ai-prompt`/`ai-invoke` are registered as sink tags.
   *
-  * NB (Task 5 input): receiver typing would let `invoke` be scoped to actual runnables - today the
-  * gate is project-wide (any `invoke` in an AI-gated project is treated as chain-related), and the
-  * runnable side of `|` composition is matched structurally (either operand is a call), not by
-  * type.
+  * NB: receiver type inference would let `invoke` be scoped to actual runnables - the gate is
+  * project-wide (any `invoke` in an AI-gated project is treated as chain-related), and the runnable
+  * side of `|` composition is matched structurally (either operand is a call), not by type.
   */
 object AiLlmRecognizer extends PythonFrameworkRecognizer:
 
@@ -100,7 +99,7 @@ object AiLlmRecognizer extends PythonFrameworkRecognizer:
 
     // LangChain `|` composition: `tpl | ChatOpenAI(model=...)` lowers to `<operator>.or`.
     // Treated as composition when either operand is a call (a constructor/chain expression);
-    // typing the operands to runnables needs Task 5.
+    // typing the operands to runnables would need receiver type inference.
     cpg.call
         .nameExact(Operators.or)
         .filter(_.code.contains("|"))

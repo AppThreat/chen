@@ -17,8 +17,8 @@ pushd "$AST_GEN_REPO" >/dev/null
 
 # chen invokes the generator in directory mode (`rbastgen -i <dir> -o <out>`), so the fixtures
 # must be generated that way too: in single-file mode `rel_file_path` is the basename, which
-# would silently rewrite `models/user.rb` to `user.rb` and break require resolution (the
-# generator's plan 03 §5 fix). The truncation fixture needs a second run at --max-depth 3.
+# would silently rewrite `models/user.rb` to `user.rb` and break require resolution.
+# The truncation fixture needs a second run at --max-depth 3.
 bundle exec ruby exe/ruby_ast_gen -i "$TARGET_DIR" -o "$WORK_DIR" -e ZZZNOMATCH
 bundle exec ruby exe/ruby_ast_gen -i "$TARGET_DIR" -o "$WORK_DIR_TRUNCATED" -e ZZZNOMATCH --max-depth 3
 cp "$WORK_DIR_TRUNCATED/nested/truncated.rb.json" "$WORK_DIR/nested/truncated.rb.json"

@@ -6,7 +6,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Random
 
-/** Property 7 (P7) — Node attribute round-trip (task 12.3; Validates: Requirement 3.1).
+/** Property test: node attribute round-trip.
   *
   * Property statement: for an arbitrary non-negative `(startLine, startFilePos, kind)` triple
   * embedded in a nikic-shaped node's `attributes` object, decoding that node through
@@ -76,7 +76,7 @@ class NodeAttributeRoundtripTests extends AnyWordSpec with Matchers:
   /** Draw a non-negative int biased toward including 0 and large values as edge cases. */
   private def nonNegativeInt(): Int = rng.nextInt(Int.MaxValue)
 
-  "Node attribute round-trip (P7)" should {
+  "Node attribute round-trip" should {
 
       "preserve startLine/startFilePos/kind for Stmt_Nop -> NopStmt (fixed edge values)" in {
           val edges = List(

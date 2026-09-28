@@ -130,7 +130,7 @@ object Domain:
 
     /** Extract the PHP 8.4 asymmetric set-visibility keyword from a `flags` bitmask, or None when
       * no set-visibility bit is present. Resilient by contract: a missing/absent `flags` yields
-      * None (Requirement 4.1/5.5).
+      * None.
       */
     def getSetVisibility(json: Value, modifierString: String = "flags"): Option[String] =
       val flags = json.objOpt.flatMap(_.get(modifierString)).map(_.num.toInt).getOrElse(0)
@@ -142,12 +142,11 @@ object Domain:
   sealed trait PhpNode:
     def attributes: PhpAttributes
 
-  // Additive provenance the generator (`phpastgen`) attaches to each per-file AST wrapper object
-  // (design §2.5/2.6, Data Models). Every key is OPTIONAL by contract (Requirement 4.1/4.5/5.5):
-  // a bare-array AST from an older generator, or a wrapper missing a given key, decodes with the
-  // corresponding field left unset/empty. Modelled as a small carrier so callers (AstCreator, the
-  // capability probe, atom's version gate) can read provenance without recomputing it, while older
-  // callers that ignore it are unaffected.
+  // Additive provenance the generator (`phpastgen`) attaches to each per-file AST wrapper object.
+  // Every key is OPTIONAL by contract: a bare-array AST from an older generator, or a wrapper
+  // missing a given key, decodes with the corresponding field left unset/empty. Modelled as a
+  // small carrier so callers (AstCreator, the capability probe, atom's version gate) can read
+  // provenance without recomputing it, while older callers that ignore it are unaffected.
   final case class PhpProvenance(
     parserBackend: Option[String] = None,
     generatorVersion: Option[String] = None,
@@ -161,9 +160,9 @@ object Domain:
     val Empty: PhpProvenance = PhpProvenance()
 
     /** Read the optional provenance keys from a generator wrapper object. Every key is optional: an
-      * absent key yields an unset/empty value rather than failing decode (Requirement 5.5/4.5).
-      * `target_version` may be JSON `null` (unset) — treated as `None`. Unknown sibling keys (e.g.
-      * `ast`) are simply ignored, keeping the contract additive.
+      * absent key yields an unset/empty value rather than failing decode. `target_version` may be
+      * JSON `null` (unset) — treated as `None`. Unknown sibling keys (e.g. `ast`) are simply
+      * ignored, keeping the contract additive.
       */
     def fromWrapper(json: Value): PhpProvenance =
       def optStr(key: String): Option[String] =
@@ -735,7 +734,7 @@ object Domain:
             Nil
 
   // Decode the top-level AST. Two shapes are accepted (backward + forward compatible with the
-  // cross-repo contract, Requirement 4.1/4.2): the new generator emits a wrapper OBJECT
+  // cross-repo contract): the new generator emits a wrapper OBJECT
   // `{ ast: [<stmts>], parser_backend, generator_version, ... }`; an older generator emits a bare
   // ARRAY of statements. The shape is detected by the presence of an `ast` array key. Provenance is
   // read from the wrapper when present and left empty for the bare-array form. Unknown sibling keys
@@ -756,7 +755,7 @@ object Domain:
 
   // Read the `nodeType` discriminator tolerantly: an object without a string `nodeType` (e.g. a
   // future/unknown wrapper key that leaks into a statement position) yields the empty string, which
-  // falls through to the graceful `NopStmt` catch-all rather than throwing (Requirement 4.2/3.10).
+  // falls through to the graceful `NopStmt` catch-all rather than throwing.
   private def nodeTypeOf(json: Value): String =
       json.objOpt.flatMap(_.get("nodeType")).flatMap {
           case Str(s) => Some(s)
@@ -806,8 +805,7 @@ object Domain:
         case "Stmt_Block"        => NopStmt(PhpAttributes(json))
         // Unmapped/newer `nodeType` the decoder does not model: degrade gracefully to `NopStmt`
         // (never crash or abort the file), retaining `startLine`/`startFilePos`/`kind` via
-        // `PhpAttributes(json)`, and emit a diagnostic naming the unmapped `kind` (Requirement
-        // 3.10/4.2, design §2.6 / Error Handling).
+        // `PhpAttributes(json)`, and emit a diagnostic naming the unmapped `kind`.
         case unhandled =>
             logger.debug(s"Unmapped statement nodeType degraded to Nop: '$unhandled'")
             NopStmt(PhpAttributes(json))
@@ -1210,11 +1208,10 @@ object Domain:
         case typ if isCastType(typ)     => readCast(json)
 
         // Unmapped/newer expression `nodeType`: degrade gracefully to a name-expr placeholder
-        // instead of throwing, so an unknown node never crashes or aborts the file (Requirement
-        // 3.10/4.2, design §2.6 / Error Handling). `PhpNameExpr` is the minimal `PhpExpr` fallback
-        // (`NopStmt` is a statement, not an expression); the placeholder retains
-        // `startLine`/`startFilePos`/`kind` via `PhpAttributes(json)` and names the unmapped `kind`
-        // in the diagnostic.
+        // instead of throwing, so an unknown node never crashes or aborts the file. `PhpNameExpr`
+        // is the minimal `PhpExpr` fallback (`NopStmt` is a statement, not an expression); the
+        // placeholder retains `startLine`/`startFilePos`/`kind` via `PhpAttributes(json)` and
+        // names the unmapped `kind` in the diagnostic.
         case unhandled =>
             logger.debug(s"Unmapped expression nodeType degraded to placeholder: '$unhandled'")
             PhpNameExpr(if unhandled.nonEmpty then unhandled else "unknown", PhpAttributes(json))
@@ -1359,9 +1356,8 @@ object Domain:
     )
 
   /** Decode the PHP 8.4 `hooks` array (get/set hooks) nikic emits on `Stmt_Property` and on
-    * constructor-promoted params. Resilient by contract (Requirement 4.1/5.5): a missing, null, or
-    * empty `hooks` yields `Nil`, and a malformed individual hook is skipped rather than failing the
-    * whole property.
+    * constructor-promoted params. Resilient by contract: a missing, null, or empty `hooks` yields
+    * `Nil`, and a malformed individual hook is skipped rather than failing the whole property.
     */
   private def readPropertyHooks(json: Value): List[PhpPropertyHook] =
       json.objOpt
@@ -1649,9 +1645,9 @@ object Domain:
     PhpCast(typ, expr, PhpAttributes(json))
 
   /** Decode the `attrGroups` array (PHP 8.0+ `#[Attr(...)]`) that nikic emits on declaration nodes.
-    * Resilient by contract (Requirement 4.1/5.5): a missing, null, or empty `attrGroups` yields an
-    * empty list rather than a failure, and any unmodelled/extra keys on the declaration (e.g. an
-    * additive `framework_facts`) are ignored.
+    * Resilient by contract: a missing, null, or empty `attrGroups` yields an empty list rather than
+    * a failure, and any unmodelled/extra keys on the declaration (e.g. an additive
+    * `framework_facts`) are ignored.
     */
   private def readAttributeGroups(json: Value): List[PhpAttributeGroup] =
       json.objOpt

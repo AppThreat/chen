@@ -10,8 +10,8 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.compiletime.uninitialized
 import scala.util.{Success, Try}
 
-/** Integration tests for the probe-gated ingestion added in tasks 14.1-14.3 (Requirements 3.6, 3.7,
-  * 3.8, 3.9).
+/** Integration tests for the probe-gated ingestion (capability probe, directory-batch ingestion
+  * with per-file isolation, and the per-file fallback).
   *
   * Unlike the hermetic domain-decode tests, these exercise the real shell-out surface of
   * [[PhpParser]] by pointing it — via the [[PhpParser.fromPaths]] testing seam — at a small PHP

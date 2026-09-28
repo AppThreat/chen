@@ -4,9 +4,9 @@ import io.appthreat.pysrc2cpg.PySrc2CpgFixture.shippedTypeRecoveryConfig
 import io.appthreat.x2cpg.passes.taggers.CdxPass
 import io.shiftleft.semanticcpg.language.*
 
-/** Task 09: dotted full names are the ONLY representation. These specs - the full names, the
-  * call-graph edges (the join key that silently loses edges when producer and consumer disagree),
-  * the tagger hits - are now assertions about the default path every run takes.
+/** Dotted full names are the ONLY representation. These specs - the full names, the call-graph
+  * edges (the join key that silently loses edges when producer and consumer disagree), the tagger
+  * hits - are assertions about the default path every run takes.
   */
 class DottedFullNamesTests extends PySrc2CpgFixture(
       withOssDataflow = false,

@@ -1,0 +1,200 @@
+package io.appthreat.c2cpg.passes
+
+import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
+import io.appthreat.x2cpg.passes.taggers.{
+    ExtentPass,
+    GuardPass,
+    IntegerWidthPass,
+    MemoryApiPass,
+    MemorySafetyFindingPass,
+    ValueOriginPass
+}
+import io.shiftleft.semanticcpg.language.*
+
+/** MS-INT-001 / MS-INT-002: the integer rules over the IntegerWidthPass facts. Every positive
+  * mirrors a known shape (the classic CWE-190 overflow, a lossy cast inside a guard, the hevc.c:847
+  * realloc), and every negative is the paired correctly-written variant - including the upstream
+  * FIXES' own shapes: a guard bounding an operand, a widened operand, and a cast sitting on the
+  * guard's BOUND side instead of the bounded value.
+  */
+class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+    |#include <stdlib.h>
+    |#include <string.h>
+    |#include <stdint.h>
+    |
+    |struct nal_array { void *nal; uint16_t numNalus; };
+    |
+    |/* ---- MS-INT-001 ---- */
+    |
+    |/* the hevc.c:847 shape: the attacker-influenced COUNT factor of a count-by-size realloc */
+    |void *bad_count_unguarded(struct nal_array *array)
+    |{
+    |    uint16_t numNalus = array->numNalus;
+    |    void *p = reallocarray(array->nal, numNalus + 1, sizeof(*array->nal));
+    |    array->nal = p;
+    |    return p;
+    |}
+    |
+    |/* the upstream fix adds exactly this guard - the rule must stand down */
+    |void *good_count_guarded(struct nal_array *array)
+    |{
+    |    if (array->numNalus >= 65535) return NULL;
+    |    void *p = reallocarray(array->nal, array->numNalus + 1, sizeof(*array->nal));
+    |    array->nal = p;
+    |    return p;
+    |}
+    |
+    |/* the CWE-190 addition shape */
+    |void *bad_add_overflow(int len)
+    |{
+    |    return malloc(len + 1);
+    |}
+    |
+    |/* widened before the multiply: the product already computes at 64 bits */
+    |void *good_widened(unsigned int count)
+    |{
+    |    return malloc((size_t) count * 64);
+    |}
+    |
+    |/* the CWE-190 guarded multiplication */
+    |void *good_mul_guarded(unsigned int count)
+    |{
+    |    if (count > 4294967295u / 4) return NULL;
+    |    return malloc(count * 4);
+    |}
+    |
+    |/* ---- MS-INT-002 ---- */
+    |
+    |/* the CVE-2026-75145 shape: the guard tests the re-signed view, the use reads uint32_t */
+    |int bad_resign_guard(uint32_t obu_size, int remaining, unsigned char *dst,
+    |                     const unsigned char *src)
+    |{
+    |    if ((long)obu_size > remaining)
+    |        return -1;
+    |    memcpy(dst, src, obu_size);
+    |    return 0;
+    |}
+    |
+    |/* the upstream fix's shape: the cast is on the BOUND, the bounded value never changed width */
+    |int good_resign_on_bound(uint32_t obu_size, int frame_size)
+    |{
+    |    if (obu_size > (unsigned) frame_size)
+    |        return -1;
+    |    frame_size -= obu_size;
+    |    return frame_size;
+    |}
+    |
+    |/* a sign-changing cast that feeds a copy length with no guard around it: not this rule */
+    |int good_cast_in_copy(int n, unsigned char *d, const unsigned char *s)
+    |{
+    |    memcpy(d, s, (size_t) n);
+    |    return 0;
+    |}
+    |
+    |/* ---- the arithmetic's position in the copy ---- */
+    |
+    |/* the arithmetic is in the DESTINATION expression and the length is a plain identifier: a
+    |   def walk that crosses argument-to-argument edges into the destination's subtree would
+    |   report the pointer arithmetic as "the length computation" */
+    |int good_dst_arithmetic(char *dst_base, int off, int n, const char *src)
+    |{
+    |    memcpy(dst_base + off, src, n);
+    |    return 0;
+    |}
+    |
+    |/* the copy's destination already carries a capacity: the wrap question belongs to the BOUND
+    |   rules, whatever the arithmetic does to the length */
+    |struct data_block { unsigned char *payload; int payload_len; };
+    |int good_copy_known_capacity(struct data_block *db, const char *src)
+    |{
+    |    char buf[64];
+    |    int n = db->payload_len;
+    |    memcpy(buf, src, n + 1);
+    |    return n;
+    |}
+    |""".stripMargin,
+    "integers.c"
+  )
+
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new IntegerWidthPass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  /** (rule id, line) pairs found on ANY expression of the method, MS-INT rules only - MS-NULL-001
+    * also fires on these fixtures' unguarded struct parameters and has its own suite.
+    */
+  private def findingsIn(method: String): Set[(String, Int)] =
+      cpg.method
+          .name(method)
+          .ast
+          .collectAll[io.shiftleft.codepropertygraph.generated.nodes.Expression]
+          .filter(_.tag.name("ms-finding").l.nonEmpty)
+          .flatMap(a =>
+              a.tag.name("ms-finding").value.l.map(v =>
+                  (v, a.lineNumber.map(_.toInt).getOrElse(-1))
+              )
+          )
+          .l
+          .toSet
+          .filter((rule, _) => rule.startsWith("MS-INT"))
+
+  "MS-INT-001" should:
+
+    "fire on the attacker-influenced count factor of a count-by-size realloc (hevc.c:847)" in {
+        findingsIn("bad_count_unguarded").map(_._1) shouldBe Set("MS-INT-001")
+        // the finding names the arithmetic itself, not the memory call
+        findingsIn("bad_count_unguarded").forall { case (_, line) => line > 0 } shouldBe true
+    }
+
+    "fire on an unguarded addition length" in {
+        findingsIn("bad_add_overflow").map(_._1) shouldBe Set("MS-INT-001")
+    }
+
+    "stand down when a guard bounds the count from above (the upstream fix's guard)" in {
+        findingsIn("good_count_guarded") shouldBe empty
+    }
+
+    "stand down when an operand was widened before the arithmetic" in {
+        findingsIn("good_widened") shouldBe empty
+    }
+
+    "stand down when the multiplication is guarded (the CWE-190 good_ pair)" in {
+        findingsIn("good_mul_guarded") shouldBe empty
+    }
+
+    "stand down when the arithmetic is the copy's DESTINATION expression, not its length" in {
+        // the length is the plain identifier n; a def walk that crosses the memcpy's
+        // argument-to-argument edges into dst_base + off reports the pointer arithmetic.
+        // (the site itself still draws MS-BOUND-002 - an externally reachable helper copying a
+        // caller-chosen count - which is that rule's question, not this one's)
+        findingsIn("good_dst_arithmetic").map(_._1) should not contain "MS-INT-001"
+    }
+
+    "stand down when the copy's destination already carries a capacity" in {
+        // buf is char[64]: the wrap question about n + 1 is the BOUND rules', not this rule's
+        findingsIn("good_copy_known_capacity") shouldBe empty
+    }
+
+  "MS-INT-002" should:
+
+    "fire where the guard tests the re-signed view and the use reads the declared one" in {
+        // the memcpy in the same fixture draws the BOUND rules too - the length is an
+        // unguarded caller param - so assert presence, not exclusivity
+        findingsIn("bad_resign_guard").map(_._1) should contain("MS-INT-002")
+        findingsIn("bad_resign_guard").count(_._1 == "MS-INT-002") shouldBe 1
+    }
+
+    "not fire when the cast is on the guard's bound (the upstream fix's shape)" in {
+        findingsIn("good_resign_on_bound") shouldBe empty
+    }
+
+    "not fire on a resign cast that feeds a length with no guard around it" in {
+        findingsIn("good_cast_in_copy") shouldBe empty
+    }
+end MemorySafetyIntegerRuleTests
