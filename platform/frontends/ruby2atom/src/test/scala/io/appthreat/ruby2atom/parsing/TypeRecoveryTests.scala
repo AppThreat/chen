@@ -5,11 +5,11 @@ import io.appthreat.ruby2atom.testfixtures.Ruby2AtomFixture
 import io.appthreat.ruby2atom.testfixtures.RubyCode2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
-/** Type recovery (plan 04 §6): `RubyProgramSummary` is populated from the parsed ASTs of all files
-  * before AST creation, `require` calls pull the required types into scope, and the previously
-  * unscheduled `ImportsPass`/`ImplicitRequirePass` run. Fixtures: `models/user.rb` defines `User`,
-  * `app.rb` requires and instantiates it, `cli.rb` instantiates `User` without a require
-  * (zeitwerk-style autoload), `models/report.rb` is a `Data.define` class.
+/** Type recovery: `RubyProgramSummary` is populated from the parsed ASTs of all files before AST
+  * creation, `require` calls pull the required types into scope, and the previously unscheduled
+  * `ImportsPass`/`ImplicitRequirePass` run. Fixtures: `models/user.rb` defines `User`, `app.rb`
+  * requires and instantiates it, `cli.rb` instantiates `User` without a require (zeitwerk-style
+  * autoload), `models/report.rb` is a `Data.define` class.
   */
 class TypeRecoveryTests extends RubyCode2CpgFixture:
 

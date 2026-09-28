@@ -3,7 +3,7 @@ package io.appthreat.ruby2atom.parsing
 import io.appthreat.ruby2atom.testfixtures.RubyCode2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
-/** Literal-level fixtures: heredocs and percent-array literals (plan 04 §5). */
+/** Literal-level fixtures: heredocs and percent-array literals. */
 class LiteralTests extends RubyCode2CpgFixture:
 
   "heredoc content reaches the CPG through the node value" in {

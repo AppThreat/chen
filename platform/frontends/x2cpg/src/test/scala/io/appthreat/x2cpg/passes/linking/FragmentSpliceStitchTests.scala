@@ -11,10 +11,9 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.mutable
 
-/** End-to-end "fastest splice" (CHEN3_PLAN §3.4): two per-unit mini-graphs are serialized as
-  * fragments, spliced STRAIGHT into a fresh graph via [[FragmentSplicePass]] (no re-parse, no diff
-  * rebuild), and then linked across units by [[StitchPass]] - the serialized analogue of the
-  * in-memory modular build.
+/** End-to-end "fastest splice": two per-unit mini-graphs are serialized as fragments, spliced
+  * STRAIGHT into a fresh graph via [[FragmentSplicePass]] (no re-parse, no diff rebuild), and then
+  * linked across units by [[StitchPass]] - the serialized analogue of the in-memory modular build.
   */
 class FragmentSpliceStitchTests extends AnyWordSpec with Matchers:
 

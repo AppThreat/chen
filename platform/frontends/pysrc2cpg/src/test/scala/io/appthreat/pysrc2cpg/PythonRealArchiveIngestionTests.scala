@@ -6,17 +6,17 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.file.{Files, Paths}
 
-/** Task 12 Part A against REAL published distributions - the `flask-3.0.3` wheel and the
-  * `itsdangerous-2.2.0` sdist from the corpus, i.e. the exact input of the 0.3 archive gap.
+/** Archive ingestion against REAL published distributions - the `flask-3.0.3` wheel and the
+  * `itsdangerous-2.2.0` sdist in a local fixture directory.
   *
   * These assert the ingested CONTENT - module counts, dotted names, externality, purls - which an
   * atom's byte size can only stand in for. A size distinguishes "extracted something" from
   * "extracted nothing" and nothing finer: it moves for unrelated reasons, and when it moves nobody
-  * can tell whether the graph got better or worse. The `verify-12.sh` archive gate keeps a size
-  * floor as a crude tripwire; the real claims live here.
+  * can tell whether the graph got better or worse. A size floor is at most a crude tripwire; the
+  * real claims live here.
   *
   * The fixtures are third-party archives that do not belong in the repo, so the whole suite is
-  * registered only when the corpus is present - absent it, there are no tests rather than
+  * registered only when the fixtures are present - absent it, there are no tests rather than
   * cancellations.
   */
 class PythonRealArchiveIngestionTests extends AnyWordSpec with Matchers:

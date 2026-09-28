@@ -2,9 +2,9 @@ package io.appthreat.dataflowengineoss.semantics
 
 /** Framework taint identifiers for PHP (Laravel, Symfony, WordPress).
   *
-  * This object is the single documented home for the framework taint model described in the
-  * php-support-upgrade design §2.7 (Requirements 6.2, 6.3, 6.4). It records, per framework, the
-  * SOURCE / SINK / SANITIZER / ENTRYPOINT identifiers as they appear in a php2atom CPG.
+  * This object is the single documented home for the PHP framework taint model. It records, per
+  * framework, the SOURCE / SINK / SANITIZER / ENTRYPOINT identifiers as they appear in a php2atom
+  * CPG.
   *
   * Every part of the model is consumed:
   *
@@ -83,7 +83,7 @@ object PhpFrameworkSemantics:
   object WordPress:
     /** Superglobal sources: access is `<operator>.indexAccess` over these identifier names.
       * `_SERVER` is included because `HTTP_REFERER`, `REQUEST_URI`, `QUERY_STRING` and friends are
-      * attacker controlled and are real XSS / SQLi vectors (finding C-M2).
+      * attacker controlled and are real XSS / SQLi vectors.
       */
     val sourceSuperglobals: Set[String] =
         Set("_GET", "_POST", "_REQUEST", "_COOKIE", "_SERVER")
@@ -155,7 +155,7 @@ object PhpFrameworkSemantics:
     *
     * `fullNames` are qualified (`Class::method`) and therefore unambiguous.
     * `receiverGatedCallNames` are bare method names shared with ordinary collection/ORM/HTTP-client
-    * APIs, so a match also requires the receiver to look like a request object (finding C-M3).
+    * APIs, so a match also requires the receiver to look like a request object.
     */
   object Sources:
     val fullNames: Set[String] = Laravel.sourceFullNames ++ Symfony.sourceFullNames

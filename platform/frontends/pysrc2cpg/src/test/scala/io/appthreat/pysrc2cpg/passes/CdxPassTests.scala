@@ -9,10 +9,10 @@ import io.shiftleft.semanticcpg.language.*
   * dependency nodes, the `framework` tag on framework-typed component nodes, and namespace patterns
   * that match the `methodFullName` shapes the frontend actually produces.
   *
-  * The second half is what makes Task 6 (full-name normalization) safe to attempt:
-  * `CdxPass.toPyModuleForm` encodes the current full-name shape (`<module>.<callee>`), and every
-  * shape assertion below fails with a message naming the actual full names if that shape changes
-  * without the pass changing with it.
+  * The second half is what makes full-name normalization changes safe: `CdxPass.toPyModuleForm`
+  * encodes the current full-name shape (`<module>.<callee>`), and every shape assertion below fails
+  * with a message naming the actual full names if that shape changes without the pass changing with
+  * it.
   */
 class CdxPassTests extends PySrc2CpgFixture(withOssDataflow = false):
 

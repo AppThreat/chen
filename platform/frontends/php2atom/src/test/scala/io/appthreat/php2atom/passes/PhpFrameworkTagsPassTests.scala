@@ -4,8 +4,8 @@ import io.appthreat.php2atom.testfixtures.PhpCode2CpgFixture
 import io.shiftleft.semanticcpg.language.*
 
 /** Tests for [[PhpFrameworkTagsPass]] - the pass that turns the framework taint vocabulary declared
-  * in `PhpFrameworkSemantics` into `framework-input` / `framework-output` / `sql` tags on the graph
-  * (Requirements 6.2/6.3/6.4).
+  * in `PhpFrameworkSemantics` into `framework-input` / `framework-output` / `sql` tags on the
+  * graph.
   *
   * The pass runs as part of `Php2Atom.createCpg`, so nothing in these tests registers it: the tags
   * asserted here are exactly the tags a real run produces.

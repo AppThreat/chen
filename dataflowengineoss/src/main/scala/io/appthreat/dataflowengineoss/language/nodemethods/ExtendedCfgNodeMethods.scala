@@ -23,7 +23,7 @@ class ExtendedCfgNodeMethods[NodeType <: CfgNode](val node: NodeType) extends An
   )(implicit context: EngineContext): Iterator[NodeType] =
       node.start.reachableBy(sourceTrav, sourceTravs*)
 
-  def ddgIn(implicit semantics: Semantics = DefaultSemantics()): Iterator[CfgNode] =
+  def ddgIn(implicit semantics: Semantics = DefaultSemantics.memoised): Iterator[CfgNode] =
     val cache  = mutable.HashMap[CfgNode, Vector[PathElement]]()
     val result = ddgIn(Vector(PathElement(node)), withInvisible = false, cache)
     cache.clear()

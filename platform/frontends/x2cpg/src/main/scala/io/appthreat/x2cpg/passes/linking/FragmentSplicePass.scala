@@ -5,9 +5,9 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.CpgPass
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
-/** Warm-restore "fastest splice" (CHEN3_PLAN §3.4): reconstruct a CPG from a set of cached per-unit
-  * mini-graph fragments by applying each STRAIGHT into the live graph ([[AstFragment.applyToGraph]]
-  * / `BatchedUpdate.applyFragment`), skipping both re-parsing and the Scala diff-graph rebuild.
+/** Warm-restore "fastest splice": reconstruct a CPG from a set of cached per-unit mini-graph
+  * fragments by applying each STRAIGHT into the live graph ([[AstFragment.applyToGraph]] /
+  * `BatchedUpdate.applyFragment`), skipping both re-parsing and the Scala diff-graph rebuild.
   *
   * This is a single `CpgPass` (one part, one thread), so the direct graph mutation is safe - it
   * runs before the framework applies this pass's (unused) diff graph. Fragments are spliced with

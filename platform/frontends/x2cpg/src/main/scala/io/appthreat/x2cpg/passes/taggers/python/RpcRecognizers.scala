@@ -6,14 +6,14 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import PythonRecognizerUtil.*
 
-/** B4 - gRPC servicers. A class inheriting `*Servicer` (including the generated
+/** gRPC servicers. A class inheriting `*Servicer` (including the generated
   * `..._pb2_grpc.<Service>Servicer` bases) is an RPC endpoint; every servicer method's `request`
   * parameter is a source.
   *
   * Structure used: `inheritsFromTypeFullName` last segment (`grpc.py:<module>.Servicer`,
-  * `helloworld_pb2_grpc.GreeterServicer`). The `context` parameter is deliberately NOT a source. NB
-  * (Task 5 input): the generated stubs carry the real request message type on the parameter
-  * annotation; a type-based request-parameter rule would be more precise than the name-based one.
+  * `helloworld_pb2_grpc.GreeterServicer`). The `context` parameter is deliberately NOT a source.
+  * NB: the generated stubs carry the real request message type on the parameter annotation; a
+  * type-based request-parameter rule would be more precise than the name-based one.
   */
 object GrpcRecognizer extends PythonFrameworkRecognizer:
 
@@ -55,10 +55,10 @@ object GrpcRecognizer extends PythonFrameworkRecognizer:
   end run
 end GrpcRecognizer
 
-/** B4 - Model Context Protocol. Tool/resource/prompt functions (`@mcp.tool()`,
-  * `@mcp.resource("x")`, `@mcp.prompt()`) receive attacker-controlled arguments by construction.
-  * Their parameters are tagged `mcp-input` - a dedicated tag, NOT a reuse of `framework-input`
-  * (atom's reachables treat it as a source tag in its own right).
+/** Model Context Protocol. Tool/resource/prompt functions (`@mcp.tool()`, `@mcp.resource("x")`,
+  * `@mcp.prompt()`) receive attacker-controlled arguments by construction. Their parameters are
+  * tagged `mcp-input` - a dedicated tag, NOT a reuse of `framework-input` (atom's reachables treat
+  * it as a source tag in its own right).
   */
 object McpRecognizer extends PythonFrameworkRecognizer:
 

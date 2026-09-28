@@ -1,5 +1,6 @@
 package io.shiftleft.semanticcpg.accesspath
 
+import scala.language.implicitConversions
 import io.shiftleft.semanticcpg.accesspath.MatchResult.*
 import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.wordspec.AnyWordSpec

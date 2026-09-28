@@ -47,9 +47,11 @@ class AstCacheTests extends AbstractPassTest:
             .map(_.toFile)
             .forEach(_.delete())
 
-  private def computeHash(path: Path): String =
+  /** The store's key: path, then the frontend fingerprint of the config the pass runs with. */
+  private def computeHash(path: Path, config: Config): String =
     val digest = MessageDigest.getInstance("SHA-256")
     digest.update(path.toAbsolutePath.toString.getBytes("UTF-8"))
+    digest.update(AstCreationPass.cacheFingerprint(config).getBytes("UTF-8"))
     digest.update(Files.readAllBytes(path))
     digest.digest().map("%02x".format(_)).mkString
 
@@ -165,7 +167,7 @@ class AstCacheTests extends AbstractPassTest:
             val filePath = rootDir.resolve("file.c")
             val filename = filePath.toAbsolutePath.toString
 
-            val hash      = computeHash(filePath)
+            val hash      = computeHash(filePath, config)
             val cacheFile = cacheDir.resolve(s"$hash.ast")
 
             // a cache from an incompatible (future) format version must never be loaded
@@ -192,7 +194,7 @@ class AstCacheTests extends AbstractPassTest:
             val config    = createConfig(rootDir, cacheDir)
             val filePath  = rootDir.resolve("file.c")
             val filename  = filePath.toAbsolutePath.toString
-            val hash      = computeHash(filePath)
+            val hash      = computeHash(filePath, config)
             val cacheFile = cacheDir.resolve(s"$hash.ast")
 
             Files.writeString(cacheFile, "THIS IS NOT VALID MSG PACK DATA")

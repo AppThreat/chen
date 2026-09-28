@@ -1007,7 +1007,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         // relative `@Path("users")` composes into a route-path but gets no framework-route tag of
         // its own. The divergence predates the helpers and no rationale for it is recorded - JAX-RS
         // method paths are relative as often as Spring's. Reconciling them changes what gets
-        // tagged (a tagging change with corpus consequences), so it is flagged here rather than
+        // tagged (a change to existing results), so it is flagged here rather than
         // folded in; it needs its own test and justification.
         handler.annotation
             .name(http.jaxRsPathAnnotation)
@@ -1602,7 +1602,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
     // 1) Attribute routes: `#[Route(...)]`, `#[Get(...)]`, etc. on controller methods. The routed
     //    method surfaces as an entrypoint (framework-route) and its parameters as web-facing input
-    //    (framework-input). Requirement 6.5 / design Decision 3.
+    //    (framework-input).
     val routedMethods =
         atom.method.where(_.annotation.name(PHP_ROUTE_ATTRIBUTE_REGEX)).l
     routedMethods.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
@@ -1617,7 +1617,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     //    string literal naming a function/method that exists in the graph, its parameters are also
     //    marked framework-input so the handler's inputs are treated as web-facing. (EasyTagsPass
     //    already tags add_action/add_filter method *parameters*; here we add the missing mapping of
-    //    the registration/callable itself to a framework-route entrypoint.) Requirement 6.5.
+    //    the registration/callable itself to a framework-route entrypoint.)
     val hookCalls = atom.call.name(WORDPRESS_HOOK_REGEX).l
     hookCalls.foreach { call =>
       val callableArgs = call.argument.argumentIndex(2).l

@@ -10,8 +10,8 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, Da
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
-/** Fragment-based codec for a frontend's local diff graph (CHEN3_PLAN §3/§4 - the successor to
-  * [[AstCache]]'s bespoke upickle bitcode).
+/** Fragment-based codec for a frontend's local diff graph (the successor to [[AstCache]]'s bespoke
+  * upickle bitcode).
   *
   * It serializes a self-contained, add-only diff graph with overflowdb2's `GraphFragmentCodec`,
   * which gives us, for free: a typed lossless value codec (the shared `ValueTypes` path), a

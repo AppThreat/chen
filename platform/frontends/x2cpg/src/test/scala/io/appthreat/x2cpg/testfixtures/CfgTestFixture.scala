@@ -1,5 +1,6 @@
 package io.appthreat.x2cpg.testfixtures
 
+import scala.language.implicitConversions
 import io.appthreat.x2cpg.passes.controlflow.CfgCreationPass
 import io.appthreat.x2cpg.passes.controlflow.cfgcreation.Cfg.CfgEdgeType
 import io.shiftleft.codepropertygraph.Cpg

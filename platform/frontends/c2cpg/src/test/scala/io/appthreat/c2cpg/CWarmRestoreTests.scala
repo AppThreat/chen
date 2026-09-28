@@ -7,10 +7,10 @@ import _root_.io.shiftleft.semanticcpg.language.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Validates the c2cpg fastest-splice warm restore (CHEN3_PLAN §3.4): with fragment caching enabled
-  * (atom `--flux`), a cold `createCpg` parses the project and writes per-file `.frag` mini-graphs;
-  * a second `createCpg` over the same sources reconstructs the AST layer by splicing those
-  * fragments (no parsing, no diff rebuild) and yields a structurally identical graph.
+/** Validates the c2cpg fastest-splice warm restore: with fragment caching enabled (atom `--flux`),
+  * a cold `createCpg` parses the project and writes per-file `.frag` mini-graphs; a second
+  * `createCpg` over the same sources reconstructs the AST layer by splicing those fragments (no
+  * parsing, no diff rebuild) and yields a structurally identical graph.
   */
 class CWarmRestoreTests extends AnyWordSpec with Matchers:
 

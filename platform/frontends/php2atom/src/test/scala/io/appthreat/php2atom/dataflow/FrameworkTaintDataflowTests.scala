@@ -6,7 +6,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
 import io.shiftleft.semanticcpg.language.*
 import io.appthreat.dataflowengineoss.language.*
 
-/** Framework taint dataflow tests (php-support-upgrade task 21.2, Requirements 6.2/6.3/6.4).
+/** Framework taint dataflow tests.
   *
   * For each framework (Laravel, Symfony, WordPress) two behaviours are asserted:
   *   - unsanitized: a framework SOURCE reaches a framework SINK with no sanitizer on the path -> a
@@ -90,7 +90,7 @@ class FrameworkTaintDataflowTests extends PhpCode2CpgFixture(runOssDataflow = tr
 
   // ---------------------------------------------------------------------------
   // Symfony: source Request::get ; sink raw Doctrine DQL ($em->createQuery)
-  // Symfony has no free-function sanitizer in the design (escaping is done by the
+  // Symfony has no free-function sanitizer in the model (escaping is done by the
   // templating/binding layer), so only the unsanitized flow is asserted here.
   // ---------------------------------------------------------------------------
 

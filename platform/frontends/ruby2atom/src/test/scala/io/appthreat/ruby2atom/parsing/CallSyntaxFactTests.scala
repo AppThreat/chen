@@ -5,17 +5,17 @@ import io.shiftleft.semanticcpg.language.*
 
 /** Call syntax comes from the generator's syntax facts (`call_operator`, `has_parentheses`,
   * `percent_array`, `heredoc`) instead of text heuristics over the whitespace-normalized `code`
-  * string (plan 04 §5).
+  * string.
   *
   * Measured scope of that migration, by reverting each fact read to the heuristic it replaced and
   * re-running this suite: only the `heredoc` fact changes an observable outcome (the multiline
   * string case below). `has_parentheses` and `call_operator` agree with the old text checks on
   * every fixture here, and on realistic Ruby generally - `usesParenthesis` is only consulted for
-  * calls with no arguments, which is why plan 04 §5's `log foo(bar)` example is a misread of the
-  * text but not a misclassified call. The facts are still the right input: they are exact, they do
-  * not depend on `code` being un-normalized, and they cost nothing to read. The tests below
-  * therefore pin the *outcomes* - the shapes the CPG must have - and only the heredoc one is a
-  * regression test in the strict sense.
+  * calls with no arguments, which is why `log foo(bar)`, whose text ends in `)`, is still not a
+  * misclassified call. The facts are still the right input: they are exact, they do not depend on
+  * `code` being un-normalized, and they cost nothing to read. The tests below therefore pin the
+  * *outcomes* - the shapes the CPG must have - and only the heredoc one is a regression test in the
+  * strict sense.
   */
 class CallSyntaxFactTests extends RubyCode2CpgFixture:
 

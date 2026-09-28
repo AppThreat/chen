@@ -61,7 +61,7 @@ class Ruby2Atom extends X2CpgFrontend[Config]:
           )
 
         // First pass: a program-wide type inventory that `require` handling and scope
-        // resolution consult during AST creation (plan 04 §6).
+        // resolution consult during AST creation.
         val programSummary = RubyProgramSummaryBuilder.build(
           parsedFiles.map(parsed => parsed.relativeFilePath -> parsed.program)
         )

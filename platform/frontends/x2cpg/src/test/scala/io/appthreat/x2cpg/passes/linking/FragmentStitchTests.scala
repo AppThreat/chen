@@ -15,8 +15,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.jdk.CollectionConverters.*
 
 /** Validates that the overflowdb2 3.0.2 fragment foundation (GraphFragmentCodec / applyFragment)
-  * works for chen's cpg2 schema and node types - the substrate for serialized mini-graph stitching
-  * (CHEN3_PLAN §3):
+  * works for chen's cpg2 schema and node types - the substrate for serialized mini-graph stitching:
   *   - a self-contained frontend diff round-trips through encode -> applyFragment, producing a
   *     graph identical (DiffTool) to directly applying the diff;
   *   - a cross-unit boundary edge is recorded with a symbolic key and resolved back to the live

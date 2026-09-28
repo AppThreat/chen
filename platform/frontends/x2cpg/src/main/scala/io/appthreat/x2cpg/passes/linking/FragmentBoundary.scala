@@ -8,8 +8,8 @@ import java.util.Optional
 
 /** Codec between chen's structured symbol address `(kind, fqName, arity)` and the opaque
   * `overflowdb.SymbolicKey` string used by the fragment foundation (`GraphFragmentCodec` /
-  * `applyFragment`). Keeping the structure on the chen side, and the key opaque in overflowdb, is
-  * the split recommended by the foundation design (§3.6).
+  * `applyFragment`). Keeping the structure on the chen side, and the key opaque in overflowdb,
+  * keeps overflowdb free of any knowledge of chen's symbol model.
   *
   * A NUL separator is used so it never collides with characters that appear in fully-qualified
   * names (`.`, `:`, `|`, etc.).

@@ -4,13 +4,13 @@ import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.appthreat.x2cpg.passes.taggers.EasyTagsPass
 import io.shiftleft.semanticcpg.language.*
 
-/** PEP 750 t-strings, CPG side (Task 10 A, renderer half closed by Task 12 D.1). Two things are
-  * asserted per the task's quality bar: the AST SHAPE (a t-string is a `<operator>.templateString`
-  * call whose interpolations are `<operator>.interpolation` calls - not an opaque Unknown and not a
-  * formatString), and the security semantics that make t-strings worth having (an f-string IS its
-  * concatenation, a t-string is not: nothing flows from an interpolation into the literal's result
-  * \- unless a renderer consumes the template, which the `PythonTemplateRenderPass` bridge edges
-  * carry, `str(t"…")` being the canonical renderer).
+/** PEP 750 t-strings, CPG side, including the renderer half. Two things are asserted: the AST SHAPE
+  * (a t-string is a `<operator>.templateString` call whose interpolations are
+  * `<operator>.interpolation` calls - not an opaque Unknown and not a formatString), and the
+  * security semantics that make t-strings worth having (an f-string IS its concatenation, a
+  * t-string is not: nothing flows from an interpolation into the literal's result - unless a
+  * renderer consumes the template, which the `PythonTemplateRenderPass` bridge edges carry,
+  * `str(t"…")` being the canonical renderer).
   */
 class Py314TemplateStringTests extends PySrc2CpgFixture(withOssDataflow = true):
 
@@ -87,14 +87,14 @@ class Py314TemplateStringTests extends PySrc2CpgFixture(withOssDataflow = true):
           flowsFor("""t"ls {col}"""") shouldBe 0
       }
 
-      "report through a str() renderer (task 12 D.1 closed the limit)" in {
+      "report through a str() renderer" in {
           // In the real language str(tpl) renders the template and the taint escapes; the
           // PythonTemplateRenderPass bridges each interpolation's value to the renderer call,
           // so the flow reports. Both halves hold: the boundary above, the renderer here.
           flowsFor("""str(t"ls {col}")""") should be > 0
       }
 
-      "not bridge through a variable-indirect template (the precise D.1 boundary)" in {
+      "not bridge through a variable-indirect template (the precise renderer boundary)" in {
           val cpg = code(s"""
               |def handler(col):
               |    from string import Template

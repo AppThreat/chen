@@ -13,9 +13,9 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.nio.file.Files
 import scala.jdk.CollectionConverters.*
 
-/** End-to-end check of the fragment-codec mode of [[AstCacheStore]] (CHEN3_PLAN §3/§4): a cold run
-  * parses the part and writes the on-disk fragment; a subsequent warm run reuses it WITHOUT
-  * reparsing and reconstructs an identical graph and the same `usedTypes`.
+/** End-to-end check of the fragment-codec mode of [[AstCacheStore]]: a cold run parses the part and
+  * writes the on-disk fragment; a subsequent warm run reuses it WITHOUT reparsing and reconstructs
+  * an identical graph and the same `usedTypes`.
   */
 class AstCacheStoreFragmentTests extends AnyWordSpec with Matchers:
 

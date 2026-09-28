@@ -4,8 +4,8 @@ import io.appthreat.ruby2atom.testfixtures.RubyCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
 
-/** `itblock` and `numblock` lowering (plan 04 §3). Both used to drop the call and the body: the
-  * numblock collapsed to a bare identifier and the itblock was unknown outright.
+/** `itblock` and `numblock` lowering. Both used to drop the call and the body: the numblock
+  * collapsed to a bare identifier and the itblock was unknown outright.
   */
 class BlockTests extends RubyCode2CpgFixture:
 

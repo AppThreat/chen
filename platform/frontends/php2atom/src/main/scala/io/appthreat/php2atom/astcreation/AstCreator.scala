@@ -228,8 +228,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
     scope.popScope()
     // PHP 8.0+ attribute groups on the method (e.g. `#[Route("/users")]`) map to CPG annotations
-    // so routed controller methods surface as entrypoints downstream (design §2.6; Requirement
-    // 3.2). Additive: a method with no attribute groups yields no annotations.
+    // so routed controller methods surface as entrypoints downstream. Additive: a method with no
+    // attribute groups yields no annotations.
     val annotationAsts = astsForAttributeGroups(decl.attributeGroups)
     methodAstWithAnnotations(
       method,
@@ -277,8 +277,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     * group's attributes into a single sequence. Mirrors the javasrc2cpg annotation convention: one
     * NewAnnotation per attribute with its argument ASTs parented as annotation-assignment children.
     * Additive: an empty `attributeGroups` list yields no annotations, so previously-annotated-free
-    * declarations are unaffected. (design §2.6 "add explicit handlers ... so they stop degrading to
-    * Nop"; Requirement 3.2)
+    * declarations are unaffected. Attribute groups get explicit handling here rather than degrading
+    * to Nop.
     */
   private def astsForAttributeGroups(groups: List[PhpAttributeGroup]): List[Ast] =
       groups.flatMap(_.attrs).map(astForAttribute)
@@ -1018,8 +1018,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
   private def astsForPropertyStmt(stmt: PhpPropertyStmt): List[Ast] =
     // PHP 8.0+ attribute groups map to CPG annotations; PHP 8.4 asymmetric visibility (e.g.
     // `private(set)`) maps to an extra modifier so it is not dropped; PHP 8.4 property hooks
-    // (get/set) have their bodies emitted as child ASTs so hook logic survives downstream
-    // (design §2.6; Requirements 3.2, 3.3).
+    // (get/set) have their bodies emitted as child ASTs so hook logic survives downstream.
     val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
     val asymVisModifier =
         stmt.asymmetricVisibility.map(vis => Ast(newModifierNode(vis))).toList
@@ -1046,7 +1045,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
   /** Emit PHP 8.4 property-hook (`get`/`set`) bodies so their statements are not dropped. A hook
     * with a statement body contributes those statements (wrapped in a block); an abstract/interface
     * hook (no body) contributes nothing. The hook's own attribute groups map to annotations. Kept
-    * intentionally lightweight per design §2.6 (do not over-build). (Requirement 3.3)
+    * intentionally lightweight.
     */
   private def astsForPropertyHook(hook: PhpPropertyHook): List[Ast] =
     val annotationAsts = astsForAttributeGroups(hook.attributeGroups)

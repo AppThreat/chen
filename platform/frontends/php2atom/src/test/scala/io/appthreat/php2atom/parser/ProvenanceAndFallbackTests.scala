@@ -4,9 +4,8 @@ import io.appthreat.php2atom.parser.Domain.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Domain-level decode tests for task 12.1: reading the additive provenance keys off the generator
-  * wrapper object and degrading unmapped nodes gracefully (Requirements 3.1, 3.5, 3.10, 4.1, 4.5;
-  * design §2.6 / Error Handling).
+/** Domain-level decode tests for reading the additive provenance keys off the generator wrapper
+  * object and degrading unmapped nodes gracefully.
   *
   * These feed the JSON contract straight into [[Domain.fromJson]] so they stay hermetic (no PHP
   * runtime required). Two top-level shapes are exercised: the new generator wrapper `{ "ast":

@@ -1,0 +1,576 @@
+package io.appthreat.x2cpg.passes.taggers
+
+import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.passes.CpgPass
+import io.shiftleft.semanticcpg.language.*
+
+import scala.collection.mutable
+
+/** What does this comparison establish.
+  *
+  * For every comparison that control-dominates a memory operation, decide which value it bounds, on
+  * which side, and against what - and tag the bounded value's argument node at that operation:
+  *
+  *   - `bounded-above`, valued `<bounding node id>:<rendered code>` - `size > max_payload_size`
+  *     (early-exit), `cap < len`, `len >= cap`, `!(len <= cap)`;
+  *   - `bounded-below`, same - `size >= 0`, `size > 0`;
+  *   - `bounded-by-extent`, valued with the extent fact the bound came from - `if (n >
+  *     sizeof(dst))`.
+  *
+  * Normalising the comparison is the whole job. `len > cap`, `cap < len`, `len >= cap`, `!(len <=
+  * cap)` and an `FFMIN` clamp are the same fact, and only this pass says so. Nothing here reads
+  * source text: operands come from the comparison's argument expressions, and "the same variable"
+  * is OverlayFacts' structural key (identifier name, or base+member for field accesses) - the thing
+  * a `.code` regex could only approximate.
+  *
+  * Which side holds is decided structurally, not by textual shape: a guard's condition HOLDS at a
+  * memory operation inside the guard's then-subtree or loop body, and does NOT hold at one that
+  * merely follows an early-exit `if` - which is exactly the difference between `if (len < cap)
+  * memcpy(...)` (bounded above) and `if (len > cap) memcpy(...)` (not bounded). Negation through
+  * `!(...)`, `||` and `&&` follows the boolean algebra; where only a disjunction could be concluded
+  * (`if (a || b) memcpy(...)`), no fact is emitted rather than a wrong one.
+  *
+  * Clamps are found as assignments whose right side is a conditional whose branches are the
+  * comparison's own operands (`x = a < b ? a : b`, the shape every min/max macro expands to,
+  * including inside an INLINED macro expansion), or a vocabulary clamp call (`FFMIN`) when the
+  * frontend left the macro unexpanded. The bound propagates from the assignment's definition along
+  * REACHING_DEF to the memory-operation arguments that use the clamped value.
+  *
+  * Runs after [[ExtentPass]] (a bound compared against a buffer's extent is `bounded-by-extent`)
+  * and [[MemoryApiPass]]. C/C++ graphs only.
+  */
+class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPass(atom):
+
+  import GuardPass.*
+  import OverlayFacts.*
+
+  override def run(dstGraph: DiffGraphBuilder): Unit =
+    if !MemoryApiPass.appliesTo(atom) then return
+
+    // argument node -> (tag, value) pairs, emitted in one batch at the end
+    val bounds = mutable.LinkedHashMap.empty[StoredNode, mutable.LinkedHashSet[(String, String)]]
+    def add(node: StoredNode, tag: String, value: String): Unit =
+        bounds.getOrElseUpdate(node, mutable.LinkedHashSet.empty) += ((tag, value))
+
+    val sites = OverlayFacts.memoryArgumentSites(atom)
+    val argsByCall = sites.groupBy { case (call, _, _) => call }
+        .map { case (call, rows) => call -> rows.map { case (_, arg, _) => arg }.distinct }
+    val argNodeIds = sites.map { case (_, arg, _) => arg.id }.toSet
+
+    // An array index is a value a guard can bound exactly like a copy length. The tagged
+    // node is the index ARGUMENT; the controller is the statement the access lives in - CDG
+    // edges reach statement nodes, not the nested access.
+    val indexEntries = atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .flatMap(c => c.argumentOption(2).map(arg => (c, List(arg))))
+
+    guardBounds(argsByCall.toList, add)
+    guardBounds(indexEntries, add, controllerOf = statementRootOf)
+    clampBounds(argNodeIds, add)
+
+    OverlayFacts.emitTags(
+      dstGraph,
+      bounds.toList.flatMap { case (node, tags) =>
+          tags.toList.map { case (tag, value) => (node, tag, value) }
+      }
+    )
+  end run
+
+  /** Facts from comparisons that control memory operations. `controllerOf` decides which node
+    * carries the control relationship - the memory call itself, or (for index accesses) the
+    * statement the access is nested in.
+    */
+  private def guardBounds(
+    entries: List[(Call, List[Expression])],
+    add: (StoredNode, String, String) => Unit,
+    controllerOf: Call => CfgNode = identity
+  ): Unit =
+      entries.foreach { case (call, args) =>
+          val argKeys = args.flatMap { a =>
+              // a guard bounding a variable bounds the whole length when the length is that
+              // variable scaled by a constant or a sizeof: `malloc(n * sizeof(T))` under
+              // `if (n > MAX / sizeof(T))`. Operand sums (`a + b`) are deliberately not covered -
+              // bounding one summand bounds nothing.
+              scaledKeyOf(a).orElse(variableKey(a)).map(k => k -> a)
+          }.toMap
+          guardingControllers(controllerOf(call)).foreach { controller =>
+              conjunctsAt(controller, call).foreach {
+                  case (cmp, cmpHolds) =>
+                      directionalFacts(cmp, cmpHolds).foreach { case (bounded, above, bound) =>
+                          // the value tested must be the value used: `while (n < 4) { n =
+                          // read(); a[n]; }` tests an older n
+                          variableKey(bounded).flatMap(argKeys.get)
+                              .filter(arg => unchangedSince(bounded, arg)).foreach { arg =>
+                                add(
+                                  arg,
+                                  if above then TagAbove else TagBelow,
+                                  s"${bound.id}:${bound.code}"
+                                )
+                                extentValueOf(bound).foreach(ev => add(arg, TagByExtent, ev))
+                              }
+                      }
+              }
+          }
+      }
+
+  /** The statement an expression is rooted in: the innermost node whose parent is a block, a
+    * control structure, or a method. CDG in-edges land on such nodes.
+    */
+  private def statementRootOf(node: CfgNode): CfgNode = GuardPass.statementRootOf(node)
+
+  /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
+    * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
+    * expression.
+    */
+  private def scaledKeyOf(arg: Expression): Option[String] = arg match
+    case c: Call =>
+        c.name match
+          case "<operator>.multiplication" | "<operator>.division" =>
+              val operands = c.argument.l.take(2)
+              operands match
+                case Seq(a, b) =>
+                    if isScaleOperand(b) then variableKey(a)
+                    else if isScaleOperand(a) then variableKey(b)
+                    else None
+                case _ => None
+          case _ => None
+    case _ => None
+
+  private def isScaleOperand(e: Expression): Boolean = e match
+    case _: Literal => true
+    case c: Call    => c.name.startsWith("<operator>.sizeOf")
+    case _          => false
+
+  /** Facts from clamping assignments: `x = a < b ? a : b`, an INLINED macro expansion of it, or a
+    * vocabulary clamp call. Tagged at the definition and at the memory-operation arguments that use
+    * the clamped value.
+    */
+  private def clampBounds(
+    argNodeIds: Set[Long],
+    add: (StoredNode, String, String) => Unit
+  ): Unit =
+    val inventory = MemApiVocab.inventory(externalConfig)
+    atom.call.name("<operator>.assignment").l.foreach { assignment =>
+      val lhs = assignment.argumentOption(1).collect { case i: Identifier => i }
+      val rhs = assignment.argumentOption(2).collect { case c: Call => c }
+      (lhs, rhs) match
+        case (Some(target), Some(clampCall)) =>
+            clampOf(clampCall, inventory).foreach { clamp =>
+              def emit(tag: String): Unit =
+                val value = s"${clamp.node.id}:${clamp.node.code}"
+                add(target, tag, value)
+                // tags land where the rules read them: the argument nodes using the
+                // clamped value
+                reachingUsesOut(target)
+                    .filter(u => argNodeIds.contains(u.id))
+                    .foreach(u => add(u, tag, value))
+              clamp.above.foreach(_ => emit(TagAbove))
+              clamp.below.foreach(_ => emit(TagBelow))
+            }
+        case _ => ()
+    }
+  end clampBounds
+
+  private final case class Clamp(node: Call, above: List[Expression], below: List[Expression])
+
+  /** Recognise `cmp ? a : b` where {a, b} are cmp's own operands (the min/max shape), including
+    * when it sits inside an INLINED macro expansion; or a vocabulary clamp (`FFMIN`). The tag names
+    * `node`: the conditional itself, or the macro invocation for the unexpanded form.
+    */
+  private def clampOf(
+    rhs: Call,
+    inventory: Map[String, MemApiVocab.MemApiEntry]
+  ): Option[Clamp] =
+      rhs.name match
+        case "<operator>.conditional" =>
+            conditionalClamp(rhs, evidence = rhs)
+        case _ =>
+            // an unexpanded macro invocation: the expansion (if wired in) is a copy under the
+            // call; either way the tag names the macro call, which is "the FFMIN clamp"
+            rhs.astChildren.isBlock.ast
+                .isCall
+                .name("<operator>.conditional")
+                .l
+                .headOption
+                .flatMap(cond => conditionalClamp(cond, evidence = rhs))
+                .orElse(vocabularyClamp(rhs, inventory))
+
+  private def vocabularyClamp(
+    call: Call,
+    inventory: Map[String, MemApiVocab.MemApiEntry]
+  ): Option[Clamp] =
+    def arg(i: Int): Option[Expression] = call.argumentOption(i)
+    inventory.get(call.name).flatMap(_.clamp).flatMap {
+        case "min" if arg(1).isDefined && arg(2).isDefined =>
+            Some(Clamp(call, List(arg(1).get, arg(2).get), Nil))
+        case "max" if arg(1).isDefined && arg(2).isDefined =>
+            Some(Clamp(call, Nil, List(arg(1).get, arg(2).get)))
+        case "clip" if arg(2).isDefined && arg(3).isDefined =>
+            Some(Clamp(call, List(arg(3).get), List(arg(2).get)))
+        case _ => None
+    }
+
+  /** `cond ? x : y` where cond compares x and y: the result is one of the operands, so it is
+    * bounded above by both (min) or below by both (max).
+    */
+  private def conditionalClamp(conditional: Call, evidence: Call): Option[Clamp] =
+      for
+        cond <- conditional.argumentOption(1).collect { case c: Call => c }
+        t    <- conditional.argumentOption(2)
+        f    <- conditional.argumentOption(3)
+        kL   <- cond.argumentOption(1).flatMap(variableKey)
+        kR   <- cond.argumentOption(2).flatMap(variableKey)
+        kT   <- variableKey(t)
+        kF   <- variableKey(f)
+        if Set(kL, kR) == Set(kT, kF)
+        lOp <- cond.argumentOption(1)
+        rOp <- cond.argumentOption(2)
+      yield
+        // a < b ? a : b is min; a < b ? b : a is max (and the > mirror)
+        val lessThan = cond.name match
+          case "<operator>.lessThan" | "<operator>.lessEqualsThan" => true
+          case _                                                   => false
+        val isMin = if lessThan then kT == kL else kT == kR
+        if isMin then Clamp(evidence, List(lOp, rOp), Nil)
+        else Clamp(evidence, Nil, List(lOp, rOp))
+
+  /** The comparison facts implied by a boolean expression that holds (or does not hold) at a point:
+    * a list of (comparison, holds) conjuncts, or None when only a disjunction follows and no
+    * per-comparison fact can be honestly emitted.
+    */
+  private def conjuncts(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
+      GuardPass.conjuncts(expr, holds)
+
+  /** Which value a comparison bounds and against what, given that it holds (or does not hold)
+    * there: `len > cap` NOT holding at a point means `len <= cap` there. Returns (bounded operand,
+    * isAbove, bounding operand). Directional operators only; equality establishes nothing
+    * directional.
+    */
+  private def directionalFacts(
+    cmp: Call,
+    holds: Boolean
+  ): List[(Expression, Boolean, Expression)] =
+      GuardPass.directionalFacts(cmp, holds)
+
+  /** Does `condition` (as written) hold at `target`? Decided by control-structure nesting: the
+    * condition holds inside its own then-subtree or loop body, does not hold inside its else, and
+    * does not hold after an early-exit if (the only way a following node stays control-dependent on
+    * the condition).
+    */
+
+  /** The extent fact a bounding expression carries, when it is a buffer's capacity: a sizeof call,
+    * or a variable whose declaration ExtentPass tagged.
+    */
+  private def extentValueOf(bound: Expression): Option[String] = bound match
+    case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+        c.argumentOption(1).map(operand => s"${ExtentPass.ValueSizeof}:${operand.code}")
+    case i: Identifier =>
+        declExtent(i.method.local.name(i.name).headOption)
+            .orElse(declExtent(i.method.parameter.name(i.name).headOption))
+    case c: Call
+        if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
+        OverlayFacts.memberRefOf(atom, c).flatMap(m => declExtent(Some(m)))
+    case _ => None
+
+  private def declExtent(decl: Option[StoredNode]): Option[String] =
+      decl.flatMap: d =>
+        // an `offset:` value (pointer arithmetic into a buffer) is not a capacity and must not
+        // present as the bound a comparison was made against
+        d.tag.name(ExtentPass.TagExtent).value.l.headOption
+            .filterNot(v =>
+                v == ExtentPass.ValueUnknown || v.startsWith(ExtentPass.ValueOffset + ":")
+            )
+end GuardPass
+
+object GuardPass:
+  final val TagAbove    = "bounded-above"
+  final val TagBelow    = "bounded-below"
+  final val TagByExtent = "bounded-by-extent"
+
+  /** The pure comparison semantics, shared with the rules: what a boolean expression establishes,
+    * which side of a comparison it bounds, and whether a condition holds at a point. They read
+    * nothing but the comparison's arguments and the AST/control nesting.
+    */
+  private[taggers] val comparisonOps = Set(
+    "<operator>.greaterThan",
+    "<operator>.greaterEqualsThan",
+    "<operator>.lessThan",
+    "<operator>.lessEqualsThan",
+    "<operator>.equals",
+    "<operator>.notEquals"
+  )
+
+  private[taggers] def statementRootOf(node: CfgNode): CfgNode =
+    var cursor  = node
+    var walking = true
+    while walking do
+      cursor._astIn.nextOption() match
+        case Some(_: Block | _: ControlStructure | _: Method) => walking = false
+        case Some(parent: CfgNode)                            => cursor = parent
+        case _                                                => walking = false
+    cursor
+
+  /** The conditions that establish facts at `node`: its control-dependence controllers that also
+    * DOMINATE it. Control dependence alone is not a guard. Through a loop's back edge a statement
+    * depends on every exit in the loop body, so a sibling `case`'s `if (size > 1000000) goto fail`,
+    * on an EARLIER iteration's value, read as bounding the `avi_read_tag(..., size)` of another
+    * case (avidec.c:1043, where `size` is re-read every iteration); and a do-while body runs once
+    * before its condition is tested. A dominating condition was evaluated on every path to the
+    * node.
+    */
+  private[taggers] def guardingControllers(node: CfgNode): List[Call] =
+    val controllers = node.controlledBy.collect { case c: Call => c }.l
+    if controllers.isEmpty then Nil
+    else
+      val dominators = node.dominatedBy.map(_.id()).toSet
+      controllers.filter(c => dominators.contains(c.id()))
+
+  /** Is the value `use` reads the one the comparison operand `guarded` tested, with no definition
+    * of the variable between them? The walk back from `use` stops at the operand (every call
+    * argument is a reaching definition, the comparison's too); a definition it reaches another way
+    * is a newer value when the guard DOMINATES it - it runs after the test (`while (n < 4) { n =
+    * read(); a[n]; }`). One the guard does not dominate ran before the test, and since the guard
+    * dominates the use, its value went through the test: the reaching definitions are
+    * path-insensitive, so `if (i >= 0 && i < n) a[i]` also delivers the parameter through the
+    * short-circuit path on which the `&&` is false and the access never runs. Plain variables only
+    *   - a field access has no per-variable definitions to walk and is matched by its key alone.
+    */
+  private[taggers] def unchangedSince(guarded: Expression, use: Expression): Boolean =
+      (withoutCasts(guarded), withoutCasts(use)) match
+        case (g: Identifier, u: Identifier) if g.name == u.name =>
+            valueSources(u, stopAt = Some(g.id())).exists(_.forall {
+                case d: CfgNode => !d.dominatedBy.exists(_.id() == g.id())
+                case _          => true
+            })
+        case _ => true
+
+  private def withoutCasts(e: Expression): Expression = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argumentOption(2).orElse(c.argumentOption(1)).collect { case x: Expression => x }
+            .map(withoutCasts).getOrElse(e)
+    case other => other
+
+  /** The definitions of `use`'s variable that its value can come from: parameters, assignment,
+    * increment and address-taken targets. A by-value argument of any other call (`f(i)`, `i < n`)
+    * is also a reaching definition on the graph but does not change the value, and the walk passes
+    * through it; `stopAt` ends the walk at one node without counting it. None when the walk runs
+    * past its budget.
+    */
+  private[taggers] def valueSources(
+    use: Identifier,
+    stopAt: Option[Long] = None,
+    budget: Int = 512
+  ): Option[Set[StoredNode]] =
+    val found                      = mutable.LinkedHashSet.empty[StoredNode]
+    val seen                       = mutable.HashSet.empty[Long]
+    var frontier: List[Identifier] = List(use)
+    var left                       = budget
+    while frontier.nonEmpty && left > 0 do
+      val next = mutable.ListBuffer.empty[Identifier]
+      frontier.foreach { n =>
+        val exclude = OverlayFacts.expansionExclusionOf(n)
+        n._reachingDefIn.foreach { d =>
+            if !exclude.contains(d.id()) && seen.add(d.id()) then
+              left -= 1
+              d match
+                case _ if stopAt.contains(d.id())               => ()
+                case p: MethodParameterIn if p.name == use.name => found += p
+                case i: Identifier if i.name == use.name =>
+                    if isDefinitionSite(i) then found += i else next += i
+                // the method entry, and the argument-to-argument plumbing of the flow semantics
+                case _ => ()
+        }
+      }
+      frontier = next.toList
+    if frontier.nonEmpty then None else Some(found.toSet)
+  end valueSources
+
+  /** Does this occurrence of a variable give it a new value? */
+  private[taggers] def isDefinitionSite(i: Identifier): Boolean =
+      i._astIn.collectFirst { case c: Call => c }.exists { c =>
+        val isTarget = c.argumentOption(1).exists(_.id() == i.id())
+        (isTarget && (c.name.startsWith("<operator>.assignment") ||
+            c.name.matches("<operator>\\.(pre|post)(In|De)crement"))) ||
+        c.name == "<operator>.addressOf"
+      }
+
+  /** Is the directional fact `cmp` gives at `holds` strict? `i < n` holding, or `i >= n` failing,
+    * puts i strictly below n; `i <= n` holding allows i == n.
+    */
+  private[taggers] def isStrict(cmp: Call, holds: Boolean): Boolean = (cmp.name, holds) match
+    case ("<operator>.lessThan" | "<operator>.greaterThan", true)              => true
+    case ("<operator>.lessEqualsThan" | "<operator>.greaterEqualsThan", false) => true
+    case _                                                                     => false
+
+  private[taggers] def conjuncts(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
+      expr.name match
+        case n if comparisonOps.contains(n) => Some(List((expr, holds)))
+        case "<operator>.logicalNot" =>
+            expr.argumentOption(1).collect { case c: Call => c }.flatMap(conjuncts(_, !holds))
+        case "<operator>.logicalAnd" if holds => andThen(expr, holds)
+        case "<operator>.logicalOr" if !holds => andThen(expr, holds)
+        case _                                => None
+
+  private def andThen(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
+    // a non-comparison operand (an integer's truthiness, `audio_roll_distance`) yields no
+    // comparison facts of its own, but its truth or falsity does not BLOCK the comparison
+    // facts of the sibling disjuncts: `!(a > 1 || b > 2U || roll)` still bounds a and b. A
+    // whole-conjunct None (a nested disjunction at the holding polarity) still voids the split.
+    def side(e: Option[AstNode]): Option[List[(Call, Boolean)]] = e match
+      case Some(c: Call)
+          if comparisonOps.contains(c.name) ||
+              c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
+              c.name == "<operator>.logicalOr" => conjuncts(c, holds)
+      // any other operand - an integer's truthiness, a field read - yields no comparison
+      // facts of its own and does not block the sibling's
+      case Some(_) => Some(Nil)
+      case None    => None
+    (side(expr.argumentOption(1)), side(expr.argumentOption(2))) match
+      case (Some(ls), Some(rs)) => Some(ls ++ rs)
+      case _                    => None
+
+  private[taggers] def directionalFacts(
+    cmp: Call,
+    holds: Boolean
+  ): List[(Expression, Boolean, Expression)] =
+      (cmp.argumentOption(1), cmp.argumentOption(2)) match
+        case (Some(l), Some(r)) =>
+            cmp.name match
+              case "<operator>.greaterThan" | "<operator>.greaterEqualsThan" =>
+                  if holds then List((r, true, l), (l, false, r))
+                  else List((l, true, r), (r, false, l))
+              case "<operator>.lessThan" | "<operator>.lessEqualsThan" =>
+                  if holds then List((l, true, r), (r, false, l))
+                  else List((r, true, l), (l, false, r))
+              case _ => Nil
+        case _ => Nil
+
+  /** Does `condition` (as written) hold at `target`? `Some(true)` inside its own then-subtree or
+    * loop body, `Some(false)` inside its else. After the structure, the CFG decides: the target is
+    * reached only through the true branch (the else exits) - it holds; only through the false
+    * branch (the then exits, or a loop left by its condition) - it does not; through both - `None`,
+    * and no fact may be drawn from the condition. (Reading "after the structure" as always false
+    * would read an `if (c) {...} else { return; }` backwards.)
+    */
+  private[taggers] def holdsAtOpt(condition: Call, target: StoredNode): Option[Boolean] =
+      ownerOf(condition).flatMap { owner =>
+        var cursor: Option[StoredNode] = Some(target)
+        var result: Option[Boolean]    = None
+        var resolved                   = false
+        while cursor.isDefined && !resolved do
+          cursor match
+            case Some(cs: ControlStructure) =>
+                if cs == owner then
+                  result = Some(true)
+                  resolved = true
+                else if isElse(cs) && cs._astIn
+                      .collectFirst { case p: ControlStructure => p }
+                      .exists(_ == owner)
+                then
+                  result = Some(false)
+                  resolved = true
+                else cursor = cs._astIn.nextOption()
+            case Some(_: Method) => resolved = true
+            case Some(other)     => cursor = other._astIn.nextOption()
+            case None            => resolved = true
+        result.orElse(branchReaching(condition, owner, target))
+      }
+
+  /** The branch of `condition` through which `target` (outside the structure) is reached. */
+  private def branchReaching(
+    condition: Call,
+    owner: ControlStructure,
+    target: StoredNode
+  ): Option[Boolean] =
+      target match
+        case t: CfgNode =>
+            val (onTrue, onFalse) = branchSuccessors(condition).getOrElse((Nil, Nil))
+            def reaches(from: List[CfgNode]): Boolean =
+                cfgReaches(from, t.id(), avoid = condition.id())
+            (reaches(onTrue), reaches(onFalse)) match
+              case (true, false) => Some(true)
+              case (false, true) => Some(false)
+              case _             => None
+        case _ => None
+
+  /** The condition's CFG successors split into the branch taken when it holds and the one taken
+    * when it does not: the true branch starts inside the structure (its then or body), the false
+    * one in its else or after it.
+    */
+  private[taggers] def branchSuccessors(condition: Expression)
+    : Option[(List[CfgNode], List[CfgNode])] =
+      ownerOf(condition).map { owner =>
+        val elseIds = owner.astChildren.collect {
+            case e: ControlStructure if isElse(e) => e
+        }.ast.id.toSet
+        val condIds  = condition.ast.id.toSet
+        val ownerIds = owner.ast.id.toSet
+        condition._cfgOut.collectAll[CfgNode].l.partition(s =>
+            ownerIds.contains(s.id()) && !elseIds.contains(s.id()) && !condIds.contains(s.id())
+        )
+      }
+
+  /** Is `targetId` reachable from `from` along the CFG without passing `avoid`? An exhausted budget
+    * answers yes: an unknown path may exist.
+    */
+  private[taggers] def cfgReaches(
+    from: List[CfgNode],
+    targetId: Long,
+    avoid: Long,
+    budget: Int
+  ): Boolean = cfgReachesAvoiding(from, targetId, Set(avoid), budget)
+
+  private[taggers] def cfgReaches(from: List[CfgNode], targetId: Long, avoid: Long): Boolean =
+      cfgReachesAvoiding(from, targetId, Set(avoid), 20000)
+
+  /** [[cfgReaches]] around several nodes: a path through any of `avoid` does not count. */
+  private[taggers] def cfgReachesAvoiding(
+    from: List[CfgNode],
+    targetId: Long,
+    avoid: Set[Long],
+    budget: Int = 20000
+  ): Boolean =
+    val seen     = mutable.HashSet.empty[Long]
+    val frontier = mutable.Stack.from(from)
+    var left     = budget
+    var found    = false
+    while !found && frontier.nonEmpty && left > 0 do
+      val n = frontier.pop()
+      if n.id() == targetId then found = true
+      else if !avoid.contains(n.id()) && seen.add(n.id()) then
+        left -= 1
+        n._cfgOut.collectAll[CfgNode].foreach(frontier.push)
+    found || left <= 0
+
+  /** The (comparison, holds) conjuncts of a controller at a target, or none when the controller's
+    * truth there is not known.
+    */
+  private[taggers] def conjunctsAt(condition: Call, target: StoredNode): List[(Call, Boolean)] =
+      holdsAtOpt(condition, target).flatMap(h => conjuncts(condition, h)).getOrElse(Nil)
+
+  private def ownerOf(condition: Expression): Option[ControlStructure] =
+    var cursor: Option[StoredNode]      = condition._astIn.nextOption()
+    var owner: Option[ControlStructure] = None
+    while owner.isEmpty && cursor.isDefined do
+      cursor.get match
+        case cs: ControlStructure => owner = Some(cs)
+        case _: Method            => cursor = None
+        case other                => cursor = other._astIn.nextOption()
+    owner
+
+  /** The else branch is typed by `controlStructureType` - c2cpg emits it as `ELSE` carrying the
+    * else-block's own parser type (`CASTCompoundStatement`), so matching on parserTypeName alone
+    * never recognises one. Every guard written as `if (too big) { ... } else { the copy }` would
+    * then be read as if the condition HELD at the copy: a disjunction in it could not be split
+    * (`conjuncts(_, holds = true)` is not separable), no bound would be emitted, and the bounds
+    * rules would fire on correctly guarded code - a common MS-BOUND-002/MS-BOUND-003 false
+    * positive.
+    */
+  private def isElse(cs: ControlStructure): Boolean =
+      cs.controlStructureType.equalsIgnoreCase("ELSE") ||
+          cs.parserTypeName.equalsIgnoreCase("else")
+
+  def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end GuardPass

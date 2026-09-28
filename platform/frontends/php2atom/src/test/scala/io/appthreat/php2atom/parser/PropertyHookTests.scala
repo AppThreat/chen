@@ -5,16 +5,14 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import ujson.Value
 
-/** Domain-level decode tests for PHP 8.4 property hooks and asymmetric visibility (task 10.2,
-  * Requirement 3.3).
+/** Domain-level decode tests for PHP 8.4 property hooks and asymmetric visibility.
   *
   * These feed representative nikic/php-parser 5.x JSON (the `--json-dump` shape for PHP 8.4
   * `Stmt_Property` with a `hooks` array and set-visibility `flags` bits) straight into
   * [[Domain.fromJson]]. A Domain-level decode test is used deliberately rather than a `source ->
   * cpg` fixture: property hooks require the PHP 8.4 grammar, which the runtime bundled in CI may
   * not be able to parse, so exercising the JSON contract directly keeps the test hermetic while
-  * still asserting the exact decoded [[PhpPropertyHook]] / `asymmetricVisibility` shapes landed by
-  * task 10.1.
+  * still asserting the exact decoded [[PhpPropertyHook]] / `asymmetricVisibility` shapes.
   */
 class PropertyHookTests extends AnyWordSpec with Matchers:
 

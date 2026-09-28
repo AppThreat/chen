@@ -3,10 +3,10 @@ package io.appthreat.pysrc2cpg
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Task 09 section B: the module-name rules that make dotted names unambiguous, asserted against
-  * CPython's own import semantics (oracle: 3.14.6, `importlib.util.find_spec` - a directory
-  * containing `__init__.py` is found by the path finder BEFORE same-named module files, so the
-  * package wins and the shadowed file is unimportable).
+/** The module-name rules that make dotted names unambiguous, asserted against CPython's own import
+  * semantics (oracle: 3.14.6, `importlib.util.find_spec` - a directory containing `__init__.py` is
+  * found by the path finder BEFORE same-named module files, so the package wins and the shadowed
+  * file is unimportable).
   */
 class PythonModuleNameTests extends AnyWordSpec with Matchers:
 

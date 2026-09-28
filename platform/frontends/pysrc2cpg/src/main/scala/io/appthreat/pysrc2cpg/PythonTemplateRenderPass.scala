@@ -7,20 +7,20 @@ import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
-/** Task 12 D.1 - renderer-aware t-string semantics.
+/** Renderer-aware t-string semantics.
   *
   * PEP 750's boundary: a t-string is not a concatenation, and the no-flow semantic declared for
   * `<operator>.templateString` keeps an interpolation's taint out of the template object. That is
   * correct and stays - an UNRENDERED template reaching a sink is not a finding, because nothing has
   * been substituted.
   *
-  * The other half, closed here: a RENDERER - a call that consumes a template and produces a string,
-  * `str(tpl)` being the canonical example - re-exposes the interpolations in the real language, and
-  * the engine should propagate their taint through it. Node-local taint cannot distinguish the
-  * consumer, so the semantic alone cannot express "flow only when rendered"; instead this pass adds
-  * the missing `REACHING_DEF` bridge edges from each interpolation's value expression to the
-  * RENDERER CALL NODE, but only when a renderer's argument IS a `<operator>.templateString` call.
-  * The permissive call-site walk then carries the value's taint to the renderer's result, while the
+  * The other half: a RENDERER - a call that consumes a template and produces a string, `str(tpl)`
+  * being the canonical example - re-exposes the interpolations in the real language, and the engine
+  * should propagate their taint through it. Node-local taint cannot distinguish the consumer, so
+  * the semantic alone cannot express "flow only when rendered"; instead this pass adds the missing
+  * `REACHING_DEF` bridge edges from each interpolation's value expression to the RENDERER CALL
+  * NODE, but only when a renderer's argument IS a `<operator>.templateString` call. The permissive
+  * call-site walk then carries the value's taint to the renderer's result, while the
   * direct-consumption boundary keeps holding - the template object itself still receives nothing
   * from its interpolations.
   *

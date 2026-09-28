@@ -366,9 +366,8 @@ class CdxPass(
     val reChars = "[](){}*+&|?.,\\$"
     str.exists(reChars.contains)
 
-  /** The full-name pattern shape for Python. This is the blocking constraint from Task 6: the
-    * pattern form MUST match the representation the frontend produced, or every purl, `framework`
-    * and description tag silently zeroes out.
+  /** The full-name pattern shape for Python. The pattern form MUST match the representation the
+    * frontend produced, or every purl, `framework` and description tag silently zeroes out.
     */
   private def toPyModuleForm(str: String): String =
     if str.isEmpty then return str

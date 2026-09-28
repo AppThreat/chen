@@ -6,8 +6,8 @@ import io.shiftleft.semanticcpg.language.*
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 
 /** Regression tests for the false-positive-reduction tagging added to [[EasyTagsPass]] for Python:
-  * literal-argument reflection suppression (G2), ORM `db-read` barrier tagging (G1), unsafe vs safe
-  * (de)serialisation split (G5) and benign render/redirect output suppression (G3/G4).
+  * literal-argument reflection suppression, ORM `db-read` barrier tagging, unsafe vs safe
+  * (de)serialisation split and benign render/redirect output suppression.
   */
 class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
 
@@ -17,7 +17,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
   ): Set[String] =
       cpg.call.code(s".*${java.util.regex.Pattern.quote(snippet)}.*").tag.name.toSet
 
-  "EasyTagsPass Python reflection (G2)" should:
+  "EasyTagsPass Python reflection (literal attribute names)" should:
 
     "not tag getattr with a literal attribute name as reflection" in:
       val cpg = code("""
@@ -35,7 +35,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       tagsOfCallContaining(cpg, "getattr") should contain("reflection")
 
-  "EasyTagsPass Python ORM reads (G1)" should:
+  "EasyTagsPass Python ORM reads (Django accessors)" should:
 
     "tag get_object_or_404 as db-read" in:
       val cpg = code("""
@@ -53,7 +53,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       cpg.call.name("get").tag.name.toSet should contain("db-read")
 
-  "EasyTagsPass Python (de)serialisation (G5)" should:
+  "EasyTagsPass Python (de)serialisation" should:
 
     "tag pickle.loads as unsafe-deserialization" in:
       val cpg = code("""
@@ -73,7 +73,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       tagsOfCallContaining(cpg, "json.loads") should not contain "unsafe-deserialization"
 
-  "EasyTagsPass Python render/output (G3)" should:
+  "EasyTagsPass Python render/output" should:
 
     "not tag render with a method-resolved template as framework-output" in:
       val cpg = code("""
@@ -91,7 +91,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       cpg.call.name("render").tag.name.toSet should not contain "framework-output"
 
-  "EasyTagsPass Python ORM reads (G1, round 3)" should:
+  "EasyTagsPass Python ORM reads (get_object_or_none)" should:
 
     "tag get_object_or_none as db-read and not framework-output" in:
       val cpg = code("""
@@ -103,7 +103,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       tags should contain("db-read")
       tags should not contain "framework-output"
 
-  "EasyTagsPass Python reflection (G2, round 3)" should:
+  "EasyTagsPass Python reflection (self attribute names)" should:
 
     "not tag getattr with a self.<attr> attribute as reflection" in:
       val cpg = code("""
@@ -113,7 +113,7 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       cpg.call.name("getattr").tag.name.toSet should not contain "reflection"
 
-  "EasyTagsPass Python sanitizers (G6+)" should:
+  "EasyTagsPass Python sanitizers" should:
 
     "tag url_has_allowed_host_and_scheme as sanitization" in:
       val cpg = code("""
@@ -171,13 +171,13 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       new EasyTagsPass(cpg).createAndApply()
       cpg.call.name("run").tag.name.toSet should not contain "code-execution"
 
-  /** P.2 prefilter safety: every sink family whose regex is now wrapped in a `PrefilteredRegex`
-    * must still tag its call. Each case names the family and a call that the regex accepted before
-    * the prefilter; a literal group narrower than its pattern drops the tag here. Families whose
-    * full-name pattern only fires in dotted mode (socket, ssl, net-protocol, shutil) are covered by
+  /** Prefilter safety: every sink family whose regex is wrapped in a `PrefilteredRegex` must still
+    * tag its call. Each case names the family and a call that the bare regex accepts; a literal
+    * group narrower than its pattern drops the tag here. Families whose full-name pattern only
+    * fires in dotted mode (socket, ssl, net-protocol, shutil) are covered by
     * [[EasyTagsPassDottedPrefilterTests]].
     */
-  "EasyTagsPass Python prefiltered sink families (P.2)" should:
+  "EasyTagsPass Python prefiltered sink families" should:
 
     val families = Table(
       ("family", "snippet", "tag"),
@@ -264,8 +264,8 @@ class EasyTagsPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       cpg.call.tag.name.toSet should not contain "network"
 end EasyTagsPassTests
 
-/** The dotted half of the P.2 prefilter safety net: `socket.socket()`, `ssl.*` etc. only resolve to
-  * full names their regex accepts in dotted form, which is now the only form.
+/** The dotted half of the prefilter safety net: `socket.socket()`, `ssl.*` etc. only resolve to
+  * full names their regex accepts in dotted form, which is the only form.
   */
 class EasyTagsPassDottedPrefilterTests extends PySrc2CpgFixture(withOssDataflow = false):
 
@@ -275,7 +275,7 @@ class EasyTagsPassDottedPrefilterTests extends PySrc2CpgFixture(withOssDataflow 
   ): Set[String] =
       cpg.call.name(callName).tag.name.toSet
 
-  "EasyTagsPass dotted-mode prefiltered families (P.2)" should:
+  "EasyTagsPass dotted-mode prefiltered families" should:
 
     "tag socket.socket as network" in:
       val cpg = code("""

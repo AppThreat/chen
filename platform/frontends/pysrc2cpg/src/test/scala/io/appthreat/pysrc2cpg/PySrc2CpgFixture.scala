@@ -127,7 +127,7 @@ class PySrcTestCpg extends TestCpg with PythonFrontend:
       val options = new OssDataFlowOptions(extraFlows = _extraFlows ++ depSemantics)
       new OssDataFlow(options).run(context)
       // Mirrors atom's enhancement order: the t-string renderer bridges run after the DDG
-      // exists (task 12 D.1).
+      // exists.
       new PythonTemplateRenderPass(this).createAndApply()
   end applyPasses
 end PySrcTestCpg

@@ -46,10 +46,10 @@ class SourceTravsToStartingPointsTask[NodeType](sourceTravs: IterableOnce[NodeTy
     tasks.flatMap { case (src, t: ForkJoinTask[List[CfgNode]]) =>
         Try(t.get()).orElse(Try(new SourceToStartingPoints(src).compute())) match
           // One synchronous retry: these tasks only read the graph, and a transient loss of
-          // the race against another thread's lazy deserialization of the same adjacency used
-          // to drop the source's starting points - and with them every flow rooted at that
-          // source - silently, a different handful per run (task 12 part B). A source that
-          // fails twice is still dropped, but logged, and identically on every run.
+          // the race against another thread's lazy deserialization of the same adjacency would
+          // otherwise drop the source's starting points - and with them every flow rooted at
+          // that source - silently, a different handful per run. A source that fails twice is
+          // still dropped, but logged, and identically on every run.
           case Failure(e) =>
               // Twice, now - the message says so, because "unable to complete" read as a
               // first-attempt hiccup and this is a source whose every flow is absent from the

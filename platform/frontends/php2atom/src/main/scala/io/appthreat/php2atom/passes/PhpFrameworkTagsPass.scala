@@ -12,13 +12,12 @@ import java.util.regex.Pattern
 import scala.collection.mutable
 
 /** Tags PHP framework taint SOURCES and SINKS on the CPG from the vocabulary declared in
-  * [[io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics]] (php-support-upgrade design
-  * §2.7, Requirements 6.2/6.3/6.4).
+  * [[io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics]].
   *
-  * Until this pass existed the source/sink half of the framework taint model was a set of unused
-  * constants: only the sanitizer half (`DefaultSemantics.phpFlows`) and route/entrypoint tagging
-  * (`ChennaiTagsPass.tagPhpRoutes`) were wired, so nothing marked the framework request accessors
-  * or the raw query/output sinks on the graph.
+  * This pass consumes the source/sink half of the framework taint model; the sanitizer half is
+  * consumed by `DefaultSemantics.phpFlows` and route/entrypoint tagging by
+  * `ChennaiTagsPass.tagPhpRoutes`. Without it nothing would mark the framework request accessors or
+  * the raw query/output sinks on the graph.
   *
   * ==Tag names==
   * The existing tag vocabulary is reused rather than extended, so the tags are observable by
@@ -92,8 +91,8 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
             matchesReceiver(call, RequestReceiverPattern))
 
   /** `$_GET['q']` and friends: an `<operator>.indexAccess` whose base identifier is a superglobal.
-    * `$_SERVER` is filtered down to the attacker-controlled keys (finding C-M2) so that reads such
-    * as `$_SERVER['DOCUMENT_ROOT']` are not reported as web input.
+    * `$_SERVER` is filtered down to the attacker-controlled keys so that reads such as
+    * `$_SERVER['DOCUMENT_ROOT']` are not reported as web input.
     */
   private def isSuperglobalRead(call: Call): Boolean =
     val base = call.argument.argumentIndex(1).isIdentifier.name.headOption

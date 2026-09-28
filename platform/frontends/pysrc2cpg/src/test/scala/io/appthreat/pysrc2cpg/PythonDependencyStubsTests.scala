@@ -259,14 +259,14 @@ class PythonDependencyStubsTests extends PySrc2CpgFixture(withOssDataflow = true
       route.ast.isReturn.l should not be empty
 end PythonDependencyStubsTests
 
-/** Task 7.1: what `summaries` mode is actually worth.
+/** What `summaries` mode is actually worth.
   *
   * The engine's default for a callee it cannot look inside is permissive - every argument taints
   * the call's result. So `python-deps=stubs` on its own barely moves flows: taint already crossed
   * the library boundary, it just crossed it for every library function alike, `sanitize` and
   * `passthrough` treated identically. The summaries computed from the dependency's real source
-  * become declared flow semantics, and a declared semantic is authoritative - which is what finally
-  * lets the two be told apart.
+  * become declared flow semantics, and a declared semantic is authoritative - which is what lets
+  * the two be told apart.
   *
   * The suite is written as a matched triple against the SAME library and the SAME user code, so
   * every assertion is paired with its near-miss:

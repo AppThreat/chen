@@ -31,9 +31,9 @@ case class SymbolicKey(kind: String, fqName: String, arity: Int = -1)
   * `cpg.method.fullNameExact(...)` calls that each linking pass performs independently today.
   *
   * Besides the lookup maps it records, per unit (source file), the set of FQNs that unit exports.
-  * That `unitExports` table is the boundary interface needed for incremental re-stitching
-  * (CHEN3_PLAN §3.2/§4): when a file changes, only call sites in dirty units and edges that
-  * targeted symbols whose defining unit changed need to be re-resolved.
+  * That `unitExports` table is the boundary interface needed for incremental re-stitching: when a
+  * file changes, only call sites in dirty units and edges that targeted symbols whose defining unit
+  * changed need to be re-resolved.
   */
 class SymbolIndex private (
   private val methodsByFullName: mutable.Map[String, mutable.ArrayBuffer[Method]],

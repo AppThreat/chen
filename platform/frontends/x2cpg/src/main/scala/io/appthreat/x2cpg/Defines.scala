@@ -13,9 +13,26 @@ object Defines:
   // is the number of call arguments.
   // Note that this schema and thus the defines only makes sense for statically
   // typed languages with a package/namespace structure like Java, CSharp, etc..
-  val Any                 = "ANY"
-  val UnresolvedNamespace = "<unresolvedNamespace>"
-  val UnresolvedSignature = "<unresolvedSignature>"
+  val Any = "ANY"
+
+  // A frontend-recorded storage class on a LOCAL that has static storage duration (C/C++
+  // `static` inside a function): the schema has no property or MODIFIER child for it on a LOCAL.
+  val StorageClassTag = "storage-class"
+
+  /** The compile-time value of a constant a frontend could not show as a literal (a `const` or
+    * `constexpr` integral defined in a header the tree does not parse), on the identifiers that
+    * name it.
+    */
+  val ConstValueTag      = "const-value"
+  val StorageClassStatic = "static"
+
+  /** A GCC/Clang function attribute written on a declaration or definition, normalised
+    * (`__malloc__` -> `malloc`, `alloc_size(1, 2)` -> `alloc_size(1,2)`): the declared semantics a
+    * header gives a function whose body is out of scope. On the METHOD, one tag per attribute.
+    */
+  val FunctionAttributeTag = "fn-attr"
+  val UnresolvedNamespace  = "<unresolvedNamespace>"
+  val UnresolvedSignature  = "<unresolvedSignature>"
 
   // Name of the synthetic, static method that contains the initialization of member variables.
   val StaticInitMethodName = "<clinit>"

@@ -11,15 +11,13 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-/** In-process counterpart of the `~/sandbox/py-corpus` harness (P0.3): runs the grammar-corpus
-  * assertions from the corpus files' `# CHEN-EXPECT:` headers, so CI catches parser regressions
-  * without the built atom binary.
+/** Runs the grammar-corpus assertions from the corpus files' `# CHEN-EXPECT:` headers in process,
+  * so CI catches parser regressions without the built atom binary.
   *
-  * The corpus lives in `src/test/resources/corpus/grammar` and mirrors
-  * `~/sandbox/py-corpus/grammar`. Structural assertions (parse errors, node absence, control
-  * structures) are evaluated here; the heavier framework/flow suite stays in the external harness.
-  * An `# CHEN-EXPECT-XFAIL:` header marks a known-red assertion; when it starts passing the test
-  * fails with a request to remove the -XFAIL.
+  * The corpus lives in `src/test/resources/corpus/grammar`. Structural assertions (parse errors,
+  * node absence, control structures) are evaluated here; heavier framework and flow checks need a
+  * built atom binary and run outside the unit tests. An `# CHEN-EXPECT-XFAIL:` header marks a
+  * known-red assertion; when it starts passing the test fails with a request to remove the -XFAIL.
   */
 class PyCorpusRegressionTests extends AnyFreeSpec with Matchers:
 

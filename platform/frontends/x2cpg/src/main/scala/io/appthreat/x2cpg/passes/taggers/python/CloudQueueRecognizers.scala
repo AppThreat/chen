@@ -6,11 +6,11 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import PythonRecognizerUtil.*
 
-/** B6 - cloud, queues and task frameworks.
+/** Cloud, queues and task frameworks.
   *
-  * NB (Task 5 input): boto3 client objects are untyped at call sites (`s3.get_object(...)`), so the
-  * service operations are matched by call NAME within the boto3-gated project; a receiver type join
-  * (client -> service) would be more precise.
+  * NB: boto3 client objects are untyped at call sites (`s3.get_object(...)`), so the service
+  * operations are matched by call NAME within the boto3-gated project; a receiver type join (client
+  * -> service) would be more precise.
   */
 object Boto3Recognizer extends PythonFrameworkRecognizer:
 
@@ -54,8 +54,8 @@ object Boto3Recognizer extends PythonFrameworkRecognizer:
     cpg.call.name(EgressOps.mkString("|")).foreach(c => tag(c, SERVICE_EGRESS_TAG))
 end Boto3Recognizer
 
-/** B6 - AWS Lambda event handlers: `def lambda_handler(event, context)` (also `handler` and
-  * `*_handler` naming). The `event` parameter is attacker-controlled; `context` is not.
+/** AWS Lambda event handlers: `def lambda_handler(event, context)` (also `handler` and `*_handler`
+  * naming). The `event` parameter is attacker-controlled; `context` is not.
   *
   * The gate is a method-name index lookup (lambda projects have no importable framework); the
   * handler-shape check (first user parameter named `event`) keeps the run phase precise.
@@ -89,7 +89,7 @@ object LambdaHandlerRecognizer extends PythonFrameworkRecognizer:
         }
 end LambdaHandlerRecognizer
 
-/** B6 - Azure Functions (v2 programming model: `@app.route`, `@app.timer_trigger`, ... on
+/** Azure Functions (v2 programming model: `@app.route`, `@app.timer_trigger`, ... on
   * `function_app.py` handlers, and the v1 `def main(req)` convention).
   */
 object AzureFunctionsRecognizer extends PythonFrameworkRecognizer:
@@ -116,7 +116,7 @@ object AzureFunctionsRecognizer extends PythonFrameworkRecognizer:
         .foreach(m => tagHandler(m))
 end AzureFunctionsRecognizer
 
-/** B6 - GCP Cloud Functions via `functions_framework` (`@functions_framework.http`, legacy `def
+/** GCP Cloud Functions via `functions_framework` (`@functions_framework.http`, legacy `def
   * main(request)` entry points).
   */
 object GcpCloudFunctionRecognizer extends PythonFrameworkRecognizer:
@@ -136,7 +136,7 @@ object GcpCloudFunctionRecognizer extends PythonFrameworkRecognizer:
         .filter(isUserMethod)
         .foreach(m => tagHandler(m))
 
-/** B6 - task queues and schedulers. Task functions are entry points: Celery `@app.task` /
+/** Task queues and schedulers. Task functions are entry points: Celery `@app.task` /
   * `@shared_task`, RQ `@job`, Dramatiq `@dramatiq.actor`, APScheduler `@scheduled_job`. Enqueue
   * calls (`delay`, `apply_async`, `enqueue`, `send`) are service egress; APScheduler's `add_job`
   * registrations are cron metadata.
@@ -169,9 +169,9 @@ object TaskQueueRecognizer extends PythonFrameworkRecognizer:
     cpg.call.nameExact("add_job").foreach(c => tag(c, CRON_TAG))
 end TaskQueueRecognizer
 
-/** B6 - ORMs / database drivers. `execute`/`raw`/`extra`/`text` are already tagged `sql` by
-  * EasyTagsPass (P1.3); this recognizer adds the shapes those rules miss: SQLAlchemy 2.0's
-  * `select(...)` expression API and the asyncpg/psycopg fetch family.
+/** ORMs / database drivers. `execute`/`raw`/`extra`/`text` are already tagged `sql` by
+  * EasyTagsPass; this recognizer adds the shapes those rules miss: SQLAlchemy 2.0's `select(...)`
+  * expression API and the asyncpg/psycopg fetch family.
   */
 object OrmRecognizer extends PythonFrameworkRecognizer:
 

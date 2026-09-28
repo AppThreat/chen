@@ -47,6 +47,114 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   private val localUsedTypes: java.util.Set[String] =
       java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
 
+  private val localMemberOwners: java.util.Set[String] =
+      java.util.concurrent.ConcurrentHashMap.newKeySet[String]()
+
+  /** Record the ordered member layout of the struct or class a member access reads: a type defined
+    * in a header is otherwise known to the graph only as an `<includes>` stub without members, and
+    * the member's declared type (`char space_[200]`) is what extent reasoning reads. CDT's binding
+    * resolves across includes. Recorded through the used-types channel, so the AST cache replays
+    * it; registered under the spelling the graph uses for the type and under the composite's own
+    * name (a typedef and its struct).
+    */
+  protected def registerMembersOf(owner: IType): Unit =
+      unwrapCompositeType(owner).foreach { ct =>
+        val spelled =
+            Try(safeGetType(owner)).toOption.toList ++ Try(safeGetType(ct)).toOption.toList
+        val names = spelled
+            .map(t =>
+                fixQualifiedName(StringUtils.normalizeSpace(cleanType(t))).stripSuffix("*").trim
+            )
+            .filter(n => n.nonEmpty && n != Defines.anyTypeName)
+            .distinct
+        val fields = Try(ct.getFields.toList).getOrElse(Nil)
+        names.filter(localMemberOwners.add).foreach { ownerName =>
+            fields.zipWithIndex.foreach { (f, i) =>
+              val tpe = fieldDeclarationType(f)
+                  .getOrElse(declarationSpelling(cleanType(safeGetType(f.getType))))
+              val record = CGlobal.memberRecord(ownerName, i + 1, f.getName, tpe)
+              CGlobal.usedTypes.putIfAbsent(record, true)
+              localUsedTypes.add(record)
+            }
+        }
+      }
+
+  /** A member type as the declaration pass spells it: CDT's string with the extent attached (`char
+    * [16]` -> `char[16]`), the signedness where CDT puts it (`short unsigned`, as a parsed struct's
+    * own members read).
+    */
+  private def declarationSpelling(t: String): String = t.replaceAll("\\s+\\[", "[")
+
+  /** The member type exactly as the declaration pass computes it for a parsed struct: the field's
+    * own declarator (CDT's binding keeps its definition, in whichever header) - `typeFor` for an
+    * array declarator, the declaration's specifier otherwise.
+    */
+  private def fieldDeclarationType(f: IField): Option[String] =
+    val definition = f match
+      case b: org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding =>
+          Option(b.getDefinition)
+      case b: ICPPInternalBinding => Option(b.getDefinition)
+      case _                      => None
+    definition.flatMap(n => Option(n.getParent)).collect { case d: IASTDeclarator => d }.flatMap {
+        d =>
+            d.getParent match
+              case decl: IASTSimpleDeclaration =>
+                  Try {
+                      d match
+                        case _: IASTArrayDeclarator => typeFor(d)
+                        case _ =>
+                            typeForDeclSpecifier(
+                              decl.getDeclSpecifier,
+                              index = decl.getDeclarators.indexOf(d).max(0)
+                            )
+                  }.toOption.filter(t => t.nonEmpty && t != Defines.anyTypeName)
+              case _ => None
+    }
+  end fieldDeclarationType
+
+  private def unwrapCompositeType(t: IType): Option[ICompositeType] = t match
+    case ct: ICompositeType => Some(ct)
+    case td: ITypedef       => Option(td.getType).flatMap(unwrapCompositeType)
+    case q: IQualifierType  => Option(q.getType).flatMap(unwrapCompositeType)
+    case p: IPointerType    => Option(p.getType).flatMap(unwrapCompositeType)
+    case _                  => None
+
+  /** A name the file reads but does not define, bound to a `const`/`constexpr` integral variable
+    * with a compile-time value (`config::kNumLevels` from a header): record the value, the way the
+    * preprocessor already shows a `#define` as its literal.
+    */
+  protected def registerConstantRead(ident: IASTNode): Unit =
+    val binding = ident match
+      case id: IASTIdExpression => Try(id.getName.resolveBinding()).toOption
+      case n: IASTName          => Try(n.resolveBinding()).toOption
+      case _                    => None
+    binding.collect { case v: IVariable if !v.isInstanceOf[IParameter] => v }.foreach { v =>
+      val constant = Try(v.getType).toOption.exists {
+          case q: IQualifierType => q.isConst
+          case _                 => false
+      } || (v match
+        case c: ICPPVariable => Try(c.isConstexpr).getOrElse(false)
+        case _               => false
+      )
+      val value =
+          Try(Option(v.getInitialValue).flatMap(iv => Option(iv.numericalValue()))).toOption.flatten
+      if constant then
+        value.foreach { n =>
+          val record = CGlobal.constRecord(v.getName, n.longValue)
+          CGlobal.usedTypes.putIfAbsent(record, true)
+          localUsedTypes.add(record)
+        }
+    }
+  end registerConstantRead
+
+  /** An implicit-this member read (`space_` inside a method): record its class's layout. */
+  protected def registerImplicitMemberOwner(ident: IASTNode): Unit = ident match
+    case s: CPPASTIdExpression =>
+        safeGetEvaluation(s) match
+          case Some(e: EvalMemberAccess) => registerMembersOf(e.getOwnerType)
+          case _                         => ()
+    case _ => ()
+
   /** The distinct type names this creator registered, for caching. */
   def usedTypes: Seq[String] =
     import scala.jdk.CollectionConverters.*
@@ -299,7 +407,12 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           val nodeType = safeGetNodeType(node)
           cleanType(nodeType, stripKeywords)
       case s: IASTNamedTypeSpecifier =>
-          cleanType(ASTStringUtil.getReturnTypeString(s, null), stripKeywords)
+          val spelled = ASTStringUtil.getReturnTypeString(s, null)
+          val name    = s.getName.toString
+          val qualified = bindingQualifiedName(s.getName)
+              .filter(_ => spelled.endsWith(name))
+              .map(q => spelled.dropRight(name.length) + q)
+          cleanType(qualified.getOrElse(spelled), stripKeywords)
       case s: IASTCompositeTypeSpecifier =>
           cleanType(ASTStringUtil.getReturnTypeString(s, null), stripKeywords)
       case s: IASTEnumerationSpecifier =>
@@ -619,7 +732,9 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           // qualify correctly via pointersAsString.
           val parentDecl = s.getParent.asInstanceOf[IASTFunctionDefinition].getDeclarator
           pointersAsString(s, parentDecl, stripKeywords)
-      case s: IASTNamedTypeSpecifier => ASTStringUtil.getSimpleName(s.getName)
+      case s: IASTNamedTypeSpecifier =>
+          bindingQualifiedName(s.getName).map(fixQualifiedName)
+              .getOrElse(ASTStringUtil.getSimpleName(s.getName))
       case s: IASTCompositeTypeSpecifier if s.getParent.isInstanceOf[IASTSimpleDeclaration] =>
           val parentDecl =
               s.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclarators.toList(index)
@@ -639,6 +754,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           val parentDecl =
               s.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclarators.toList(index)
           pointersAsString(s, parentDecl, stripKeywords)
+      case s: IASTElaboratedTypeSpecifier
+          if s.getParent.isInstanceOf[IASTFunctionDefinition] =>
+          // `struct entry *find(...) {...}`: the return type's pointer lives on the function
+          // declarator. Without this case the definition's return type would be `struct entry` -
+          // no pointer - while the same function's declaration says `struct entry*`
+          val parentDecl = s.getParent.asInstanceOf[IASTFunctionDefinition].getDeclarator
+          pointersAsString(s, parentDecl, stripKeywords)
       case s: IASTElaboratedTypeSpecifier => ASTStringUtil.getSignatureString(s, null)
       case _                              => Defines.anyTypeName
     if tpe.isEmpty then Defines.anyTypeName else tpe
@@ -649,6 +771,29 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
 
   protected def safeGetType(tpe: IType): String =
       Try(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
+
+  /** The qualified name (`kv::LookupKey`) of a C++ class or enum written as a plain name inside its
+    * namespace or class. The member layouts, implicit-this owners and resolved calls all spell the
+    * type through its binding, so the source spelling alone (`LookupKey`) would give the same class
+    * a second, member-less `<includes>` stub. Only a plain name bound to a non-template class or
+    * enum outside the global scope is qualified: typedefs, template ids, names already written with
+    * a qualifier and unresolved names keep their spelling.
+    */
+  private def bindingQualifiedName(name: IASTName): Option[String] = name match
+    case _: ICPPASTQualifiedName | _: ICPPASTTemplateId => None
+    case _ =>
+        Try(name.resolveBinding()).toOption
+            .collect {
+                case _: IProblemBinding        => None
+                case _: ICPPTemplateDefinition => None
+                case _: ICPPSpecialization     => None
+                case _: ICPPUnknownBinding     => None
+                case t: ICPPClassType          => Some(t)
+                case t: ICPPEnumeration        => Some(t)
+            }
+            .flatten
+            .map(t => safeGetType(t))
+            .filter(q => q.endsWith(s"${Defines.qualifiedNameSeparator}${name.toString}"))
 
   protected def safeGetNodeType(node: IASTNode): String =
       Try(ASTTypeUtil.getNodeType(node)).getOrElse(Defines.anyTypeName)

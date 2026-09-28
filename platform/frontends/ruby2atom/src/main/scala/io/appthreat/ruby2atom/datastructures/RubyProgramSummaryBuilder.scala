@@ -9,7 +9,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /** Builds a [[RubyProgramSummary]] from the parsed ASTs of all files in one pass before AST
-  * creation (plan 04 §6, the "two-phase parse"): a class/module/def inventory per file plus
+  * creation (the "two-phase parse"): a class/module/def inventory per file plus
   * `Data.define`/`Struct.new` assignments. During AST creation, `require` calls consult
   * `pathToType` (keyed by the require-style relative path, e.g. `models/user`) and pull the
   * required types into scope.

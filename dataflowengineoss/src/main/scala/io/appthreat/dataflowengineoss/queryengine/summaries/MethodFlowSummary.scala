@@ -14,7 +14,7 @@ import io.shiftleft.semanticcpg.language.*
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
-/** A context-independent flow summary for a single method (CHEN3_PLAN §5).
+/** A context-independent flow summary for a single method.
   *
   * Unlike a `ReachableByResult` (which is tied to a specific query/sink/call-stack and therefore
   * cannot be reused across call sites), a summary records only facts that hold for the method in

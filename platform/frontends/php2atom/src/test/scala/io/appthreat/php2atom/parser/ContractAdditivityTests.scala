@@ -6,16 +6,15 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.{Random, Try}
 
-/** Property test for task 12.4 — Property 1 (P1): Contract additivity.
+/** Property test: contract additivity.
   *
-  * P1 statement: an unknown/newer `nodeType` degrades gracefully (decode never crashes); known
-  * nodes still decode; unknown sibling keys are ignored; and this holds in BOTH directions —
+  * Property statement: an unknown/newer `nodeType` degrades gracefully (decode never crashes);
+  * known nodes still decode; unknown sibling keys are ignored; and this holds in BOTH directions —
   * older-reads-newer (a newer generator wrapper `{ ast: [...], ...extra provenance }` read by this
-  * decoder) and newer-reads-older (a bare/known node carrying additive sibling keys). Validates
-  * Requirements 4.1, 4.2.
+  * decoder) and newer-reads-older (a bare/known node carrying additive sibling keys).
   *
-  * Task 12.1 implemented the behaviour under test in [[Domain]]: an unmapped statement `nodeType`
-  * degrades to [[NopStmt]] (retaining attributes); an unmapped expression `nodeType` (reached via a
+  * The behaviour under test lives in [[Domain]]: an unmapped statement `nodeType` degrades to
+  * [[NopStmt]] (retaining attributes); an unmapped expression `nodeType` (reached via a
   * `Stmt_Expression` wrapper) degrades to a [[PhpNameExpr]] placeholder; the generator wrapper `{
   * ast: [...], ...provenance }` is unwrapped and unknown provenance/sibling keys are ignored.
   *
@@ -110,7 +109,7 @@ class ContractAdditivityTests extends AnyWordSpec with Matchers:
           }
           .get
 
-  s"Contract additivity (P1), $Iterations randomized cases per property, seed=$seed" should {
+  s"Contract additivity, $Iterations randomized cases per property, seed=$seed" should {
 
       "degrade an arbitrary unknown STATEMENT nodeType to NopStmt without ever throwing" in {
           (0 until Iterations).foreach { _ =>

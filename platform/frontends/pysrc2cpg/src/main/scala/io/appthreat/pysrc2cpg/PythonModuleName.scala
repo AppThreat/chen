@@ -1,7 +1,7 @@
 package io.appthreat.pysrc2cpg
 
-/** The path -> dotted-module rules; since task 09 the PRIMARY name computation of the frontend
-  * (every METHOD/TYPE_DECL full name is built from it), no longer a tag index's helper.
+/** The path -> dotted-module rules; the PRIMARY name computation of the frontend (every
+  * METHOD/TYPE_DECL full name is built from it), not merely a tag index's helper.
   *
   * The rules, in order:
   *

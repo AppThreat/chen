@@ -4,12 +4,11 @@ import io.appthreat.php2atom.parser.Domain.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Explicit two-directional cross-version decode-compatibility guard (Requirements 4.2, 4.5; design
-  * Decision 4).
+/** Explicit two-directional cross-version decode-compatibility guard.
   *
-  * Where [[ProvenanceAndFallbackTests]] (task 12.1) pins wrapper-unwrap + node fallback in
-  * isolation and [[ContractAdditivityTests]] (task 12.4) exercises additivity generatively, this
-  * suite frames the contract as the two concrete cross-version directions the decoder must survive:
+  * Where [[ProvenanceAndFallbackTests]] pins wrapper-unwrap + node fallback in isolation and
+  * [[ContractAdditivityTests]] exercises additivity generatively, this suite frames the contract as
+  * the two concrete cross-version directions the decoder must survive:
   *
   *   1. OLDER chen reads NEWER-generator output — a wrapper carrying future/unknown provenance keys
   *      and an `ast` mixing known nodes with an unknown future `nodeType` and additive per-node
@@ -52,7 +51,7 @@ class CrossVersionDecodeTests extends AnyWordSpec with Matchers:
   // Direction 1: older chen reads newer-generator output.
   // ---------------------------------------------------------------------------
 
-  "Cross-version decode: older chen reading newer-generator output (Requirements 4.2, 4.5)" should {
+  "Cross-version decode: older chen reading newer-generator output" should {
 
       /** A newer-generator wrapper: current provenance PLUS a future/unknown provenance key, and an
         * `ast` that mixes a known statement, an unknown future statement `nodeType`, and a node
@@ -122,7 +121,7 @@ class CrossVersionDecodeTests extends AnyWordSpec with Matchers:
   // Direction 2: newer chen reads older-generator output.
   // ---------------------------------------------------------------------------
 
-  "Cross-version decode: newer chen reading older-generator output (Requirements 4.2, 4.5)" should {
+  "Cross-version decode: newer chen reading older-generator output" should {
 
       /** A property node in the OLDER shape: it omits the newer optional keys entirely (`hooks`,
         * `attrGroups`) so it exercises additive tolerance in the backward direction.
@@ -186,7 +185,7 @@ class CrossVersionDecodeTests extends AnyWordSpec with Matchers:
   // Cross-cutting invariant: unknown nodeType degrades, never crashes.
   // ---------------------------------------------------------------------------
 
-  "Cross-version decode: an unknown nodeType degrades rather than crashing (Requirements 4.2, 4.5)" should {
+  "Cross-version decode: an unknown nodeType degrades rather than crashing" should {
 
       "degrade an unknown statement nodeType to NopStmt without throwing" in {
           val unknownStmt = ujson.Obj(
