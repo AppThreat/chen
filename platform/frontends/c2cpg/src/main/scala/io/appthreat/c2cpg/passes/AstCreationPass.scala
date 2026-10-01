@@ -69,7 +69,9 @@ object AstCreationPass:
     * existed would make a warm run silently lose every header attribute).
     */
   // 3: member layouts of header-defined types ride the used types
-  private val AstFormatVersion = "c2cpg-ast-3"
+  // 4: C++ implicit calls linked to their METHODs, operator calls typed; sizeof-family operators
+  //    and catch handlers in their own shapes
+  private val AstFormatVersion = "c2cpg-ast-4"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial
