@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  s_b9f6f98e1c3bda::t_5e36b7fbd76649 29
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/datastructures/CGlobal.scala
+  s_b9f6f98e1c3bda::t_5e36b7fbd76649 35-42
+  s_b9f6f98e1c3bda::t_8be5f534c2c4cc 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eecbe56de89417bb9ee303e78bcb1751e6e0a029",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
