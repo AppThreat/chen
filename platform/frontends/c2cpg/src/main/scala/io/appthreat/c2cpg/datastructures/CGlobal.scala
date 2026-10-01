@@ -32,6 +32,15 @@ object CGlobal extends Global:
     */
   @volatile var lastConstants: Map[String, Long] = Map.empty
 
+  /** Forget what an earlier frontend run in this process registered and did not drain: a run that
+    * stopped early, or an AST pass used on its own, would otherwise lend its types, member layouts
+    * and constants to the next graph.
+    */
+  def reset(): Unit =
+    usedTypes.clear()
+    lastMembers = Map.empty
+    lastConstants = Map.empty
+
   def typesSeen(): List[String] =
     val (constants, rest) =
         usedTypes.keys().asScala.toList.partition(_.startsWith(ConstRecordPrefix))

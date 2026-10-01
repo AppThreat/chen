@@ -26,6 +26,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
 
   def createCpg(config: Config): Try[Cpg] =
       withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
+        CGlobal.reset()
         new MetaDataPass(cpg, Languages.NEWC, config.inputPath).createAndApply()
         val updatedConfig = if config.includePathsAutoDiscovery then
           val projectIncludes =
