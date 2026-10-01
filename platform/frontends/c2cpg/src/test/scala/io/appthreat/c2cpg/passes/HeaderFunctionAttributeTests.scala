@@ -132,3 +132,19 @@ class AstCacheFingerprintTests extends AnyWordSpec with Matchers:
         AstCreationPass.cacheFingerprint(base.withDefines(Set("A=1"))) should not be
             AstCreationPass.cacheFingerprint(base)
     }
+    "differ by every parser option, so a header-mode cache never feeds a full run" in {
+        val base = Config().withInputPath("/x")
+        Seq(
+          base.withFunctionBodies(true),
+          base.withParseInactiveCode(true),
+          base.withIncludeComments(true),
+          base.withImageLocations(true),
+          base.withIncludeTrivialExpressions(true),
+          base.withCppStandard("c++20"),
+          base.withIncludePathsAutoDiscovery(true),
+          base.withProjectIndexes(true)
+        ).foreach { changed =>
+            AstCreationPass.cacheFingerprint(changed) should not be
+                AstCreationPass.cacheFingerprint(base)
+        }
+    }

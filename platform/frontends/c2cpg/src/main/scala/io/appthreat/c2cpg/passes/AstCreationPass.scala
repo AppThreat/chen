@@ -72,9 +72,14 @@ object AstCreationPass:
   private val AstFormatVersion = "c2cpg-ast-3"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
-    * format, the include paths a header is resolved through, the defines that gate it, and the
-    * macro and include files every file is preprocessed with. (A header's own content is not
-    * covered.)
+    * format, the parser options (function bodies, inactive code, comments, image locations,
+    * trivial expressions, the C++ standard, include discovery, the project index), the include
+    * paths a header is resolved through, the defines that gate it, and the macro and include files
+    * every file is preprocessed with. (A header's own content is not covered.)
+    *
+    * The parser options matter because one project directory serves several modes: atom's header
+    * mode parses without function bodies, and a later full run must not replay those body-less
+    * ASTs.
     */
   def cacheFingerprint(config: Config): String =
     // a macro or include file changes what every file preprocesses to: its path AND content
@@ -83,8 +88,18 @@ object AstCreationPass:
       val crc = new java.util.zip.CRC32()
       Try(Files.readAllBytes(Paths.get(p))).foreach(b => crc.update(b))
       s"$kind:$p:${crc.getValue}"
-    (AstFormatVersion +: (config.includePaths.toList.sorted ++ config.defines.toList.sorted ++
-        config.macroFiles.toList.sorted.map(contentOf("macro")) ++
+    val parserOptions = Seq(
+      s"bodies=${config.includeFunctionBodies}",
+      s"inactive=${config.parseInactiveCode}",
+      s"comments=${config.includeComments}",
+      s"imageLocations=${config.includeImageLocations}",
+      s"trivial=${config.includeTrivialExpressions}",
+      s"std=${config.cppStandard}",
+      s"discovery=${config.includePathsAutoDiscovery}",
+      s"index=${config.useProjectIndex}"
+    )
+    (AstFormatVersion +: (parserOptions ++ config.includePaths.toList.sorted ++
+        config.defines.toList.sorted ++ config.macroFiles.toList.sorted.map(contentOf("macro")) ++
         config.includeFiles.toList.sorted.map(contentOf("include"))))
         .mkString("\u0000")
 
