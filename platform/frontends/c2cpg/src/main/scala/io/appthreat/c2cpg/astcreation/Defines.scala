@@ -8,6 +8,13 @@ object Defines:
   val operatorPointerCall            = "<operator>.pointerCall"
   val operatorConstructorInitializer = "<operator>.constructorInitializer"
   val operatorTypeOf                 = "<operator>.typeOf"
+  val operatorTypeId                 = "<operator>.typeId"
+  val operatorAlignOf                = "<operator>.alignOf"
+  // `sizeof...(pack)` counts elements and is not a byte size, so it deliberately does not share
+  // the `<operator>.sizeOf` prefix that passes match on
+  val operatorParameterPackSize      = "<operator>.parameterPackSize"
+  val operatorNoexcept               = "<operator>.noexcept"
+  val operatorLabelAddress           = "<operator>.labelAddress"
   val operatorMax                    = "<operator>.max"
   val operatorMin                    = "<operator>.min"
   val operatorEllipses               = "<operator>.op_ellipses"

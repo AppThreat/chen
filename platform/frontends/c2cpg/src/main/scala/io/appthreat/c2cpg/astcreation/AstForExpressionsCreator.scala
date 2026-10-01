@@ -455,7 +455,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case IASTUnaryExpression.op_postFixIncr      => Operators.postIncrement
       case IASTUnaryExpression.op_postFixDecr      => Operators.postDecrement
       case IASTUnaryExpression.op_throw            => "<operator>.throw"
-      case IASTUnaryExpression.op_typeid           => "<operator>.typeOf"
+      case IASTUnaryExpression.op_typeid           => Defines.operatorTypeId
+      case IASTUnaryExpression.op_alignOf          => Defines.operatorAlignOf
+      case IASTUnaryExpression.op_sizeofParameterPack => Defines.operatorParameterPackSize
+      case IASTUnaryExpression.op_noexcept            => Defines.operatorNoexcept
+      case IASTUnaryExpression.op_labelReference      => Defines.operatorLabelAddress
       case IASTUnaryExpression.op_bracketedPrimary => "<operator>.bracketedPrimary"
       case _                                       => "<operator>.unknown"
 
@@ -478,24 +482,37 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   end astForUnaryExpression
 
   private def astForTypeIdExpression(typeId: IASTTypeIdExpression): Ast =
-      typeId.getOperator match
-        case op
-            if op == IASTTypeIdExpression.op_sizeof ||
-                op == IASTTypeIdExpression.op_sizeofParameterPack ||
-                op == IASTTypeIdExpression.op_typeid ||
-                op == IASTTypeIdExpression.op_alignof ||
-                op == IASTTypeIdExpression.op_typeof =>
-            val call =
-                callNode(
-                  typeId,
-                  code(typeId),
-                  Operators.sizeOf,
-                  Operators.sizeOf,
-                  DispatchTypes.STATIC_DISPATCH
-                )
-            val arg = astForNode(typeId.getTypeId.getDeclSpecifier)
-            callAst(call, List(arg))
-        case _ => notHandledYet(typeId)
+    val operatorMethod = typeId.getOperator match
+      case IASTTypeIdExpression.op_sizeof              => Some(Operators.sizeOf)
+      case IASTTypeIdExpression.op_alignof             => Some(Defines.operatorAlignOf)
+      case IASTTypeIdExpression.op_typeid              => Some(Defines.operatorTypeId)
+      case IASTTypeIdExpression.op_typeof              => Some(Defines.operatorTypeOf)
+      case IASTTypeIdExpression.op_sizeofParameterPack => Some(Defines.operatorParameterPackSize)
+      case _                                           => None
+    operatorMethod match
+      case Some(name) =>
+          val call = callNode(typeId, code(typeId), name, name, DispatchTypes.STATIC_DISPATCH)
+          callAst(call, List(astForTypeIdOperand(typeId.getTypeId)))
+      case None => notHandledYet(typeId)
+
+  /** The type a `sizeof(T)`-style operator is applied to. A plain type name keeps the identifier
+    * that names it. When the type id has an abstract declarator, the identifier spells the whole
+    * type id instead: `sizeof(char *)` measures a pointer and `sizeof(int[4])` an array, and naming
+    * only the declaration specifier would make both read as `sizeof(char)` and `sizeof(int)`.
+    */
+  private def astForTypeIdOperand(typeId: IASTTypeId): Ast =
+    val declarator = typeId.getAbstractDeclarator
+    val hasDeclarator = declarator != null && (
+      declarator.getPointerOperators.nonEmpty ||
+        declarator.getNestedDeclarator != null ||
+        declarator.isInstanceOf[IASTArrayDeclarator] ||
+        declarator.isInstanceOf[IASTFunctionDeclarator]
+    )
+    if hasDeclarator then
+      val spelled = code(typeId).replaceAll("\\s+", " ").strip()
+      val tpe     = registerType(cleanType(safeGetNodeType(typeId)))
+      Ast(identifierNode(typeId, spelled, spelled, tpe))
+    else astForNode(typeId.getDeclSpecifier)
 
   private def astForConditionalExpression(expr: IASTConditionalExpression): Ast =
     val name = Operators.conditional

@@ -125,6 +125,12 @@ object DefaultSemantics:
     F(Operators.preDecrement, List((1, 1), (1, -1))),
     F(Operators.preIncrement, List((1, 1), (1, -1))),
     F(Operators.sizeOf, List.empty[(Int, Int)]),
+    // C and C++ operators whose result depends only on the type of their operand, never on its
+    // value: like sizeof, nothing flows from the operand into the result
+    F("<operator>.alignOf", List.empty[(Int, Int)]),
+    F("<operator>.typeId", List.empty[(Int, Int)]),
+    F("<operator>.parameterPackSize", List.empty[(Int, Int)]),
+    F("<operator>.noexcept", List.empty[(Int, Int)]),
     // PEP 750 t-strings (Python 3.14): a t-string is not a concatenation. The interpolations
     // are held unevaluated in the Template object, so no argument may flow into the literal's
     // result - that boundary is the entire point of the PEP (libraries escape/parameterise
