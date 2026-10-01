@@ -208,7 +208,8 @@ class CppImplicitCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
           |  return a.x + c.x + d.x + e.x + o->data[0] + placed->x;
           |}
           |""".stripMargin)
-      def callIn(code: String): Call = cpg.method.nameExact("main").call.codeExact(code).head
+      def callIn(code: String): Call = cpg.method.nameExact("main").call.codeExact(code)
+          .filterNot(_.name == Operators.assignment).head
 
       "name constructors and destructors with a void return type" in {
           cpg.method.nameExact("Vec2").fullName.toSetMutable shouldBe Set(
@@ -242,6 +243,19 @@ class CppImplicitCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
           }
       }
 
+      "assign each constructed object what its constructor builds" in {
+          val assignments = cpg.method.nameExact("main").call.nameExact(Operators.assignment)
+              .filter(_.argument(2).isCall).l
+          assignments.map(a => a.argument(1).code -> a.argument(2).code).toSetMutable should contain allOf (
+            "a" -> "a(1, 2)",
+            "c" -> "c",
+            "d" -> "d{3, 4}",
+            "e" -> "Vec2(5, 6)",
+            "guard" -> "guard"
+          )
+          assignments.find(_.argument(1).code == "a").map(_.typeFullName) shouldBe Some("Vec2")
+      }
+
       "call nothing for a class without a user-declared constructor" in {
           cpg.method.nameExact("main").call.codeExact("plain").l shouldBe empty
       }
@@ -269,6 +283,50 @@ class CppImplicitCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
           operatorNew.name shouldBe "operator new"
           argsOf(operatorNew) shouldBe List(1 -> "buf")
           operatorNew.callee.isExternal.l shouldBe List(false)
+      }
+  }
+
+  "copy-initialisation" should {
+      val cpg = code("""
+          |struct Name {
+          |  const char *s;
+          |  Name(const char *p) : s(p) {}
+          |  Name(const Name &o) : s(o.s) {}
+          |};
+          |Name make();
+          |int main() {
+          |  Name a = "x";
+          |  Name b = {"y"};
+          |  Name c = Name("z");
+          |  Name d = a;
+          |  Name e = make();
+          |  return 0;
+          |}
+          |""".stripMargin)
+      def assignmentTo(name: String): Call = cpg.method.nameExact("main").call
+          .nameExact(Operators.assignment).filter(_.argument(1).code == name).head
+
+      "call the converting constructor for a value of another type" in {
+          val ctor = assignmentTo("a").argument(2).asInstanceOf[Call]
+          ctor.methodFullName shouldBe "Name.Name:void(char*)"
+          argsOf(ctor) shouldBe List(1 -> "\"x\"")
+          ctor.callee.isExternal.l shouldBe List(false)
+          val listCtor = assignmentTo("b").argument(2).asInstanceOf[Call]
+          listCtor.methodFullName shouldBe "Name.Name:void(char*)"
+          argsOf(listCtor) shouldBe List(1 -> "\"y\"")
+      }
+
+      "call the copy constructor the class declares for an object of its own type" in {
+          val ctor = assignmentTo("d").argument(2).asInstanceOf[Call]
+          ctor.methodFullName shouldBe "Name.Name:void(Name &)"
+          argsOf(ctor) shouldBe List(1 -> "a")
+      }
+
+      "construct nothing more for a value of the variable's own type" in {
+          val cast = assignmentTo("c").argument(2).asInstanceOf[Call]
+          cast.code shouldBe "Name(\"z\")"
+          cast.methodFullName shouldBe "Name.Name:void(char*)"
+          assignmentTo("e").argument(2).code shouldBe "make()"
       }
   }
 

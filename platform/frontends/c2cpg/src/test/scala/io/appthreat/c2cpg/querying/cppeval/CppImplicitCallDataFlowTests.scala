@@ -46,6 +46,21 @@ class CppImplicitCallDataFlowTests extends CppDataFlowCodeToCpgSuite:
       |  sink(d.s);
       |}
       |
+      |struct Name {
+      |  const char *s;
+      |  Name(const char *p) : s(p) {}
+      |};
+      |
+      |void throughDirectInit() {
+      |  Text t(source());
+      |  sink(t.s);
+      |}
+      |
+      |void throughCopyInit() {
+      |  Name n = source();
+      |  sink(n.s);
+      |}
+      |
       |void throughFunctionalCast() {
       |  Text t = Text(source());
       |  sink(t.s);
@@ -101,6 +116,11 @@ class CppImplicitCallDataFlowTests extends CppDataFlowCodeToCpgSuite:
 
       "build its value from its arguments" in {
           sinkArgsIn("throughFunctionalCast").reachableByFlows(sources)(using cContext).l should not be empty
+      }
+
+      "build the object a declaration initialises from its arguments" in {
+          sinkArgsIn("throughDirectInit").reachableByFlows(sources)(using cContext).l should not be empty
+          sinkArgsIn("throughCopyInit").reachableByFlows(sources)(using cContext).l should not be empty
       }
   }
 

@@ -29,7 +29,7 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           |""".stripMargin)
 
       "name the call after the constructed type, not the variable (regression)" in {
-          val call = cpg.method.nameExact("main").call.codeExact("a(1, 2)").head
+          val call = cpg.method.nameExact("main").call.nameExact("Point").codeExact("a(1, 2)").head
           call.name shouldBe "Point"
           call.methodFullName shouldBe "Point.Point:void(int,int)"
           call.typeFullName shouldBe "Point"
@@ -37,8 +37,21 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
       }
 
       "pass the constructor arguments" in {
-          val call = cpg.method.nameExact("main").call.codeExact("a(1, 2)").head
+          val call = cpg.method.nameExact("main").call.nameExact("Point").codeExact("a(1, 2)").head
           call.argument.code.l shouldBe List("1", "2")
+      }
+
+      "assign what the constructor builds to the declared object" in {
+          val List(assignment) =
+              cpg.method.nameExact("main").call.nameExact(Operators.assignment).l
+          assignment.code shouldBe "a(1, 2)"
+          assignment.typeFullName shouldBe "Point"
+          assignment.argument.map(a => a.argumentIndex -> a.code).l shouldBe List(
+            1 -> "a",
+            2 -> "a(1, 2)"
+          )
+          assignment.argument(2).asInstanceOf[io.shiftleft.codepropertygraph.generated.nodes.Call]
+              .name shouldBe "Point"
       }
 
       "still resolve ordinary member calls" in {
