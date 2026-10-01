@@ -4,6 +4,7 @@ import io.circe.*
 import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
+import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -320,45 +321,38 @@ class CdxPass(
     descTags: List[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
-    val isRegex = containsRegex(bpkg)
-    val pattern = if isRegex then Pattern.quote(bpkg) else bpkg
+    val isRegex       = containsRegex(bpkg)
+    val pattern       = if isRegex then Pattern.quote(bpkg) else bpkg
+    val typePattern   = if isRegex then bpkg else pattern
+    val methodPattern = if isRegex then bpkg else s"$pattern.*"
 
-    atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(using
-    dstGraph)
-    atom.identifier.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(
-      using dstGraph
-    )
-    atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(purl).store()(
-      using dstGraph
-    )
+    // Each node set is matched once and reused for every tag below. Each match is a regex over
+    // every call, identifier, parameter or method of the graph, and the purl, the component type
+    // and every description tag used to repeat it - per component, which on a project with a
+    // few hundred dependencies made this pass a visible share of the whole run. The tags are
+    // added in the same order as before.
+    val calls       = atom.call.typeFullName(typePattern).l
+    val identifiers = atom.identifier.typeFullName(typePattern).l
+    val parameters  = atom.method.parameter.typeFullName(typePattern).l
+    val methods     = atom.method.fullName(methodPattern).l
+    def tag(nodes: List[StoredNode], name: String): Unit =
+        nodes.iterator.newTagNode(name).store()(using dstGraph)
 
-    if !isRegex then
-      atom.method.fullName(s"$pattern.*").newTagNode(purl).store()(using dstGraph)
-    else
-      atom.method.fullName(bpkg).newTagNode(purl).store()(using dstGraph)
+    tag(calls, purl)
+    tag(identifiers, purl)
+    tag(parameters, purl)
+    tag(methods, purl)
 
     if compType != "library" then
-      atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(compType).store()(
-        using dstGraph
-      )
-      atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(compType)
-          .store()(using dstGraph)
-      atom.method.fullName(if isRegex then bpkg else s"$pattern.*").newTagNode(compType).store()(
-        using dstGraph
-      )
+      tag(calls, compType)
+      tag(parameters, compType)
+      tag(methods, compType)
 
-    descTags.foreach { tag =>
-      atom.call.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(using
-      dstGraph)
-      atom.identifier.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(
-        using dstGraph
-      )
-      atom.method.parameter.typeFullName(if isRegex then bpkg else pattern).newTagNode(tag).store()(
-        using dstGraph
-      )
-      atom.method.fullName(if isRegex then bpkg else s"$pattern.*").newTagNode(tag).store()(
-        using dstGraph
-      )
+    descTags.foreach { descTag =>
+      tag(calls, descTag)
+      tag(identifiers, descTag)
+      tag(parameters, descTag)
+      tag(methods, descTag)
     }
   end tagGeneric
 
