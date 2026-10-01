@@ -8,7 +8,11 @@ import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
-import org.eclipse.cdt.core.dom.ast.cpp.{ICPPASTFunctionDeclarator, ICPPASTLambdaExpression}
+import org.eclipse.cdt.core.dom.ast.cpp.{
+    ICPPASTFunctionDeclarator,
+    ICPPASTFunctionWithTryBlock,
+    ICPPASTLambdaExpression
+}
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.{
     CASTFunctionDeclarator,
@@ -358,7 +362,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     val astForMethod = methodAst(
       methodNode_,
       parameterNodes.map(Ast(_)),
-      astForMethodBody(Option(funcDef.getBody)),
+      astForFunctionBody(funcDef),
       newMethodReturnNode(funcDef, registerType(returnType)),
       modifiers = modifiers
     )
@@ -500,6 +504,15 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     scope.addToScope(name, (parameterNode, tpe))
     parameterNode
   end parameterNode
+
+  /** A function-try-block (`void f() try { ... } catch (...) { ... }`) wraps the whole body in a
+    * try, so its handlers are part of the function.
+    */
+  private def astForFunctionBody(funcDef: IASTFunctionDefinition): Ast = funcDef match
+    case f: ICPPASTFunctionWithTryBlock if f.getCatchHandlers.nonEmpty =>
+        val node = blockNode(f.getBody, Defines.empty, registerType(Defines.voidTypeName))
+        blockAst(node, List(tryAst(f, nullSafeAst(f.getBody, 1), f.getCatchHandlers)))
+    case _ => astForMethodBody(Option(funcDef.getBody))
 
   private def astForMethodBody(body: Option[IASTStatement]): Ast = body match
     case Some(b: IASTCompoundStatement) => astForBlockStatement(b)

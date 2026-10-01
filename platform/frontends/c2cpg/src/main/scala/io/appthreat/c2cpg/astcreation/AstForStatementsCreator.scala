@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
 import io.appthreat.x2cpg.{Ast, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.ExpressionNew
+import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewBlock}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTGotoStatement
@@ -120,14 +120,48 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       Ast(newJumpTargetNode(caseStmt))
 
   private def astForTryStatement(tryStmt: ICPPASTTryBlockStatement): Ast =
-    val cpgTry = controlStructureNode(tryStmt, ControlStructureTypes.TRY, "try")
-    val body   = nullSafeAst(tryStmt.getTryBody)
-    // All catches must have order 2 for correct control flow generation.
-    // TODO fix this. Multiple siblings with the same order are invalid
-    val catches = tryStmt.getCatchHandlers.flatMap { stmt =>
-        astsForStatement(stmt.getCatchBody, 2)
-    }.toIndexedSeq
-    Ast(cpgTry).withChildren(body).withChildren(catches)
+      tryAst(tryStmt, nullSafeAst(tryStmt.getTryBody, 1), tryStmt.getCatchHandlers)
+
+  /** A C++ try: the try body first, then one `catch` block that groups the handlers. The handlers
+    * are alternatives (an exception reaches at most one of them), so each takes its own position
+    * inside the group, and the CFG gives every handler its own edge from the try body.
+    */
+  protected def tryAst(node: IASTNode, body: Seq[Ast], handlers: Array[ICPPASTCatchHandler]): Ast =
+    val cpgTry      = controlStructureNode(node, ControlStructureTypes.TRY, "try")
+    val handlerAsts = withIndex(handlers)((handler, order) => astForCatchHandler(handler, order))
+    val group = Option.when(handlerAsts.nonEmpty) {
+        val groupNode = NewBlock()
+            .code("catch")
+            .typeFullName(registerType(Defines.voidTypeName))
+            .lineNumber(line(handlers.head))
+            .columnNumber(column(handlers.head))
+            .order(2)
+            .argumentIndex(2)
+        blockAst(groupNode, handlerAsts.toList)
+    }
+    Ast(cpgTry).withChildren(body).withChildren(group.toList)
+
+  /** One handler: the exception it binds, as a local of the handler block, then the handler's body
+    * block. `catch (...)` and an unnamed `catch (int)` bind nothing.
+    */
+  private def astForCatchHandler(handler: ICPPASTCatchHandler, order: Int): Ast =
+    val declaration = Option(handler.getDeclaration)
+    val code        = s"catch (${declaration.map(nodeSignature).getOrElse("...")})"
+    val node = blockNode(handler, code, registerType(Defines.voidTypeName))
+        .order(order)
+        .argumentIndex(order)
+    scope.pushNewScope(node)
+    val bound = declaration.toList.flatMap {
+        case decl: IASTSimpleDeclaration =>
+            decl.getDeclarators.zipWithIndex.toList.collect {
+                case (d, i) if ASTStringUtil.getSimpleName(d.getName).nonEmpty =>
+                    astForDeclarator(decl, d, i)
+            }
+        case _ => Nil
+    }
+    val body = nullSafeAst(handler.getCatchBody, bound.size + 1)
+    scope.popScope()
+    blockAst(node, bound ++ body)
 
   protected def astsForStatement(statement: IASTStatement, argIndex: Int = -1): Seq[Ast] =
     val r = statement match

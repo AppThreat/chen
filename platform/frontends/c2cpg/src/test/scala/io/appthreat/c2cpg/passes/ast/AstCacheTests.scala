@@ -134,6 +134,24 @@ class AstCacheTests extends AbstractPassTest:
           }
       }
 
+      "keep a header-mode parse and a full parse of the same file apart" in withCacheDir {
+          cacheDir =>
+              withTempScope("""int foo(int x) { return x + 1; }""") { (_, rootDir) =>
+                val full     = createConfig(rootDir, cacheDir).withFunctionBodies(true)
+                val headers  = full.withFunctionBodies(false)
+                val filename = rootDir.resolve("file.c").toAbsolutePath.toString
+
+                // atom's header mode parses without bodies first, in the same project
+                new AstCreationPass(newEmptyCpg(), headers)
+                    .runOnPart(new DiffGraphBuilder, filename)
+                Files.list(cacheDir).iterator().asScala.toList.size shouldBe 1
+
+                // a full parse must not replay that body-less AST
+                new AstCreationPass(newEmptyCpg(), full).runOnPart(new DiffGraphBuilder, filename)
+                Files.list(cacheDir).iterator().asScala.toList.size shouldBe 2
+              }
+      }
+
       "invalidate cache if file content changes" in withCacheDir { cacheDir =>
           withTempScope("""void a() {}""") { (cpg, rootDir) =>
             val config   = createConfig(rootDir, cacheDir)

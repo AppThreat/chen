@@ -496,10 +496,9 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * statement in each `catch` block should then have an outgoing edge to the `finally` block if it
     * exists (and not to any subsequent catch blocks), or otherwise * be part of the fringe.
     *
-    * By default, the first child of the `TRY` node is treated as the try body, while every
-    * subsequent node is treated as a `catch`, with no `finally` present. To treat the last child of
-    * the node as the `finally` block, the `code` field of the `Block` node must be set to
-    * `finally`.
+    * The children are read by `order`: 1 is the try body, every child with order 2 is a `catch` (a
+    * block coded `catch` stands for each of its children, see [[cfgsForCatch]]), and 3 is the
+    * `finally` body.
     */
   protected def cfgForTryStatement(node: ControlStructure): Cfg =
     val maybeTryBlock =
@@ -513,9 +512,10 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     val catchBodyCfgs: List[Cfg] =
         node.astChildren
             .where(_.order(2))
-            .toList match
+            .toList
+            .flatMap(cfgsForCatch) match
           case Nil  => List(Cfg.empty)
-          case asts => asts.map(cfgFor)
+          case cfgs => cfgs
 
     val maybeFinallyBodyCfg: List[Cfg] =
         node.astChildren
@@ -562,6 +562,27 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
           )
     end if
   end cfgForTryStatement
+
+  /** One CFG per handler a `catch` child stands for. A block coded `catch` groups several handlers
+    * (javasrc2cpg, and c2cpg for C++): they are alternatives, so each gets its own edge from the
+    * try body instead of running one after another. Neither a handler block nor a body block
+    * directly inside it is a CFG node of its own, just as the try body's block is not (c2cpg puts
+    * the exception binding in the handler block and the handler's statements in a body block).
+    */
+  private def cfgsForCatch(node: AstNode): List[Cfg] = node match
+    case group: Block if group.code == "catch" =>
+        group.astChildren.l.map {
+            case handler: Block =>
+                handler.astChildren.l
+                    .map {
+                        case body: Block => cfgForChildren(body)
+                        case other       => cfgFor(other)
+                    }
+                    .reduceOption((x, y) => x ++ y)
+                    .getOrElse(Cfg.empty)
+            case handler => cfgFor(handler)
+        }
+    case handler => List(cfgFor(handler))
 
   /** The CFGs for match cases are modeled after PHP match expressions and assumes that a case will
     * always consist of one or more JumpTargets followed by a single expression. The CFG also

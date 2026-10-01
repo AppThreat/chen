@@ -113,7 +113,8 @@ private object Frontend:
           .text("macro files")
           .action((macrof, c) => c.withMacroFiles(c.macroFiles + macrof)),
       opt[Unit]("no-include-auto-discovery")
-          .text("disables auto discovery of system header include paths")
+          .text("disables auto discovery of system header include paths (the default)")
+          .action((_, c) => c.withIncludePathsAutoDiscovery(false))
           .hidden(),
       opt[Unit]("with-include-auto-discovery")
           .text("enables auto discovery of system header include paths")

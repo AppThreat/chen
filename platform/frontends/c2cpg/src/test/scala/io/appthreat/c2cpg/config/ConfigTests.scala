@@ -51,4 +51,15 @@ class ConfigTests extends AnyWordSpec with Matchers with Inside:
           config.defines shouldBe Set("DEFINED_NAME")
       }
   }
+
+  "the last of --with-include-auto-discovery and --no-include-auto-discovery should win" in {
+      val parser = Main.cmdLineParser
+      def discovery(flags: String*): Option[Boolean] =
+          X2Cpg.parseCommandLine(Array("INPUT") ++ flags, parser, Config())
+              .map(_.includePathsAutoDiscovery)
+      discovery() shouldBe Some(false)
+      discovery("--with-include-auto-discovery") shouldBe Some(true)
+      discovery("--with-include-auto-discovery", "--no-include-auto-discovery") shouldBe Some(false)
+      discovery("--no-include-auto-discovery", "--with-include-auto-discovery") shouldBe Some(true)
+  }
 end ConfigTests

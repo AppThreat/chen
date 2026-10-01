@@ -44,4 +44,33 @@ class CfgTests extends JavaSrcCode2CpgFixture:
   "should find that method does not post dominate anything" in {
       cpg.method("foo").postDominates.l.size shouldBe 0
   }
+
+  "catch clauses" should {
+      lazy val tryCpg = code("""
+          |class Bar {
+          | static void a() {}
+          | static void b() {}
+          | static void c() {}
+          | static void d() {}
+          | static void bar() {
+          |  try {
+          |   a();
+          |  } catch (IllegalStateException e) {
+          |   b();
+          |  } catch (RuntimeException e) {
+          |   c();
+          |  }
+          |  d();
+          | }
+          |}
+        """.stripMargin)
+
+      "be alternatives, each entered from the try body and none from another" in {
+          def next(name: String) = tryCpg.call.nameExact(name).cfgNext.isCall.name.toSetMutable
+          (next("a") should contain).allOf("b", "c")
+          next("b") should not contain "c"
+          next("c") should contain("d")
+          next("b") should contain("d")
+      }
+  }
 end CfgTests

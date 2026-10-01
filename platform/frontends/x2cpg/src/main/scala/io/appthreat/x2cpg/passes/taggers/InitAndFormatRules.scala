@@ -16,8 +16,9 @@ import scala.collection.mutable
   *     initialises: a forward maybe-initialised dataflow over the CFG, per variable and per struct
   *     field (`s.a = 1; use(s.b)` reads an uninitialised member). Taking the address (`&x`, an
   *     out-parameter) or writing any part counts as initialising it; static locals are
-  *     zero-initialised. Arrays and class types are left alone - a constructor or a fill loop
-  *     initialises what this cannot see.
+  *     zero-initialised, and a C++ handler's exception binding (`catch (int e)`) is initialised by
+  *     the throw. Arrays and class types are left alone - a constructor or a fill loop initialises
+  *     what this cannot see.
   */
 object InitAndFormatRules:
 
@@ -159,6 +160,18 @@ object InitAndFormatRules:
 
   private def parentCall(n: AstNode): Option[Call] = n._astIn.collectFirst { case c: Call => c }
 
+  /** The exception a C++ handler binds: a local of a handler block inside the `catch` group of a
+    * TRY (the handler's own locals are in its body block). The thrown object initialises it.
+    */
+  private def isCatchBinding(l: Local): Boolean =
+      l._astIn.collectFirst { case handler: Block => handler }.exists(handler =>
+          handler._astIn.collectFirst { case group: Block => group }.exists(group =>
+              group.code == "catch" && group._astIn.collectFirst { case t: ControlStructure =>
+                  t
+              }.exists(_.controlStructureType == "TRY")
+          )
+      )
+
   private def isLhsOf(n: AstNode, c: Call): Boolean =
       c.name.startsWith("<operator>.assignment") && c.argumentOption(1).exists(_.id == n.id)
 
@@ -224,7 +237,9 @@ object InitAndFormatRules:
         val declaredTwice =
             locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
         val candidates = locals
-            .filter(l => !isStatic(l) && candidateType(atom, l.typeFullName, l.code))
+            .filter(l =>
+                !isStatic(l) && !isCatchBinding(l) && candidateType(atom, l.typeFullName, l.code)
+            )
             .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
             .map(_.name)
             .toSet -- macroNames -- params -- declaredTwice
