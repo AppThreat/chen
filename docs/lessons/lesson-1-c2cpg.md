@@ -72,9 +72,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 
 1. **MetaDataPass** — writes the `MetaData` node (language = `NEWC`, root path).
 2. **IncludeAutoDiscovery** — if `includePathsAutoDiscovery = true`, guesses the project's own
-   include directories and merges them into `Config.includePaths` before parsing. (The compiler's
-   system include paths are discovered separately, from `gcc`/`clang -E -v`, when the parser is
-   configured.)
+   include directories and merges them into `Config.includePaths` before parsing. The same flag
+   makes the parser ask `gcc` and `clang` (`-E -v`) for the compiler's system include paths.
 3. **Macro census** — with `autoDefines`, scans the tree for build-option macros and defines them.
 4. **AstCreationPass** — drives Eclipse CDT over every source and header file; writes `METHOD`,
    `TYPE_DECL`, `CALL`, `LOCAL`, `LITERAL`, `CONTROL_STRUCTURE`, etc. Supports parallel file
