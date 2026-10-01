@@ -65,7 +65,8 @@ object InternalLinkage:
   private val TranslationUnitExtensions =
       Seq(".c", ".cc", ".cpp", ".cxx", ".c++", ".cp", ".m", ".mm")
 
-  private val HeaderExtensions = Seq(".h", ".hh", ".hpp", ".hxx", ".h++", ".inc", ".inl", ".ipp", ".tcc")
+  private val HeaderExtensions =
+      Seq(".h", ".hh", ".hpp", ".hxx", ".h++", ".inc", ".inl", ".ipp", ".tcc")
 
   def isTranslationUnit(file: String): Boolean =
     val f = Option(file).getOrElse("").toLowerCase

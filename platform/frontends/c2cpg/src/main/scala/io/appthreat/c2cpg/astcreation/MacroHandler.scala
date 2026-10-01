@@ -76,6 +76,7 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
                 blockAst(b, List(newAst))
           callAst.withChildren(lostLocals).withChild(childAst)
       case None => ast
+    end match
   end asChildOfMacroCall
 
   /** For the given node, determine if it is expanded from a macro, and if so, find the first

@@ -931,15 +931,15 @@ class AstCreationPassTests extends AbstractPassTest:
         |  sizeof(int[4]);
         |  sizeof(char);
         |}""".stripMargin) { cpg =>
-          val operands = cpg.call.name(Operators.sizeOf).argument(1).isIdentifier.l
-          operands.map(_.name) shouldBe List(
-            "char *",
-            "const struct node *",
-            "int[4]",
-            "char"
-          )
-          operands.map(_.typeFullName) shouldBe List("char*", "node*", "int[4]", "char")
-          operands.map(_.argumentIndex).distinct shouldBe List(1)
+        val operands = cpg.call.name(Operators.sizeOf).argument(1).isIdentifier.l
+        operands.map(_.name) shouldBe List(
+          "char *",
+          "const struct node *",
+          "int[4]",
+          "char"
+        )
+        operands.map(_.typeFullName) shouldBe List("char*", "node*", "int[4]", "char")
+        operands.map(_.argumentIndex).distinct shouldBe List(1)
       }
 
       "name alignof, typeid and sizeof... by what they compute" in AstFixture(
@@ -955,15 +955,15 @@ class AstCreationPassTests extends AbstractPassTest:
         |}""".stripMargin,
         "file.cpp"
       ) { cpg =>
-          cpg.call.name(Operators.sizeOf).size shouldBe 0
-          cpg.call.name("<operator>.alignOf").code.l shouldBe List(
-            "alignof(double)",
-            "__alignof__(x)"
-          )
-          cpg.call.name("<operator>.typeId").code.l shouldBe List("typeid(int)", "typeid(x)")
-          cpg.call.name("<operator>.parameterPackSize").code.l shouldBe List("sizeof...(Ts)")
-          cpg.call.name("<operator>.noexcept").code.l shouldBe List("noexcept(x + 1)")
-          cpg.call.name("<operator>.unknown").size shouldBe 0
+        cpg.call.name(Operators.sizeOf).size shouldBe 0
+        cpg.call.name("<operator>.alignOf").code.l shouldBe List(
+          "alignof(double)",
+          "__alignof__(x)"
+        )
+        cpg.call.name("<operator>.typeId").code.l shouldBe List("typeid(int)", "typeid(x)")
+        cpg.call.name("<operator>.parameterPackSize").code.l shouldBe List("sizeof...(Ts)")
+        cpg.call.name("<operator>.noexcept").code.l shouldBe List("noexcept(x + 1)")
+        cpg.call.name("<operator>.unknown").size shouldBe 0
       }
 
       "name C11 _Alignof and the address of a label" in AstFixture("""
@@ -973,9 +973,9 @@ class AstCreationPassTests extends AbstractPassTest:
         |done:
         |  return;
         |}""".stripMargin) { cpg =>
-          cpg.call.name("<operator>.alignOf").argument(1).isIdentifier.name.l shouldBe List("long")
-          cpg.call.name("<operator>.labelAddress").code.l shouldBe List("&&done")
-          cpg.call.name(Operators.sizeOf).size shouldBe 0
+        cpg.call.name("<operator>.alignOf").argument(1).isIdentifier.name.l shouldBe List("long")
+        cpg.call.name("<operator>.labelAddress").code.l shouldBe List("&&done")
+        cpg.call.name(Operators.sizeOf).size shouldBe 0
       }
   }
 

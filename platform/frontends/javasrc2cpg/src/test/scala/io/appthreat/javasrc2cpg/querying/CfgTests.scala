@@ -67,7 +67,7 @@ class CfgTests extends JavaSrcCode2CpgFixture:
 
       "be alternatives, each entered from the try body and none from another" in {
           def next(name: String) = tryCpg.call.nameExact(name).cfgNext.isCall.name.toSetMutable
-          next("a") should contain allOf ("b", "c")
+          (next("a") should contain).allOf("b", "c")
           next("b") should not contain "c"
           next("c") should contain("d")
           next("b") should contain("d")

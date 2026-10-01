@@ -443,25 +443,25 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astForUnaryExpression(unary: IASTUnaryExpression): Ast =
     val operatorMethod = unary.getOperator match
-      case IASTUnaryExpression.op_prefixIncr       => Operators.preIncrement
-      case IASTUnaryExpression.op_prefixDecr       => Operators.preDecrement
-      case IASTUnaryExpression.op_plus             => Operators.plus
-      case IASTUnaryExpression.op_minus            => Operators.minus
-      case IASTUnaryExpression.op_star             => Operators.indirection
-      case IASTUnaryExpression.op_amper            => Operators.addressOf
-      case IASTUnaryExpression.op_tilde            => Operators.not
-      case IASTUnaryExpression.op_not              => Operators.logicalNot
-      case IASTUnaryExpression.op_sizeof           => Operators.sizeOf
-      case IASTUnaryExpression.op_postFixIncr      => Operators.postIncrement
-      case IASTUnaryExpression.op_postFixDecr      => Operators.postDecrement
-      case IASTUnaryExpression.op_throw            => "<operator>.throw"
-      case IASTUnaryExpression.op_typeid           => Defines.operatorTypeId
-      case IASTUnaryExpression.op_alignOf          => Defines.operatorAlignOf
+      case IASTUnaryExpression.op_prefixIncr          => Operators.preIncrement
+      case IASTUnaryExpression.op_prefixDecr          => Operators.preDecrement
+      case IASTUnaryExpression.op_plus                => Operators.plus
+      case IASTUnaryExpression.op_minus               => Operators.minus
+      case IASTUnaryExpression.op_star                => Operators.indirection
+      case IASTUnaryExpression.op_amper               => Operators.addressOf
+      case IASTUnaryExpression.op_tilde               => Operators.not
+      case IASTUnaryExpression.op_not                 => Operators.logicalNot
+      case IASTUnaryExpression.op_sizeof              => Operators.sizeOf
+      case IASTUnaryExpression.op_postFixIncr         => Operators.postIncrement
+      case IASTUnaryExpression.op_postFixDecr         => Operators.postDecrement
+      case IASTUnaryExpression.op_throw               => "<operator>.throw"
+      case IASTUnaryExpression.op_typeid              => Defines.operatorTypeId
+      case IASTUnaryExpression.op_alignOf             => Defines.operatorAlignOf
       case IASTUnaryExpression.op_sizeofParameterPack => Defines.operatorParameterPackSize
       case IASTUnaryExpression.op_noexcept            => Defines.operatorNoexcept
       case IASTUnaryExpression.op_labelReference      => Defines.operatorLabelAddress
-      case IASTUnaryExpression.op_bracketedPrimary => "<operator>.bracketedPrimary"
-      case _                                       => "<operator>.unknown"
+      case IASTUnaryExpression.op_bracketedPrimary    => "<operator>.bracketedPrimary"
+      case _                                          => "<operator>.unknown"
 
     if
       unary.getOperator == IASTUnaryExpression.op_bracketedPrimary &&
@@ -504,9 +504,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val declarator = typeId.getAbstractDeclarator
     val hasDeclarator = declarator != null && (
       declarator.getPointerOperators.nonEmpty ||
-        declarator.getNestedDeclarator != null ||
-        declarator.isInstanceOf[IASTArrayDeclarator] ||
-        declarator.isInstanceOf[IASTFunctionDeclarator]
+          declarator.getNestedDeclarator != null ||
+          declarator.isInstanceOf[IASTArrayDeclarator] ||
+          declarator.isInstanceOf[IASTFunctionDeclarator]
     )
     if hasDeclarator then
       val spelled = code(typeId).replaceAll("\\s+", " ").strip()

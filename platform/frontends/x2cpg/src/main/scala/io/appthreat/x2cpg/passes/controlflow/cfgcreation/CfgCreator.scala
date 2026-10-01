@@ -496,8 +496,8 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * statement in each `catch` block should then have an outgoing edge to the `finally` block if it
     * exists (and not to any subsequent catch blocks), or otherwise * be part of the fringe.
     *
-    * The children are read by `order`: 1 is the try body, every child with order 2 is a `catch`
-    * (a block coded `catch` stands for each of its children, see [[cfgsForCatch]]), and 3 is the
+    * The children are read by `order`: 1 is the try body, every child with order 2 is a `catch` (a
+    * block coded `catch` stands for each of its children, see [[cfgsForCatch]]), and 3 is the
     * `finally` body.
     */
   protected def cfgForTryStatement(node: ControlStructure): Cfg =
@@ -564,9 +564,9 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
   end cfgForTryStatement
 
   /** One CFG per handler a `catch` child stands for. A block coded `catch` groups several handlers
-    * (javasrc2cpg, and c2cpg for C++): they are alternatives, so each gets its own edge from the try
-    * body instead of running one after another, and a handler block is not a CFG node of its own,
-    * just as the try body's block is not.
+    * (javasrc2cpg, and c2cpg for C++): they are alternatives, so each gets its own edge from the
+    * try body instead of running one after another, and a handler block is not a CFG node of its
+    * own, just as the try body's block is not.
     */
   private def cfgsForCatch(node: AstNode): List[Cfg] = node match
     case group: Block if group.code == "catch" =>

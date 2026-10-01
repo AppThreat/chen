@@ -51,7 +51,7 @@ class SourceFileExtensionTests extends CCodeToCpgSuite:
           FileDefaults.isCPPFile("src/x.H") shouldBe true
           FileDefaults.isCPPFile("src/x.h") shouldBe false
           FileDefaults.isHeaderFile("src/x.H") shouldBe true
-          FileDefaults.SOURCE_FILE_EXTENSIONS should contain allOf (".c", ".C", ".cxx", ".CXX")
+          (FileDefaults.SOURCE_FILE_EXTENSIONS should contain).allOf(".c", ".C", ".cxx", ".CXX")
       }
   }
 end SourceFileExtensionTests

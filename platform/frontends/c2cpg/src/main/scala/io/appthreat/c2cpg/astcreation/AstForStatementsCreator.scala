@@ -165,12 +165,13 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       case body                        => Option(body).toList
     var currOrder = bound.size + 1
     val body = statements.flatMap { stmt =>
-        val r = astsForStatement(stmt, currOrder)
-        currOrder = currOrder + r.length
-        r
+      val r = astsForStatement(stmt, currOrder)
+      currOrder = currOrder + r.length
+      r
     }
     scope.popScope()
     blockAst(node, bound ++ body)
+  end astForCatchHandler
 
   protected def astsForStatement(statement: IASTStatement, argIndex: Int = -1): Seq[Ast] =
     val r = statement match
