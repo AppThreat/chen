@@ -141,9 +141,8 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     }
     Ast(cpgTry).withChildren(body).withChildren(group.toList)
 
-  /** One handler: the exception it binds, as a local, then the statements of its body. The binding
-    * shares the body's scope (C++ forbids redeclaring it there), so the body's statements sit in
-    * the handler block itself. `catch (...)` and an unnamed `catch (int)` bind nothing.
+  /** One handler: the exception it binds, as a local of the handler block, then the handler's
+    * body block. `catch (...)` and an unnamed `catch (int)` bind nothing.
     */
   private def astForCatchHandler(handler: ICPPASTCatchHandler, order: Int): Ast =
     val declaration = Option(handler.getDeclaration)
@@ -160,15 +159,7 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
             }
         case _ => Nil
     }
-    val statements = handler.getCatchBody match
-      case body: IASTCompoundStatement => body.getStatements.toList
-      case body                        => Option(body).toList
-    var currOrder = bound.size + 1
-    val body = statements.flatMap { stmt =>
-      val r = astsForStatement(stmt, currOrder)
-      currOrder = currOrder + r.length
-      r
-    }
+    val body = nullSafeAst(handler.getCatchBody, bound.size + 1)
     scope.popScope()
     blockAst(node, bound ++ body)
   end astForCatchHandler

@@ -565,14 +565,22 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
 
   /** One CFG per handler a `catch` child stands for. A block coded `catch` groups several handlers
     * (javasrc2cpg, and c2cpg for C++): they are alternatives, so each gets its own edge from the
-    * try body instead of running one after another, and a handler block is not a CFG node of its
-    * own, just as the try body's block is not.
+    * try body instead of running one after another. Neither a handler block nor a body block
+    * directly inside it is a CFG node of its own, just as the try body's block is not (c2cpg puts
+    * the exception binding in the handler block and the handler's statements in a body block).
     */
   private def cfgsForCatch(node: AstNode): List[Cfg] = node match
     case group: Block if group.code == "catch" =>
         group.astChildren.l.map {
-            case handler: Block => cfgForChildren(handler)
-            case handler        => cfgFor(handler)
+            case handler: Block =>
+                handler.astChildren.l
+                    .map {
+                        case body: Block => cfgForChildren(body)
+                        case other       => cfgFor(other)
+                    }
+                    .reduceOption((x, y) => x ++ y)
+                    .getOrElse(Cfg.empty)
+            case handler => cfgFor(handler)
         }
     case handler => List(cfgFor(handler))
 

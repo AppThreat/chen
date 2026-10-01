@@ -134,6 +134,28 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "rules.c"
+  ).moreCode(
+    """
+    |int may_throw(int x);
+    |int init_ok_catch(int x)
+    |{
+    |    int caught = 0;
+    |    try { may_throw(x); }
+    |    catch (int e) { caught = e; }
+    |    catch (...) { caught = -1; }
+    |    return caught;
+    |}
+    |int init_bad_in_handler(int x)
+    |{
+    |    try { may_throw(x); }
+    |    catch (int e) {
+    |        int y;
+    |        return y + e;
+    |    }
+    |    return 0;
+    |}
+    |""".stripMargin,
+    "handlers.cpp"
   )
 
   new MemorySemanticsPass(cpg).createAndApply()
@@ -187,5 +209,12 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
           "init_ok_macro",
           "init_ok_av_uninit"
         ).foreach { m => withClue(m) { findingsIn(m) should not contain "MS-INIT-001" } }
+    }
+    "treat a catch handler's exception as initialised, but not the handler's own locals" in {
+        findingsIn("init_ok_catch") should not contain "MS-INIT-001"
+        findingsIn("init_bad_in_handler") should contain("MS-INIT-001")
+        cpg.method.nameExact("init_bad_in_handler").ast.isIdentifier
+            .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-INIT-001"))
+            .name.l shouldBe List("y")
     }
 end InitAndFormatRulesTests
