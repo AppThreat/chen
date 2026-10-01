@@ -4,7 +4,7 @@ import io.appthreat.c2cpg.testfixtures.{DataFlowCodeToCpgSuite, DataFlowTestCpg}
 import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.language.*
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
-import io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn
+import io.shiftleft.codepropertygraph.generated.nodes.{Block, MethodParameterIn}
 import io.shiftleft.semanticcpg.language.*
 
 /** Macro guards must be visible to data flow.
@@ -45,6 +45,15 @@ class MacroGuardTests extends DataFlowCodeToCpgSuite:
 
   private def ffminCall = cpg.call.name("FFMIN").head
 
+  private val quotedArguments = code(
+    """
+      |#define PAIR(a, b) ((a) + (b))
+      |int g(const char *s, char c, int n);
+      |int f(int n) { return PAIR(g("x, (y", ',', n), n); }
+      |""".stripMargin,
+    "quoted.c"
+  )
+
   "a header-defined clamping macro" should {
 
       "be emitted as an INLINED call with a location-encoded fullName" in {
@@ -74,6 +83,26 @@ class MacroGuardTests extends DataFlowCodeToCpgSuite:
               .foreach { n =>
                   (n._cfgIn.l.size + n._cfgOut.l.size) should be > 0
               }
+      }
+
+      "keep the expansion apart from the argument copies" in {
+          // The argument copies are the call's arguments 1..n; the expansion is the last AST
+          // child and no argument, so its index must not collide with any argument's.
+          val call = ffminCall
+          call.argument.argumentIndex.l shouldBe List(1, 2)
+          inside(call.astChildren.l.last) { case expansion: Block =>
+              expansion.argumentIndex shouldBe 3
+              expansion.order shouldBe 3
+              call.argument.l should not contain expansion
+          }
+      }
+
+      "split its arguments on top-level commas only" in {
+          // commas and brackets inside string and character literals do not separate arguments
+          quotedArguments.call.name("PAIR").argument.code.l shouldBe List(
+            "g(\"x, (y\", ',', n)",
+            "n"
+          )
       }
 
       "receive real reaching definitions inside the expansion" in {
