@@ -1,0 +1,35 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 446-459,463-464,507-509
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForStatementsCreator.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 168-170,174
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/controlflow/cfgcreation/CfgCreator.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 499-500,567-569
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/AstCreationPassTests.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 934-942,958-966,976-978
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/Defines.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 15-27
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/CfgTests.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 70
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/SourceFileExtensionTests.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 54
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/InternalLinkage.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 68-69
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/MacroHandler.scala
+  s_b9f6f98e1c3bda::t_8fb600a6076f0a 79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6a06deec02158b1325e0830e9d1d633e195e9e02",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
