@@ -1,6 +1,8 @@
 package io.appthreat.x2cpg.passes.taggers
 
+import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -510,6 +512,24 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
   private def tagValues(node: StoredNode, tag: String): Set[String] =
       node.tag.name(tag).value.l.toSet
 
+  /** A call to a constructor: the call to the element constructor that follows an array `new`'s
+    * extents.
+    */
+  private def isConstructorCall(e: Expression): Boolean = e match
+    case c: Call =>
+        c.callee(NoResolve).modifier.modifierTypeExact(ModifierTypes.CONSTRUCTOR).nonEmpty
+    case _ => false
+
+  /** `new T[n]` released by a scalar `delete`, or `new T` released by `delete[]`. */
+  private def arrayFormMismatch(allocation: Call, release: Call): Boolean =
+    def isArray(c: Call): Option[Boolean] =
+        tagValues(c, Defines.AllocFormTag).collectFirst {
+            case Defines.AllocFormArray  => true
+            case Defines.AllocFormScalar => false
+        }
+    allocation.name == "<operator>.new" && release.name == "<operator>.delete" &&
+    (for a <- isArray(allocation); r <- isArray(release) yield a != r).getOrElse(false)
+
   /** MS-BOUND-002: attacker-controlled length, no upper bound, into a buffer the call actually
     * writes (CWE-787 is about a destination; an allocation-size argument creates a buffer, it does
     * not overrun one). A length that flows from the destination's own paired capacity parameter is
@@ -940,12 +960,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               tagValues(c, MemoryApiPass.TagRealloc).nonEmpty => Some(c)
       case _ => None
     // the length arguments of an allocation: the inventoried `mem-len` positions, and for a
-    // C++ array construction the size expression the frontend wires in after the type
+    // C++ array construction the extents the frontend wires in after the type. The arguments of
+    // a scalar `new T(args)` are the constructor's, not a size, and neither is the call to the
+    // element constructor that follows an array's extents
     def allocLenArgs(alloc: Call): List[Expression] =
-        alloc.argument.l.collect { case e: Expression => e }.filter { a =>
-            a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
-            (alloc.name == "<operator>.new" && a.argumentIndex > 1)
-        }
+      val arrayNew = alloc.name == "<operator>.new" &&
+          tagValues(alloc, Defines.AllocFormTag).contains(Defines.AllocFormArray)
+      alloc.argument.l.collect { case e: Expression => e }.filter { a =>
+          a.tag.name(MemoryApiPass.TagLen).nonEmpty ||
+          (arrayNew && a.argumentIndex > 1 && !isConstructorCall(a))
+      }
     // an allocation sized from the copy: a copying allocator (`strndup`) allocates what it
     // copies, not its length argument; a count-by-size allocator (`calloc(count, size)`) is a
     // product, sized when one factor holds the length and every other is a positive constant
@@ -3598,11 +3622,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     *     arithmetic (`p + 4`, `p += n`), or an identifier whose definition is such arithmetic on a
     *     tracked allocation.
     *
-    * and **MS-ALLOC-007 (CWE-762)** - the release family does not match the acquisition family. The
-    * graph cannot distinguish `new[]`/`delete[]` from `new`/`delete` (the frontend models both
-    * alike), so the reachable mismatches are the cross-family ones: `new` released by `free`,
-    * `malloc` released by `delete`. The array/scalar confusion inside one family is out of reach
-    * and is said so rather than guessed.
+    * and **MS-ALLOC-007 (CWE-762)** - the release does not match the acquisition: a cross-family
+    * release (`new` released by `free`, `malloc` released by `delete`), or inside the C++ family an
+    * array allocation released by a scalar `delete` and the reverse, read off the `alloc-form` tags
+    * the frontend writes on `new` and `delete`.
     */
   private def ruleWrongDeallocation(record: (StoredNode, String) => Unit): Unit =
     def allocCallOf(e: Expression): Option[Call] = e match
@@ -3682,8 +3705,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           case _ => false
                       }
                   if defsAreOffsetArith then record(i, RuleOffsetFree)
-                  // CWE-762: family mismatch against the allocation that produced the pointer
-                  val allocFamily = OverlayFacts
+                  // CWE-762: family or form mismatch against the allocation that produced the
+                  // pointer
+                  val allocation = OverlayFacts
                       .reachingDefsIn(i)
                       .collect { case d: Identifier => d }
                       .flatMap(d =>
@@ -3693,11 +3717,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       )
                       .flatMap(_.argumentOption(2))
                       .flatMap(allocCallOf)
-                      .flatMap(alloc => tagValues(alloc, MemoryApiPass.TagAlloc).headOption)
                       .headOption
-                  allocFamily.foreach { acquired =>
-                      if freeFamilies.exists(_ != acquired) then
-                        record(i, RuleMismatchedFree)
+                  allocation.foreach { alloc =>
+                      tagValues(alloc, MemoryApiPass.TagAlloc).headOption.foreach { acquired =>
+                          if freeFamilies.exists(_ != acquired) || arrayFormMismatch(alloc, c)
+                          then record(i, RuleMismatchedFree)
+                      }
                   }
               case arith: Call
                   if arith.name == "<operator>.addition" || arith.name == "<operator>.subtraction" =>
@@ -4180,20 +4205,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         castOperand(c).flatMap(castUnwrappingKey)
     case other => OverlayFacts.variableKey(other)
 
-  /** The declared type of an index expression, when the frontend recorded one. */
+  /** The declared type of an index expression, as the frontend recorded it. */
   private def typeOfExpr(e: Expression): String = e match
     case i: Identifier => i.typeFullName
-    // c2cpg leaves a field access's own type empty; the member it reads has one
-    case c: Call
-        if isFieldAccess(c) && Option(c.typeFullName).forall(t => t.isEmpty || t == "ANY") =>
-        OverlayFacts.memberRefOf(atom, c).map(_.typeFullName).getOrElse("")
-    case c: Call    => c.typeFullName
-    case l: Literal => l.typeFullName
-    case _          => ""
+    case c: Call       => c.typeFullName
+    case l: Literal    => l.typeFullName
+    case _             => ""
 
-  /** Can this index go negative, and do we actually know? c2cpg often leaves the TYPE of a
-    * field-access expression empty, so a `pls->cur_seq_no` index resolves its type through the
-    * member it reads; when neither records a type, the answer is None - we do not know.
+  /** Can this index go negative, and do we actually know? The index's recorded type answers (a
+    * field access carries the type of the member it reads); when it is unresolved, the answer is
+    * None - we do not know.
     *
     * The distinction is load-bearing. Treating "no type recorded" as signed would make the rule
     * fire mostly on indices whose type the frontend simply never wrote down: an absent fact quietly
@@ -4202,13 +4223,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * evidence.
     */
   private def signednessOf(idx: Expression): Option[Boolean] =
-    val declared = typeOfExpr(idx) match
-      // c2cpg writes the placeholder type "<empty>" rather than an empty string
-      case t if t.nonEmpty && t != "<empty>" => Some(t)
-      case _ =>
-          idx match
-            case c: Call => OverlayFacts.memberRefOf(atom, c).map(_.typeFullName)
-            case _       => None
+    val declared = Option(typeOfExpr(idx)).filter(_.nonEmpty)
     declared.collect {
         case t if OverlayFacts.isSignedIntegral(t)   => true
         case t if OverlayFacts.isUnsignedIntegral(t) => false

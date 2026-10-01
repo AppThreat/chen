@@ -114,6 +114,10 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
     */
   private def staticLookup(subclass: String, baseMethod: Method): Option[String] =
       typeMap.get(subclass) match
+        case Some(sc) if isCppDestructor(baseMethod) =>
+            // a C++ destructor is overridden by the subclass's destructor, which is named after
+            // the subclass
+            sc._methodViaAstOut.filter(isCppDestructor).fullName.headOption
         case Some(sc) =>
             val sameName = sc._methodViaAstOut.nameExact(baseMethod.name).l
             sameName.find(_.signature == baseMethod.signature).map(_.fullName).orElse {
@@ -126,6 +130,9 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
                   case _            => None
             }
         case None => None
+
+  private def isCppDestructor(method: Method): Boolean =
+      method.name.startsWith("~") && method.name.length > 1
 
   /** The number of parameters a `returnType(paramType, ..)` signature declares. */
   private def parameterCount(signature: String): Int =

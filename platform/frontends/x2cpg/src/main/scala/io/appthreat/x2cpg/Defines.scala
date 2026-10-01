@@ -31,8 +31,29 @@ object Defines:
     * header gives a function whose body is out of scope. On the METHOD, one tag per attribute.
     */
   val FunctionAttributeTag = "fn-attr"
-  val UnresolvedNamespace  = "<unresolvedNamespace>"
-  val UnresolvedSignature  = "<unresolvedSignature>"
+
+  /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
+    * operator the expression is written with (`<operator>.addition`), so a consumer that matches
+    * operator names still finds the expression after the frontend linked it to its method.
+    */
+  val OperatorCallTag = "operator-call"
+
+  /** On a CALL that a frontend linked to the generic definition of a function template: the
+    * signature of the instance the call uses (`short(short,short)` for `clampAdd<short>`).
+    */
+  val TemplateInstanceTag = "template-instance"
+
+  /** On a C++ `<operator>.new` or `<operator>.delete` CALL: which form it is. `new` is `scalar`,
+    * `array` (`new T[n]`) or `placement` (`new (buf) T`); `delete` is `scalar` or `array`
+    * (`delete[]`).
+    */
+  val AllocFormTag       = "alloc-form"
+  val AllocFormScalar    = "scalar"
+  val AllocFormArray     = "array"
+  val AllocFormPlacement = "placement"
+
+  val UnresolvedNamespace = "<unresolvedNamespace>"
+  val UnresolvedSignature = "<unresolvedSignature>"
 
   // Name of the synthetic, static method that contains the initialization of member variables.
   val StaticInitMethodName = "<clinit>"

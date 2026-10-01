@@ -113,9 +113,11 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       op,
       op,
       if fieldRef.isPointerDereference then DispatchTypes.DYNAMIC_DISPATCH
-      else DispatchTypes.STATIC_DISPATCH
+      else DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(expressionType(fieldRef))
     )
-    val owner = astForExpression(fieldRef.getFieldOwner)
+    val owner = fieldOwnerAst(fieldRef)
     Try(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
         .flatMap(f => Option(f.getCompositeTypeOwner))
         .foreach(registerMembersOf)

@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
 import io.appthreat.x2cpg.{Ast, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewBlock}
+import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewBlock, NewCall}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTGotoStatement
@@ -29,8 +29,31 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       currOrder = currOrder + r.length
       r
     }
+    val destructorCalls = scopeEndDestructorCalls(blockStmt)
     scope.popScope()
-    blockAst(node, childAsts.toList)
+    blockAst(node, childAsts.toList ++ destructorCalls)
+
+  /** The destructor calls that end a C++ scope (a block, a `for` statement's declarations, a catch
+    * handler's exception), in the order CDT reports them: the reverse of construction. They are
+    * placed where control falls out of the scope. CDT reports one list per scope, not one per exit,
+    * so a `return`, `break` or `goto` that leaves the scope early is not followed by them.
+    */
+  protected def scopeEndDestructorCalls(owner: IASTNode): List[Ast] = owner match
+    case o: IASTImplicitDestructorNameOwner =>
+        val names = scala.util.Try(o.getImplicitDestructorNames.toList).getOrElse(Nil)
+        names.flatMap { n =>
+          val destroyed = Option(n.getConstructionPoint).map(_.toString).getOrElse("")
+          val callCode  = s"$destroyed.${n.toString}()"
+          destructorCallAst(owner, n.resolveBinding(), callCode).map { ast =>
+            ast.root.foreach {
+                case call: NewCall =>
+                    call.lineNumber(lineEnd(owner)).columnNumber(columnEnd(owner))
+                case _ =>
+            }
+            ast
+          }
+        }
+    case _ => Nil
 
   private def astsForDeclarationStatement(decl: IASTDeclarationStatement): Seq[Ast] =
       decl.getDeclaration match
@@ -53,8 +76,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
                     astForDeclarator(simplDecl, d, i)
                 }
             val calls =
-                simplDecl.getDeclarators.filter(_.getInitializer != null).toList.map { d =>
-                    astForInitializer(d, d.getInitializer)
+                simplDecl.getDeclarators.toList.flatMap { d =>
+                    if d.getInitializer != null then Some(astForInitializer(d, d.getInitializer))
+                    else defaultConstructionAst(simplDecl, d)
                 }
             locals ++ calls
         case s: ICPPASTStaticAssertDeclaration => Seq(astForStaticAssert(s))
@@ -159,32 +183,34 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
             }
         case _ => Nil
     }
-    val body = nullSafeAst(handler.getCatchBody, bound.size + 1)
+    val body            = nullSafeAst(handler.getCatchBody, bound.size + 1)
+    val destructorCalls = scopeEndDestructorCalls(handler)
     scope.popScope()
-    blockAst(node, bound ++ body)
+    blockAst(node, bound ++ body ++ destructorCalls)
 
   protected def astsForStatement(statement: IASTStatement, argIndex: Int = -1): Seq[Ast] =
     val r = statement match
-      case expr: IASTExpressionStatement          => Seq(astForExpression(expr.getExpression))
-      case block: IASTCompoundStatement           => Seq(astForBlockStatement(block, argIndex))
-      case ifStmt: IASTIfStatement                => Seq(astForIf(ifStmt))
-      case whileStmt: IASTWhileStatement          => Seq(astForWhile(whileStmt))
-      case forStmt: IASTForStatement              => Seq(astForFor(forStmt))
-      case forStmt: ICPPASTRangeBasedForStatement => Seq(astForRangedFor(forStmt))
-      case doStmt: IASTDoStatement                => Seq(astForDoStatement(doStmt))
-      case switchStmt: IASTSwitchStatement        => Seq(astForSwitchStatement(switchStmt))
-      case ret: IASTReturnStatement               => Seq(astForReturnStatement(ret))
-      case br: IASTBreakStatement                 => Seq(astForBreakStatement(br))
-      case cont: IASTContinueStatement            => Seq(astForContinueStatement(cont))
-      case goto: IASTGotoStatement                => Seq(astForGotoStatement(goto))
-      case goto: IGNUASTGotoStatement             => astsForGnuGotoStatement(goto)
-      case defStmt: IASTDefaultStatement          => Seq(astForDefaultStatement(defStmt))
-      case tryStmt: ICPPASTTryBlockStatement      => Seq(astForTryStatement(tryStmt))
-      case caseStmt: IASTCaseStatement            => astsForCaseStatement(caseStmt)
-      case decl: IASTDeclarationStatement         => astsForDeclarationStatement(decl)
-      case label: IASTLabelStatement              => astsForLabelStatement(label)
-      case _: IASTNullStatement                   => Seq.empty
-      case _                                      => Seq(astForNode(statement))
+      case expr: IASTExpressionStatement => Seq(astForExpression(expr.getExpression))
+      case block: IASTCompoundStatement  => Seq(astForBlockStatement(block, argIndex))
+      case ifStmt: IASTIfStatement       => Seq(astForIf(ifStmt))
+      case whileStmt: IASTWhileStatement => Seq(astForWhile(whileStmt))
+      case forStmt: IASTForStatement     => astForFor(forStmt) +: scopeEndDestructorCalls(forStmt)
+      case forStmt: ICPPASTRangeBasedForStatement =>
+          astForRangedFor(forStmt) +: scopeEndDestructorCalls(forStmt)
+      case doStmt: IASTDoStatement           => Seq(astForDoStatement(doStmt))
+      case switchStmt: IASTSwitchStatement   => Seq(astForSwitchStatement(switchStmt))
+      case ret: IASTReturnStatement          => Seq(astForReturnStatement(ret))
+      case br: IASTBreakStatement            => Seq(astForBreakStatement(br))
+      case cont: IASTContinueStatement       => Seq(astForContinueStatement(cont))
+      case goto: IASTGotoStatement           => Seq(astForGotoStatement(goto))
+      case goto: IGNUASTGotoStatement        => astsForGnuGotoStatement(goto)
+      case defStmt: IASTDefaultStatement     => Seq(astForDefaultStatement(defStmt))
+      case tryStmt: ICPPASTTryBlockStatement => Seq(astForTryStatement(tryStmt))
+      case caseStmt: IASTCaseStatement       => astsForCaseStatement(caseStmt)
+      case decl: IASTDeclarationStatement    => astsForDeclarationStatement(decl)
+      case label: IASTLabelStatement         => astsForLabelStatement(label)
+      case _: IASTNullStatement              => Seq.empty
+      case _                                 => Seq(astForNode(statement))
     try
       r.map(x => asChildOfMacroCall(statement, x))
     catch

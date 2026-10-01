@@ -2,13 +2,14 @@ package io.appthreat.c2cpg.querying.cppeval
 
 import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.appthreat.x2cpg.Defines as X2CpgDefines
+import io.shiftleft.codepropertygraph.generated.{ModifierTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.language.NoResolve
 
-/** Regression coverage for constructor calls made through an object declaration (`Point a(1, 2);`).
-  * These used to be modelled as a call to the declared *variable* name (`a`), masking the
-  * constructor invocation. They are now named after the constructed type, consistent with the
-  * explicit constructor-expression form `Point(...)`.
+/** Constructor calls made through an object declaration (`Point a(1, 2);`): named after the
+  * constructed type (not the declared variable), and linked to the constructor's METHOD. Overloaded
+  * operators call the operator method the class declares.
   */
 class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
@@ -30,8 +31,9 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
       "name the call after the constructed type, not the variable (regression)" in {
           val call = cpg.method.nameExact("main").call.codeExact("a(1, 2)").head
           call.name shouldBe "Point"
-          call.methodFullName shouldBe "Point"
+          call.methodFullName shouldBe "Point.Point:void(int,int)"
           call.typeFullName shouldBe "Point"
+          call.callee(NoResolve).fullName.l shouldBe List("Point.Point:void(int,int)")
       }
 
       "pass the constructor arguments" in {
@@ -45,8 +47,10 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           )
       }
 
-      "keep the constructor Method node present" in {
-          cpg.method.fullNameExact("Point.Point:ANY(int,int)").l should not be empty
+      "keep the constructor Method node present, marked as a constructor" in {
+          val List(ctor) = cpg.method.fullNameExact("Point.Point:void(int,int)").l
+          ctor.modifier.modifierType.l should contain(ModifierTypes.CONSTRUCTOR)
+          ctor.methodReturn.typeFullName shouldBe "void"
       }
   }
 
@@ -76,17 +80,24 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
       }
 
       "keep the constructor and operator+ Method nodes present" in {
-          cpg.method.fullNameExact("Point.Point:ANY(int,int)").l should not be empty
+          cpg.method.fullNameExact("Point.Point:void(int,int)").l should not be empty
           cpg.method.name("operator \\+").fullName.l should contain(
             "Point.operator +:Point(Point &)"
           )
       }
 
-      // The overloaded `a + b` is still modelled with the built-in arithmetic operator rather than
-      // being resolved to `Point.operator+`; operator-overload resolution is a separate concern.
-      "model a + b with the built-in addition operator" in {
-          cpg.method.nameExact("main").call.codeExact("a + b").name.l shouldBe List(
-            Operators.addition
+      "call Point.operator+ for a + b, tagged with the built-in operator" in {
+          val List(call) = cpg.method.nameExact("main").call.codeExact("a + b").l
+          call.name shouldBe "operator +"
+          call.methodFullName shouldBe "Point.operator +:Point(Point &)"
+          call.callee(NoResolve).fullName.l shouldBe List("Point.operator +:Point(Point &)")
+          call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List(Operators.addition)
+          call.argument.map(a => a.argumentIndex -> a.code).l shouldBe List(0 -> "a", 1 -> "b")
+      }
+
+      "call the constructor from the operator's body" in {
+          cpg.method.nameExact("operator +").call.nameExact("Point").methodFullName.l shouldBe List(
+            "Point.Point:void(int,int)"
           )
       }
   }

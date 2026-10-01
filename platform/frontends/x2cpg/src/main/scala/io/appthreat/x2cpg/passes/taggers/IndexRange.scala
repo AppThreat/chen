@@ -137,15 +137,6 @@ private[taggers] final class IndexRange(
                     convert(Some(r), typeOf(c)).orElse(Option.when(r.lo >= 0 && r.hi <= 127)(r))
                 )
                 .orElse(ofType(typeOf(c)))
-        // an element read: the element type of the array (`unsigned int buffer_num[4]`), which
-        // the frontend leaves off the access itself
-        case c: Call
-            if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" =>
-            ofType(typeOf(c)).orElse(
-              operand(c, 1)
-                  .map(b => typeOf(b).trim.replaceAll("""\[[^\]]*\]$""", "").trim)
-                  .flatMap(ofType)
-            )
         case other => ofType(typeOf(other))
       )
 

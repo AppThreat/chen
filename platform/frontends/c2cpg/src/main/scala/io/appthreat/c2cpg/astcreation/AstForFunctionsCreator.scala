@@ -11,7 +11,9 @@ import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{
     ICPPASTFunctionDeclarator,
     ICPPASTFunctionWithTryBlock,
-    ICPPASTLambdaExpression
+    ICPPASTLambdaExpression,
+    ICPPConstructor,
+    ICPPMethod
 }
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.{
@@ -21,7 +23,7 @@ import org.eclipse.cdt.internal.core.dom.parser.c.{
 }
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPASTFunctionDeclarator,
-    CPPASTFunctionDefinition,
+    CPPClosureType,
     CPPASTParameterDeclaration,
     ICPPInternalBinding
 }
@@ -70,18 +72,19 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForMethodRefForLambda(lambdaExpression: ICPPASTLambdaExpression): Ast =
     val filename = fileName(lambdaExpression)
 
-    val returnType = lambdaExpression.getDeclarator match
-      case declarator: IASTDeclarator =>
-          declarator.getTrailingReturnType match
-            case id: IASTTypeId => typeForDeclSpecifier(id.getDeclSpecifier)
-            case null           => Defines.anyTypeName
-      case null => Defines.anyTypeName
+    // the trailing return type when the lambda writes one, else the type CDT deduces for its
+    // call operator from the body
+    val returnType = Option(lambdaExpression.getDeclarator)
+        .flatMap(d => Option(d.getTrailingReturnType))
+        .map(id => typeForDeclSpecifier(id.getDeclSpecifier))
+        .getOrElse(deducedLambdaReturnType(lambdaExpression))
     val (name, fullname) = uniqueName("lambda", "", fullName(lambdaExpression))
     val signature =
         s"$returnType ${parameterListSignature(lambdaExpression)}"
     val code = nodeSignature(lambdaExpression)
     val methodNode_ =
         methodNode(lambdaExpression, name, code, fullname, Some(signature), filename)
+    registerLambdaMethod(lambdaExpression, name, fullname)
 
     scope.pushNewScope(methodNode_)
     val parameterNodes = withIndex(parameters(lambdaExpression.getDeclarator)) { (p, i) =>
@@ -103,6 +106,13 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
     Ast(methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName))
   end astForMethodRefForLambda
+
+  private def deducedLambdaReturnType(lambdaExpression: ICPPASTLambdaExpression): String =
+      scala.util.Try(lambdaExpression.getExpressionType).toOption
+          .collect { case closure: CPPClosureType => closure.getFunctionCallOperator }
+          .flatMap(op => Option(op).flatMap(o => Option(o.getType)))
+          .map(t => typeNameOf(t.getReturnType))
+          .getOrElse(Defines.anyTypeName)
 
   /** A function declarator does not always declare a function: `int (*op)(int, int)` is a
     * function-*pointer* variable whose name resolves to an `IVariable`, not an `IFunction`.
@@ -211,9 +221,12 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     val binding = funcDecl.getName.resolveBinding()
     binding match
       case function: IFunction =>
-          val returnType = typeForDeclSpecifier(
-            funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
-          )
+          val returnType =
+              if isConstructorOrDestructorBinding(function) then Defines.voidTypeName
+              else
+                typeForDeclSpecifier(
+                  funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+                )
           val name     = shortName(funcDecl)
           val fullname = fullName(funcDecl)
           val fixedName = if name.isEmpty then
@@ -262,7 +275,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                   methodNode_,
                   parameterNodes,
                   newMethodReturnNode(funcDecl, registerType(returnType)),
-                  internalLinkageModifiers(
+                  constructorModifiers(function) ++ internalLinkageModifiers(
                     funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier,
                     funcDecl,
                     fixedFullName
@@ -302,20 +315,9 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
     val filename = fileName(funcDef)
-    val returnType = if isCppConstructor(funcDef) then
-      // A constructor has no explicit return type. We approximate it with the type of the
-      // first base/member initializer (e.g. `FooT(...) : Bar::Foo(a, b) {}` yields `Bar.Foo`).
-      // typeFor can, however, return a method-signature-like string for some initializer
-      // expressions (e.g. a member initialized via a call), which must not leak into the
-      // constructor's return type / signature. Fall back to the ANY type in that case, which
-      // is also what the fullName's signature uses (see functionTypeToSignature).
-      val cppFunc = funcDef.asInstanceOf[CPPASTFunctionDefinition]
-      val candidate = cppFunc.getMemberInitializers.headOption
-          .map(m => typeFor(m.getInitializer))
-          .getOrElse(Defines.anyTypeName)
-      if candidate.isEmpty || candidate.contains("(") || candidate.contains(":") then
-        Defines.anyTypeName
-      else candidate
+    val binding  = funcDef.getDeclarator.getName.resolveBinding()
+    // a constructor or destructor declares no return type: `void`, as its full name says
+    val returnType = if isConstructorOrDestructorBinding(binding) then Defines.voidTypeName
     else
       val fromSpec = typeForDeclSpecifier(funcDef.getDeclSpecifier)
       // Trailing return type: `auto f(...) -> RealType`. The declaration specifier is `auto`
@@ -342,7 +344,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     tagFunctionAttributes(
       methodNode_,
       Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier),
-      funcDef.getDeclarator.getName.resolveBinding()
+      binding
     )
     methodAstParentStack.push(methodNode_)
     scope.pushNewScope(methodNode_)
@@ -352,12 +354,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     }
     setVariadic(parameterNodes, funcDef)
     val modifiers =
-        (if isCppConstructor(funcDef) then
-           List(
-             newModifierNode(ModifierTypes.CONSTRUCTOR),
-             newModifierNode(ModifierTypes.PUBLIC)
-           )
-         else Nil) ++
+        constructorModifiers(binding) ++
             internalLinkageModifiers(funcDef.getDeclSpecifier, funcDef, fullname)
     val astForMethod = methodAst(
       methodNode_,
@@ -453,10 +450,16 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def fullNameWithoutLocation(fullName: String) = fullName.split(":").last
 
-  private def isCppConstructor(funcDef: IASTFunctionDefinition): Boolean =
-      funcDef match
-        case cppFunc: CPPASTFunctionDefinition => cppFunc.getMemberInitializers.nonEmpty
-        case _                                 => false
+  private def isConstructorOrDestructorBinding(binding: IBinding): Boolean = binding match
+    case _: ICPPConstructor => true
+    case m: ICPPMethod      => m.isDestructor
+    case _                  => false
+
+  /** Every constructor is marked as one, with or without a member initializer list. */
+  private def constructorModifiers(binding: IBinding): List[NewModifier] = binding match
+    case _: ICPPConstructor =>
+        List(newModifierNode(ModifierTypes.CONSTRUCTOR), newModifierNode(ModifierTypes.PUBLIC))
+    case _ => Nil
 
   private def parameterNode(parameter: IASTNode, paramIndex: Int): NewMethodParameterIn =
     val (name, code, tpe, variadic) = parameter match

@@ -181,7 +181,8 @@ class ClassTypeTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT):
                 |}""".stripMargin
               )
               val List(constructor) = cpg.typeDecl.nameExact("FooT").method.isConstructor.l
-              constructor.signature shouldBe "Bar.Foo (std.string,Bar.SomeClass)"
+              // a constructor declares no return type: `void`, as its full name says
+              constructor.signature shouldBe "void (std.string,Bar.SomeClass)"
               val List(p1, p2) = constructor.parameter.l
               p1.typ.fullName shouldBe "std.string"
               p2.typ.fullName shouldBe "Bar.SomeClass"

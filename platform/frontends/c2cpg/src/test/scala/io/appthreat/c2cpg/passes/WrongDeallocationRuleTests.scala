@@ -82,9 +82,10 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
         """
     |#include <stdlib.h>
     |
-    |/* the CWE-762 shapes the graph can see: cross-family mismatch. A .cpp
-    |   file - the C parser reads `delete` as a bare call and the operator forms
-    |   never appear. */
+    |/* the CWE-762 shapes: a cross-family mismatch, and an array allocation
+    |   released by the scalar form (and the reverse). A .cpp file - the C
+    |   parser reads `delete` as a bare call and the operator forms never
+    |   appear. */
     |void bad_mismatched_malloc_delete(void)
     |{
     |    int *p = (int *)malloc(sizeof(int) * 16);
@@ -101,6 +102,24 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |{
     |    int *p = new int(5);
     |    delete p;
+    |}
+    |
+    |void bad_array_new_scalar_delete(void)
+    |{
+    |    char *p = new char[16];
+    |    delete p;
+    |}
+    |
+    |void bad_scalar_new_array_delete(void)
+    |{
+    |    int *p = new int(5);
+    |    delete[] p;
+    |}
+    |
+    |void good_matched_array_new_delete(void)
+    |{
+    |    char *p = new char[16];
+    |    delete[] p;
     |}
     |""".stripMargin,
         "mismatch.cpp"
@@ -206,6 +225,13 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     }
     "stay silent on a matched new/delete pair" in {
         findingsIn("good_matched_new_delete") should not contain "MS-ALLOC-007"
+    }
+    "fire on new[] released with a scalar delete, and new with delete[] (CWE-762)" in {
+        findingsIn("bad_array_new_scalar_delete") should contain("MS-ALLOC-007")
+        findingsIn("bad_scalar_new_array_delete") should contain("MS-ALLOC-007")
+    }
+    "stay silent on a matched new[]/delete[] pair" in {
+        findingsIn("good_matched_array_new_delete") should not contain "MS-ALLOC-007"
     }
 
   "MS-ALLOC-008/009 (uncontrolled size)" should:

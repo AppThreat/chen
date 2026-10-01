@@ -1198,7 +1198,7 @@ class AstCreationPassTests extends AbstractPassTest:
         inside(cpg.call.codeExact("f1(0)").l) { case List(call: Call) =>
             // The callee is the constructed type's constructor, not the declared variable.
             call.name shouldBe "Foo"
-            call.methodFullName shouldBe "Foo"
+            call.methodFullName shouldBe "Foo.Foo:void(int)"
             call.typeFullName shouldBe "Foo"
             call.argument(1).code shouldBe "0"
         }

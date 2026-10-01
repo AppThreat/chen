@@ -115,6 +115,9 @@ object DefaultSemantics:
     F(Operators.indexAccess, List((1, -1))),
     F(Operators.indirectComputedMemberAccess, List((1, -1))),
     F(Operators.indirectFieldAccess, List((1, -1))),
+    // C++ `obj.*pm` and `ptr->*pm`: like a member access, the value comes from the object
+    F("<operator>.pointerToMember", List((1, -1))),
+    F("<operator>.indirectPointerToMember", List((1, -1))),
     F(Operators.indirectIndexAccess, List((1, -1), (2, 1))),
     F(Operators.indirectMemberAccess, List((1, -1))),
     F(Operators.indirection, List((1, -1))),
@@ -258,7 +261,37 @@ object DefaultSemantics:
     F("strtok_r", List((1, 1), (2, 2), (3, 3), (1, 3), (1, -1))),
     F("vsnprintf", List((1, 1), (2, 2), (3, 3), (4, 4), (3, 1), (4, 1), (1, -1), (3, -1), (4, -1))),
     F("vsprintf", List((1, 1), (2, 2), (3, 3), (2, 1), (3, 1), (1, -1), (2, -1), (3, -1)))
-  ) ++ clampingMacroFlows
+  ) ++ clampingMacroFlows ++ cppResolvedCallFlows
+
+  /** Semantics for the C++ calls the frontend links to a method the graph holds although the source
+    * does not spell them as calls: constructors and user-defined operators.
+    *
+    * The graph has no `this` parameter, so a member's body cannot show what reaches the object it
+    * runs on. These summaries keep what the expression itself says: the value a constructor builds
+    * is made from its arguments, an operator's result from its operands (the object a member
+    * operator is called on is argument 0), and an assignment operator stores its right operand in
+    * its left one, keeping what the left already held when it is compound. The bodies are still
+    * explored from the inside, so a sink in a constructor or an operator is reached from its
+    * parameters.
+    *
+    * The METHOD full names follow the frontend's convention: a constructor is
+    * `<class>.<class>:void(<params>)`, an operator `<scope>.operator <symbol>:<signature>`.
+    * Operators named with a word (`operator new`, `operator bool`) are left to their bodies.
+    */
+  private def cppResolvedCallFlows: List[FlowSemantic] =
+    val assignment = "(?:.*\\.)?operator =:.*"
+    val compound   = "(?:.*\\.)?operator (?:\\+|-|\\*|/|%|\\^|&|\\||<<|>>)=:.*"
+    val operator = "(?:.*\\.)?operator (?!(?:\\+|-|\\*|/|%|\\^|&|\\||<<|>>)?=:)[^A-Za-z_:][^:]*:.*"
+    List(
+      FlowSemantic("(?:.*\\.)?([^.:]+)\\.\\1:void\\(.*\\)", List(PassThroughMapping), regex = true),
+      FlowSemantic.from(assignment, List((1, 0), (1, -1), (2, 1), (2, -1)), regex = true),
+      FlowSemantic.from(
+        compound,
+        List((0, 0), (1, 0), (0, -1), (1, -1), (1, 1), (2, 1), (2, -1)),
+        regex = true
+      ),
+      FlowSemantic.from(operator, List((0, -1), (1, -1), (2, -1)), regex = true)
+    )
 
   /** Semantics for the common clamping macros (`FFMIN`, `FFMAX`, `FFABS`, `av_clip`), so that a
     * clamp the frontend left unexpanded as an opaque call still propagates "the result is derived

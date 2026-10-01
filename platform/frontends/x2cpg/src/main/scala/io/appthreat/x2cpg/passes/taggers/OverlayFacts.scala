@@ -186,12 +186,15 @@ private[taggers] object OverlayFacts:
     * this object normalises to the canonical order first. The bare spellings `unsigned` and
     * `signed` are `unsigned int` and `int` in C - libavformat's `unsigned count` parameters carry
     * the bare word, and without this every integral lookup on them would conclude nothing (the
-    * one-sided bounds arm's `param:` extent and the unsigned-index check both read it).
+    * one-sided bounds arm's `param:` extent and the unsigned-index check both read it). The `int`
+    * of `short int`, `long int` and `long long int` is dropped: CDT spells the types of expressions
+    * that way, declarations usually do not.
     */
   def normalizeTypeName(t: String): String =
     val words = t.stripPrefix("const ").trim.split("\\s+").toList
     val sign  = words.find(w => w == "unsigned" || w == "signed")
-    val rest  = words.filterNot(w => sign.contains(w))
+    val sized = words.exists(w => w == "short" || w == "long")
+    val rest  = words.filterNot(w => sign.contains(w) || (sized && w == "int"))
     val norm  = (sign.toList ::: rest).mkString(" ")
     norm match
       case "unsigned" => "unsigned int"

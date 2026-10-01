@@ -256,11 +256,14 @@ class CallTests extends CCodeToCpgSuite:
             "test.cpp"
           )
 
-          val List(call) = cpg.call.nameExact("<operator>()").l
+          // the call through the closure reaches the lambda's METHOD
+          val List(call) = cpg.call.nameExact("anonymous_lambda_0").l
           call.signature shouldBe "void(int)"
-          call.methodFullName shouldBe "<operator>():void(int)"
-          call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
+          call.methodFullName shouldBe "outer:void().anonymous_lambda_0"
+          call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
           call.typeFullName shouldBe "void"
+          call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List("<operator>()")
+          call.callee(NoResolve).fullName.l shouldBe List("outer:void().anonymous_lambda_0")
 
           val List(arg1) = call.argument.l
           arg1.code shouldBe "1"
@@ -324,11 +327,14 @@ class CallTests extends CCodeToCpgSuite:
             "test.cpp"
           )
 
-          val List(call) = cpg.call.nameExact("<operator>()").l
+          // the call operator the class declares, called on the object
+          val List(call) = cpg.call.nameExact("operator ()").l
           call.signature shouldBe "void(int)"
-          call.methodFullName shouldBe "NNN.Callable.<operator>():void(int)"
+          call.methodFullName shouldBe "NNN.Callable.operator ():void(int)"
           call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
           call.typeFullName shouldBe "void"
+          call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List("<operator>()")
+          call.callee(NoResolve).fullName.l shouldBe List("NNN.Callable.operator ():void(int)")
 
           val List(instArg, arg1) = call.argument.l
           instArg.code shouldBe "a.foo"
@@ -336,8 +342,8 @@ class CallTests extends CCodeToCpgSuite:
           arg1.code shouldBe "1"
           arg1.argumentIndex shouldBe 1
 
-          val List(receiver) = call.receiver.l
-          receiver shouldBe instArg
+          // a non-virtual call operator is dispatched statically: no receiver
+          call.receiver.isEmpty shouldBe true
       }
 
       "have correct call for call on function pointer (C)" in {

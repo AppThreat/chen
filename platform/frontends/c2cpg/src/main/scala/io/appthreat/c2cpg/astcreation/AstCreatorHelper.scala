@@ -479,8 +479,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     * unresolved `?` placeholders, CDT-internal template indices) are canonicalised consistently
     * with all other type names in the graph.
     */
-  protected def functionTypeToSignature(typ: IFunctionType): String =
-    val returnType     = cleanType(safeGetType(typ.getReturnType))
+  protected def functionTypeToSignature(
+    typ: IFunctionType,
+    returnTypeOverride: Option[String] = None
+  ): String =
+    val returnType     = returnTypeOverride.getOrElse(cleanType(safeGetType(typ.getReturnType)))
     val parameterTypes = typ.getParameterTypes.map(t => cleanType(safeGetType(t)))
     s"$returnType(${parameterTypes.mkString(",")})"
 
@@ -497,13 +500,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           case declarator: CPPASTFunctionDeclarator =>
               declarator.getName.resolveBinding() match
                 case function: ICPPFunction =>
-                    val fullNameNoSig = function.getQualifiedName.mkString(".")
-                    val fn =
-                        if function.isExternC then
-                          function.getName
-                        else
-                          s"$fullNameNoSig:${functionTypeToSignature(function.getType)}"
-                    return fn
+                    return methodFullNameOf(function)
                 case field: ICPPField =>
                 case _: IProblemBinding =>
                     val fullNameNoSig = ASTStringUtil.getQualifiedName(declarator.getName)
@@ -771,6 +768,35 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
 
   protected def safeGetType(tpe: IType): String =
       Try(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
+
+  /** The name of a type CDT resolved, normalised like every other type in the graph. A closure or
+    * an anonymous struct (spelled with braces) has no name worth recording: normalising it would
+    * mint a fresh anonymous name from the counter the lambdas of the file are numbered with.
+    */
+  protected def typeNameOf(tpe: IType): String =
+    val raw = safeGetType(tpe)
+    if raw == null || raw.contains("{") || raw.contains("}") then Defines.anyTypeName
+    else tightenTypePunctuation(cleanType(raw))
+
+  /** The type CDT gives an expression, normalised and registered like every other type. */
+  protected def expressionType(expression: IASTExpression): String =
+      registerType(Try(expression.getExpressionType).map(typeNameOf).getOrElse(
+        Defines.anyTypeName
+      ))
+
+  /** An operand of unsigned integer type, through typedefs and qualifiers: `>>` on it shifts in
+    * zeros.
+    */
+  protected def isUnsignedOperand(operand: IASTExpression): Boolean =
+    @scala.annotation.tailrec
+    def unwrap(t: IType): IType = t match
+      case td: ITypedef      => unwrap(td.getType)
+      case q: IQualifierType => unwrap(q.getType)
+      case other             => other
+    Try(unwrap(operand.getExpressionType)).toOption.exists {
+        case b: IBasicType => b.isUnsigned
+        case _             => false
+    }
 
   /** The qualified name (`kv::LookupKey`) of a C++ class or enum written as a plain name inside its
     * namespace or class. The member layouts, implicit-this owners and resolved calls all spell the

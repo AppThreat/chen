@@ -64,14 +64,17 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
       atom.call.foreach { c =>
           c.name match
             case "<operator>.cast" =>
-                // c2cpg lays a cast out as (type placeholder, operand): the target type is
-                // the FIRST argument's rendered name, the operand the second
+                // c2cpg lays a cast out as (type placeholder, operand) and types the call with
+                // the target type; when that type is unresolved the written type name stands in
                 val args       = argumentsOf(c)
                 val operandOpt = argAt(args, 2).orElse(argAt(args, 1))
                 val targetName =
-                    if argAt(args, 2).isDefined then
-                      argAt(args, 1).map(_.code).getOrElse(c.typeFullName)
-                    else c.typeFullName
+                    if c.typeFullName.nonEmpty && c.typeFullName != "ANY" &&
+                      c.typeFullName != "<empty>"
+                    then c.typeFullName
+                    else
+                      argAt(args, 1).filter(_ => argAt(args, 2).isDefined).map(_.code)
+                          .getOrElse(c.typeFullName)
                 operandOpt.foreach { operand =>
                   val (from, fromW) = declaredWidthOf(operand)
                   integralWidth(targetName).foreach { tw =>
@@ -179,69 +182,14 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
     ValueOriginPass.OriginMixed
   )
 
-  /** The declared type of an assignment destination: an identifier's type, or - for the field
-    * accesses the frontend often leaves typeless - the type of the member it writes.
+  /** The declared type of an assignment destination or an operand: the type the frontend records on
+    * it (a field access carries the type of the member it reads, an element access its element
+    * type).
     */
-  private def declaredTypeOf(lhs: Expression): String =
-    val direct = lhs match
-      case i: Identifier => i.typeFullName
-      case c: Call       => c.typeFullName
-      case _             => ""
-    if direct.nonEmpty && direct != "<empty>" then direct
-    else
-      lhs match
-        case c: Call => memberTypeOf(c).getOrElse("")
-        case _       => ""
-
-  /** The type an operand expression carries, through the typeless-field fallback. */
-  private def operandType(c: Call): Option[String] =
-      c.argumentOption(1).map(declaredTypeOf).filter(_.nonEmpty)
-
-  /** The struct member type a field-access call reads, resolved exactly where
-    * `OverlayFacts.memberRefOf` resolves it (base identifier type, or the nested field access's
-    * member type; pointer stripped), but answered from [[memberTypes]] - a whole-graph `typeDecl`
-    * scan PER ASSIGNMENT is far too expensive on a large tree. The declared members of the tree do
-    * not change while the overlay runs, so the question has a single answer for the whole pass no
-    * matter how many times it is asked.
-    */
-  private def memberTypeOf(fieldAccess: Call): Option[String] =
-    val args = argumentsOf(fieldAccess)
-    for
-      fi   <- args.collectFirst { case fi: FieldIdentifier => fi }
-      base <- argAt(args, 1)
-      baseType <- base match
-        case i: Identifier => Option.when(i.typeFullName.nonEmpty)(i.typeFullName)
-        case c: Call =>
-            c.name match
-              case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" =>
-                  memberTypeOf(c)
-              case _ => None
-        case _ => None
-      typeName = baseType.stripSuffix("*").trim
-      memberType <- memberTypes.get((typeName, fi.canonicalName)).flatMap { candidates =>
-        // same-named structs in different files are different structs: the
-        // definition in the file that reads it is the one in scope; the rest answer in a
-        // content-stable order so the run-to-run parse order cannot choose for us
-        val inFile = fieldAccess.method.filename
-        candidates.collect { case (f, t) if f == inFile => t }.headOption.orElse(
-          candidates.map(_._2).sortBy(identity).headOption
-        )
-      }
-    yield memberType
-    end for
-  end memberTypeOf
-
-  private lazy val memberTypes: Map[(String, String), List[(String, String)]] =
-    val types = mutable.HashMap.empty[(String, String), List[(String, String)]]
-    atom.typeDecl.foreach { td =>
-        OverlayFacts.membersOfTypeDecl(td).foreach { m =>
-            types.updateWith((td.name, m.name)) {
-                case Some(existing) => Some(existing :+ (td.filename, m.typeFullName))
-                case None           => Some(List((td.filename, m.typeFullName)))
-            }
-        }
-    }
-    types.toMap
+  private def declaredTypeOf(e: Expression): String = e match
+    case i: Identifier => i.typeFullName
+    case c: Call       => c.typeFullName
+    case _             => ""
 
   /** (declared type, width) of an expression; width 0 when the type is not a known integral. */
   private def declaredWidthOf(e: Expression): (String, Int) =
