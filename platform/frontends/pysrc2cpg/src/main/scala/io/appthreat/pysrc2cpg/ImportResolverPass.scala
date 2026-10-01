@@ -8,7 +8,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
 import java.io.File as JFile
-import java.util.regex.Pattern
+import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable
 
@@ -39,6 +39,24 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     */
   private lazy val importsByFile: Map[String, Seq[PythonDependencyStubs.DepImport]] =
       PythonDependencyStubs.importsByFile(cpg)
+
+  /** The module-scope type decls, collected once per pass. Only these may contribute members to
+    * `from pkg import x` (see `membersMatchingImports`), and there are far fewer of them than type
+    * decls. Matching every import against every type decl with a regex made this pass most of a
+    * large Python run's frontend time.
+    */
+  private lazy val moduleScopeDecls: Vector[TypeDecl] =
+      cpg.typeDecl.nameExact(PythonDependencyStubs.ModuleScope).toVector
+
+  // Imports repeat the same few packages across files, so the scan runs once per package.
+  private val moduleDeclsByPath = new ConcurrentHashMap[String, Vector[TypeDecl]]()
+
+  /** The module-scope decls whose full name contains `path`, in graph order. */
+  private def moduleDeclsUnder(path: String): Vector[TypeDecl] =
+      moduleDeclsByPath.computeIfAbsent(
+        path,
+        _ => moduleScopeDecls.filter(_.fullName.contains(path))
+      )
 
   override protected def optionalResolveImport(
     fileName: String,
@@ -212,9 +230,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
         // url_for` resolves as a member access on the class instead of the module function - a
         // failure mode that only exists once dependency signatures are ingested. `from Class import
         // attr` is not Python, so no real import loses a resolution to this.
-        cpg.typeDecl
-            .fullName(s".*${Pattern.quote(path)}.*")
-            .nameExact(PythonDependencyStubs.ModuleScope)
+        moduleDeclsUnder(path)
             .flatMap(t =>
                 t.member.nameExact(expEntity).headOption match
                   case Some(member) => Option((t, member))
