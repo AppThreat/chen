@@ -33,28 +33,6 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     scope.popScope()
     blockAst(node, childAsts.toList ++ destructorCalls)
 
-  /** The destructor calls that end a C++ scope (a block, a `for` statement's declarations, a catch
-    * handler's exception), in the order CDT reports them: the reverse of construction. They are
-    * placed where control falls out of the scope. CDT reports one list per scope, not one per exit,
-    * so a `return`, `break` or `goto` that leaves the scope early is not followed by them.
-    */
-  protected def scopeEndDestructorCalls(owner: IASTNode): List[Ast] = owner match
-    case o: IASTImplicitDestructorNameOwner =>
-        val names = scala.util.Try(o.getImplicitDestructorNames.toList).getOrElse(Nil)
-        names.flatMap { n =>
-          val destroyed = Option(n.getConstructionPoint).map(_.toString).getOrElse("")
-          val callCode  = s"$destroyed.${n.toString}()"
-          destructorCallAst(owner, n.resolveBinding(), callCode).map { ast =>
-            ast.root.foreach {
-                case call: NewCall =>
-                    call.lineNumber(lineEnd(owner)).columnNumber(columnEnd(owner))
-                case _ =>
-            }
-            ast
-          }
-        }
-    case _ => Nil
-
   private def astsForDeclarationStatement(decl: IASTDeclarationStatement): Seq[Ast] =
       decl.getDeclaration match
         // Must precede the IASTSimpleDeclaration cases below: a structured binding declaration
@@ -129,10 +107,18 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     controlStructureAst(doNode, Some(conditionAst), bodyAst, placeConditionLast = true)
 
   private def astForSwitchStatement(switchStmt: IASTSwitchStatement): Ast =
-    val code         = s"switch(${nullSafeCode(switchStmt.getControllerExpression)})"
-    val switchNode   = controlStructureNode(switchStmt, ControlStructureTypes.SWITCH, code)
-    val conditionAst = astForConditionExpression(switchStmt.getControllerExpression)
-    val stmtAsts     = nullSafeAst(switchStmt.getBody)
+    val declaration = switchStmt match
+      case s: ICPPASTSwitchStatement if s.getControllerExpression == null =>
+          Option(s.getControllerDeclaration)
+      case _ => None
+    val controller = declaration.getOrElse(switchStmt.getControllerExpression)
+    val code       = s"switch(${nullSafeCode(controller)})"
+    val switchNode = controlStructureNode(switchStmt, ControlStructureTypes.SWITCH, code)
+    val conditionAst = declaration match
+      case Some(d) => conditionDeclarationAst(d)
+      case None    => astForConditionExpression(switchStmt.getControllerExpression)
+    val stmtAsts = nullSafeAst(switchStmt.getBody)
+    if declaration.isDefined then scope.popScope()
     controlStructureAst(switchNode, Some(conditionAst), stmtAsts)
 
   private def astsForCaseStatement(caseStmt: IASTCaseStatement): Seq[Ast] =
@@ -192,17 +178,27 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     val r = statement match
       case expr: IASTExpressionStatement => Seq(astForExpression(expr.getExpression))
       case block: IASTCompoundStatement  => Seq(astForBlockStatement(block, argIndex))
-      case ifStmt: IASTIfStatement       => Seq(astForIf(ifStmt))
-      case whileStmt: IASTWhileStatement => Seq(astForWhile(whileStmt))
-      case forStmt: IASTForStatement     => astForFor(forStmt) +: scopeEndDestructorCalls(forStmt)
+      case ifStmt: IASTIfStatement =>
+          val init = ifStmt match
+            case s: ICPPASTIfStatement => s.getInitializerStatement
+            case _                     => null
+          withInitStatement(ifStmt, init, astForIf(ifStmt))
+      case whileStmt: IASTWhileStatement =>
+          astForWhile(whileStmt) +: scopeEndDestructorCalls(whileStmt)
+      case forStmt: IASTForStatement => astForFor(forStmt) +: scopeEndDestructorCalls(forStmt)
       case forStmt: ICPPASTRangeBasedForStatement =>
           astForRangedFor(forStmt) +: scopeEndDestructorCalls(forStmt)
-      case doStmt: IASTDoStatement           => Seq(astForDoStatement(doStmt))
-      case switchStmt: IASTSwitchStatement   => Seq(astForSwitchStatement(switchStmt))
-      case ret: IASTReturnStatement          => Seq(astForReturnStatement(ret))
-      case br: IASTBreakStatement            => Seq(astForBreakStatement(br))
-      case cont: IASTContinueStatement       => Seq(astForContinueStatement(cont))
-      case goto: IASTGotoStatement           => Seq(astForGotoStatement(goto))
+      case doStmt: IASTDoStatement => Seq(astForDoStatement(doStmt))
+      case switchStmt: IASTSwitchStatement =>
+          val init = switchStmt match
+            case s: ICPPASTSwitchStatement => s.getInitializerStatement
+            case _                         => null
+          withInitStatement(switchStmt, init, astForSwitchStatement(switchStmt))
+      case ret: IASTReturnStatement => Seq(returnLeavingScopes(ret, astForReturnStatement(ret)))
+      case br: IASTBreakStatement   => Seq(jumpLeavingScopes(br, astForBreakStatement(br)))
+      case cont: IASTContinueStatement =>
+          Seq(jumpLeavingScopes(cont, astForContinueStatement(cont)))
+      case goto: IASTGotoStatement => Seq(jumpLeavingScopes(goto, astForGotoStatement(goto)))
       case goto: IGNUASTGotoStatement        => astsForGnuGotoStatement(goto)
       case defStmt: IASTDefaultStatement     => Seq(astForDefaultStatement(defStmt))
       case tryStmt: ICPPASTTryBlockStatement => Seq(astForTryStatement(tryStmt))
@@ -219,6 +215,30 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           if e.getMessage != null && e.getMessage.contains("maximum nested depth") => r
       case e: Throwable => r
   end astsForStatement
+
+  /** An `if` or `switch` with an init statement (`if (auto n = size(); n > 0)`) is a block that runs
+    * the init statement, then the statement: the init statement's variables are in scope in the
+    * condition and in every branch, and are destroyed after the statement.
+    */
+  private def withInitStatement(stmt: IASTStatement, init: IASTStatement, build: => Ast): Seq[Ast] =
+      if init == null then build +: scopeEndDestructorCalls(stmt)
+      else
+        val node = blockNode(stmt, Defines.empty, registerType(Defines.voidTypeName))
+        scope.pushNewScope(node)
+        val initAsts = astsForStatement(init)
+        val ast      = build
+        scope.popScope()
+        Seq(blockAst(node, (initAsts :+ ast).toList ++ scopeEndDestructorCalls(stmt)))
+
+  /** A condition that declares a variable (`while (Node *n = next())`): a block holding the
+    * declaration, whose scope the caller closes once the statement's body is built.
+    */
+  private def conditionDeclarationAst(declaration: IASTDeclaration): Ast =
+    val node = blockNode(declaration, Defines.empty, registerType(Defines.voidTypeName))
+    scope.pushNewScope(node)
+    val asts = astsForDeclaration(declaration)
+    setArgumentIndices(asts)
+    blockAst(node, asts.toList)
 
   private def astForConditionExpression(
     expr: IASTExpression,
@@ -243,8 +263,12 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
   end astForConditionExpression
 
   private def astForFor(forStmt: IASTForStatement): Ast =
+    val conditionDeclaration = forStmt match
+      case s: ICPPASTForStatement if s.getConditionExpression == null =>
+          Option(s.getConditionDeclaration)
+      case _ => None
     val codeInit = nullSafeCode(forStmt.getInitializerStatement)
-    val codeCond = nullSafeCode(forStmt.getConditionExpression)
+    val codeCond = nullSafeCode(conditionDeclaration.getOrElse(forStmt.getConditionExpression))
     val codeIter = nullSafeCode(forStmt.getIterationExpression)
 
     val code    = s"for ($codeInit$codeCond;$codeIter)"
@@ -257,9 +281,16 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     val initAstBlock = blockNode(forStmt, Defines.empty, registerType(Defines.voidTypeName))
     scope.pushNewScope(initAstBlock)
     val initAst    = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
-    val compareAst = astForConditionExpression(forStmt.getConditionExpression, Some(2))
-    val updateAst  = nullSafeAst(forStmt.getIterationExpression, 3)
-    val bodyAsts   = nullSafeAst(forStmt.getBody, 4)
+    val compareAst = conditionDeclaration match
+      case Some(d) =>
+          val a = conditionDeclarationAst(d)
+          a.root.foreach { case b: ExpressionNew => b.argumentIndex = 2; case _ => }
+          a
+      case None => astForConditionExpression(forStmt.getConditionExpression, Some(2))
+    val updateAst = nullSafeAst(forStmt.getIterationExpression, 3)
+    val bodyAsts =
+        withIterationEnd(forStmt, forStmt.getBody, nullSafeAst(forStmt.getBody, 4))
+    if conditionDeclaration.isDefined then scope.popScope()
     scope.popScope()
     forAst(forNode, Seq(), Seq(initAst), Seq(compareAst), Seq(updateAst), bodyAsts)
   end astForFor
@@ -273,13 +304,20 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
 
     val initAst = astForNode(forStmt.getInitializerClause)
     val declAst = astsForDeclaration(forStmt.getDeclaration)
-    val stmtAst = nullSafeAst(forStmt.getBody)
+    val stmtAst = withIterationEnd(forStmt, forStmt.getBody, nullSafeAst(forStmt.getBody))
     controlStructureAst(forNode, None, Seq(initAst) ++ declAst ++ stmtAst)
 
   private def astForWhile(whileStmt: IASTWhileStatement): Ast =
-    val code       = s"while (${nullSafeCode(whileStmt.getCondition)})"
-    val compareAst = astForConditionExpression(whileStmt.getCondition)
-    val bodyAst    = nullSafeAst(whileStmt.getBody)
+    val declaration = whileStmt match
+      case s: ICPPASTWhileStatement if s.getCondition == null => Option(s.getConditionDeclaration)
+      case _                                                  => None
+    val code = s"while (${nullSafeCode(declaration.getOrElse(whileStmt.getCondition))})"
+    val compareAst = declaration match
+      case Some(d) => conditionDeclarationAst(d)
+      case None    => astForConditionExpression(whileStmt.getCondition)
+    val bodyAst =
+        withIterationEnd(whileStmt, whileStmt.getBody, nullSafeAst(whileStmt.getBody))
+    if declaration.isDefined then scope.popScope()
     whileAst(
       Some(compareAst),
       bodyAst,
@@ -300,13 +338,8 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           (c, compareAst)
       case s: CPPASTIfStatement if s.getConditionExpression == null =>
           val c = s"if (${nullSafeCode(s.getConditionDeclaration)})"
-          val exprBlock =
-              blockNode(s.getConditionDeclaration, Defines.empty, Defines.voidTypeName)
-          scope.pushNewScope(exprBlock)
           conditionScopeOpen = true
-          val a = astsForDeclaration(s.getConditionDeclaration)
-          setArgumentIndices(a)
-          (c, blockAst(exprBlock, a.toList))
+          (c, conditionDeclarationAst(s.getConditionDeclaration))
 
     val ifNode = controlStructureNode(ifStmt, ControlStructureTypes.IF, code)
 
