@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/config/ConfigTests.scala
+  s_b9f6f98e1c3bda::t_93f4bfcaa11d4b 54-64
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_b9f6f98e1c3bda::t_93f4bfcaa11d4b 116-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ed9730b636d3abc531d79402e9b69a58d712be4f",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
