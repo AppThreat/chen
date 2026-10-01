@@ -272,8 +272,10 @@ end TaskCreator
   * Every task that starts at a parameter looks up the references to its method. As a filter over
   * all METHOD_REF nodes of the graph that lookup was linear per task, which made it one of the
   * larger costs of the backward query on a big Python project. The index is built on first use and
-  * rebuilt when the number of METHOD_REF nodes changes, so a graph that gained or lost references
-  * between queries is not answered from a stale index.
+  * rebuilt when the number of METHOD_REF nodes changes. That covers references added or removed
+  * between queries; an edit that replaces references one for one leaves the count unchanged and
+  * would need the index dropped, which no caller does - the query engine runs on a graph whose
+  * passes have finished.
   */
 object MethodRefIndex:
 
