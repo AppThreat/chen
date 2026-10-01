@@ -553,5 +553,24 @@ class CppCfgCreationPassTests extends CfgTestFixture(() => new CCfgTestCpg(".cpp
           succOf("c") shouldBe expected(("RET", AlwaysEdge))
           succOf("d") shouldBe expected(("RET", AlwaysEdge))
       }
+
+      "be correct for a function-try-block" in {
+          // the fixture wraps the code in `RET func() { ... }`: close it and open a second function
+          implicit val cpg: Cpg = code("""
+                               |}
+                               |void g(int v) try {
+                               |  a;
+                               |} catch (int y) {
+                               |  b;
+                               |} catch (...) {
+                               |  c;
+                               |}
+                               |void h() {
+                               |""".stripMargin)
+          succOf("g") shouldBe expected(("a", AlwaysEdge))
+          succOf("a") shouldBe expected(("b", AlwaysEdge), ("c", AlwaysEdge), ("RET", AlwaysEdge))
+          succOf("b") shouldBe expected(("RET", AlwaysEdge))
+          succOf("c") shouldBe expected(("RET", AlwaysEdge))
+      }
   }
 end CppCfgCreationPassTests

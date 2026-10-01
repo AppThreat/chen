@@ -116,4 +116,39 @@ class ControlStructureTests extends CCodeToCpgSuite(FileDefaults.CPP_EXT):
       }
 
   }
+
+  "a try with several handlers" should {
+      val cpg = code("""
+        |struct E { int code; };
+        |int use(int v);
+        |int f(int x) {
+        |  try { return use(x); }
+        |  catch (const E &e) { return e.code; }
+        |  catch (int) { return 1; }
+        |  catch (...) { return 2; }
+        |}
+        |""".stripMargin)
+
+      "group the handlers under one catch block, each at its own position" in {
+          inside(cpg.method("f").tryBlock.l) { case List(t) =>
+              t.astChildren.order.l shouldBe List(1, 2)
+              inside(t.astChildren.order(2).isBlock.l) { case List(group) =>
+                  group.code shouldBe "catch"
+                  group.astChildren.isBlock.map(b => (b.order, b.code)).l shouldBe List(
+                    (1, "catch (const E &e)"),
+                    (2, "catch (int)"),
+                    (3, "catch (...)")
+                  )
+              }
+          }
+      }
+
+      "bind a named exception as a local of its handler" in {
+          inside(cpg.method("f").local.nameExact("e").l) { case List(e) =>
+              e.typeFullName shouldBe "E"
+              cpg.method("f").ast.isIdentifier.nameExact("e").refsTo.l shouldBe List(e)
+          }
+          cpg.method("f").local.name.l shouldBe List("e")
+      }
+  }
 end ControlStructureTests
