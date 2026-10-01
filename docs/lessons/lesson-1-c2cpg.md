@@ -223,6 +223,40 @@ Each top-level macro invocation becomes a `CALL` with dispatch type `INLINED`:
 Only the outermost invocation of nested macros is represented, and `#define` directives are not
 nodes.
 
+## C++ Calls the Source Does Not Spell
+
+C++ calls functions the source never writes as calls. CDT resolves each of them, and c2cpg emits a
+`CALL` whose `methodFullName` is the METHOD the graph holds, so the call graph and data flow reach
+the body:
+
+| Source | CALL |
+|---|---|
+| `a + b` on a class with `operator+` | `operator +` → `Vec2.operator +:Vec2(Vec2 &)`, `a` as argument 0 (member operator) or `a`, `b` as arguments 1, 2 (free operator), tagged `operator-call=<operator>.addition` |
+| `p->m()` on a smart pointer | the `operator ->` call on `p` is the receiver of `m`; the method call dispatches to the overrides |
+| `Point a(1, 2)`, `Point a{1, 2}`, `Point a;`, `Point(1, 2)` | `Point` → `Point.Point:void(int,int)` (the default constructor for `Point a;`) |
+| `new T(args)` | `<operator>.new`: argument 1 is the type, argument 2 the constructor call holding `args`; tagged `alloc-form=scalar`, `array` (`new T[n]`, the extents follow the type) or `placement` (the placement arguments go to a project's `operator new`) |
+| `delete p`, `delete[] p` | `<operator>.delete`: argument 1 is the pointer, argument 2 the destructor call; tagged `alloc-form=scalar` or `array` |
+| end of a block | one destructor call per local with a destructor, the last constructed first, where control falls out of the block |
+| `clampAdd<short>(x, 7)` | `clampAdd:ANY(ANY,ANY)`, the generic definition, tagged `template-instance=short int(short int,short int)`; an explicit specialization keeps its own name |
+| `f(x)` where `f` holds a lambda | `anonymous_lambda_0` → the lambda's METHOD, `f` as the receiver |
+
+An initialisation written with `=` (`Point a = b;`, `Point a = Point(1, 2);`) stays an
+assignment: it is what carries the value into the variable for data flow. A functional cast on its
+right-hand side is itself a constructor call.
+
+A callee is linked only when the graph holds its METHOD: a function the compiler generates (an
+implicit copy assignment) or one declared only in a library header keeps the shape it has
+otherwise, and an operator then stays the built-in `<operator>.*` call. Constructors and
+destructors are named with a `void` return type (`Point.Point:void(int,int)`,
+`Point.~Point:void()`), and every constructor carries the `CONSTRUCTOR` modifier.
+
+Destructor calls at the end of a scope follow CDT's per-scope list, so a `return`, `break` or
+`goto` that leaves the scope early is not followed by them.
+
+Operator calls carry the type CDT gives the expression (`p->name[1]` is `char`), `>>` on an
+unsigned operand is `<operator>.logicalShiftRight`, and `obj.*pm` / `ptr->*pm` are
+`<operator>.pointerToMember` / `<operator>.indirectPointerToMember`.
+
 ## Notes for Security Analysts
 
 - `parseInactiveCode = true` can reveal code that is compiled only under specific build
