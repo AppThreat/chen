@@ -79,6 +79,103 @@ class DottedFullNamesTests extends PySrc2CpgFixture(
           cpg.tag.name("code-execution").l should not be empty
       }
 
+      "resolve a plain standard-library import in a nested file to the top-level module" in {
+          val cpg = code(
+            """import subprocess
+              |import pickle
+              |
+              |def dangerous(cmd, blob):
+              |    pickle.loads(blob)
+              |    return subprocess.getoutput(cmd)
+              |""".stripMargin,
+            "introduction/views.py"
+          ).moreCode("", "introduction/__init__.py")
+          new io.appthreat.x2cpg.passes.taggers.EasyTagsPass(cpg)
+              .createAndApply()
+
+          cpg.call.nameExact("getoutput").methodFullName.l shouldBe List("subprocess.getoutput")
+          cpg.call.nameExact("loads").methodFullName.l shouldBe List("pickle.loads")
+          cpg.call.nameExact("getoutput").tag.name.l should contain("code-execution")
+      }
+
+      "resolve a plain import of a sibling module in a nested directory" in {
+          val cpg = code(
+            """def sink(x):
+              |    return x
+              |""".stripMargin,
+            "scripts/helpers.py"
+          ).moreCode(
+            """import helpers
+              |
+              |def run(user_input):
+              |    return helpers.sink(user_input)
+              |""".stripMargin,
+            "scripts/app.py"
+          )
+
+          cpg.method.fullNameExact("scripts.helpers.sink").l should not be empty
+          cpg.call.nameExact("sink").methodFullName.l shouldBe List("scripts.helpers.sink")
+          cpg.call.nameExact("sink").callee.fullName.l shouldBe List("scripts.helpers.sink")
+      }
+
+      "prefer the sibling module over a top-level module of the same name only when it exists" in {
+          val cpg = code(
+            """import json
+              |
+              |def run(s):
+              |    return json.loads(s)
+              |""".stripMargin,
+            "scripts/app.py"
+          ).moreCode(
+            """def loads(s):
+              |    return s
+              |""".stripMargin,
+            "lib/json.py"
+          )
+
+          // `lib/json.py` is not next to the importer, so `import json` is the standard library.
+          cpg.call.nameExact("loads").methodFullName.l shouldBe List("json.loads")
+      }
+
+      "resolve a sibling package that shadows a same-named module file to the package" in {
+          val cpg = code(
+            """def sink(x):
+              |    return "module " + x
+              |""".stripMargin,
+            "scripts/helpers.py"
+          ).moreCode(
+            """def sink(x):
+                |    return "package " + x
+                |""".stripMargin,
+            "scripts/helpers/__init__.py"
+          ).moreCode(
+            """import helpers
+                |
+                |def run(user_input):
+                |    return helpers.sink(user_input)
+                |""".stripMargin,
+            "scripts/app.py"
+          )
+
+          // CPython's finder prefers the regular package; the module file is unimportable.
+          val callees = cpg.call.nameExact("sink").callee.l
+          callees.map(_.fullName) shouldBe List("helpers.sink")
+          callees.map(_.filename) shouldBe List("scripts/helpers/__init__.py")
+      }
+
+      "resolve a dotted plain import in a nested file to the top-level module" in {
+          val cpg = code(
+            """import os.path
+              |
+              |def run(a, b):
+              |    return os.path.join(a, b)
+              |""".stripMargin,
+            "pkg/app.py"
+          ).moreCode("", "pkg/__init__.py")
+
+          cpg.call.nameExact("join").methodFullName.l shouldBe List("os.path.join")
+      }
+
       "resolve a dotted base class so inheritance edges survive" in {
           val cpg = code(
             """class Base:
