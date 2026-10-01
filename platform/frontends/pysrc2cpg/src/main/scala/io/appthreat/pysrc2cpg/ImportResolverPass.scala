@@ -8,7 +8,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
 import java.io.File as JFile
-import java.util.regex.Pattern
+import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable
 
@@ -40,6 +40,24 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
   private lazy val importsByFile: Map[String, Seq[PythonDependencyStubs.DepImport]] =
       PythonDependencyStubs.importsByFile(cpg)
 
+  /** The module-scope type decls, collected once per pass. Only these may contribute members to
+    * `from pkg import x` (see `membersMatchingImports`), and there are far fewer of them than type
+    * decls. Matching every import against every type decl with a regex made this pass most of a
+    * large Python run's frontend time.
+    */
+  private lazy val moduleScopeDecls: Vector[TypeDecl] =
+      cpg.typeDecl.nameExact(PythonDependencyStubs.ModuleScope).toVector
+
+  // Imports repeat the same few packages across files, so the scan runs once per package.
+  private val moduleDeclsByPath = new ConcurrentHashMap[String, Vector[TypeDecl]]()
+
+  /** The module-scope decls whose full name contains `path`, in graph order. */
+  private def moduleDeclsUnder(path: String): Vector[TypeDecl] =
+      moduleDeclsByPath.computeIfAbsent(
+        path,
+        _ => moduleScopeDecls.filter(_.fullName.contains(path))
+      )
+
   override protected def optionalResolveImport(
     fileName: String,
     importCall: Call,
@@ -60,12 +78,35 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
       val relCurrDir =
           toCpgPath(currDir.pathAsString.stripPrefix(root).stripPrefix(JFile.separator))
 
-      (relCurrDir, importedEntity)
+      // `import X` is absolute: X is the top-level module X. The importing file's directory
+      // only counts when it is itself on sys.path, as it is for a script run directly, so a
+      // module X ingested next to the importer is preferred, and anything else (the standard
+      // library, an installed package) is the top-level X. Prefixing the importer's directory
+      // unconditionally turned `import pickle` in `introduction/views.py` into calls to
+      // `introduction.pickle.loads`, which no sink rule recognises.
+      ("", siblingModule(relCurrDir, importedEntity).getOrElse(importedEntity))
 
     resolveEntities(namespace, entityName, importedAs).foreach(x =>
         resolvedImportToTag(x, importCall, diffGraph)
     )
   end optionalResolveImport
+
+  private lazy val ingestedFiles: Set[String] = cpg.file.name.toSet
+
+  /** The dotted name of module `name` when it is ingested in directory `relDir` (graph-space,
+    * relative to the input root), as a `name/` package or a `name.py`/`name.pyi` file. The package
+    * is tried first: CPython's finder checks directories before module files, so a regular package
+    * shadows a same-named module file (which [[PythonModuleName.moduleFor]] names
+    * `name.__shadowed__`).
+    */
+  private def siblingModule(relDir: String, name: String): Option[String] =
+      if relDir.isEmpty then None
+      else
+        Seq(s"$name/__init__.py", s"$name/__init__.pyi", s"$name.py", s"$name.pyi")
+            .map(candidate => s"$relDir$CpgSep$candidate")
+            .find(ingestedFiles.contains)
+            .flatMap(PythonModuleName.moduleFor(ingestedFiles, _))
+            .filterNot(_.endsWith(".__shadowed__"))
 
   private def relativizeNamespace(path: String, fileName: String): String =
       if path.startsWith(".") then
@@ -212,9 +253,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
         // url_for` resolves as a member access on the class instead of the module function - a
         // failure mode that only exists once dependency signatures are ingested. `from Class import
         // attr` is not Python, so no real import loses a resolution to this.
-        cpg.typeDecl
-            .fullName(s".*${Pattern.quote(path)}.*")
-            .nameExact(PythonDependencyStubs.ModuleScope)
+        moduleDeclsUnder(path)
             .flatMap(t =>
                 t.member.nameExact(expEntity).headOption match
                   case Some(member) => Option((t, member))

@@ -53,8 +53,10 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
   def reachableByFlows[A](sourceTrav: IterableOnce[A], sourceTravs: IterableOnce[A]*)(implicit
     context: EngineContext
   ): Iterator[Path] =
-    val sources        = sourceTravsToStartingPoints(sourceTrav +: sourceTravs*)
-    val startingPoints = sources.map(_.startingPoint)
+    val sources = sourceTravsToStartingPoints(sourceTrav +: sourceTravs*)
+    // A set, not the list: it is probed once per element of every result path, and a scan of the
+    // list per probe grew with sources times path elements on a large project.
+    val startingPoints = sources.iterator.map(_.startingPoint).toSet[AstNode]
     val paths = reachableByInternal(sources).par
         .map { result =>
           // We can get back results that start in nodes that are invisible
@@ -104,7 +106,10 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
     val result = engine.backwards(sinks, startingPointsWithSources.map(_.startingPoint))
 
     engine.shutdown()
-    val sources = startingPointsWithSources.map(_.source)
+    // Probed once per result. As a list this was a linear scan per result, and on a large Python
+    // project that scan was most of the reachables run. Node equality is by id with a matching
+    // hash, so set membership answers exactly what `List.contains` did.
+    val sources = startingPointsWithSources.iterator.map(_.source).toSet[StoredNode]
     val startingPointToSource = startingPointsWithSources.map { x =>
         x.startingPoint.asInstanceOf[AstNode] -> x.source
     }.toMap

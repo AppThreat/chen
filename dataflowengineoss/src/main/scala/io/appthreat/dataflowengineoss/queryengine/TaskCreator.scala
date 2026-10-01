@@ -99,13 +99,10 @@ class TaskCreator(context: EngineContext):
           .l
 
   /** Expand to receiver objects of calls that reference the method of the parameter, e.g., if
-    * `param` is a parameter of `m`, return `foo` in `foo.bar(m)` TODO: I'm not sure whether
-    * `methodRef.methodFullNameExact(...)` uses an index. If not, then caching these lookups or
-    * keeping a map of all method names to their references may make sense.
+    * `param` is a parameter of `m`, return `foo` in `foo.bar(m)`.
     */
-
   private def paramToMethodRefCallReceivers(param: MethodParameterIn): List[Expression] =
-      new Cpg(param.graph()).methodRef.methodFullNameExact(param.method.fullName).inCall.argument(
+      MethodRefIndex.referencing(param.graph(), param.method.fullName).iterator.inCall.argument(
         0
       ).l
 
@@ -269,3 +266,41 @@ class TaskCreator(context: EngineContext):
       else
         Vector()
 end TaskCreator
+
+/** METHOD_REF nodes by the method full name they reference, per graph.
+  *
+  * Every task that starts at a parameter looks up the references to its method. As a filter over
+  * all METHOD_REF nodes of the graph that lookup was linear per task, which made it one of the
+  * larger costs of the backward query on a big Python project. The index is built on first use and
+  * rebuilt when the number of METHOD_REF nodes changes. That covers references added or removed
+  * between queries; an edit that replaces references one for one leaves the count unchanged and
+  * would need the index dropped, which no caller does - the query engine runs on a graph whose
+  * passes have finished.
+  */
+object MethodRefIndex:
+
+  // Node ids, not nodes: a node references its graph, and a value that references its own key
+  // would keep every graph this index has seen from ever being collected.
+  private final class Entry(val methodRefCount: Int, val idsByFullName: Map[String, Array[Long]])
+
+  private val entries = new java.util.WeakHashMap[overflowdb.Graph, Entry]()
+
+  def referencing(graph: overflowdb.Graph, methodFullName: String): List[MethodRef] =
+      entryFor(graph).idsByFullName.get(methodFullName) match
+        case Some(ids) => ids.iterator.map(graph.node(_)).collect { case m: MethodRef => m }.toList
+        case None      => Nil
+
+  private def entryFor(graph: overflowdb.Graph): Entry = entries.synchronized {
+      val count   = graph.nodeCount(MethodRef.Label)
+      val current = entries.get(graph)
+      if current != null && current.methodRefCount == count then current
+      else
+        // Graph order within each name, as the filter it replaces returned them.
+        val ids = new Cpg(graph).methodRef.l.groupBy(_.methodFullName).view.mapValues(
+          _.map(_.id()).toArray
+        ).toMap
+        val built = Entry(count, ids)
+        entries.put(graph, built)
+        built
+  }
+end MethodRefIndex
