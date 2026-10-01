@@ -1,0 +1,37 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_b9f6f98e1c3bda::t_96725fc3ed633c 365,508-513,515
+  s_b9f6f98e1c3bda::t_bf1086be05bba9 11-15,514
+  s_b9f6f98e1c3bda::t_b08b5094cfb0af 516
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/cfg/CfgCreationPassTests.scala
+  s_b9f6f98e1c3bda::t_6ad2aa470dc962 556-570,574
+  s_b9f6f98e1c3bda::t_309fea46c03726 571-573
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/CfgTests.scala
+  s_b9f6f98e1c3bda::t_ddf4628a2571dd 47-50,56-75
+  s_b9f6f98e1c3bda::t_6cd6ddad62a263 51-55
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/ControlStructureTests.scala
+  s_b9f6f98e1c3bda::t_022e46f5ee5640 119-153
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForStatementsCreator.scala
+  s_b9f6f98e1c3bda::t_309fea46c03726 144-146,163-171
+  s_b9f6f98e1c3bda::t_96725fc3ed633c 5,123-143,147-162,172-173
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/controlflow/cfgcreation/CfgCreator.scala
+  s_b9f6f98e1c3bda::t_309fea46c03726 500,516,518,566,568-569,571-577
+  s_b9f6f98e1c3bda::t_bf1086be05bba9 515,567,570
+  s_b9f6f98e1c3bda::t_ee33e84e437757 499,501
+  s_b9f6f98e1c3bda::t_ab784c62fe7f02 578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "655650d761baf49f49cfe9686460adc31cac9882",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
