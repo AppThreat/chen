@@ -72,10 +72,10 @@ object AstCreationPass:
   private val AstFormatVersion = "c2cpg-ast-3"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
-    * format, the parser options (function bodies, inactive code, comments, image locations,
-    * trivial expressions, the C++ standard, include discovery, the project index), the include
-    * paths a header is resolved through, the defines that gate it, and the macro and include files
-    * every file is preprocessed with. (A header's own content is not covered.)
+    * format, the parser options (function bodies, inactive code, comments, image locations, trivial
+    * expressions, the C++ standard, include discovery, the project index), the include paths a
+    * header is resolved through, the defines that gate it, and the macro and include files every
+    * file is preprocessed with. (A header's own content is not covered.)
     *
     * The parser options matter because one project directory serves several modes: atom's header
     * mode parses without function bodies, and a later full run must not replay those body-less
@@ -102,6 +102,7 @@ object AstCreationPass:
         config.defines.toList.sorted ++ config.macroFiles.toList.sorted.map(contentOf("macro")) ++
         config.includeFiles.toList.sorted.map(contentOf("include"))))
         .mkString("\u0000")
+  end cacheFingerprint
 
   /** The AST cache key for a file: absolute path identity + file content (matches what the AST pass
     * uses, so warm-restore finds the same `.frag`).

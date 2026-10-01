@@ -148,3 +148,4 @@ class AstCacheFingerprintTests extends AnyWordSpec with Matchers:
                 AstCreationPass.cacheFingerprint(base)
         }
     }
+end AstCacheFingerprintTests
