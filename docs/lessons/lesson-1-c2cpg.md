@@ -16,14 +16,17 @@ include resolution, defines, C++ standard selection, and the AST fragment cache.
 ## Conceptual Background
 
 C/C++ analysis differs from managed-language frontends because the preprocessor can radically change
-which tokens a parser sees. `c2cpg` uses the Eclipse CDT parser, which treats macros, `#ifdef`
-blocks, and `#include` directives as first-class AST nodes rather than expanding them away first.
-This means macro invocations are visible in the graph, and inactive `#ifdef` branches can optionally
-be retained and analysed.
+which tokens a parser sees. `c2cpg` uses the Eclipse CDT parser, which preprocesses each file but
+records where every expansion came from. `c2cpg` uses those records to keep macro invocations
+visible in the graph (see [Macros](#macros)), and inactive `#ifdef` branches can optionally be
+retained and analysed.
 
-Source files with extensions `.c`, `.cpp`, `.cc`, `.cxx` are handled by `C2Cpg`. Header-only
-translation units (`.h`, `.hpp`, `.i`) are handled by the `C2Atom` variant that the `atom` CLI
-selects when `-l H` or `-l HPP` is given.
+Translation units are `.c` (C) and `.cc`, `.cpp`, `.cxx`, `.c++`, `.C` (C++). Headers are `.h`,
+`.i`, `.h.in` and `.tmh` (C) and `.hpp`, `.hh`, `.hxx`, `.h++`, `.H`, `.ipp`, `.inl`, `.tcc` (C++).
+The extensions longer than one letter also match in upper case (`.CPP`). Every header is also parsed
+on its own, so code in headers that no parsed source includes still reaches the graph. The `atom`
+CLI selects `C2Cpg` for `-l c` and `-l cpp`; for `-l h`, `-l hpp` and `-l i` it runs `C2Atom`, the
+same AST pass without function bodies or overlays.
 
 The default output file is `app.atom` (an MVStore binary, the overflowdb2 storage format). The
 fragment-cache mechanism (`enableAstCache = true` by default) stores one serialised AST fragment per
@@ -54,7 +57,10 @@ final case class Config(
   includeTrivialExpressions: Boolean      = false,
   enableAstCache: Boolean                 = true,        // fragment cache on by default
   cacheDir: String                        = "",          // defaults to <input>/.chen/
-  onlyAstCache: Boolean                   = false        // warm the cache only, skip CPG output
+  onlyAstCache: Boolean                   = false,       // warm the cache only, skip CPG output
+  autoDefines: Boolean                    = false,       // define the macro census's build options
+  macroCensusReport: String               = "",          // write the census to <file>.json/.h
+  macroCensusOnly: Boolean                = false        // write the census and stop: no CPG
 ) extends X2CpgConfig[Config]
 ```
 
@@ -65,19 +71,24 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 ## Pass Pipeline (`C2Cpg.createCpg`)
 
 1. **MetaDataPass** — writes the `MetaData` node (language = `NEWC`, root path).
-2. **IncludeAutoDiscovery** — if `includePathsAutoDiscovery = true`, scans the project for system
-   include paths and merges them into `Config.includePaths` before parsing.
-3. **AstCreationPass** — drives Eclipse CDT over every `.c`/`.cpp`/`.h` file; writes `METHOD`,
+2. **IncludeAutoDiscovery** — if `includePathsAutoDiscovery = true`, guesses the project's own
+   include directories and merges them into `Config.includePaths` before parsing. (The compiler's
+   system include paths are discovered separately, from `gcc`/`clang -E -v`, when the parser is
+   configured.)
+3. **Macro census** — with `autoDefines`, scans the tree for build-option macros and defines them.
+4. **AstCreationPass** — drives Eclipse CDT over every source and header file; writes `METHOD`,
    `TYPE_DECL`, `CALL`, `LOCAL`, `LITERAL`, `CONTROL_STRUCTURE`, etc. Supports parallel file
    processing. When `enableAstCache` is on and the project is fully cached,
    **FragmentSplicePass** runs instead — it grafts pre-serialised AST fragments directly into the
    graph, bypassing the CDT parser entirely.
-4. **ConfigFileCreationPass** — creates `CONFIG_FILE` nodes for `.cmake`, `.make`, `Makefile`,
+5. **ConfigFileCreationPass** — creates `CONFIG_FILE` nodes for `.cmake`, `.make`, `Makefile`,
    `CMakeLists.txt`, etc. (skipped when `onlyAstCache = true`).
-5. **TypeNodePass** — materialises `TYPE` nodes from the set of types collected during AST
+6. **TypeNodePass** — materialises `TYPE` nodes from the set of types collected during AST
    creation (skipped when `onlyAstCache = true`).
-6. **TypeDeclNodePass** — creates `TYPE_DECL` stubs for types seen but not declared in the parsed
+7. **TypeDeclNodePass** — creates `TYPE_DECL` stubs for types seen but not declared in the parsed
    files (skipped when `onlyAstCache = true`).
+8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers with their value
+   (`const-value`).
 
 `createCpgWithOverlays` additionally applies the four default overlays defined in `X2Cpg.scala`:
 **Base**, **ControlFlow**, **TypeRelations**, **CallGraph**.
@@ -96,32 +107,31 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 | `--log-preprocessor`                    | `logPreprocessor`           |
 | `--print-ifdef-only`                    | `printIfDefsOnly`           |
 | `--with-include-auto-discovery`         | `includePathsAutoDiscovery` |
+| `--no-include-auto-discovery` (hidden)  | `includePathsAutoDiscovery` |
 | `--with-function-bodies`                | `includeFunctionBodies`     |
 | `--with-image-locations`                | `includeImageLocations`     |
 | `--with-project-index`                  | `useProjectIndex`           |
-| `--enable-ast-cache` / `--no-ast-cache` | `enableAstCache`            |
+| `--no-ast-cache`                        | `enableAstCache`            |
 | `--cache-dir <dir>`                     | `cacheDir`                  |
 | `--only-ast-cache`                      | `onlyAstCache`              |
+| `--auto-defines`                        | `autoDefines`               |
+| `--macro-census <file>`                 | `macroCensusReport`         |
 
 ## atom CLI (`-l cpp` / `-l c`)
 
-`atom` maps frontend-args as comma-separated `key=value` pairs:
+`atom` passes frontend settings as comma-separated `key=value` pairs:
 
 ```bash
 atom -l cpp \
   -o app.atom \
-  --frontend-args "defines=NDEBUG,VERSION=3;includes=/usr/include;cpp-standard=c++20;enable-ast-cache=true;ast-cache-dir=/tmp/chen-cache" \
+  --frontend-args cpp-standard=c++20,includes=/usr/local/include,enable-ast-cache=true \
   /path/to/cpp/project
 ```
 
-Key frontend-arg names recognised by `Atom.scala`:
-
-- `defines` (semicolon-separated)
-- `includes` / `include-paths` (semicolon-separated)
-- `cpp-standard`
-- `enable-ast-cache` / `only-ast-cache`
-- `ast-cache-dir`
-- `function-bodies` / `parse-inactive-code` / `with-image-locations` / `include-comments`
+`atom --frontend-args-keys -l cpp` prints every key the C and C++ frontends accept, with its type
+and default (`defines`, `includes`/`include-paths`, `include-files`, `macro-files`,
+`cpp-standard`, `auto-defines`, `macro-census`, `function-bodies`, `parse-inactive-code`,
+`enable-ast-cache`, `ast-cache-dir`, …).
 
 ## Real Commands and Code Examples
 
@@ -200,12 +210,26 @@ cpg.method.filter(_.parameter.size > 50).name.l
 cpg.typ.name.take(20).l
 ```
 
+## Macros
+
+Each top-level macro invocation becomes a `CALL` with dispatch type `INLINED`:
+
+- `name` is the macro name; `methodFullName` encodes where the macro is defined,
+  `<file>:<line>:<lineEnd>:<NAME>:<argc>` (plain `NULL` keeps its name).
+- The invocation's arguments are matched by their source text inside the expansion and copied
+  under the call as arguments `1..argc`, so data flows into the macro's value.
+- The expansion itself is the call's last AST child, a block after the arguments, and the CFG runs
+  through it, so guards written as macros (`MIN`, `MAX`, `CLAMP`) take part in data flow.
+
+Only the outermost invocation of nested macros is represented, and `#define` directives are not
+nodes.
+
 ## Notes for Security Analysts
 
 - `parseInactiveCode = true` can reveal code that is compiled only under specific build
   configurations (e.g. debug-only assertions, platform guards). Use it when auditing for latent
   vulnerabilities in conditional branches.
-- Macro expansions appear as `MACRO_DEF` / `MACRO_EXPANSION` nodes in the CPG — query
-  `cpg.graph.nodes("MACRO_EXPANSION")` to enumerate all macro call sites.
+- Macro invocations appear as calls with dispatch type `INLINED` (see [Macros](#macros)) — query
+  `cpg.call.dispatchType("INLINED")` to enumerate them.
 - `logProblems = true` surfaces CDT parse errors to stdout, which is useful when include paths are
   incomplete and many symbols are unresolved.
