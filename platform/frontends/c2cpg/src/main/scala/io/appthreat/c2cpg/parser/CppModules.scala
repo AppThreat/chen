@@ -145,8 +145,11 @@ object CppModules:
       * same array when it has none.
       */
     def rewrite(file: Path, chars: Array[Char]): Array[Char] =
-        if !mayHaveModuleSyntax(chars) then chars
-        else rewritten.computeIfAbsent(file.toAbsolutePath.normalize, f => rewriteLines(f, chars))
+        // remembered either way: a header is read into many units
+        rewritten.computeIfAbsent(
+          file.toAbsolutePath.normalize,
+          f => if mayHaveModuleSyntax(chars) then rewriteLines(f, chars) else chars
+        )
 
     private def rewriteLines(file: Path, chars: Array[Char]): Array[Char] =
       val text         = new String(chars)

@@ -92,6 +92,24 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "a database compiler from the project itself" should {
+      "never be run: its family's table stands in" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("project") { dir =>
+            val cc     = fakeCompiler(dir)
+            val config = Config().withInputPath(dir.pathAsString)
+            PredefinedMacros.clearProcessCache()
+            val before = PredefinedMacros.compilerRuns.get()
+            Seq(cc, "./fakecc", "tools/../fakecc").foreach { compiler =>
+              val flags    = CompileCommand.parseArguments(Seq(compiler, "-c", "a.c"), dir.path)
+              val settings = ProjectSources.settings(config, SourceLanguage.C, Some(flags), None)
+              settings.definedSymbols should not contain key("__FAKECC__")
+            }
+            PredefinedMacros.compilerRuns.get() shouldBe before
+          }
+      }
+  }
+
   "the fallback tables" should {
       "select macros by language for the compiler family and target" in {
           val gccC =

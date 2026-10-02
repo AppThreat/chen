@@ -253,7 +253,9 @@ object ProjectSources:
     val cpp = language == SourceLanguage.Cpp
     val identity: Option[CompilerIdentity] = flags match
       case Some(f) =>
-          f.compiler.map(exe => CompilerIdentity(exe, f.family, language, f.targetOptions))
+          f.compiler.flatMap(trustedExecutable(_, config)).map(exe =>
+              CompilerIdentity(exe, f.family, language, f.targetOptions)
+          )
       case None if config.includePathsAutoDiscovery => hostCompiler(config, language)
       case None                                     => None
     val facts = identity.flatMap(PredefinedMacros.ofCompiler(_, cacheDir))
@@ -304,6 +306,29 @@ object ProjectSources:
           config.macroFiles.toSeq.sorted.map(p => Paths.get(p).toAbsolutePath)
     )
   end settings
+
+  /** The compiler a compile command names, when it may be run: a command found on the `PATH`, or an
+    * absolute path to an executable, outside the project. A compilation database can come with the
+    * code it describes, so a compiler inside the project tree, or named by a relative path that
+    * resolves into it, is never run (its table stands in). Only the options that change which
+    * macros are predefined are passed to it (see [[CompileCommand.parseArguments]]).
+    */
+  private def trustedExecutable(compiler: String, config: Config): Option[String] =
+    val root = Try(Paths.get(config.inputPath).toRealPath()).getOrElse(
+      Paths.get(config.inputPath).toAbsolutePath.normalize
+    )
+    val named = Try(Paths.get(compiler)).toOption
+    val candidates: Seq[Path] = named match
+      case Some(p) if p.isAbsolute => Seq(p)
+      case Some(p) if p.getNameCount == 1 && !compiler.contains('/') && !compiler.contains('\\') =>
+          val suffixes = if scala.util.Properties.isWin then Seq("", ".exe") else Seq("")
+          sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator).toSeq.filter(_.nonEmpty)
+              .flatMap(dir => suffixes.map(sfx => Paths.get(dir).resolve(compiler + sfx)))
+      case _ => Nil
+    candidates.find(p => Files.isRegularFile(p) && Files.isExecutable(p))
+        .flatMap(p => Try(p.toRealPath()).toOption)
+        .filterNot(_.startsWith(root))
+        .map(_.toString)
 
   /** The C++ standard a unit without a compile command is parsed as, unless one is configured. */
   val DefaultCppStandard = "gnu++17"
