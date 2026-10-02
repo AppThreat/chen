@@ -7,8 +7,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Call, CfgNode}
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
 
-/** Objects with automatic storage are destroyed where control leaves their scope: at its end, and at
-  * every `return`, `break`, `continue` and `goto` that leaves it early.
+/** Objects with automatic storage are destroyed where control leaves their scope: at its end, and
+  * at every `return`, `break`, `continue` and `goto` that leaves it early.
   */
 class CppScopeExitTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
@@ -21,8 +21,8 @@ class CppScopeExitTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
   private def destructorsOn(cpg: io.shiftleft.codepropertygraph.Cpg, method: String) =
       cpg.method.nameExact(method).call.nameExact("~Guard").code.l
 
-  /** The destructor calls that run right before the jump statement with `code` in `method`, in
-    * the order they run.
+  /** The destructor calls that run right before the jump statement with `code` in `method`, in the
+    * order they run.
     */
   private def destructorsBefore(
     cpg: io.shiftleft.codepropertygraph.Cpg,
@@ -170,7 +170,7 @@ class CppScopeExitTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
       }
 
       "build the declarations of conditions and init statements" in {
-          cpg.method.nameExact("conditions").local.name.toSetMutable should contain allOf (
+          (cpg.method.nameExact("conditions").local.name.toSetMutable should contain).allOf(
             "g",
             "w",
             "s"

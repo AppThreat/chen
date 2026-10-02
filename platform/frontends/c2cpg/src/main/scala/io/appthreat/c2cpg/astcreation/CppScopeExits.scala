@@ -71,10 +71,10 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
         case _                        => Nil
     }
     declarators.flatMap { d =>
-        val name = d.getName
-        Try(name.resolveBinding()).toOption.collect { case v: ICPPVariable => v }
-            .flatMap(v => destructorOf(v.getType))
-            .map(Destruction(owner, name, _))
+      val name = d.getName
+      Try(name.resolveBinding()).toOption.collect { case v: ICPPVariable => v }
+          .flatMap(v => destructorOf(v.getType))
+          .map(Destruction(owner, name, _))
     }.reverse
 
   /** Whether `d` lives for one iteration of its loop. */
@@ -94,12 +94,12 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
       destructions.flatMap { d =>
         val callCode = s"${d.declaredAt}.${d.destructor.getName}()"
         destructorCallAst(at, d.destructor, callCode).map { ast =>
-            if atEnd then
-              ast.root.foreach {
-                  case call: NewCall => call.lineNumber(lineEnd(at)).columnNumber(columnEnd(at))
-                  case _             =>
-              }
-            ast
+          if atEnd then
+            ast.root.foreach {
+                case call: NewCall => call.lineNumber(lineEnd(at)).columnNumber(columnEnd(at))
+                case _             =>
+            }
+          ast
         }
       }
 
@@ -122,14 +122,18 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
     * variables.
     */
   protected def iterationEndDestructorCalls(loop: IASTNode, body: IASTStatement): List[Ast] =
-    if body == null || isJump(body) then Nil
-    else
-      body match
-        case b: IASTCompoundStatement if b.getStatements.lastOption.exists(isJump) => Nil
-        case _ => destructorCalls(destructionsOf(loop).filter(isPerIteration), body, atEnd = true)
+      if body == null || isJump(body) then Nil
+      else
+        body match
+          case b: IASTCompoundStatement if b.getStatements.lastOption.exists(isJump) => Nil
+          case _ => destructorCalls(destructionsOf(loop).filter(isPerIteration), body, atEnd = true)
 
   /** `bodyAsts` followed by the destructor calls that end one iteration of `loop`, as one block. */
-  protected def withIterationEnd(loop: IASTNode, body: IASTStatement, bodyAsts: Seq[Ast]): Seq[Ast] =
+  protected def withIterationEnd(
+    loop: IASTNode,
+    body: IASTStatement,
+    bodyAsts: Seq[Ast]
+  ): Seq[Ast] =
     val calls = iterationEndDestructorCalls(loop, body)
     if calls.isEmpty then bodyAsts
     else
@@ -163,9 +167,9 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
 
   /** The objects a jump statement destroys, in destruction order. */
   private def destructionsLeftBy(jump: IASTStatement): List[Destruction] =
-    val jumpAt = offsetOf(jump)
+    val jumpAt                                   = offsetOf(jump)
     def constructedBefore(ds: List[Destruction]) = ds.filter(d => offsetOf(d.declaredAt) < jumpAt)
-    val scopes = enclosingScopes(jump)
+    val scopes                                   = enclosingScopes(jump)
     jump match
       case _: IASTReturnStatement => scopes.flatMap(s => constructedBefore(destructionsOf(s)))
       case _: IASTBreakStatement | _: IASTContinueStatement =>
@@ -218,10 +222,11 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
     else
       val block = blockNode(ret, Defines.empty, registerType(Defines.voidTypeName))
       value match
-        case Some(v) if observesDestruction(v, destructions.flatMap(d => bindingOf(d.declaredAt))) =>
+        case Some(v)
+            if observesDestruction(v, destructions.flatMap(d => bindingOf(d.declaredAt))) =>
             scope.pushNewScope(block)
-            val tpe    = expressionType(v)
-            val local  = localNode(ret, ReturnValueName, s"$tpe $ReturnValueName", tpe)
+            val tpe   = expressionType(v)
+            val local = localNode(ret, ReturnValueName, s"$tpe $ReturnValueName", tpe)
             scope.addToScope(ReturnValueName, (local, tpe))
             val target = identifierNode(ret, ReturnValueName, ReturnValueName, tpe)
             val store = callNode(
@@ -233,14 +238,19 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
               None,
               Some(tpe)
             )
-            val storeAst = callAst(store, List(Ast(target).withRefEdge(target, local), astForNode(v)))
-            val read     = identifierNode(ret, ReturnValueName, ReturnValueName, tpe)
-            val retNode  = returnNode(ret, nodeSignature(ret))
+            val storeAst =
+                callAst(store, List(Ast(target).withRefEdge(target, local), astForNode(v)))
+            val read    = identifierNode(ret, ReturnValueName, ReturnValueName, tpe)
+            val retNode = returnNode(ret, nodeSignature(ret))
             val retAst =
-                Ast(retNode).withChild(Ast(read).withRefEdge(read, local)).withArgEdge(retNode, read)
+                Ast(retNode).withChild(Ast(read).withRefEdge(read, local)).withArgEdge(
+                  retNode,
+                  read
+                )
             scope.popScope()
             blockAst(block, List(Ast(local), storeAst) ++ calls :+ retAst)
         case _ => blockAst(block, calls :+ plainReturn)
+      end match
     end if
   end returnLeavingScopes
 
@@ -259,7 +269,9 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
       case id: IASTIdExpression =>
           bindingOf(id.getName).exists {
               case v: ICPPVariable =>
-                  destroyed.contains(v) || Try(v.getType).toOption.exists(_.isInstanceOf[ICPPReferenceType])
+                  destroyed.contains(v) || Try(v.getType).toOption.exists(
+                    _.isInstanceOf[ICPPReferenceType]
+                  )
               case _ => false
           }
       case o: IASTImplicitNameOwner => Try(o.getImplicitNames.nonEmpty).getOrElse(false)

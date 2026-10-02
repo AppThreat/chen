@@ -198,9 +198,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       case br: IASTBreakStatement   => Seq(jumpLeavingScopes(br, astForBreakStatement(br)))
       case cont: IASTContinueStatement =>
           Seq(jumpLeavingScopes(cont, astForContinueStatement(cont)))
-      case goto: IASTGotoStatement => Seq(jumpLeavingScopes(goto, astForGotoStatement(goto)))
-      case goto: IGNUASTGotoStatement        => astsForGnuGotoStatement(goto)
-      case defStmt: IASTDefaultStatement     => Seq(astForDefaultStatement(defStmt))
+      case goto: IASTGotoStatement       => Seq(jumpLeavingScopes(goto, astForGotoStatement(goto)))
+      case goto: IGNUASTGotoStatement    => astsForGnuGotoStatement(goto)
+      case defStmt: IASTDefaultStatement => Seq(astForDefaultStatement(defStmt))
       case tryStmt: ICPPASTTryBlockStatement => Seq(astForTryStatement(tryStmt))
       case caseStmt: IASTCaseStatement       => astsForCaseStatement(caseStmt)
       case decl: IASTDeclarationStatement    => astsForDeclarationStatement(decl)
@@ -216,9 +216,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       case e: Throwable => r
   end astsForStatement
 
-  /** An `if` or `switch` with an init statement (`if (auto n = size(); n > 0)`) is a block that runs
-    * the init statement, then the statement: the init statement's variables are in scope in the
-    * condition and in every branch, and are destroyed after the statement.
+  /** An `if` or `switch` with an init statement (`if (auto n = size(); n > 0)`) is a block that
+    * runs the init statement, then the statement: the init statement's variables are in scope in
+    * the condition and in every branch, and are destroyed after the statement.
     */
   private def withInitStatement(stmt: IASTStatement, init: IASTStatement, build: => Ast): Seq[Ast] =
       if init == null then build +: scopeEndDestructorCalls(stmt)
@@ -280,7 +280,7 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     // nothing for a definition-keyed data-flow engine to connect.
     val initAstBlock = blockNode(forStmt, Defines.empty, registerType(Defines.voidTypeName))
     scope.pushNewScope(initAstBlock)
-    val initAst    = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
+    val initAst = blockAst(initAstBlock, nullSafeAst(forStmt.getInitializerStatement, 1).toList)
     val compareAst = conditionDeclaration match
       case Some(d) =>
           val a = conditionDeclarationAst(d)

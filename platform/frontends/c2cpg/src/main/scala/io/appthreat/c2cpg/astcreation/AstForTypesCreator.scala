@@ -232,8 +232,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             callAst(callNode_, List(left, right))
         case _ => astForNode(init)
 
-  /** A variable a constructor initialises: the assignment of the constructor call to the
-    * variable, so the variable holds what the constructor builds from its arguments.
+  /** A variable a constructor initialises: the assignment of the constructor call to the variable,
+    * so the variable holds what the constructor builds from its arguments.
     */
   private def constructionAst(
     declarator: IASTDeclarator,
@@ -255,6 +255,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       Some(typeFullName)
     )
     callAst(assignment, List(astForNode(effectiveDeclaratorName(declarator)), constructorCall))
+  end constructionAst
 
   /** The constructor a copy-initialisation (`T t = x`, `T t = {a, b}`) calls, when the graph holds
     * its METHOD. None when the initialiser is already a `T` value that becomes the variable itself
@@ -293,8 +294,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       }.getOrElse(registerType(Defines.anyTypeName))
 
   /** `Guard g;` default-constructs `g`: the call to the default constructor assigned to `g`, when
-    * the graph holds its METHOD. A member declarator inside a class body is constructed by the class's own
-    * constructors, not where it is declared.
+    * the graph holds its METHOD. A member declarator inside a class body is constructed by the
+    * class's own constructors, not where it is declared.
     */
   protected def defaultConstructionAst(
     declaration: IASTSimpleDeclaration,

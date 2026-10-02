@@ -246,11 +246,12 @@ class CppImplicitCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
       "assign each constructed object what its constructor builds" in {
           val assignments = cpg.method.nameExact("main").call.nameExact(Operators.assignment)
               .filter(_.argument(2).isCall).l
-          assignments.map(a => a.argument(1).code -> a.argument(2).code).toSetMutable should contain allOf (
-            "a" -> "a(1, 2)",
-            "c" -> "c",
-            "d" -> "d{3, 4}",
-            "e" -> "Vec2(5, 6)",
+          (assignments.map(a => a.argument(1).code -> a.argument(2).code)
+              .toSetMutable should contain).allOf(
+            "a"     -> "a(1, 2)",
+            "c"     -> "c",
+            "d"     -> "d{3, 4}",
+            "e"     -> "Vec2(5, 6)",
             "guard" -> "guard"
           )
           assignments.find(_.argument(1).code == "a").map(_.typeFullName) shouldBe Some("Vec2")
