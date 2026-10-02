@@ -94,6 +94,8 @@ class CompileCommandTests extends AnyWordSpec with Matchers:
               "--target=aarch64-linux-gnu",
               "--sysroot",
               "/sysroot",
+              "-arch",
+              "arm64",
               "-m64",
               "-O2",
               "-fPIC",
@@ -129,6 +131,8 @@ class CompileCommandTests extends AnyWordSpec with Matchers:
             "-std=gnu11",
             "--target=aarch64-linux-gnu",
             "--sysroot=/sysroot",
+            "-arch",
+            "arm64",
             "-m64",
             "-O2",
             "-fPIC"

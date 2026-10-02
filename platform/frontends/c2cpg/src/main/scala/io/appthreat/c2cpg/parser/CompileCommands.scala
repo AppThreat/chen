@@ -267,6 +267,7 @@ object CompileCommand:
       else if arg == "-target" || arg == "--target" then
         valueOf(arg, arg).foreach(v => targetOptions ++= Seq("--target=" + v))
       else if arg.startsWith("--target=") then targetOptions += arg
+      else if arg == "-arch" then valueOf(arg, arg).foreach(v => targetOptions ++= Seq("-arch", v))
       else if arg == "--sysroot" then
         valueOf(arg, arg).foreach(v => targetOptions += s"--sysroot=${path(v)}")
       else if arg.startsWith("--sysroot=") then
