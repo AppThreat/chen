@@ -159,7 +159,9 @@ and otherwise C++ when it declares a class, a namespace or a template.
 **Predefined macros** come from the unit's real compiler: `<cc> <options> -x <lang> -dM -E -v -`
 runs once per compiler and option set (target, sysroot, `-m`, `-O`, `-f`, `-std` options), and also
 gives the compiler's system include path, in its search order. Results are kept for the process and
-under `.chen/compilers/` keyed by the compiler's `--version`. Without a database the host's `gcc`
+under `.chen/compilers/` keyed by the compiler's `--version`. A database's compiler is run only
+when it is a command on the `PATH` or an absolute path outside the project tree: a database can come
+with the code it describes, so a compiler inside the tree, or named by a relative path, is never run. Without a database the host's `gcc`
 (or `clang`) is used when include discovery is on, asked for C++17 unless `--cpp-standard` says
 otherwise. A compiler that cannot be run (a database from another machine, or MSVC's `cl.exe`,
 which cannot list its macros) falls back to a table for its family and target, generated from real
