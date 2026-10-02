@@ -10,7 +10,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
     Return,
     StoredNode
 }
-import io.shiftleft.codepropertygraph.generated.{Languages, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Languages, PropertyNames}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -71,8 +71,8 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
         matchesByTag.getOrElseUpdate(tag, mutable.LinkedHashSet.empty) += ((node, value))
 
     atom.call.foreach { call =>
-        inventory.get(call.name).foreach { entry =>
-            tagCall(entry, call, record)
+        inventory.get(call.name).filterNot(expandsSameApiMacro(call, _, inventory)).foreach {
+            entry => tagCall(entry, call, record)
         }
     }
 
@@ -98,6 +98,22 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     }
     umbrella.iterator.newTagNode(UmbrellaTag).store()(using dstGraph)
   end run
+
+  /** Whether `call` is what a macro spelling the same API expands to - `alloca(n)` defined as
+    * `__builtin_alloca(n)`, `memcpy` defined as `__builtin___memcpy_chk` under `_FORTIFY_SOURCE`.
+    * The macro's call carries the roles, on the arguments as written; tagging both would report
+    * every finding twice.
+    */
+  private def expandsSameApiMacro(
+    call: Call,
+    entry: MemApiVocab.MemApiEntry,
+    inventory: Map[String, MemApiVocab.MemApiEntry]
+  ): Boolean =
+      call.dispatchType != DispatchTypes.INLINED &&
+          call.inAst.collectAll[Call].exists(m =>
+              m.dispatchType == DispatchTypes.INLINED &&
+                  inventory.get(m.name).exists(_.apiName == entry.apiName)
+          )
 
   private def tagCall(
     entry: MemApiVocab.MemApiEntry,

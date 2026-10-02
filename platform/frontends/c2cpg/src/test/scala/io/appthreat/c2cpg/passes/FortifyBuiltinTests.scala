@@ -154,6 +154,30 @@ class FortifyBuiltinTests extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "a macro that spells an API as its builtin" should {
+      val macros = code(
+        """
+          |typedef unsigned long size_t;
+          |#define alloca(size) __builtin_alloca(size)
+          |#define memcpy(d, s, n) __builtin___memcpy_chk(d, s, n, __builtin_object_size(d, 0))
+          |long atol(const char *s);
+          |void stack(const char *in) { char *p = (char *)alloca((size_t)atol(in)); p[0] = 0; }
+          |void copy(const char *src, unsigned n) { char buf[16]; memcpy(buf, src, n); }
+          |""".stripMargin,
+        "macros.c"
+      )
+      new MemoryApiPass(macros).createAndApply()
+
+      "carry the roles once, on the macro's call" in {
+          def tagged(method: String, tag: String) =
+              macros.method.nameExact(method).ast.collectAll[StoredNode]
+                  .filter(_.tag.name(tag).nonEmpty).l
+          tagged("stack", MemoryApiPass.TagAlloc).collect { case c: Call => c.name } shouldBe
+              List("alloca")
+          tagged("copy", MemoryApiPass.TagDst) should have size 1
+      }
+  }
+
   "a builtin of strlen" should {
       "read its argument as strlen does" in {
           cpg.call.nameExact("__builtin_strlen").argument(1).tag.name("mem-src").value.l shouldBe
