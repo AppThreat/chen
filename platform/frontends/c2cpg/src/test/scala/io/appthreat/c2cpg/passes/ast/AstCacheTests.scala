@@ -51,7 +51,12 @@ class AstCacheTests extends AbstractPassTest:
   private def computeHash(path: Path, config: Config): String =
     val digest = MessageDigest.getInstance("SHA-256")
     digest.update(path.toAbsolutePath.toString.getBytes("UTF-8"))
-    digest.update(AstCreationPass.cacheFingerprint(config).getBytes("UTF-8"))
+    val fingerprint = AstCreationPass.fileFingerprint(
+      config,
+      new io.appthreat.c2cpg.parser.ProjectSources(config),
+      path.toAbsolutePath.toString
+    )
+    digest.update(fingerprint.getBytes("UTF-8"))
     digest.update(Files.readAllBytes(path))
     digest.digest().map("%02x".format(_)).mkString
 

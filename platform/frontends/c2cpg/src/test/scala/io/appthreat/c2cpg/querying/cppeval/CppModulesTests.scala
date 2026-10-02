@@ -5,15 +5,10 @@ import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
-/** Evaluates AST creation for C++20 module units: module interface / implementation units, module
-  * partitions, exported namespaces and declarations, and a module consumer.
-  *
-  * The underlying Eclipse CDT parser (9.3) has no C++20 module support and represents an exported
-  * declaration (`export namespace {...}`, `export void f() {...}`) as a single ProblemDeclaration,
-  * which silently drops the whole declaration body. The frontend neutralises the `export` keyword
-  * at the preprocessor stage so the underlying declaration parses normally; these tests pin that
-  * behaviour and document the remaining known gaps (module `import` statements are not yet modelled
-  * as Import nodes; a `module X;` line parses as a stray declaration).
+/** C++20 module units: interface and implementation units, partitions, exported namespaces,
+  * declarations and blocks, and the units that import them. An import of a module the project
+  * declares makes the module's exported declarations visible, so calls into it resolve and link
+  * across files.
   */
 class CppModulesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT):
 
@@ -125,6 +120,111 @@ class CppModulesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
           val call = cpg.call.nameExact("say_hello").head
           call.code shouldBe "hello::say_hello(\"World\")"
           call.argument.isLiteral.code.l should contain("\"World\"")
+      }
+  }
+
+  "a project of module units" should {
+      val cpg = code(
+        """
+          |export module hello;
+          |export import :format;
+          |export namespace hello {
+          |  void say_hello(const char *name);
+          |}
+          |export {
+          |  int exported_total(int a, int b);
+          |}
+          |""".stripMargin,
+        "hello.mxx"
+      ).moreCode(
+        """
+          |export module hello:format;
+          |export namespace hello {
+          |  int format_hello(int n) { return n + 1; }
+          |}
+          |""".stripMargin,
+        "hello-format.mxx"
+      ).moreCode(
+        """
+          |module;
+          |#include "log.hpp"
+          |module hello;
+          |namespace hello {
+          |  void say_hello(const char *n) { log_line(n); }
+          |}
+          |int exported_total(int a, int b) { return a + b; }
+          |""".stripMargin,
+        "hello.cxx"
+      ).moreCode("void log_line(const char *s);", "log.hpp")
+          .moreCode(
+            """
+              |import hello;
+              |import "log.hpp";
+              |import std;
+              |int main() {
+              |  hello::say_hello("World");
+              |  log_line("done");
+              |  return hello::format_hello(1) + exported_total(1, 2);
+              |}
+              |""".stripMargin,
+            "main.cxx"
+          )
+
+      "parse module interface units by their extension" in {
+          cpg.method.nameExact("format_hello").filename.l shouldBe List("hello-format.mxx")
+      }
+
+      "resolve calls into an imported module to its declarations" in {
+          val main = cpg.method.nameExact("main").head
+          main.call.nameExact("say_hello").methodFullName.l shouldBe List(
+            "hello.say_hello:void(char*)"
+          )
+          main.call.nameExact("format_hello").methodFullName.l shouldBe List(
+            "hello.format_hello:int(int)"
+          )
+          main.call.nameExact("exported_total").methodFullName.l shouldBe List(
+            "exported_total:int(int,int)"
+          )
+      }
+
+      "link those calls to the definitions in the module's units" in {
+          // (the interface's declarations have METHODs of their own, as a header's prototypes do)
+          val main = cpg.method.nameExact("main").head
+          main.call.nameExact("say_hello").callee.filename.l should contain("hello.cxx")
+          main.call.nameExact("format_hello").callee.filename.l shouldBe List("hello-format.mxx")
+          main.call.nameExact("exported_total").callee.filename.l should contain("hello.cxx")
+      }
+
+      "give an implementation unit its interface's declarations" in {
+          cpg.method.nameExact("say_hello").filter(_.filename == "hello.cxx").fullName.l shouldBe
+              List("hello.say_hello:void(char*)")
+      }
+
+      "include an imported header unit" in {
+          cpg.method.nameExact("main").call.nameExact("log_line").methodFullName.l shouldBe List(
+            "log_line:void(char*)"
+          )
+      }
+
+      "keep line numbers after rewritten lines" in {
+          cpg.method.nameExact("main").call.nameExact("say_hello").lineNumber.l shouldBe List(6)
+          cpg.method.nameExact("main").call.nameExact("say_hello").columnNumber.l shouldBe List(3)
+      }
+  }
+
+  "import outside a module unit" should {
+      val cpg = code(
+        """
+          |typedef int import;
+          |import counter;
+          |int next() { return ++counter; }
+          |""".stripMargin,
+        "legacy.cpp"
+      )
+
+      "stay a declaration when no module of that name exists" in {
+          cpg.method.nameExact("next").ast.isIdentifier.nameExact("counter").l should not be empty
+          cpg.call.nameExact("<operator>.preIncrement").argument.code.l shouldBe List("counter")
       }
   }
 end CppModulesTests

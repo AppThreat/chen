@@ -87,6 +87,8 @@ object IncludeAutoDiscovery:
             )
             false
 
+  def clangAvailable(): Boolean = isClangAvailableCheck()
+
   private def isClangAvailableCheck(): Boolean = isClangAvailable match
     case Some(value) => value
     case None =>

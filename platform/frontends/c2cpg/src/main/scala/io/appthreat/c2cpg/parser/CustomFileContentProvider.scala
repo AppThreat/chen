@@ -51,8 +51,14 @@ object CustomFileContentProvider:
     contentCache.clear()
 end CustomFileContentProvider
 
-class CustomFileContentProvider(headerFileFinder: HeaderFileFinder, currentFileContext: Path)
-    extends InternalFileContentProvider:
+/** Resolves and loads the files a translation unit includes. `transform` turns a file's content
+  * into what the unit reads (see [[CppModules]]); the content cache holds it untransformed.
+  */
+class CustomFileContentProvider(
+  headerFileFinder: HeaderFileFinder,
+  currentFileContext: Path,
+  transform: (Path, Array[Char]) => Array[Char] = (_, chars) => chars
+) extends InternalFileContentProvider:
 
   override def getInclusionExists(path: String): Boolean =
     val cached = CustomFileContentProvider.existsCache.get(path)
@@ -84,7 +90,8 @@ class CustomFileContentProvider(headerFileFinder: HeaderFileFinder, currentFileC
           try
             val chars = CustomFileContentProvider.contentCache
                 .computeIfAbsent(canonicalPath, p => CdtParser.readFileChars(Paths.get(p)))
-            FileContent.create(canonicalPath, true, chars).asInstanceOf[InternalFileContent]
+            FileContent.create(canonicalPath, true, transform(Paths.get(canonicalPath), chars))
+                .asInstanceOf[InternalFileContent]
           catch
             case e: Throwable => null
       case None => null

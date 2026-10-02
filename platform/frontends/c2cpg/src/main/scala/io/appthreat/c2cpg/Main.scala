@@ -32,7 +32,11 @@ final case class Config(
   // where to write the census report (JSON) and its `--macro-files` header; empty = none
   macroCensusReport: String = "",
   // run the census, write the report and stop: no CPG
-  macroCensusOnly: Boolean = false
+  macroCensusOnly: Boolean = false,
+  // a JSON compilation database, or a directory holding compile_commands.json; empty = none
+  compileCommands: String = "",
+  // with a compilation database, parse only its translation units (no other headers)
+  compileCommandsOnly: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -76,6 +80,10 @@ final case class Config(
       this.copy(macroCensusReport = value).withInheritedFields(this)
   def withMacroCensusOnly(value: Boolean): Config =
       this.copy(macroCensusOnly = value).withInheritedFields(this)
+  def withCompileCommands(value: String): Config =
+      this.copy(compileCommands = value).withInheritedFields(this)
+  def withCompileCommandsOnly(value: Boolean): Config =
+      this.copy(compileCommandsOnly = value).withInheritedFields(this)
 end Config
 
 private object Frontend:
@@ -139,6 +147,14 @@ private object Frontend:
       opt[String]("cpp-standard")
           .text("C++ standard version (e.g., c++17, c++20).")
           .action((s, c) => c.withCppStandard(s)),
+      opt[String]("compile-commands")
+          .text(
+            "parse the translation units of a JSON compilation database (a compile_commands.json file, or a directory holding one) with their own flags"
+          )
+          .action((f, c) => c.withCompileCommands(f)),
+      opt[Unit]("compile-commands-only")
+          .text("with --compile-commands, parse only the database's translation units")
+          .action((_, c) => c.withCompileCommandsOnly(true)),
       opt[Unit]("no-ast-cache")
           .text("Disables AST caching to disk (enabled by default).")
           .action((_, c) => c.withAstCache(false)),

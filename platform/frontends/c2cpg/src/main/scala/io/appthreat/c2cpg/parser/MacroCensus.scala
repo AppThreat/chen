@@ -341,7 +341,14 @@ object MacroCensus:
   def run(config: Config): Report =
     val root    = Paths.get(config.inputPath).toAbsolutePath.normalize
     val reports = reportPaths(config).map(_.toAbsolutePath.normalize).toSet
-    val userDefined = config.defines.map(_.takeWhile(_ != '=')) ++
+    // a name the build's compile commands define or undefine is the build's decision too
+    val databaseNames = Option(config.compileCommands).filter(_.nonEmpty)
+        .flatMap(CompileDatabase.locate(_, root)).map(CompileDatabase.load).toSeq
+        .flatMap(db => db.files.flatMap(db.commandFor)).flatMap(_.flags.macros).map {
+            case MacroChange.Define(name, _) => name
+            case MacroChange.Undefine(name)  => name
+        }
+    val userDefined = config.defines.map(_.takeWhile(_ != '=')) ++ databaseNames ++
         (config.macroFiles ++ config.includeFiles).flatMap(p => namesDeclaredIn(Paths.get(p)))
     val discovery = config.withIncludePathsAutoDiscovery(true)
     val systemRoots =

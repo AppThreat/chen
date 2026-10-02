@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.passes
 
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.astcreation.AstCreator
-import io.appthreat.c2cpg.parser.{CdtParser, FileDefaults, HeaderFileFinder}
+import io.appthreat.c2cpg.parser.{CdtParser, ProjectSources}
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
@@ -13,10 +13,8 @@ import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
 
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.*
-import java.util.regex.Pattern
 import scala.concurrent.duration.*
 import scala.util.Try
-import scala.util.matching.Regex
 
 object AstCreationPass:
   // The parse pool exists only to give each parse a cancellable thread for the timeout below.
@@ -42,27 +40,10 @@ object AstCreationPass:
   private[passes] val debugTiming: Boolean =
       sys.env.get("CHEN_CDT_DEBUG").exists(v => v == "1" || v.equalsIgnoreCase("true"))
 
-  private val EscapedFileSeparator = Pattern.quote(java.io.File.separator)
-  private val DefaultIgnoredFolders: List[Regex] = List(
-    "\\..*".r,
-    s"(.*[$EscapedFileSeparator])?tests?[$EscapedFileSeparator].*".r,
-    s"(.*[$EscapedFileSeparator])?CMakeFiles[$EscapedFileSeparator].*".r
-  )
-
   /** The set of source/header files the AST pass would process, in the same order. Shared with the
     * warm-restore path so it keys exactly the same parts.
     */
-  def sourceFiles(config: Config): Array[String] =
-      SourceFiles
-          .determine(
-            config.inputPath,
-            FileDefaults.SOURCE_FILE_EXTENSIONS ++ FileDefaults.HEADER_FILE_EXTENSIONS,
-            ignoredDefaultRegex = Option(DefaultIgnoredFolders),
-            ignoredFilesRegex = Option(config.ignoredFilesRegex),
-            ignoredFilesPath = Option(config.ignoredFiles)
-          )
-          .sortWith(_.compareToIgnoreCase(_) > 0)
-          .toArray
+  def sourceFiles(config: Config): Array[String] = new ProjectSources(config).files
 
   /** Bump whenever AST creation changes what it emits for unchanged source: a cached AST from an
     * older frontend is otherwise replayed as-is (a fragment cached before call-site `fn-attr` tags
@@ -71,7 +52,9 @@ object AstCreationPass:
   // 3: member layouts of header-defined types ride the used types
   // 4: C++ implicit calls linked to their METHODs, operator calls typed; sizeof-family operators
   //    and catch handlers in their own shapes
-  private val AstFormatVersion = "c2cpg-ast-4"
+  // 5: destructors at scope exits, constructed objects assigned, condition declarations, C++20
+  //    module units, header language from includers, compiler-predefined macros
+  private val AstFormatVersion = "c2cpg-ast-5"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial
@@ -106,6 +89,12 @@ object AstCreationPass:
         .mkString("\u0000")
   end cacheFingerprint
 
+  /** The cache fingerprint of one file: the run's, and how the file itself is parsed (its language,
+    * macros, include path and forced includes, which a compilation database sets per file).
+    */
+  def fileFingerprint(config: Config, sources: ProjectSources, filename: String): String =
+      cacheFingerprint(config) + "\u0000" + sources.settingsFor(Paths.get(filename)).fingerprint
+
   /** The AST cache key for a file: absolute path identity + file content (matches what the AST pass
     * uses, so warm-restore finds the same `.frag`).
     */
@@ -120,7 +109,8 @@ class AstCreationPass(
   cpg: Cpg,
   config: Config,
   timeoutDuration: FiniteDuration = AstCreationPass.parseTimeout,
-  parseTimeoutDuration: FiniteDuration = AstCreationPass.parseTimeout
+  parseTimeoutDuration: FiniteDuration = AstCreationPass.parseTimeout,
+  projectSources: ProjectSources = null
 ) extends StreamingCpgPass[String](cpg):
 
   import AstCreationPass.*
@@ -133,7 +123,7 @@ class AstCreationPass(
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)
 
-  private val sharedHeaderFileFinder = new HeaderFileFinder(config.inputPath)
+  private val sources = Option(projectSources).getOrElse(new ProjectSources(config))
 
   override def finish(): Unit =
       try
@@ -143,14 +133,14 @@ class AstCreationPass(
       finally
         super.finish()
 
-  override def generateParts(): Array[String] = AstCreationPass.sourceFiles(config)
+  override def generateParts(): Array[String] = sources.files
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
       cacheStore.process(
         diffGraph,
         filename,
         cacheKey = AstCreationPass.fileCacheKey(filename),
-        fingerprint = AstCreationPass.cacheFingerprint(config),
+        fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
         registerUsedTypes = registerUsedTypes,
         createAst = createAst(filename)
       )
@@ -159,7 +149,7 @@ class AstCreationPass(
     val path             = Paths.get(filename).toAbsolutePath
     val relPath          = SourceFiles.toRelativePath(path.toString, config.inputPath)
     val file2OffsetTable = new ConcurrentHashMap[String, Array[Int]]()
-    val parser           = new CdtParser(config, sharedHeaderFileFinder)
+    val parser           = new CdtParser(config, sources.headerFileFinder, sources)
     val parseStart       = if AstCreationPass.debugTiming then System.nanoTime() else 0L
     try
       val parsed =
@@ -176,9 +166,14 @@ class AstCreationPass(
       parsed match
         case Some(translationUnit: IASTTranslationUnit) =>
             val astCreator =
-                new AstCreator(relPath, config, translationUnit, file2OffsetTable)(using
-                  config.schemaValidation
-                )
+                new AstCreator(
+                  relPath,
+                  config,
+                  translationUnit,
+                  file2OffsetTable,
+                  // every file of the unit as the parser read it, in the unit's language
+                  p => sources.textOf(p, sources.settingsFor(path).language)
+                )(using config.schemaValidation)
             val localDiff = runWithTimeout(() => astCreator.createAst(), timeoutDuration)
             Some(ParsedUnit(localDiff, astCreator.usedTypes))
         case _ => None

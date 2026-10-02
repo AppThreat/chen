@@ -26,7 +26,10 @@ class AstCreator(
   val filename: String,
   val config: Config,
   val cdtAst: IASTTranslationUnit,
-  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]]
+  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]],
+  /** A file's content as the parser read it, for line and column numbers. */
+  val sourceText: java.nio.file.Path => Array[Char] =
+      io.appthreat.c2cpg.parser.CdtParser.readFileChars
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(filename)
     with AstForTypesCreator

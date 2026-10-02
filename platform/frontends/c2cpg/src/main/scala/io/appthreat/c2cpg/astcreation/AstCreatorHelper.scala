@@ -276,7 +276,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     file2OffsetTable.computeIfAbsent(path, _ => genFileOffsetTable(Paths.get(path)))
 
   private def genFileOffsetTable(absolutePath: Path): Array[Int] =
-    val asCharArray = IOUtils.readLinesInFile(absolutePath).mkString("\n").toCharArray
+    val asCharArray = sourceText(absolutePath)
     val offsets     = mutable.ArrayBuffer.empty[Int]
 
     for i <- Range(0, asCharArray.length) do

@@ -17,7 +17,7 @@ import io.appthreat.x2cpg.passes.linking.FragmentSplicePass
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 
-import io.appthreat.c2cpg.parser.MacroCensus
+import io.appthreat.c2cpg.parser.{MacroCensus, ProjectSources}
 
 import java.nio.file.{Files, Paths}
 import scala.util.Try
@@ -37,9 +37,15 @@ class C2Cpg extends X2CpgFrontend[Config]:
         else
           config
         val censusConfig = C2Cpg.withCensusDefines(updatedConfig)
+        val sources      = new ProjectSources(censusConfig)
+        sources.database.foreach(db =>
+            println(
+              s"Using the compilation database ${db.path} (${db.files.size} translation units)"
+            )
+        )
 
-        if !warmRestoreFromFragments(cpg, censusConfig) then
-          new AstCreationPass(cpg, censusConfig).createAndApply()
+        if !warmRestoreFromFragments(cpg, censusConfig, sources) then
+          new AstCreationPass(cpg, censusConfig, projectSources = sources).createAndApply()
 
         if !config.onlyAstCache then
           new ConfigFileCreationPass(cpg).createAndApply()
@@ -55,10 +61,10 @@ class C2Cpg extends X2CpgFrontend[Config]:
     * running the parallel [[AstCreationPass]]. Returns false (so the normal pass runs) when caching
     * is off, in cache-warming mode, or the project is not fully cached.
     */
-  private def warmRestoreFromFragments(cpg: Cpg, config: Config): Boolean =
+  private def warmRestoreFromFragments(cpg: Cpg, config: Config, sources: ProjectSources): Boolean =
       if !config.enableAstCache || config.onlyAstCache || !CacheControl.useFragments then false
       else
-        val files = AstCreationPass.sourceFiles(config)
+        val files = sources.files
         if files.isEmpty then false
         else
           val store = new AstCacheStore(
@@ -70,7 +76,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
               files.toSeq.map(f =>
                   store.fragmentFor(
                     AstCreationPass.fileCacheKey(f),
-                    AstCreationPass.cacheFingerprint(config)
+                    AstCreationPass.fileFingerprint(config, sources, f)
                   )
               )
           if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse

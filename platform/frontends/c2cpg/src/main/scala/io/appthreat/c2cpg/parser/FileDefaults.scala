@@ -22,16 +22,14 @@ object FileDefaults:
   private val CPP_HEADER_EXTENSIONS: Set[String] =
       withUpperCase(Set(".hpp", ".hh", ".hxx", ".h++", ".ipp", ".inl", ".tcc")) + ".H"
 
-  /** C++20 module interface units. They are not parsed, but are C++ wherever they are seen. */
-  private val CPP_MODULE_EXTENSIONS: Set[String] = Set(".ccm", ".cxxm", ".c++m")
-
   val SOURCE_FILE_EXTENSIONS: Set[String] = CPP_SOURCE_EXTENSIONS + C_EXT
 
   val HEADER_FILE_EXTENSIONS: Set[String] =
       CPP_HEADER_EXTENSIONS ++ Set(".h", ".i", ".h.in", ".tmh")
 
+  /** Every C++ file, C++20 module interface units included (see [[CppModules]]). */
   private val CPP_FILE_EXTENSIONS =
-      CPP_SOURCE_EXTENSIONS ++ CPP_HEADER_EXTENSIONS ++ CPP_MODULE_EXTENSIONS
+      CPP_SOURCE_EXTENSIONS ++ CPP_HEADER_EXTENSIONS ++ CppModules.ModuleUnitExtensions
 
   def isHeaderFile(filePath: String): Boolean =
       HEADER_FILE_EXTENSIONS.exists(filePath.endsWith)

@@ -36,9 +36,6 @@ object CdtParser:
   def readFileChars(path: Path): Array[Char] =
       IOUtils.readLinesInFile(path).mkString("\n").toArray
 
-  def readFileAsFileContent(path: Path): FileContent =
-      FileContent.create(path.toString, true, readFileChars(path))
-
   /** A parser log service that also exposes CDT's cooperative cancellation hook.
     *
     * `AbstractCLikeLanguage.getASTTranslationUnit` registers an `ICancelable` on the log service
@@ -62,69 +59,30 @@ object CdtParser:
     override def isCanceled: Boolean = canceled
 end CdtParser
 
-class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends ParseProblemsLogger
+class CdtParser(
+  config: Config,
+  headerFileFinder: HeaderFileFinder,
+  projectSources: ProjectSources = null
+) extends ParseProblemsLogger
     with PreprocessorStatementsLogger:
 
   import CdtParser.*
 
-  private val parserConfig   = ParserConfig.fromConfig(config)
-  private val definedSymbols = parserConfig.definedSymbols.asJava
-  // Probe order matters: CDT's CPreprocessor.findInclusion walks the search path array in order
-  // until a candidate resolves. Sorting shallow-first (fewer path segments) puts general top-level
-  // include roots ahead of deeply nested ones, so the common `<pkg/...>` style includes resolve
-  // with fewer failed probes. Order is deterministic for reproducible parses.
-  private val includePaths =
-      parserConfig.userIncludePaths.toSeq.sortBy(p => (p.getNameCount, p.toString))
-  private val log = new CancelableLogService
+  private val sources = Option(projectSources).getOrElse(new ProjectSources(config))
+  private val log     = new CancelableLogService
 
   /** Cooperatively cancels an in-flight parse on this parser (see `CancelableLogService`). Safe to
     * call from another thread, e.g. a timeout watchdog.
     */
   def cancel(): Unit = log.setCanceled(true)
 
-  private var stayCpp: Boolean = false
-
-  private lazy val cScannerInfo: ExtendedScannerInfo = new ExtendedScannerInfo(
-    definedSymbols,
-    (includePaths ++ parserConfig.systemIncludePathsC).map(_.toString).toArray,
-    parserConfig.macroFiles.map(_.toString).toArray,
-    parserConfig.includeFiles.map(_.toString).toArray
-  )
-
-  private lazy val cppScannerInfo: ExtendedScannerInfo =
-    val symbolMap = new HashMap[String, String](definedSymbols)
-
-    val stdVal = config.cppStandard.toLowerCase match
-      case ""                => ""
-      case "c++98" | "c++03" => "199711L"
-      case "c++11"           => "201103L"
-      case "c++14"           => "201402L"
-      case "c++17"           => "201703L"
-      case "c++20"           => "202002L"
-      case "c++23"           => "202302L"
-      case other             => other
-
-    if stdVal.nonEmpty then
-      symbolMap.put("__cplusplus", stdVal)
-    else if !symbolMap.containsKey("__cplusplus") then
-      symbolMap.put("__cplusplus", "201703L")
-
-    // CDT 9.3 has no C++20 module support: it parses an exported declaration
-    // (`export namespace {...}`, `export void f() {...}`, `export class ...`) as a single
-    // ProblemDeclaration and drops the entire declaration body. `export` only ever acts as a
-    // visibility marker in a module interface unit and carries no meaning for the CPG, so we
-    // erase it at the preprocessor stage (it operates on pp-tokens before keyword recognition),
-    // letting the underlying declaration parse normally. Only applied to the C++ scanner.
-    if !symbolMap.containsKey("export") then
-      symbolMap.put("export", "")
-
-    new ExtendedScannerInfo(
-      symbolMap,
-      (includePaths ++ parserConfig.systemIncludePathsCPP).map(_.toString).toArray,
-      parserConfig.macroFiles.map(_.toString).toArray,
-      parserConfig.includeFiles.map(_.toString).toArray
-    )
-  end cppScannerInfo
+  private def scannerInfo(settings: UnitSettings): ExtendedScannerInfo =
+      new ExtendedScannerInfo(
+        settings.definedSymbols.asJava,
+        settings.includePaths.map(_.toString).toArray,
+        settings.macroFiles.map(_.toString).toArray,
+        settings.includeFiles.map(_.toString).toArray
+      )
 
   // Setup indexing
   var index: Option[IIndex] = Option(EmptyCIndex.INSTANCE)
@@ -145,41 +103,41 @@ class CdtParser(config: Config, headerFileFinder: HeaderFileFinder) extends Pars
   if !config.includeTrivialExpressions then
     opts |= ILanguage.OPTION_SKIP_TRIVIAL_EXPRESSIONS_IN_AGGREGATE_INITIALIZERS
 
-  private def createParseLanguage(file: Path): ILanguage =
-      if FileDefaults.isCPPFile(file.toString) then
-        GPPLanguage.getDefault
-      else
-        GCCLanguage.getDefault
-
-  private def createScannerInfo(file: Path): ExtendedScannerInfo =
-      if stayCpp || FileDefaults.isCPPFile(file.toString) then
-        stayCpp = true
-        cppScannerInfo
-      else cScannerInfo
+  private def parseLanguage(settings: UnitSettings): ILanguage = settings.language match
+    case SourceLanguage.Cpp => GPPLanguage.getDefault
+    case SourceLanguage.C   => GCCLanguage.getDefault
 
   private def parseInternal(file: Path): ParseResult =
     val realPath = File(file)
     if realPath.isRegularFile then // handling potentially broken symlinks
-      val fileContentProvider = new CustomFileContentProvider(headerFileFinder, realPath.path)
+      val settings = sources.settingsFor(realPath.path)
+      // a header included into a C++ unit reads as C++, module syntax included
+      val transform: (Path, Array[Char]) => Array[Char] =
+          if settings.language == SourceLanguage.Cpp then sources.modules.rewrite else (_, c) => c
+      val fileContentProvider =
+          new CustomFileContentProvider(headerFileFinder, realPath.path, transform)
       try
-        val fileContent = readFileAsFileContent(realPath.path)
-        val lang        = createParseLanguage(realPath.path)
-        val scannerInfo = createScannerInfo(realPath.path)
+        val fileContent = FileContent.create(
+          realPath.path.toString,
+          true,
+          sources.textOf(realPath.path, settings.language)
+        )
+        val lang = parseLanguage(settings)
         index match
           case Some(x) => if x.isFullyInitialized then x.acquireReadLock()
           case _       =>
         val translationUnit =
             lang.getASTTranslationUnit(
               fileContent,
-              scannerInfo,
+              scannerInfo(settings),
               fileContentProvider,
               index.get,
               opts,
               log
             )
         val problems = CPPVisitor.getProblems(translationUnit)
-        if parserConfig.logProblems then logProblems(problems.toList)
-        if parserConfig.logPreprocessor then logPreprocessorStatements(translationUnit)
+        if config.logProblems then logProblems(problems.toList)
+        if config.logPreprocessor then logPreprocessorStatements(translationUnit)
         ParseResult(
           Option(translationUnit),
           preprocessorErrorCount = translationUnit.getPreprocessorProblemsCount,
