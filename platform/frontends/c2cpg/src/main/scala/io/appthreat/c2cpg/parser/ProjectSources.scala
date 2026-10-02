@@ -285,7 +285,9 @@ object ProjectSources:
       // `export` marks an exported declaration of a module interface unit; see CppModules
       if !symbols.contains("export") then symbols += "export" -> ""
     else symbols -= "__cplusplus"
-    val systemIncludes = facts.filter(_ => flags.isDefined).map(_.systemIncludePaths).getOrElse(
+    // the compiler's own search order: a C++ library's wrapper headers (`<cstdlib>`'s
+    // `<stdlib.h>`) must be found before the C library's, and `#include_next` relies on it
+    val systemIncludes = facts.map(_.systemIncludePaths).filter(_.nonEmpty).getOrElse(
       if cpp then IncludeAutoDiscovery.discoverIncludePathsCPP(config).toSeq.sortBy(_.toString)
       else IncludeAutoDiscovery.discoverIncludePathsC(config).toSeq.sortBy(_.toString)
     )
@@ -303,10 +305,20 @@ object ProjectSources:
     )
   end settings
 
-  /** The host's GCC (or Clang when there is no GCC), as include discovery uses it. */
+  /** The C++ standard a unit without a compile command is parsed as, unless one is configured. */
+  val DefaultCppStandard = "gnu++17"
+
+  /** The host's GCC (or Clang when there is no GCC), as include discovery uses it, asked for the
+    * configured C++ standard (C++17 when none is): a compiler's own default can be older, and the
+    * standard library hides what a newer standard adds.
+    */
   private def hostCompiler(config: Config, language: SourceLanguage): Option[CompilerIdentity] =
-    val std = Option(config.cppStandard).filter(_.nonEmpty && language == SourceLanguage.Cpp)
-        .map(s => s"-std=$s").toSeq
+    val std =
+        if language != SourceLanguage.Cpp then Nil
+        else
+          val configured = Option(config.cppStandard).map(_.trim.toLowerCase)
+              .filter(s => s.startsWith("c++") || s.startsWith("gnu++"))
+          Seq(s"-std=${configured.getOrElse(DefaultCppStandard)}")
     if IncludeAutoDiscovery.gccAvailable() then
       Some(CompilerIdentity("gcc", CompilerFamily.Gcc, language, std))
     else if IncludeAutoDiscovery.clangAvailable() then

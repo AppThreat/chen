@@ -70,6 +70,28 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "a database compiler's search path" should {
+      "follow the unit's own include directories, in the compiler's order" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("predef") { dir =>
+            val cc = fakeCompiler(dir)
+            val flags = CompileCommand.parseArguments(
+              Seq(cc, "-Iinc", "-isystem", "/sys", "-c", "a.cpp"),
+              dir.path
+            )
+            PredefinedMacros.clearProcessCache()
+            val settings = ProjectSources.settings(Config(), SourceLanguage.Cpp, Some(flags), None)
+            settings.includePaths shouldBe Seq(
+              dir.path.resolve("inc"),
+              Paths.get("/sys"),
+              Paths.get("/fake/include")
+            )
+            settings.definedSymbols should contain("__FAKECC__" -> "1")
+            settings.definedSymbols should contain("__cplusplus" -> "202002L")
+          }
+      }
+  }
+
   "the fallback tables" should {
       "select macros by language for the compiler family and target" in {
           val gccC =
