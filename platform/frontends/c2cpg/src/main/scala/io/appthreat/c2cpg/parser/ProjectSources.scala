@@ -253,9 +253,10 @@ object ProjectSources:
     val cpp = language == SourceLanguage.Cpp
     val identity: Option[CompilerIdentity] = flags match
       case Some(f) =>
-          f.compiler.flatMap(trustedExecutable(_, config)).map(exe =>
-              CompilerIdentity(exe, f.family, language, f.targetOptions)
-          )
+          f.compiler.filter(_ => RunnableFamilies.contains(f.family))
+              .flatMap(trustedExecutable(_, config)).map(exe =>
+                  CompilerIdentity(exe, f.family, language, f.targetOptions)
+              )
       case None if config.includePathsAutoDiscovery => hostCompiler(config, language)
       case None                                     => None
     val facts = identity.flatMap(PredefinedMacros.ofCompiler(_, cacheDir))
@@ -306,6 +307,12 @@ object ProjectSources:
           config.macroFiles.toSeq.sorted.map(p => Paths.get(p).toAbsolutePath)
     )
   end settings
+
+  /** The compilers asked for their macros: the GCC and Clang drivers, which answer `-dM -E`. A
+    * command of any other name is not run (its family's table stands in), so a compilation database
+    * cannot have an arbitrary program started.
+    */
+  private val RunnableFamilies = Set(CompilerFamily.Gcc, CompilerFamily.Clang)
 
   /** The compiler a compile command names, when it may be run: a command found on the `PATH`, or an
     * absolute path to an executable, outside the project. A compilation database can come with the

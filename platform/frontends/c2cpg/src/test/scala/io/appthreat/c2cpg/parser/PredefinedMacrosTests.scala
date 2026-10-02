@@ -13,8 +13,8 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
   /** A stand-in compiler: answers `--version`, and for `-dM -E -v` prints one macro (named after
     * its language option) and a system include directory.
     */
-  private def fakeCompiler(dir: File): String =
-    val script = dir / "fakecc"
+  private def fakeCompiler(dir: File, name: String = "fake-gcc"): String =
+    val script = dir / name
     script.writeText(
       """#!/bin/sh
         |if [ "$1" = "--version" ]; then echo "fakecc 1.0"; exit 0; fi
@@ -100,12 +100,34 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
             val config = Config().withInputPath(dir.pathAsString)
             PredefinedMacros.clearProcessCache()
             val before = PredefinedMacros.compilerRuns.get()
-            Seq(cc, "./fakecc", "tools/../fakecc").foreach { compiler =>
+            Seq(cc, "./fake-gcc", "tools/../fake-gcc").foreach { compiler =>
               val flags    = CompileCommand.parseArguments(Seq(compiler, "-c", "a.c"), dir.path)
               val settings = ProjectSources.settings(config, SourceLanguage.C, Some(flags), None)
               settings.definedSymbols should not contain key("__FAKECC__")
             }
             PredefinedMacros.compilerRuns.get() shouldBe before
+          }
+      }
+  }
+
+  "a database command that does not name GCC or Clang" should {
+      "never be run, even from outside the project" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("tools") { tools =>
+              File.usingTemporaryDirectory("project") { dir =>
+                val config = Config().withInputPath(dir.pathAsString)
+                PredefinedMacros.clearProcessCache()
+                val before = PredefinedMacros.compilerRuns.get()
+                Seq("fakeformat", "nvcc", "icx").foreach { name =>
+                  val tool  = fakeCompiler(tools, name)
+                  val flags = CompileCommand.parseArguments(Seq(tool, "-c", "a.c"), dir.path)
+                  val settings =
+                      ProjectSources.settings(config, SourceLanguage.C, Some(flags), None)
+                  settings.definedSymbols should not contain key("__FAKECC__")
+                  (settings.definedSymbols should contain).key("__STDC_VERSION__")
+                }
+                PredefinedMacros.compilerRuns.get() shouldBe before
+              }
           }
       }
   }
