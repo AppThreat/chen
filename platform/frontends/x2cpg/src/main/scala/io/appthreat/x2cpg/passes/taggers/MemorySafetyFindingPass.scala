@@ -706,7 +706,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     val copyCall = lenArg._astIn.collectFirst { case c: Call => c }
     // strncat and friends append at strlen(dst): the length says nothing about where the write
     // ends
-    val appending = copyCall.exists(c => AppendingCopies.contains(c.name))
+    val appending = copyCall.exists(c => AppendingCopies.contains(MemApiVocab.apiOf(c.name)))
     // the ASSIGNMENTS, address-takings and parameters that reach a use: a by-value call argument
     // is a definition to the reaching-def graph (`malloc(len)` "redefines" len), which says
     // nothing about its value; `get_len(&len)` does
@@ -1019,7 +1019,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     // locals holding it): no object reaches SIZE_MAX, so a small constant added to it cannot wrap
     def objectSized(e: Expression, depth: Int = 0): Boolean = unwrapCast(e) match
       case c: Call =>
-          ObjectSizeCalls.contains(c.name)
+          ObjectSizeCalls.contains(MemApiVocab.apiOf(c.name))
       case i: Identifier if depth < 3 =>
           isUnsigned(i) &&
           scalarValues(i).exists(vs => vs.nonEmpty && vs.forall(objectSized(_, depth + 1)))
@@ -1115,7 +1115,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     }
     // dashdec.c's clear-the-tail idiom: `memset(tmp_str, 0, strlen(tmp_str))`
     val clearsOwnLength = lenArg match
-      case c: Call if c.name == "strlen" || c.name == "strnlen" =>
+      case c: Call if isStrlen(c) =>
           c.argumentOption(1).collect { case e: Expression => e }.exists(sameBuffer(dst, _))
       case _ => false
     // the destination is the data member of a packet the SAME function sized through the
@@ -1223,6 +1223,11 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   /** calls whose result is the size of an object that exists */
   private val ObjectSizeCalls = Set("size", "length", "strlen", "strnlen", "wcslen", "wcsnlen")
+
+  /** A `strlen`/`strnlen` call, in any spelling (`__builtin_strlen`). */
+  private def isStrlen(c: Call): Boolean =
+    val api = MemApiVocab.apiOf(c.name)
+    api == "strlen" || api == "strnlen"
 
   private val BytePointees =
       Set("char", "signedchar", "unsignedchar", "uint8_t", "int8_t", "std.byte", "byte", "u_char")
@@ -3806,9 +3811,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         if depth < 0 then false
         else
           e match
-            case l: Literal                                           => true
-            case c: Call if c.name == "strlen" || c.name == "strnlen" => true
-            case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
+            case l: Literal                                        => true
+            case c: Call if isStrlen(c)                            => true
+            case c: Call if c.name.startsWith("<operator>.sizeOf") => true
             case c: Call if c.name == "<operator>.cast" => castOperand(c).exists(go(_, depth))
             case c: Call
                 if c.name == "<operator>.addition" || c.name == "<operator>.multiplication" =>
@@ -4045,10 +4050,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case l: Literal => l.code.trim.toLongOption.exists(v => v >= 0 && v <= 16)
       case _          => false
     def stringLength(e: Expression): Boolean = e match
-      case _: Literal                                           => true
-      case c: Call if c.name == "strlen" || c.name == "strnlen" => true
-      case c: Call if c.name.startsWith("<operator>.sizeOf")    => true
-      case c: Call if c.name == "<operator>.addition"           => c.argument.l.forall(stringLength)
+      case _: Literal                                        => true
+      case c: Call if isStrlen(c)                            => true
+      case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+      case c: Call if c.name == "<operator>.addition"        => c.argument.l.forall(stringLength)
       // a string's length scaled by a small constant (`strlen(s) * 4`, a wide-char buffer)
       case c: Call if c.name == "<operator>.multiplication" =>
           c.argument.l match

@@ -35,7 +35,11 @@ import scala.collection.mutable
   *     can overflow is the product;
   *   - `mem-alloc` / `mem-free` / `mem-realloc`, valued with the family (`heap`, `new`, `mmap`,
   *     `file`, `socket`), on the call;
-  *   - `untrusted-read`, valued with the API name, on the call and on the buffer it fills.
+  *   - `untrusted-read`, valued with the API name, on the call and on the buffer it fills;
+  *   - `mem-object-size` on the destination size a FORTIFY wrapper receives.
+  *
+  * The API name is the one a spelling stands for: `__builtin___memcpy_chk` tags are valued
+  * `memcpy`, so every rule reads a FORTIFY wrapper or a compiler builtin as the API itself.
   *
   * The umbrella tag is what lets `atom reachables --sink-tag memory-safety` and a chennai session
   * see this work without a second output path.
@@ -103,13 +107,15 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     def argAt(index: Int): Option[StoredNode] =
         call.argumentOption(index).collect { case s: StoredNode => s }
 
-    entry.dst.foreach(i => argAt(i).foreach(n => record(TagDst, entry.name, n)))
-    entry.src.foreach(i => argAt(i).foreach(n => record(TagSrc, entry.name, n)))
-    entry.len.foreach(i => argAt(i).foreach(n => record(TagLen, entry.name, n)))
+    val api = entry.apiName
+    entry.dst.foreach(i => argAt(i).foreach(n => record(TagDst, api, n)))
+    entry.src.foreach(i => argAt(i).foreach(n => record(TagSrc, api, n)))
+    entry.len.foreach(i => argAt(i).foreach(n => record(TagLen, api, n)))
     // A count-by-size allocator bounds the operation by the PRODUCT, so the element count
     // joins the size as a length role - the attacker-influenced factor carries mem-len too and
     // the overflow question can be asked about it (ValueOrigin gives it an origin from here).
-    entry.count.foreach(i => argAt(i).foreach(n => record(TagLen, entry.name, n)))
+    entry.count.foreach(i => argAt(i).foreach(n => record(TagLen, api, n)))
+    entry.objectSize.foreach(i => argAt(i).foreach(n => record(TagObjectSize, api, n)))
 
     entry.alloc.foreach(family => record(TagAlloc, family, call))
     entry.free.foreach(family => record(TagFree, family, call))
@@ -120,14 +126,14 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     // fd's failure mode is -1, and conflating the two would turn checked fds into null-deref
     // findings.
     if entry.nullableReturn then
-      record(TagNullableReturn, entry.name, call)
+      record(TagNullableReturn, api, call)
 
     entry.untrustedRead.foreach { i =>
-      record(TagUntrustedRead, entry.name, call)
-      argAt(i).foreach(n => record(TagUntrustedRead, entry.name, n))
+      record(TagUntrustedRead, api, call)
+      argAt(i).foreach(n => record(TagUntrustedRead, api, n))
     }
     if entry.untrustedCall then
-      record(TagUntrustedRead, entry.name, call)
+      record(TagUntrustedRead, api, call)
 
     entry.returnRange.foreach { case (lo, hi) => record(TagReturnRange, s"$lo:$hi", call) }
     entry.returnBits.foreach { i =>
@@ -144,11 +150,16 @@ object MemoryApiPass:
   /** The umbrella tag every fine-grained tag is emitted alongside. */
   final val UmbrellaTag = "memory-safety"
 
-  final val TagDst   = "mem-dst"
-  final val TagSrc   = "mem-src"
-  final val TagLen   = "mem-len"
-  final val TagAlloc = "mem-alloc"
-  final val TagFree  = "mem-free"
+  final val TagDst = "mem-dst"
+  final val TagSrc = "mem-src"
+  final val TagLen = "mem-len"
+
+  /** The argument a FORTIFY wrapper (`__memcpy_chk`) receives the destination's size in, as the
+    * compiler worked it out: capacity evidence for [[ExtentPass]].
+    */
+  final val TagObjectSize = "mem-object-size"
+  final val TagAlloc      = "mem-alloc"
+  final val TagFree       = "mem-free"
 
   /** The third family: the call releases its input pointer and returns a fresh allocation. It is
     * deliberately NOT emitted as both `mem-alloc` and `mem-free` - every consumer reads those as

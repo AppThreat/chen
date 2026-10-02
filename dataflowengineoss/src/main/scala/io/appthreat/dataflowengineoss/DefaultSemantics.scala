@@ -1,7 +1,14 @@
 package io.appthreat.dataflowengineoss
 
 import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
-import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, PassThroughMapping, Semantics}
+import io.appthreat.dataflowengineoss.semanticsloader.{
+    FlowMapping,
+    FlowNode,
+    FlowSemantic,
+    ParameterNode,
+    PassThroughMapping,
+    Semantics
+}
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 
 import scala.annotation.unused
@@ -184,7 +191,11 @@ object DefaultSemantics:
     *   href="https://www.ibm.com/docs/en/i/7.3?topic=extensions-standard-c-library-functions-table-by-name">Standard
     *   C Library Functions</a>
     */
-  def cFlows: List[FlowSemantic] = List(
+  def cFlows: List[FlowSemantic] =
+      libraryCFlows ++ fortifyFlows ++ builtinSpellings(libraryCFlows ++ fortifyFlows) ++
+          clampingMacroFlows ++ cppResolvedCallFlows
+
+  private val libraryCFlows: List[FlowSemantic] = List(
     F("abs", List((1, 1), (1, -1))),
     F("abort", List.empty[(Int, Int)]),
     F("accept", List((1, 1), (2, 2), (3, 3), (1, 2), (1, 3), (1, -1))),
@@ -261,7 +272,60 @@ object DefaultSemantics:
     F("strtok_r", List((1, 1), (2, 2), (3, 3), (1, 3), (1, -1))),
     F("vsnprintf", List((1, 1), (2, 2), (3, 3), (4, 4), (3, 1), (4, 1), (1, -1), (3, -1), (4, -1))),
     F("vsprintf", List((1, 1), (2, 2), (3, 3), (2, 1), (3, 1), (1, -1), (2, -1), (3, -1)))
-  ) ++ clampingMacroFlows ++ cppResolvedCallFlows
+  )
+
+  /** The wrappers the C library's `_FORTIFY_SOURCE` turns a call into (`memcpy` becomes
+    * `__memcpy_chk`): each takes its function's arguments with some inserted - the destination's
+    * size, and for the printf family a flag - at the given positions of its own signature.
+    */
+  private val fortifyWrappers: List[(String, String, List[Int])] = List(
+    ("__memcpy_chk", "memcpy", List(4)),
+    ("__memmove_chk", "memmove", List(4)),
+    ("__mempcpy_chk", "mempcpy", List(4)),
+    ("__strcpy_chk", "strcpy", List(3)),
+    ("__stpcpy_chk", "stpcpy", List(3)),
+    ("__strcat_chk", "strcat", List(3)),
+    ("__strncpy_chk", "strncpy", List(4)),
+    ("__strncat_chk", "strncat", List(4)),
+    ("__sprintf_chk", "sprintf", List(2, 3)),
+    ("__vsprintf_chk", "vsprintf", List(2, 3)),
+    ("__snprintf_chk", "snprintf", List(3, 4)),
+    ("__vsnprintf_chk", "vsnprintf", List(3, 4)),
+    ("__read_chk", "read", List(4)),
+    ("__pread_chk", "pread", List(5)),
+    ("__recv_chk", "recv", List(4)),
+    ("__recvfrom_chk", "recvfrom", List(4)),
+    ("__fgets_chk", "fgets", List(2)),
+    ("__gets_chk", "gets", List(2)),
+    ("__readlink_chk", "readlink", List(4))
+  )
+
+  /** A FORTIFY wrapper carries what its function carries, with the arguments moved past the
+    * inserted ones; an inserted argument keeps its own definition and carries nothing.
+    */
+  private def fortifyFlows: List[FlowSemantic] =
+    val byName = libraryCFlows.map(f => f.methodFullName -> f).toMap
+    fortifyWrappers.flatMap { (wrapper, function, inserted) =>
+      def moved(index: Int): Int =
+          if index < 1 then index
+          else inserted.sorted.foldLeft(index)((i, p) => if p <= i then i + 1 else i)
+      def node(n: FlowNode): FlowNode = n match
+        case ParameterNode(index, name) => ParameterNode(moved(index), name)
+        case other                      => other
+      byName.get(function).map { base =>
+        val mappings = base.mappings.map {
+            case FlowMapping(src, dst) => FlowMapping(node(src), node(dst))
+            case other                 => other
+        } ++ inserted.map(p => FlowMapping(p, p))
+        FlowSemantic(wrapper, mappings)
+      }
+    }
+
+  /** The compiler builtin `__builtin_f` of each function `f` takes `f`'s arguments and does what it
+    * does (`__builtin_memcpy`, and the compiler's FORTIFY wrappers `__builtin___memcpy_chk`).
+    */
+  private def builtinSpellings(flows: List[FlowSemantic]): List[FlowSemantic] =
+      flows.filterNot(_.regex).map(f => f.copy(methodFullName = s"__builtin_${f.methodFullName}"))
 
   /** Semantics for the C++ calls the frontend links to a method the graph holds although the source
     * does not spell them as calls: constructors and user-defined operators.

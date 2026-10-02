@@ -26,7 +26,8 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPClosureType,
     CPPField,
     CPPFunction,
-    CPPFunctionType
+    CPPFunctionType,
+    CPPImplicitFunction
 }
 
 import scala.util.Try
@@ -187,8 +188,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                       else
                         functionTypeToSignature(functionType)
 
+                  // a compiler builtin has C linkage: named as in C, so its summaries apply
+                  val builtin = function.isInstanceOf[CPPImplicitFunction] &&
+                      CBuiltins.isBuiltinName(name)
                   val fullName =
-                      if function.isExternC then
+                      if function.isExternC || builtin then
                         name
                       else
                         val fullNameNoSig = function.getQualifiedName.mkString(".")
@@ -390,19 +394,31 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case idExpr: CPPASTIdExpression =>
           val args = call.getArguments.toList.map(a => astForNode(a))
 
-          val name      = idExpr.getName.getLastName.toString
-          val signature = X2CpgDefines.UnresolvedSignature
-          val fullName  = s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature(${args.size})"
-
-          val callCpgNode = callNode(
-            call,
-            code(call),
-            name,
-            fullName,
-            DispatchTypes.STATIC_DISPATCH,
-            Some(signature),
-            Some(X2CpgDefines.Any)
-          )
+          val name = idExpr.getName.getLastName.toString
+          // a builtin the parser does not declare (`__builtin___memcpy_chk`) is known by name
+          val callCpgNode = CBuiltins.get(name) match
+            case Some(builtin) =>
+                callNode(
+                  call,
+                  code(call),
+                  name,
+                  name,
+                  DispatchTypes.STATIC_DISPATCH,
+                  Some(builtin.signature),
+                  Some(registerType(builtin.returnType))
+                )
+            case None =>
+                val signature = X2CpgDefines.UnresolvedSignature
+                val fullName = s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature(${args.size})"
+                callNode(
+                  call,
+                  code(call),
+                  name,
+                  fullName,
+                  DispatchTypes.STATIC_DISPATCH,
+                  Some(signature),
+                  Some(X2CpgDefines.Any)
+                )
 
           createCallAst(callCpgNode, args)
       case other =>
@@ -468,6 +484,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             val fallbackSignature = ""
             (fallbackSignature, s"$name:$fallbackSignature")
 
+    // a builtin the parser does not declare (`__builtin___memcpy_chk`) has its known signature
+    val builtin      = CBuiltins.get(name).filter(_ => callTypeFullName == X2CpgDefines.Any)
     val dispatchType = DispatchTypes.STATIC_DISPATCH
     val callCpgNode = callNode(
       call,
@@ -475,8 +493,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       name,
       name,
       dispatchType,
-      Some(signature),
-      Some(callTypeFullName)
+      Some(builtin.map(_.signature).getOrElse(signature)),
+      Some(builtin.map(b => registerType(b.returnType)).getOrElse(callTypeFullName))
     )
     idExpr.getName.getBinding match
       case function: IFunction => tagCallAttributes(callCpgNode, function)

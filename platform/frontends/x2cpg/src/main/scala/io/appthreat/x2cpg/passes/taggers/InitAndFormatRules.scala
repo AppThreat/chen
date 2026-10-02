@@ -51,8 +51,29 @@ object InitAndFormatRules:
     "av_log"      -> 3,
     "av_vlog"     -> 3,
     "av_bprintf"  -> 2,
-    "av_asprintf" -> 1
+    "av_asprintf" -> 1,
+    // the C library's _FORTIFY_SOURCE wrappers take a flag (and a destination size) first
+    "__printf_chk"    -> 2,
+    "__vprintf_chk"   -> 2,
+    "__fprintf_chk"   -> 3,
+    "__vfprintf_chk"  -> 3,
+    "__dprintf_chk"   -> 3,
+    "__vdprintf_chk"  -> 3,
+    "__asprintf_chk"  -> 3,
+    "__vasprintf_chk" -> 3,
+    "__syslog_chk"    -> 3,
+    "__vsyslog_chk"   -> 3,
+    "__sprintf_chk"   -> 4,
+    "__vsprintf_chk"  -> 4,
+    "__snprintf_chk"  -> 5,
+    "__vsnprintf_chk" -> 5
   )
+
+  /** The format argument of a printf-family call, in any spelling: a compiler builtin
+    * (`__builtin_sprintf`, `__builtin___sprintf_chk`) takes the arguments of the function it names.
+    */
+  def formatArgIndex(callName: String): Option[Int] =
+      FormatArgIndex.get(callName).orElse(FormatArgIndex.get(callName.stripPrefix("__builtin_")))
 
   private def unwrapCasts(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" =>
@@ -71,8 +92,8 @@ object InitAndFormatRules:
       ) || Option(m.signature).exists(_.contains("..."))
 
   def formatString(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
-      atom.call.filter(c => FormatArgIndex.contains(c.name)).foreach { call =>
-          call.argumentOption(FormatArgIndex(call.name)).collect { case e: Expression => e }
+      atom.call.filter(c => formatArgIndex(c.name).isDefined).foreach { call =>
+          call.argumentOption(formatArgIndex(call.name).get).collect { case e: Expression => e }
               .map(unwrapCasts)
               .foreach {
                   case i: Identifier if !isStringLiteral(i) =>

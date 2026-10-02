@@ -16,6 +16,8 @@ import scala.collection.mutable
   *     `int[16]` is in `typeFullName`);
   *   - `const:N-k` - a copy into `buf + k` for a literal k: the remaining capacity of the same
   *     buffer from the write's start;
+  *   - `const:N` too for the destination size a FORTIFY wrapper (`__memcpy_chk`) was given, when
+  *     the compiler knew it, and the extent of the object `__builtin_object_size(p, k)` names;
   *   - `offset:<extent>` - somewhere inside (or, for `base - k`, before) a buffer whose extent is
   *     `<extent>`, reduced by an unknown amount. NOT an extent: a rule that needs a capacity must
   *     reject it exactly as it rejects `unknown`. It exists so a later rule can tell "inside a
@@ -75,7 +77,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                     if dstKey == lenKey
                   yield s"$ValueSizeof:${operand.code}"
 
-              extentOf(dst, call.method, sizeofInCopy) match
+              extentOf(dst, call.method, sizeofInCopy)
+                  .orElse(objectSizeExtentOf(call, dst, call.method)) match
                 case Some((value, decls)) =>
                     argExtents(dst) = value
                     decls.foreach(d => declExtents(d) = value)
@@ -229,6 +232,31 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   private def isAllocationCall(c: Call): Boolean =
       c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty ||
           c.tag.name(MemoryApiPass.TagRealloc).l.nonEmpty
+
+  /** The capacity a FORTIFY wrapper (`__memcpy_chk`) was given for its destination: a constant is
+    * the size the compiler worked out (`(size_t)-1` when it could not, which is no capacity), and
+    * `__builtin_object_size(p, k)` (or the dynamic form) is the capacity of the object it names.
+    */
+  private def objectSizeExtentOf(
+    call: Call,
+    dst: Expression,
+    method: Method
+  ): Option[(String, List[StoredNode])] =
+    def withoutCasts(e: AstNode): AstNode = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.lastOption.map(withoutCasts).getOrElse(c)
+      case other => other
+    call.argument.l.find(_.tag.name(MemoryApiPass.TagObjectSize).nonEmpty).map(withoutCasts)
+        .flatMap {
+            case c: Call if ObjectSizeBuiltins.contains(c.name) =>
+                c.argumentOption(1).collect { case e: Expression => e }
+                    .filterNot(_ == dst)
+                    .flatMap(extentOf(_, method, None))
+            case other =>
+                IndexRange.literal(other).filter(v => v > 0 && v < MaxObjectSize)
+                    .map(v => (s"$ValueConst:$v", List.empty[StoredNode]))
+        }
+  end objectSizeExtentOf
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
@@ -397,5 +425,11 @@ object ExtentPass:
   final val ValueParam   = "param"
   final val ValueField   = "field"
   final val ValueUnknown = "unknown"
+
+  /** The compiler builtins that evaluate to the size of the object a pointer addresses. */
+  final val ObjectSizeBuiltins = Set("__builtin_object_size", "__builtin_dynamic_object_size")
+
+  /** A FORTIFY object size at or above this (`(size_t)-1`) says the compiler did not know it. */
+  private[taggers] val MaxObjectSize = BigInt(Long.MaxValue)
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
