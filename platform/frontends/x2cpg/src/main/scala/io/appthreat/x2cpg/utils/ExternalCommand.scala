@@ -4,6 +4,7 @@ import io.shiftleft.utils.IOUtils
 import java.io.File
 import java.nio.file.{Path, Paths}
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
 import scala.sys.process.{Process, ProcessLogger}
 import scala.util.{Failure, Success, Try}
 import scala.jdk.CollectionConverters.*
@@ -17,10 +18,15 @@ object ExternalCommand:
   private val shellPrefix: Seq[String] =
       if IS_WIN then "cmd" :: "/c" :: Nil else "sh" :: "-c" :: Nil
 
-  case class ExternalCommandResult(exitCode: Int, stdOut: Seq[String], stdErr: Seq[String]):
+  case class ExternalCommandResult(
+    exitCode: Int,
+    stdOut: Seq[String],
+    stdErr: Seq[String],
+    timedOut: Boolean = false
+  ):
     def successOption: Option[Seq[String]] = exitCode match
-      case 0 => Some(stdOut)
-      case _ => None
+      case 0 if !timedOut => Some(stdOut)
+      case _              => None
 
     def toTry: Try[Seq[String]] = exitCode match
       case 0 => Success(stdOut)
@@ -79,11 +85,17 @@ object ExternalCommand:
           Failure(new RuntimeException(allOutput.mkString(System.lineSeparator())))
   end runMultiple
 
+  /** Milliseconds `waitFor` grants a process started by [[runWithResult]] past its
+    * `timeoutMillis` before the exit value is read with a fallback, after it was destroyed.
+    */
+  private val DESTROY_SETTLE_MS = 5000L
+
   def runWithResult(
     command: Seq[String],
     cwd: String,
     mergeStdErrInStdOut: Boolean = false,
-    extraEnv: Map[String, String] = Map.empty
+    extraEnv: Map[String, String] = Map.empty,
+    timeoutMillis: Long = -1L
   ): ExternalCommandResult =
     val builder = new ProcessBuilder()
         .command(command.toArray*)
@@ -98,12 +110,25 @@ object ExternalCommand:
       builder.redirectOutput(stdOutFile)
       stdErrFile.foreach(f => builder.redirectError(f))
 
-      val process     = builder.start()
-      val returnValue = process.waitFor()
+      val process = builder.start()
+      // A caller that passes no timeout keeps the historic wait-forever behaviour;
+      // a caller that passes one gets the process destroyed on expiry rather than
+      // an abandoned thread holding a live child (a wedged generator would
+      // otherwise outlive the probe that started it).
+      val timedOut =
+          if timeoutMillis > 0 then !process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+          else
+              process.waitFor()
+              false
+      if timedOut then
+          process.destroyForcibly()
+          // Give the OS a moment to reap it before reading the exit value.
+          process.waitFor(DESTROY_SETTLE_MS, TimeUnit.MILLISECONDS)
+      val returnValue = Try(process.exitValue()).getOrElse(1)
 
       val stdOut = IOUtils.readLinesInFile(stdOutFile.toPath)
       val stdErr = stdErrFile.map(f => IOUtils.readLinesInFile(f.toPath)).getOrElse(Seq.empty)
-      ExternalCommandResult(returnValue, stdOut, stdErr)
+      ExternalCommandResult(returnValue, stdOut, stdErr, timedOut)
     catch
       case NonFatal(exception) =>
           ExternalCommandResult(1, Seq.empty, stdErr = Seq(exception.getMessage))

@@ -7,9 +7,6 @@ import io.appthreat.x2cpg.utils.ExternalCommand
 import org.slf4j.LoggerFactory
 
 import java.nio.file.Paths
-import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future, TimeoutException}
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Failure, Success, Try}
 
 /** Result of decoding a single AST document produced by the batch generator.
@@ -23,71 +20,137 @@ import scala.util.{Failure, Success, Try}
   */
 case class BatchParsedFile(sourcePath: String, phpFile: PhpFile)
 
-class PhpParser private (phpParserPath: String, phpIniPath: String):
+class PhpParser private (
+  phpParserPath: String,
+  phpIniPath: String,
+  batchGeneratorOverride: Option[String] = None
+):
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   private def phpParseCommand(filename: String): String =
     val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
     phpParserPath match
+      case path if path.endsWith(".js") =>
+          // A Node script (phpastgen.js) cannot run under the php interpreter.
+          s"node $path $phpParserCommands $filename"
       case "phpastgen" =>
           s"$phpParserPath $phpParserCommands $filename"
       case _ =>
           s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
 
-  /** Prefix the generator arguments with the right invocation shape, mirroring
-    * [[phpParseCommand]]'s two forms (vendored/`phpastgen` binary vs the `php --php-ini <ini>
-    * <bin>` wrapper).
-    *
-    * Returns an ARGUMENT VECTOR rather than a shell string: both the probe and the batch invocation
-    * are executed through [[ExternalCommand.runWithResult]] (a `ProcessBuilder`), so no shell ever
-    * parses these paths. A project directory containing spaces, quotes, backticks or `$(...)` is
-    * therefore passed through verbatim and cannot be word-split or injected.
-    */
-  private def generatorCommand(args: Seq[String]): Seq[String] =
-      phpParserPath match
-        case "phpastgen" =>
-            phpParserPath +: args
-        case _ =>
-            Seq("php", "--php-ini", phpIniPath, phpParserPath) ++ args
+  /** Milliseconds a capability probe may run before it is killed. */
+  private val ProbeTimeoutMs = 5000L
 
-  /** Argument vector for the capability probe. */
-  private def parserInfoCommand: Seq[String] =
-      generatorCommand(Seq("--parser-info"))
+  /** Argument-vector head that launches the batch-capable generator, or `None` when only the
+    * per-file parser is available.
+    *
+    * The batch generator is `phpastgen` — the Node CLI shipped by @appthreat/atom-parsetools —
+    * which is a different program from the per-file `php-parse` the parser path may name: a
+    * configured php-parse is the LEGACY per-file parser and knows neither `--parser-info` nor
+    * `-i/-o`, so probing it can only fail and, worse, leaves the frontend grinding through one
+    * interpreter spawn per file (hours for a vendored PHP project on Windows). Resolution order:
+    *
+    *   1. the `PHP_ASTGEN_BIN` environment variable — an absolute path to `phpastgen.js`
+    *      (forwarded by cdxgen, which knows the install location) — run as `node <path>`;
+    *   2. a phpParserPath that already names phpastgen (a `.js` path, or the bare name);
+    *   3. otherwise no batch: the configured per-file parser cannot batch, and the caller
+    *      falls back to per-file parsing without wasting a probe.
+    *
+    * The result is an ARGUMENT VECTOR rather than a shell string: the probe and the batch
+    * invocation are executed through [[ExternalCommand.runWithResult]] (a `ProcessBuilder`), so
+    * no shell ever parses these paths. A project directory containing spaces, quotes, backticks
+    * or `$(...)` is therefore passed through verbatim and cannot be word-split or injected.
+    *
+    * Windows note: `ProcessBuilder` cannot launch the bare name `phpastgen` (`CreateProcess`
+    * appends `.exe` only, while the bin shims are `.cmd`), so the bare name is resolved once
+    * through `where phpastgen` — preferring the package's `phpastgen.js` under `node`, which
+    * keeps the batch invocation shell-free — and, failing that, run through `cmd /c`, which
+    * resolves the shim. POSIX executes the bare name directly.
+    */
+  private lazy val batchCommandPrefix: Option[Seq[String]] =
+    def jsInvocation(path: String): Option[Seq[String]] =
+        Option.when(File(path).exists())(Seq("node", path))
+
+    batchGeneratorOverride
+        .orElse(Option(System.getenv(PhpParser.BatchGeneratorEnvVar)))
+        .flatMap(jsInvocation)
+        .orElse(phpParserPath match
+          case path if path.endsWith(".js") => jsInvocation(path)
+          case "phpastgen"                  => Some(resolveBarePhpastgen())
+          // A configured php script (the vendored php-parse) is still probed via
+          // the php wrapper: it cannot batch today, but the probe is one cheap
+          // spawn and a future/custom generator keeping the php shape stays
+          // supported.
+          case path => Some(Seq("php", "--php-ini", phpIniPath, path))
+        )
+
+  /** Derive the `phpastgen.js` script path next to a bin shim.
+    *
+    * A project shim `<node_modules>/.bin/phpastgen.cmd` puts the package at
+    * `<node_modules>/@appthreat/atom-parsetools/phpastgen.js`; a global-prefix shim
+    * `<prefix>/phpastgen.cmd` puts it at `<prefix>/node_modules/@appthreat/atom-parsetools/phpastgen.js`.
+    */
+  private def phpastgenJsNear(shimPath: String): Option[String] =
+    val shim       = File(shimPath)
+    val shimDir    = shim.parent
+    val candidates = Seq(
+      shimDir.parent / "@appthreat" / "atom-parsetools" / "phpastgen.js",
+      shimDir / "node_modules" / "@appthreat" / "atom-parsetools" / "phpastgen.js"
+    )
+    candidates.find(_.exists()).map(_.canonicalPath)
+
+  /** Argument-vector head for the bare `phpastgen` name (see [[batchCommandPrefix]]). */
+  private def resolveBarePhpastgen(): Seq[String] =
+    if !scala.util.Properties.isWin then Seq("phpastgen")
+    else
+      val resolved  = ExternalCommand.runWithResult(
+        Seq("where", "phpastgen"),
+        ".",
+        timeoutMillis = ProbeTimeoutMs
+      )
+      val shimPath  = resolved.stdOut
+          .map(_.trim)
+          .filter(p => p.toLowerCase.endsWith(".cmd") || p.toLowerCase.endsWith(".bat"))
+          .headOption
+      shimPath match
+        case Some(shim) =>
+            phpastgenJsNear(shim) match
+              case Some(script) => Seq("node", script)
+              case None         => Seq("cmd", "/c", File(shim).canonicalPath)
+        case None =>
+            // Last resort: let the shell resolve the name from PATH.
+            Seq("cmd", "/c", "phpastgen")
+
+  /** Argument vector for the capability probe, when a batch generator is available. */
+  private def parserInfoCommand: Option[Seq[String]] =
+    batchCommandPrefix.map(_ :+ "--parser-info")
 
   /** Argument vector for batch mode: `<bin> -i <inputDir> -o <outputDir>`. */
-  private def batchCommand(inputDir: String, outputDir: String): Seq[String] =
-      generatorCommand(Seq("-i", inputDir, "-o", outputDir))
+  private def batchCommand(inputDir: String, outputDir: String): Option[Seq[String]] =
+    batchCommandPrefix.map(prefix => prefix ++ Seq("-i", inputDir, "-o", outputDir))
 
   /** Capability probe.
     *
     * Invokes the generator's `--parser-info` and returns `true` ONLY when the output contains a
     * `Generator version:` line. The probe is treated as FAILED (returns `false`) on any of:
+    *   - no batch generator being resolvable at all,
     *   - a non-zero exit / exception from the underlying command,
     *   - no `Generator version:` line in the output,
-    *   - the probe not returning within 5 seconds (timeout).
-    *
-    * The timeout is enforced by running the (blocking) command on a `Future` and `Await`-ing it for
-    * at most 5 seconds; a `TimeoutException` (or any other throwable) is caught and mapped to
-    * `false` so a hung generator can never wedge ingestion.
+    *   - the probe not returning within [[ProbeTimeoutMs]] (the process is destroyed).
     */
   def supportsBatch: Boolean =
-    val command = parserInfoCommand
-    val probe: Future[Boolean] = Future {
-        ExternalCommand.runWithResult(command, ".").toTry match
-          case Success(output) =>
-              output.exists(_.contains("Generator version:"))
-          case Failure(_) =>
+    parserInfoCommand match
+      case Some(command) =>
+          val result = ExternalCommand.runWithResult(command, ".", timeoutMillis = ProbeTimeoutMs)
+          if result.timedOut then
+              logger.debug(
+                s"Capability probe timed out after ${ProbeTimeoutMs}ms: ${command.mkString(" ")}"
+              )
               false
-    }
-    Try(Await.result(probe, 5.seconds)) match
-      case Success(result) =>
-          result
-      case Failure(_: TimeoutException) =>
-          logger.debug(s"Capability probe timed out after 5s: ${command.mkString(" ")}")
-          false
-      case Failure(exception) =>
-          logger.debug(s"Capability probe failed: ${exception.getMessage}")
+          else
+              result.exitCode == 0 && result.stdOut.exists(_.contains("Generator version:"))
+      case None =>
           false
 
   /** Directory-batch ingestion with per-file isolation.
@@ -111,14 +174,17 @@ class PhpParser private (phpParserPath: String, phpIniPath: String):
     outDir.createDirectoryIfNotExists(createParents = true)
     val outDirPath = outDir.canonicalPath
 
-    val command = batchCommand(inDir, outDirPath)
-    ExternalCommand.runWithResult(command, inDir).toTry match
-      case Success(_) =>
-          collectBatchAsts(inDir, outDir)
-      case Failure(exception) =>
-          logger.debug(
-            s"Batch generation failed for input '$inDir' -> '$outDirPath': ${exception.getMessage}"
-          )
+    batchCommand(inDir, outDirPath) match
+      case Some(command) =>
+          ExternalCommand.runWithResult(command, inDir).toTry match
+            case Success(_) =>
+                collectBatchAsts(inDir, outDir)
+            case Failure(exception) =>
+                logger.debug(
+                  s"Batch generation failed for input '$inDir' -> '$outDirPath': ${exception.getMessage}"
+                )
+                Seq.empty
+      case None =>
           Seq.empty
 
   /** Read and decode every AST `*.json` under `outputDir`, isolating per-file decode failures. */
@@ -279,6 +345,13 @@ object PhpParser:
 
   val PhpParserBinEnvVar = "PHP_PARSER_BIN"
 
+  /** Environment variable carrying the absolute path of the batch-capable `phpastgen.js`
+    * (a Node CLI), forwarded by callers such as cdxgen that know where it is installed. Unlike
+    * [[PhpParserBinEnvVar]] — which names the LEGACY per-file `php-parse` — this one selects the
+    * generator used for batch ingestion. Unset means "resolve phpastgen from PATH/the default".
+    */
+  val BatchGeneratorEnvVar = "PHP_ASTGEN_BIN"
+
   private lazy val defaultPhpIni: String =
     val tmpIni = File.newTemporaryFile(suffix = "-php.ini").deleteOnExit()
     tmpIni.writeText("memory_limit = -1")
@@ -293,22 +366,17 @@ object PhpParser:
           false
 
   private def defaultPhpParserBin: String =
-    val dir =
-        Paths.get(
-          this.getClass.getProtectionDomain.getCodeSource.getLocation.toURI
-        ).toAbsolutePath.toString
-
-    val fixedDir = new java.io.File(dir.substring(0, dir.indexOf("php2atom"))).toString
-
-    val builtInGen = Paths.get(
-      fixedDir,
-      "php2atom",
-      "vendor",
-      "bin",
-      "php-parse"
-    ).toAbsolutePath.toString
-    if File(builtInGen).exists() then builtInGen
-    else "phpastgen"
+    // In a GraalVM native image getCodeSource.getLocation is null, and a classpath layout
+    // without a php2atom segment makes indexOf return -1 (substring would throw); either
+    // would kill getParser where a plain "phpastgen" default keeps the frontend alive.
+    val builtInGen = Try {
+        val dir = Paths
+            .get(this.getClass.getProtectionDomain.getCodeSource.getLocation.toURI)
+            .toAbsolutePath.toString
+        val fixedDir = new java.io.File(dir.substring(0, dir.indexOf("php2atom"))).toString
+        Paths.get(fixedDir, "php2atom", "vendor", "bin", "php-parse").toAbsolutePath.toString
+    }.toOption
+    builtInGen.filter(p => File(p).exists()).getOrElse("phpastgen")
 
   private def configOverrideOrDefaultPath(
     identifier: String,
@@ -347,8 +415,13 @@ object PhpParser:
     *
     * Primarily a testing seam for the batch/probe/fallback paths: it lets tests point the parser at
     * a stub generator without going through [[Config]] resolution. The public behaviour of
-    * [[getParser]] is unchanged.
+    * [[getParser]] is unchanged. `batchGeneratorOverride` stands in for the
+    * [[BatchGeneratorEnvVar]] environment variable (which cannot be mutated in-JVM for tests).
     */
-  def fromPaths(phpParserPath: String, phpIniPath: String): PhpParser =
-      new PhpParser(phpParserPath, phpIniPath)
+  def fromPaths(
+    phpParserPath: String,
+    phpIniPath: String,
+    batchGeneratorOverride: Option[String] = None
+  ): PhpParser =
+    new PhpParser(phpParserPath, phpIniPath, batchGeneratorOverride)
 end PhpParser
