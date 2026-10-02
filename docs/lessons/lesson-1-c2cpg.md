@@ -21,12 +21,14 @@ records where every expansion came from. `c2cpg` uses those records to keep macr
 visible in the graph (see [Macros](#macros)), and inactive `#ifdef` branches can optionally be
 retained and analysed.
 
-Translation units are `.c` (C) and `.cc`, `.cpp`, `.cxx`, `.c++`, `.C` (C++). Headers are `.h`,
-`.i`, `.h.in` and `.tmh` (C) and `.hpp`, `.hh`, `.hxx`, `.h++`, `.H`, `.ipp`, `.inl`, `.tcc` (C++).
-The extensions longer than one letter also match in upper case (`.CPP`). Every header is also parsed
-on its own, so code in headers that no parsed source includes still reaches the graph. The `atom`
-CLI selects `C2Cpg` for `-l c` and `-l cpp`; for `-l h`, `-l hpp` and `-l i` it runs `C2Atom`, the
-same AST pass without function bodies or overlays.
+Translation units are `.c` (C), `.cc`, `.cpp`, `.cxx`, `.c++`, `.C` (C++) and the C++20 module
+interface units `.cppm`, `.ccm`, `.cxxm`, `.c++m`, `.ixx`, `.mxx`. Headers are `.h`, `.i`, `.h.in`,
+`.tmh`, `.hpp`, `.hh`, `.hxx`, `.h++`, `.H`, `.ipp`, `.inl` and `.tcc`. The extensions longer than
+one letter also match in upper case (`.CPP`). Every header is also parsed on its own, so code in
+headers that no parsed source includes still reaches the graph (see
+[How each file is parsed](#how-each-file-is-parsed) for its language). The `atom` CLI selects
+`C2Cpg` for `-l c` and `-l cpp`; for `-l h`, `-l hpp` and `-l i` it runs `C2Atom`, the same AST pass
+without function bodies or overlays.
 
 The default output file is `app.atom` (an MVStore binary, the overflowdb2 storage format). The
 fragment-cache mechanism (`enableAstCache = true` by default) stores one serialised AST fragment per
@@ -60,7 +62,9 @@ final case class Config(
   onlyAstCache: Boolean                   = false,       // warm the cache only, skip CPG output
   autoDefines: Boolean                    = false,       // define the macro census's build options
   macroCensusReport: String               = "",          // write the census to <file>.json/.h
-  macroCensusOnly: Boolean                = false        // write the census and stop: no CPG
+  macroCensusOnly: Boolean                = false,       // write the census and stop: no CPG
+  compileCommands: String                 = "",          // compile_commands.json, or its directory
+  compileCommandsOnly: Boolean            = false        // parse only the database's units
 ) extends X2CpgConfig[Config]
 ```
 
@@ -73,7 +77,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 1. **MetaDataPass** — writes the `MetaData` node (language = `NEWC`, root path).
 2. **IncludeAutoDiscovery** — if `includePathsAutoDiscovery = true`, guesses the project's own
    include directories and merges them into `Config.includePaths` before parsing. The same flag
-   makes the parser ask `gcc` and `clang` (`-E -v`) for the compiler's system include paths.
+   makes the parser ask the host's `gcc` (or `clang`) for its predefined macros and system include
+   path (see [How each file is parsed](#how-each-file-is-parsed)).
 3. **Macro census** — with `autoDefines`, scans the tree for build-option macros and defines them.
 4. **AstCreationPass** — drives Eclipse CDT over every source and header file; writes `METHOD`,
    `TYPE_DECL`, `CALL`, `LOCAL`, `LITERAL`, `CONTROL_STRUCTURE`, etc. Supports parallel file
@@ -115,6 +120,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 | `--only-ast-cache`                      | `onlyAstCache`              |
 | `--auto-defines`                        | `autoDefines`               |
 | `--macro-census <file>`                 | `macroCensusReport`         |
+| `--compile-commands <file\|dir>`        | `compileCommands`           |
+| `--compile-commands-only`               | `compileCommandsOnly`       |
 
 ## atom CLI (`-l cpp` / `-l c`)
 
@@ -129,8 +136,71 @@ atom -l cpp \
 
 `atom --frontend-args-keys -l cpp` prints every key the C and C++ frontends accept, with its type
 and default (`defines`, `includes`/`include-paths`, `include-files`, `macro-files`,
-`cpp-standard`, `auto-defines`, `macro-census`, `function-bodies`, `parse-inactive-code`,
-`enable-ast-cache`, `ast-cache-dir`, …).
+`cpp-standard`, `compile-commands`, `compile-commands-only`, `auto-defines`, `macro-census`,
+`function-bodies`, `parse-inactive-code`, `enable-ast-cache`, `ast-cache-dir`, …). A compilation
+database also has its own flag: `atom -l cpp --compile-commands build/ -o app.atom .`.
+
+## How each file is parsed
+
+**With a compilation database** (`--compile-commands`, a `compile_commands.json` or a directory
+holding one, also its `build/` subdirectory), each translation unit is parsed with its own compile
+command: the include directories (`-I`, `-iquote`, `-isystem`, `-idirafter`, `/I`), macros (`-D`,
+`-U`, `/D`, `/U`, in order), forced files (`-include`, `-imacros`, `/FI`) and language (`-x`, `/TP`,
+`/TC`, a C++ driver such as `g++`). A `command` string is split with POSIX quoting, or the Windows
+rules for `cl.exe` and `clang-cl`. Only the database's units and the project's headers are parsed
+(only the units with `--compile-commands-only`); a relative path is taken from the working
+directory, then from the project root. The user's `--define`s and `--include`s still apply on top.
+
+**Headers** take the language, and with a database the flags, of the first unit that includes
+them, found from the project's `#include` lines: a `.h` file included from a C++ file is parsed as
+C++. A header no unit includes is C in a project without C++ sources, C++ in one without C sources,
+and otherwise C++ when it declares a class, a namespace or a template.
+
+**Predefined macros** come from the unit's real compiler: `<cc> <options> -x <lang> -dM -E -v -`
+runs once per compiler and option set (target, sysroot, `-m`, `-O`, `-f`, `-std` options), and also
+gives the compiler's system include path, in its search order. Results are kept for the process and
+under `.chen/compilers/` keyed by the compiler's `--version`. Without a database the host's `gcc`
+(or `clang`) is used when include discovery is on, asked for C++17 unless `--cpp-standard` says
+otherwise. A compiler that cannot be run (a database from another machine, or MSVC's `cl.exe`,
+which cannot list its macros) falls back to a table for its family and target, generated from real
+compilers by `tools/predefined-macros/generate.sh`; with no compiler at all, a GCC identity
+(`__GNUC__` 4.9) stands in so headers still see the attributes they gate on it. The feature tests
+the parser does not evaluate (`__has_builtin`, `__has_feature`, `__has_attribute`, …) read as 0, and
+MSVC's keywords (`__declspec`, `__cdecl`, …) are spelled out only for MSVC or an unknown compiler.
+
+**C++20 modules.** Module interface units are parsed by their extensions, and the module syntax of
+every C++ unit is rewritten line by line before parsing (line numbers do not change):
+
+| Source | Read as |
+|---|---|
+| `import <vector>;`, `import "a.h";` | `#include <vector>`, `#include "a.h"` |
+| `import hello;`, `import :part;`, `export import ...;` | `#include` of the interface unit that declares the module or partition, found in the project |
+| `module hello;` (an implementation unit) | `#include` of the primary interface |
+| `export module hello;` | `#pragma once` |
+| `module;`, `module :private;`, `import std;` | nothing |
+| `export { ... }`, `export int f();` | the declarations, without `export` |
+
+So calls into an imported module resolve and link to the module's units. Outside a module unit,
+`import name;` is a module import only when the project declares `name`.
+
+The AST cache key includes each file's language, macros, include path and forced files.
+
+## Compiler builtins and FORTIFY
+
+The C library's `_FORTIFY_SOURCE` wrappers (`__memcpy_chk`, `__sprintf_chk`, `__read_chk`, …), the
+compiler's spellings of them (`__builtin___memcpy_chk`) and the builtins of library functions
+(`__builtin_memcpy`, `__builtin_strlen`) are read as the functions they stand for: the
+memory-safety tags are valued as the function (`mem-dst=memcpy`), the data-flow summaries are the
+function's with the arguments moved past the inserted ones, and the printf-family format positions
+follow. A wrapper's destination size is tagged `mem-object-size`; a constant other than `(size_t)-1`,
+or `__builtin_object_size(p, k)`, gives the destination's `extent` when nothing else does. When a
+header defines a function as a macro over its builtin (`#define alloca(n) __builtin_alloca(n)`), the
+macro's call carries the tags.
+
+A call to a builtin the parser does not declare (the FORTIFY builtins, or `__memcpy_chk` without
+its header) gets its signature and return type from `builtin-functions.txt`, generated from the EDG
+C/C++ front end's builtin definitions by `tools/builtins/generate.py`. In C++ a builtin is named as
+in C (`__builtin_memcpy`, no signature in the full name), so its summary applies.
 
 ## Real Commands and Code Examples
 
@@ -236,13 +306,16 @@ the body:
 | `Point a(1, 2)`, `Point a{1, 2}`, `Point a;`, `Point(1, 2)` | `Point` → `Point.Point:void(int,int)` (the default constructor for `Point a;`) |
 | `new T(args)` | `<operator>.new`: argument 1 is the type, argument 2 the constructor call holding `args`; tagged `alloc-form=scalar`, `array` (`new T[n]`, the extents follow the type) or `placement` (the placement arguments go to a project's `operator new`) |
 | `delete p`, `delete[] p` | `<operator>.delete`: argument 1 is the pointer, argument 2 the destructor call; tagged `alloc-form=scalar` or `array` |
-| end of a block | one destructor call per local with a destructor, the last constructed first, where control falls out of the block |
+| leaving a scope | one destructor call per object with a destructor, the last constructed first: where control falls out of a block, a catch handler or a statement's declarations, and before each `return`, `break`, `continue` and `goto` that leaves it early |
 | `clampAdd<short>(x, 7)` | `clampAdd:ANY(ANY,ANY)`, the generic definition, tagged `template-instance=short int(short int,short int)`; an explicit specialization keeps its own name |
 | `f(x)` where `f` holds a lambda | `anonymous_lambda_0` → the lambda's METHOD, `f` as the receiver |
 
-An initialisation written with `=` (`Point a = b;`, `Point a = Point(1, 2);`) stays an
-assignment: it is what carries the value into the variable for data flow. A functional cast on its
-right-hand side is itself a constructor call.
+A declared object whose constructor the graph holds (`Point a(1, 2)`, `Point a{1, 2}`, `Point a;`,
+`Point a = 5;`, `Point a = {1, 2};`) is an assignment of the constructor call to the variable, so
+data flow carries the constructor's arguments into it; copy-initialisation calls the converting
+constructor, or the copy constructor the class declares. A value of the variable's own type
+initialises it in place (`Point a = Point(1, 2);`, `Point a = make();`): the right-hand side is
+the only call.
 
 A callee is linked only when the graph holds its METHOD: a function the compiler generates (an
 implicit copy assignment) or one declared only in a library header keeps the shape it has
@@ -250,8 +323,14 @@ otherwise, and an operator then stays the built-in `<operator>.*` call. Construc
 destructors are named with a `void` return type (`Point.Point:void(int,int)`,
 `Point.~Point:void()`), and every constructor carries the `CONSTRUCTOR` modifier.
 
-Destructor calls at the end of a scope follow CDT's per-scope list, so a `return`, `break` or
-`goto` that leaves the scope early is not followed by them.
+Scope exits: objects are destroyed innermost scope first, and only those constructed before the
+exit. A loop's condition variable and a range-based `for`'s loop variable are destroyed at the end
+of each iteration and at `continue`; variables an `if`, `switch` or `while` declares in its
+condition or init statement, after the statement. A `return` whose value could observe a destroyed
+object (it calls a function, reads through a pointer or names one of the objects) stores the value
+in a local `<return-value>` first, then destroys, then returns it. No calls follow a block that ends
+in a jump. Temporaries are not covered: CDT's tree does not show the temporaries implicit
+conversions create, so their destruction is left to a frontend that does.
 
 Operator calls carry the type CDT gives the expression (`p->name[1]` is `char`), `>>` on an
 unsigned operand is `<operator>.logicalShiftRight`, and `obj.*pm` / `ptr->*pm` are
