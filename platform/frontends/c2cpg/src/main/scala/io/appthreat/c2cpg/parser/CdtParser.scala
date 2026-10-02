@@ -23,6 +23,9 @@ object CdtParser:
 
   private val logger = LoggerFactory.getLogger(classOf[CdtParser])
 
+  // CDT logs through its plugin object, which needs setting up outside an OSGi runtime
+  CdtLogging.install()
+
   private case class ParseResult(
     translationUnit: Option[IASTTranslationUnit],
     preprocessorErrorCount: Int = 0,
@@ -175,7 +178,7 @@ class CdtParser(
       parse(file).map(t => preprocessorStatements(t)).getOrElse(Iterable.empty)
 
   def parse(file: Path): Option[IASTTranslationUnit] =
-    val parseResult = parseInternal(file)
+    val parseResult = CdtLogging.captured(parseInternal(file))
     parseResult match
       case ParseResult(Some(t), c, p, _) =>
           Option(t)

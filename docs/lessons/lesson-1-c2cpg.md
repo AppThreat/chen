@@ -190,6 +190,12 @@ So calls into an imported module resolve and link to the module's units. Outside
 
 The AST cache key includes each file's language, macros, include path and forced files.
 
+**CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
+evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.
+`c2cpg` sets that log up when it first parses, so such a report no longer fails the file, and
+sends the messages to the debug log (`io.appthreat.c2cpg.parser.CdtLogging`) rather than standard
+output.
+
 ## Compiler builtins and FORTIFY
 
 The C library's `_FORTIFY_SOURCE` wrappers (`__memcpy_chk`, `__sprintf_chk`, `__read_chk`, …), the

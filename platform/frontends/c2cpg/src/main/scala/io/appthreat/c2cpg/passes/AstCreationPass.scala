@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.passes
 
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.astcreation.AstCreator
-import io.appthreat.c2cpg.parser.{CdtParser, ProjectSources}
+import io.appthreat.c2cpg.parser.{CdtLogging, CdtParser, ProjectSources}
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
@@ -174,7 +174,9 @@ class AstCreationPass(
                   // every file of the unit as the parser read it, in the unit's language
                   p => sources.textOf(p, sources.settingsFor(path).language)
                 )(using config.schemaValidation)
-            val localDiff = runWithTimeout(() => astCreator.createAst(), timeoutDuration)
+            // resolving bindings and types while walking the AST runs CDT code that logs too
+            val localDiff =
+                runWithTimeout(() => CdtLogging.captured(astCreator.createAst()), timeoutDuration)
             Some(ParsedUnit(localDiff, astCreator.usedTypes))
         case _ => None
     catch
