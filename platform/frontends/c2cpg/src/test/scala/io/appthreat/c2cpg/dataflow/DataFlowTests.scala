@@ -1865,6 +1865,77 @@ class DataFlowTests extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "a value passed by its address, through function pointers, and in globals" should {
+      val cpg = code("""
+        |char *getenv(const char *name);
+        |char *strncat(char *dest, const char *src, unsigned long n);
+        |unsigned long strlen(const char *s);
+        |int system(const char *command);
+        |void run_through_pointer(char **command) {
+        |    char *c = *command;
+        |    system(c);
+        |}
+        |void pass_address(void) {
+        |    char buf[100] = "ls ";
+        |    char *command = buf;
+        |    unsigned long len = strlen(command);
+        |    strncat(command + len, getenv("ARGS"), 100 - len - 1);
+        |    run_through_pointer(&command);
+        |}
+        |struct runner { void (*run)(char *); };
+        |void run_command(char *c) { system(c); }
+        |void through_local(void) {
+        |    void (*fp)(char *) = run_command;
+        |    fp(getenv("LOCAL"));
+        |}
+        |void setup(struct runner *r) { r->run = &run_command; }
+        |void through_member(struct runner *r) { r->run(getenv("MEMBER")); }
+        |static struct runner table = { run_command };
+        |void through_table(void) { (*table.run)(getenv("TABLE")); }
+        |void apply(void (*callback)(char *), char *value) { callback(value); }
+        |void through_callback(void) { apply(run_command, getenv("CALLBACK")); }
+        |char *saved;
+        |static char *kept;
+        |char *other;
+        |void store(void) { saved = getenv("SAVED"); kept = getenv("KEPT"); }
+        |void use_saved(void) { system(saved); }
+        |void use_kept(void) { system(kept); }
+        |void use_other(void) { system(other); }
+        |""".stripMargin)
+
+      def flowsInto(sinkMethod: String, sourceArg: String) =
+          cpg.method.nameExact(sinkMethod).call.name("system").argument(1)
+              .reachableByFlows(cpg.call.name("getenv").where(_.argument.code(sourceArg))).l
+
+      "reach a callee that reads the buffer through the pointer's address" in {
+          flowsInto("run_through_pointer", "\"ARGS\"") should not be empty
+      }
+
+      "link a call through a function pointer to the functions stored into it" in {
+          cpg.call.nameExact("<operator>.pointerCall").l.map(c =>
+              (
+                c.method.name,
+                c._callOut.collectAll[io.shiftleft.codepropertygraph.generated.nodes.Method].name.l
+              )
+          ).sortBy(_._1) shouldBe List(
+            ("apply", List("run_command")),
+            ("through_local", List("run_command")),
+            ("through_member", List("run_command")),
+            ("through_table", List("run_command"))
+          )
+          List("\"LOCAL\"", "\"MEMBER\"", "\"TABLE\"", "\"CALLBACK\"").foreach { arg =>
+              withClue(arg)(flowsInto("run_command", arg) should not be empty)
+          }
+      }
+
+      "carry a global's value from the function that writes it to those that read it" in {
+          flowsInto("use_saved", "\"SAVED\"") should not be empty
+          flowsInto("use_kept", "\"KEPT\"") should not be empty
+          cpg.method.nameExact("use_other").call.name("system").argument(1)
+              .reachableByFlows(cpg.call.name("getenv")).l shouldBe empty
+      }
+  }
+
 end DataFlowTests
 
 class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:

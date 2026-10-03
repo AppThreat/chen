@@ -2,7 +2,7 @@ package io.appthreat.x2cpg.passes.linking
 
 import io.appthreat.x2cpg.Defines
 import io.appthreat.x2cpg.passes.base.MethodStubCreator.createMethodStub
-import io.appthreat.x2cpg.passes.callgraph.DynamicCallLinker
+import io.appthreat.x2cpg.passes.callgraph.{DynamicCallLinker, FunctionPointerCallLinker}
 import io.appthreat.x2cpg.passes.frontend.Dereference
 import io.appthreat.x2cpg.utils.LinkingUtil
 import io.shiftleft.codepropertygraph.Cpg
@@ -82,6 +82,7 @@ class StitchPass(cpg: Cpg, dirtyUnits: Option[Set[String]] = None):
     // index for its type/method maps, avoiding two more whole-graph scans. Full stitch only.
     if dirtyUnits.isEmpty then
       new DynamicCallLinker(cpg, Some(index)).createAndApply()
+      new FunctionPointerCallLinker(cpg).createAndApply()
   end createAndApply
 end StitchPass
 

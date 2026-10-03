@@ -462,16 +462,17 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def parameterNode(parameter: IASTNode, paramIndex: Int): NewMethodParameterIn =
     val (name, code, tpe, variadic) = parameter match
+      // a pointer to function, `void (*callback)(char *)`, is named by its nested declarator
       case p: CASTParameterDeclaration =>
           (
-            ASTStringUtil.getSimpleName(p.getDeclarator.getName),
+            ASTStringUtil.getSimpleName(effectiveDeclaratorName(p.getDeclarator)),
             nodeSignature(p),
             cleanType(typeForDeclSpecifier(p.getDeclSpecifier)),
             false
           )
       case p: CPPASTParameterDeclaration =>
           (
-            ASTStringUtil.getSimpleName(p.getDeclarator.getName),
+            ASTStringUtil.getSimpleName(effectiveDeclaratorName(p.getDeclarator)),
             nodeSignature(p),
             cleanType(typeForDeclSpecifier(p.getDeclSpecifier)),
             p.getDeclarator.declaresParameterPack()

@@ -31,3 +31,17 @@ class MethodParameterTests extends CCodeToCpgSuite:
       cpg.parameter.name("argc").method.name.l shouldBe List("main")
   }
 end MethodParameterTests
+
+class FunctionPointerParameterTests extends CCodeToCpgSuite:
+
+  private val cpg = code("""
+      |void apply(void (*callback)(char *), char *value) { callback(value); }
+      |""".stripMargin)
+
+  "a pointer-to-function parameter" should {
+      "be named after its declarator, so its uses refer to it" in {
+          cpg.method.nameExact("apply").parameter.name.l shouldBe List("callback", "value")
+          cpg.identifier.nameExact("callback").refsTo.l shouldBe
+              cpg.method.nameExact("apply").parameter.nameExact("callback").l
+      }
+  }

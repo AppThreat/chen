@@ -270,12 +270,15 @@ private class UsageAnalyzer(
   val numberToNode: Map[Definition, StoredNode] =
       problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
 
+  // `*p` reaches the object `p` points to as `p[0]` does: a read of `*p` uses `p`'s definition,
+  // and a write through `*p` reaches later uses of `p`
   private val containerSet =
       Set(
         Operators.fieldAccess,
         Operators.indexAccess,
         Operators.indirectIndexAccess,
-        Operators.indirectFieldAccess
+        Operators.indirectFieldAccess,
+        Operators.indirection
       )
   private val indirectionAccessSet = Set(Operators.addressOf, Operators.indirection)
   val usedIncomingDefs: Map[StoredNode, Map[StoredNode, Set[Definition]]] = initUsedIncomingDefs()
@@ -319,8 +322,23 @@ private class UsageAnalyzer(
                 nodeToString(use) == nodeToString(base)
             }
         case call: Call =>
-            pointerOperandOf(call).exists(base => nodeToString(use) == nodeToString(base))
+            pointerOperandOf(call).exists { base =>
+              val written = nodeToString(base)
+              nodeToString(use) == written || addressOrCastOf(use).exists(
+                nodeToString(_) == written
+              )
+            }
         case _ => false
+
+  /** The pointer a use passes on unchanged but for its address or type: `&buf` (a callee that is
+    * given `&buf` reads the buffer through `*p`) or `(char *)buf`.
+    */
+  private def addressOrCastOf(use: StoredNode): Option[Expression] =
+      use match
+        case c: Call if c.name == Operators.addressOf => c.argument.l.headOption
+        case c: Call if c.name == Operators.cast =>
+            c.argument.l.lastOption.flatMap(inner => addressOrCastOf(inner).orElse(Some(inner)))
+        case _ => None
 
   /** The pointer operand of a pointer addition or subtraction, as the C/C++ frontend tags it
     * (`add:<i>`/`sub:<i>`, the argument index of the pointer), also under casts (`(char *)(buf +
