@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
+import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
@@ -125,9 +126,27 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
               typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = false, index)
           val node = localNode(declarator, name, s"$codeTpe $name", tpe)
           scope.addToScope(name, (node, tpe))
+          registerArrayTypedef(declarator, tpe)
           localAst(declaration, node)
     end match
   end astForDeclarator
+
+  /** Records `tpe` as an array behind a typedef when the declared variable's type is one. */
+  private def registerArrayTypedef(declarator: IASTDeclarator, tpe: String): Unit =
+    @scala.annotation.tailrec
+    def isArray(t: IType): Boolean = t match
+      case td: ITypedef      => isArray(td.getType)
+      case q: IQualifierType => isArray(q.getType)
+      case _: IArrayType     => true
+      case _                 => false
+    val typedefArray = Try(declarator.getName.resolveBinding()).toOption.collect {
+        case v: IVariable => v.getType
+    }.exists {
+        case td: ITypedef      => isArray(td)
+        case q: IQualifierType => q.getType.isInstanceOf[ITypedef] && isArray(q)
+        case _                 => false
+    }
+    if typedefArray then registerRecord(CGlobal.arrayTypedefRecord(tpe))
 
   /** A local's AST. A declaration with static storage duration (`static char buf[32];` inside a
     * function) tags its local `storage-class=static`: the storage class is otherwise only in the

@@ -54,7 +54,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)
               .createAndApply()
           new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
-          new ReferenceKindPass(cpg).createAndApply()
+          new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
       }
 
   /** Fastest-splice warm restore: when fragment caching is enabled (atom `--flux`) and every source

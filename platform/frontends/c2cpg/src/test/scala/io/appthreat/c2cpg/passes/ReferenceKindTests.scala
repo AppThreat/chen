@@ -89,6 +89,22 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
     |    note();
     |}
     |
+    |#include "envbuf.h"
+    |void save_env(env_t);
+    |void header_array_typedef(void)
+    |{
+    |    env_t env2;
+    |    save_env(env2);
+    |}
+    |
+    |typedef int jbuf[8];
+    |void save(int *);
+    |void array_typedef(void)
+    |{
+    |    jbuf env;
+    |    save(env);
+    |}
+    |
     |int flags_kind(int x)
     |{
     |    int flags = 0;
@@ -106,7 +122,7 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "refkinds.c"
-  )
+  ).moreCode("typedef int env_t[4];\n", "envbuf.h")
 
   new MemorySemanticsPass(cpg).createAndApply()
   new MemoryApiPass(cpg).createAndApply()
@@ -145,6 +161,10 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
       }
       "count an array passed out as address-taken and an element store as modified" in {
           kindsOf("kinds", "arr") shouldBe Set("modified", "address-taken")
+          // an array behind a typedef decays the same way
+          kindsOf("array_typedef", "env") shouldBe Set("address-taken")
+          // also when a header the project does not parse defines the typedef (`jmp_buf`)
+          kindsOf("header_array_typedef", "env2") shouldBe Set("address-taken")
       }
       "be read-only otherwise" in {
           kindsOf("kinds", "ro") shouldBe Set("read-only")
@@ -176,3 +196,41 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
       }
   }
 end ReferenceKindTests
+
+/** The object of a C++ member call is address-taken: the call receives `this`. */
+class CppReferenceKindTests extends io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite(fileSuffix =
+        io.appthreat.c2cpg.parser.FileDefaults.CPP_EXT
+    ):
+  "a C++ object" should {
+      val cpg = code(
+        """
+          |struct Box { int value; int get() { return value; } };
+          |void bump(int &n);
+          |int use() {
+          |  Box b; b.value = 1;
+          |  int k = 0;
+          |  bump(k);
+          |  int plain = 2;
+          |  Box *bp = &b;
+          |  return b.get() + k + plain + bp->get();
+          |}
+          |""".stripMargin,
+        "box.cpp"
+      )
+      def kinds(name: String): Set[String] =
+          cpg.method.nameExact("use").local.nameExact(name).tag
+              .nameExact(io.appthreat.x2cpg.Defines.ReferenceKindTag).value.toSet
+
+      "be address-taken as the object of a member call" in {
+          kinds("b") shouldBe Set("modified", "address-taken")
+      }
+      "be address-taken when bound to a non-const reference" in {
+          kinds("k") shouldBe Set("address-taken")
+      }
+      "be read-only otherwise" in {
+          kinds("plain") shouldBe Set("read-only")
+          // a member call through a pointer receives the pointer's value, not its address
+          kinds("bp") shouldBe Set("read-only")
+      }
+  }
+end CppReferenceKindTests

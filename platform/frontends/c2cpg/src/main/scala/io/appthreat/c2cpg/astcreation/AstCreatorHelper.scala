@@ -160,6 +160,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           case _                         => ()
     case _ => ()
 
+  /** Registers a side-channel record (member layouts, constants, array typedefs) the way a used
+    * type is registered, so an AST cache hit replays it.
+    */
+  protected def registerRecord(record: String): Unit =
+    CGlobal.usedTypes.putIfAbsent(record, true)
+    localUsedTypes.add(record)
+
   /** The distinct type names this creator registered, for caching. */
   def usedTypes: Seq[String] =
     import scala.jdk.CollectionConverters.*

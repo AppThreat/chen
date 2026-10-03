@@ -20,7 +20,7 @@ import scala.collection.mutable
   *     declaration's own initializer is not a modification;
   *   - `read-only`: neither of the above.
   */
-class ReferenceKindPass(cpg: Cpg) extends CpgPass(cpg):
+class ReferenceKindPass(cpg: Cpg, arrayTypedefs: Set[String] = Set.empty) extends CpgPass(cpg):
 
   import ReferenceKindPass.*
 
@@ -76,6 +76,12 @@ class ReferenceKindPass(cpg: Cpg) extends CpgPass(cpg):
           else Some(Modified)
       case Some(c) if storage.id() == i.id() && isArray(variable) && isCallOutward(c) =>
           Some(AddressTaken)
+      // the object of a member call: `this` is its address. Through a pointer (`p->f()`) the
+      // call receives the pointer's value
+      case Some(c)
+          if isCallOutward(c) && storage.argumentIndex == 0 &&
+              c.argumentOption(0).exists(_.id() == storage.id()) && !isPointerVariable(variable) =>
+          Some(AddressTaken)
       case Some(c) if bindsToReference(c, storage) => Some(AddressTaken)
       case _                                       => None
 
@@ -112,27 +118,60 @@ class ReferenceKindPass(cpg: Cpg) extends CpgPass(cpg):
         case _ => false
       )
 
-  private def isArray(variable: StoredNode): Boolean = variable match
-    case l: Local             => l.typeFullName.contains('[')
-    case p: MethodParameterIn => false
+  private def isPointerVariable(variable: StoredNode): Boolean = variable match
+    case l: Local             => l.typeFullName.trim.endsWith("*")
+    case p: MethodParameterIn => p.typeFullName.trim.endsWith("*")
     case _                    => false
+
+  /** A local of array type, also through typedefs (`jmp_buf`). A parameter declared as an array is
+    * a pointer.
+    */
+  private def isArray(variable: StoredNode): Boolean = variable match
+    case l: Local => isArrayType(l.typeFullName, 0)
+    case _        => false
+
+  private lazy val typeAliases: Map[String, String] =
+      cpg.typeDecl.flatMap(td => td.aliasTypeFullName.map(td.fullName -> _)).toMap
+
+  @scala.annotation.tailrec
+  private def isArrayType(t: String, depth: Int): Boolean =
+      t.contains('[') || arrayTypedefs.contains(t) || (depth < 8 && (typeAliases.get(t) match
+        case Some(alias) => isArrayType(alias, depth + 1)
+        case None        => false
+      ))
 
   /** A call that is not an operator: the array argument leaves as a pointer. */
   private def isCallOutward(c: Call): Boolean = !c.name.startsWith("<operator>")
 
-  /** The non-const reference parameters of each method the graph holds, by full name. */
-  private lazy val referenceParameters: Map[String, Set[Int]] =
-      cpg.method.l.flatMap { m =>
-        val indices = m.parameter.l.filter { p =>
-          val t = p.typeFullName.trim
-          t.endsWith("&") && !t.startsWith("const ")
-        }.map(_.index)
-        Option.when(indices.nonEmpty)(m.fullName -> indices.toSet)
-      }.toMap
-
-  /** An argument bound to a non-const reference parameter of a method the graph holds. */
+  /** An argument bound to a non-const reference parameter, by the call's signature (`void(int&)`):
+    * a function only a header declares has no METHOD to ask.
+    */
   private def bindsToReference(c: Call, arg: Expression): Boolean =
-      referenceParameters.get(c.methodFullName).exists(_.contains(arg.argumentIndex))
+      arg.argumentIndex >= 1 && !c.name.startsWith("<operator>") &&
+          parameterTypes(c.signature).lift(arg.argumentIndex - 1).exists { t =>
+            val tt = t.trim
+            tt.endsWith("&") && !tt.endsWith("&&") && !tt.startsWith("const ")
+          }
+
+  /** The parameter types of a signature `ret(a,b<c,d>,e)`, split at top-level commas. */
+  private def parameterTypes(signature: String): List[String] =
+    val open = signature.indexOf('(')
+    if open < 0 || !signature.endsWith(")") then Nil
+    else
+      val inner   = signature.substring(open + 1, signature.length - 1)
+      val parts   = mutable.ListBuffer.empty[String]
+      var depth   = 0
+      val current = new StringBuilder
+      inner.foreach {
+          case ',' if depth == 0 =>
+              parts += current.toString; current.clear()
+          case ch =>
+              if ch == '<' || ch == '(' then depth += 1
+              if ch == '>' || ch == ')' then depth -= 1
+              current += ch
+      }
+      if current.nonEmpty then parts += current.toString
+      parts.toList.map(_.trim).filter(_.nonEmpty)
 end ReferenceKindPass
 
 object ReferenceKindPass:

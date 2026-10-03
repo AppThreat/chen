@@ -32,6 +32,16 @@ object CGlobal extends Global:
     */
   @volatile var lastConstants: Map[String, Long] = Map.empty
 
+  /** Type names that are arrays behind a typedef (`jmp_buf`), on the same channel: such a variable
+    * decays to a pointer when it is passed, as a spelled array does.
+    */
+  val ArrayTypedefPrefix = "\u0000arraytypedef\u0000"
+
+  def arrayTypedefRecord(name: String): String = s"$ArrayTypedefPrefix$name"
+
+  /** The array typedef names the last [[typesSeen]] drained. */
+  @volatile var lastArrayTypedefs: Set[String] = Set.empty
+
   /** Forget what an earlier frontend run in this process registered and did not drain: a run that
     * stopped early, or an AST pass used on its own, would otherwise lend its types, member layouts
     * and constants to the next graph.
@@ -40,6 +50,7 @@ object CGlobal extends Global:
     usedTypes.clear()
     lastMembers = Map.empty
     lastConstants = Map.empty
+    lastArrayTypedefs = Set.empty
 
   def typesSeen(): List[String] =
     val (constants, rest) =
@@ -49,7 +60,9 @@ object CGlobal extends Global:
           case Array(name, value) => value.toLongOption.map(name -> _)
           case _                  => None
     }.groupMap(_._1)(_._2).collect { case (n, vs) if vs.distinct.size == 1 => n -> vs.head }
-    val (records, types) = rest.partition(_.startsWith(MemberRecordPrefix))
+    val (arrayTypedefs, others) = rest.partition(_.startsWith(ArrayTypedefPrefix))
+    lastArrayTypedefs = arrayTypedefs.map(_.stripPrefix(ArrayTypedefPrefix)).toSet
+    val (records, types) = others.partition(_.startsWith(MemberRecordPrefix))
     lastMembers = records.flatMap { r =>
         r.stripPrefix(MemberRecordPrefix).split('\u0000') match
           case Array(owner, order, name, tpe) => order.toIntOption.map(o => (owner, (o, name, tpe)))
