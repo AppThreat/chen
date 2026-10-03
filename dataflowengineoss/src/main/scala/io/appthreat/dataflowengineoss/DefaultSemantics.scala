@@ -169,7 +169,39 @@ object DefaultSemantics:
     PTF("<operator>.dictLiteral"),
     PTF("<operator>.setLiteral"),
     PTF("<operator>.listLiteral")
-  )
+  ) ++ valueOperatorFlows
+
+  /** Operators that compute a value from their operands and write none of them: each operand flows
+    * into the result and into no other operand. Without a semantic an operator passes taint between
+    * its operands too, so `fgets(buf, n, stdin) != NULL` tainted the `NULL` and every later use of
+    * it.
+    */
+  private def valueOperatorFlows: List[FlowSemantic] =
+    val binary = List(
+      Operators.subtraction,
+      Operators.multiplication,
+      Operators.division,
+      Operators.exponentiation,
+      Operators.modulo,
+      Operators.shiftLeft,
+      Operators.logicalShiftRight,
+      Operators.arithmeticShiftRight,
+      Operators.and,
+      Operators.or,
+      Operators.xor,
+      Operators.logicalAnd,
+      Operators.logicalOr,
+      Operators.equals,
+      Operators.notEquals,
+      Operators.lessThan,
+      Operators.greaterThan,
+      Operators.lessEqualsThan,
+      Operators.greaterEqualsThan,
+      Operators.compare
+    )
+    val unary = List(Operators.not, Operators.logicalNot, Operators.minus, Operators.plus)
+    binary.map(op => F(op, List((1, -1), (2, -1)))) ++ unary.map(op => F(op, List((1, -1))))
+  end valueOperatorFlows
 
   /** Semantic summaries for common external C/C++ calls.
     *

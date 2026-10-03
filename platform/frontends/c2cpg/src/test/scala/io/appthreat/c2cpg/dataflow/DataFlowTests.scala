@@ -373,8 +373,8 @@ class DataFlowTests extends DataFlowCodeToCpgSuite:
               flows.map(flowToResultPairs).toSetMutable shouldBe
                   Set(
                     List(
+                      // a comparison reads `a` and does not redefine it
                       ("getpid()", 8),
-                      ("a == 666", 10),
                       ("a * 666", 11),
                       ("return a;", 16)
                     )
@@ -567,9 +567,8 @@ class DataFlowTests extends DataFlowCodeToCpgSuite:
           flows.map(flowToResultPairs).toSetMutable shouldBe
               Set(
                 List(
+                  // the nested conditions read `a` and do not redefine it
                   ("a < 10", 5),
-                  ("a < 5", 6),
-                  ("a < 2", 7),
                   ("x = a", 8),
                   ("return x;", 12)
                 )
@@ -1785,6 +1784,87 @@ class DataFlowTests extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "a write through a pointer moved by pointer arithmetic" should {
+      val cpg = code("""
+        |char *getenv(const char *name);
+        |char *strncat(char *dest, const char *src, unsigned long n);
+        |unsigned long strlen(const char *s);
+        |int system(const char *command);
+        |void append_and_run(void) {
+        |    char command[100] = "ls ";
+        |    unsigned long len = strlen(command);
+        |    char *input = getenv("ARGS");
+        |    strncat(command + len, input, 100 - len - 1);
+        |    system(command);
+        |}
+        |long recv(int fd, void *buf, unsigned long len, int flags);
+        |void receive_and_run(int fd) {
+        |    char command[100] = "ls ";
+        |    unsigned long len = strlen(command);
+        |    recv(fd, (char *)(command + len), 100 - len - 1, 0);
+        |    system(command);
+        |}
+        |void append_elsewhere(void) {
+        |    char command[100] = "ls ";
+        |    char scratch[100];
+        |    char *input = getenv("ARGS");
+        |    strncat(scratch + 1, input, 10);
+        |    system(command);
+        |}""".stripMargin)
+
+      "taint the buffer the pointer operand points to" in {
+          def source = cpg.method.name("append_and_run").call.name("getenv")
+          def sink   = cpg.method.name("append_and_run").call.name("system").argument(1)
+          sink.reachableByFlows(source).l.map(flowToResultPairs).flatten.map(_._1) should contain(
+            "strncat(command + len, input, 100 - len - 1)"
+          )
+      }
+
+      "taint it through a cast of the moved pointer" in {
+          def source = cpg.method.name("receive_and_run").call.name("recv")
+          def sink   = cpg.method.name("receive_and_run").call.name("system").argument(1)
+          sink.reachableByFlows(source ++ source.argument).l should not be empty
+      }
+
+      "leave other buffers untainted" in {
+          def source = cpg.method.name("append_elsewhere").call.name("getenv")
+          def sink   = cpg.method.name("append_elsewhere").call.name("system").argument(1)
+          sink.reachableByFlows(source).l shouldBe empty
+      }
+  }
+
+  "a macro that names a variable, and a comparison" should {
+      val cpg = code("""
+        |char *getenv(const char *name);
+        |int system(const char *command);
+        |char *fgets(char *s, int n, void *stream);
+        |extern void *stdin;
+        |#define COMMAND command
+        |void run_named(void) {
+        |    char *command = getenv("ARGS");
+        |    system(COMMAND);
+        |}
+        |void compare_only(void) {
+        |    char buf[100];
+        |    char *none = 0;
+        |    if (fgets(buf, 100, stdin) != none) {
+        |        system(none);
+        |    }
+        |}""".stripMargin)
+
+      "carry the variable's value through the macro's expansion" in {
+          def source = cpg.method.name("run_named").call.name("getenv")
+          def sink   = cpg.method.name("run_named").call.name("system").argument(1)
+          sink.reachableByFlows(source).l should not be empty
+      }
+
+      "not taint one operand of a comparison with the other" in {
+          def source = cpg.method.name("compare_only").call.name("fgets")
+          def sink   = cpg.method.name("compare_only").call.name("system").argument(1)
+          sink.reachableByFlows(source ++ source.argument).l shouldBe empty
+      }
+  }
+
 end DataFlowTests
 
 class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
@@ -2082,11 +2162,12 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite:
           // The BAR(v1) elements appear because the synthetic macro call carries its argument
           // (x) as an argument node: v1's definition reaches the call, and the call reaches the
           // method return. Before macro arguments were attached, no flow could cross the macro
-          // call boundary at all.
+          // call boundary at all. The call's value is also its expansion's, `(v1)`, so a flow
+          // passes through the expansion's v1 too.
           sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
-            List(("v1 = 0", 5), ("BAR(v1)", 6), ("RET", 4)),
+            List(("v1 = 0", 5), ("BAR(v1)", 6), ("v1", -1), ("BAR(v1)", 6), ("RET", 4)),
             List(("v1 = 1", 6), ("RET", 4)),
-            List(("BAR(v1)", 6), ("RET", 4))
+            List(("BAR(v1)", 6), ("v1", -1), ("BAR(v1)", 6), ("RET", 4))
           )
       }
   }
