@@ -62,8 +62,7 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           // The expansion follows the argument copies (1..n) and is not an argument itself, so
           // it takes the next index rather than colliding with the first argument's.
           val expansionIndex = matchingMacro.map(_._2.size).getOrElse(0) + 1
-          val newAst =
-              ast.subTreeCopy(ast.root.get.asInstanceOf[AstNodeNew], argIndex = expansionIndex)
+          val newAst = copyTagged(ast, ast.root.get.asInstanceOf[AstNodeNew], expansionIndex)
           // We need to wrap the copied AST as it may contain CPG nodes not being allowed
           // to be connected via AST edges under a CALL. E.g., LOCALs but only if its not already a BLOCK.
           val childAst = newAst.root match
@@ -170,8 +169,15 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
   private def argumentTrees(arguments: List[String], ast: Ast): List[Option[Ast]] =
       arguments.zipWithIndex.map { case (arg, i) =>
           val rootNode = argForCode(arg, ast)
-          rootNode.map(x => ast.subTreeCopy(x.asInstanceOf[AstNodeNew], i + 1))
+          rootNode.map(x => copyTagged(ast, x.asInstanceOf[AstNodeNew], i + 1))
       }
+
+  /** A copy of the subtree at `node`, whose nodes carry the tags of the nodes they copy. */
+  private def copyTagged(ast: Ast, node: AstNodeNew, argIndex: Int): Ast =
+    val copies = mutable.LinkedHashMap.empty[AstNodeNew, AstNodeNew]
+    val copy   = ast.subTreeCopy(node, argIndex, copyMap = copies)
+    copyTags(copies)
+    copy
 
   private def tokenize(s: String): Seq[String] =
       TokenizerPattern.split(s).map(_.trim).filter(_.nonEmpty).toSeq

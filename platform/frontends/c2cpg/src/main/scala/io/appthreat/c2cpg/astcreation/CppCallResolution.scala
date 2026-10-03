@@ -67,10 +67,41 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
   protected def tagCall(call: NewCall, name: String, value: String): Unit =
       tagNode(call, name, value)
 
+  /** Tags waiting for the AST to be final, in the order they were written. A macro expansion is
+    * copied into its INLINED call and the original dropped, so a tag follows its node to each copy
+    * ([[copyTags]]), and only nodes of a stored AST are tagged ([[storeAst]], [[flushTags]]).
+    */
+  private val pendingTags = mutable.LinkedHashMap.empty[NewNode, List[(String, String)]]
+
+  private val storedNodes = mutable.HashSet.empty[NewNode]
+
   /** Tags a node of this file; one TAG node per name and value. */
   protected def tagNode(node: NewNode, name: String, value: String): Unit =
-    val tag = callTags.getOrElseUpdate((name, value), NewTag().name(name).value(value))
-    diffGraph.addEdge(node, tag, EdgeTypes.TAGGED_BY)
+    val tags = pendingTags.getOrElse(node, Nil)
+    if !tags.contains((name, value)) then pendingTags.update(node, tags :+ (name, value))
+
+  /** The copies of tagged nodes carry the same tags. */
+  protected def copyTags(copies: collection.Map[? <: NewNode, ? <: NewNode]): Unit =
+      copies.foreach { (original, copy) =>
+          pendingTags.get(original).foreach(tags => pendingTags.update(copy, tags))
+      }
+
+  /** Stores an AST of this file in the diff graph; its nodes take their tags at [[flushTags]]. */
+  protected def storeAst(ast: Ast): Unit =
+    Ast.storeInDiffGraph(ast, diffGraph)
+    storedNodes.addAll(ast.nodes)
+
+  /** Writes the tags of the stored nodes; a node no stored AST holds was dropped. */
+  protected def flushTags(): Unit =
+    pendingTags.foreach { (node, tags) =>
+        if storedNodes.contains(node) then
+          tags.foreach { (name, value) =>
+            val tag = callTags.getOrElseUpdate((name, value), NewTag().name(name).value(value))
+            diffGraph.addEdge(node, tag, EdgeTypes.TAGGED_BY)
+          }
+    }
+    pendingTags.clear()
+    storedNodes.clear()
 
   private def isUnderProject(node: IASTNode): Boolean =
       Option(node.getFileLocation).flatMap(l => Option(l.getFileName)).exists { file =>

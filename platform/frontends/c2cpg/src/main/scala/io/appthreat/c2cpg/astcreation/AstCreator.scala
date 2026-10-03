@@ -59,7 +59,8 @@ class AstCreator(
     * creator's own diff graph. Caching is handled separately by the AST creation pass.
     */
   def createAst(): DiffGraphBuilder =
-    Ast.storeInDiffGraph(generateAst(cdtAst), diffGraph)
+    storeAst(generateAst(cdtAst))
+    flushTags()
     diffGraph
 
   def generateAst(iASTTranslationUnit: IASTTranslationUnit): Ast =

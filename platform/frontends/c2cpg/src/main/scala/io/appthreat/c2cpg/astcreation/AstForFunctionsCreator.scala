@@ -6,7 +6,7 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newModifierNode
 import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, ModifierTypes}
+import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{
     ICPPASTFunctionDeclarator,
@@ -102,7 +102,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     )
     val typeDeclAst =
         createFunctionTypeAndTypeDecl(lambdaExpression, methodNode_, name, fullname, signature)
-    Ast.storeInDiffGraph(astForLambda.merge(typeDeclAst), diffGraph)
+    storeAst(astForLambda.merge(typeDeclAst))
 
     Ast(methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName))
   end astForMethodRefForLambda
@@ -190,19 +190,11 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   ): Unit =
     val tagged = methodAttributes.getOrElseUpdate(method.fullName, mutable.HashSet.empty)
     gccAttributes(owners ++ Option(binding).toSeq.flatMap(declarationOwners)).foreach { attr =>
-        if tagged.add(attr) then
-          diffGraph.addEdge(
-            method,
-            NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr),
-            EdgeTypes.TAGGED_BY
-          )
+        if tagged.add(attr) then tagNode(method, X2CpgDefines.FunctionAttributeTag, attr)
     }
 
   /** The attributes already on each METHOD (by full name), so none is tagged twice. */
   private val methodAttributes = mutable.HashMap.empty[String, mutable.HashSet[String]]
-
-  /** One tag node per attribute per translation unit, shared by every call that carries it. */
-  private val callAttributeTags = mutable.HashMap.empty[String, NewTag]
 
   /** The declared attributes of the function a direct call resolves to, on the CALL: when the
     * declaration sits in a header outside the analysed input no METHOD is built from it (it is an
@@ -210,28 +202,12 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     */
   protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
     val owners = declarationOwners(function)
-    gccAttributes(owners).foreach { attr =>
-      val tag = callAttributeTags.getOrElseUpdate(
-        attr,
-        NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
-      )
-      diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
-    }
+    gccAttributes(owners).foreach(attr => tagNode(call, X2CpgDefines.FunctionAttributeTag, attr))
     // the header a function is declared in, when this file does not declare it: what tells an
     // SBOM which package's API the call uses
     if owners.nonEmpty && owners.forall(isIncludedNode) then
       owners.flatMap(o => Option(o.getFileLocation).flatMap(l => Option(l.getFileName)))
-          .headOption.foreach { header =>
-            val tag = calleeHeaderTags.getOrElseUpdate(
-              header,
-              NewTag().name(Defines.CalleeDeclaredInTag).value(header)
-            )
-            diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
-          }
-  end tagCallAttributes
-
-  /** One tag node per declaring header per translation unit. */
-  private val calleeHeaderTags = mutable.HashMap.empty[String, NewTag]
+          .headOption.foreach(header => tagNode(call, Defines.CalleeDeclaredInTag, header))
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
@@ -412,7 +388,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
           astParentType,
           astParentFullName
         )
-        Ast.storeInDiffGraph(Ast(typeDeclNode_), diffGraph)
+        storeAst(Ast(typeDeclNode_))
         typeDeclNode_
     }
 

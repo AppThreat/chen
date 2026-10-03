@@ -1,7 +1,7 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
@@ -137,11 +137,10 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     */
   private def localAst(declaration: IASTSimpleDeclaration, node: NewLocal): Ast =
     if declaration.getDeclSpecifier.getStorageClass == IASTDeclSpecifier.sc_static then
-      diffGraph.addEdge(
+      tagNode(
         node,
-        NewTag().name(io.appthreat.x2cpg.Defines.StorageClassTag)
-            .value(io.appthreat.x2cpg.Defines.StorageClassStatic),
-        EdgeTypes.TAGGED_BY
+        io.appthreat.x2cpg.Defines.StorageClassTag,
+        io.appthreat.x2cpg.Defines.StorageClassStatic
       )
     Ast(node)
 

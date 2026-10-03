@@ -46,4 +46,23 @@ class IncludeResolutionTests extends CCodeToCpgSuite:
           system.tag.nameExact(Defines.IncludeResolvedPathTag).size shouldBe 0
       }
   }
+
+  "a call written inside a macro" should {
+      val cpg = code(
+        """
+          |#include "lib/api.h"
+          |#define TWICE(x) ((x) * 2)
+          |int main(void) { return TWICE(api()); }
+          |""".stripMargin,
+        "main.c"
+      ).moreCode("int api(void);\n", "lib/api.h")
+
+      "keep its header tag on the call the graph holds" in {
+          val calls = cpg.call.nameExact("api").l
+          // the argument copy and the call inside the expansion; the dropped original is not kept
+          calls.size shouldBe 2
+          calls.foreach(_._astIn.hasNext shouldBe true)
+          calls.map(_.tag.nameExact(Defines.CalleeDeclaredInTag).size) shouldBe List(1, 1)
+      }
+  }
 end IncludeResolutionTests
