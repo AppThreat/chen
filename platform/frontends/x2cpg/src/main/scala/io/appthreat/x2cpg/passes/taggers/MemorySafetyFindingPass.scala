@@ -2094,11 +2094,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           .l
           .flatMap(_.argumentOption(1).collect { case i: Identifier => i.name })
           .toSet
-      val pointerLocals = method.local.l
-          .filter(l => OverlayFacts.isPointer(l.typeFullName.trim))
-          .map(_.name)
-          .toSet
-      if readsThrough.nonEmpty && pointerLocals.nonEmpty then
+      // the walks that move a pointer: `p += step`, `p = p + step` the frontend tagged
+      def movesPointer(walk: Call, lhs: Identifier): Boolean = walk.name match
+        case "<operator>.assignmentPlus" => OverlayFacts.pointerArithmeticOf(walk).isDefined
+        case _ =>
+            walk.argumentOption(2).collect { case add: Call => add }
+                .flatMap(OverlayFacts.pointerOperandOf)
+                .exists(OverlayFacts.variableKey(_).contains(s"v:${lhs.name}"))
+      val movesAnyPointer = method.ast.isCall
+          .exists(c => OverlayFacts.pointerArithmeticOf(c).isDefined)
+      if readsThrough.nonEmpty && movesAnyPointer then
         // the comparisons the method's guards carry, collected ONCE: a walk's guard question
         // is then a set lookup, not a conjunct walk per candidate step (a per-walk version
         // is measurably slow on a large library)
@@ -2125,7 +2130,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 val walkLine = walk.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
                 // cheap structural checks first; the attacker-origin def walk runs only for
                 // walks that survived them and carry no bound
-                if pointerLocals.contains(lhs.name) && readsThrough.contains(lhs.name) &&
+                if readsThrough.contains(lhs.name) && movesPointer(walk, lhs) &&
                   insideLoop(walk) &&
                   !guardedAbove(s"v:${lhs.name}", walkLine) &&
                   !OverlayFacts.variableKey(step).exists(guardedAbove(_, walkLine)) &&
@@ -3583,7 +3588,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     */
   private def hasByteElements(dst: Expression): Boolean =
     val t = Option(dst.property("TYPE_FULL_NAME")).collect { case s: String => s }.getOrElse("")
+    // an array's element, or the pointee of a pointer into one (`buf + 4` is a `char*`)
     val element = t.replaceAll("""\[[^\]]*\]""", "").replace("const ", "").trim
+        .stripSuffix("*").trim
     MemorySafetyFindingPass.ByteTypes.contains(element)
 
   /** The (literal, node) pair of an expression when it is a plain literal - Function.unlift keeps
@@ -4038,7 +4045,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * address is the bounds rules' question.
     */
   private def pointerArithmetic(arith: Call): Boolean =
-      arith.argument.l.exists(a => OverlayFacts.isPointer(typeOfExpr(a).trim))
+      OverlayFacts.pointerArithmeticOf(arith).isDefined
 
   /** `strlen(s) + 1` and its kin: every non-constant operand is the length of a string that already
     * exists in memory (or a sizeof), so the sum cannot wrap a size_t on a real address space - the

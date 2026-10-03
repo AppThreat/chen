@@ -285,26 +285,23 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         case _ =>
             sizeofInCopy.map(v => (v, List.empty[StoredNode]))
 
-  /** Pointer arithmetic over a buffer. `base + k` for a literal k shrinks a known capacity by k
-    * (`const:N` -> `const:N-k`); every other shape - a non-literal offset, a subtraction whose
-    * start may be negative, a literal offset at or past the capacity - says only "at an unknown
-    * distance inside `<base extent>`": the `offset:` value, never presented as a capacity. A base
-    * that itself resolves to nothing stays `unknown`: there is no capacity to reduce.
+  /** Pointer arithmetic over a buffer, as the frontend tagged it: the pointer operand is the base.
+    * `base + k` for a constant k shrinks a known capacity by k (`const:N` -> `const:N-k`); every
+    * other shape - a non-constant offset, a subtraction whose start may be negative, a constant
+    * offset at or past the capacity - says only "at an unknown distance inside `<base extent>`":
+    * the `offset:` value, never presented as a capacity. A base that itself resolves to nothing
+    * stays `unknown`: there is no capacity to reduce, and neither is there for arithmetic that
+    * moves no pointer.
     */
   private def additiveExtentOf(
     arith: Call,
     method: Method,
     sizeofInCopy: Option[String]
   ): Option[(String, List[StoredNode])] =
-    def literalOf(e: Option[Expression]): Option[Long] = e.flatMap {
-        case l: Literal => l.code.toLongOption
-        case _          => None
-    }
-    val (base, offset) =
-        (arith.argumentOption(1), arith.argumentOption(2)) match
-          case (b, o) if literalOf(o).isDefined => (b, literalOf(o))
-          case (b, o) if literalOf(b).isDefined => (o, literalOf(b))
-          case (b, _)                           => (b, None)
+    val base = OverlayFacts.pointerOperandOf(arith)
+    val offset = OverlayFacts.pointerArithmeticOf(arith).flatMap((_, i) =>
+        arith.argumentOption(3 - i).collect { case e: Expression => e }
+    ).flatMap(IndexRange.literal).filter(_.isValidLong).map(_.toLong)
     base.flatMap(extentOf(_, method, sizeofInCopy)).map { case (baseValue, _) =>
         // the distance the write starts inside the capacity; a subtraction or a negative
         // literal may start BEFORE the buffer, which no capacity describes

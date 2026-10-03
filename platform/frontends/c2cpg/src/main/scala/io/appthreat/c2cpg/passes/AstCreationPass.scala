@@ -58,7 +58,8 @@ object AstCreationPass:
   //    calls with the header that declares their function
   // 7: designated initializers assign into the initialised object
   // 8: tags follow macro copies, constant expressions carry their value, host type sizes
-  private val AstFormatVersion = "c2cpg-ast-8"
+  // 9: pointer arithmetic tagged, `i[a]` written as `a[i]`
+  private val AstFormatVersion = "c2cpg-ast-9"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial

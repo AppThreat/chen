@@ -208,6 +208,13 @@ conditionals over them. A macro constant's INLINED call carries the value of its
 (`(unsigned int)-1` is 4294967295). The memory-safety passes read a tagged expression as they read
 a literal: a known copy length, allocation size, guard scale or stored value.
 
+**Pointer arithmetic.** An addition, subtraction, compound assignment or increment that moves a
+pointer or an array is tagged `ptr-arith`: `add:<i>` or `sub:<i>` with the argument index of the
+pointer operand (`p + n` is `add:1`, `n + p` is `add:2`, `p -= n` and `p--` are `sub:1`), and `diff`
+for the distance between two pointers. The type is CDT's, so a typedef'd pointer counts. `i[a]` is
+written as `a[i]`: the pointer or array is always the base, argument 1. The memory-safety passes
+take the buffer and the offset from the tag rather than from type names or operand order.
+
 **CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
 evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.
 `c2cpg` sets that log up when it first parses, so such a report no longer fails the file, and

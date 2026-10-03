@@ -130,8 +130,33 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
           )
           val left  = nullSafeAst(bin.getOperand1)
           val right = nullSafeAst(bin.getOperand2)
+          pointerArithmeticOf(bin).foreach(tagNode(callNode_, X2CpgDefines.PointerArithmeticTag, _))
           callAst(callNode_, List(left, right))
   end astForBinaryExpression
+
+  /** A pointer or an array, through typedefs and qualifiers: what pointer arithmetic moves. */
+  private def isAddressOperand(e: IASTExpression): Boolean =
+    @scala.annotation.tailrec
+    def unwrap(t: IType): IType = t match
+      case td: ITypedef      => unwrap(td.getType)
+      case q: IQualifierType => unwrap(q.getType)
+      case other             => other
+    e != null && Try(unwrap(e.getExpressionType)).toOption.exists {
+        case _: IPointerType | _: IArrayType => true
+        case _                               => false
+    }
+
+  /** The [[X2CpgDefines.PointerArithmeticTag]] value of `+`, `-`, `+=` and `-=` over a pointer. */
+  private def pointerArithmeticOf(bin: IASTBinaryExpression): Option[String] =
+    val (p1, p2) = (isAddressOperand(bin.getOperand1), isAddressOperand(bin.getOperand2))
+    bin.getOperator match
+      case IASTBinaryExpression.op_plus if p1 && !p2 => Some("add:1")
+      case IASTBinaryExpression.op_plus if p2 && !p1 => Some("add:2")
+      case IASTBinaryExpression.op_minus if p1 && p2 => Some("diff")
+      case IASTBinaryExpression.op_minus if p1       => Some("sub:1")
+      case IASTBinaryExpression.op_plusAssign if p1  => Some("add:1")
+      case IASTBinaryExpression.op_minusAssign if p1 => Some("sub:1")
+      case _                                         => None
 
   private def astForExpressionList(exprList: IASTExpressionList): Ast =
     val name = "<operator>.expressionList"
@@ -599,6 +624,13 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   Some(expressionType(unary))
                 )
             val operand = nullSafeAst(unary.getOperand)
+            if isAddressOperand(unary.getOperand) then
+              unary.getOperator match
+                case IASTUnaryExpression.op_prefixIncr | IASTUnaryExpression.op_postFixIncr =>
+                    tagNode(cpgUnary, X2CpgDefines.PointerArithmeticTag, "add:1")
+                case IASTUnaryExpression.op_prefixDecr | IASTUnaryExpression.op_postFixDecr =>
+                    tagNode(cpgUnary, X2CpgDefines.PointerArithmeticTag, "sub:1")
+                case _ =>
             callAst(cpgUnary, List(operand))
       end match
     end if
@@ -670,8 +702,24 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val overloaded = arrayIndexExpression match
       case cpp: ICPPASTArraySubscriptExpression => linkedImplicitOperator(cpp)
       case _                                    => None
-    val expr = astForExpression(arrayIndexExpression.getArrayExpression)
-    val arg  = astForNode(arrayIndexExpression.getArgument)
+    // `i[a]` is `a[i]`: the pointer or array is the base whichever side it is written on
+    val swapped = overloaded.isEmpty &&
+        !isAddressOperand(arrayIndexExpression.getArrayExpression) &&
+        (arrayIndexExpression.getArgument match
+          case e: IASTExpression => isAddressOperand(e)
+          case _                 => false
+        )
+    val (expr, arg) =
+        if swapped then
+          (
+            astForNode(arrayIndexExpression.getArgument),
+            astForExpression(arrayIndexExpression.getArrayExpression)
+          )
+        else
+          (
+            astForExpression(arrayIndexExpression.getArrayExpression),
+            astForNode(arrayIndexExpression.getArgument)
+          )
     overloaded match
       case Some((overload, linked)) =>
           overloadedOperatorAst(arrayIndexExpression, overload, linked, name, List(expr, arg))

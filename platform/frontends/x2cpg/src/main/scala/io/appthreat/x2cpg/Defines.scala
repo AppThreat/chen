@@ -19,9 +19,8 @@ object Defines:
   // `static` inside a function): the schema has no property or MODIFIER child for it on a LOCAL.
   val StorageClassTag = "storage-class"
 
-  /** The compile-time value of a constant a frontend could not show as a literal (a `const` or
-    * `constexpr` integral defined in a header the tree does not parse), on the identifiers that
-    * name it.
+  /** The compile-time value of an integer constant expression a frontend evaluated, in decimal:
+    * `sizeof(T)`, an enumerator, a `const` integral (also one a header defines), `N * 4`.
     */
   val ConstValueTag      = "const-value"
   val StorageClassStatic = "static"
@@ -31,6 +30,12 @@ object Defines:
     * header gives a function whose body is out of scope. On the METHOD, one tag per attribute.
     */
   val FunctionAttributeTag = "fn-attr"
+
+  /** On an addition, subtraction, compound assignment or increment over a pointer or an array:
+    * `add:<i>` or `sub:<i>` with the argument index of the pointer operand (`p + n` is `add:1`, `n
+    * + p` is `add:2`, `p -= n` is `sub:1`), and `diff` for the distance between two pointers.
+    */
+  val PointerArithmeticTag = "ptr-arith"
 
   /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
     * operator the expression is written with (`<operator>.addition`), so a consumer that matches

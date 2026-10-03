@@ -134,6 +134,25 @@ private[taggers] object OverlayFacts:
     */
   def isPointer(t: String): Boolean = t.endsWith("*") || t.endsWith("[]")
 
+  /** Pointer arithmetic, as the frontend tagged it
+    * ([[io.appthreat.x2cpg.Defines.PointerArithmeticTag]]): the kind (`add`, `sub`, `diff`) and the
+    * argument index of the pointer operand (1 for `diff`).
+    */
+  def pointerArithmeticOf(c: Call): Option[(String, Int)] =
+      c.tag.nameExact(io.appthreat.x2cpg.Defines.PointerArithmeticTag).value.headOption.flatMap {
+          v =>
+              v.split(':') match
+                case Array("diff")      => Some(("diff", 1))
+                case Array(kind, index) => index.toIntOption.map(i => (kind, i))
+                case _                  => None
+      }
+
+  /** The pointer operand of `p + n`, `n + p` or `p - n`: the buffer the arithmetic moves within. */
+  def pointerOperandOf(c: Call): Option[Expression] =
+      pointerArithmeticOf(c).filter(_._1 != "diff").flatMap((_, i) =>
+          c.argumentOption(i).collect { case e: Expression => e }
+      )
+
   private val integralTypes = Set(
     "int",
     "unsigned int",
@@ -469,7 +488,7 @@ private[taggers] object OverlayFacts:
     def namesBase(e: Expression): Boolean = withoutCastsE(e) match
       case i: Identifier => declOf(i).exists(d => baseDecls.contains(d.id()))
       case c: Call if c.name == "<operator>.addition" =>
-          c.argumentOption(1).collect { case x: Expression => x }.exists(namesBase)
+          pointerOperandOf(c).exists(namesBase)
       case c: Call if c.name == "<operator>.addressOf" =>
           c.argumentOption(1).collect { case x: Expression => x }.exists(x =>
               x.ast.isIdentifier.l.exists(i => declOf(i).exists(d => baseDecls.contains(d.id())))

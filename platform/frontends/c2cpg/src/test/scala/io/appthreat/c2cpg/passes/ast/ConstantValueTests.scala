@@ -26,6 +26,7 @@ class ConstantValueTests extends CCodeToCpgSuite:
           |static const int SLOTS = 3;
           |static const volatile int REG = 7;
           |#define N (4 * 8)
+          |#define M 24
           |void use(long);
           |int run(int a, struct packet *p) {
           |  use(sizeof(struct packet));
@@ -36,6 +37,7 @@ class ConstantValueTests extends CCodeToCpgSuite:
           |  use(SLOTS * 2);
           |  use(REG + 1);
           |  use(N);
+          |  use(M);
           |  use((unsigned int)-1);
           |  use(a + 1);
           |  use(a ? 1 : 2);
@@ -68,6 +70,10 @@ class ConstantValueTests extends CCodeToCpgSuite:
           macroCall.map(valueOf) shouldBe List(Some("32"))
           macroCall.ast.isCall.nameExact("<operator>.multiplication").map(valueOf).l shouldBe
               List(Some("32"))
+          // a macro that is a literal: the call carries it, the literal stays untagged
+          val literalMacro = cpg.call.nameExact("M").l
+          literalMacro.map(valueOf) shouldBe List(Some("24"))
+          literalMacro.ast.isLiteral.map(valueOf).l shouldBe List(None)
       }
 
       "wrap an unsigned value at its width" in {
