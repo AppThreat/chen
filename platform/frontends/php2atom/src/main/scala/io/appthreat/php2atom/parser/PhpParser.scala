@@ -39,8 +39,16 @@ class PhpParser private (
       case _ =>
           s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
 
-  /** Milliseconds a capability probe may run before it is killed. */
-  private val ProbeTimeoutMs = 5000L
+  /** Milliseconds a capability probe may run before it is killed.
+    *
+    * The probe is one `node` cold start, but it races the first wave of AST
+    * cache misses (thousands of file reads and hashes) on worker threads that
+    * start as soon as the pass does; five seconds was regularly lost to that
+    * contention on loaded runners, silently demoting whole-directory batch
+    * ingestion to the per-file fallback. Thirty seconds still bounds a wedged
+    * generator while leaving room for a busy machine.
+    */
+  private val ProbeTimeoutMs = 30000L
 
   /** Argument-vector head that launches the batch-capable generator, or `None` when only the
     * per-file parser is available.
