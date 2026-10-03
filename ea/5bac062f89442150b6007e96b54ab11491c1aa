@@ -1,0 +1,37 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/SourceIntegrityPass.scala
+  s_b9f6f98e1c3bda::t_3d2721cdbc0fba 19-23,44-45,48-63
+  s_b9f6f98e1c3bda::t_65b07ae1d4dcc2 1-18,24-43,46-47,64-95
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/UnicodeSkeleton.scala
+  s_b9f6f98e1c3bda::t_bcc0b2b5da11b7 31-39,41,48
+  s_b9f6f98e1c3bda::t_206cd8f0926de7 42
+  s_b9f6f98e1c3bda::t_65b07ae1d4dcc2 1-30,40,43-47,49-63
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/SourceIntegrityTests.scala
+  s_b9f6f98e1c3bda::t_4e75e1e8f2486e 32-35,39-41
+  s_b9f6f98e1c3bda::t_0b0cddb06d890b 1-31,36-38,42-58
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_b9f6f98e1c3bda::t_65b07ae1d4dcc2 58-63
+platform/frontends/x2cpg/src/main/resources/unicode/LICENSE-UNICODE.txt
+  s_b9f6f98e1c3bda::t_44e89479b616d2 1-39
+platform/frontends/x2cpg/src/main/resources/unicode/confusables.txt
+  s_b9f6f98e1c3bda::t_985ed9520d4ed6 1-6715
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/UnicodeSkeletonTests.scala
+  s_b9f6f98e1c3bda::t_ce3348fe271426 1-28
+platform/frontends/x2cpg/tools/unicode/generate-confusables.py
+  s_b9f6f98e1c3bda::t_0e11f301f2fc1b 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea5bac062f89442150b6007e96b54ab11491c1aa",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
