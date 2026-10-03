@@ -716,7 +716,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             case d: Identifier
                 if d._astIn.exists {
                     case a: Call =>
-                        ((a.name.startsWith("<operator>.assignment") ||
+                        ((OverlayFacts.isAssignmentOperator(a.name) ||
                             a.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")) &&
                             a.argumentOption(1).exists(_.id == d.id)) ||
                         (a.name == "<operator>.addressOf" && !OverlayFacts.readOnlyAddress(a))
@@ -730,7 +730,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     lazy val fieldStores: List[Call] =
         dst.method.ast.isCall
             .filter(c =>
-                c.name.startsWith("<operator>.assignment") ||
+                OverlayFacts.isAssignmentOperator(c.name) ||
                     c.name.matches("<operator>\\.(pre|post)(Increment|Decrement)")
             )
             .filter(_.argumentOption(1).exists {
@@ -3059,10 +3059,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                   val between = defLine < gLine && gLine < callLine
                   val redefines = cs.whenTrue.ast.isCall
                       .l
-                      .filter(c =>
-                          c.name.startsWith("<operator>.assignment") ||
-                              c.name.startsWith("<operators>.assignment")
-                      )
+                      .filter(c => OverlayFacts.isAssignmentOperator(c.name))
                       .exists(a => a.argumentOption(1).exists(t => t.code.trim == v.name))
                   val bounds = cs.condition.collect { case c: Call => c }.exists { cond =>
                       GuardPass.conjuncts(cond, holds = false).getOrElse(Nil).exists {
@@ -3320,7 +3317,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               .distinct
           val writes = cs.whenTrue.ast.collectAll[Call].l
               .filter(c =>
-                  c.name.startsWith("<operator>.assignment") ||
+                  OverlayFacts.isAssignmentOperator(c.name) ||
                       c.name.endsWith("Increment") || c.name.endsWith("Decrement")
               )
               .flatMap(_.argumentOption(1).collect { case i: Identifier => i.name })
@@ -3345,7 +3342,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
   /** A read through the index is CWE-125, a write through it CWE-787. */
   private def ruleIdFor(access: Call): String =
     val isWrite = access._astIn.collectFirst { case c: Call => c }.exists(c =>
-        c.name.startsWith("<operator>.assignment") &&
+        OverlayFacts.isAssignmentOperator(c.name) &&
             c.argumentOption(1).exists(_.id == access.id)
     )
     if isWrite then RuleIndexWrite else RuleIndexRead

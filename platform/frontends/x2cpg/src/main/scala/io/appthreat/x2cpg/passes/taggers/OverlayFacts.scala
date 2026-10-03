@@ -134,6 +134,13 @@ private[taggers] object OverlayFacts:
     */
   def isPointer(t: String): Boolean = t.endsWith("*") || t.endsWith("[]")
 
+  /** Any assignment: `=` and every compound form. The schema spells six compound forms
+    * `<operators>.assignment...` (`%=`, `<<=`, `>>=`, `&=`, `|=`, `^=`), the rest
+    * `<operator>.assignment...`.
+    */
+  def isAssignmentOperator(name: String): Boolean =
+      name.startsWith("<operator>.assignment") || name.startsWith("<operators>.assignment")
+
   /** Pointer arithmetic, as the frontend tagged it
     * ([[io.appthreat.x2cpg.Defines.PointerArithmeticTag]]): the kind (`add`, `sub`, `diff`) and the
     * argument index of the pointer operand (1 for `diff`).
@@ -466,7 +473,7 @@ private[taggers] object OverlayFacts:
     val code   = spelled(field)
     val baseId = baseOf(field)
     val stores = field.method.ast.isCall.l.filter { a =>
-        a.name.startsWith("<operator>.assignment") &&
+        isAssignmentOperator(a.name) &&
         a.argumentOption(1).exists {
             case lhs: Call =>
                 (lhs.name == "<operator>.fieldAccess" || lhs

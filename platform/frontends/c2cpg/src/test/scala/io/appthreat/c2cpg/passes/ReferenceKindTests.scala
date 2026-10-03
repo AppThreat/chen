@@ -79,6 +79,23 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
     |    note();
     |}
     |
+    |/* a compound assignment the schema spells <operators>.assignmentOr changes the value too */
+    |void bad_guard_then_or_assign(int n, int bits)
+    |{
+    |    char buf[16];
+    |    if (n < 0 || n >= 16) return;
+    |    n |= bits;
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |
+    |int flags_kind(int x)
+    |{
+    |    int flags = 0;
+    |    flags |= x;
+    |    return flags;
+    |}
+    |
     |/* a read-only parameter keeps its guard */
     |void good_read_only(int n)
     |{
@@ -123,6 +140,8 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
           kindsOf("kinds", "b") shouldBe Set("modified")
           kindsOf("kinds", "s") shouldBe Set("modified")
           globalKinds("global_count") shouldBe Set("modified")
+          // `|=` is <operators>.assignmentOr in the schema
+          kindsOf("flags_kind", "flags") shouldBe Set("modified")
       }
       "count an array passed out as address-taken and an element store as modified" in {
           kindsOf("kinds", "arr") shouldBe Set("modified", "address-taken")
@@ -142,6 +161,9 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
       }
       "not hold across a call that receives the address directly" in {
           boundFindings("bad_guard_then_direct_escape") should not be empty
+      }
+      "not hold across a compound assignment of any spelling" in {
+          boundFindings("bad_guard_then_or_assign") should not be empty
       }
       "not hold across a write through the pointer" in {
           boundFindings("bad_guard_then_write_through") should not be empty

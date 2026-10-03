@@ -194,7 +194,7 @@ object InitAndFormatRules:
       )
 
   private def isLhsOf(n: AstNode, c: Call): Boolean =
-      c.name.startsWith("<operator>.assignment") && c.argumentOption(1).exists(_.id == n.id)
+      OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists(_.id == n.id)
 
   /** `s.b` / `s->b` with `s` an identifier: (base, field). */
   private def fieldPath(c: Call): Option[(String, String)] =
@@ -282,7 +282,7 @@ object InitAndFormatRules:
     val gen   = mutable.LongMap.empty[Set[String]]
     val reads = mutable.ListBuffer.empty[(CfgNode, String, Set[String])] // node, shown, accepted
     nodes.foreach {
-        case c: Call if c.name.startsWith("<operator>.assignment") =>
+        case c: Call if OverlayFacts.isAssignmentOperator(c.name) =>
             c.argumentOption(1).foreach {
                 case i: Identifier if candidates.contains(i.name) =>
                     gen(c.id()) = Set(i.name)

@@ -94,8 +94,12 @@ class ReferenceKindPass(cpg: Cpg) extends CpgPass(cpg):
         case _ => climbing = false
     top
 
+  /** Any assignment or increment. The schema spells six compound forms `<operators>.assignment...`
+    * (`%=`, `<<=`, `>>=`, `&=`, `|=`, `^=`).
+    */
   private def isWrite(c: Call): Boolean =
-      c.name.startsWith("<operator>.assignment") || IncDec.contains(c.name)
+      c.name.startsWith("<operator>.assignment") || c.name.startsWith("<operators>.assignment") ||
+          IncDec.contains(c.name)
 
   /** `int n = 5;`: the frontend writes the declarator's initializer as an assignment at the
     * declarator's own position.

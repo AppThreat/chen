@@ -183,7 +183,7 @@ private[taggers] final class IndexRange(
                       case some @ Some(_) => List(some)
                       case None           => List(None)
                 case n
-                    if isTarget && (n.startsWith("<operator>.assignment") ||
+                    if isTarget && (OverlayFacts.isAssignmentOperator(n) ||
                         n.matches("<operator>\\.(pre|post)Decrement")) =>
                     List(None)
                 case "<operator>.addressOf" => List(None)

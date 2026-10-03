@@ -384,7 +384,7 @@ object GuardPass:
       val writers = method.ast.isCall.l.filter { c =>
           if !c.name.startsWith("<operator>") then
             c.argument.l.exists(a => isAddressOf(a) || isAlias(a))
-          else if c.name.startsWith("<operator>.assignment") then
+          else if OverlayFacts.isAssignmentOperator(c.name) then
             c.argumentOption(1).collect { case t: Call => t }.exists { target =>
                 (target.name == "<operator>.indirection" ||
                     target.name == "<operator>.indirectIndexAccess" ||
@@ -449,7 +449,7 @@ object GuardPass:
   private[taggers] def isDefinitionSite(i: Identifier): Boolean =
       i._astIn.collectFirst { case c: Call => c }.exists { c =>
         val isTarget = c.argumentOption(1).exists(_.id() == i.id())
-        (isTarget && (c.name.startsWith("<operator>.assignment") ||
+        (isTarget && (OverlayFacts.isAssignmentOperator(c.name) ||
             c.name.matches("<operator>\\.(pre|post)(In|De)crement"))) ||
         c.name == "<operator>.addressOf"
       }
