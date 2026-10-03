@@ -55,6 +55,12 @@ object Defines:
   val MacroOriginTag       = "macro-origin"
   val MacroArgumentCopyTag = "macro-argument-copy"
 
+  /** Unicode that hides what source code does (see `SourceIntegrityPass`): a name that looks like
+    * another name of its file, and bidirectional formatting characters in a literal or comment.
+    */
+  val UnicodeConfusableTag  = "unicode-confusable"
+  val UnicodeBidiControlTag = "unicode-bidi-control"
+
   /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
     * operator the expression is written with (`<operator>.addition`), so a consumer that matches
     * operator names still finds the expression after the frontend linked it to its method.
