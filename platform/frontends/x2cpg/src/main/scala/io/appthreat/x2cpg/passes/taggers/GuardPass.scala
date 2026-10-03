@@ -383,7 +383,9 @@ object GuardPass:
         case _             => false
       val writers = method.ast.isCall.l.filter { c =>
           if !c.name.startsWith("<operator>") then
-            c.argument.l.exists(a => isAddressOf(a) || isAlias(a))
+            c.argument.l.exists(a =>
+                isAddressOf(a) || isAlias(a) || (namesVariable(a) && bindsToMutableReference(c, a))
+            )
           else if OverlayFacts.isAssignmentOperator(c.name) then
             c.argumentOption(1).collect { case t: Call => t }.exists { target =>
                 (target.name == "<operator>.indirection" ||
@@ -403,6 +405,19 @@ object GuardPass:
   end changedThroughAlias
 
   private val AddressTakenKind = "address-taken"
+
+  /** An argument bound to a non-const reference parameter of the function the call links to: the
+    * callee can write the variable. The parameter's declaration says (`int &n`, `const int &n`); a
+    * call with no linked function to ask keeps the guard.
+    */
+  private def bindsToMutableReference(c: Call, arg: Expression): Boolean =
+      arg.argumentIndex >= 1 && c._callOut.collectAll[Method].exists { m =>
+          m.parameter.l.find(_.index == arg.argumentIndex).exists { p =>
+            val declared = p.code.trim.stripSuffix(p.name).trim
+            declared.endsWith("&") && !declared.endsWith("&&") &&
+            !declared.startsWith("const ") && !declared.contains(" const ")
+          }
+      }
 
   private def withoutCasts(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" =>

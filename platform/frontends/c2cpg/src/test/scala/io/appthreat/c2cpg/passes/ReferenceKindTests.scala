@@ -241,3 +241,80 @@ class CppReferenceKindTests extends io.appthreat.c2cpg.testfixtures.CCodeToCpgSu
       }
   }
 end CppReferenceKindTests
+
+/** C++ references and class assignment, and a guard across a call that binds the variable to a
+  * non-const reference.
+  */
+class CppReferenceSemanticsTests extends io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite:
+  private val cpg = code(
+    """
+      |struct Status { int code; Status &operator=(const Status &o) { code = o.code; return *this; } };
+      |struct Options { int size; int limit() const { return size; } };
+      |void refill(int &n);
+      |void look(const int &n);
+      |void note();
+      |
+      |int uses(const Options &options, Status s, Status t, int k) {
+      |  s = t;
+      |  look(k);
+      |  return options.limit() + s.code;
+      |}
+      |
+      |void bad_guard_then_ref(int n) {
+      |  char buf[16];
+      |  if (n < 0 || n >= 16) return;
+      |  refill(n);
+      |  buf[n] = 0;
+      |  note();
+      |}
+      |
+      |void good_guard_then_const_ref(int n) {
+      |  char buf[16];
+      |  if (n < 0 || n >= 16) return;
+      |  look(n);
+      |  buf[n] = 0;
+      |  note();
+      |}
+      |""".stripMargin,
+    "refs.cpp"
+  )
+
+  new MemorySemanticsPass(cpg).createAndApply()
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new IntegerWidthPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  private def kinds(method: String, name: String): Set[String] =
+      cpg.method.nameExact(method).parameter.nameExact(name).tag
+          .nameExact(Defines.ReferenceKindTag).value.toSet
+
+  private def boundFindings(method: String): List[String] =
+      cpg.method.nameExact(method).ast.collectAll[StoredNode]
+          .flatMap(_.tag.name("ms-finding").value.l)
+          .filter(_.startsWith("MS-BOUND")).l
+
+  "a C++ variable" should {
+      "take nothing when it is itself a reference" in {
+          kinds("uses", "options") shouldBe Set("read-only")
+      }
+      "be modified by its class's assignment operator" in {
+          kinds("uses", "s") should contain("modified")
+      }
+      "be address-taken when bound to a const reference" in {
+          kinds("uses", "k") shouldBe Set("address-taken")
+      }
+  }
+
+  "a guard" should {
+      "not hold across a call that binds the variable to a non-const reference" in {
+          boundFindings("bad_guard_then_ref") should not be empty
+      }
+      "hold across one that binds it to a const reference" in {
+          boundFindings("good_guard_then_const_ref") shouldBe empty
+      }
+  }
+end CppReferenceSemanticsTests

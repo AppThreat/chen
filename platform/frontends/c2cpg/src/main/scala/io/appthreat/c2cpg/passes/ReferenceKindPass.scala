@@ -13,11 +13,13 @@ import scala.collection.mutable
   * ([[Defines.ReferenceKindTag]]), after the kinds a C/C++ compiler's cross-reference records:
   *
   *   - `address-taken`: the operand of `&` (also `&v.member`, `&v[i]`), an array passed to a call
-  *     (it decays to a pointer to the array), or an argument bound to a non-const reference
-  *     parameter of a function the graph holds. The variable can then change without being named;
-  *   - `modified`: assigned, compound-assigned, incremented or decremented after its declaration,
-  *     also through a member or an element of it (`v.f = x`, `a[i] = x` for an array `a`). A
-  *     declaration's own initializer is not a modification;
+  *     (it decays to a pointer to the array), an argument bound to a reference parameter, or the
+  *     object of a member call (`this`). A variable that is itself a reference takes nothing: its
+  *     referent's address was taken where it was bound;
+  *   - `modified`: assigned (also through a class's assignment operator), compound-assigned,
+  *     incremented or decremented after its declaration, also through a member or an element of it
+  *     (`v.f = x`, `a[i] = x` for an array `a`). A declaration's own initializer is not a
+  *     modification;
   *   - `read-only`: neither of the above.
   */
 class ReferenceKindPass(cpg: Cpg, arrayTypedefs: Set[String] = Set.empty) extends CpgPass(cpg):
@@ -71,16 +73,50 @@ class ReferenceKindPass(cpg: Cpg, arrayTypedefs: Set[String] = Set.empty) extend
       case Some(c) if isWrite(c) && c.argumentOption(1).exists(_.id() == storage.id()) =>
           if storage.id() == i.id() && isInitializerOf(c, variable) then None
           else Some(Modified)
+      // a class object's assignment operator (`s = t` calling `Status::operator=`) writes it
+      case Some(c) if isAssignmentOperatorCall(c) && isAssignedOperand(c, storage) =>
+          Some(Modified)
       case Some(c) if storage.id() == i.id() && isArray(variable) && isCallOutward(c) =>
           Some(AddressTaken)
       // the object of a member call: `this` is its address. Through a pointer (`p->f()`) the
-      // call receives the pointer's value
+      // call receives the pointer's value, and through a reference the referent's address
       case Some(c)
           if isCallOutward(c) && storage.argumentIndex == 0 &&
-              c.argumentOption(0).exists(_.id() == storage.id()) && !isPointerVariable(variable) =>
+              c.argumentOption(0).exists(_.id() == storage.id()) &&
+              !isPointerVariable(variable) && !isReferenceVariable(variable) =>
           Some(AddressTaken)
-      case Some(c) if bindsToReference(c, storage) => Some(AddressTaken)
-      case _                                       => None
+      case Some(c) if !isReferenceVariable(variable) && bindsToReference(c, storage) =>
+          Some(AddressTaken)
+      case _ => None
+    end match
+  end referenceKindOf
+
+  /** A user-defined assignment operator the frontend linked (`operator-call` names the built-in
+    * operator it is written with).
+    */
+  private def isAssignmentOperatorCall(c: Call): Boolean =
+      c.tag.nameExact(Defines.OperatorCallTag).value.exists(v =>
+          v.startsWith("<operator>.assignment") || v.startsWith("<operators>.assignment")
+      )
+
+  /** The operand an assignment operator writes: the receiver of a member operator, the first
+    * argument of a free one.
+    */
+  private def isAssignedOperand(c: Call, operand: Expression): Boolean =
+      c.argumentOption(0).exists(_.id() == operand.id()) ||
+          (c.argumentOption(0).isEmpty && c.argumentOption(1).exists(_.id() == operand.id()))
+
+  /** A variable declared as a reference: binding it or calling through it reaches the referent. The
+    * type the graph records drops the `&`, so it is read off the declaration (`const Options
+    * &options`).
+    */
+  private def isReferenceVariable(variable: StoredNode): Boolean = variable match
+    case l: Local             => declaresReference(l.code, l.name)
+    case p: MethodParameterIn => declaresReference(p.code, p.name)
+    case _                    => false
+
+  private def declaresReference(code: String, name: String): Boolean =
+      code.trim.stripSuffix(name).trim.endsWith("&")
 
   /** The outermost `.`/`[]` expression over `i` that still names `variable`'s own storage. */
   private def storageChainTop(i: Identifier, variable: StoredNode): Expression =
@@ -140,14 +176,15 @@ class ReferenceKindPass(cpg: Cpg, arrayTypedefs: Set[String] = Set.empty) extend
   /** A call that is not an operator: the array argument leaves as a pointer. */
   private def isCallOutward(c: Call): Boolean = !c.name.startsWith("<operator>")
 
-  /** An argument bound to a non-const reference parameter, by the call's signature (`void(int&)`):
-    * a function only a header declares has no METHOD to ask.
+  /** An argument bound to a reference parameter, const or not, by the call's signature
+    * (`void(int&)`): the callee receives the variable's address. A function only a header declares
+    * has no METHOD to ask.
     */
   private def bindsToReference(c: Call, arg: Expression): Boolean =
       arg.argumentIndex >= 1 && !c.name.startsWith("<operator>") &&
           parameterTypes(c.signature).lift(arg.argumentIndex - 1).exists { t =>
             val tt = t.trim
-            tt.endsWith("&") && !tt.endsWith("&&") && !tt.startsWith("const ")
+            tt.endsWith("&") && !tt.endsWith("&&")
           }
 
   /** The parameter types of a signature `ret(a,b<c,d>,e)`, split at top-level commas. */
