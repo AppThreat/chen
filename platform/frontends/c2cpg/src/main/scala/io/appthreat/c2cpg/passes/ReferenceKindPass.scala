@@ -29,13 +29,10 @@ class ReferenceKindPass(cpg: Cpg, arrayTypedefs: Set[String] = Set.empty) extend
     def note(variable: StoredNode, kind: String): Unit =
         kinds.getOrElseUpdate(variable, mutable.LinkedHashSet.empty) += kind
 
-    // the globals of each file, by name, for the identifiers no REF edge links
-    val globalsByFile = cpg.method.nameExact("<global>").l.groupBy(_.filename).map {
-        (file, methods) => file -> methods.flatMap(_.local.l).map(l => l.name -> l).toMap
-    }
+    // a global is linked like a local (a REF edge to its LOCAL in the file's `<global>`); a name
+    // with no REF edge is not a variable this graph declares
     def variableOf(i: Identifier): Option[StoredNode] =
         i._refOut.collectFirst { case d @ (_: Local | _: MethodParameterIn) => d }
-            .orElse(globalsByFile.get(i.method.filename).flatMap(_.get(i.name)))
 
     // every variable starts read-only; the frontend's graph has no CONTAINS edges yet, so the
     // locals come from the whole graph rather than per method

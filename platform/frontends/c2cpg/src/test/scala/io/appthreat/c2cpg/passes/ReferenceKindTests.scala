@@ -105,6 +105,13 @@ class ReferenceKindTests extends DataFlowCodeToCpgSuite:
     |    save(env);
     |}
     |
+    |/* a name nothing declares (a macro the build would define) */
+    |int undeclared_name(void)
+    |{
+    |    NOT_DECLARED_ANYWHERE += 1;
+    |    return NOT_DECLARED_ANYWHERE;
+    |}
+    |
     |int flags_kind(int x)
     |{
     |    int flags = 0;
