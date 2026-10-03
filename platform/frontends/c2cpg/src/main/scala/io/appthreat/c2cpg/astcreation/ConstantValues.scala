@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.Defines as X2CpgDefines
+import io.shiftleft.codepropertygraph.generated.nodes.NewLiteral
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.internal.core.dom.parser.{SizeofCalculator, ValueFactory}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPSemantics
@@ -22,32 +23,30 @@ import scala.util.Try
 trait ConstantValues(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
-  /** The value of each expression of this file seen so far, None when it is not an integer constant
-    * expression. A literal is known to be constant; its value is not computed.
+  /** Each expression of this file seen so far: None when it is not an integer constant expression,
+    * else its value when CDT reports one (a literal is constant whether or not it does).
     */
   private val constantExpressions =
-      new java.util.IdentityHashMap[IASTExpression, Option[BigInt]]()
+      new java.util.IdentityHashMap[IASTExpression, Option[Option[BigInt]]]()
 
-  /** What a literal records: it is constant, and its node is not tagged. */
-  private val literalConstant = Some(BigInt(0))
-
-  private def valueOf(expression: IASTExpression): Option[BigInt] =
+  private def constantOf(expression: IASTExpression): Option[Option[BigInt]] =
       if constantExpressions.containsKey(expression) then constantExpressions.get(expression)
       else
-        val value =
-            if isIntegerLiteral(expression) then literalConstant
-            else if mayBeConstant(expression) then integerValueOf(expression)
+        val constant =
+            if isIntegerLiteral(expression) then Some(integerValueOf(expression))
+            else if mayBeConstant(expression) then integerValueOf(expression).map(Some(_))
             else None
-        constantExpressions.put(expression, value)
-        value
+        constantExpressions.put(expression, constant)
+        constant
 
-  /** Tags the root of `ast`, built for `expression`, with its constant value when it has one. The
-    * INLINED call that stands for a macro's expansion is tagged the same way.
+  /** Tags the root of `ast`, built for `expression`, with its constant value when it has one: the
+    * expression's own node, or the INLINED call that stands for a macro's expansion (`#define N 32`
+    * too). A literal node is its own value and is not tagged.
     */
   protected def tagConstantValue(expression: IASTExpression, ast: Ast): Unit =
-    val value = valueOf(expression)
-    if !expression.isInstanceOf[IASTLiteralExpression] then
-      for v <- value; root <- ast.root do tagNode(root, X2CpgDefines.ConstValueTag, v.toString)
+    val value = constantOf(expression).flatten
+    for v <- value; root <- ast.root if !root.isInstanceOf[NewLiteral] do
+      tagNode(root, X2CpgDefines.ConstValueTag, v.toString)
 
   private def isConstant(e: IASTExpression): Boolean =
       e != null && Option(constantExpressions.get(e)).exists(_.isDefined)
