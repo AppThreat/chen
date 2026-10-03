@@ -144,12 +144,24 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
           case hit @ Some(_) => hit
           case None =>
               logger.debug(
-                s"Batch output did not include $filename; parsing it individually."
+                s"Batch output did not include $filename; the generator excluded it."
               )
               None
 
   private def createAst(filename: String): Option[ParsedUnit] =
-      batchAstFor(filename).orElse(parser.parseFile(filename, config.phpIni)) match
+      val maybeParsed =
+          if batchAsts.nonEmpty then
+              // A completed batch is authoritative about what it parsed: the
+              // generator's own exclusion policy (phpastgen skips vendor,
+              // node_modules and friends by default) kept the file out on
+              // purpose. Re-parsing every uncovered file individually would
+              // resurrect one interpreter spawn per file - hours on windows -
+              // for directories the generator is designed to skip, so the
+              // per-file fallback runs only when no batch happened at all.
+              batchAstFor(filename)
+          else
+              parser.parseFile(filename, config.phpIni)
+      maybeParsed match
         case Some(parseResult) =>
             val diff = new AstCreator(relativeFilename(filename), parseResult)(
               using config.schemaValidation

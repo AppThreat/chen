@@ -159,7 +159,7 @@ class BatchIngestionWiringTests extends AnyWordSpec with Matchers with BeforeAnd
           methods should not contain "perFileFunc"
       }
 
-      "fall back to per-file parsing for files the batch did not cover" in {
+      "keep files the batch generator excluded out of the CPG" in {
           cancelUnlessRunnable()
 
           val scenario = (workRoot / "partial").createDirectoryIfNotExists()
@@ -167,12 +167,16 @@ class BatchIngestionWiringTests extends AnyWordSpec with Matchers with BeforeAnd
           (inputDir / "covered.php").writeText("<?php ;")
           (inputDir / "missing.php").writeText("<?php ;")
 
-          // Batch emits an AST for `covered.php` only; `missing.php` must still be parsed individually.
+          // The batch succeeded and emitted an AST for `covered.php` only,
+          // which is the generator's exclusion policy speaking (phpastgen
+          // skips vendor and friends by default). Uncovered files must NOT be
+          // re-parsed individually: one interpreter spawn per excluded file is
+          // the per-file grind this pass grew batch mode to avoid.
           val bin = writeStub(scenario / "gen", stubBody(advertiseBatch = true, Seq("covered.php")))
           val methods = methodNamesFor(inputDir, bin)
 
           methods should contain("batchOnlyFunc")
-          methods should contain("perFileFunc")
+          methods should not contain "perFileFunc"
       }
 
       "pass an input directory containing spaces through to the generator unmangled" in {
