@@ -54,7 +54,8 @@ object AstCreationPass:
   //    and catch handlers in their own shapes
   // 5: destructors at scope exits, constructed objects assigned, condition declarations, C++20
   //    module units, header language from includers, compiler-predefined macros
-  private val AstFormatVersion = "c2cpg-ast-5"
+  // 6: includes tagged with the file they resolved to and whether they name a system header
+  private val AstFormatVersion = "c2cpg-ast-6"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial

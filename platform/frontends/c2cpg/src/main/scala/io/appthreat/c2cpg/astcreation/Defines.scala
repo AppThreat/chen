@@ -27,4 +27,10 @@ object Defines:
   val operatorNew                     = "<operator>.new"
   val operatorThrow                   = "<operator>.throw"
   val operatorBracketedPrimary        = "<operator>.bracketedPrimary"
+
+  /** On an `#include`'s IMPORT node: the file the include resolved to (absolute). */
+  val IncludeResolvedPathTag = "include-resolved-path"
+
+  /** On an `#include`'s IMPORT node: `true` when it names a system header (`<...>`). */
+  val IncludeSystemTag = "include-system"
 end Defines

@@ -647,6 +647,12 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       val importNode      = newImportNode(nodeSignature(include), name, name, include)
       diffGraph.addNode(_dependencyNode)
       diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+      // the file the include resolved to, which names the package that provides it far better
+      // than the header name, and whether it was written as a system include
+      Option(include.getPath).filter(p => include.isResolved && p.nonEmpty).foreach { path =>
+          tagNode(importNode, Defines.IncludeResolvedPathTag, path)
+      }
+      if include.isSystemInclude then tagNode(importNode, Defines.IncludeSystemTag, "true")
       Ast(importNode)
     }
 

@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.astcreation
 
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.{Ast, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewTag}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewNode, NewTag}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
@@ -65,8 +65,12 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
       }.flatMap(l => Option(lambdaMethods.get(l)))
 
   protected def tagCall(call: NewCall, name: String, value: String): Unit =
+      tagNode(call, name, value)
+
+  /** Tags a node of this file; one TAG node per name and value. */
+  protected def tagNode(node: NewNode, name: String, value: String): Unit =
     val tag = callTags.getOrElseUpdate((name, value), NewTag().name(name).value(value))
-    diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
+    diffGraph.addEdge(node, tag, EdgeTypes.TAGGED_BY)
 
   private def isUnderProject(node: IASTNode): Boolean =
       Option(node.getFileLocation).flatMap(l => Option(l.getFileName)).exists { file =>

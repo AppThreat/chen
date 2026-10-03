@@ -190,6 +190,12 @@ So calls into an imported module resolve and link to the module's units. Outside
 
 The AST cache key includes each file's language, macros, include path and forced files.
 
+**Includes.** Each `#include` of a file becomes an IMPORT node (and a DEPENDENCY named after the
+header as written). The IMPORT node is tagged with the file the include resolved to
+(`include-resolved-path`, an absolute path) and, for a `<...>` include, `include-system=true`;
+an include that did not resolve has no path tag. The resolved file tells which package provides
+the header far better than its name: atom's `usages` slices carry it for SBOM tools.
+
 **CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
 evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.
 `c2cpg` sets that log up when it first parses, so such a report no longer fails the file, and
