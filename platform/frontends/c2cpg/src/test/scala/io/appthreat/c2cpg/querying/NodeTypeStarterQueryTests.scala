@@ -91,7 +91,9 @@ class NodeTypeStarterQueryTests extends CCodeToCpgSuite:
   "should allow retrieving all nodes" in {
       val allNodesLabels = cpg.all.label.toSetMutable
 
+      // TAG: every variable carries how it is referenced
       allNodesLabels shouldBe Set(
+        NodeTypes.TAG,
         NodeTypes.NAMESPACE_BLOCK,
         NodeTypes.MEMBER,
         NodeTypes.TYPE_DECL,

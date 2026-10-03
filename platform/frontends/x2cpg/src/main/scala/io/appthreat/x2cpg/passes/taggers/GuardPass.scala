@@ -343,8 +343,66 @@ object GuardPass:
             valueSources(u, stopAt = Some(g.id())).exists(_.forall {
                 case d: CfgNode => !d.dominatedBy.exists(_.id() == g.id())
                 case _          => true
-            })
+            }) && !changedThroughAlias(g, u)
         case _ => true
+
+  /** Can a variable whose address was taken ([[io.appthreat.x2cpg.Defines.ReferenceKindTag]]) have
+    * changed between the guard and the use without being named? Yes when a call that receives its
+    * address (`f(&n)`, or `f(p)` for a `p` that holds `&n`) or a write through such a pointer (`*p
+    * \= x`, `p[i] = x`, `p->f = x`) can run in between.
+    */
+  private def changedThroughAlias(g: Identifier, u: Identifier): Boolean =
+    val variable = OverlayFacts.declOf(u)
+    val addressTaken = variable.exists(
+      _.tag.nameExact(io.appthreat.x2cpg.Defines.ReferenceKindTag).value.l.contains(
+        AddressTakenKind
+      )
+    )
+    if !addressTaken then false
+    else
+      val method = u.method
+      def namesVariable(e: Expression): Boolean = withoutCasts(e) match
+        case i: Identifier => OverlayFacts.declOf(i).map(_.id()) == variable.map(_.id())
+        case c: Call if c.name == "<operator>.fieldAccess" || c.name.endsWith("ndexAccess") =>
+            c.argumentOption(1).collect { case x: Expression => x }.exists(namesVariable)
+        case _ => false
+      def isAddressOf(e: Expression): Boolean = withoutCasts(e) match
+        case c: Call if c.name == "<operator>.addressOf" =>
+            c.argumentOption(1).collect { case x: Expression => x }.exists(namesVariable)
+        case _ => false
+      // the pointer variables that are given its address
+      val aliases = method.ast.isCall.nameExact("<operator>.assignment").l.flatMap { a =>
+          for
+            lhs  <- a.argumentOption(1).collect { case i: Identifier => i }
+            rhs  <- a.argumentOption(2).collect { case e: Expression => e } if isAddressOf(rhs)
+            decl <- OverlayFacts.declOf(lhs)
+          yield decl.id()
+      }.toSet
+      def isAlias(e: Expression): Boolean = withoutCasts(e) match
+        case i: Identifier => OverlayFacts.declOf(i).exists(d => aliases.contains(d.id()))
+        case _             => false
+      val writers = method.ast.isCall.l.filter { c =>
+          if !c.name.startsWith("<operator>") then
+            c.argument.l.exists(a => isAddressOf(a) || isAlias(a))
+          else if c.name.startsWith("<operator>.assignment") then
+            c.argumentOption(1).collect { case t: Call => t }.exists { target =>
+                (target.name == "<operator>.indirection" ||
+                    target.name == "<operator>.indirectIndexAccess" ||
+                    target.name == "<operator>.indirectFieldAccess") &&
+                target.argumentOption(1).collect { case x: Expression => x }.exists(isAlias)
+            }
+          else false
+      }
+      // a writer that runs after the guard and before the use, on some path
+      writers.exists { w =>
+          w.id() != g.id() &&
+          cfgReachesAvoiding(g._cfgOut.collectAll[CfgNode].l, w.id(), Set.empty) &&
+          cfgReachesAvoiding(w._cfgOut.collectAll[CfgNode].l, u.id(), Set(g.id()))
+      }
+    end if
+  end changedThroughAlias
+
+  private val AddressTakenKind = "address-taken"
 
   private def withoutCasts(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" =>

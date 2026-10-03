@@ -6,6 +6,7 @@ import io.appthreat.c2cpg.passes.{
     ConfigFileCreationPass,
     ConstantTagPass,
     PreprocessorPass,
+    ReferenceKindPass,
     TypeDeclNodePass
 }
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
@@ -53,6 +54,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)
               .createAndApply()
           new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
+          new ReferenceKindPass(cpg).createAndApply()
       }
 
   /** Fastest-splice warm restore: when fragment caching is enabled (atom `--flux`) and every source

@@ -1,0 +1,156 @@
+package io.appthreat.c2cpg.passes
+
+import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
+import io.appthreat.x2cpg.Defines
+import io.appthreat.x2cpg.passes.taggers.*
+import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.semanticcpg.language.*
+
+/** Each variable says how it is referenced, and a guard on a variable whose address left is not
+  * trusted across a write that can reach it unnamed.
+  */
+class ReferenceKindTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+    |void g(int *);
+    |void use(int *);
+    |void note(void);
+    |int global_count;
+    |int global_limit = 8;
+    |
+    |int kinds(int a, int b, int c)
+    |{
+    |    int n = 5, k, ro = 3;
+    |    int arr[4];
+    |    struct { int f; } s;
+    |    int *p = &n;
+    |    k = a;
+    |    g(p);
+    |    b += 1;
+    |    arr[0] = 1;
+    |    s.f = 2;
+    |    use(arr);
+    |    global_count++;
+    |    return n + k + ro + b + c + global_limit;
+    |}
+    |
+    |void refill(int *n);
+    |
+    |/* the guard holds when tested, then the value changes through a pointer to it */
+    |void bad_guard_then_escape(int n)
+    |{
+    |    char buf[16];
+    |    int *alias = &n;
+    |    if (n < 0 || n >= 16) return;
+    |    refill(alias);
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |
+    |/* the address is passed directly */
+    |void bad_guard_then_direct_escape(int n)
+    |{
+    |    char buf[16];
+    |    if (n < 0 || n >= 16) return;
+    |    refill(&n);
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |
+    |/* written through the pointer after the guard */
+    |void bad_guard_then_write_through(int n, int m)
+    |{
+    |    char buf[16];
+    |    int *alias = &n;
+    |    if (n < 0 || n >= 16) return;
+    |    *alias = m;
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |
+    |/* the address left before the guard and nothing touches it after: still bounded */
+    |void good_escape_before_guard(int n)
+    |{
+    |    char buf[16];
+    |    refill(&n);
+    |    if (n < 0 || n >= 16) return;
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |
+    |/* a read-only parameter keeps its guard */
+    |void good_read_only(int n)
+    |{
+    |    char buf[16];
+    |    if (n < 0 || n >= 16) return;
+    |    buf[n] = 0;
+    |    note();
+    |}
+    |""".stripMargin,
+    "refkinds.c"
+  )
+
+  new MemorySemanticsPass(cpg).createAndApply()
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new IntegerWidthPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  private def kindsOf(method: String, name: String): Set[String] =
+    val m = cpg.method.nameExact(method).l
+    (m.local.nameExact(name).tag.l ++ m.parameter.nameExact(name).tag.l)
+        .filter(_.name == Defines.ReferenceKindTag).map(_.value).toSet
+
+  private def globalKinds(name: String): Set[String] =
+      cpg.method.nameExact("<global>").local.nameExact(name).tag
+          .nameExact(Defines.ReferenceKindTag).value.toSet
+
+  private def boundFindings(method: String): List[String] =
+      cpg.method.nameExact(method).ast.collectAll[StoredNode]
+          .flatMap(_.tag.name("ms-finding").value.l)
+          .filter(_.startsWith("MS-BOUND")).l
+
+  "a variable" should {
+      "be address-taken when its address leaves, and not modified by its own initializer" in {
+          kindsOf("kinds", "n") shouldBe Set("address-taken")
+      }
+      "be modified when written after its declaration" in {
+          kindsOf("kinds", "k") shouldBe Set("modified")
+          kindsOf("kinds", "b") shouldBe Set("modified")
+          kindsOf("kinds", "s") shouldBe Set("modified")
+          globalKinds("global_count") shouldBe Set("modified")
+      }
+      "count an array passed out as address-taken and an element store as modified" in {
+          kindsOf("kinds", "arr") shouldBe Set("modified", "address-taken")
+      }
+      "be read-only otherwise" in {
+          kindsOf("kinds", "ro") shouldBe Set("read-only")
+          kindsOf("kinds", "a") shouldBe Set("read-only")
+          kindsOf("kinds", "c") shouldBe Set("read-only")
+          kindsOf("kinds", "p") shouldBe Set("read-only")
+          globalKinds("global_limit") shouldBe Set("read-only")
+      }
+  }
+
+  "a guard on an address-taken variable" should {
+      "not hold across a call that receives the address through a pointer" in {
+          boundFindings("bad_guard_then_escape") should not be empty
+      }
+      "not hold across a call that receives the address directly" in {
+          boundFindings("bad_guard_then_direct_escape") should not be empty
+      }
+      "not hold across a write through the pointer" in {
+          boundFindings("bad_guard_then_write_through") should not be empty
+      }
+      "hold when the address left before the guard and nothing writes after it" in {
+          boundFindings("good_escape_before_guard") shouldBe empty
+      }
+      "hold on a read-only parameter" in {
+          boundFindings("good_read_only") shouldBe empty
+      }
+  }
+end ReferenceKindTests

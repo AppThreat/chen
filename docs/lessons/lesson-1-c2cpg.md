@@ -93,6 +93,11 @@ recovery pass). Every field has a corresponding `withX` builder method that call
    files (skipped when `onlyAstCache = true`).
 8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers the frontend could not
    evaluate in place with their value (`const-value`).
+9. **ReferenceKindPass** — tags every local, parameter and global with how it is referenced
+   (`ref`): `address-taken` (the operand of `&`, an array passed to a call, an argument bound to a
+   non-const reference), `modified` (written after its declaration, also through a member or an
+   element of an array), or `read-only`. A guard on an address-taken variable is not trusted
+   across a call that receives its address or a write through a pointer to it.
 
 `createCpgWithOverlays` additionally applies the four default overlays defined in `X2Cpg.scala`:
 **Base**, **ControlFlow**, **TypeRelations**, **CallGraph**.

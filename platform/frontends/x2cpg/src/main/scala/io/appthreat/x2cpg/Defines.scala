@@ -37,6 +37,12 @@ object Defines:
     */
   val PointerArithmeticTag = "ptr-arith"
 
+  /** On a LOCAL or METHOD_PARAMETER_IN (C/C++): how the variable is referenced, one tag per kind -
+    * `address-taken` (its address leaves, so it can change unnamed), `modified` (written after its
+    * declaration), or `read-only`.
+    */
+  val ReferenceKindTag = "ref"
+
   /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
     * operator the expression is written with (`<operator>.addition`), so a consumer that matches
     * operator names still finds the expression after the frontend linked it to its method.
