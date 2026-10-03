@@ -651,14 +651,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       // branch side is the tiebreaker two structurally identical branches need: same line, same
       // code, different narrowing.
       val cs = guards.get(node.id())
-      val successors = node._cfgOut.iterator.collect { case succ: CfgNode => succ }.toList
-          .sortBy { succ =>
-              (
-                succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue),
-                succ.code,
-                cs.flatMap(branchOf(succ, _)).map(b => if b then 0 else 1).getOrElse(2)
-              )
-          }
+      // a call that never returns (abort, exit, a `noreturn` function) ends its path: nothing
+      // after it runs, so no use, leak or escape there is reachable from this state
+      val successors =
+          if isNoReturnCall(node) then Nil
+          else
+            node._cfgOut.iterator.collect { case succ: CfgNode => succ }.toList
+                .sortBy { succ =>
+                    (
+                      succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue),
+                      succ.code,
+                      cs.flatMap(branchOf(succ, _)).map(b => if b then 0 else 1).getOrElse(2)
+                    )
+                }
       successors.foreach { succ =>
         // branch edges leave from the CONDITION CALL of a guard, not from the control
         // structure node, so the narrowing rides on the condition's out-edges
@@ -1340,9 +1345,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // branchOf: Some(true) where the condition holds on this successor, None when unknown
     val facts: List[(String, Option[Boolean])] = branchOf(succ, cs) match
       case Some(holds) =>
-          nullFacts(cond, holds).map { case (n, nullHere) => (n, Some(nullHere)) } ++
+          val nulls = nullFacts(cond, holds)
+          nulls.map { case (n, nullHere) => (n, Some(nullHere)) } ++
               handleFailureSides(cond, out, isHandleSite)
-                  .map { case (n, failureHolds) => (n, Some(holds == failureHolds)) }
+                  .map { case (n, failureHolds) => (n, Some(holds == failureHolds)) } ++
+              errorChannelFacts(nulls, out)
       case None => Nil
     facts.foldLeft(out) { case (acc, (name, nullHereOpt)) =>
         nullHereOpt match
@@ -1373,6 +1380,60 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case None => acc
     }
   end branchNarrowing
+
+  /** A call to a function that does not return: declared `noreturn` (on the call, from its
+    * declaration, or on the METHOD it links to), or one of the C library's terminators when no
+    * header said so.
+    */
+  private def isNoReturnCall(node: CfgNode): Boolean = node match
+    case c: Call if !c.name.startsWith("<operator") =>
+        NoReturnFunctions.contains(c.name) ||
+        c.tag.nameExact(io.appthreat.x2cpg.Defines.FunctionAttributeTag).value.l.contains(
+          "noreturn"
+        ) ||
+        c._callOut.collectAll[Method].exists(
+          _.tag.nameExact(io.appthreat.x2cpg.Defines.FunctionAttributeTag).value.l.contains(
+            "noreturn"
+          )
+        )
+    case _ => false
+
+  /** The error channel of a C API: `db = leveldb_open(opts, name, &err)` returns NULL exactly when
+    * it sets `err`. Where a guard proves `err` NULL the call succeeded and its result is not NULL;
+    * where it proves `err` set, the result is NULL - the same two sides `if (!db)` gives. `nulls`
+    * are the condition's null facts on this side: (variable, whether it is NULL here).
+    */
+  private def errorChannelFacts(
+    nulls: List[(String, Boolean)],
+    out: Map[String, Tracked]
+  ): List[(String, Option[Boolean])] =
+      if nulls.isEmpty then Nil
+      else
+        out.toList.flatMap { (name, t) =>
+            if t.site == 0L || !t.nullable then Nil
+            else
+              val channel = errorOutParams(t.site)
+              nulls.collectFirst { case (err, errNull) if channel.contains(err) => errNull }
+                  .map(errNull => (name, Some(!errNull)))
+                  .toList
+        }
+
+  private val errorOutParamCache = mutable.LongMap.empty[Set[String]]
+
+  /** The variables whose address the producing call at `site` (the call, or the assignment of its
+    * result) received: where it reports an error.
+    */
+  private def errorOutParams(site: Long): Set[String] =
+      errorOutParamCache.getOrElseUpdate(
+        site,
+        Option(atom.graph.node(site)).collect { case c: Call => c }.toList
+            .flatMap(c => c :: c.ast.isCall.l)
+            .filterNot(_.name.startsWith("<operator"))
+            .flatMap(_.argument.l)
+            .collect { case a: Call if a.name == "<operator>.addressOf" => a }
+            .flatMap(_.argument.l.collect { case i: Identifier => i.name })
+            .toSet
+      )
 
   /** Which way the condition of `cs` went on the edge to `succ`: Some(true) where it holds,
     * Some(false) where it does not, None when the structure's successors carry no condition
@@ -1819,9 +1880,30 @@ object AllocationStatePass:
   val RoleInfoNone: RoleInfo =
       RoleInfo(Set.empty, Set.empty, Set.empty, nullable = false, isMemoryCall = false)
 
-  final val TagState       = "alloc-state"
-  final val TagLeak        = "alloc-leak"
-  final val TagNullUse     = "null-use"
+  final val TagState   = "alloc-state"
+  final val TagLeak    = "alloc-leak"
+  final val TagNullUse = "null-use"
+
+  /** The C library's functions that do not return, for code whose headers are not available. */
+  private val NoReturnFunctions = Set(
+    "abort",
+    "exit",
+    "_exit",
+    "_Exit",
+    "quick_exit",
+    "__assert_fail",
+    "__assert_rtn",
+    "__builtin_trap",
+    "__builtin_unreachable",
+    "longjmp",
+    "siglongjmp",
+    "_longjmp",
+    "pthread_exit",
+    "err",
+    "errx",
+    "verr",
+    "verrx"
+  )
   final val TagStackEscape = "stack-escape"
 
   /** A per-method effect summary, ON the method node - `effect:frees-param:<i>`,

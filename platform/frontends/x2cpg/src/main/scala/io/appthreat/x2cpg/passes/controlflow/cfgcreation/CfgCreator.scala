@@ -346,6 +346,11 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
     * representation because it allows both queries that use the macro reference as well as queries
     * that reference the inline code to be chosen as sources/sinks in data flow queries.
     */
+  /** A macro invocation: its argument copies, the INLINED call, then the expansion. The expansion
+    * always runs, so control leaves through it - a guard the macro expands to (`if (err) abort();`)
+    * stands between what precedes the invocation and what follows it. Without an expansion the call
+    * itself is the exit.
+    */
   def cfgForInlinedCall(call: Call): Cfg =
     val cfgForMacroCall = call.argument.l
         .map(cfgFor)
@@ -359,7 +364,9 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
           edges =
               cfgForMacroCall.edges ++ cfgForExpansion.edges ++ cfgForExpansion.entryNode.toList
                   .flatMap(x => singleEdge(call, x)),
-          fringe = cfgForMacroCall.fringe ++ cfgForExpansion.fringe
+          fringe =
+              if cfgForExpansion.entryNode.isDefined then cfgForExpansion.fringe
+              else cfgForMacroCall.fringe
         )
     cfg
 
