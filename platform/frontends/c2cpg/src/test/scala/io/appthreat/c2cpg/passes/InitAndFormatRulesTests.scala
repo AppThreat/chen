@@ -218,3 +218,38 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
             .name.l shouldBe List("y")
     }
 end InitAndFormatRulesTests
+
+/** A printf-family function defined as a macro over its checked builtin, as C libraries do under
+  * `_FORTIFY_SOURCE`: one finding, on the macro's call.
+  */
+class FortifiedFormatTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+      |typedef unsigned long size_t;
+      |int __builtin___snprintf_chk(char *, size_t, int, size_t, const char *, ...);
+      |#define snprintf(buf, len, ...) \
+      |    __builtin___snprintf_chk(buf, len, 0, __builtin_object_size(buf, 0), __VA_ARGS__)
+      |void fortified(const char *userInput) {
+      |    char buf[64];
+      |    snprintf(buf, sizeof(buf), userInput);
+      |}
+      |""".stripMargin,
+    "fortified.c"
+  )
+
+  new MemorySemanticsPass(cpg).createAndApply()
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  "a non-constant format through the macro" should {
+      "be reported once" in {
+          cpg.method.nameExact("fortified").ast.collectAll[StoredNode]
+              .flatMap(_.tag.nameExact("ms-finding").value.l).l.count(_ == "MS-FMT-001") shouldBe 1
+      }
+  }
+end FortifiedFormatTests

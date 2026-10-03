@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
@@ -91,33 +92,44 @@ object InitAndFormatRules:
           p.typeFullName.contains("va_list") || p.code.contains("...") || p.isVariadic
       ) || Option(m.signature).exists(_.contains("..."))
 
+  /** The call a printf-family macro expands to (`snprintf` defined as `__builtin___snprintf_chk`
+    * under `_FORTIFY_SOURCE`): the macro's call carries the format, on the arguments as written;
+    * checking both would report every finding twice.
+    */
+  private def expandsFormatMacro(call: Call): Boolean =
+      call.dispatchType != DispatchTypes.INLINED &&
+          call.inAst.collectAll[Call].exists(m =>
+              m.dispatchType == DispatchTypes.INLINED && formatArgIndex(m.name).isDefined
+          )
+
   def formatString(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
-      atom.call.filter(c => formatArgIndex(c.name).isDefined).foreach { call =>
-          call.argumentOption(formatArgIndex(call.name).get).collect { case e: Expression => e }
-              .map(unwrapCasts)
-              .foreach {
-                  case i: Identifier if !isStringLiteral(i) =>
-                      val method = call.method
-                      method.parameter.nameExact(i.name).l.headOption match
-                        case Some(param) =>
-                            if !isForwarder(method) && someCallerPassesNonLiteral(
-                                method,
-                                param.index
-                              )
-                            then record(i, MemorySafetyFindingPass.RuleFormatString)
-                        case None if method.local.nameExact(i.name).nonEmpty =>
-                            val defs = OverlayFacts.reachingDefsIn(i)
-                                .collect { case d: Identifier => d }
-                                .flatMap(_._astIn.collectFirst {
-                                    case a: Call if a.name == "<operator>.assignment" => a
-                                })
-                                .flatMap(_.argumentOption(2))
-                                .collect { case e: Expression => e }
-                            if defs.nonEmpty && !defs.forall(isStringLiteral) then
-                              record(i, MemorySafetyFindingPass.RuleFormatString)
-                        case None => () // a global table or a macro constant
-                  case _ => ()
-              }
+      atom.call.filter(c => formatArgIndex(c.name).isDefined && !expandsFormatMacro(c)).foreach {
+          call =>
+              call.argumentOption(formatArgIndex(call.name).get).collect { case e: Expression => e }
+                  .map(unwrapCasts)
+                  .foreach {
+                      case i: Identifier if !isStringLiteral(i) =>
+                          val method = call.method
+                          method.parameter.nameExact(i.name).l.headOption match
+                            case Some(param) =>
+                                if !isForwarder(method) && someCallerPassesNonLiteral(
+                                    method,
+                                    param.index
+                                  )
+                                then record(i, MemorySafetyFindingPass.RuleFormatString)
+                            case None if method.local.nameExact(i.name).nonEmpty =>
+                                val defs = OverlayFacts.reachingDefsIn(i)
+                                    .collect { case d: Identifier => d }
+                                    .flatMap(_._astIn.collectFirst {
+                                        case a: Call if a.name == "<operator>.assignment" => a
+                                    })
+                                    .flatMap(_.argumentOption(2))
+                                    .collect { case e: Expression => e }
+                                if defs.nonEmpty && !defs.forall(isStringLiteral) then
+                                  record(i, MemorySafetyFindingPass.RuleFormatString)
+                            case None => () // a global table or a macro constant
+                      case _ => ()
+                  }
       }
 
   /** A method nobody in the tree calls is an entry point: its caller is outside and passes
