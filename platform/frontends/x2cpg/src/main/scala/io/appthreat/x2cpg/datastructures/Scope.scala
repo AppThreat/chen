@@ -18,6 +18,13 @@ class Scope[I, V, S]:
   def pushNewScope(scopeNode: S): Unit =
       stack = ScopeElement[I, V, S](scopeNode) :: stack
 
+  /** The scopes and their variables as they are now, for [[restore]]. */
+  def snapshot: List[ScopeElement[I, V, S]] = stack
+
+  /** Puts back the scopes of a [[snapshot]]: what was pushed or declared since is dropped. */
+  def restore(saved: List[ScopeElement[I, V, S]]): Unit =
+      stack = saved
+
   def popScope(): Option[S] =
       stack match
         case Nil => None

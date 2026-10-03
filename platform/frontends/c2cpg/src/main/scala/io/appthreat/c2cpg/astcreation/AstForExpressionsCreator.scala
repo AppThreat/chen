@@ -30,12 +30,13 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPImplicitFunction
 }
 
-import scala.util.Try
-
 trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
   protected def astForExpression(expression: IASTExpression): Ast =
+      withOverflowRecovery(expression, identity)(expressionAst(expression))
+
+  private def expressionAst(expression: IASTExpression): Ast =
     val r = expression match
       case lit: IASTLiteralExpression                  => astForLiteral(lit)
       case un: IASTUnaryExpression                     => astForUnaryExpression(un)
@@ -61,7 +62,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val inMacro = asChildOfMacroCall(expression, r)
     if inMacro ne r then tagConstantValue(expression, inMacro)
     inMacro
-  end astForExpression
+  end expressionAst
 
   protected def astForStaticAssert(a: ICPPASTStaticAssertDeclaration): Ast =
     val name  = "static_assert"
@@ -142,7 +143,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case td: ITypedef      => unwrap(td.getType)
       case q: IQualifierType => unwrap(q.getType)
       case other             => other
-    e != null && Try(unwrap(e.getExpressionType)).toOption.exists {
+    e != null && CdtQuery(unwrap(e.getExpressionType)).toOption.exists {
         case _: IPointerType | _: IArrayType => true
         case _                               => false
     }
@@ -185,7 +186,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astForCppCallExpressionByCallee(call: ICPPASTFunctionCallExpression): Ast =
     val functionNameExpr = call.getFunctionNameExpression
-    val typ              = Try(functionNameExpr.getExpressionType).getOrElse(null)
+    val typ              = CdtQuery(functionNameExpr.getExpressionType).getOrElse(null)
     typ match
       case _: TypeOfDependentExpression =>
           astForCppCallExpressionUntyped(call)
@@ -295,21 +296,16 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             case _ =>
                 astForCppCallExpressionUntyped(call)
       case classType: ICPPClassType =>
-          val evaluation = call.getEvaluation
+          val evaluation = CdtQuery(call.getEvaluation).getOrElse(null)
           evaluation match
             case evalFuncCall: EvalFunctionCall =>
-                val overloadOpt: Option[ICPPFunction] =
-                    try
-                      val overload = evalFuncCall.getOverload
-                      Option(overload)
-                    catch
-                      case _: NullPointerException => // CDT parsing bugs
-                          None
+                val overloadOpt: Option[(ICPPFunction, IFunctionType)] =
+                    CdtQuery(Option(evalFuncCall.getOverload).map(o => o -> o.getType)).toOption
+                        .flatten.filter(_._2 != null)
                 overloadOpt match
-                  case Some(overload) =>
-                      val functionType = overload.getType
-                      val signature    = functionTypeToSignature(functionType)
-                      val name         = "<operator>()"
+                  case Some((overload, functionType)) =>
+                      val signature = functionTypeToSignature(functionType)
+                      val name      = "<operator>()"
                       classType match
                         case closureType: CPPClosureType =>
                             // the receiver first: an immediately invoked lambda builds its
@@ -352,6 +348,10 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                               name,
                               operands
                             )
+                        // a class that converts to a pointer to function is called through the
+                        // pointer: CDT's overload is then a surrogate function, not a member
+                        case _ if !overload.isInstanceOf[ICPPMethod] =>
+                            astForCppCallExpressionUntyped(call)
                         case _ =>
                             val classFullName = cleanType(safeGetType(classType))
                             val fullName      = s"$classFullName.$name:$signature"
@@ -868,11 +868,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     // pointee's class
     val destructor =
         if delExpression.isVectored then
-          Try(operand.getExpressionType).toOption.collect { case p: IPointerType => p.getType }
+          CdtQuery(operand.getExpressionType).toOption.collect { case p: IPointerType => p.getType }
               .flatMap(destructorOf)
         else
-          Try(delExpression.getImplicitNames.toList).getOrElse(Nil).filterNot(_.isOperator)
-              .flatMap(n => Try(n.resolveBinding()).toOption)
+          CdtQuery(delExpression.getImplicitNames.toList).getOrElse(Nil).filterNot(_.isOperator)
+              .flatMap(n => CdtQuery(n.resolveBinding()).toOption)
               .collectFirst { case m: ICPPMethod if m.isDestructor => m }
     val destructorCall = destructor.flatMap { d =>
         destructorCallAst(delExpression, d, s"${nodeSignature(operand)}->${d.getName}()")

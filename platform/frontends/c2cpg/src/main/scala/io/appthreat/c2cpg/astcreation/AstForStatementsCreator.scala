@@ -175,6 +175,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
     blockAst(node, bound ++ body ++ destructorCalls)
 
   protected def astsForStatement(statement: IASTStatement, argIndex: Int = -1): Seq[Ast] =
+      withOverflowRecovery(statement, Seq(_))(statementAsts(statement, argIndex))
+
+  private def statementAsts(statement: IASTStatement, argIndex: Int): Seq[Ast] =
     val r = statement match
       case expr: IASTExpressionStatement => Seq(astForExpression(expr.getExpression))
       case block: IASTCompoundStatement  => Seq(astForBlockStatement(block, argIndex))
@@ -214,7 +217,7 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
       case e: RuntimeException
           if e.getMessage != null && e.getMessage.contains("maximum nested depth") => r
       case e: Throwable => r
-  end astsForStatement
+  end statementAsts
 
   /** An `if` or `switch` with an init statement (`if (auto n = size(); n > 0)`) is a block that
     * runs the init statement, then the statement: the init statement's variables are in scope in

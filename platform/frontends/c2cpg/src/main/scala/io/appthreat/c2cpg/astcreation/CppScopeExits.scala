@@ -8,8 +8,6 @@ import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTGotoStatement
 import org.eclipse.cdt.internal.core.dom.parser.ASTNode
 
-import scala.util.Try
-
 /** Destructor calls where C++ objects with automatic storage end their lifetime: where control
   * falls out of the scope that declares them, and at every `return`, `break`, `continue` and `goto`
   * that leaves the scope early. Objects are destroyed in the reverse order of their construction,
@@ -49,9 +47,9 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
   private def destructionsOf(owner: IASTNode): List[Destruction] = owner match
     case _: IASTExpression => Nil
     case o: IASTImplicitDestructorNameOwner =>
-        Try(o.getImplicitDestructorNames.toList).getOrElse(Nil).flatMap { n =>
+        CdtQuery(o.getImplicitDestructorNames.toList).getOrElse(Nil).flatMap { n =>
             Option(n.getConstructionPoint).flatMap(point =>
-                Try(n.resolveBinding()).toOption.map(Destruction(owner, point, _))
+                CdtQuery(n.resolveBinding()).toOption.map(Destruction(owner, point, _))
             )
         }
     case s: ICPPASTIfStatement =>
@@ -72,7 +70,7 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
     }
     declarators.flatMap { d =>
       val name = d.getName
-      Try(name.resolveBinding()).toOption.collect { case v: ICPPVariable => v }
+      CdtQuery(name.resolveBinding()).toOption.collect { case v: ICPPVariable => v }
           .flatMap(v => destructorOf(v.getType))
           .map(Destruction(owner, name, _))
     }.reverse
@@ -188,7 +186,7 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
           }
           inside.flatMap(s => constructedBefore(destructionsOf(s))) ++ constructedBefore(ofTarget)
       case goto: IASTGotoStatement =>
-          Try(goto.getName.resolveBinding()).toOption.collect { case l: ILabel => l }
+          CdtQuery(goto.getName.resolveBinding()).toOption.collect { case l: ILabel => l }
               .flatMap(l => Option(l.getLabelStatement)) match
             case Some(label) =>
                 val (inside, rest) = scopes.span(s => !encloses(s, label))
@@ -254,7 +252,7 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
     end if
   end returnLeavingScopes
 
-  private def bindingOf(name: IASTName): Option[IBinding] = Try(name.resolveBinding()).toOption
+  private def bindingOf(name: IASTName): Option[IBinding] = CdtQuery(name.resolveBinding()).toOption
 
   /** Whether evaluating `expr` after the destructors ran could give a different value: it calls a
     * function (an overloaded operator or a conversion included), reads through a pointer or a
@@ -269,12 +267,12 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
       case id: IASTIdExpression =>
           bindingOf(id.getName).exists {
               case v: ICPPVariable =>
-                  destroyed.contains(v) || Try(v.getType).toOption.exists(
+                  destroyed.contains(v) || CdtQuery(v.getType).toOption.exists(
                     _.isInstanceOf[ICPPReferenceType]
                   )
               case _ => false
           }
-      case o: IASTImplicitNameOwner => Try(o.getImplicitNames.nonEmpty).getOrElse(false)
+      case o: IASTImplicitNameOwner => CdtQuery(o.getImplicitNames.nonEmpty).getOrElse(false)
       case _                        => false
     here || expr.getChildren.exists(observesDestruction(_, destroyed))
 end CppScopeExits

@@ -60,7 +60,7 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
 
   /** The METHOD built for the lambda whose closure `closureType` is, when this file built it. */
   protected def lambdaMethodOf(closureType: CPPClosureType): Option[(String, String)] =
-      Try(closureType.getDefinition).toOption.collect { case l: ICPPASTLambdaExpression =>
+      CdtQuery(closureType.getDefinition).toOption.collect { case l: ICPPASTLambdaExpression =>
           l
       }.flatMap(l => Option(lambdaMethods.get(l)))
 
@@ -145,7 +145,7 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
       case other => other
     binding match
       case f: ICPPFunction =>
-          Try(generic(f)).toOption.filterNot(isCompilerGenerated).filter(isDeclaredInProject)
+          CdtQuery(generic(f)).toOption.filterNot(isCompilerGenerated).filter(isDeclaredInProject)
       case _ => None
 
   private def isConstructorOrDestructor(function: IFunction): Boolean = function match
@@ -153,12 +153,19 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     case m: ICPPMethod      => m.isDestructor
     case _                  => false
 
-  /** The signature part of a METHOD full name for `function`. */
+  /** The signature part of a METHOD full name for `function`. When CDT cannot deduce its type (an
+    * `auto` return type it fails on), the return type is unknown and the parameter types still tell
+    * overloads apart.
+    */
   protected def methodSignature(function: IFunction): String =
-      functionTypeToSignature(
-        function.getType,
-        Option.when(isConstructorOrDestructor(function))(Defines.voidTypeName)
-      )
+    val returnType = Option.when(isConstructorOrDestructor(function))(Defines.voidTypeName)
+    CdtQuery(function.getType).toOption.filter(_ != null) match
+      case Some(functionType) => functionTypeToSignature(functionType, returnType)
+      case None =>
+          val parameterTypes = CdtQuery(function.getParameters.toList).getOrElse(Nil).map(p =>
+              CdtQuery(cleanType(safeGetType(p.getType))).getOrElse(Defines.anyTypeName)
+          )
+          s"${returnType.getOrElse(Defines.anyTypeName)}(${parameterTypes.mkString(",")})"
 
   /** The full name of the METHOD for `function`, as its definition is named. */
   protected def methodFullNameOf(function: ICPPFunction): String =
@@ -244,16 +251,16 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
 
   /** The graph's METHOD for the user-defined operator an expression calls, if any. */
   protected def linkedOverload(overload: => ICPPFunction): Option[(ICPPFunction, ICPPFunction)] =
-      Try(Option(overload)).toOption.flatten.flatMap(o => graphFunction(o).map(o -> _))
+      CdtQuery(Option(overload)).toOption.flatten.flatMap(o => graphFunction(o).map(o -> _))
 
   /** The operator function an expression with implicit names calls (`a[i]` calling `operator[]`),
     * and the graph's METHOD for it.
     */
   protected def linkedImplicitOperator(owner: IASTImplicitNameOwner)
     : Option[(ICPPFunction, ICPPFunction)] =
-      Try(owner.getImplicitNames.toList).getOrElse(Nil)
+      CdtQuery(owner.getImplicitNames.toList).getOrElse(Nil)
           .filter(_.isOperator)
-          .flatMap(n => Try(n.resolveBinding()).toOption)
+          .flatMap(n => CdtQuery(n.resolveBinding()).toOption)
           .collectFirst { case f: ICPPFunction => f }
           .flatMap(f => graphFunction(f).map(f -> _))
 
@@ -262,9 +269,9 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     */
   protected def linkedConstructor(owner: IASTNode): Option[(ICPPFunction, ICPPFunction)] =
     val names = owner match
-      case o: IASTImplicitNameOwner => Try(o.getImplicitNames.toList).getOrElse(Nil)
+      case o: IASTImplicitNameOwner => CdtQuery(o.getImplicitNames.toList).getOrElse(Nil)
       case _                        => Nil
-    names.filterNot(_.isOperator).flatMap(n => Try(n.resolveBinding()).toOption).collectFirst {
+    names.filterNot(_.isOperator).flatMap(n => CdtQuery(n.resolveBinding()).toOption).collectFirst {
         case c: ICPPConstructor => c
     }.flatMap(c => graphFunction(c).map(c -> _))
 
@@ -301,8 +308,8 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     val owner = astForExpression(fieldRef.getFieldOwner)
     fieldRef match
       case cpp: ICPPASTFieldReference if cpp.isPointerDereference =>
-          val operators = Try(cpp.getImplicitNames.toList).getOrElse(Nil)
-              .flatMap(n => Try(n.resolveBinding()).toOption)
+          val operators = CdtQuery(cpp.getImplicitNames.toList).getOrElse(Nil)
+              .flatMap(n => CdtQuery(n.resolveBinding()).toOption)
               .collect { case f: ICPPFunction => f }
           val linked = operators.map(f => graphFunction(f).map(f -> _))
           if operators.isEmpty || linked.exists(_.isEmpty) then owner
@@ -321,7 +328,7 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
       case td: ITypedef      => unwrap(td.getType)
       case q: IQualifierType => unwrap(q.getType)
       case other             => other
-    Try(unwrap(tpe)).toOption.collect { case ct: ICPPClassType => ct }
-        .flatMap(ct => Try(ct.getDeclaredMethods.toList).toOption)
+    CdtQuery(unwrap(tpe)).toOption.collect { case ct: ICPPClassType => ct }
+        .flatMap(ct => CdtQuery(ct.getDeclaredMethods.toList).toOption)
         .flatMap(_.find(_.isDestructor))
 end CppCallResolution

@@ -8,8 +8,6 @@ import org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{CPPASTQualifiedName, ICPPInternalBinding}
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
-import scala.util.Try
-
 trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
@@ -84,7 +82,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                                 // `safeGetType`) rather than `IType.toString`, which yields internal
                                 // debug spellings that downstream `cleanType` cannot normalise and
                                 // often degrade to ANY.
-                                Try(v.getType).getOrElse(null) match
+                                CdtQuery(v.getType).getOrElse(null) match
                                   case f: IFunctionType       => safeGetType(f.getReturnType)
                                   case other if other != null => safeGetType(other)
                                   case _                      => Defines.anyTypeName
@@ -120,7 +118,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       Some(expressionType(fieldRef))
     )
     val owner = fieldOwnerAst(fieldRef)
-    Try(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
+    CdtQuery(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
         .flatMap(f => Option(f.getCompositeTypeOwner))
         .foreach(registerMembersOf)
     val member = fieldIdentifierNode(

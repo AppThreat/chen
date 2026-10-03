@@ -7,8 +7,6 @@ import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.internal.core.dom.parser.{SizeofCalculator, ValueFactory}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPSemantics
 
-import scala.util.Try
-
 /** The value of each integer constant expression a file writes as more than a literal: `sizeof` and
   * `alignof`, enumerators, `const` integers with a known initializer, and arithmetic, casts and
   * conditionals over those, including the expansion of a macro constant (`#define N (4 * 8)`). The
@@ -82,7 +80,7 @@ trait ConstantValues(implicit withSchemaValidation: ValidationMode):
             isConstant(c.getNegativeResultExpression)
         case c: IASTCastExpression => isConstant(c.getOperand)
         case id: IASTIdExpression =>
-            Try(id.getName.resolveBinding()).toOption.exists {
+            CdtQuery(id.getName.resolveBinding()).toOption.exists {
                 case _: IEnumerator => true
                 case _: IParameter  => false
                 case v: IVariable   => isConstQualified(v.getType)
@@ -120,7 +118,7 @@ trait ConstantValues(implicit withSchemaValidation: ValidationMode):
     case other             => other
 
   private def isIntegral(e: IASTExpression): Boolean =
-      Try(unqualified(e.getExpressionType)).toOption.exists {
+      CdtQuery(unqualified(e.getExpressionType)).toOption.exists {
           case b: IBasicType =>
               b.getKind match
                 case IBasicType.Kind.eInt | IBasicType.Kind.eChar | IBasicType.Kind.eBoolean |
@@ -141,7 +139,7 @@ trait ConstantValues(implicit withSchemaValidation: ValidationMode):
 
   /** CDT's value of the expression, an unsigned result reduced to its type's width. */
   private def integerValueOf(e: IASTExpression): Option[BigInt] =
-    val number = Try(atLookupPoint(e)(Option(ValueFactory.getConstantNumericalValue(e))))
+    val number = CdtQuery(atLookupPoint(e)(Option(ValueFactory.getConstantNumericalValue(e))))
     number.toOption.flatten.collect {
         case n: java.lang.Long       => BigInt(n)
         case n: java.lang.Integer    => BigInt(n.longValue)
@@ -158,10 +156,10 @@ trait ConstantValues(implicit withSchemaValidation: ValidationMode):
 
   /** The width in bits of an unsigned integral expression's type, for the target. */
   private def unsignedWidthOf(e: IASTExpression): Option[Int] =
-      Try(unqualified(e.getExpressionType)).toOption.collect {
+      CdtQuery(unqualified(e.getExpressionType)).toOption.collect {
           case b: IBasicType if b.isUnsigned => b
       }.flatMap(b =>
-          Try(Option(atLookupPoint(e)(SizeofCalculator.getSizeAndAlignment(b)))).toOption.flatten
+          CdtQuery(Option(atLookupPoint(e)(SizeofCalculator.getSizeAndAlignment(b)))).toOption.flatten
               .map(s => (s.size * 8).toInt)
       )
 end ConstantValues

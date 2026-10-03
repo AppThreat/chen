@@ -115,7 +115,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   end astForMethodRefForLambda
 
   private def deducedLambdaReturnType(lambdaExpression: ICPPASTLambdaExpression): String =
-      scala.util.Try(lambdaExpression.getExpressionType).toOption
+      CdtQuery(lambdaExpression.getExpressionType).toOption
           .collect { case closure: CPPClosureType => closure.getFunctionCallOperator }
           .flatMap(op => Option(op).flatMap(o => Option(o.getType)))
           .map(t => typeNameOf(t.getReturnType))

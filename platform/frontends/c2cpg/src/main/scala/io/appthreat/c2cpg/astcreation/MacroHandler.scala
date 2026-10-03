@@ -202,7 +202,7 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     val relative = SourceFiles.toRelativePath(path, config.inputPath)
     if relative != path then relative
     else
-      scala.util.Try {
+      CdtQuery {
           val root = java.nio.file.Paths.get(config.inputPath).toRealPath()
           val file = java.nio.file.Paths.get(path).toRealPath()
           if file.startsWith(root) then root.relativize(file).toString else path

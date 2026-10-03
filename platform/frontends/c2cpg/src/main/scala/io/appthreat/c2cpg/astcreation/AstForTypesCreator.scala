@@ -10,7 +10,6 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.appthreat.x2cpg.datastructures.Stack.*
 import scala.annotation.tailrec
-import scala.util.Try
 
 trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
@@ -139,7 +138,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       case q: IQualifierType => isArray(q.getType)
       case _: IArrayType     => true
       case _                 => false
-    val typedefArray = Try(declarator.getName.resolveBinding()).toOption.collect {
+    val typedefArray = CdtQuery(declarator.getName.resolveBinding()).toOption.collect {
         case v: IVariable => v.getType
     }.exists {
         case td: ITypedef      => isArray(td)
@@ -290,10 +289,11 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   ): Option[(ICPPFunction, ICPPFunction)] =
     val initialisesInPlace = init.getInitializerClause match
       case e: IASTExpression =>
-          Try(e.getValueCategory == IASTExpression.ValueCategory.PRVALUE).getOrElse(false) &&
-          Try(effectiveDeclaratorName(declarator).resolveBinding()).toOption.exists {
-              case v: IVariable => Try(sameClass(v.getType, e.getExpressionType)).getOrElse(false)
-              case _            => false
+          CdtQuery(e.getValueCategory == IASTExpression.ValueCategory.PRVALUE).getOrElse(false) &&
+          CdtQuery(effectiveDeclaratorName(declarator).resolveBinding()).toOption.exists {
+              case v: IVariable =>
+                  CdtQuery(sameClass(v.getType, e.getExpressionType)).getOrElse(false)
+              case _ => false
           }
       case _ => false
     if initialisesInPlace then None else linkedConstructor(declarator)
@@ -311,7 +311,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     * assignment of that type.
     */
   private def declaredType(declarator: IASTDeclarator): String =
-      Try(effectiveDeclaratorName(declarator).resolveBinding()).toOption.collect {
+      CdtQuery(effectiveDeclaratorName(declarator).resolveBinding()).toOption.collect {
           // a reference is modelled as the type it refers to, as the variable's LOCAL is
           case v: IVariable => registerType(typeNameOf(v.getType).stripSuffix("&").stripSuffix("&"))
       }.getOrElse(registerType(Defines.anyTypeName))
@@ -391,6 +391,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   end astForStructuredBindingDeclaration
 
   protected def astsForDeclaration(decl: IASTDeclaration): Seq[Ast] =
+      withOverflowRecovery(decl, Seq(_))(declarationAsts(decl))
+
+  private def declarationAsts(decl: IASTDeclaration): Seq[Ast] =
     val declAsts = decl match
       case sb: ICPPASTStructuredBindingDeclaration =>
           Seq(astForStructuredBindingDeclaration(sb))
@@ -472,7 +475,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           }
       case _ => Nil
     declAsts ++ initAsts
-  end astsForDeclaration
+  end declarationAsts
 
   private def astsForLinkageSpecification(l: ICPPASTLinkageSpecification): Seq[Ast] =
       l.getDeclarations.toList.flatMap { d =>
@@ -513,7 +516,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             // AST spelling.  This preserves template parameters on base classes while
             // still gaining namespace qualification for non-template bases.
             val astSpelling = s.getNameSpecifier.toString
-            val bindingName = Try(s.getNameSpecifier.resolveBinding()).toOption
+            val bindingName = CdtQuery(s.getNameSpecifier.resolveBinding()).toOption
                 .collect { case b: ICPPBinding => b.getQualifiedName.mkString(".") }
                 .filter(_.length >= astSpelling.length)
                 .getOrElse(astSpelling)

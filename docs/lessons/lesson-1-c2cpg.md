@@ -226,6 +226,16 @@ evaluation it gave up on) through its plugin's log, which normally exists only i
 sends the messages to the debug log (`io.appthreat.c2cpg.parser.CdtLogging`) rather than standard
 output.
 
+**When CDT's semantics fail.** CDT throws on some code it does not model (an `auto` it cannot
+deduce), and its template instantiation and return-type deduction can recurse without bound on
+self-referential code: a variable template initialised with itself, nested generic lambdas that
+fold a pack they capture. Questions to CDT go through `CdtQuery`, which fails the one question, a
+`StackOverflowError` included (Scala's `Try` lets it through). An overflow anywhere else costs the
+expression, statement or declaration being built: it becomes an UNKNOWN node with its code, and
+the scopes it opened are put back. A function whose return type CDT cannot deduce keeps its METHOD
+with an `ANY` return type and its parameter types. The rest of the file keeps its AST: c2cpg parses
+every file of EDG's C/C++ front-end test suite.
+
 ## Compiler builtins and FORTIFY
 
 The C library's `_FORTIFY_SOURCE` wrappers (`__memcpy_chk`, `__sprintf_chk`, `__read_chk`, …), the
