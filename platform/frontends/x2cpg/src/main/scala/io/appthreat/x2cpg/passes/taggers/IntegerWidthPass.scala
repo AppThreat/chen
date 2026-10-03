@@ -16,13 +16,17 @@ import scala.collection.mutable
   * Facts (each alongside the `memory-safety` umbrella, fine-grained tag valued with the evidence,
   * the overlay's layered convention):
   *
-  *   - `int-narrow` - a (compound) assignment, increment or cast whose DESTINATION is narrower than
-  *     the width the value is computed in. `array->numNalus = array->numNalus + 1` on a uint16_t
-  *     member computes in int and wraps back into 16 bits.
+  *   - `int-narrow` - a (compound) assignment, increment, cast, return or argument whose
+  *     DESTINATION is narrower than the width the value is computed in. `array->numNalus =
+  *     array->numNalus + 1` on a uint16_t member computes in int and wraps back into 16 bits; a
+  *     constant narrows when the destination cannot hold its value. An argument's fact is on the
+  *     argument, valued `arg:<index>:...`; a return's on the return.
   *   - `int-resign` - a cast that changes signedness, at any width: the `(long) obu_size` guard
   *     test reinterprets an unsigned int as a signed long, which on LLP64 (long = 32) discards the
   *     values it claims to reject. The width table is LP64, so this fact is what makes the LLP64
-  *     hazard visible under a model where the narrowing does not happen.
+  *     hazard visible under a model where the narrowing does not happen. Also a negative decimal
+  *     constant stored unsigned, and a comparison that converts a signed operand to unsigned
+  *     (`compare:...`).
   *   - `int-arith-len` - a multiplication or addition with an attacker-influenced operand (origin
   *     `caller-param` / `untrusted-read` / `struct-field` / `mixed`) whose result reaches a
   *     `mem-len` argument or an allocation size - the multiply that computes the copy length or the
@@ -61,56 +65,156 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
     * on a large tree).
     */
   private def narrowingFacts(record: (StoredNode, String, String) => Unit): Unit =
-      atom.call.foreach { c =>
-          c.name match
-            case "<operator>.cast" =>
-                // c2cpg lays a cast out as (type placeholder, operand) and types the call with
-                // the target type; when that type is unresolved the written type name stands in
-                val args       = argumentsOf(c)
-                val operandOpt = argAt(args, 2).orElse(argAt(args, 1))
-                val targetName =
-                    if c.typeFullName.nonEmpty && c.typeFullName != "ANY" &&
-                      c.typeFullName != "<empty>"
-                    then c.typeFullName
-                    else
-                      argAt(args, 1).filter(_ => argAt(args, 2).isDefined).map(_.code)
-                          .getOrElse(c.typeFullName)
-                operandOpt.filterNot(fitsAsConstant(_, targetName)).foreach { operand =>
-                  val (from, fromW) = declaredWidthOf(operand)
-                  integralWidth(targetName).foreach { tw =>
-                      if fromW > tw then
-                        record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
-                      else if fromW > 0 && signednessOf(from) != signednessOf(targetName) then
-                        record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
-                  }
+    atom.call.foreach { c =>
+        c.name match
+          case "<operator>.cast" =>
+              // c2cpg lays a cast out as (type placeholder, operand) and types the call with
+              // the target type; when that type is unresolved the written type name stands in
+              val args       = argumentsOf(c)
+              val operandOpt = argAt(args, 2).orElse(argAt(args, 1))
+              val targetName =
+                  if c.typeFullName.nonEmpty && c.typeFullName != "ANY" &&
+                    c.typeFullName != "<empty>"
+                  then c.typeFullName
+                  else
+                    argAt(args, 1).filter(_ => argAt(args, 2).isDefined).map(_.code)
+                        .getOrElse(c.typeFullName)
+              operandOpt.filterNot(fitsAsConstant(_, targetName)).foreach { operand =>
+                val (from, fromW) = declaredWidthOf(operand)
+                integralWidth(targetName).foreach { tw =>
+                    if fromW > tw then
+                      record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
+                    else if fromW > 0 && signednessOf(from) != signednessOf(targetName) then
+                      record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
                 }
-            case "<operator>.assignment" | "<operator>.assignmentPlus" |
-                "<operator>.assignmentMinus" | "<operator>.postIncrement" |
-                "<operator>.preIncrement" =>
-                val args = argumentsOf(c)
-                argAt(args, 1).foreach { lhs =>
-                  val to = declaredTypeOf(lhs)
-                  integralWidth(to).foreach { tw =>
-                      argAt(args, 2).orElse(argAt(args, 1)).foreach { rhs =>
-                        // a stored constant narrows exactly when the destination cannot hold it;
-                        // a compound assignment computes in the wider type whatever it adds
-                        val constant =
-                            if c.name == "<operator>.assignment" then IndexRange.literal(rhs)
-                            else None
-                        constant match
-                          case Some(v) =>
-                              if overflowsType(v, to) then
-                                record(c, TagNarrow, s"from:constant:$v->to:$to:$tw")
-                          case None =>
-                              val (from, fromW) = computedWidthOf(rhs)
-                              if fromW > tw && !fitsAsConstant(rhs, to) then
-                                record(c, TagNarrow, s"from:$from:$fromW->to:$to:$tw")
-                      }
+              }
+          case "<operator>.assignment" | "<operator>.assignmentPlus" |
+              "<operator>.assignmentMinus" | "<operator>.postIncrement" |
+              "<operator>.preIncrement" =>
+              val args = argumentsOf(c)
+              argAt(args, 1).foreach { lhs =>
+                  argAt(args, 2).orElse(argAt(args, 1)).foreach { rhs =>
+                      // a compound assignment computes in the wider type whatever it adds
+                      storeFacts(
+                        record,
+                        c,
+                        declaredTypeOf(lhs),
+                        rhs,
+                        plainStore = c.name == "<operator>.assignment"
+                      )
                   }
-                }
-            case _ => ()
-      }
+              }
+          case name if comparisonOps.contains(name)  => comparisonFacts(record, c)
+          case name if !name.startsWith("<operator") => argumentFacts(record, c)
+          case _                                     => ()
+    }
+    // a returned value converts to the function's return type
+    atom.ret.foreach { r =>
+        r.astChildren.collectFirst { case e: Expression => e }.foreach { value =>
+            storeFacts(record, r, r.method.methodReturn.typeFullName, value, plainStore = true)
+        }
+    }
   end narrowingFacts
+
+  /** The facts of storing `value` into a destination of type `to` at `site`: an assignment, a
+    * return, an argument passed to a parameter. A constant is judged by its value, the way a
+    * compiler warns: it narrows when the destination cannot hold it, and a negative one stored into
+    * an unsigned type changes sign. A constant written as a bit pattern (a hexadecimal or octal
+    * literal, or bitwise operators over constants) changes sign on purpose: only lost bits count.
+    */
+  private def storeFacts(
+    record: (StoredNode, String, String) => Unit,
+    site: StoredNode,
+    to: String,
+    value: Expression,
+    plainStore: Boolean,
+    label: String = ""
+  ): Unit =
+      integralWidth(to).foreach { tw =>
+        val constant = if plainStore then IndexRange.literal(value) else None
+        constant match
+          case Some(v) if isBitPattern(value) =>
+              if v > (BigInt(1) << tw) - 1 || v < -(BigInt(1) << (tw - 1)) then
+                record(site, TagNarrow, s"${label}from:constant:$v->to:$to:$tw")
+          case Some(v) =>
+              if overflowsType(v, to) then
+                record(site, TagNarrow, s"${label}from:constant:$v->to:$to:$tw")
+              else if v < 0 && isUnsignedIntegral(to) then
+                record(site, TagResign, s"${label}from:constant:$v->to:$to:$tw")
+          case None =>
+              val (from, fromW) = computedWidthOf(value)
+              if fromW > tw && !fitsAsConstant(value, to) then
+                record(site, TagNarrow, s"${label}from:$from:$fromW->to:$to:$tw")
+      }
+
+  /** A constant written as bits: a hexadecimal, octal or binary literal (also behind a macro), or a
+    * bitwise operator over constants.
+    */
+  private def isBitPattern(e: Expression): Boolean = e match
+    case l: Literal =>
+        val c = l.code.trim.toLowerCase
+        c.startsWith("0x") || c.startsWith("0b") || c.matches("0[0-7]+[ul]*")
+    case c: Call if bitwiseOps.contains(c.name) => true
+    case c: Call if c.name == "<operator>.cast" || c.dispatchType == "INLINED" =>
+        c.ast.isLiteral.l.lastOption.exists(isBitPattern)
+    case _ => false
+
+  /** Arguments passed to parameters of a narrower integral type, by the call's signature. */
+  private def argumentFacts(record: (StoredNode, String, String) => Unit, c: Call): Unit =
+    val params = parameterTypes(c.signature)
+    if params.nonEmpty then
+      argumentsOf(c).filter(_.argumentIndex >= 1).foreach { arg =>
+          params.lift(arg.argumentIndex - 1).filterNot(_ == "...").foreach { to =>
+              storeFacts(
+                record,
+                arg,
+                to,
+                arg,
+                plainStore = true,
+                label = s"arg:${arg.argumentIndex}:"
+              )
+          }
+      }
+
+  /** A comparison of a signed operand with an unsigned one at least as wide: the usual arithmetic
+    * conversions turn the signed value unsigned, so a negative one compares as a large one.
+    */
+  private def comparisonFacts(record: (StoredNode, String, String) => Unit, c: Call): Unit =
+      argumentsOf(c) match
+        case List(a, b) =>
+            val (ta, wa)         = declaredWidthOf(a)
+            val (tb, wb)         = declaredWidthOf(b)
+            def promoted(w: Int) = w.max(32)
+            (signednessOf(ta), signednessOf(tb)) match
+              case (Some(true), Some(false))
+                  if wa > 0 && promoted(wb) >= promoted(wa) && wb >= 32 =>
+                  record(c, TagResign, s"compare:from:$ta:$wa->to:$tb:$wb")
+              case (Some(false), Some(true))
+                  if wb > 0 && promoted(wa) >= promoted(wb) && wa >= 32 =>
+                  record(c, TagResign, s"compare:from:$tb:$wb->to:$ta:$wa")
+              case _ => ()
+        case _ => ()
+
+  /** The parameter types of a signature `ret(a,b<c,d>,e)`, split at top-level commas. */
+  private def parameterTypes(signature: String): List[String] =
+    val open = signature.indexOf('(')
+    if open < 0 || !signature.endsWith(")") then Nil
+    else
+      val inner   = signature.substring(open + 1, signature.length - 1)
+      val parts   = mutable.ListBuffer.empty[String]
+      var depth   = 0
+      val current = new StringBuilder
+      inner.foreach {
+          case ',' if depth == 0 =>
+              parts += current.toString
+              current.clear()
+          case ch =>
+              if ch == '<' || ch == '(' then depth += 1
+              if ch == '>' || ch == ')' then depth -= 1
+              current += ch
+      }
+      if current.nonEmpty then parts += current.toString
+      parts.toList.map(_.trim).filter(_.nonEmpty)
 
   /** A constant the destination type holds: storing it changes nothing, whatever type the constant
     * is computed in (`uint8_t c = 5`, `(uint16_t) sizeof(hdr)`).
@@ -244,6 +348,25 @@ end IntegerWidthPass
 
 object IntegerWidthPass:
 
+  private val comparisonOps = Set(
+    "<operator>.lessThan",
+    "<operator>.greaterThan",
+    "<operator>.lessEqualsThan",
+    "<operator>.greaterEqualsThan",
+    "<operator>.equals",
+    "<operator>.notEquals"
+  )
+
+  private val bitwiseOps = Set(
+    "<operator>.and",
+    "<operator>.or",
+    "<operator>.xor",
+    "<operator>.not",
+    "<operator>.shiftLeft",
+    "<operator>.arithmeticShiftRight",
+    "<operator>.logicalShiftRight"
+  )
+
   final val TagNarrow   = "int-narrow"
   final val TagResign   = "int-resign"
   final val TagArithLen = "int-arith-len"
@@ -252,3 +375,4 @@ object IntegerWidthPass:
   private val MaxWalkHops = 8
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end IntegerWidthPass
