@@ -9,6 +9,9 @@ import scala.jdk.CollectionConverters.*
 
 /** Which of the METHODs sharing a full name a reference in a given file can reach.
   *
+  * A function's prototypes and its definition are one function: when the definition is among the
+  * reachable candidates, the prototypes are not callees of their own.
+  *
   * C gives two `static` functions in different translation units the same name - libavformat
   * defines hundreds of function names in more than one file - and full-name linking alone connects
   * every call to all of them, so `a.c`'s `static get_tag` would answer to `b.c`'s callers. A
@@ -36,10 +39,27 @@ final class InternalLinkage(cpg: Cpg):
 
   def hasInternalLinkage(m: Method): Boolean = internal.contains(m.id())
 
-  /** The candidates a reference in `file` can reach. With no internal-linkage candidate, or no
-    * file, this is every candidate - plain full-name linking.
+  /** A C/C++ function with a body. A prototype is a METHOD too (c2cpg builds one per declaring
+    * file, with an empty block that has no position): it names the same function and is not a
+    * second callee.
+    */
+  private def isDefinition(m: Method): Boolean =
+      !InternalLinkage.isCFamily(m.filename) || m.block.exists(b =>
+          b.lineNumber.isDefined || b.astChildren.nonEmpty
+      )
+
+  /** The candidates a reference in `file` can reach: the visible ones, and of those the definitions
+    * when there are any - a prototype in a header and the definition in another file are one
+    * function.
     */
   def visibleFrom(file: Option[String], candidates: Seq[Method]): Seq[Method] =
+    val visible = visibleByLinkage(file, candidates)
+    if visible.sizeIs <= 1 then visible
+    else
+      val definitions = visible.filter(isDefinition)
+      if definitions.nonEmpty then definitions else visible
+
+  private def visibleByLinkage(file: Option[String], candidates: Seq[Method]): Seq[Method] =
       file match
         case Some(f)
             if internal.nonEmpty && InternalLinkage.isCFamily(f) &&
@@ -56,7 +76,7 @@ final class InternalLinkage(cpg: Cpg):
 
   /** The same, from the referencing node itself. */
   def visibleFrom(node: StoredNode, candidates: Seq[Method]): Seq[Method] =
-      if candidates.sizeIs <= 1 && !candidates.exists(hasInternalLinkage) then candidates
+      if candidates.sizeIs <= 1 then candidates
       else visibleFrom(InternalLinkage.fileOf(node), candidates)
 end InternalLinkage
 

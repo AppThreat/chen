@@ -73,11 +73,19 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             .filter(n => n.nonEmpty && n != Defines.anyTypeName)
             .distinct
         val fields = Try(ct.getFields.toList).getOrElse(Nil)
+        // the header that defines the composite: same-named structs differ by it
+        val definedIn = (ct match
+          case b: org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding =>
+              Option(b.getDefinition)
+          case b: org.eclipse.cdt.internal.core.dom.parser.cpp.ICPPInternalBinding =>
+              Option(b.getDefinition)
+          case _ => None
+        ).flatMap(d => Option(d.getFileLocation)).flatMap(l => Option(l.getFileName)).getOrElse("")
         names.filter(localMemberOwners.add).foreach { ownerName =>
             fields.zipWithIndex.foreach { (f, i) =>
               val tpe = fieldDeclarationType(f)
                   .getOrElse(declarationSpelling(cleanType(safeGetType(f.getType))))
-              val record = CGlobal.memberRecord(ownerName, i + 1, f.getName, tpe)
+              val record = CGlobal.memberRecord(ownerName, definedIn, i + 1, f.getName, tpe)
               CGlobal.usedTypes.putIfAbsent(record, true)
               localUsedTypes.add(record)
             }

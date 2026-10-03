@@ -90,9 +90,56 @@ private[taggers] object OverlayFacts:
         .flatMap(td => membersOfTypeDecl(td).map(m => (td.filename, m)))
         .filter { case (_, m) => m.name == memberName }
     val sameFile = candidates.collect { case (f, m) if f == inFile => m }
-    val ordered = if sameFile.nonEmpty then sameFile
-    else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
+    // the definition a header the file includes gives it, when two headers define the name
+    lazy val included = decls.headOption.map(td => includedBy(Cpg(td.graph), inFile))
+        .getOrElse(Set.empty)
+    lazy val fromIncludes = candidates.collect { case (f, m) if included.contains(f) => m }
+    val ordered =
+        if sameFile.nonEmpty then sameFile
+        else if candidates.map(_._1).distinct.sizeIs > 1 && fromIncludes.nonEmpty then
+          fromIncludes.sortBy(_.typeFullName)
+        else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
     ordered.distinctBy(_.id)
+
+  /** The include graph of each graph, between its FILE names: a file -> the files its includes
+    * resolved to. An include records the absolute path it resolved to; it names the graph's file
+    * whose (project-relative) name that path ends with.
+    */
+  private val includeGraphs =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Cpg, Map[
+        String,
+        Set[String]
+      ]]())
+
+  private def includeGraph(cpg: Cpg): Map[String, Set[String]] =
+    val known = includeGraphs.get(cpg)
+    if known != null then known
+    else
+      val byBaseName = cpg.file.name.l.groupBy(n => n.replace('\\', '/').split('/').last)
+      def fileNamed(path: String): String =
+        val p = path.replace('\\', '/')
+        byBaseName.getOrElse(p.split('/').last, Nil)
+            .filter(f => p == f.replace('\\', '/') || p.endsWith("/" + f.replace('\\', '/')))
+            .maxByOption(_.length).getOrElse(path)
+      val graph = cpg.imports.l.flatMap { imp =>
+          for
+            file <- imp.file.name.headOption
+            path <- imp.tag.nameExact("include-resolved-path").value.headOption
+          yield file -> fileNamed(path)
+      }.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
+      includeGraphs.put(cpg, graph)
+      graph
+
+  /** Every file `file` includes, directly or through other includes. */
+  def includedBy(cpg: Cpg, file: String): Set[String] =
+    val graph = includeGraph(cpg)
+    val seen  = mutable.LinkedHashSet.empty[String]
+    var next  = graph.getOrElse(file, Set.empty).toList
+    while next.nonEmpty do
+      val f = next.head
+      next = next.tail
+      if seen.add(f) then next = graph.getOrElse(f, Set.empty).toList ++ next
+    seen.toSet
 
   /** The member an implicit-this read names (`space_` inside a method). c2cpg types that identifier
     * with the OWNER class (`leveldb.LookupKey`, `leveldb..PosixWritableFile` in an anonymous

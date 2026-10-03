@@ -12,12 +12,13 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
 /** Stub type declarations for the types the graph uses but no parsed file defines, carrying the
-  * member layouts the AST pass recorded for them (`members`: owner -> (order, name, type)) - a
-  * struct or class defined in a header.
+  * member layouts the AST pass recorded for them (`members`: owner -> (defining header, [(order,
+  * name, type)])) - a struct or class defined in a header. Same-named structs that headers define
+  * differently get one stub each, named after its header, so a reader picks the one it includes.
   */
 class TypeDeclNodePass(
   cpg: Cpg,
-  members: Map[String, List[(Int, String, String)]] = Map.empty
+  members: Map[String, List[(String, List[(Int, String, String)])]] = Map.empty
 )(implicit withSchemaValidation: ValidationMode)
     extends CpgPass(cpg):
 
@@ -60,23 +61,30 @@ class TypeDeclNodePass(
     val stubbed            = scala.collection.mutable.HashSet.empty[String]
     def stub(name: String, typeDeclFullName: String): Unit =
         if stubbed.add(typeDeclFullName) then
-          val newTypeDecl = NewTypeDecl()
-              .name(name)
-              .fullName(typeDeclFullName)
-              .code(name)
-              .isExternal(true)
-              .filename(filename)
-              .astParentType(NodeTypes.NAMESPACE_BLOCK)
-              .astParentFullName(fullName)
-          dstGraph.addNode(newTypeDecl)
-          members.getOrElse(typeDeclFullName, Nil).foreach { (order, memberName, tpe) =>
-            val member = NewMember()
-                .name(memberName)
-                .code(s"$tpe $memberName")
-                .typeFullName(tpe)
-                .order(order)
-            dstGraph.addNode(member)
-            dstGraph.addEdge(newTypeDecl, member, EdgeTypes.AST)
+          val layouts = members.getOrElse(typeDeclFullName, Nil) match
+            case Nil => List((filename, Nil))
+            // one layout: whichever headers define it, it is the type
+            case List((_, only)) => List((filename, only))
+            case several => several.map((file, ms) => (if file.isEmpty then filename else file, ms))
+          layouts.foreach { (definedIn, layout) =>
+            val newTypeDecl = NewTypeDecl()
+                .name(name)
+                .fullName(typeDeclFullName)
+                .code(name)
+                .isExternal(true)
+                .filename(definedIn)
+                .astParentType(NodeTypes.NAMESPACE_BLOCK)
+                .astParentFullName(fullName)
+            dstGraph.addNode(newTypeDecl)
+            layout.foreach { (order, memberName, tpe) =>
+              val member = NewMember()
+                  .name(memberName)
+                  .code(s"$tpe $memberName")
+                  .typeFullName(tpe)
+                  .order(order)
+              dstGraph.addNode(member)
+              dstGraph.addEdge(newTypeDecl, member, EdgeTypes.AST)
+            }
           }
           hadMissingTypeDecl = true
     cpg.typ.filter(typeNeedsTypeDeclStub).foreach(t => stub(t.name, t.typeDeclFullName))

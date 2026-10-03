@@ -5,6 +5,7 @@ import io.appthreat.c2cpg.passes.{
     AstCreationPass,
     ConfigFileCreationPass,
     ConstantTagPass,
+    DeclarationAttributesPass,
     PreprocessorPass,
     ReferenceKindPass,
     TypeDeclNodePass
@@ -55,6 +56,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
               .createAndApply()
           new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
           new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
+          new DeclarationAttributesPass(cpg).createAndApply()
       }
 
   /** Fastest-splice warm restore: when fragment caching is enabled (atom `--flux`) and every source

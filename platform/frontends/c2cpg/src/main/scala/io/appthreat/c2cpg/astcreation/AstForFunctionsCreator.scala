@@ -59,15 +59,22 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     node: IASTNode,
     fullName: String
   ): List[NewModifier] =
-    val insideClass = Iterator.iterate(node.getParent)(_.getParent).takeWhile(_ != null)
-        .exists(_.isInstanceOf[IASTCompositeTypeSpecifier])
+    val ancestors   = Iterator.iterate(node.getParent)(_.getParent).takeWhile(_ != null).toList
+    val insideClass = ancestors.exists(_.isInstanceOf[IASTCompositeTypeSpecifier])
     val declaredStatic = declSpecifier != null &&
         declSpecifier.getStorageClass == IASTDeclSpecifier.sc_static
+    // a C++ unnamed namespace gives everything in it internal linkage, as `static` does
+    val inAnonymousNamespace = ancestors.exists {
+        case ns: org.eclipse.cdt.core.dom.ast.cpp.ICPPASTNamespaceDefinition =>
+            ns.getName.toString.isEmpty
+        case _ => false
+    }
     if insideClass then Nil
-    else if declaredStatic || internalLinkageNames.contains(fullName) then
+    else if declaredStatic || inAnonymousNamespace || internalLinkageNames.contains(fullName) then
       internalLinkageNames += fullName
       List(newModifierNode(ModifierTypes.STATIC))
     else Nil
+  end internalLinkageModifiers
 
   protected def astForMethodRefForLambda(lambdaExpression: ICPPASTLambdaExpression): Ast =
     val filename = fileName(lambdaExpression)
