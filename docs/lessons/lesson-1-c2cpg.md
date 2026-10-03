@@ -193,8 +193,10 @@ The AST cache key includes each file's language, macros, include path and forced
 **Includes.** Each `#include` of a file becomes an IMPORT node (and a DEPENDENCY named after the
 header as written). The IMPORT node is tagged with the file the include resolved to
 (`include-resolved-path`, an absolute path) and, for a `<...>` include, `include-system=true`;
-an include that did not resolve has no path tag. The resolved file tells which package provides
-the header far better than its name: atom's `usages` slices carry it for SBOM tools.
+an include that did not resolve has no path tag. A call to a function that only a header
+declares is tagged with that header (`callee-declared-in`, an absolute path). The resolved file
+tells which package provides the header far better than its name, and the declaring header which
+package's API a call uses: atom's `usages` slices carry both for SBOM tools.
 
 **CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
 evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.

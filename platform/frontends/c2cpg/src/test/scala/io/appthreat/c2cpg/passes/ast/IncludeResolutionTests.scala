@@ -14,7 +14,8 @@ class IncludeResolutionTests extends CCodeToCpgSuite:
         """
           |#include "lib/api.h"
           |#include <no_such_system_header.h>
-          |int main(void) { return api(); }
+          |static int local_helper(void) { return 1; }
+          |int main(void) { return api() + local_helper(); }
           |""".stripMargin,
         "main.c"
       ).moreCode("int api(void);\n", "lib/api.h")
@@ -28,6 +29,15 @@ class IncludeResolutionTests extends CCodeToCpgSuite:
           paths.size shouldBe 1
           paths.head.replace('\\', '/') should endWith("/lib/api.h")
           importOf("lib/api.h").tag.nameExact(Defines.IncludeSystemTag).size shouldBe 0
+      }
+
+      "make a call to a function the header declares name that header" in {
+          val apiCall = cpg.call.nameExact("api").head
+          val headers = apiCall.tag.nameExact(Defines.CalleeDeclaredInTag).value.l
+          headers.size shouldBe 1
+          headers.head.replace('\\', '/') should endWith("/lib/api.h")
+          cpg.call.nameExact("local_helper").tag.nameExact(Defines.CalleeDeclaredInTag)
+              .size shouldBe 0
       }
 
       "record a system include, and no path when it did not resolve" in {

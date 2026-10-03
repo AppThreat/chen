@@ -33,4 +33,7 @@ object Defines:
 
   /** On an `#include`'s IMPORT node: `true` when it names a system header (`<...>`). */
   val IncludeSystemTag = "include-system"
+
+  /** On a call to a function declared only in another file (a header): that file (absolute). */
+  val CalleeDeclaredInTag = "callee-declared-in"
 end Defines

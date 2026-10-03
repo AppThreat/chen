@@ -209,13 +209,29 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     * included node of every translation unit), and the call is where its semantics survive.
     */
   protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
-      gccAttributes(declarationOwners(function)).foreach { attr =>
-        val tag = callAttributeTags.getOrElseUpdate(
-          attr,
-          NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
-        )
-        diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
-      }
+    val owners = declarationOwners(function)
+    gccAttributes(owners).foreach { attr =>
+      val tag = callAttributeTags.getOrElseUpdate(
+        attr,
+        NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
+      )
+      diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
+    }
+    // the header a function is declared in, when this file does not declare it: what tells an
+    // SBOM which package's API the call uses
+    if owners.nonEmpty && owners.forall(isIncludedNode) then
+      owners.flatMap(o => Option(o.getFileLocation).flatMap(l => Option(l.getFileName)))
+          .headOption.foreach { header =>
+            val tag = calleeHeaderTags.getOrElseUpdate(
+              header,
+              NewTag().name(Defines.CalleeDeclaredInTag).value(header)
+            )
+            diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
+          }
+  end tagCallAttributes
+
+  /** One tag node per declaring header per translation unit. */
+  private val calleeHeaderTags = mutable.HashMap.empty[String, NewTag]
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
