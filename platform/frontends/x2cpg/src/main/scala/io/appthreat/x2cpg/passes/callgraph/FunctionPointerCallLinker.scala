@@ -3,6 +3,7 @@ package io.appthreat.x2cpg.passes.callgraph
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators}
+import io.appthreat.x2cpg.passes.linking.InternalLinkage
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -93,10 +94,20 @@ class FunctionPointerCallLinker(cpg: Cpg) extends CpgPass(cpg):
     }
   end run
 
-  /** The functions an expression refers to: `f`, `&f`, `(handler)f`. */
+  private lazy val linkage = new InternalLinkage(cpg)
+
+  private lazy val methodsByFullName: Map[String, List[Method]] = cpg.method.l.groupBy(_.fullName)
+
+  /** The functions an expression refers to: `f`, `&f`, `(handler)f`. A function declared in the
+    * file and defined in another is its definition, as for a call.
+    */
   private def functionsIn(e: Expression): List[Method] =
       e match
-        case ref: MethodRef => ref._refOut.collectAll[Method].l
+        case ref: MethodRef =>
+            val referenced = ref._refOut.collectAll[Method].l
+            val candidates =
+                referenced.flatMap(m => methodsByFullName.getOrElse(m.fullName, Nil)).distinct
+            linkage.visibleFrom(ref, if candidates.isEmpty then referenced else candidates).toList
         case c: Call if c.name == Operators.addressOf || c.name == Operators.cast =>
             c.argument.l.lastOption.toList.flatMap(functionsIn)
         case _ => Nil

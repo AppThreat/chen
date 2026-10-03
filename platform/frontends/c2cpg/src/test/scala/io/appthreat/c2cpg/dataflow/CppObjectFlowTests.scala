@@ -87,3 +87,35 @@ class CppObjectFlowTests extends DataFlowCodeToCpgSuite:
       }
   }
 end CppObjectFlowTests
+
+/** A function pointer set from a function another file defines. */
+class FunctionPointerAcrossFilesTests
+    extends io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+      |char *getenv(const char *name);
+      |void run_command(char *c);
+      |void through_pointer(void) {
+      |  void (*fp)(char *) = run_command;
+      |  fp(getenv("ARGS"));
+      |}
+      |""".stripMargin,
+    "caller.c"
+  ).moreCode(
+    """
+      |int system(const char *command);
+      |void run_command(char *c) { system(c); }
+      |""".stripMargin,
+    "callee.c"
+  )
+
+  "a call through the pointer" should {
+      "reach the definition, not the prototype" in {
+          cpg.call.nameExact("<operator>.pointerCall")._callOut.collectAll[Method]
+              .map(m => (m.name, m.filename)).l shouldBe List(("run_command", "callee.c"))
+          cpg.method.nameExact("run_command").call.name("system").argument(1)
+              .reachableByFlows(cpg.call.name("getenv")).l should not be empty
+      }
+  }
+end FunctionPointerAcrossFilesTests

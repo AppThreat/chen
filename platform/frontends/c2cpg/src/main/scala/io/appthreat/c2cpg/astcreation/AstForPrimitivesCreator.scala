@@ -18,20 +18,26 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     val tpe = cleanType(safeGetType(lit.getExpressionType))
     Ast(literalNode(lit, nodeSignature(lit), registerType(tpe)))
 
+  /** The full name and return type of the function a binding names, from its definition, else from
+    * its first declaration: a function the file only declares (`void run(char *);`, defined in
+    * another file) is still a function when its name is used as a value.
+    */
   private def namesForBinding(binding: ICInternalBinding | ICPPInternalBinding)
     : (Option[String], Option[String]) =
-    val definition = binding match
+    val (definition, declarations) = binding match
       // sadly, there is no common interface defining .getDefinition
-      case b: ICInternalBinding   => b.getDefinition
-      case b: ICPPInternalBinding => b.getDefinition
-    if definition == null then
-      (None, None)
-    else
-      val functionDeclarator = definition.asInstanceOf[IASTFunctionDeclarator]
-      val typeFullName = functionDeclarator.getParent match
-        case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
-        case _                         => None
-      (Some(this.fullName(functionDeclarator)), typeFullName)
+      case b: ICInternalBinding   => (b.getDefinition, Option(b.getDeclarations).toSeq.flatten)
+      case b: ICPPInternalBinding => (b.getDefinition, Option(b.getDeclarations).toSeq.flatten)
+    (Option(definition).toSeq ++ declarations).collectFirst { case d: IASTFunctionDeclarator =>
+        d
+    } match
+      case None => (None, None)
+      case Some(functionDeclarator) =>
+          val typeFullName = functionDeclarator.getParent match
+            case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
+            case d: IASTSimpleDeclaration  => Some(typeForDeclSpecifier(d.getDeclSpecifier))
+            case _                         => None
+          (Some(this.fullName(functionDeclarator)), typeFullName)
 
   private def maybeMethodRefForIdentifier(ident: IASTNode): Option[NewMethodRef] =
       ident match
@@ -40,13 +46,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             if binding == null then return None
 
             val (mayBeFullName, mayBeTypeFullName) = binding match
-              case b: ICInternalBinding
-                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(b)
-              case b: ICPPInternalBinding
-                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(b)
-              case _ => (None, None)
+              case b: ICInternalBinding if b.isInstanceOf[IFunction]   => namesForBinding(b)
+              case b: ICPPInternalBinding if b.isInstanceOf[IFunction] => namesForBinding(b)
+              case _                                                   => (None, None)
             for
               fullName     <- mayBeFullName
               typeFullName <- mayBeTypeFullName
