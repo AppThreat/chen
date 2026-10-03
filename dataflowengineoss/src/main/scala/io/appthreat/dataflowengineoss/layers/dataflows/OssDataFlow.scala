@@ -5,6 +5,7 @@ import io.appthreat.dataflowengineoss.passes.reachingdef.{
     FluxReachingDefPass,
     ReachingDefPass,
     GlobalVariableDefUsePass,
+    MemberDefUsePass,
     StaticMemberDefUsePass
 }
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
@@ -62,7 +63,8 @@ class OssDataFlow(opts: OssDataFlowOptions)(implicit
         Iterator(
           reachingDefPass,
           new StaticMemberDefUsePass(cpg),
-          new GlobalVariableDefUsePass(cpg)
+          new GlobalVariableDefUsePass(cpg),
+          new MemberDefUsePass(cpg)
         )
     enhancementExecList.zipWithIndex.foreach { case (pass, index) =>
         runPass(pass, context, storeUndoInfo, index)
