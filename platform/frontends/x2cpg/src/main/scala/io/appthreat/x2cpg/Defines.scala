@@ -43,6 +43,18 @@ object Defines:
     */
   val ReferenceKindTag = "ref"
 
+  /** C/C++ macro invocations. Each invocation of a file has an index: its INLINED call and the
+    * nodes its expansion produced carry `macro-invocation=<index>`; an invocation nested in another
+    * (an argument that is itself a macro) carries `macro-parent=<index>` of the enclosing one. A
+    * node written in a macro's definition carries `macro-origin=<file>:<line>:<column>` there. The
+    * INLINED call's arguments are copies of subtrees of the expansion (the AST is a tree), each
+    * node of them marked `macro-argument-copy`.
+    */
+  val MacroInvocationTag   = "macro-invocation"
+  val MacroParentTag       = "macro-parent"
+  val MacroOriginTag       = "macro-origin"
+  val MacroArgumentCopyTag = "macro-argument-copy"
+
   /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
     * operator the expression is written with (`<operator>.addition`), so a consumer that matches
     * operator names still finds the expression after the frontend linked it to its method.

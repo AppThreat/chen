@@ -225,14 +225,11 @@ object InitAndFormatRules:
               c.name == "sizeof" || c.name == "offsetof"
       ) || insideMacroArgument(n)
 
-  /** Inside a macro invocation - an INLINED call, its argument copies or its expansion. The
-    * arguments are copies (`GET_UTF16(val, ...)` assigns val in its expansion; the copy is no read)
-    * and the expansion's CFG is stitched in, not built from the source: its locals and loops
-    * (GET_UTF8, FFSWAP, DEFINE_CKSUM_LINE) would dominate the reports on FFmpeg. A
-    * must-uninitialised claim there is not one this rule can make.
+  /** A copy of a macro argument (the frontend marks each node of the INLINED call's argument
+    * subtrees): the expansion holds the same expression, and the copy is not a second read.
     */
   private def insideMacroArgument(n: AstNode): Boolean =
-      n.inAst.collectAll[Call].exists(_.dispatchType == "INLINED")
+      n.tag.nameExact(io.appthreat.x2cpg.Defines.MacroArgumentCopyTag).nonEmpty
 
   /** `x = x` - FFmpeg's `av_uninit(x)`, the compiler-warning silencer: a declaration, not a read.
     */
@@ -248,13 +245,12 @@ object InitAndFormatRules:
   def uninitialisedReads(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
       atom.method.isExternal(false).foreach { method =>
         val locals = method.local.l
-        // a macro may assign what it is handed (`GET_V(count, ...)`, `bn_hex2bn(p, hex, ret)`)
-        // and its expansion's CFG is stitched, not built: a name a macro invocation mentions,
-        // or a local its body declares, is out of reach. So is a name declared twice (an inner
-        // scope's `int i` shadowing another) or shadowing a parameter - a name is the key here
-        val inlined    = method.ast.collectAll[Call].filter(_.dispatchType == "INLINED").l
-        val macroNames = inlined.flatMap(_.ast.collectAll[Identifier].name.l).toSet
-        val params     = method.parameter.name.toSet
+        // a macro's expansion is on the path (an assignment it makes to what it is handed,
+        // `GET_V(count, ...)`, is a definition) and its argument copies are marked, so a name a
+        // macro mentions is analysed like any other; a local a macro's body declares is not, nor
+        // a name declared twice (an inner scope's `int i` shadowing another) or shadowing a
+        // parameter - a name is the key here
+        val params = method.parameter.name.toSet
         val declaredTwice =
             locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
         val candidates = locals
@@ -263,7 +259,7 @@ object InitAndFormatRules:
             )
             .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
             .map(_.name)
-            .toSet -- macroNames -- params -- declaredTwice
+            .toSet -- params -- declaredTwice
         // declared on the line it is read on: hand-written C does not do that, a macro that
         // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
         val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap

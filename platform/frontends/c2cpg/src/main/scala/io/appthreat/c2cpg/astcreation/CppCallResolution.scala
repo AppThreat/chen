@@ -80,6 +80,10 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     val tags = pendingTags.getOrElse(node, Nil)
     if !tags.contains((name, value)) then pendingTags.update(node, tags :+ (name, value))
 
+  /** Whether `node` is waiting for a tag named `name`. */
+  protected def hasPendingTag(node: NewNode, name: String): Boolean =
+      pendingTags.get(node).exists(_.exists(_._1 == name))
+
   /** The copies of tagged nodes carry the same tags. */
   protected def copyTags(copies: collection.Map[? <: NewNode, ? <: NewNode]): Unit =
       copies.foreach { (original, copy) =>

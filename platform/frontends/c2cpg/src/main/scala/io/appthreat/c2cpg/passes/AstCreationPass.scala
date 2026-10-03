@@ -60,7 +60,9 @@ object AstCreationPass:
   // 8: tags follow macro copies, constant expressions carry their value, host type sizes
   // 9: pointer arithmetic tagged, `i[a]` written as `a[i]`
   // 10: header struct layouts recorded with their defining header; array typedefs recorded
-  private val AstFormatVersion = "c2cpg-ast-10"
+  // 11: macro invocations indexed and their arguments found by location and marked as copies;
+  //     image locations on by default; a local declared outside a macro keeps its place
+  private val AstFormatVersion = "c2cpg-ast-11"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial

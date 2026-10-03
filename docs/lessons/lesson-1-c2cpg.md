@@ -326,13 +326,21 @@ Each top-level macro invocation becomes a `CALL` with dispatch type `INLINED`:
 
 - `name` is the macro name; `methodFullName` encodes where the macro is defined,
   `<file>:<line>:<lineEnd>:<NAME>:<argc>` (plain `NULL` keeps its name).
-- The invocation's arguments are matched by their source text inside the expansion and copied
-  under the call as arguments `1..argc`, so data flows into the macro's value.
-- The expansion itself is the call's last AST child, a block after the arguments, and the CFG runs
-  through it, so guards written as macros (`MIN`, `MAX`, `CLAMP`) take part in data flow.
+- The invocation's arguments are found in the expansion by where CDT says their tokens came from
+  (image locations, on by default): the widest expression whose names are all tokens of one
+  argument, written once. An object-like macro argument (`LIMIT`) is the literal it expands to; an
+  argument with no names is matched by its text. Each is copied under the call as arguments
+  `1..argc` (the AST is a tree), every node of the copy tagged `macro-argument-copy`, so data flows
+  into the macro's value and a rule can tell the copy from the expansion.
+- The expansion itself is the call's last AST child, a block after the arguments. It always runs:
+  the CFG goes through it and only out of it, so a guard written as a macro (`CHECK(i, n)`,
+  `MIN`, `CLAMP`) stands between what precedes and what follows the invocation.
+- Each invocation of a file has an index: the INLINED call and the nodes of its expansion carry
+  `macro-invocation=<index>`. An argument that is itself a macro invocation (`MIN(a, MAX(b, c))`)
+  is nested in it: its expansion's nodes carry their own index and `macro-parent=<index>`. A node
+  whose name a macro's definition wrote carries `macro-origin=<file>:<line>:<column>` there.
 
-Only the outermost invocation of nested macros is represented, and `#define` directives are not
-nodes.
+Only the outermost invocation is an INLINED call, and `#define` directives are not nodes.
 
 ## Designated Initializers
 

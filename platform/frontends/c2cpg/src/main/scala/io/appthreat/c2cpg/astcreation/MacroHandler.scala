@@ -9,11 +9,14 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
     NewFieldIdentifier,
     NewNode
 }
-import io.appthreat.x2cpg.{Ast, AstEdge, ValidationMode}
+import io.appthreat.x2cpg.{Ast, AstEdge, SourceFiles, ValidationMode}
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.utils.StringUtils
 import io.shiftleft.codepropertygraph.generated.nodes.NewLocal
 import org.eclipse.cdt.core.dom.ast.{
+    IASTImageLocation,
     IASTMacroExpansionLocation,
+    IASTName,
     IASTNode,
     IASTPreprocessorMacroDefinition
 }
@@ -40,6 +43,14 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
             .sortBy(_._1)
       )
 
+  /** The root node built for each expression of the file, by CDT node: the argument of a macro
+    * invocation is found by where CDT says its tokens came from.
+    */
+  protected val expressionRoots = new java.util.IdentityHashMap[IASTNode, NewNode]()
+
+  /** The index of the next macro invocation of this file. */
+  private var nextInvocationIndex = 0
+
   /** For the given node, determine if it is expanded from a macro, and if so, create a Call node to
     * represent the macro invocation and attach `ast` as its child.
     */
@@ -50,18 +61,45 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     // We do nothing for locals only.
     if ast.nodes.size == 1 && ast.root.exists(_.isInstanceOf[NewLocal]) then return ast
     // Otherwise, we create the synthetic call AST.
-    val matchingMacro = extractMatchingMacro(node)
-    val macroCallAst = matchingMacro.map { case (mac, args) =>
-        createMacroCallAst(ast, node, mac, args)
-    }
-    macroCallAst match
-      case Some(callAst) =>
-          val lostLocals = ast.refEdges.collect { case AstEdge(_, dst: NewLocal) =>
-              Ast(dst)
-          }.toList
+    extractMatchingMacro(node) match
+      case Some((mac, args)) =>
+          val index = nextInvocationIndex
+          nextInvocationIndex += 1
+          val nestedNames = nestedMacroNames(node)
+          val roots       = argumentRoots(node, ast, args, nestedNames)
+          // an argument that is itself a macro invocation is an invocation nested in this one:
+          // its source range, and its own index
+          val nested = argumentRanges(node).zip(args).collect {
+              case (range, text) if nestedNames.contains(leadingName(text)) =>
+                  val nestedIndex = nextInvocationIndex
+                  nextInvocationIndex += 1
+                  range -> nestedIndex
+          }
+          tagExpansion(node, ast, index, nested)
+          val callAst = createMacroCallAst(ast, node, mac, args, roots.map(_.map(_._2)))
+          // a local of the expansion's AST that is not under its root would be lost by the copy;
+          // a local declared outside the macro keeps its own place
+          val underRoot = java.util.Collections.newSetFromMap(
+            new java.util.IdentityHashMap[NewNode, java.lang.Boolean]()
+          )
+          var frontier = ast.root.toList
+          while frontier.nonEmpty do
+            val n = frontier.head
+            frontier = frontier.tail
+            if underRoot.add(n) then
+              frontier = ast.edges.filter(_.src eq n).map(_.dst).toList ++ frontier
+          val inExpansion = java.util.Collections.newSetFromMap(
+            new java.util.IdentityHashMap[NewNode, java.lang.Boolean]()
+          )
+          ast.nodes.foreach(inExpansion.add)
+          val lostLocals = ast.refEdges.collect {
+              case AstEdge(_, dst: NewLocal)
+                  if inExpansion.contains(dst) && !underRoot.contains(dst) =>
+                  Ast(dst)
+          }.toList.distinctBy(_.root.map(System.identityHashCode))
           // The expansion follows the argument copies (1..n) and is not an argument itself, so
           // it takes the next index rather than colliding with the first argument's.
-          val expansionIndex = matchingMacro.map(_._2.size).getOrElse(0) + 1
+          val expansionIndex = args.size + 1
           val newAst = copyTagged(ast, ast.root.get.asInstanceOf[AstNodeNew], expansionIndex)
           // We need to wrap the copied AST as it may contain CPG nodes not being allowed
           // to be connected via AST edges under a CALL. E.g., LOCALs but only if its not already a BLOCK.
@@ -73,10 +111,264 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
                   registerType(Defines.voidTypeName)
                 )
                 blockAst(b, List(newAst))
-          callAst.withChildren(lostLocals).withChild(childAst)
+          val result = callAst.withChildren(lostLocals).withChild(childAst)
+          result.root.foreach(tagNode(_, X2CpgDefines.MacroInvocationTag, index.toString))
+          result
       case None => ast
     end match
   end asChildOfMacroCall
+
+  /** The macros the invocation's expansion names besides its own: those written in its arguments or
+    * its definition.
+    */
+  private def nestedMacroNames(node: IASTNode): Set[String] =
+      expandedFromMacro(node).headOption.toList
+          .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
+          .map(_.toString)
+          .toSet
+
+  /** The identifier an argument's text starts with: `MAX` for `MAX(b, c)`, `LIMIT` for `LIMIT`. */
+  private def leadingName(text: String): String =
+      text.trim.takeWhile(c => c.isLetterOrDigit || c == '_')
+
+  /** The source ranges [start, end) of an invocation's arguments, in its file. */
+  private def argumentRanges(node: IASTNode): List[(Int, Int)] =
+      Option(node.getFileLocation).toList.flatMap(invocation =>
+          macroArgumentRanges(safeGetRawSignature(node)).map((s, e) =>
+              (invocation.getNodeOffset + s, invocation.getNodeOffset + e)
+          )
+      )
+
+  /** Whether every name of `n` is a token CDT took from the source range `range` of the
+    * invocation's file.
+    */
+  private def fromRange(n: IASTNode, file: String, range: (Int, Int)): Boolean =
+    val images = namesIn(n).map(name => Option(name.getImageLocation))
+    images.nonEmpty && images.forall(_.exists(img =>
+        img.getLocationKind == IASTImageLocation.ARGUMENT_TO_MACRO_EXPANSION &&
+            img.getFileName == file && img.getNodeOffset >= range._1 &&
+            img.getNodeOffset + img.getNodeLength <= range._2
+    ))
+
+  /** Tags the nodes `node`'s expansion produced with the invocation's index - those of an
+    * invocation nested in it (`nested`: the source range of an argument that is a macro invocation,
+    * with that one's index) with its index and this one as its parent - and those written in a
+    * macro's definition with their position there. Done before the expansion is copied under its
+    * INLINED call: the copies carry the tags.
+    */
+  private def tagExpansion(
+    node: IASTNode,
+    ast: Ast,
+    index: Int,
+    nested: List[((Int, Int), Int)]
+  ): Unit =
+    val inExpansion = java.util.Collections.newSetFromMap(
+      new java.util.IdentityHashMap[NewNode, java.lang.Boolean]()
+    )
+    ast.nodes.foreach(inExpansion.add)
+    val file = Option(node.getFileLocation).map(_.getFileName).getOrElse("")
+    def visit(n: IASTNode, current: Int, parent: Option[Int], inNested: Boolean): Unit =
+      // the widest node whose names all come from a nested invocation's argument is (one copy
+      // of) that invocation's expansion
+      val enters =
+          if inNested then None else nested.find((range, _) => fromRange(n, file, range))
+      val (here, hereParent) = enters match
+        case Some((_, nestedIndex)) => (nestedIndex, Some(current))
+        case None                   => (current, parent)
+      Option(expressionRoots.get(n)).filter(inExpansion.contains).foreach { root =>
+        tagNode(root, X2CpgDefines.MacroInvocationTag, here.toString)
+        hereParent.foreach(p => tagNode(root, X2CpgDefines.MacroParentTag, p.toString))
+        // where the node's first name was written: CDT keeps image locations on names
+        namesIn(n).headOption.flatMap(name => Option(name.getImageLocation)).filter(
+          _.getLocationKind == IASTImageLocation.MACRO_DEFINITION
+        ).foreach { image =>
+            positionIn(image.getFileName, image.getNodeOffset).foreach { (line, col) =>
+                tagNode(
+                  root,
+                  X2CpgDefines.MacroOriginTag,
+                  s"${projectRelative(image.getFileName)}:$line:$col"
+                )
+            }
+        }
+      }
+      n.getChildren.foreach(visit(_, here, hereParent, inNested || enters.isDefined))
+    end visit
+    visit(node, index, None, inNested = false)
+  end tagExpansion
+
+  /** A path relative to the project root, comparing real paths (macOS's `/var` is `/private/var`).
+    */
+  private def projectRelative(path: String): String =
+    val relative = SourceFiles.toRelativePath(path, config.inputPath)
+    if relative != path then relative
+    else
+      scala.util.Try {
+          val root = java.nio.file.Paths.get(config.inputPath).toRealPath()
+          val file = java.nio.file.Paths.get(path).toRealPath()
+          if file.startsWith(root) then root.relativize(file).toString else path
+      }.getOrElse(path)
+
+  /** The names in `n`'s subtree, in source order. */
+  private def namesIn(n: IASTNode): List[IASTName] = n match
+    case name: IASTName => List(name)
+    case other          => other.getChildren.toList.flatMap(namesIn)
+
+  /** Each argument's subtree in the expansion, with the CDT node it was built from when known.
+    *
+    * By where CDT says the expansion's tokens came from: an expression every name of which is a
+    * token of the i-th argument is (part of) it, and the widest such expression is the argument -
+    * one that shows each argument token once (`TWICE(count + 1)` expands to `(count + 1) + (count +
+    * 1)`, and the argument is one of the halves), unless the argument is itself a macro invocation
+    * whose own expansion repeats them (`MIN(a, MAX(b, c))`). An argument with no names that is an
+    * object-like macro (`LIMIT`) is the literal it expands to; any other is matched by its text.
+    */
+  private def argumentRoots(
+    node: IASTNode,
+    ast: Ast,
+    args: List[String],
+    nestedNames: Set[String]
+  ): List[Option[(Option[IASTNode], NewNode)]] =
+    val byLocation = argumentRootsByLocation(node, ast, args, nestedNames)
+    args.zipWithIndex.map { case (arg, i) =>
+        byLocation.get(i).map((cdt, root) => (Some(cdt), root))
+            .orElse(objectMacroLiteral(node, ast, arg, nestedNames).map((cdt, root) =>
+                (Some(cdt), root)
+            ))
+            .orElse(argForCode(arg, ast).map(root => (None, root)))
+    }
+
+  private def argumentRootsByLocation(
+    node: IASTNode,
+    ast: Ast,
+    args: List[String],
+    nestedNames: Set[String]
+  ): Map[Int, (IASTNode, NewNode)] =
+      Option(node.getFileLocation).toList.flatMap { invocation =>
+        val text = safeGetRawSignature(node)
+        val ranges = macroArgumentRanges(text).map((s, e) =>
+            (invocation.getNodeOffset + s, invocation.getNodeOffset + e)
+        )
+        if ranges.size != args.size then Nil
+        else
+          val inAst = java.util.Collections.newSetFromMap(
+            new java.util.IdentityHashMap[NewNode, java.lang.Boolean]()
+          )
+          ast.nodes.foreach(inAst.add)
+          // arg, span, each token once, node, root
+          val candidates = mutable.ArrayBuffer.empty[(Int, Int, Boolean, IASTNode, NewNode)]
+          def argumentOf(n: IASTNode): Option[(Int, Int, Boolean)] =
+            val images = namesIn(n).map(name => Option(name.getImageLocation))
+            if images.isEmpty || images.exists(_.isEmpty) then None
+            else
+              val located = images.flatten.filter(img =>
+                  img.getLocationKind == IASTImageLocation.ARGUMENT_TO_MACRO_EXPANSION &&
+                      img.getFileName == invocation.getFileName
+              )
+              if located.size != images.size then None
+              else
+                val start = located.map(_.getNodeOffset).min
+                val end   = located.map(i => i.getNodeOffset + i.getNodeLength).max
+                val once  = located.map(_.getNodeOffset).distinct.size == located.size
+                ranges.indexWhere((s, e) => start >= s && end <= e) match
+                  case -1 => None
+                  case i  => Some((i, end - start, once))
+          def visit(n: IASTNode): Unit =
+            Option(expressionRoots.get(n)).filter(inAst.contains).foreach { root =>
+                argumentOf(n).foreach((i, span, once) => candidates += ((i, span, once, n, root)))
+            }
+            n.getChildren.foreach(visit)
+          node.getChildren.foreach(visit)
+          candidates.groupBy(_._1).toList.flatMap { (i, cs) =>
+            val invocationArgument = nestedNames.contains(leadingName(args(i)))
+            val eligible           = if invocationArgument then cs else cs.filter(_._3)
+            // the expression written as the argument (names alone cannot tell `x` from `(16) <
+            // (x)`), else the widest, the first of them in source order
+            val written = eligible.find(c =>
+                c._5 match
+                  case e: ExpressionNew => tokenize(e.code) == tokenize(args(i))
+                  case _                => false
+            )
+            written.orElse(
+              eligible.maxByOption(_._2).map(_._2).flatMap(widest => eligible.find(_._2 == widest))
+            ).map(c => i -> (c._4, c._5))
+          }
+        end if
+      }.toMap
+
+  /** An argument that is an object-like macro expanding to a literal (`LIMIT` for `16`): the first
+    * such literal of the expansion.
+    */
+  private def objectMacroLiteral(
+    node: IASTNode,
+    ast: Ast,
+    arg: String,
+    nestedNames: Set[String]
+  ): Option[(IASTNode, NewNode)] =
+    val name = arg.trim
+    if !nestedNames.contains(name) || leadingName(name) != name then None
+    else
+      val expansion = expandedFromMacro(node).headOption.toList
+          .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
+          .find(_.toString == name)
+          .flatMap(ref => Option(ref.resolveBinding()))
+          .collect { case m: org.eclipse.cdt.core.dom.ast.IMacroBinding => m }
+          .flatMap(m => Option(m.getExpansion)).map(new String(_).trim)
+      val inAst = java.util.Collections.newSetFromMap(
+        new java.util.IdentityHashMap[NewNode, java.lang.Boolean]()
+      )
+      ast.nodes.foreach(inAst.add)
+      def literals(n: IASTNode): List[IASTNode] = n match
+        case l: org.eclipse.cdt.core.dom.ast.IASTLiteralExpression => List(l)
+        case other => other.getChildren.toList.flatMap(literals)
+      expansion.toList.flatMap(text =>
+          literals(node).filter(l =>
+              new String(
+                l.asInstanceOf[org.eclipse.cdt.core.dom.ast.IASTLiteralExpression].getValue
+              )
+                  .trim == text.stripPrefix("(").stripSuffix(")").trim
+          )
+      ).flatMap(l => Option(expressionRoots.get(l)).filter(inAst.contains).map(l -> _)).headOption
+    end if
+  end objectMacroLiteral
+
+  /** The [start, end) offsets of each argument inside an invocation's text `NAME(a, b)`. */
+  private def macroArgumentRanges(text: String): List[(Int, Int)] =
+    val open  = text.indexOf('(')
+    val close = text.lastIndexOf(')')
+    if open < 0 || close <= open then Nil
+    else
+      val ranges  = mutable.ListBuffer.empty[(Int, Int)]
+      var depth   = 0
+      var quote   = NoQuote
+      var escaped = false
+      var start   = open + 1
+      for i <- open + 1 until close do
+        val c = text.charAt(i)
+        if escaped then escaped = false
+        else if c == '\\' && quote != NoQuote then escaped = true
+        else if quote != NoQuote then
+          if c == quote then quote = NoQuote
+        else
+          c match
+            case '"' | '\''      => quote = c
+            case '(' | '[' | '{' => depth += 1
+            case ')' | ']' | '}' => depth -= 1
+            case ',' if depth == 0 =>
+                ranges += ((start, i))
+                start = i + 1
+            case _ =>
+      if text.substring(start, close).trim.nonEmpty || ranges.nonEmpty then
+        ranges += ((start, close))
+      ranges.toList.map((s, e) => trimmed(text, s, e)).filter((s, e) => e > s)
+    end if
+  end macroArgumentRanges
+
+  private def trimmed(text: String, start: Int, end: Int): (Int, Int) =
+    var s = start
+    var e = end
+    while s < e && text.charAt(s).isWhitespace do s += 1
+    while e > s && text.charAt(e - 1).isWhitespace do e -= 1
+    (s, e)
 
   /** For the given node, determine if it is expanded from a macro, and if so, find the first
     * matching (offset, macro) pair in nodeOffsetMacroPairs, removing non-matching elements from the
@@ -166,10 +458,13 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
         loc.getExpansion.getMacroDefinition
       )
 
-  private def argumentTrees(arguments: List[String], ast: Ast): List[Option[Ast]] =
-      arguments.zipWithIndex.map { case (arg, i) =>
-          val rootNode = argForCode(arg, ast)
-          rootNode.map(x => copyTagged(ast, x.asInstanceOf[AstNodeNew], i + 1))
+  private def argumentTrees(ast: Ast, roots: List[Option[NewNode]]): List[Option[Ast]] =
+      roots.zipWithIndex.map { case (root, i) =>
+          root.map { x =>
+            val copy = copyTagged(ast, x.asInstanceOf[AstNodeNew], i + 1)
+            copy.nodes.foreach(tagNode(_, X2CpgDefines.MacroArgumentCopyTag, "true"))
+            copy
+          }
       }
 
   /** A copy of the subtree at `node`, whose nodes carry the tags of the nodes they copy. */
@@ -206,11 +501,12 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     ast: Ast,
     node: IASTNode,
     macroDef: IASTPreprocessorMacroDefinition,
-    arguments: List[String]
+    arguments: List[String],
+    roots: List[Option[NewNode]]
   ): Ast =
     val name    = ASTStringUtil.getSimpleName(macroDef.getName)
     val code    = safeGetRawSignature(node).stripSuffix(";")
-    val argAsts = argumentTrees(arguments, ast).map(_.getOrElse(Ast()))
+    val argAsts = argumentTrees(ast, roots).map(_.getOrElse(Ast()))
 
     val callName     = StringUtils.normalizeSpace(name)
     val callFullName = StringUtils.normalizeSpace(fullName(macroDef, argAsts))

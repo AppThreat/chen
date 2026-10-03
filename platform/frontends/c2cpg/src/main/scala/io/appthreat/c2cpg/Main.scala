@@ -20,7 +20,8 @@ final case class Config(
   printIfDefsOnly: Boolean = false,
   includePathsAutoDiscovery: Boolean = false,
   includeFunctionBodies: Boolean = false,
-  includeImageLocations: Boolean = false,
+  // where each name came from (a macro's definition, an argument): macro invocations need it
+  includeImageLocations: Boolean = true,
   useProjectIndex: Boolean = false,
   parseInactiveCode: Boolean = false,
   includeTrivialExpressions: Boolean = false,

@@ -57,6 +57,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case pExpr: ICPPASTPackExpansionExpression       => astForPackExpansionExpression(pExpr)
       case _                                           => notHandledYet(expression)
     tagConstantValue(expression, r)
+    r.root.foreach(root => expressionRoots.put(expression, root))
     val inMacro = asChildOfMacroCall(expression, r)
     if inMacro ne r then tagConstantValue(expression, inMacro)
     inMacro

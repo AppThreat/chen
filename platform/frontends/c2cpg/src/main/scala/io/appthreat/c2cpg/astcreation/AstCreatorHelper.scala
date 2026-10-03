@@ -291,6 +291,17 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val column = offset - lineStartOffset + 1
     column
 
+  /** The 1-based line and column of `offset` in the file at `path` (absolute, as CDT names it). */
+  protected def positionIn(path: String, offset: Int): Option[(Int, Int)] =
+      scala.util.Try {
+          val table =
+              file2OffsetTable.computeIfAbsent(path, _ => genFileOffsetTable(Paths.get(path)))
+          val index = java.util.Arrays.binarySearch(table, offset)
+          val line  = if index < 0 then -(index + 1) else index + 1
+          val start = if line == 0 then 0 else table(line - 1)
+          (line + 1, offset - start + 1)
+      }.toOption
+
   private def fileOffsetTable(node: IASTNode): Array[Int] =
     val path = SourceFiles.toAbsolutePath(fileName(node), config.inputPath)
     file2OffsetTable.computeIfAbsent(path, _ => genFileOffsetTable(Paths.get(path)))
