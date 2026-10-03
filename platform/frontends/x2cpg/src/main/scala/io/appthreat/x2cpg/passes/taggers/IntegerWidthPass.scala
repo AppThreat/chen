@@ -75,7 +75,7 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
                     else
                       argAt(args, 1).filter(_ => argAt(args, 2).isDefined).map(_.code)
                           .getOrElse(c.typeFullName)
-                operandOpt.foreach { operand =>
+                operandOpt.filterNot(fitsAsConstant(_, targetName)).foreach { operand =>
                   val (from, fromW) = declaredWidthOf(operand)
                   integralWidth(targetName).foreach { tw =>
                       if fromW > tw then
@@ -92,15 +92,40 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
                   val to = declaredTypeOf(lhs)
                   integralWidth(to).foreach { tw =>
                       argAt(args, 2).orElse(argAt(args, 1)).foreach { rhs =>
-                        val (from, fromW) = computedWidthOf(rhs)
-                        if fromW > tw then
-                          record(c, TagNarrow, s"from:$from:$fromW->to:$to:$tw")
+                        // a stored constant narrows exactly when the destination cannot hold it;
+                        // a compound assignment computes in the wider type whatever it adds
+                        val constant =
+                            if c.name == "<operator>.assignment" then IndexRange.literal(rhs)
+                            else None
+                        constant match
+                          case Some(v) =>
+                              if overflowsType(v, to) then
+                                record(c, TagNarrow, s"from:constant:$v->to:$to:$tw")
+                          case None =>
+                              val (from, fromW) = computedWidthOf(rhs)
+                              if fromW > tw && !fitsAsConstant(rhs, to) then
+                                record(c, TagNarrow, s"from:$from:$fromW->to:$to:$tw")
                       }
                   }
                 }
             case _ => ()
       }
   end narrowingFacts
+
+  /** A constant the destination type holds: storing it changes nothing, whatever type the constant
+    * is computed in (`uint8_t c = 5`, `(uint16_t) sizeof(hdr)`).
+    */
+  private def fitsAsConstant(value: Expression, destination: String): Boolean =
+      IndexRange.literal(value).exists(IndexRange.fitsType(_, destination))
+
+  /** A constant the destination cannot hold under either signedness: past the top of its range, or
+    * below the bottom of a signed one. `-1` into an unsigned type is the all-bits-set idiom, not a
+    * loss.
+    */
+  private def overflowsType(v: BigInt, destination: String): Boolean =
+      IndexRange.ofType(destination).exists(r =>
+          v > r.hi || (v < r.lo && !isUnsignedIntegral(destination))
+      )
 
   /** The arguments of a call, fetched with one traversal and ordered locally. */
   private def argumentsOf(c: Call): List[Expression] =

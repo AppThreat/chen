@@ -121,8 +121,8 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
   private def statementRootOf(node: CfgNode): CfgNode = GuardPass.statementRootOf(node)
 
   /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
-    * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
-    * expression.
+    * constant (a literal, a sizeof, an enumerator, a macro constant) - the scaling shapes whose
+    * bound travels from the variable to the whole expression.
     */
   private def scaledKeyOf(arg: Expression): Option[String] = arg match
     case c: Call =>
@@ -139,9 +139,9 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     case _ => None
 
   private def isScaleOperand(e: Expression): Boolean = e match
-    case _: Literal => true
-    case c: Call    => c.name.startsWith("<operator>.sizeOf")
-    case _          => false
+    case _: Literal                                        => true
+    case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+    case other                                             => IndexRange.literal(other).isDefined
 
   /** Facts from clamping assignments: `x = a < b ? a : b`, an INLINED macro expansion of it, or a
     * vocabulary clamp call. Tagged at the definition and at the memory-operation arguments that use

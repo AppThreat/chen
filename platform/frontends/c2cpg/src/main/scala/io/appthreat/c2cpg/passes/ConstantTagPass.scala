@@ -10,7 +10,8 @@ import io.shiftleft.semanticcpg.language.*
 /** Tags the identifiers that read a header constant with its compile-time value
   * ([[Defines.ConstValueTag]]): the AST pass recorded `name -> value` for `const`/`constexpr`
   * integrals it could resolve but not see defined. An identifier bound to a local or a parameter is
-  * that variable, not the constant, and is left alone.
+  * that variable, not the constant, and is left alone, and one the frontend already evaluated keeps
+  * its own value.
   */
 class ConstantTagPass(cpg: Cpg, constants: Map[String, Long]) extends CpgPass(cpg):
   override def run(dstGraph: DiffGraphBuilder): Unit =
@@ -19,14 +20,15 @@ class ConstantTagPass(cpg: Cpg, constants: Map[String, Long]) extends CpgPass(cp
             name -> NewTag().name(Defines.ConstValueTag).value(value.toString)
         )
         var used = Set.empty[String]
-        cpg.identifier.filter(i => constants.contains(i.name)).foreach { i =>
-          val local = i._refOut.exists {
-              case _: Local | _: MethodParameterIn => true
-              case _                               => false
-          }
-          if !local then
-            if !used.contains(i.name) then
-              dstGraph.addNode(tags(i.name))
-              used += i.name
-            dstGraph.addEdge(i, tags(i.name), EdgeTypes.TAGGED_BY)
-        }
+        cpg.identifier.filter(i => constants.contains(i.name))
+            .filter(_.tag.nameExact(Defines.ConstValueTag).isEmpty).foreach { i =>
+              val local = i._refOut.exists {
+                  case _: Local | _: MethodParameterIn => true
+                  case _                               => false
+              }
+              if !local then
+                if !used.contains(i.name) then
+                  dstGraph.addNode(tags(i.name))
+                  used += i.name
+                dstGraph.addEdge(i, tags(i.name), EdgeTypes.TAGGED_BY)
+            }

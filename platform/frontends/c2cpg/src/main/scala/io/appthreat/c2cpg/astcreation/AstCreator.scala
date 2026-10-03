@@ -42,6 +42,7 @@ class AstCreator(
     with MacroHandler
     with CppCallResolution
     with CppScopeExits
+    with ConstantValues
     with X2CpgAstNodeBuilder[IASTNode, AstCreator]:
 
   protected val logger: Logger = LoggerFactory.getLogger(classOf[AstCreator])

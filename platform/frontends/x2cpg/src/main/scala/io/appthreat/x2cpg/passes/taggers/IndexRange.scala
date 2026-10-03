@@ -316,13 +316,24 @@ private[taggers] object IndexRange:
     * and a negated literal.
     */
   def literal(e: AstNode): Option[BigInt] = e match
-    case l: Literal                              => literalValue(l.code)
-    case c: Call if c.name == "<operator>.minus" => c.argumentOption(1).flatMap(literal).map(-_)
-    // a header constant the frontend folded: `config::kNumLevels` is 7
-    case i: Identifier =>
-        i.tag.name(io.appthreat.x2cpg.Defines.ConstValueTag).value.headOption
-            .flatMap(v => scala.util.Try(BigInt(v)).toOption)
-    case _ => None
+    case l: Literal => literalValue(l.code)
+    // a constant expression the frontend evaluated: `sizeof(struct hdr)`, an enumerator, `N * 4`,
+    // a header constant (`config::kNumLevels` is 7)
+    case x: Expression if constValueOf(x).isDefined => constValueOf(x)
+    case c: Call if c.name == "<operator>.minus"    => c.argumentOption(1).flatMap(literal).map(-_)
+    case _                                          => None
+
+  private def constValueOf(e: Expression): Option[BigInt] =
+      e.tag.name(io.appthreat.x2cpg.Defines.ConstValueTag).value.headOption
+          .flatMap(v => scala.util.Try(BigInt(v)).toOption)
+
+  /** Whether `v` is a value of the fixed-width integral type `t` whatever its signedness: plain
+    * `char` holds 0 to 127 everywhere.
+    */
+  def fitsType(v: BigInt, t: String): Boolean =
+      TypeRanges.get(OverlayFacts.normalizeTypeName(Option(t).getOrElse("").trim)).exists {
+          case (fit, _) => v >= fit.lo && v <= fit.hi
+      }
 
   def literalValue(code: String): Option[BigInt] =
     val c = code.trim.toLowerCase.replaceAll("[ul]+$", "")

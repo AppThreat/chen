@@ -10,6 +10,39 @@ object DefaultDefines:
     */
   val GNU_COMPILER: Map[String, String] =
       Map("__GNUC__" -> "4", "__GNUC_MINOR__" -> "9", "__GNUC_PATCHLEVEL__" -> "0")
+
+  /** The type sizes of the host's data model, in bytes, as GCC and Clang predefine them: what
+    * `sizeof` evaluates to when neither a compiler nor a compilation database names the target.
+    * Windows is LLP64 (`long` and `wchar_t` narrower); everything else 64-bit is LP64.
+    */
+  lazy val HOST_TYPE_SIZES: Map[String, String] =
+      typeSizes(
+        windows = Option(System.getProperty("os.name")).exists(_.toLowerCase.startsWith("windows")),
+        pointerBytes =
+            if Option(System.getProperty("sun.arch.data.model")).contains("32") then 4 else 8,
+        longDoubleBytes =
+            if Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac")) &&
+              Option(System.getProperty("os.arch")).contains("aarch64")
+            then 8
+            else 16
+      )
+
+  def typeSizes(windows: Boolean, pointerBytes: Int, longDoubleBytes: Int): Map[String, String] =
+      Map(
+        "__SIZEOF_BOOL__"        -> 1,
+        "__SIZEOF_SHORT__"       -> 2,
+        "__SIZEOF_INT__"         -> 4,
+        "__SIZEOF_LONG__"        -> (if windows || pointerBytes == 4 then 4 else 8),
+        "__SIZEOF_LONG_LONG__"   -> 8,
+        "__SIZEOF_INT128__"      -> 16,
+        "__SIZEOF_POINTER__"     -> pointerBytes,
+        "__SIZEOF_SIZE_T__"      -> pointerBytes,
+        "__SIZEOF_PTRDIFF_T__"   -> pointerBytes,
+        "__SIZEOF_WCHAR_T__"     -> (if windows then 2 else 4),
+        "__SIZEOF_FLOAT__"       -> 4,
+        "__SIZEOF_DOUBLE__"      -> 8,
+        "__SIZEOF_LONG_DOUBLE__" -> (if windows then 8 else longDoubleBytes)
+      ).view.mapValues(_.toString).toMap
   val DEFAULT_CALL_CONVENTIONS: Map[String, String] = Map(
     "__fastcall"   -> "__attribute((fastcall))",
     "__cdecl"      -> "__attribute((cdecl))",

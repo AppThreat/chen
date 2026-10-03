@@ -56,7 +56,10 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case cExpr: IGNUASTCompoundStatementExpression   => astForCompoundStatementExpression(cExpr)
       case pExpr: ICPPASTPackExpansionExpression       => astForPackExpansionExpression(pExpr)
       case _                                           => notHandledYet(expression)
-    asChildOfMacroCall(expression, r)
+    tagConstantValue(expression, r)
+    val inMacro = asChildOfMacroCall(expression, r)
+    if inMacro ne r then tagConstantValue(expression, inMacro)
+    inMacro
   end astForExpression
 
   protected def astForStaticAssert(a: ICPPASTStaticAssertDeclaration): Ast =

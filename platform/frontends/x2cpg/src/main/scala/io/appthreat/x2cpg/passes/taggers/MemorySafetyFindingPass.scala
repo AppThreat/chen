@@ -3373,9 +3373,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .groupBy { case (c, _, _) => c }
         .map { case (c, rows) => c -> rows.map { case (_, arg, _) => arg }.distinct }
 
-    def literalNumberOf(e: Expression): Option[Long] = e match
-      case l: Literal => l.code.trim.toLongOption
-      case _          => None
+    // a literal, or a constant the frontend evaluated (`HDR_LEN`, `COUNT`, `sizeof(int)`)
+    def literalNumberOf(e: Expression): Option[Long] =
+        IndexRange.literal(e).filter(_.isValidLong).map(_.toLong)
 
     def allocCallOf(e: Expression): Option[Call] = e match
       case c: Call
@@ -3482,6 +3482,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       def keyOf(e: Expression): Option[String] = OverlayFacts.variableKey(e)
       def isConstantish(e: Expression): Boolean = e match
         case _: Literal                                        => true
+        case _ if IndexRange.literal(e).isDefined              => true
         case c: Call if c.name.startsWith("<operator>.sizeOf") => true
         case c: Call
             if !c.name.startsWith("<operator>") && c.ast.isLiteral.l.nonEmpty &&
@@ -3589,9 +3590,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * the for-comprehension shape of the arm-1 loop.
     */
   private def literalNumberOfAs(e: Expression): Option[(Expression, Long)] =
-      e match
-        case l: Literal => l.code.trim.toLongOption.map(v => (l, v))
-        case _          => None
+      IndexRange.literal(e).filter(_.isValidLong).map(v => (e, v.toLong))
 
   /** Is the copy guarded by a comparison bounding some call over the content variable above - `if
     * (strlen(userInput) < sizeof(dest)) strcpy(dest, userInput)`? The guard bounds the source's

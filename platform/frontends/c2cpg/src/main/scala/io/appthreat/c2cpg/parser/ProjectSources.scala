@@ -264,7 +264,7 @@ object ProjectSources:
         flags.map(_.family).orElse(identity.map(_.family)).getOrElse(CompilerFamily.Unknown)
     val predefined: Map[String, String] = facts.map(_.macros).orElse(
       flags.map(f => PredefinedMacros.fallback(f.family, language, f.targetOptions))
-    ).filter(_.nonEmpty).getOrElse(DefaultDefines.GNU_COMPILER)
+    ).filter(_.nonEmpty).getOrElse(DefaultDefines.GNU_COMPILER ++ DefaultDefines.HOST_TYPE_SIZES)
     // MSVC's keywords are spelled out for MSVC, and wherever the real compiler is not known
     val msvcKeywords =
         if family == CompilerFamily.Msvc || facts.isEmpty && flags.isEmpty then

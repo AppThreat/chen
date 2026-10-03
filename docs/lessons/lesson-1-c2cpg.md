@@ -91,8 +91,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
    creation (skipped when `onlyAstCache = true`).
 7. **TypeDeclNodePass** — creates `TYPE_DECL` stubs for types seen but not declared in the parsed
    files (skipped when `onlyAstCache = true`).
-8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers with their value
-   (`const-value`).
+8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers the frontend could not
+   evaluate in place with their value (`const-value`).
 
 `createCpgWithOverlays` additionally applies the four default overlays defined in `X2Cpg.scala`:
 **Base**, **ControlFlow**, **TypeRelations**, **CallGraph**.
@@ -169,7 +169,8 @@ run. Without a database the host's `gcc`
 otherwise. A compiler that cannot be run (a database from another machine, or MSVC's `cl.exe`,
 which cannot list its macros) falls back to a table for its family and target, generated from real
 compilers by `tools/predefined-macros/generate.sh`; with no compiler at all, a GCC identity
-(`__GNUC__` 4.9) stands in so headers still see the attributes they gate on it. The feature tests
+(`__GNUC__` 4.9) stands in so headers still see the attributes they gate on it, with the host's
+type sizes (`__SIZEOF_LONG__` and the rest: LLP64 on Windows, LP64 elsewhere). The feature tests
 the parser does not evaluate (`__has_builtin`, `__has_feature`, `__has_attribute`, …) read as 0, and
 MSVC's keywords (`__declspec`, `__cdecl`, …) are spelled out only for MSVC or an unknown compiler.
 
@@ -197,6 +198,15 @@ an include that did not resolve has no path tag. A call to a function that only 
 declares is tagged with that header (`callee-declared-in`, an absolute path). The resolved file
 tells which package provides the header far better than its name, and the declaring header which
 package's API a call uses: atom's `usages` slices carry both for SBOM tools.
+
+**Constant values.** Every integer constant expression that is more than a literal carries its
+value as a `const-value` tag (decimal), computed by CDT as the target's compiler would: `sizeof`
+and `alignof`, enumerators, `const` integers with a known initializer, and arithmetic, casts and
+conditionals over them. A macro constant's INLINED call carries the value of its expansion
+(`#define N (4 * 8)` is 32). Type sizes come from the unit's predefined macros, so `sizeof(long)` is
+4 for an MSVC unit and 8 for an LP64 one, and an unsigned result wraps at its type's width
+(`(unsigned int)-1` is 4294967295). The memory-safety passes read a tagged expression as they read
+a literal: a known copy length, allocation size, guard scale or stored value.
 
 **CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
 evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.

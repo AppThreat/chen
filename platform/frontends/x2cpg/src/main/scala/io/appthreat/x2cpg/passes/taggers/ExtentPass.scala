@@ -206,10 +206,11 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     *
     * A count-by-size allocator tags BOTH factors `mem-len`, and then NO single argument is the
     * capacity - `calloc(n, sizeof(x))` holds `n * sizeof(x)` bytes, and naming either factor
-    * reports a capacity the buffer does not have. Only a product of literals can be named, so the
-    * rest answer `unknown`: an extent that is one element wide would present as a known capacity to
-    * the index rules, which is the shape the overlay never emits (a fact we do not have, dressed as
-    * one we do).
+    * reports a capacity the buffer does not have. When every factor is a constant the allocation is
+    * still named (`alloc:`), and a reader multiplies its size arguments into bytes; `const:` would
+    * read as a declared array's element count. The rest answer `unknown`: an extent that is one
+    * element wide would present as a known capacity to the index rules, which is the shape the
+    * overlay never emits (a fact we do not have, dressed as one we do).
     */
   private def sizeArgValueOf(alloc: Call): Option[String] =
     val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
@@ -220,13 +221,9 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       case Nil        => None
       case List(only) => Some(valueOf(only))
       case several    =>
-          // every factor a literal: the product IS knowable, and it is a const extent
-          val literals = several.map {
-              case l: Literal => l.code.trim.toLongOption
-              case _          => None
-          }
-          Option.when(literals.forall(_.isDefined))(
-            s"$ValueConst:${literals.flatten.product}"
+          // every factor a constant: the product IS knowable, in bytes, from the allocation
+          Option.when(several.forall(IndexRange.literal(_).isDefined))(
+            s"$ValueAlloc:${several.head.id}"
           )
 
   private def isAllocationCall(c: Call): Boolean =
