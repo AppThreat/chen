@@ -1102,10 +1102,11 @@ class AstCreationPassTests extends AbstractPassTest:
       """.stripMargin) { cpg =>
         val List(localMyOtherFs) = cpg.method("main").local.name("my_other_fs").l
         localMyOtherFs.order shouldBe 2
-        localMyOtherFs.referencingIdentifiers.name.l shouldBe List("my_other_fs")
+        // the declaration, and the member `.open` assigns into
+        localMyOtherFs.referencingIdentifiers.name.l shouldBe List("my_other_fs", "my_other_fs")
         val List(localMyFs) = cpg.local.name("my_fs").l
         localMyFs.order shouldBe 4
-        localMyFs.referencingIdentifiers.name.l shouldBe List("my_fs")
+        localMyFs.referencingIdentifiers.name.l shouldBe List("my_fs", "my_fs")
         cpg.typeDecl.nameNot(NamespaceTraversal.globalNamespaceName).fullName.l
             .distinct shouldBe List("filesystem")
       }
@@ -1543,19 +1544,21 @@ class AstCreationPassTests extends AbstractPassTest:
         val List(methodA, methodB) = cpg.method.nameNot("<global>").l
         inside(cpg.call.nameExact(Operators.arrayInitializer).assignment.l) {
             case List(callA: Call, callB: Call) =>
-                val argsAIdent = callA.argument(1).asInstanceOf[Identifier]
-                val argARef    = callA.argument(2).asInstanceOf[MethodRef]
-                argsAIdent.order shouldBe 1
-                argsAIdent.name shouldBe "a"
-                argsAIdent.code shouldBe "a"
+                // `.a = methodA` assigns into the member `bar.a`
+                val memberA = callA.argument(1).asInstanceOf[Call]
+                val argARef = callA.argument(2).asInstanceOf[MethodRef]
+                memberA.order shouldBe 1
+                memberA.name shouldBe Operators.fieldAccess
+                memberA.code shouldBe "bar.a"
+                memberA.argument(1).asInstanceOf[Identifier].name shouldBe "bar"
+                memberA.argument(2).asInstanceOf[FieldIdentifier].canonicalName shouldBe "a"
                 argARef.order shouldBe 2
                 argARef.methodFullName shouldBe "methodA"
                 argARef.typeFullName shouldBe methodA.methodReturn.typeFullName
-                val argsBIdent = callB.argument(1).asInstanceOf[Identifier]
-                val argBRef    = callB.argument(2).asInstanceOf[MethodRef]
-                argsBIdent.order shouldBe 1
-                argsBIdent.code shouldBe "b"
-                argsBIdent.name shouldBe "b"
+                val memberB = callB.argument(1).asInstanceOf[Call]
+                val argBRef = callB.argument(2).asInstanceOf[MethodRef]
+                memberB.order shouldBe 1
+                memberB.code shouldBe "bar.b"
                 argBRef.order shouldBe 2
                 argBRef.methodFullName shouldBe "methodB"
                 argBRef.typeFullName shouldBe methodB.methodReturn.typeFullName
@@ -1734,27 +1737,29 @@ class AstCreationPassTests extends AbstractPassTest:
               call.order shouldBe 2
               call.name shouldBe Operators.arrayInitializer
               call.methodFullName shouldBe Operators.arrayInitializer
-              val children = call.astMinusRoot.isCall.name(Operators.assignment).l
-              val args     = call.argument.astChildren.l
+              val children = call.argument.isCall.name(Operators.assignment).l
               inside(children) { case List(call1, call2, call3) =>
+                  // each element assigns into the initialised array
                   call1.code shouldBe "[1] = 5"
                   call1.name shouldBe Operators.assignment
-                  call1.astMinusRoot.code.l shouldBe List("1", "5")
-                  call1.argument.code.l shouldBe List("1", "5")
+                  call1.argument.code.l shouldBe List("a[1]", "5")
+                  call1.argument(1).start.isCall.name.l shouldBe List(Operators.indirectIndexAccess)
+                  call1.argument(1).start.isCall.argument.code.l shouldBe List("a", "1")
                   call2.code shouldBe "[2] = 10"
-                  call2.name shouldBe Operators.assignment
-                  call2.astMinusRoot.code.l shouldBe List("2", "10")
-                  call2.argument.code.l shouldBe List("2", "10")
+                  call2.argument.code.l shouldBe List("a[2]", "10")
                   call3.code shouldBe "[3 ... 9] = 15"
                   call3.name shouldBe Operators.assignment
-                  val List(desCall) = call3.argument(1).start.collectAll[Call].l
-                  val List(value)   = call3.argument(2).start.collectAll[Literal].l
+                  val List(index) = call3.argument(1).start.isCall.l
+                  index.name shouldBe Operators.indirectIndexAccess
+                  index.code shouldBe "a[3 ... 9]"
+                  val List(value) = call3.argument(2).start.collectAll[Literal].l
                   value.code shouldBe "15"
+                  val List(desCall) = index.argument(2).start.isCall.l
                   desCall.name shouldBe Operators.arrayInitializer
                   desCall.code shouldBe "[3 ... 9]"
                   desCall.argument.code.l shouldBe List("3", "9")
               }
-              children shouldBe args
+              call.argument.l shouldBe children
           }
       }
 
@@ -1773,27 +1778,29 @@ class AstCreationPassTests extends AbstractPassTest:
               call.order shouldBe 2
               call.name shouldBe Operators.arrayInitializer
               call.methodFullName shouldBe Operators.arrayInitializer
-              val children = call.astMinusRoot.isCall.name(Operators.assignment).l
-              val args     = call.argument.astChildren.l
+              val children = call.argument.isCall.name(Operators.assignment).l
               inside(children) { case List(call1, call2, call3) =>
+                  // each element assigns into the initialised array
                   call1.code shouldBe "[1] = 5"
                   call1.name shouldBe Operators.assignment
-                  call1.astMinusRoot.code.l shouldBe List("1", "5")
-                  call1.argument.code.l shouldBe List("1", "5")
+                  call1.argument.code.l shouldBe List("a[1]", "5")
+                  call1.argument(1).start.isCall.name.l shouldBe List(Operators.indirectIndexAccess)
+                  call1.argument(1).start.isCall.argument.code.l shouldBe List("a", "1")
                   call2.code shouldBe "[2] = 10"
-                  call2.name shouldBe Operators.assignment
-                  call2.astMinusRoot.code.l shouldBe List("2", "10")
-                  call2.argument.code.l shouldBe List("2", "10")
+                  call2.argument.code.l shouldBe List("a[2]", "10")
                   call3.code shouldBe "[3 ... 9] = 15"
                   call3.name shouldBe Operators.assignment
-                  val List(desCall) = call3.argument(1).start.collectAll[Call].l
-                  val List(value)   = call3.argument(2).start.collectAll[Literal].l
+                  val List(index) = call3.argument(1).start.isCall.l
+                  index.name shouldBe Operators.indirectIndexAccess
+                  index.code shouldBe "a[3 ... 9]"
+                  val List(value) = call3.argument(2).start.collectAll[Literal].l
                   value.code shouldBe "15"
+                  val List(desCall) = index.argument(2).start.isCall.l
                   desCall.name shouldBe Operators.arrayInitializer
                   desCall.code shouldBe "[3 ... 9]"
                   desCall.argument.code.l shouldBe List("3", "9")
               }
-              children shouldBe args
+              call.argument.l shouldBe children
           }
       }
 
@@ -1809,19 +1816,18 @@ class AstCreationPassTests extends AbstractPassTest:
               call.order shouldBe 2
               call.name shouldBe Operators.arrayInitializer
               call.methodFullName shouldBe Operators.arrayInitializer
-              val children = call.astMinusRoot.isCall.l
-              val args     = call.argument.astChildren.l
-              inside(children) { case List(call1, call2) =>
+              val assignments = call.argument.isCall.name(Operators.assignment).l
+              inside(assignments) { case List(call1, call2) =>
+                  // each member assigns into the initialised struct
                   call1.code shouldBe ".a = 1"
-                  call1.name shouldBe Operators.assignment
-                  call1.astMinusRoot.code.l shouldBe List("a", "1")
-                  call1.argument.code.l shouldBe List("a", "1")
+                  call1.argument.code.l shouldBe List("b.a", "1")
+                  val List(member) = call1.argument(1).start.isCall.l
+                  member.name shouldBe Operators.fieldAccess
+                  member.argument(1).start.isIdentifier.name.l shouldBe List("b")
+                  member.argument(2).start.isFieldIdentifier.canonicalName.l shouldBe List("a")
                   call2.code shouldBe ".b = 2"
-                  call2.name shouldBe Operators.assignment
-                  call2.astMinusRoot.code.l shouldBe List("b", "2")
-                  call2.argument.code.l shouldBe List("b", "2")
+                  call2.argument.code.l shouldBe List("b.b", "2")
               }
-              children shouldBe args
           }
       }
 
@@ -1867,6 +1873,88 @@ class AstCreationPassTests extends AbstractPassTest:
                       children shouldBe args
                   }
           }
+      }
+
+      "assign nested designated initializers into the declared object" in AstFixture("""
+        |struct In { int b; int c[4]; };
+        |struct Out { struct In a; int n; };
+        |void foo(int *p) {
+        |  struct Out o = { .a = { .b = *p, .c[2] = 7 }, .n = 1 };
+        |  struct Out q = { .a.b = 3 };
+        |};
+      """.stripMargin) { cpg =>
+        val assigned = cpg.assignment.filter(_.code.startsWith(".")).argument(1).code.l
+        assigned shouldBe List("o.a", "o.a.b", "o.a.c[2]", "o.n", "q.a.b")
+        val List(deref) = cpg.assignment.codeExact(".b = *p").argument(2).isCall.l
+        deref.name shouldBe Operators.indirection
+        // the member chain is built from field accesses on the declared variable
+        val List(oab) = cpg.assignment.codeExact(".b = *p").argument(1).isCall.l
+        oab.name shouldBe Operators.fieldAccess
+        oab.argument(1).start.isCall.argument(1).isIdentifier.name.l shouldBe List("o")
+      }
+
+      "assign designated initializers of a C++ declaration into the declared object" in AstFixture(
+        """
+        |struct Point3D { int x; int y; int z; };
+        |Point3D origin = { .x = 0, .y = 0 };
+        |void foo() { Point3D other = { .z = 3 }; }
+      """.stripMargin,
+        "test.cpp"
+      ) { cpg =>
+          // CDT does not accept designators in a direct-list-initialization (`Point3D p{ .x = 1 }`)
+          cpg.assignment.filter(_.code.startsWith(".")).argument(1).code.l shouldBe List(
+            "origin.x",
+            "origin.y",
+            "other.z"
+          )
+      }
+
+      "keep the designators of a compound literal on their own" in AstFixture("""
+        |struct P { int x; };
+        |void use(struct P);
+        |void foo() { int x = 0; use((struct P){ .x = 1 }); };
+      """.stripMargin) { cpg =>
+        // a compound literal names no object to assign into: the member is assigned on its own,
+        // and is not the local of the same name
+        val List(member) = cpg.assignment.codeExact(".x = 1").argument(1).l
+        member shouldBe a[FieldIdentifier]
+        member.code shouldBe "x"
+        cpg.local.nameExact("x").referencingIdentifiers.code.l shouldBe List("x")
+      }
+
+      "assign a compound literal's designated initializers into the object it initialises" in AstFixture(
+        """
+        |struct W { int *e; int cur; };
+        |#define WRITER(n) int elements[n]; struct W writer = (struct W){ .e = elements, .cur = -1 }
+        |void foo() { WRITER(4); struct W other = (struct W){ .cur = 2 }; }
+      """.stripMargin
+      ) { cpg =>
+        cpg.assignment.argument(1).isCall.nameExact(Operators.fieldAccess).code.l shouldBe List(
+          "writer.e",
+          "writer.cur",
+          "other.cur"
+        )
+        // a variable a macro declares is referenced by its name, not the invocation's text
+        val writerRefs = cpg.local.nameExact("writer").referencingIdentifiers.l
+        writerRefs.name.distinct.l shouldBe List("writer")
+        writerRefs.size shouldBe 3
+      }
+
+      "assign designated initializers written by a macro into the declared object" in AstFixture(
+        """
+        |struct S { int *p; int n; };
+        |#define INIT_P(v) .p = (v)
+        |#define S_INIT(v, k) { INIT_P(v), .n = k }
+        |void foo(int *q) {
+        |  struct S a = { INIT_P(q), .n = 2 };
+        |  struct S b = S_INIT(q, 3);
+        |}
+      """.stripMargin
+      ) { cpg =>
+        val members = cpg.assignment.argument(1).isCall.nameExact(Operators.fieldAccess).l
+        members.code.l shouldBe List("a.p", "a.n", "b.p", "b.n")
+        members.argument(1).isIdentifier.name.l shouldBe List("a", "a", "b", "b")
+        members.argument(2).isFieldIdentifier.canonicalName.l shouldBe List("p", "n", "p", "n")
       }
 
       "be correct for call with pack expansion" in AstFixture(

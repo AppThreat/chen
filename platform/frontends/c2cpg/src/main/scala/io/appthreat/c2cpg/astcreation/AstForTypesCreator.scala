@@ -163,8 +163,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         case i: IASTEqualsInitializer =>
             val operatorName = Operators.assignment
             val left         = astForNode(effectiveDeclaratorName(declarator))
-            val right        = astForNode(i.getInitializerClause)
-            val code         = i.getInitializerClause.getRawSignature
+            // designated initializers in the list assign into the declared object
+            val right = withInitializedObject(
+              i.getInitializerClause,
+              () => astForNode(effectiveDeclaratorName(declarator))
+            )(astForNode(i.getInitializerClause))
+            val code = i.getInitializerClause.getRawSignature
             val dispatchType =
                 if code.nonEmpty && (code.startsWith("&") || code.contains("->")) then
                   DispatchTypes.DYNAMIC_DISPATCH
@@ -227,8 +231,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                   None,
                   Some(declaredType(declarator))
                 )
-            val left  = astForNode(declarator.getName)
-            val right = astForNode(i)
+            val left = astForNode(declarator.getName)
+            val right =
+                withInitializedObject(i, () => astForNode(declarator.getName))(astForNode(i))
             callAst(callNode_, List(left, right))
         case _ => astForNode(init)
 

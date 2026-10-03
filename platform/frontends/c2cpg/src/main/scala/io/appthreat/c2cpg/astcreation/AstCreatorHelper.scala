@@ -5,7 +5,12 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewCall, NewNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    ExpressionNew,
+    NewCall,
+    NewIdentifier,
+    NewNode
+}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 import io.shiftleft.utils.IOUtils
 import org.eclipse.cdt.core.dom.ast.*
@@ -902,35 +907,138 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val operand  = nullSafeAst(decl.getDecltypeExpression)
     callAst(cpgUnary, List(operand))
 
+  /** The object an initializer list initialises, innermost last: `s` while `{ .a = 1 }` of `struct
+    * S s = { .a = 1 }` is created, `s.a` inside `{ .a = { .b = 1 } }`. Each entry builds a fresh
+    * AST of that object.
+    */
+  private val initializedObjects = mutable.Stack.empty[(IASTNode, () => Ast)]
+
+  /** Creates `body` with `target` as the object the designated initializers of `list` assign into.
+    * Only that list's own designated initializers use it: a compound literal nested in the
+    * initializer initialises another object. When the whole initializer is a compound literal, as
+    * in `T v = (T){ .a = 1 }`, the literal is copied into the object, so its list assigns into it
+    * as well.
+    */
+  protected def withInitializedObject[T](list: IASTNode, target: () => Ast)(body: => T): T =
+      list match
+        case l: IASTInitializerList =>
+            initializedObjects.push((l, target))
+            try body
+            finally initializedObjects.pop()
+        case c: IASTTypeIdInitializerExpression =>
+            withInitializedObject(c.getInitializer, target)(body)
+        case _ => body
+
+  /** The object's code for a member access built on it: a variable by its name, since inside a
+    * macro expansion an identifier's code is the invocation's text.
+    */
+  private def rootCode(ast: Ast): String =
+      ast.root.collect {
+          case i: NewIdentifier => i.name
+          case n: ExpressionNew => n.code
+      }.getOrElse("")
+
+  /** `base.field`, `base[index]` or `base[low ... high]` for one designator. */
+  private def designatorAccessAst(base: Ast, designator: IASTNode): Ast =
+      designator match
+        case f: ICASTFieldDesignator   => fieldDesignatorAst(base, f, f.getName)
+        case f: ICPPASTFieldDesignator => fieldDesignatorAst(base, f, f.getName)
+        case a: ICASTArrayDesignator =>
+            indexDesignatorAst(base, a, nullSafeAst(a.getSubscriptExpression))
+        case a: ICPPASTArrayDesignator =>
+            indexDesignatorAst(base, a, nullSafeAst(a.getSubscriptExpression))
+        case r: CASTArrayRangeDesignator   => indexDesignatorAst(base, r, astForNode(r))
+        case r: CPPASTArrayRangeDesignator => indexDesignatorAst(base, r, astForNode(r))
+        case other                         => indexDesignatorAst(base, other, astForNode(other))
+
+  private def fieldDesignatorAst(base: Ast, designator: IASTNode, name: IASTName): Ast =
+    val field = name.toString
+    val tpe = Try(name.resolveBinding()).toOption.collect { case v: IVariable => v.getType }
+        .map(t => registerType(cleanType(safeGetType(t)))).getOrElse(Defines.anyTypeName)
+    val op = Operators.fieldAccess
+    val access = callNode(
+      designator,
+      s"${rootCode(base)}.$field",
+      op,
+      op,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(tpe)
+    )
+    callAst(access, List(base, Ast(fieldIdentifierNode(designator, field, field))))
+
+  private def indexDesignatorAst(base: Ast, designator: IASTNode, index: Ast): Ast =
+    val op = Operators.indirectIndexAccess
+    // `[1]` or `[3 ... 9]`, as written
+    val access = callNode(
+      designator,
+      s"${rootCode(base)}${nodeSignature(designator)}",
+      op,
+      op,
+      DispatchTypes.STATIC_DISPATCH
+    )
+    callAst(access, List(base, index))
+
+  /** A designated initializer (`.a.b[2] = v` in an initializer list) assigns `v` to the designated
+    * member of the object the list initialises: `s.a.b[2] = v`. A nested list (`.a = { .b = 1 }`)
+    * initialises that member in turn. Outside a declaration's initializer (a compound literal, a
+    * C++ temporary) the object has no name: the assignment's target is the designator itself, a
+    * FIELD_IDENTIFIER for a member.
+    */
+  private def astForDesignatedInitializer(
+    d: IASTNode,
+    designators: Seq[IASTNode],
+    operand: IASTInitializerClause
+  ): Ast =
+      initializedObjects.headOption.filter((list, _) => list eq d.getParent)
+          .map(_._2).orElse(declaredObjectOf(d.getParent)) match
+        case Some(target) =>
+            val member = () => designators.foldLeft(target())(designatorAccessAst)
+            val right  = withInitializedObject(operand, member)(astForNode(operand))
+            val op     = Operators.assignment
+            val assignment =
+                callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
+            callAst(assignment, List(member(), right))
+        case None =>
+            val node = blockNode(d, Defines.empty, Defines.voidTypeName)
+            scope.pushNewScope(node)
+            val op = Operators.assignment
+            val calls = withIndex(designators.toArray) { (des, o) =>
+              val callNode_ =
+                  callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
+                      .argumentIndex(o)
+              // a member of the unnamed object, never a variable of the same name
+              val left = des match
+                case f: ICASTFieldDesignator =>
+                    Ast(fieldIdentifierNode(f, f.getName.toString, f.getName.toString))
+                case f: ICPPASTFieldDesignator =>
+                    Ast(fieldIdentifierNode(f, f.getName.toString, f.getName.toString))
+                case _ => astForNode(des)
+              val right = astForNode(operand)
+              callAst(callNode_, List(left, right))
+            }
+            scope.popScope()
+            blockAst(node, calls.toList)
+
+  /** The object a declaration's initializer list initialises, whatever form the initializer takes
+    * (`T v = {...}`, `T v{...}`, `T v({...})`).
+    */
+  private def declaredObjectOf(list: IASTNode): Option[() => Ast] =
+      list match
+        case l: IASTInitializerList =>
+            val declarator = l.getParent match
+              case d: IASTDeclarator => Some(d)
+              case i: IASTInitializer =>
+                  Option(i.getParent).collect { case d: IASTDeclarator => d }
+              case _ => None
+            declarator.map(d => () => astForNode(effectiveDeclaratorName(d)))
+        case _ => None
+
   private def astForCASTDesignatedInitializer(d: ICASTDesignatedInitializer): Ast =
-    val node = blockNode(d, Defines.empty, Defines.voidTypeName)
-    scope.pushNewScope(node)
-    val op = Operators.assignment
-    val calls = withIndex(d.getDesignators) { (des, o) =>
-      val callNode_ =
-          callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
-              .argumentIndex(o)
-      val left  = astForNode(des)
-      val right = astForNode(d.getOperand)
-      callAst(callNode_, List(left, right))
-    }
-    scope.popScope()
-    blockAst(node, calls.toList)
+      astForDesignatedInitializer(d, d.getDesignators.toSeq, d.getOperand)
 
   private def astForCPPASTDesignatedInitializer(d: ICPPASTDesignatedInitializer): Ast =
-    val node = blockNode(d, Defines.empty, Defines.voidTypeName)
-    scope.pushNewScope(node)
-    val op = Operators.assignment
-    val calls = withIndex(d.getDesignators) { (des, o) =>
-      val callNode_ =
-          callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
-              .argumentIndex(o)
-      val left  = astForNode(des)
-      val right = astForNode(d.getOperand)
-      callAst(callNode_, List(left, right))
-    }
-    scope.popScope()
-    blockAst(node, calls.toList)
+      astForDesignatedInitializer(d, d.getDesignators.toSeq, d.getOperand)
 
   private def astForCPPASTConstructorInitializer(c: ICPPASTConstructorInitializer): Ast =
     val name = "<operator>.constructorInitializer"

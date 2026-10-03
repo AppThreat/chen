@@ -66,7 +66,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                   id.getBinding.getName
               case id: IASTName if ASTStringUtil.getSimpleName(id).isEmpty =>
                   uniqueName("name", "", "")._1
-              case _ => code(ident)
+              // the name as spelled: inside a macro expansion the node's code is the invocation's text
+              case id: IASTName => id.toString
+              case _            => code(ident)
             val variableOption = scope.lookupVariable(identifierName)
             if variableOption.isEmpty then registerConstantRead(ident)
             val identifierTypeName = variableOption match

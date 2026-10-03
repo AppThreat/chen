@@ -312,6 +312,23 @@ Each top-level macro invocation becomes a `CALL` with dispatch type `INLINED`:
 Only the outermost invocation of nested macros is represented, and `#define` directives are not
 nodes.
 
+## Designated Initializers
+
+A designated initializer assigns into the object its list initialises. `struct S s = { .a.b = v,
+.c[2] = w };` gives the assignments `s.a.b = v` and `s.c[2] = w`, built from
+`<operator>.fieldAccess` (with a `FIELD_IDENTIFIER` for the member) and
+`<operator>.indirectIndexAccess`. A GNU range `[3 ... 9] = v` indexes with the range. A nested
+list (`.a = { .b = 1 }`) assigns into `s.a`. A compound literal that is the whole initializer
+(`T v = (T){ .a = 1 }`) assigns into `v`, also when a macro writes the declaration.
+
+A compound literal used anywhere else, or a C++ temporary, has no name. Its designated
+initializers stay assignments to the bare designator, a `FIELD_IDENTIFIER` for a member, so they
+never read or write a variable that has the same name.
+
+CDT 12.6 does not accept designators in a C++ direct-list-initialization (`Point p{ .x = 1 };`).
+At file scope the declaration is left unparsed; in a function body it is read as an expression.
+`Point p = { .x = 1 };` parses and is lowered as above.
+
 ## C++ Calls the Source Does Not Spell
 
 C++ calls functions the source never writes as calls. CDT resolves each of them, and c2cpg emits a

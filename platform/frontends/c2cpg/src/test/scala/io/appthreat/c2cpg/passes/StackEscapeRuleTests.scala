@@ -79,6 +79,39 @@ class StackEscapeRuleTests extends DataFlowCodeToCpgSuite:
     |    out = buf;
     |    out[0] = (char)n;
     |}
+    |
+    |/* designated initializers store into the object they initialise, not into a global */
+    |struct pair { char *first; int n; };
+    |void consume(struct pair);
+    |
+    |void good_designated_local(void)
+    |{
+    |    char storage[8];
+    |    struct pair p = { .first = storage, .n = 1 };
+    |    consume(p);
+    |}
+    |
+    |void good_compound_literal(void)
+    |{
+    |    char storage[8];
+    |    consume((struct pair){ .first = storage });
+    |}
+    |
+    |#define PAIR_OF(s) { .first = (s), .n = 0 }
+    |#define PAIR_WRITER(n) char cells[n]; struct pair w = (struct pair){ .first = cells, .n = n }
+    |
+    |void good_compound_literal_declared(void)
+    |{
+    |    PAIR_WRITER(8);
+    |    consume(w);
+    |}
+    |
+    |void good_designated_macro(void)
+    |{
+    |    char storage[8];
+    |    struct pair p = PAIR_OF(storage);
+    |    consume(p);
+    |}
     |""".stripMargin,
     "stack_escape.c"
   )
@@ -136,5 +169,15 @@ class StackEscapeRuleTests extends DataFlowCodeToCpgSuite:
     "stay silent when a parameter is merely rebound to a local" in {
         // `out = buf` rebinds this frame's copy of the parameter; the callee cannot see it
         stackEscapesIn("good_escape_param_copy") shouldBe empty
+    }
+
+    "stay silent on a stack address a designated initializer stores into a local" in {
+        stackEscapesIn("good_designated_local") shouldBe empty
+        stackEscapesIn("good_designated_macro") shouldBe empty
+    }
+
+    "stay silent on a stack address stored into a compound literal" in {
+        stackEscapesIn("good_compound_literal") shouldBe empty
+        stackEscapesIn("good_compound_literal_declared") shouldBe empty
     }
 end StackEscapeRuleTests

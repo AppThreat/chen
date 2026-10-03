@@ -688,7 +688,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   (holdsStackAddress(e, ctx) || viaTracked || refToLocale)
                 then record(r, TagStackEscape, "escape:return")
               }
-          case c: Call if c.name == "<operator>.assignment" =>
+          case c: Call if c.name == "<operator>.assignment" && !initializesTemporary(c) =>
               (argAt(c.argument.l, 1), argAt(c.argument.l, 2)) match
                 case (Some(dst), Some(rhs)) =>
                     val stackRhs = rhsHoldsStackAddress(rhs, settled, ctx)
@@ -1595,6 +1595,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => false
     case i: Identifier => ctx.arrayLocals.contains(i.name)
     case _             => false
+
+  /** A designated initializer of an object with no name - a compound literal, a C++ temporary: the
+    * frontend writes it as an assignment to the bare designator inside the initializer list. The
+    * object lives in this frame, as a by-value local does; whether it leaves the frame is the
+    * enclosing expression's business.
+    */
+  private def initializesTemporary(c: Call): Boolean =
+      c.astParent match
+        case b: Block =>
+            b.astParent match
+              case list: Call => list.name == "<operator>.arrayInitializer"
+              case _          => false
+        case _ => false
 
   /** Is this destination part of the frame: a member or element, through `.` and `[]` only, of an
     * array or by-value aggregate local? `->` leaves the frame's storage for wherever the pointer

@@ -56,7 +56,7 @@ object AstCreationPass:
   //    module units, header language from includers, compiler-predefined macros
   // 6: includes tagged with the file they resolved to and whether they name a system header, and
   //    calls with the header that declares their function
-  private val AstFormatVersion = "c2cpg-ast-6"
+  private val AstFormatVersion = "c2cpg-ast-7"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial
