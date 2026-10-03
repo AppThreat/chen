@@ -402,6 +402,19 @@ Operator calls carry the type CDT gives the expression (`p->name[1]` is `char`),
 unsigned operand is `<operator>.logicalShiftRight`, and `obj.*pm` / `ptr->*pm` are
 `<operator>.pointerToMember` / `<operator>.indirectPointerToMember`.
 
+## Functions and Types Across Files
+
+A function declared in a header and defined in another file is one function: c2cpg builds a
+METHOD for each declaring file (an empty block marks the prototype), the call linkers pick the
+definition, the definition carries the attributes its prototypes declare, and flow summaries come
+from the definition. A `static` function and anything in a C++ unnamed namespace have internal
+linkage: a call reaches only its own file's definition. A `static` file-scope variable is its own
+file's.
+
+A struct that two headers define differently keeps one layout per header (headers that agree give
+one), and a member access sees the layout of a header its file includes, directly or through other
+includes, by the resolved include paths.
+
 ## Notes for Security Analysts
 
 - `parseInactiveCode = true` can reveal code that is compiled only under specific build
