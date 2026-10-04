@@ -340,6 +340,41 @@ class CppShapesTests extends EdgCodeToCpgSuite:
       }
   }
 
+  "what the front end knows beyond the code" should {
+      val cpg = code(
+        """
+        |#define TWICE(x) ((x) * 2)
+        |struct Lock { Lock(); ~Lock(); };
+        |struct Base { virtual int area() const { return 0; } virtual ~Base() {} };
+        |int scaled(int v, int factor = 3) { return v * factor; }
+        |int sink(char *p);
+        |int facts(const Base &b, int n) {
+        |  Lock guard;
+        |  char buf[n];
+        |  buf[0] = 1;
+        |  return b.area() + scaled(n) + TWICE(n) + sink(buf);
+        |}
+        |""".stripMargin
+      )
+
+      "be tags on the nodes it is about" in {
+          requireEdga()
+          def tagged(name: String) =
+              cpg.method.nameExact("facts").ast.collectAll[
+                io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+              ]
+                  .flatMap(n => n.tag.nameExact(name).value.l.map(n.propertiesMap.get("CODE") -> _)).l
+          tagged(X2CpgDefines.VirtualCallTag) shouldBe List("b.area()" -> "true")
+          tagged(X2CpgDefines.DefaultArgumentTag).map(_._2) shouldBe List("true")
+          tagged(X2CpgDefines.VlaSizeTag).map(_._2) shouldBe List("n")
+          tagged(X2CpgDefines.LifetimeEndTag).map(_._2).distinct shouldBe List("guard")
+          tagged(X2CpgDefines.CompilerGeneratedTag).map(_._1.toString) should contain(
+            "guard.~Lock()"
+          )
+          tagged(X2CpgDefines.MacroOriginTag).map(_._2).exists(_.matches(".*:2:\\d+")) shouldBe true
+      }
+  }
+
   "a namespace-scope constant" should {
       val cpg = code(
         """

@@ -219,6 +219,12 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  return copied;
       |}
       |
+      |unsigned short add_counts(unsigned short a, unsigned short b) {
+      |  unsigned short s = a + b;
+      |  long wide = s;
+      |  return static_cast<unsigned short>(wide);
+      |}
+      |
       |template <class T> struct Limits { static const int digits = 64; };
       |int digits_of() {
       |  int width = Limits<long>::digits / 4;
@@ -310,6 +316,16 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       "not be indexed out of bounds" in {
           requireEdga()
           findingsIn("post_event") should not contain "MS-BOUND-003"
+      }
+  }
+
+  "a narrowing store" should {
+      "be read from the conversion the frontend recorded" in {
+          requireEdga()
+          val narrow = cpg.method.nameExact("add_counts").ast.isCall.l
+              .flatMap(c => c.tag.nameExact("int-narrow").value.l.map(c.code -> _))
+          narrow should contain("s = a + b" -> "from:int:32->to:unsigned short:16")
+          narrow.map(_._1) should not contain "wide = s"
       }
   }
 

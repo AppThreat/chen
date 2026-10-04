@@ -624,9 +624,20 @@ class AstCreator(
             val label = statementAst(s)
             val value = s.string("value").map(v => Ast(literalNode(s, v, registerType("int"))))
             label +: value.toSeq
-        case "label"                               => Seq(statementAst(s)).filter(_.root.isDefined)
-        case "empty" | "vla_decl" | "set_vla_size" => Seq.empty
-        case _                                     => Seq(statementAst(s)).filter(_.root.isDefined)
+        case "label" => Seq(statementAst(s)).filter(_.root.isDefined)
+        // a variable length array: its number of elements, on its LOCAL
+        case "set_vla_size" =>
+            pendingVlaSize = s.field("size").map(code).filter(_.nonEmpty)
+            Seq.empty
+        case "vla_decl" =>
+            for
+              size  <- pendingVlaSize
+              local <- s.long("var").flatMap(variables.get)
+            do tagNode(local, X2CpgDefines.VlaSizeTag, size)
+            pendingVlaSize = None
+            Seq.empty
+        case "empty" => Seq.empty
+        case _       => Seq(statementAst(s)).filter(_.root.isDefined)
 
   private def declarationAsts(s: Value): Seq[Ast] =
       s.list("decls").flatMap { d =>
@@ -655,8 +666,10 @@ class AstCreator(
                 scope.addToScope(name, (local, tpe))
                 if d.string("storage").contains("static") then
                   tagNode(local, X2CpgDefines.StorageClassTag, X2CpgDefines.StorageClassStatic)
-                if d.field("init").isDefined then d.long("id").foreach(initializedAtDeclaration.add)
-                val init = d.field("init").flatMap { i =>
+                // a default-initialised object has an initialiser of kind `none`: it is not one
+                val initialiser = d.field("init").filterNot(_.kind == "none")
+                if initialiser.isDefined then d.long("id").foreach(initializedAtDeclaration.add)
+                val init = initialiser.flatMap { i =>
                     if unit.isCpp && i.kind == "constructor" then
                       constructedVariableAst(d, local, tpe, i)
                     else Some(initializerAssignment(d, local, tpe, i))
@@ -694,6 +707,7 @@ class AstCreator(
       (s.long("var"), s.field("init")) match
         // written with the declaration already
         case (Some(id), _) if initializedAtDeclaration.contains(id) => Seq.empty
+        case (_, Some(init)) if init.kind == "none"                 => Seq.empty
         case (Some(id), Some(init)) =>
             variables.get(id).collect { case local: NewLocal =>
                 initializerAssignment(
@@ -704,6 +718,9 @@ class AstCreator(
                 )
             }.toSeq
         case _ => Seq.empty
+
+  /** A variable length array's number of elements, until its declaration statement. */
+  private var pendingVlaSize: Option[String] = None
 
   /** Variables whose initialiser was written with their declaration. The front end also lists a
     * declaration's initialisation as a statement of its own when a statement precedes it.

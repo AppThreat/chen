@@ -241,7 +241,7 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
         val inner = afterDefine.substring(nameEnd + 1, close).trim
         if inner.isEmpty then 0 else inner.split(',').length
 
-  private def relativeTo(path: String): String =
+  protected def relativeTo(path: String): String =
     val root = AstCreator.realPath(Paths.get(config.inputPath))
     val p    = AstCreator.realPath(Paths.get(path))
     if p.startsWith(root) then root.relativize(p).toString else path

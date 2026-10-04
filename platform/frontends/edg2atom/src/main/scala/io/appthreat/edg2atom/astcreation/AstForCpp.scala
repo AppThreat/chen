@@ -552,6 +552,8 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
           at.field("end").flatMap(EdgaUnit.pos).foreach { p =>
               call.lineNumber(Integer.valueOf(p.line)).columnNumber(Integer.valueOf(p.column))
           }
+        tagNode(call, X2CpgDefines.CompilerGeneratedTag, "true")
+        tagNode(call, X2CpgDefines.LifetimeEndTag, d.name)
         ast
       }
 
@@ -651,9 +653,10 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
       val block = blockNode(s, "<empty>", registerType("void"))
       value match
         case Some(v) if observesDestruction(v, destructions.map(_.variable).toSet) =>
-            val name   = "<return-value>"
-            val tpe    = registerType(types(v.long("t")))
-            val local  = localNode(s, name, s"$tpe $name", tpe)
+            val name  = "<return-value>"
+            val tpe   = registerType(types(v.long("t")))
+            val local = localNode(s, name, s"$tpe $name", tpe)
+            tagNode(local, X2CpgDefines.CompilerGeneratedTag, "true")
             val target = identifierNode(s, name, name, tpe)
             val value  = expressionAst(v)
             val store = callNode(

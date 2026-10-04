@@ -135,4 +135,38 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
           )
       }
   }
+
+  "an implicit arithmetic conversion" should {
+      val cpg = code(
+        """unsigned short add(unsigned short a, unsigned short b) {
+        |  unsigned short s = a + b;
+        |  return s;
+        |}
+        |long widen(int i) { long l = i; return l; }
+        |unsigned flip(int i) { unsigned u = i; return u; }
+        |int truncate(double d) { int k = d; return k; }
+        |""".stripMargin
+      )
+
+      def conversionsIn(method: String) =
+          cpg.method.nameExact(method).ast.collectAll[
+            io.shiftleft.codepropertygraph.generated.nodes.Expression
+          ]
+              .flatMap(e =>
+                  e.tag.nameExact(X2CpgDefines.ImplicitConversionTag).value.l.map(e.code -> _)
+              )
+              .l.sorted
+
+      "be on the value converted, with its kind" in {
+          requireEdga()
+          conversionsIn("add") shouldBe List(
+            "a"     -> "unsigned short->int:promotion",
+            "a + b" -> "int->unsigned short:narrowing",
+            "b"     -> "unsigned short->int:promotion"
+          )
+          conversionsIn("widen") shouldBe List("i" -> "int->long:arithmetic")
+          conversionsIn("flip") shouldBe List("i" -> "int->unsigned int:sign-change")
+          conversionsIn("truncate") shouldBe List("d" -> "double->int:narrowing")
+      }
+  }
 end CShapesTests

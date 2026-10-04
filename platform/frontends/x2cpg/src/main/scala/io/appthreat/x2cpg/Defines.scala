@@ -37,6 +37,26 @@ object Defines:
     */
   val PointerArithmeticTag = "ptr-arith"
 
+  /** On a C/C++ expression the language converts implicitly to another arithmetic type, from the
+    * frontend that knows (edga): `<from>-><to>:<kind>`, the kind `promotion` (to int), `narrowing`
+    * (to a narrower integer, or a floating value to an integer), `sign-change` (the same width, the
+    * other signedness) or `arithmetic` (any other). Where it was converted - an assignment, an
+    * argument, a return, an operand - is the node's place in the AST.
+    */
+  val ImplicitConversionTag = "implicit-conversion"
+
+  /** C/C++ facts the frontend that knows them (edga) records: a node the compiler made, not the
+    * program (a destructor call where a scope ends, the value a return holds while it runs); where
+    * a variable's lifetime ends (`lifetime-end=<variable>` on that call); a call that dispatches
+    * virtually; an argument the declaration's default supplied; and a variable length array's
+    * number of elements as written (`vla-size=<expression>` on its LOCAL).
+    */
+  val CompilerGeneratedTag = "compiler-generated"
+  val LifetimeEndTag       = "lifetime-end"
+  val VirtualCallTag       = "virtual-call"
+  val DefaultArgumentTag   = "default-argument"
+  val VlaSizeTag           = "vla-size"
+
   /** On a LOCAL or METHOD_PARAMETER_IN (C/C++): how the variable is referenced, one tag per kind -
     * `address-taken` (its address leaves, so it can change unnamed), `modified` (written after its
     * declaration), or `read-only`.

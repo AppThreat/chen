@@ -142,10 +142,31 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
               else if v < 0 && isUnsignedIntegral(to) then
                 record(site, TagResign, s"${label}from:constant:$v->to:$to:$tw")
           case None =>
-              val (from, fromW) = computedWidthOf(value)
-              if fromW > tw && !fitsAsConstant(value, to) then
-                record(site, TagNarrow, s"${label}from:$from:$fromW->to:$to:$tw")
+              // the conversion the frontend recorded at this store, when it records them: the
+              // computed width is then known, not inferred
+              recordedConversion(value, to) match
+                case Some((from, kind)) =>
+                    if kind == "narrowing" && !fitsAsConstant(value, to) then
+                      val fromW = integralWidth(from).getOrElse(0)
+                      record(site, TagNarrow, s"${label}from:$from:$fromW->to:$to:$tw")
+                case None =>
+                    val (from, fromW) = computedWidthOf(value)
+                    if fromW > tw && !fitsAsConstant(value, to) then
+                      record(site, TagNarrow, s"${label}from:$from:$fromW->to:$to:$tw")
+        end match
       }
+
+  /** The implicit conversion of `value` to `to` the frontend recorded on it: (from, kind). */
+  private def recordedConversion(value: Expression, to: String): Option[(String, String)] =
+      value.tag.nameExact(io.appthreat.x2cpg.Defines.ImplicitConversionTag).value.l.flatMap { v =>
+          v.split("->", 2) match
+            case Array(from, rest) =>
+                val at = rest.lastIndexOf(':')
+                Option.when(at > 0 && normalizeTypeName(rest.take(at)) == normalizeTypeName(to))(
+                  (from, rest.drop(at + 1))
+                )
+            case _ => None
+      }.headOption
 
   /** A constant written as bits: a hexadecimal, octal or binary literal (also behind a macro), or a
     * bitwise operator over constants.

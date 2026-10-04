@@ -98,6 +98,69 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
   protected def expressionAst(raw: Value): Ast = withMacroCall(raw)(expressionAstOf(raw))
 
   private def expressionAstOf(raw: Value): Ast =
+    val ast = expressionShapeAst(raw)
+    implicitConversionOf(raw).foreach(c =>
+        ast.root.foreach(tagNode(_, X2CpgDefines.ImplicitConversionTag, c))
+    )
+    // written in a macro's definition: where, as the CDT frontend records it
+    for
+      origin <- raw.origin
+      file   <- unit.files.get(origin.file)
+      root   <- ast.root
+    do
+      tagNode(
+        root,
+        X2CpgDefines.MacroOriginTag,
+        s"${relativeTo(file.path)}:${origin.line}:${origin.column}"
+      )
+    if raw.flag("defaultArgument") then
+      ast.root.foreach(tagNode(_, X2CpgDefines.DefaultArgumentTag, "true"))
+    // a virtual call: through its object's dynamic type
+    if raw.flag("virtual") then
+      ast.root.collect { case c: NewCall => c }.foreach(tagNode(
+        _,
+        X2CpgDefines.VirtualCallTag,
+        "true"
+      ))
+    ast
+  end expressionAstOf
+
+  /** The implicit arithmetic conversion the front end applied to the value `raw` stands for:
+    * `<from>-><to>:<kind>`.
+    */
+  private def implicitConversionOf(raw: Value): Option[String] =
+      if raw.kind != "operation" then None
+      else
+        raw.string("op") match
+          case Some("cast") if raw.flag("implicit") =>
+              for
+                operand <- raw.list("ops").headOption.map(visible)
+                fromId  <- operand.long("t")
+                toId    <- raw.long("t")
+                from    <- types.resolved(fromId).filter(isArithmetic)
+                to      <- types.resolved(toId).filter(isArithmetic)
+                if types(fromId) != types(toId)
+              yield s"${types(fromId)}->${types(toId)}:${conversionKind(from, to)}"
+          case Some(op) if Transparent.contains(op) =>
+              raw.list("ops").headOption.flatMap(implicitConversionOf)
+          case _ => None
+
+  private def isArithmetic(t: Value): Boolean =
+      t.string("kind").exists(k => k == "integer" || k == "float") && !t.flag("bool")
+
+  private def conversionKind(from: Value, to: Value): String =
+    val fromSize = from.long("size").getOrElse(0L)
+    val toSize   = to.long("size").getOrElse(0L)
+    val integers = from.string("kind").contains("integer") && to.string("kind").contains("integer")
+    if to.string("kind").contains("integer") && from.string("kind").contains("float") then
+      "narrowing"
+    else if integers && toSize < fromSize then "narrowing"
+    else if integers && toSize == fromSize && from.flag("signed") != to.flag("signed") then
+      "sign-change"
+    else if integers && fromSize < 4 && toSize == 4 then "promotion"
+    else "arithmetic"
+
+  private def expressionShapeAst(raw: Value): Ast =
     val e = visible(raw)
     e.kind match
       case "operation" => operationAst(e)
@@ -154,7 +217,7 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       case "condition" => e.field("expr").map(expressionAst).getOrElse(Ast())
       case _           => Ast(unknownNode(e, code(e)))
     end match
-  end expressionAstOf
+  end expressionShapeAst
 
   private def typeOf(e: Value): String = registerType(types(e.long("t")))
 
