@@ -84,17 +84,26 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
   def arguments(file: Path): Seq[String] =
     val settings = sources.settingsFor(file)
     val cpp      = settings.language == SourceLanguage.Cpp
-    val identity = EdgaRunner.hostIdentity(config, settings.language)
-    val facts    = identity.flatMap(PredefinedMacros.ofCompiler(_, None))
-    val macros   = facts.map(_.macros).getOrElse(settings.definedSymbols)
-    val dialect  = EdgaRunner.dialectOptions(macros, cpp)
+    // the compiler the unit's flags name (a compilation database), else the host's; a compiler
+    // that cannot be asked (MSVC) has its macros in the unit's settings already
+    val identity = settings.compiler.orElse(
+      Option.when(!settings.definedSymbols.contains("_MSC_VER"))(
+        EdgaRunner.hostIdentity(config, settings.language)
+      ).flatten
+    )
+    val facts   = identity.flatMap(PredefinedMacros.ofCompiler(_, None))
+    val macros  = facts.map(_.macros).getOrElse(settings.definedSymbols)
+    val dialect = EdgaRunner.dialectOptions(macros, cpp)
     // the type-trait builtins (`__is_same(T, U)` and the rest), which C++ standard libraries use
     // without a feature check: every compiler the macros come from has them, but the front end
     // enables them only above the GNU 4.2.1 clang reports
     val standard =
         if cpp then
-          Seq(EdgaRunner.cppStandardOption(config.cppStandard), "--type_traits_helpers")
-        else Seq("--c17")
+          Seq(
+            EdgaRunner.cppStandardOption(settings.standard.getOrElse(config.cppStandard)),
+            "--type_traits_helpers"
+          )
+        else Seq(EdgaRunner.cStandardOption(settings.standard.orNull))
     val systemDirs =
         facts.map(_.systemIncludePaths).getOrElse(Seq.empty).map(_.toAbsolutePath.normalize)
     val (projectIncludes, otherIncludes) =
@@ -179,6 +188,19 @@ object EdgaRunner:
         case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
         case _                                              => "--c++17"
 
+  /** The front end's option for a C `-std` (`c99`, `gnu11`, `iso9899:2011`), C17 when none is given
+    * or the front end has no mode for it.
+    */
+  def cStandardOption(standard: String): String =
+      Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse(
+        ""
+      ) match
+        case "89" | "90" | "iso9899:1990" | "iso9899:199409" => "--c89"
+        case "99" | "9x" | "iso9899:1999"                    => "--c99"
+        case "11" | "1x" | "iso9899:2011"                    => "--c11"
+        case "2x" | "23" | "iso9899:2024"                    => "--c23"
+        case _                                               => "--c17"
+
   def locate(): Option[String] =
       sys.props.get("edga.path").orElse(sys.env.get("EDGA_PATH")).filter(p =>
           new File(p).canExecute
@@ -214,7 +236,9 @@ object EdgaRunner:
       // that matches its clang emulation
       case Some(clang) => Seq("--clang", s"--clang_version=$clang")
       case None =>
-          gnu match
-            case Some(g) => Seq(if cpp then "--g++" else "--gcc", s"--gnu_version=$g")
-            case None    => Seq.empty
+          (gnu, macros.get("_MSC_VER").flatMap(_.trim.toIntOption)) match
+            case (Some(g), _) => Seq(if cpp then "--g++" else "--gcc", s"--gnu_version=$g")
+            // MSVC, from the macros its family's table gives
+            case (None, Some(msvc)) => Seq("--microsoft", s"--microsoft_version=$msvc")
+            case _                  => Seq.empty
 end EdgaRunner

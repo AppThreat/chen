@@ -20,7 +20,11 @@ final case class UnitSettings(
   definedSymbols: Map[String, String],
   includePaths: Seq[Path],
   includeFiles: Seq[Path],
-  macroFiles: Seq[Path]
+  macroFiles: Seq[Path],
+  /** The compiler the unit's macros came from, when one was run for them. */
+  compiler: Option[CompilerIdentity] = None,
+  /** The standard the unit is compiled for, as its `-std` spells it (`c11`, `gnu++17`). */
+  standard: Option[String] = None
 ):
   /** Everything here that shapes the file's AST, for the AST cache key. */
   lazy val fingerprint: String =
@@ -31,6 +35,7 @@ final case class UnitSettings(
     (Seq(language.toString) ++ definedSymbols.toSeq.sorted.map((k, v) => s"$k=$v") ++
         includePaths.map(_.toString) ++ includeFiles.map(withContent) ++
         macroFiles.map(withContent)).mkString("\u0001")
+end UnitSettings
 
 object UnitSettings:
 
@@ -321,7 +326,9 @@ object ProjectSources:
       flags.toSeq.flatMap(_.includeFiles) ++
           config.includeFiles.toSeq.sorted.map(p => Paths.get(p).toAbsolutePath),
       flags.toSeq.flatMap(_.macroFiles) ++
-          config.macroFiles.toSeq.sorted.map(p => Paths.get(p).toAbsolutePath)
+          config.macroFiles.toSeq.sorted.map(p => Paths.get(p).toAbsolutePath),
+      identity,
+      flags.flatMap(_.standard)
     )
   end settings
 
