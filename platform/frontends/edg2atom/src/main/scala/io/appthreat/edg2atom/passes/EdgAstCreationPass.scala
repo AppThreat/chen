@@ -44,6 +44,9 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
   /** Translation units edga could not export, for a caller that parses them another way. */
   val failed: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
 
+  /** Why each failed unit failed: the front end's first error, if it reported one. */
+  val failures = new ConcurrentHashMap[String, String]()
+
   /** Translation units whose AST was written, exported or from the cache. */
   val written: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
 
@@ -69,7 +72,11 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
       createAst =
         attempted = true
         runner.exportUnit(path, EdgAstCreationPass.TimeoutSeconds) match
-          case Some(unit) if unit.status != "failed" =>
+          case Some(unit) if unit.status == "failed" =>
+              unit.diagnostics.find(_.obj.get("level").exists(_.str == "error"))
+                  .flatMap(_.obj.get("message")).foreach(m => failures.put(file, m.str))
+              None
+          case Some(unit) =>
               exported = true
               val relative = SourceFiles.toRelativePath(path.toString, config.inputPath)
               val creator =

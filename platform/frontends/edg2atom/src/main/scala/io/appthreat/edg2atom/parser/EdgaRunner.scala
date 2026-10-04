@@ -109,7 +109,11 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     val (projectIncludes, otherIncludes) =
         settings.includePaths.map(_.toAbsolutePath.normalize).filterNot(systemDirs.contains)
             .partition(_.startsWith(root))
-    val includes = projectIncludes.flatMap(p => Seq("-I", p.toString)) ++
+    // then the roots the CDT frontend would find the project's headers from by their trailing
+    // path segments, which a build passes but an analysis may not be told
+    val inferred = sources.inferredIncludeRoots.filterNot(projectIncludes.contains)
+        .filterNot(EdgaRunner.shadowsSystemHeaders(_, systemDirs))
+    val includes = (projectIncludes ++ inferred).flatMap(p => Seq("-I", p.toString)) ++
         (otherIncludes ++ systemDirs).distinct.flatMap(p => Seq("--sys_include", p.toString))
     // the compiler's macros, without those the front end defines from its own options
     val predefinedFile = macroFile(macros)
@@ -164,7 +168,12 @@ object EdgaRunner:
     "__BASE_FILE__",
     "__INCLUDE_LEVEL__",
     // Apple's blocks extension, which the front end does not parse
-    "__BLOCKS__"
+    "__BLOCKS__",
+    // ARM's NEON intrinsics are clang builtins the front end does not implement: without these,
+    // code takes its portable paths
+    "__ARM_NEON",
+    "__ARM_NEON__",
+    "__ARM_NEON_FP"
   )
 
   /** What the C/C++ parser settings define only because that parser cannot evaluate them, all of
@@ -187,6 +196,17 @@ object EdgaRunner:
         case "++20" | "++2a"                                => "--c++20"
         case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
         case _                                              => "--c++17"
+
+  /** Whether a directory holds a header a system directory also has (`time.h`): as an include
+    * directory it would be found first for `<time.h>`.
+    */
+  def shadowsSystemHeaders(dir: Path, systemDirs: Seq[Path]): Boolean =
+      Try(Files.list(dir)).toOption.exists { entries =>
+          try
+              entries.iterator.asScala.filter(Files.isRegularFile(_)).map(_.getFileName.toString)
+                  .exists(name => systemDirs.exists(d => Files.isRegularFile(d.resolve(name))))
+          finally entries.close()
+      }
 
   /** The front end's option for a C `-std` (`c99`, `gnu11`, `iso9899:2011`), C17 when none is given
     * or the front end has no mode for it.

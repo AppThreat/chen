@@ -47,14 +47,35 @@ final class IncludeGraph(
     val local    = if quoted then Option(includer.getParent).map(_.resolve(name)) else None
     val searched = local.toSeq ++ includePathsOf(unit).map(_.resolve(name))
     searched.map(_.normalize).find(projectFiles.contains)
-        .orElse(
-          headerFileFinder.find(name, Some(includer)).map(p =>
-              Paths.get(p).toAbsolutePath.normalize
-          )
-              .filter(projectFiles.contains)
-              // a bare basename match must agree on the path segments the include spells out
-              .filter(p => p.endsWith(Paths.get(name).normalize))
-        )
+        .orElse {
+            val spelled = Paths.get(name).normalize
+            val found = headerFileFinder.find(name, Some(includer)).map(p =>
+                Paths.get(p).toAbsolutePath.normalize
+            )
+                .filter(projectFiles.contains)
+                // a bare basename match must agree on the path segments the include spells out
+                .filter(p => p.endsWith(spelled))
+            // the directory the include is spelled from: an include root the build passes. A
+            // bare name (`time.h`) says nothing about one, and would shadow system headers
+            if spelled.getNameCount > 1 then
+              found.flatMap(p =>
+                  Option(p.getRoot).map(_.resolve(p.subpath(
+                    0,
+                    p.getNameCount - spelled.getNameCount
+                  )))
+              ).foreach(inferred.add)
+            found
+        }
+  end resolve
+
+  private val inferred = ConcurrentHashMap.newKeySet[Path]()
+
+  /** The directories includes were found in by their trailing path segments: the include roots the
+    * project's build passes (`include/` for `#include "leveldb/slice.h"`), known once the includes
+    * of the units have been read.
+    */
+  def inferredIncludeRoots: Seq[Path] =
+      scala.jdk.CollectionConverters.SetHasAsScala(inferred).asScala.toSeq.sortBy(_.toString)
 
   /** The project headers `unit` includes, directly or through other headers, in the order they are
     * reached.

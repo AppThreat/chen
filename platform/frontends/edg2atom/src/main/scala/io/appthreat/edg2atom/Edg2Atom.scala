@@ -53,6 +53,7 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
             else
               val pass = new EdgAstCreationPass(cpg, config, sources, runner)
               pass.createAndApply()
+              reportFailures(pass, relative)
               val edg = pass.written.asScala.toSeq.map(relative) ++
                   sources.headerOwners.collect {
                       case (header, unit) if pass.written.contains(unit.toString) =>
@@ -61,9 +62,6 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
               val cdt =
                   if fallbackToCdt && !pass.failed.isEmpty then
                     val files = pass.failed.asScala.toSeq.sorted ++ pass.unwrittenHeaders
-                    logger.warn(
-                      s"edga could not export ${pass.failed.size} units: the CDT frontend parses them"
-                    )
                     parseWithCdt(cpg, config, sources, files)
                     files.map(relative)
                   else Nil
@@ -76,6 +74,20 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
         new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
         new DeclarationAttributesPass(cpg).createAndApply()
       }
+
+  /** Says which units edga could not export, and why the first did: what a run without them leaves
+    * out is otherwise invisible.
+    */
+  private def reportFailures(pass: EdgAstCreationPass, relative: String => String): Unit =
+      if !pass.failed.isEmpty then
+        val failed = pass.failed.asScala.toSeq.sorted
+        val first  = failed.head
+        val reason = Option(pass.failures.get(first)).map(r => s": $r").getOrElse("")
+        val also   = if fallbackToCdt then "; the CDT frontend parses them" else ""
+        val total  = failed.size + pass.written.size
+        System.err.println(
+          s"edga could not export ${failed.size} of $total translation units$also (${relative(first)}$reason)"
+        )
 
   /** The CDT frontend's ASTs for `files`. */
   private def parseWithCdt(

@@ -184,6 +184,13 @@ final class ProjectSources(val config: Config):
   private lazy val includeGraph =
       new IncludeGraph(headers ++ units, unit => includePathsFor(unit), headerFileFinder)
 
+  /** The include roots the project's includes are spelled from but no include path names, as the
+    * CDT frontend finds headers by their trailing path segments (see IncludeGraph).
+    */
+  lazy val inferredIncludeRoots: Seq[Path] =
+    units.foreach(u => includeGraph.reachableFrom(u))
+    includeGraph.inferredIncludeRoots
+
   /** The project headers a translation unit includes, directly or through other headers. */
   def projectIncludes(unit: Path): Seq[Path] = includeGraph.reachableFrom(normalized(unit.toString))
 
