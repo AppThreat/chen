@@ -34,13 +34,25 @@ class DuplicateDefinitionPass(cpg: Cpg) extends CpgPass(cpg):
 
     val methods = cpg.method.isExternal(false).filterNot(_.name == "<global>").l
         .filterNot(removed.contains)
+    val byFullName = methods.groupBy(_.fullName)
+    // the lambdas a method refers to, and theirs: each unit numbers its own
+    def lambdasOf(m: Method): Set[String] =
+      val found = mutable.LinkedHashSet.empty[String]
+      var next  = m.ast.isMethodRef.methodFullName.toSet
+      while next.nonEmpty do
+        found ++= next
+        next = next.flatMap(byFullName.getOrElse(_, Nil)).flatMap(
+          _.ast.isMethodRef.methodFullName.l
+        ) -- found
+      found.toSet
     methods.groupBy(m => (m.fullName, m.filename, m.lineNumber, m.columnNumber, m.code))
         .valuesIterator.filter(_.size > 1).foreach { copies =>
-          val kept = copies.minBy(_.id)
+          val kept        = copies.minBy(_.id)
+          val keptLambdas = lambdasOf(kept)
           copies.filterNot(_ == kept).foreach { m =>
             remove(m)
-            // its lambdas, written beside it
-            methods.filter(l => l.fullName.startsWith(m.fullName + ".") && l.id != m.id)
+            // its lambdas, written beside it: those the copy kept does not refer to
+            (lambdasOf(m) -- keptLambdas).flatMap(byFullName.getOrElse(_, Nil))
                 .filterNot(removed.contains).foreach(remove)
           }
         }

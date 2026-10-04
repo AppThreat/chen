@@ -99,6 +99,40 @@ class EdgAstCreationPassTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "a template instance with a lambda, written by two units" should {
+      val header = "find.hpp" ->
+          """template <class K> int find_or_insert(K key) {
+          |  int index;
+          |  bool inserted;
+          |  [&]() {
+          |    index = static_cast<int>(key);
+          |    inserted = key != 0;
+          |  }();
+          |  return inserted ? index : -1;
+          |}
+          |""".stripMargin
+      // a lambda of its own first, so the units number the instance's lambda differently
+      val first = "a.cpp" ->
+          "#include \"find.hpp\"\nint a(long k) { auto f = [](int x) { return x; }; return f(1) + find_or_insert(k); }\n"
+      val second = "b.cpp" -> "#include \"find.hpp\"\nint b(long k) { return find_or_insert(k); }\n"
+
+      "keep the lambda the copy kept refers to" in {
+          assume(edga.isDefined, "edga is not installed")
+          project(header, first, second) { dir =>
+              graph(dir) { cpg =>
+                val outer =
+                    cpg.method.nameExact("find_or_insert").filter(_.block.astChildren.nonEmpty).l
+                outer.size shouldBe 1
+                val lambdas = outer.head.ast.isMethodRef.methodFullName.l
+                lambdas.size shouldBe 1
+                cpg.method.fullNameExact(lambdas.head).ast.isIdentifier.name.l should contain(
+                  "inserted"
+                )
+              }
+          }
+      }
+  }
+
   "a unit edga cannot export" should {
       "be left out without the fallback" in {
           assume(edga.isDefined, "edga is not installed")
