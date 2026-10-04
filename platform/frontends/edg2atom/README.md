@@ -34,8 +34,8 @@ and queries written for one work on the other.
 - libc++: `__OPTIMIZE_SIZE__`, which leaves out the vectorised algorithms built on clang's
   dependent-size vector types the front end cannot instantiate.
 - The NEON macros are not passed on: the front end does not declare the intrinsics they gate.
-- edga built without float128 (aarch64 Linux): `_Float128` is `long double` where glibc takes it
-  as the compiler's own type (GCC 7+, G++ 13+).
+- edga built without float128 (aarch64 Linux, and x86_64 Linux on musl): `_Float128` is `long
+  double` where glibc takes it as the compiler's own type (GCC 7+, G++ 13+).
 
 Each is pinned by a test in `EdgaRunnerTests`.
 

@@ -42,12 +42,14 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
   "a front end built without float128" should {
       val aarch64 = "edga 0.1.0\nEDG commit abc\nconfiguration linux-aarch64 0123"
       val x86     = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64 0123"
+      val x86Musl = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64-musl 0123"
       val gcc14   = Map("__GNUC__" -> "14")
       "name `long double` `_Float128` where glibc takes it as the compiler's type" in {
           val shim = Seq("--define_macro", "_Float128=long double")
           EdgaRunner.float128Shim(aarch64, gcc14, cpp = false) shouldBe shim
           EdgaRunner.float128Shim(aarch64, gcc14, cpp = true) shouldBe shim
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = false) shouldBe shim
+          EdgaRunner.float128Shim(x86Musl, gcc14, cpp = false) shouldBe shim
       }
       "leave it to glibc's typedef, and to a front end with float128" in {
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = true) shouldBe empty

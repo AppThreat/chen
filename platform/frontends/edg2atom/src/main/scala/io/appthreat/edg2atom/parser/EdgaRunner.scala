@@ -250,9 +250,15 @@ object EdgaRunner:
     * where the headers take the type as the compiler's: as a macro the typedef would read `typedef
     * long double long double`.
     */
+  /** edga configurations built without float128: aarch64 Linux, and x86_64 Linux on musl (no static
+    * quadmath). Either binary also runs against glibc's headers.
+    */
+  private val ConfigurationsWithoutFloat128 = Set("linux-aarch64", "linux-x86_64-musl")
+
   def float128Shim(edgaIdentity: String, macros: Map[String, String], cpp: Boolean): Seq[String] =
     val withoutFloat128 = edgaIdentity.linesIterator.exists(l =>
-        l.startsWith("configuration ") && l.split("\\s+").lift(1).contains("linux-aarch64")
+        l.startsWith("configuration ") &&
+            l.split("\\s+").lift(1).exists(ConfigurationsWithoutFloat128.contains)
     )
     val compilersType = !macros.contains("__clang__") &&
         macros.get("__GNUC__").flatMap(_.trim.toIntOption).exists(g => g >= (if cpp then 13 else 7))
