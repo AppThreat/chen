@@ -2,8 +2,9 @@ package io.appthreat.x2cpg.passes.frontend
 
 import org.slf4j.LoggerFactory
 
+import java.io.OutputStream
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
-import java.security.MessageDigest
+import java.security.{DigestInputStream, MessageDigest}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Try, Using}
 
@@ -62,7 +63,9 @@ object CpgCacheStore:
   private def hashFile(digest: MessageDigest, relPath: String, path: Path): Unit =
       Try {
           digest.update(relPath.getBytes("UTF-8"))
-          digest.update(Files.readAllBytes(path))
+          Using.resource(new DigestInputStream(Files.newInputStream(path), digest))(
+            _.transferTo(OutputStream.nullOutputStream())
+          )
       }.failed.foreach(e =>
           logger.warn(s"Could not hash $path for CPG fingerprint: ${e.getMessage}")
       )

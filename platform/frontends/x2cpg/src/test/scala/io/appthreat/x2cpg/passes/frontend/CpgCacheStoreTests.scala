@@ -3,13 +3,27 @@ package io.appthreat.x2cpg.passes.frontend
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.nio.ByteBuffer
+import java.nio.file.StandardOpenOption.{CREATE_NEW, SPARSE, WRITE}
 import java.nio.file.{Files, Path}
+import scala.util.Using
 
 class CpgCacheStoreTests extends AnyWordSpec with Matchers:
 
   private def project(files: (String, String)*): Path =
     val dir = Files.createTempDirectory("cpg-cache-proj")
     files.foreach { case (name, content) => Files.writeString(dir.resolve(name), content) }
+    dir
+
+  private val largeFileSize = Integer.MAX_VALUE.toLong + 1
+
+  private def projectWithLargeFile(lastByte: Byte): Path =
+    val dir = Files.createTempDirectory("cpg-cache-large")
+    Using.resource(Files.newByteChannel(dir.resolve("big.pack"), CREATE_NEW, WRITE, SPARSE)) {
+        channel =>
+          channel.position(largeFileSize - 1)
+          channel.write(ByteBuffer.wrap(Array(lastByte)))
+    }
     dir
 
   "CpgCacheStore.projectFingerprint" should {
@@ -42,6 +56,15 @@ class CpgCacheStoreTests extends AnyWordSpec with Matchers:
           Files.writeString(chen.resolve("deadbeef.ast"), "cache bytes")
           val fp2 = CpgCacheStore.projectFingerprint(dir.toString, Seq("v=3.0.0"))
           fp1 shouldBe fp2
+      }
+
+      "change when a file over 2 GiB changes" in {
+          val first  = projectWithLargeFile(1)
+          val second = projectWithLargeFile(2)
+          try
+              CpgCacheStore.projectFingerprint(first.toString, Seq.empty) should not be
+                  CpgCacheStore.projectFingerprint(second.toString, Seq.empty)
+          finally Seq(first, second).foreach(dir => Files.delete(dir.resolve("big.pack")))
       }
   }
 
