@@ -62,6 +62,26 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
           }
       }
 
+      "be run from every worker of the common pool at once" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("predef") { dir =>
+            val cc       = fakeCompiler(dir, "fake-gcc-pool")
+            val identity = CompilerIdentity(cc, CompilerFamily.Gcc, SourceLanguage.C, Nil)
+            PredefinedMacros.clearProcessCache()
+            // as a parallel pass does: every worker asks for the same facts under one lock, so
+            // the one running the compiler holds it while the others wait
+            val lock = new java.util.concurrent.ConcurrentHashMap[String, Option[CompilerFacts]]()
+            val workers = java.util.concurrent.ForkJoinPool.commonPool().getParallelism * 2
+            val answers = java.util.concurrent.CompletableFuture.supplyAsync(() =>
+                java.util.stream.IntStream.range(0, workers).parallel().mapToObj { _ =>
+                    lock.computeIfAbsent("cc", _ => PredefinedMacros.ofCompiler(identity, None))
+                }.toList
+            ).get(60, java.util.concurrent.TimeUnit.SECONDS)
+            import scala.jdk.CollectionConverters.*
+            answers.asScala.flatten.map(_.macros("__FAKECC__")).distinct shouldBe Seq("1")
+          }
+      }
+
       "not be run when it does not exist" in {
           PredefinedMacros.ofCompiler(
             CompilerIdentity("/nonexistent/cc", CompilerFamily.Gcc, SourceLanguage.C, Nil),

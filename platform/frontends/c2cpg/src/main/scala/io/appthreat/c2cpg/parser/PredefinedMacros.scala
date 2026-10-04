@@ -114,10 +114,21 @@ object PredefinedMacros:
           (process.exitValue(), out.join(), err.join())
       }.toOption
 
+  /** Reads a process's output on a thread of its own. The caller can be a worker of the common pool
+    * whose sibling workers all wait for it (a parallel pass asking for the same compiler's macros),
+    * so a read queued on the common pool would never run.
+    */
   private def readAsync(stream: InputStream): java.util.concurrent.CompletableFuture[String] =
-      java.util.concurrent.CompletableFuture.supplyAsync(() =>
-          new String(stream.readAllBytes(), StandardCharsets.UTF_8)
+      java.util.concurrent.CompletableFuture.supplyAsync(
+        () => new String(stream.readAllBytes(), StandardCharsets.UTF_8),
+        readers
       )
+
+  private lazy val readers = java.util.concurrent.Executors.newCachedThreadPool { task =>
+    val thread = new Thread(task, "compiler-output-reader")
+    thread.setDaemon(true)
+    thread
+  }
 
   /** `#define NAME VALUE` lines, as the compiler prints them for `-dM`. */
   def parseDefines(lines: Iterator[String]): Map[String, String] =
