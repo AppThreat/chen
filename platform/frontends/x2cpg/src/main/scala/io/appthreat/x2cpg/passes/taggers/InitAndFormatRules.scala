@@ -148,11 +148,28 @@ object InitAndFormatRules:
 
   private def isPointer(t: String): Boolean = t.trim.endsWith("*")
 
-  /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own. */
+  /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own, none of them an
+    * object a constructor initialises.
+    */
   private def isPodStruct(atom: Cpg, t: String): Boolean =
     val name = t.trim.stripPrefix("struct ").trim
     podCandidates(atom, name).exists(td =>
-        OverlayFacts.membersOfTypeDecl(td).nonEmpty && td.method.isEmpty && !td.isExternal
+        OverlayFacts.membersOfTypeDecl(td).nonEmpty && td.method.isEmpty && !td.isExternal &&
+            !OverlayFacts.membersOfTypeDecl(td).exists(m =>
+                isConstructed(atom, m.typeFullName, Set(name))
+            )
+    )
+
+  /** An object of type `t` (or an array of them) is initialised by a constructor: its class has
+    * methods of its own, or a member that is. A struct holding one (`struct Output { uint64_t
+    * number; InternalKey smallest; }`) gets an implicit constructor that runs it.
+    */
+  private def isConstructed(atom: Cpg, t: String, seen: Set[String]): Boolean =
+    val name = t.trim.stripPrefix("struct ").replaceAll("""(\s*\[[^\]]*\])+$""", "").trim
+    !name.endsWith("*") && !seen.contains(name) && podCandidates(atom, name).exists(td =>
+        !td.isExternal && (td.method.nonEmpty || OverlayFacts.membersOfTypeDecl(td).exists(m =>
+            isConstructed(atom, m.typeFullName, seen + name)
+        ))
     )
 
   /** The type declarations `name` may denote: a full-name match when one exists, else the bare

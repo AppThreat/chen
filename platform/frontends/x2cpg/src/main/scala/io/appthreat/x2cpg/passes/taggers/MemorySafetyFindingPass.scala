@@ -1708,7 +1708,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               // with no upper bound - C code carries no such types, so the arm is silent on
               // C code like libavformat by construction.
               if attackerIndex && !boundedAbove && (!signedIndex || !boundedBelow) &&
-                isCppContainer(typeOfExpr(base))
+                isCppContainer(typeOfExpr(base)) && !grownPastIndex(access, base, idx)
               then record(idx, ruleIdFor(access))
             end if
           end for
@@ -2078,7 +2078,49 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   private def isCppContainer(t: String): Boolean =
     val n = t.trim.stripPrefix("const ").trim.stripSuffix("&").trim
-    CppContainerPrefixes.exists(n.startsWith)
+    // an array of containers (`std::vector<File*> files_[7]`), or a pointer to one, is indexed
+    // as the array it is
+    CppContainerPrefixes.exists(n.startsWith) && !n.endsWith("]") && !n.endsWith("*")
+
+  /** The container was resized past the index before the access: `old = dst->size();
+    * dst->resize(old + n); (*dst)[old]`, the append-in-place idiom. The resize is on the same
+    * container (through a pointer or not), earlier in the method, and its new size adds to the very
+    * variable the access indexes with, which nothing writes after the resize (a loop moving it on
+    * after the access counts as after).
+    */
+  private def grownPastIndex(access: Call, base: Expression, idx: Expression): Boolean =
+    def containerKey(e: Expression): Option[String] = e match
+      case c: Call if c.name == "<operator>.indirection" =>
+          c.argument.l.collectFirst { case x: Expression => x }.flatMap(OverlayFacts.variableKey)
+      case other => OverlayFacts.variableKey(other)
+    val target     = containerKey(base)
+    val idxKey     = castUnwrappingKey(idx)
+    val accessLine = access.lineNumber.map(_.toInt).getOrElse(Int.MinValue)
+    def writesIndex(c: Call): Boolean =
+        (OverlayFacts.isAssignmentOperator(c.name) || IncrementOperators.contains(c.name)) &&
+            c.argument.l.collectFirst { case e: Expression if e.argumentIndex == 1 => e }
+                .flatMap(castUnwrappingKey) == idxKey
+    lazy val lastWrite = access.method.ast.isCall.filter(writesIndex).lineNumber.map(_.toInt).l
+        .maxOption.getOrElse(Int.MinValue)
+    target.isDefined && idxKey.isDefined && access.method.ast.isCall.nameExact("resize").exists {
+        resize =>
+            resize.lineNumber.map(_.toInt).exists(line => line < accessLine && line > lastWrite) &&
+            resize.argument.l.collectFirst { case r: Expression if r.argumentIndex == 0 => r }
+                .flatMap(containerKey) == target &&
+            resize.argument.l.collectFirst {
+                case add: Call if add.argumentIndex == 1 && add.name == "<operator>.addition" => add
+            }.exists(_.argument.l.collect { case x: Expression => x }.exists(op =>
+                castUnwrappingKey(op) == idxKey
+            ))
+    }
+  end grownPastIndex
+
+  private val IncrementOperators = Set(
+    "<operator>.preIncrement",
+    "<operator>.postIncrement",
+    "<operator>.preDecrement",
+    "<operator>.postDecrement"
+  )
 
   /** The pointer-walk arm (CWE-125, the CVE-2026-75147 loop-bound wraparound): inside a loop, `p +=
     * k` with an attacker-derived k and reads through p - the walk moves p past the buffer and the

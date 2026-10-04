@@ -331,22 +331,27 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     method: Method,
     sizeofInCopy: Option[String]
   ): Option[(String, List[StoredNode])] =
-      // A declared array beats everything else: the size is in the type.
-      method.local.name(name).headOption.flatMap { local =>
-          arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
-      }.orElse {
-          // A buffer parameter with an adjacent capacity parameter. The
-          // parameter declaration carries the extent so guards can match against it.
-          for
-            param <- method.parameter.name(name).headOption
-            cap   <- paramExtentOf(param)
-          yield (s"$ValueParam:$cap", List(param))
-      }.orElse {
-          sizeofInCopy.map(v => (v, List.empty))
-      }.orElse {
-          // A pointer whose definition is an inventoried allocation.
-          allocExtentOf(use).map(v => (v, List.empty))
-      }
+    // A declared array beats everything else: the size is in the type. The declaration is the
+    // one the use refers to: a function may declare two buffers of one name in two blocks
+    val declared = use match
+      case i: Identifier => i.refsTo.collectFirst { case l: Local => l }
+      case _             => None
+    declared.orElse(method.local.name(name).headOption).flatMap { local =>
+        arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
+    }.orElse {
+        // A buffer parameter with an adjacent capacity parameter. The
+        // parameter declaration carries the extent so guards can match against it.
+        for
+          param <- method.parameter.name(name).headOption
+          cap   <- paramExtentOf(param)
+        yield (s"$ValueParam:$cap", List(param))
+    }.orElse {
+        sizeofInCopy.map(v => (v, List.empty))
+    }.orElse {
+        // A pointer whose definition is an inventoried allocation.
+        allocExtentOf(use).map(v => (v, List.empty))
+    }
+  end extentOfVariable
 
   /** The capacity parameter beside a buffer parameter: adjacency in the signature plus the
     * pointer/integral type pattern. Names are deliberately not consulted.

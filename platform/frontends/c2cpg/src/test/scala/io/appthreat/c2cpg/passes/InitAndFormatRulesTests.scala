@@ -156,6 +156,40 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "handlers.cpp"
+  ).moreCode(
+    """
+    |class Key {
+    | public:
+    |  Key() : n(0) {}
+    |  void Clear() { n = 0; }
+    | private:
+    |  int n;
+    |};
+    |struct Output { unsigned long number; Key smallest, largest; };
+    |struct Batch { Output outputs[2]; };
+    |struct Plain { unsigned long number; unsigned long size; };
+    |int init_ok_constructed_member(unsigned long v)
+    |{
+    |    Output out;
+    |    out.number = v;
+    |    out.smallest.Clear();
+    |    out.largest.Clear();
+    |    return (int)out.number;
+    |}
+    |int init_ok_constructed_array_member(unsigned long v)
+    |{
+    |    Batch b;
+    |    b.outputs[0].smallest.Clear();
+    |    return (int)v;
+    |}
+    |int init_bad_plain_member(unsigned long v)
+    |{
+    |    Plain p;
+    |    p.number = v;
+    |    return (int)p.size;
+    |}
+    |""".stripMargin,
+    "members.cpp"
   )
 
   new MemorySemanticsPass(cpg).createAndApply()
@@ -216,6 +250,11 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         cpg.method.nameExact("init_bad_in_handler").ast.isIdentifier
             .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-INIT-001"))
             .name.l shouldBe List("y")
+    }
+    "leave a struct whose members a constructor initialises alone, but not a plain one" in {
+        findingsIn("init_ok_constructed_member") should not contain "MS-INIT-001"
+        findingsIn("init_ok_constructed_array_member") should not contain "MS-INIT-001"
+        findingsIn("init_bad_plain_member") should contain("MS-INIT-001")
     }
 end InitAndFormatRulesTests
 
