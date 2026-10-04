@@ -332,10 +332,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     sizeofInCopy: Option[String]
   ): Option[(String, List[StoredNode])] =
     // A declared array beats everything else: the size is in the type. The declaration is the
-    // one the use refers to: a function may declare two buffers of one name in two blocks
+    // method's own one the use refers to: a function may declare two buffers of one name in two
+    // blocks
     val declared = use match
-      case i: Identifier => i.refsTo.collectFirst { case l: Local => l }
-      case _             => None
+      case i: Identifier =>
+          i.refsTo.collectFirst { case l: Local => l }.filter(l =>
+              method.local.exists(_.id == l.id)
+          )
+      case _ => None
     declared.orElse(method.local.name(name).headOption).flatMap { local =>
         arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
     }.orElse {
