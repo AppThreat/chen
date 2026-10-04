@@ -130,7 +130,7 @@ class CompileCommandTests extends AnyWordSpec with Matchers:
           flags.targetOptions shouldBe Seq(
             "-std=gnu11",
             "--target=aarch64-linux-gnu",
-            "--sysroot=/sysroot",
+            s"--sysroot=${Paths.get("/sysroot")}",
             "-arch",
             "arm64",
             "-m64",
