@@ -31,7 +31,9 @@ Because it follows data rather than matching on names and patterns, chen disting
 
 ## Languages supported
 
-- C and C++, including headers and pre-processed `.i` files through the `H` frontend
+- C and C++, including headers and pre-processed `.i` files through the `H` frontend, with the
+  Eclipse CDT parser ([c2cpg](platform/frontends/c2cpg)) or the EDG front end
+  ([edg2atom](platform/frontends/edg2atom))
 - Java source from Java 8 through Java 26 syntax (records, sealed types, pattern matching for
   `instanceof` and `switch` with guards and record patterns, switch expressions with `yield`,
   text blocks, unnamed variables, local classes and records, module imports, flexible
