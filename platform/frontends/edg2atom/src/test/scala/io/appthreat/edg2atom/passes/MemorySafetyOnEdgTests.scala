@@ -232,6 +232,19 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  return digits;
       |}
       |}
+      |
+      |#define SOCK_IDX_VALID(i) (((i) >= 0) && ((i) < 2))
+      |#define FIRST_SOCKET 0
+      |#define SECOND_SOCKET 1
+      |struct Conn { int *filters[2]; long started[2]; };
+      |int *filter_of(Conn *conn, int sockindex) {
+      |  return SOCK_IDX_VALID(sockindex) ? conn->filters[sockindex] : nullptr;
+      |}
+      |static void clear_timer(Conn *conn, signed char sockindex) { conn->started[sockindex] = -1; }
+      |void clear_timers(Conn *conn) {
+      |  clear_timer(conn, FIRST_SOCKET);
+      |  clear_timer(conn, SECOND_SOCKET);
+      |}
       |""".stripMargin,
       "shapes.cpp"
     )
@@ -316,6 +329,20 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       "not be indexed out of bounds" in {
           requireEdga()
           findingsIn("post_event") should not contain "MS-BOUND-003"
+      }
+  }
+
+  "a table indexed by what every caller passes, macro constants" should {
+      "not be indexed out of bounds" in {
+          requireEdga()
+          findingsIn("clear_timer") should not contain "MS-BOUND-004"
+      }
+  }
+
+  "an index a macro bounds in a conditional's condition" should {
+      "not be indexed out of bounds" in {
+          requireEdga()
+          findingsIn("filter_of") should not contain "MS-BOUND-003"
       }
   }
 

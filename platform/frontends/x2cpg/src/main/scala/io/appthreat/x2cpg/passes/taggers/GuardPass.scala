@@ -1,6 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -484,7 +485,18 @@ object GuardPass:
             expr.argumentOption(1).collect { case c: Call => c }.flatMap(conjuncts(_, !holds))
         case "<operator>.logicalAnd" if holds => andThen(expr, holds)
         case "<operator>.logicalOr" if !holds => andThen(expr, holds)
-        case _                                => None
+        // a condition written as a macro (`IDX_VALID(i) ? a[i] : 0`) is its expansion
+        case _ if expr.dispatchType == DispatchTypes.INLINED =>
+            macroExpansion(expr).flatMap(conjuncts(_, holds))
+        case _ => None
+
+  /** The expression a macro invocation stands for: the last expression of the expansion block under
+    * the INLINED call.
+    */
+  private[taggers] def macroExpansion(invocation: Call): Option[Call] =
+      invocation.astChildren.collect { case b: Block => b }.lastOption
+          .flatMap(_.astChildren.collect { case e: Expression => e }.lastOption)
+          .collect { case c: Call => c }
 
   private def andThen(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
     // a non-comparison operand (an integer's truthiness, `audio_roll_distance`) yields no
@@ -495,7 +507,8 @@ object GuardPass:
       case Some(c: Call)
           if comparisonOps.contains(c.name) ||
               c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
-              c.name == "<operator>.logicalOr" => conjuncts(c, holds)
+              c.name == "<operator>.logicalOr" || c.dispatchType == DispatchTypes.INLINED =>
+          conjuncts(c, holds).orElse(Option.when(c.dispatchType == DispatchTypes.INLINED)(Nil))
       // any other operand - an integer's truthiness, a field read - yields no comparison
       // facts of its own and does not block the sibling's
       case Some(_) => Some(Nil)

@@ -97,8 +97,16 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     }
     val result = callAst(call, args).withChild(expansionBlock)
     tagNode(call, X2CpgDefines.MacroInvocationTag, index.toString)
+    // an integer constant expansion is the invocation's value, as the CDT frontend tags
+    // `#define FIRST 0` and `#define N (4 * 8)`
+    integerConstant(node).foreach(v => tagNode(call, X2CpgDefines.ConstValueTag, v))
     result
   end macroCallAst
+
+  private def integerConstant(node: Value): Option[String] =
+      Option.when(node.kind == "constant" && node.string("ck").contains("integer"))(
+        node.string("value")
+      ).flatten.filter(v => scala.util.Try(BigInt(v)).isSuccess)
 
   private def rootType(e: ExpressionNew): Option[String] = e match
     case c: NewCall       => Option(c.typeFullName)
