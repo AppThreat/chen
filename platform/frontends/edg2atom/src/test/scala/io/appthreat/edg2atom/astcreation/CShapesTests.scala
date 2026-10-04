@@ -3,7 +3,7 @@ package io.appthreat.edg2atom.astcreation
 import io.appthreat.edg2atom.testfixtures.EdgCodeToCpgSuite
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
-import io.shiftleft.codepropertygraph.generated.nodes.Call
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Literal}
 import io.shiftleft.semanticcpg.language.*
 
 /** What C declares beyond the code: function attributes, `cleanup`, and the calls that return twice
@@ -78,6 +78,31 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
               address.name shouldBe "<operator>.addressOf"
               address.argument(1).code shouldBe "guard"
           }
+      }
+  }
+
+  "a global initialised at compile time" should {
+      val cpg = code(
+        """static const int limit = 64;
+        |int table_size = 4 * 16;
+        |const char *greeting = "hi";
+        |int use(void) { return limit + table_size + greeting[0]; }
+        |""".stripMargin
+      )
+
+      "be assigned its value at the declaration" in {
+          requireEdga()
+          cpg.method.nameExact("<global>").assignment.code.l.sorted shouldBe List(
+            "greeting = \"hi\"",
+            "limit = 64",
+            "table_size = 4 * 16"
+          )
+          inside(cpg.assignment.code("limit = .*").argument(2).l) { case List(value: Literal) =>
+              value.code shouldBe "64"
+          }
+          // the folded value is kept on the expression as written
+          cpg.assignment.code("table_size = .*").argument(2).tag
+              .nameExact(X2CpgDefines.ConstValueTag).value.l shouldBe List("64")
       }
   }
 end CShapesTests

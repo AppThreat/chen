@@ -147,6 +147,8 @@ class CppShapesTests extends EdgCodeToCpgSuite:
           requireEdga()
           val sum = cpg.method.nameExact("sum").filter(_.block.astChildren.nonEmpty).head
           sum.ast.isIdentifier.name.l shouldBe List("x", "y")
+          // typed with the member's class, as the CDT frontend types them
+          sum.ast.isIdentifier.typeFullName.l.distinct shouldBe List("geo.Point")
           val area = cpg.method.nameExact("area").head
           area.ast.isLiteral.code.l should contain("this")
       }
@@ -298,6 +300,26 @@ class CppShapesTests extends EdgCodeToCpgSuite:
           val thrown = cpg.call.nameExact("<operator>.throw").head
           inside(thrown.argument(1)) { case ctor: Call =>
               ctor.methodFullName shouldBe "Error.Error:void(int)"
+          }
+      }
+  }
+
+  "a namespace-scope constant" should {
+      val cpg = code(
+        """
+        |namespace io { namespace {
+        |constexpr const unsigned long kBufferSize = 65536;
+        |}
+        |unsigned long room(unsigned long pos) { return kBufferSize - pos; }
+        |}
+        |""".stripMargin
+      )
+
+      "be assigned its value at the declaration, as the uses read it" in {
+          requireEdga()
+          inside(cpg.assignment.code("kBufferSize = .*").l) { case List(init) =>
+              init.code shouldBe "kBufferSize = 65536"
+              init.argument.argumentIndex(2).collectAll[Literal].code.l shouldBe List("65536")
           }
       }
   }

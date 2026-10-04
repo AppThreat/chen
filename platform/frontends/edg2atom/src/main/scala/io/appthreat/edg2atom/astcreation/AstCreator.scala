@@ -467,7 +467,7 @@ class AstCreator(
             Some(Ast(typeDeclNode(
               t,
               name,
-              registerType(name),
+              registerType(types(t.long("id"))),
               path,
               s"typedef $name",
               alias = Some(alias)

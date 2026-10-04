@@ -105,7 +105,9 @@ final class TypeNames(unit: EdgaUnit):
             t.long("of").map(spelledForSignature(_, depth + 1)).getOrElse(X2CpgDefines.Any)
         case _ => apply(id)
 
-  private def scoped(name: String, t: Value): String = dotted(name)
+  /** A typedef by the name its scope gives it (`std::string` is `std.string`). */
+  private def scoped(name: String, t: Value): String =
+      t.string("name").filter(_.endsWith(s"::$name")).map(dotted).getOrElse(dotted(name))
 
   /** `a::b::C` as `a.b.C`, without the inline namespaces a program names their members without
     * (`std::__1::vector` is `std.vector`).

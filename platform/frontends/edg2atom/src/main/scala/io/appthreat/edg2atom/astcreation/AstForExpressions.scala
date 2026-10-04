@@ -159,7 +159,9 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
   private def typeOf(e: Value): String = registerType(types(e.long("t")))
 
   private def identifierAst(e: Value): Ast =
-      if e.long("var").exists(thisVariables.contains) then Ast(literalNode(e, "this", typeOf(e)))
+      // `this`, spelled as the CDT frontend types it (`geo.Point *`)
+      if e.long("var").exists(thisVariables.contains) then
+        Ast(literalNode(e, "this", registerType(types.signatureType(e.long("t")))))
       else
         val name = e.string("name").getOrElse("")
         val id   = identifierNode(e, name, name, typeOf(e))
@@ -254,14 +256,28 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
     val v = visible(e)
     v.kind == "variable" && v.long("var").exists(thisVariables.contains) && v.position.isEmpty
 
+  /** A member named without `this->`: an identifier typed with the member's class, as the CDT
+    * frontend types it (the overlay finds the member through that type); in a lambda, the variable
+    * the capture copies or refers to.
+    */
   private def implicitMemberAst(e: Value, operands: Seq[Value]): Ast =
     val name = operands.lift(1).flatMap(_.string("name")).getOrElse("")
-    val id   = identifierNode(e, name, name, typeOf(e))
     val captured = visible(operands.head).long("var").flatMap(closureThis.get).flatMap(_.get(name))
         .flatMap(variables.get)
     captured match
-      case Some(target) => Ast(id).withRefEdge(id, target)
-      case None         => Ast(id)
+      case Some(target) =>
+          val tpe = target match
+            case l: NewLocal             => l.typeFullName
+            case p: NewMethodParameterIn => p.typeFullName
+            case _                       => typeOf(e)
+          val id = identifierNode(e, name, name, tpe)
+          Ast(id).withRefEdge(id, target)
+      case None =>
+          val owner =
+              visible(operands.head).long("t").flatMap(types.target).map(t =>
+                  registerType(types(t))
+              )
+          Ast(identifierNode(e, name, name, owner.getOrElse(typeOf(e))))
 
   protected def operatorAst(e: Value, name: String, operands: Seq[Value]): Ast =
     // the CDT frontend writes `p->f` as a dynamic dispatch
@@ -376,8 +392,11 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       init.kind match
         case "expression" | "class_result_via_ctor" | "bitwise_copy" =>
             init.field("expr").map(expressionAst).getOrElse(Ast())
+        // a run-time initialiser holds its constant; a static one (`const size_t n = 64;` at
+        // namespace scope) is the constant
         case "constant" | "nonconstant_aggregate" =>
-            init.field("const").map(constantAst).getOrElse(Ast())
+            init.field("const").orElse(Option.when(init.field("ck").isDefined)(init))
+                .map(constantAst).getOrElse(Ast())
         case "constructor" =>
             val target   = init.long("routine").flatMap(unit.routinesById.get)
             val name     = target.flatMap(_.string("name")).getOrElse("")

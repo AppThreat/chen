@@ -26,7 +26,8 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
       |    { "id": 13, "kind": "pointer", "name": "geo::Point *", "to": 4 },
       |    { "id": 14, "kind": "pointer", "name": "char **", "to": 10 },
       |    { "id": 15, "kind": "class", "name": "std::__1::vector<int, std::__1::allocator<int>>", "tag": "vector", "qualifiedName": "std::__1::vector<int, std::__1::allocator<int>>" },
-      |    { "id": 16, "kind": "typeref", "name": "std::__1::literals::chrono_literals::hours", "typedef": "std::__1::literals::chrono_literals::hours", "of": 0 }
+      |    { "id": 16, "kind": "typeref", "name": "std::__1::literals::chrono_literals::hours", "typedef": "std::__1::literals::chrono_literals::hours", "of": 0 },
+      |    { "id": 17, "kind": "typeref", "name": "std::__1::string", "typedef": "string", "of": 15 }
       |  ],
       |  "inlineNamespaces": ["std::__1", "std::__1::literals", "std::__1::literals::chrono_literals"]
       |}""".stripMargin
@@ -49,6 +50,8 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
       "leave out the inline namespaces a program names their members without" in {
           types(15L) shouldBe "std.vector<int, std.allocator<int>>"
           types(16L) shouldBe "std.hours"
+          // a typedef by the name its scope gives it
+          types(17L) shouldBe "std.string"
       }
 
       "not name a lambda's closure" in {
