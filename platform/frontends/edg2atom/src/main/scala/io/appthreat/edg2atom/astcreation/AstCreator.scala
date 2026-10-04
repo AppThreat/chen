@@ -311,6 +311,7 @@ class AstCreator(
     }
     methodStack = methodStack.drop(1)
     scope.popScope()
+    attributeTags(r, method)
     Some(methodAst(method, params, bodyAst, methodReturn, modifiersOf(r)))
   end routineAst
 
@@ -426,7 +427,10 @@ class AstCreator(
           (p.line < end.line || p.line == end.line && p.column <= end.column)
 
   /** The function attributes the overlay reads from a declaration (`malloc`, `alloc_size`, ...). */
-  private def attributeTags(r: Value, method: NewMethod): Unit = ()
+  private def attributeTags(r: Value, method: NewMethod): Unit =
+      r.list("attributes").flatMap(attributeText).distinct.foreach(
+        tagNode(method, X2CpgDefines.FunctionAttributeTag, _)
+      )
 
   /** A declaration's code: its source text, when the front end gave its position. */
   private def codeOfDeclaration(r: Value): String =
@@ -609,6 +613,13 @@ class AstCreator(
                   id   <- d.long("id")
                   dtor <- d.field("init").flatMap(_.long("destructor"))
                 do destroysAtScopeEnd(id, name, Some(dtor))
+                // `__attribute__((cleanup(f)))`: f(&v) where v goes out of scope
+                for
+                  id       <- d.long("id")
+                  cleanup  <- d.list("attributes").find(_.string("kind").contains("cleanup"))
+                  function <- cleanup.list("args").headOption.collect { case ujson.Str(f) => f }
+                  routine  <- unit.routines.find(_.string("name").contains(function))
+                do cleansUpAtScopeEnd(id, name, routine)
                 Ast(local) +: init.toSeq
       }
 

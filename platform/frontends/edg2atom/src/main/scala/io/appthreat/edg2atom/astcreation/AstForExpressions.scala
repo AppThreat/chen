@@ -313,6 +313,7 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
           DispatchTypes.DYNAMIC_DISPATCH
         else DispatchTypes.STATIC_DISPATCH
     val call = callNode(e, code(e), name, fullName, dispatch, Some(signatureOf(r)), Some(typeOf(e)))
+    tagCallee(call, r)
     if op == "call" then callAst(call, written.map(expressionAst))
     else
       val obj  = written.headOption

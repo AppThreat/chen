@@ -470,7 +470,15 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
   // ---- destructors where scopes end ---------------------------------------------------------
 
   /** An object a scope destroys: the variable, its destructor, and where it was declared. */
-  protected final case class Destruction(variable: Long, name: String, destructor: Value)
+  /** An object a scope destroys: the variable, and its destructor, or the function its `cleanup`
+    * attribute names (called with the variable's address).
+    */
+  protected final case class Destruction(
+    variable: Long,
+    name: String,
+    destructor: Value,
+    cleanup: Boolean = false
+  )
 
   /** A scope objects can be destroyed at the end of: a block, the boundary of a function, a loop or
     * a `switch` (the targets of `break` and `continue`).
@@ -521,21 +529,62 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
           exitScopes.headOption.foreach(_.destructions += Destruction(variable, name, d))
       }
 
+  /** Records that the innermost scope calls `function(&variable)` where it ends: the variable's
+    * `cleanup` attribute (C and C++ alike).
+    */
+  protected def cleansUpAtScopeEnd(variable: Long, name: String, function: Value): Unit =
+      exitScopes.headOption.foreach(
+        _.destructions += Destruction(variable, name, function, cleanup = true)
+      )
+
   private def destructorCallAsts(
     destructions: Seq[Destruction],
     at: Value,
     atEnd: Boolean
   ): Seq[Ast] =
       destructions.map { d =>
-        val callCode = s"${d.name}.${cppName(d.destructor.string("name").getOrElse(""))}()"
         val (call, ast) =
-            linkedCallAst(at, d.destructor, "void", None, Nil, Some(callCode))
+            if d.cleanup then cleanupCallAst(at, d)
+            else
+              val callCode = s"${d.name}.${cppName(d.destructor.string("name").getOrElse(""))}()"
+              linkedCallAst(at, d.destructor, "void", None, Nil, Some(callCode))
         if atEnd then
           at.field("end").flatMap(EdgaUnit.pos).foreach { p =>
               call.lineNumber(Integer.valueOf(p.line)).columnNumber(Integer.valueOf(p.column))
           }
         ast
       }
+
+  /** `unlock(&guard)`: the call a `cleanup(unlock)` attribute makes as `guard` goes out of scope.
+    */
+  private def cleanupCallAst(at: Value, d: Destruction): (NewCall, Ast) =
+    val function = d.destructor.string("name").getOrElse("")
+    val tpe      = registerType(types.returnType(d.destructor.long("returnType")))
+    val call = callNode(
+      at,
+      s"$function(&${d.name})",
+      function,
+      methodFullNameOf(d.destructor),
+      DispatchTypes.STATIC_DISPATCH,
+      Some(signatureOf(d.destructor)),
+      Some(tpe)
+    )
+    val target   = variables.get(d.variable)
+    val varType  = target.collect { case l: NewLocal => l.typeFullName }.getOrElse(X2CpgDefines.Any)
+    val variable = identifierNode(at, d.name, d.name, varType)
+    val address = callNode(
+      at,
+      s"&${d.name}",
+      Operators.addressOf,
+      Operators.addressOf,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(registerType(s"$varType*"))
+    )
+    val variableAst =
+        target.map(t => Ast(variable).withRefEdge(variable, t)).getOrElse(Ast(variable))
+    (call, callAst(call, Seq(callAst(address, Seq(variableAst)))))
+  end cleanupCallAst
 
   /** The destructor calls where control falls out of the innermost scope, after `statements`; none
     * when its last statement jumps away.
@@ -654,6 +703,40 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
             case _ => Seq.empty
         }
     case _ => Seq.empty
+
+  // ---- attributes -------------------------------------------------------------------------
+
+  /** An attribute as the CDT frontend renders it: `name` or `name(arg,arg)`, its name's leading and
+    * trailing `__` dropped (`__noreturn__` is `noreturn`).
+    */
+  protected def attributeText(a: Value): Option[String] =
+    val name = a.string("name").getOrElse("").stripPrefix("__").stripSuffix("__").trim
+    val args = a.list("args").flatMap {
+        case ujson.Str(s) => Some(s)
+        case ujson.Num(n) => Some(if n == n.toLong then n.toLong.toString else n.toString)
+        case o: ujson.Obj => o.value.get("name").collect { case ujson.Str(s) => s }
+                .orElse(o.value.get("value").collect { case ujson.Str(s) => s })
+        case _ => None
+    }.map(_.filterNot(_.isWhitespace))
+    Option.when(name.nonEmpty)(if args.isEmpty then name else s"$name(${args.mkString(",")})")
+
+  /** The functions that return twice, as GCC treats them whether or not a header says so. */
+  private val ReturnsTwice =
+      Set("setjmp", "_setjmp", "sigsetjmp", "__sigsetjmp", "savectx", "vfork", "getcontext")
+
+  /** The attributes a call's callee is declared with, on the CALL (where its semantics survive when
+    * no METHOD is built for a library function), and the header it is declared in when the unit's
+    * own file does not declare it.
+    */
+  protected def tagCallee(call: NewCall, r: Value): Unit =
+    val attributes = r.list("attributes").flatMap(attributeText) ++
+        Option.when(ReturnsTwice.contains(r.string("name").getOrElse("")))("returns_twice")
+    attributes.distinct.foreach(tagNode(call, X2CpgDefines.FunctionAttributeTag, _))
+    r.position.filter(_.file != 0L).flatMap(p => unit.files.get(p.file)).foreach { f =>
+        tagNode(call, CalleeDeclaredInTag, f.path)
+    }
+
+  private val CalleeDeclaredInTag = "callee-declared-in"
 
   // ---- objects a declaration constructs -----------------------------------------------------
 
