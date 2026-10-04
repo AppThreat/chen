@@ -89,9 +89,27 @@ final class TypeNames(unit: EdgaUnit):
     * (`geo.Point *`, but `char*`), the one before a `&` always (`int &`).
     */
   def signatureType(id: Option[Long]): String =
-    val spelled = id.map(spelledForSignature(_, 0)).getOrElse(X2CpgDefines.Any)
-    val base    = spelled.takeWhile(c => c != ' ' && c != '*' && c != '&')
+    val written = id.map(spelledForSignature(_, 0)).getOrElse(X2CpgDefines.Any)
+    // an integer type as the CDT frontend spells it in a full name: `long int`
+    val cut = written.indexWhere(c => c == '*' || c == '&') match
+      case -1 => written.length
+      case at => at
+    val baseText = written.take(cut).trim
+    val spelled =
+        CdtIntegerSpelling.get(baseText).map(_ + written.drop(cut).replaceFirst("^\\s*", " "))
+            .map(_.trim).getOrElse(written)
+    val base = spelled.takeWhile(c => c != ' ' && c != '*' && c != '&')
     if base.contains('.') then spelled else spelled.replace(" *", "*")
+
+  private val CdtIntegerSpelling = Map(
+    "short"              -> "short int",
+    "unsigned short"     -> "unsigned short int",
+    "unsigned"           -> "unsigned int",
+    "long"               -> "long int",
+    "unsigned long"      -> "unsigned long int",
+    "long long"          -> "long long int",
+    "unsigned long long" -> "unsigned long long int"
+  )
 
   private def spelledForSignature(id: Long, depth: Int): String =
       unit.types.get(id) match

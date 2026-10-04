@@ -1,0 +1,49 @@
+# Reviewed differences between the CDT frontend's graph and edga's for templates.cpp.
+# A lambda's parameter has its declared type; the CDT frontend leaves it unresolved.
+-   anonymous_lambda_0 IDENTIFIER x: ANY
++   anonymous_lambda_0 IDENTIFIER x: int
+# A member read in a class template instance is typed with the instance, as members are
+# typed elsewhere; the CDT frontend has only the template, with the member unresolved.
+-   get IDENTIFIER v: ANY
++   get IDENTIFIER v: Box<int>
+# Each template instance is a method or type of its own, with its arguments for its
+# parameters (`max_of:int(int,int)`, `Box<int>`), and calls link to the instance; the CDT
+# frontend writes the template once, with T and ANY.
++   max_of CALL <operator>.conditional -> <operator>.conditional [STATIC_DISPATCH] args=3
++   max_of CALL <operator>.lessThan -> <operator>.lessThan [STATIC_DISPATCH] args=2
+-   max_of IDENTIFIER a: T
+-   max_of IDENTIFIER a: T
++   max_of IDENTIFIER a: int
++   max_of IDENTIFIER a: int
++   max_of IDENTIFIER a: long
++   max_of IDENTIFIER a: long
+-   max_of IDENTIFIER b: T
+-   max_of IDENTIFIER b: T
++   max_of IDENTIFIER b: int
++   max_of IDENTIFIER b: int
++   max_of IDENTIFIER b: long
++   max_of IDENTIFIER b: long
+-   max_of PARAM a: T
++   max_of PARAM a: int
++   max_of PARAM a: long
+-   max_of PARAM b: T
++   max_of PARAM b: int
++   max_of PARAM b: long
++   max_of RETURN
+-   use CALL get -> Box.get:ANY() [STATIC_DISPATCH] args=1
++   use CALL get -> Box<int>.get:int() [STATIC_DISPATCH] args=1
+-   use CALL max_of -> max_of:ANY(ANY,ANY) [STATIC_DISPATCH] args=2
+-   use CALL max_of -> max_of:ANY(ANY,ANY) [STATIC_DISPATCH] args=2
++   use CALL max_of -> max_of:int(int,int) [STATIC_DISPATCH] args=2
++   use CALL max_of -> max_of:long int(long int,long int) [STATIC_DISPATCH] args=2
+# An expression's type: `long` as edga spells it, `long int` as the CDT frontend does. The
+# passes normalise both.
++   use LITERAL 3L: long
+-   use LITERAL 3L: long int
+- METHOD Box.get:ANY() | T () | returns T
++ METHOD Box<int>.get:int() | int () | returns int
+- METHOD max_of:ANY(ANY,ANY) | T <T> (T,T) | returns T
++ METHOD max_of:int(int,int) | int (int,int) | returns int
++ METHOD max_of:long int(long int,long int) | long (long,long) | returns long
+- TYPE_DECL Box members=v: T
++ TYPE_DECL Box<int> members=v: int

@@ -85,10 +85,10 @@ class EdgAstCreationPassTests extends AnyWordSpec with Matchers:
                 val clamps = cpg.method.nameExact("clamp").filter(_.block.astChildren.nonEmpty).l
                 clamps.map(_.fullName).sorted shouldBe List(
                   "clamp:int(int,int,int)",
-                  "clamp:short(short,short,short)"
+                  "clamp:short int(short int,short int,short int)"
                 )
                 cpg.method.nameExact("get").filter(_.block.astChildren.nonEmpty).fullName.l.sorted shouldBe
-                    List("Box<int>.get:int()", "Box<short>.get:short()")
+                    List("Box<int>.get:int()", "Box<short>.get:short int()")
                 cpg.typeDecl.isExternal(false).fullName("Box<.*").fullName.l.sorted shouldBe List(
                   "Box<int>",
                   "Box<short>"
@@ -128,6 +128,8 @@ class EdgAstCreationPassTests extends AnyWordSpec with Matchers:
                 cpg.method.fullNameExact(lambdas.head).ast.isIdentifier.name.l should contain(
                   "inserted"
                 )
+                // written where the lambda is: in the header
+                cpg.method.fullNameExact(lambdas.head).filename.l shouldBe List("find.hpp")
               }
           }
       }

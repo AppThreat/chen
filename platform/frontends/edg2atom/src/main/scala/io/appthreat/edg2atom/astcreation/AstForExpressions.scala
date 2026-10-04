@@ -85,10 +85,10 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
   private def visible(e: Value): Value =
       if e.kind == "operation" && e.flag("implicit") then
         e.string("op") match
+          // an implicit conversion, a derived class to its base among them
           case Some(op)
-              if Transparent.contains(
-                op
-              ) || op == "cast" || op == "address_of" || op == "indirect" =>
+              if Transparent.contains(op) || op == "cast" || op == "address_of" ||
+                  op == "indirect" || op == "base_class_cast" =>
               e.list("ops").headOption.map(visible).getOrElse(e)
           case _ => e
       else if e.kind == "operation" && e.string("op").exists(Transparent.contains) then
@@ -307,7 +307,7 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
                 Operators.indirectIndexAccess
               else Operators.indirectIndexAccess
           operatorAst(e, name, ordered)
-      case "cast" | "lvalue_cast" | "ref_cast" =>
+      case "cast" | "lvalue_cast" | "ref_cast" | "base_class_cast" | "derived_class_cast" =>
           val call = callNode(
             e,
             code(e),
@@ -497,8 +497,11 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
         // a run-time initialiser holds its constant; a static one (`const size_t n = 64;` at
         // namespace scope) is the constant
         case "constant" | "nonconstant_aggregate" =>
-            init.field("const").orElse(Option.when(init.field("ck").isDefined)(init))
-                .map(constantAst).getOrElse(Ast())
+            init.field("const").orElse(Option.when(init.field("ck").isDefined)(init)).map { c =>
+                // a braced object with no name (`return {x, y};`): its elements
+                if c.string("ck").contains("aggregate") then aggregateAst(init, c, () => Ast())
+                else constantAst(c)
+            }.getOrElse(Ast())
         case "constructor" =>
             val target   = init.long("routine").flatMap(unit.routinesById.get)
             val name     = target.flatMap(_.string("name")).getOrElse("")

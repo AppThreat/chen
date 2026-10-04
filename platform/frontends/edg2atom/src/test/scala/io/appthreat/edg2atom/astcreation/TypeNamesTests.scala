@@ -70,6 +70,10 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
           types.signatureType(Some(13L)) shouldBe "geo.Point *"
       }
 
+      "spell an integer type as the CDT frontend does" in {
+          types.signatureType(Some(8L)) shouldBe "unsigned long int"
+      }
+
       "tighten an unqualified pointer, but not a reference" in {
           types.signatureType(Some(14L)) shouldBe "char**"
           types.signatureType(Some(12L)) shouldBe "int &"

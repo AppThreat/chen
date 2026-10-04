@@ -1,0 +1,25 @@
+# Reviewed differences between the CDT frontend's graph and edga's for classes.cpp.
+# A constructor's member initialisers (`w_(w)`) are stores to `this->w_`; the CDT frontend
+# writes the constructor without them, an empty body this comparison leaves out.
++   Rect CALL <operator>.assignment -> <operator>.assignment [STATIC_DISPATCH] args=2
++   Rect CALL <operator>.assignment -> <operator>.assignment [STATIC_DISPATCH] args=2
++   Rect CALL <operator>.indirectFieldAccess -> <operator>.indirectFieldAccess [DYNAMIC_DISPATCH] args=2
++   Rect CALL <operator>.indirectFieldAccess -> <operator>.indirectFieldAccess [DYNAMIC_DISPATCH] args=2
++   Rect IDENTIFIER h: int
++   Rect IDENTIFIER w: int
++   Rect LITERAL this: geo.Rect *
++   Rect LITERAL this: geo.Rect *
++   Rect PARAM h: int
++   Rect PARAM w: int
+# A braced return value (`return {x + o.x, y + o.y};`) is an <operator>.arrayInitializer of
+# its elements; the CDT frontend writes the return without a value.
++   operator + CALL <operator>.addition -> <operator>.addition [STATIC_DISPATCH] args=2
++   operator + CALL <operator>.addition -> <operator>.addition [STATIC_DISPATCH] args=2
++   operator + CALL <operator>.arrayInitializer -> <operator>.arrayInitializer [STATIC_DISPATCH] args=2
++   operator + CALL <operator>.fieldAccess -> <operator>.fieldAccess [STATIC_DISPATCH] args=2
++   operator + CALL <operator>.fieldAccess -> <operator>.fieldAccess [STATIC_DISPATCH] args=2
++   operator + IDENTIFIER o: geo.Point
++   operator + IDENTIFIER o: geo.Point
++   operator + IDENTIFIER x: geo.Point
++   operator + IDENTIFIER y: geo.Point
++ METHOD geo.Rect.Rect:void(int,int) | void (int,int) | returns void

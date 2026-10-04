@@ -329,7 +329,8 @@ class AstCreator(
         Seq(NewModifier().modifierType(ModifierTypes.STATIC))
       else Seq.empty
 
-  /** A lambda's METHOD, written in the file's global block. `captures` are the outer variables its
+  /** A lambda's METHOD, written in the file's global block, in the file the lambda is written in (a
+    * header's, for one in a template instance from it). `captures` are the outer variables its
     * closure's members copy or refer to, by member name.
     */
   protected def lambdaRoutineAst(
@@ -338,7 +339,9 @@ class AstCreator(
     fullName: String,
     captures: Map[String, Long]
   ): Option[Ast] =
-      routineAst(r, currentPath, names = Some((name, fullName)), captures = captures)
+    val path = r.position.flatMap(p => unit.files.get(p.file)).filter(f => f.id != 0L && f.inRoot)
+        .map(relativePath).getOrElse(currentPath)
+    routineAst(r, path, names = Some((name, fullName)), captures = captures)
 
   /** A constructor's member initialisers, `data(new int[16])`, before its body: each the store of
     * its value into the member of the object being built, `this->data`.
@@ -346,7 +349,9 @@ class AstCreator(
   private def constructorInitAsts(r: Value): Seq[Ast] =
     val classType = r.long("class")
     val fields    = classType.flatMap(unit.types.get).toSeq.flatMap(_.list("fields"))
-    val thisType  = registerType(s"${types(classType)}*")
+    // `this` as the CDT frontend types it, as elsewhere (`geo.Point *`, `Point*`)
+    val owner    = types(classType)
+    val thisType = registerType(if owner.contains('.') then s"$owner *" else s"$owner*")
     r.list("ctorInits").filterNot(_.flag("implicit")).flatMap { ci =>
         for
           field <- ci.string("field")
