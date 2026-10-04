@@ -636,8 +636,19 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               .find(_.argumentIndex == 2)
               .flatMap(OverlayFacts.variableKey)
       case _ => None
+    // the object a `D.data()` / `D.begin()` destination writes into, and a `D.size()` of it
+    def receiverKeyOf(c: Call): Option[String] =
+        c.argument.l.collectFirst { case r: Expression if r.argumentIndex == 0 => r }
+            .flatMap(OverlayFacts.variableKey)
+    val dstObject = bufferOf(dst) match
+      case c: Call if c.name == "data" || c.name == "begin" => receiverKeyOf(c)
+      case _                                                => None
+    def sizeOfDstObject(e: Expression): Boolean = stripCasts(e) match
+      case c: Call if c.name == "size" || c.name == "length" =>
+          dstObject.isDefined && receiverKeyOf(c) == dstObject
+      case _ => false
     def boundMatches(minuend: Expression): Boolean =
-        declaredExtent.exists { d =>
+        sizeOfDstObject(minuend) || declaredExtent.exists { d =>
             literalOrIdentCode(minuend).exists {
                 case code if code == d => true
                 case code if code.nonEmpty && d.nonEmpty =>
@@ -1767,7 +1778,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         }
         value.isDefined
       }
-      Option.when(ok && known.nonEmpty)(td.name -> known.toList)
+      // by its bare name and by its full one (`absl.SynchEvent`), as a use may spell either
+      Option.when(ok && known.nonEmpty)(Seq(td.name, td.fullName).distinct.map(_ -> known.toList))
+          .getOrElse(Nil)
     }
     parsed.groupBy(_._1).collect {
         case (name, defs) if defs.map(_._2).distinct.size == 1 =>
@@ -1777,7 +1790,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   /** Every enum's name, parseable or not: an integer stored in one keeps its value. */
   private lazy val enumTypeNames: Set[String] =
-      atom.typeDecl.filter(_.code.trim.startsWith("enum")).name.toSet
+    val enums = atom.typeDecl.filter(_.code.trim.startsWith("enum")).l
+    (enums.map(_.name) ++ enums.map(_.fullName)).toSet
 
   /** Every caller of a method, or None when not all of them can be seen: an address-taken method (a
     * METHOD_REF - a function pointer, a callback table entry) is also called through the pointer,
@@ -3283,15 +3297,27 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     *
     * The descriptor form is the negative shape by construction: `fstat` checks an already-open
     * descriptor, not a name, and `write(fd, ...)` uses no path at all.
+    *
+    * A method locks when it calls a lock function, holds a scoped guard (`std::lock_guard`, or a
+    * class of the tree whose constructor locks: `absl::MutexLock l(mu);`), or declares that its
+    * callers hold the lock (`ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu)`, the thread-safety attributes).
     */
   private def ruleToctou(record: (StoredNode, String) => Unit): Unit =
     // whole-graph inputs, collected once: the file-scope names and the methods that lock - a
-    // per-method re-scan of either was measurable across a tree of a thousand methods
-    val globalNames = atom.method.nameExact("<global>").flatMap(_.local.name).toSet
-    val lockedMethodIds = atom.call.l
-        .filter(c => LockCall.matches(c.name))
-        .map(_.method.id)
-        .toSet
+    // per-method re-scan of either was measurable across a tree of a thousand methods. A
+    // namespace's variables are file-scope too, whether the frontend nests its block or not
+    val globalNames = atom.local.filter(l => enclosingMethodOf(l).exists(_.name == "<global>"))
+        .name.toSet
+    val lockingTypes = mutable.HashMap.empty[String, Boolean]
+    def isLockGuard(typeFullName: String): Boolean =
+        lockingTypes.getOrElseUpdate(typeFullName, constructorLocks(typeFullName))
+    val lockedMethodIds = callersHoldTheLock(
+      (atom.call.l.filter(c => LockCall.matches(c.name)).map(_.method.id) ++
+          atom.local.filter(l => isLockGuard(l.typeFullName)).flatMap(enclosingMethodOf).map(
+            _.id
+          ) ++
+          atom.method.filter(requiresLock).map(_.id)).toSet
+    )
     // a check-then-act race needs a second thread: `if (!inited) inited = 1;` in a program that
     // never starts one is the ordinary lazy-init idiom
     val startsThreads = atom.call.name(ThreadStartCalls).nonEmpty ||
@@ -3371,6 +3397,71 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       end if
     }
   end ruleToctou
+
+  private def enclosingMethodOf(node: AstNode): Option[Method] =
+    var cursor: Option[AstNode] = node._astIn.collectFirst { case a: AstNode => a }
+    while cursor.exists(c => !c.isInstanceOf[Method]) do
+      cursor = cursor.flatMap(_._astIn.collectFirst { case a: AstNode => a })
+    cursor.collect { case m: Method => m }
+
+  /** A scoped lock: a standard guard, or a class whose constructor takes a lock. */
+  private def constructorLocks(typeFullName: String): Boolean =
+    val name   = typeFullName.trim.stripPrefix("const ").takeWhile(_ != '<').trim
+    val simple = name.split('.').last
+    // the guard's class as the local names it, whole or from an enclosing scope
+    // (`base_internal::SpinLockHolder` for `absl.base_internal.SpinLockHolder`)
+    def isConstructorOfGuard(m: Method): Boolean =
+      val owner = m.fullName.takeWhile(_ != ':')
+      owner == s"$name.$simple" || owner.endsWith(s".$name.$simple")
+    // or one that derives from a guard (`class SpinLockHolder : public std::lock_guard<SpinLock>`)
+    def derivesFromGuard: Boolean =
+        atom.typeDecl.nameExact(simple).filter { td =>
+            td.fullName == name || td.fullName.endsWith(s".$name")
+        }.exists(_.inheritsFromTypeFullName.exists(base =>
+            base != typeFullName && constructorLocks(base)
+        ))
+    StdLockGuards.contains(name) || simple.nonEmpty && (atom.method.nameExact(simple)
+        .filter(isConstructorOfGuard)
+        .exists(_.ast.isCall.exists(c => LockCall.matches(c.name))) || derivesFromGuard)
+
+  /** The methods that run under a lock: those that take one, and those every caller of which runs
+    * under one (`GetGraphIdLocked(mu)`, called only with `deadlock_graph_mu` held). A method called
+    * through a pointer, or by no one, has callers this cannot see.
+    */
+  private def callersHoldTheLock(locking: Set[Long]): Set[Long] =
+    val locked  = mutable.HashSet.from(locking)
+    var growing = true
+    var rounds  = 0
+    while growing && rounds < 8 do
+      rounds += 1
+      val more = atom.method.filterNot(m => locked.contains(m.id) || m.isExternal).filter { m =>
+          directCallers(m).exists(callers =>
+              callers.nonEmpty && callers.forall(c => locked.contains(c.method.id))
+          )
+      }.map(_.id).l
+      growing = more.nonEmpty
+      locked ++= more
+    locked.toSet
+
+  private val StdLockGuards =
+      Set("std.lock_guard", "std.unique_lock", "std.scoped_lock", "std.shared_lock")
+
+  /** The clang thread-safety attributes saying the callers hold a lock. */
+  private def requiresLock(m: Method): Boolean =
+      m.tag.nameExact(io.appthreat.x2cpg.Defines.FunctionAttributeTag).value.exists(v =>
+          LockRequirementAttributes.contains(v.takeWhile(_ != '(').trim)
+      )
+
+  private val LockRequirementAttributes = Set(
+    "exclusive_locks_required",
+    "shared_locks_required",
+    "requires_capability",
+    "requires_shared_capability",
+    "assert_exclusive_lock",
+    "assert_shared_lock",
+    "assert_capability",
+    "assert_shared_capability"
+  )
 
   private val LockCall =
       """(?i)(.*[_.])?(lock|mutex_lock|lock_guard|unique_lock|scoped_lock|lock_shared|enter)""".r
@@ -4318,7 +4409,42 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
 
   private def reaches(value: Expression, param: MethodParameterIn): Boolean =
-      OverlayFacts.reachingDefsIn(value).contains(param)
+      OverlayFacts.reachingDefsIn(value).contains(param) || countsLoopsOver(value, param)
+
+  /** The length counts iterations of loops the capacity bounds: `n = 0; for (i = 0; i < m; i++) {
+    * ...; n++; }`, with `m` set from the capacity (`if (m > max_depth) m = max_depth;`). Each
+    * counter in the length (outside a `sizeof`) starts at a constant and only goes up by one,
+    * inside a loop whose condition reads the capacity or a value it reaches.
+    */
+  private def countsLoopsOver(value: Expression, param: MethodParameterIn): Boolean =
+    val method = value.method
+    val counters = value.ast.isIdentifier
+        .filterNot(_.inAst.collectAll[Call].exists(_.name.startsWith("<operator>.sizeOf")))
+        .filterNot(_.name == param.name).name.toSet
+    def writesOf(name: String): List[Call] =
+        method.ast.isCall.filter(c =>
+            (OverlayFacts.isAssignmentOperator(c.name) || IncrementOperators.contains(c.name)) &&
+                c.argument.l.collectFirst { case i: Identifier if i.argumentIndex == 1 => i.name }
+                    .contains(name)
+        ).l
+    def loopReadsCapacity(c: Call): Boolean =
+        c.inAst.collectAll[ControlStructure].l
+            .filter(cs => Set("FOR", "WHILE", "DO").contains(cs.controlStructureType))
+            .exists(_.condition.ast.isIdentifier.exists(i =>
+                i.name == param.name || OverlayFacts.reachingDefsIn(i).contains(param)
+            ))
+    counters.nonEmpty && counters.forall { name =>
+      val writes = writesOf(name)
+      writes.nonEmpty && writes.forall {
+          case inc
+              if inc.name == "<operator>.postIncrement" || inc.name == "<operator>.preIncrement" =>
+              loopReadsCapacity(inc)
+          case set if set.name == "<operator>.assignment" =>
+              set.argument.l.collectFirst { case l: Literal if l.argumentIndex == 2 => l }.isDefined
+          case _ => false
+      } && writes.exists(w => IncrementOperators.contains(w.name))
+    }
+  end countsLoopsOver
 end MemorySafetyFindingPass
 
 object MemorySafetyFindingPass:

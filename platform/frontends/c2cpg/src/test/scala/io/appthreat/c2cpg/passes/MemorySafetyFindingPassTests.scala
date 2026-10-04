@@ -68,6 +68,30 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |    return size;
         |}
         |
+        |int good_counts_bounded_loop(int *sizes, int max_depth, const int *found, int total)
+        |{
+        |    int n = total;
+        |    if (n > max_depth) n = max_depth;
+        |    int count = 0;
+        |    for (int i = 0; i < n; i++) {
+        |        if (found[i] == 0) break;
+        |        count++;
+        |    }
+        |    memcpy(sizes, found, sizeof(*sizes) * (unsigned long)count);
+        |    return count;
+        |}
+        |
+        |int bad_counts_unbounded_loop(int *sizes, int max_depth, const int *found, int total)
+        |{
+        |    int count = 0;
+        |    for (int i = 0; i < total; i++) {
+        |        if (found[i] == 0) break;
+        |        count++;
+        |    }
+        |    memcpy(sizes, found, sizeof(*sizes) * (unsigned long)count);
+        |    return count + max_depth;
+        |}
+        |
         |/* ---- MS-BOUND-002: the unbounded-copy shapes ---- */
         |
         |int bad_unbounded(unsigned char *d, const unsigned char *s, int size)
@@ -365,6 +389,11 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
 
       "not fire when the capacity parameter IS the length" in {
           lenFinding("good_uses_cap") shouldBe empty
+      }
+
+      "not fire when the length counts iterations of a loop the capacity bounds" in {
+          lenFinding("good_counts_bounded_loop") shouldBe empty
+          lenFinding("bad_counts_unbounded_loop") shouldBe Set("MS-BOUND-001")
       }
   }
 

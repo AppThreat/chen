@@ -679,9 +679,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         node match
           case r: Return =>
               val refToLocale = ctx.refReturn && r.astChildren.exists {
-                  case i: Identifier =>
-                      ctx.locals.contains(i.name) && !ctx.arrayLocals.contains(i.name)
-                  case _ => false
+                  case i: Identifier => boundToFrameLocal(r, i, ctx)
+                  case _             => false
               }
               r.astChildren.collect { case e: Expression => e }.foreach { e =>
                 val viaTracked =
@@ -1643,6 +1642,28 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * decaying to its own first element? A local's address is the frame's; an array local used as a
     * pointer is the same storage.
     */
+  /** Does a by-reference return hand out a frame local? The returned name, or the value the
+    * frontend's `<return-value>` temporary is bound to: the temporary holds the returned expression
+    * while the scope's destructors run, and in a reference return it is a reference to that
+    * expression (`return *this;`), not a frame object of its own.
+    */
+  private def boundToFrameLocal(r: Return, i: Identifier, ctx: MethodContext): Boolean =
+    def frameValue(name: String): Boolean =
+        ctx.locals.contains(name) && !ctx.arrayLocals.contains(name)
+    if i.name != ReturnValueName then frameValue(i.name)
+    else
+      r.astParent.astChildren.isCall.nameExact("<operator>.assignment").exists { a =>
+          a.argumentOption(1).exists {
+              case t: Identifier => t.name == ReturnValueName
+              case _             => false
+          } && a.argumentOption(2).exists {
+              case v: Identifier => v.name != ReturnValueName && frameValue(v.name)
+              case _             => false
+          }
+      }
+
+  private val ReturnValueName = "<return-value>"
+
   private def holdsStackAddress(e: Expression, ctx: MethodContext): Boolean = e match
     case c: Call =>
         c.name match

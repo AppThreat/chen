@@ -114,6 +114,24 @@ class StackEscapeRuleTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "stack_escape.c"
+  ).moreCode(
+    """
+    |struct Guard { Guard(); ~Guard(); };
+    |
+    |int &good_ref_param_under_guard(int &x)
+    |{
+    |    Guard g;
+    |    return x;
+    |}
+    |
+    |int &bad_ref_local_under_guard()
+    |{
+    |    Guard g;
+    |    int x = 1;
+    |    return x;
+    |}
+    |""".stripMargin,
+    "stack_escape_ref.cpp"
   )
 
   new MemoryApiPass(cpg).createAndApply()
@@ -140,6 +158,11 @@ class StackEscapeRuleTests extends DataFlowCodeToCpgSuite:
 
     "fire on a returned array local (decay)" in {
         stackEscapesIn("bad_return_local") should not be empty
+    }
+
+    "see through the temporary a return holds while the scope's destructors run" in {
+        stackEscapesIn("good_ref_param_under_guard") shouldBe empty
+        stackEscapesIn("bad_ref_local_under_guard") should not be empty
     }
 
     "fire on a returned &local" in {

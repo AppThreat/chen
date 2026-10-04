@@ -316,7 +316,7 @@ private[taggers] object IndexRange:
     * and a negated literal.
     */
   def literal(e: AstNode): Option[BigInt] = e match
-    case l: Literal => literalValue(l.code)
+    case l: Literal => literalValue(l.code).orElse(constValueOf(l))
     // a constant expression the frontend evaluated: `sizeof(struct hdr)`, an enumerator, `N * 4`,
     // a header constant (`config::kNumLevels` is 7)
     case x: Expression if constValueOf(x).isDefined => constValueOf(x)

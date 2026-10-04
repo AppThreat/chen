@@ -149,16 +149,53 @@ object InitAndFormatRules:
   private def isPointer(t: String): Boolean = t.trim.endsWith("*")
 
   /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own, none of them an
-    * object a constructor initialises.
+    * array (a fill loop or a `memcpy(s.buf, ...)` initialises what this cannot see), a member with
+    * a default initialiser (`size_t n = 0;`: the implicit constructor runs it), or an object a
+    * constructor initialises. The member's code is its declarator as written.
     */
+  /** A type's methods: those in its TYPE_DECL, and those written on their own (a class template
+    * instance's member functions, kept once for the whole tree), by the full name they are members
+    * of.
+    */
+  private def hasMethods(atom: Cpg, td: TypeDecl): Boolean =
+      td.method.nonEmpty || methodOwners(atom).contains(td.fullName)
+
+  private val methodOwnersOf = new java.util.WeakHashMap[Cpg, Set[String]]()
+
+  private def methodOwners(atom: Cpg): Set[String] = methodOwnersOf.synchronized {
+      Option(methodOwnersOf.get(atom)).getOrElse {
+          val owners = atom.method.isExternal(false).fullName.l.flatMap { fullName =>
+            val qualified = fullName.takeWhile(_ != ':')
+            var depth     = 0
+            var last      = -1
+            qualified.indices.foreach { i =>
+                qualified(i) match
+                  case '<'               => depth += 1
+                  case '>'               => depth -= 1
+                  case '.' if depth == 0 => last = i
+                  case _                 =>
+            }
+            Option.when(last > 0)(qualified.substring(0, last))
+          }.toSet
+          methodOwnersOf.put(atom, owners)
+          owners
+      }
+  }
+
   private def isPodStruct(atom: Cpg, t: String): Boolean =
     val name = t.trim.stripPrefix("struct ").trim
-    podCandidates(atom, name).exists(td =>
-        OverlayFacts.membersOfTypeDecl(td).nonEmpty && td.method.isEmpty && !td.isExternal &&
-            !OverlayFacts.membersOfTypeDecl(td).exists(m =>
-                isConstructed(atom, m.typeFullName, Set(name))
-            )
-    )
+    podCandidates(atom, name).exists { td =>
+      val members = OverlayFacts.membersOfTypeDecl(td)
+      members.nonEmpty && !hasMethods(atom, td) && !td.isExternal &&
+      !members.exists(m =>
+          m.typeFullName.trim.endsWith("]") || hasDefaultInitializer(m) ||
+              isConstructed(atom, m.typeFullName, Set(name))
+      )
+    }
+
+  private def hasDefaultInitializer(m: Member): Boolean =
+    val rest = m.code.trim.stripPrefix(m.name).trim
+    rest.startsWith("=") || rest.startsWith("{")
 
   /** An object of type `t` (or an array of them) is initialised by a constructor: its class has
     * methods of its own, or a member that is. A struct holding one (`struct Output { uint64_t
@@ -167,7 +204,7 @@ object InitAndFormatRules:
   private def isConstructed(atom: Cpg, t: String, seen: Set[String]): Boolean =
     val name = t.trim.stripPrefix("struct ").replaceAll("""(\s*\[[^\]]*\])+$""", "").trim
     !name.endsWith("*") && !seen.contains(name) && podCandidates(atom, name).exists(td =>
-        !td.isExternal && (td.method.nonEmpty || OverlayFacts.membersOfTypeDecl(td).exists(m =>
+        !td.isExternal && (hasMethods(atom, td) || OverlayFacts.membersOfTypeDecl(td).exists(m =>
             isConstructed(atom, m.typeFullName, seen + name)
         ))
     )
@@ -288,12 +325,22 @@ object InitAndFormatRules:
             )
             .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
             .map(_.name)
-            .toSet -- params -- declaredTwice
+            .toSet -- params -- declaredTwice -- capturedByLambdas(method)
         // declared on the line it is read on: hand-written C does not do that, a macro that
         // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
         val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap
         if candidates.nonEmpty then analyse(method, candidates, declLine, record)
       }
+
+  /** The names the method's lambdas use from it: a capture by reference may write the local (`[&] {
+    * inserted = true; }()`), out of this method's sight.
+    */
+  private def capturedByLambdas(method: Method): Set[String] =
+      method.ast.isMethodRef.l.flatMap(_._refOut.collectFirst { case m: Method => m }).flatMap {
+          lambda =>
+            val own = (lambda.local.name ++ lambda.parameter.name).toSet
+            lambda.ast.isIdentifier.name.filterNot(own.contains).l
+      }.toSet
 
   private def analyse(
     method: Method,

@@ -182,6 +182,33 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    b.outputs[0].smallest.Clear();
     |    return (int)v;
     |}
+    |struct Block { unsigned int s[4]; unsigned int tag; };
+    |extern "C" void *memcpy(void *, const void *, unsigned long);
+    |Block init_ok_array_member_filled(const void *from)
+    |{
+    |    Block result;
+    |    memcpy(result.s, from, sizeof(result.s));
+    |    result.tag = result.s[0];
+    |    return result;
+    |}
+    |int init_ok_written_by_lambda(int key)
+    |{
+    |    int index;
+    |    bool inserted;
+    |    [&]() {
+    |        index = key * 2;
+    |        inserted = true;
+    |    }();
+    |    return inserted ? index : -1;
+    |}
+    |struct Moments { unsigned long n = 0; double mean{0.0}; };
+    |double init_ok_default_initialised(double x)
+    |{
+    |    Moments m;
+    |    m.n++;
+    |    m.mean += x;
+    |    return m.mean / (double)m.n;
+    |}
     |int init_bad_plain_member(unsigned long v)
     |{
     |    Plain p;
@@ -255,6 +282,13 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         findingsIn("init_ok_constructed_member") should not contain "MS-INIT-001"
         findingsIn("init_ok_constructed_array_member") should not contain "MS-INIT-001"
         findingsIn("init_bad_plain_member") should contain("MS-INIT-001")
+    }
+    "leave a local a lambda captures alone" in {
+        findingsIn("init_ok_written_by_lambda") should not contain "MS-INIT-001"
+    }
+    "leave a struct holding an array, or one whose members have initialisers, alone" in {
+        findingsIn("init_ok_array_member_filled") should not contain "MS-INIT-001"
+        findingsIn("init_ok_default_initialised") should not contain "MS-INIT-001"
     }
 end InitAndFormatRulesTests
 
