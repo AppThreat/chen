@@ -174,10 +174,27 @@ final class ProjectSources(val config: Config):
     */
   private lazy val includers: Map[Path, Map[SourceLanguage, Path]] =
       if database.isEmpty && projectLanguages.size <= 1 then Map.empty
-      else
-        val projectFiles = headers ++ units
-        val graph = new IncludeGraph(projectFiles, unit => includePathsFor(unit), headerFileFinder)
-        graph.includers(units.map(u => u -> languageOfUnit(u)))
+      else includeGraph.includers(units.map(u => u -> languageOfUnit(u)))
+
+  private lazy val includeGraph =
+      new IncludeGraph(headers ++ units, unit => includePathsFor(unit), headerFileFinder)
+
+  /** The project headers a translation unit includes, directly or through other headers. */
+  def projectIncludes(unit: Path): Seq[Path] = includeGraph.reachableFrom(normalized(unit.toString))
+
+  /** The unit each project header belongs to when a frontend writes a header with the first unit
+    * that includes it: the first unit, in path order, of the header's language, else of any
+    * language. A header no unit includes has none.
+    */
+  lazy val headerOwners: Map[Path, Path] =
+    val byPath = units.toSeq.sortBy(_.toString)
+    includeGraph.includers(byPath.map(u => u -> languageOfUnit(u))).flatMap {
+        (header, byLanguage) =>
+            byLanguage.get(headerContext(header)._1).orElse(
+              byLanguage.values.minByOption(_.toString)
+            )
+                .map(header -> _)
+    }
 
   private def includePathsFor(unit: Path): Seq[Path] =
       flagsOf(unit).map(_.includePaths).getOrElse(Nil) ++ configIncludePaths

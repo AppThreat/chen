@@ -36,6 +36,20 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
 
   val executable: Option[String] = EdgaRunner.locate()
 
+  /** What identifies the edga build: its version, the EDG commit and its configuration. An AST
+    * built by another build is not reused.
+    */
+  lazy val identity: String =
+      executable.flatMap { exe =>
+          Try {
+              val process = new ProcessBuilder(exe, "--edga-version").redirectErrorStream(true)
+                  .start()
+              val out = new String(process.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+              process.waitFor(30, TimeUnit.SECONDS)
+              out.trim
+          }.toOption
+      }.getOrElse("")
+
   /** The unit's document, or None when edga could not be run or wrote nothing. */
   def exportUnit(file: Path, timeoutSeconds: Long): Option[EdgaUnit] =
       executable.flatMap { exe =>

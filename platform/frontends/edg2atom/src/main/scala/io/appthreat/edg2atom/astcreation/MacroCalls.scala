@@ -242,7 +242,7 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
         if inner.isEmpty then 0 else inner.split(',').length
 
   private def relativeTo(path: String): String =
-    val root = Paths.get(config.inputPath).toAbsolutePath.normalize
-    val p    = Paths.get(path)
+    val root = AstCreator.realPath(Paths.get(config.inputPath))
+    val p    = AstCreator.realPath(Paths.get(path))
     if p.startsWith(root) then root.relativize(p).toString else path
 end MacroCalls

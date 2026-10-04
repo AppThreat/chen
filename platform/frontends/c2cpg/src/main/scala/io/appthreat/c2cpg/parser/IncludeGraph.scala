@@ -56,6 +56,17 @@ final class IncludeGraph(
               .filter(p => p.endsWith(Paths.get(name).normalize))
         )
 
+  /** The project headers `unit` includes, directly or through other headers, in the order they are
+    * reached.
+    */
+  def reachableFrom(unit: Path): Seq[Path] =
+    val seen  = mutable.LinkedHashSet.empty[Path]
+    val queue = mutable.Queue.from(includesOf(unit, unit))
+    while queue.nonEmpty do
+      val header = queue.dequeue()
+      if header != unit && seen.add(header) then includesOf(header, unit).foreach(queue.enqueue)
+    seen.toSeq
+
   /** For each header reached from `units`: the first unit (in the order given) of each language
     * that includes it.
     */

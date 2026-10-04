@@ -71,7 +71,11 @@ class AstCreator(
 
   protected val usedTypes = mutable.LinkedHashSet.empty[String]
 
-  private val root = Paths.get(config.inputPath).toAbsolutePath.normalize
+  /** The type names this unit's AST uses, for the global type table. */
+  def usedTypeNames: Seq[String] = usedTypes.toSeq
+
+  /** The project root as the file system resolves it: edga names files by their real paths. */
+  private val root = AstCreator.realPath(Paths.get(config.inputPath))
 
   private val sourceLines = mutable.HashMap.empty[Long, Option[Array[String]]]
 
@@ -81,7 +85,7 @@ class AstCreator(
     usedTypes.foreach(t => CGlobal.usedTypes.putIfAbsent(t, true))
     diffGraph
 
-  /** The translation unit's own file, and the project headers it is the first to include. */
+  /** The translation unit's own file, and the project headers that belong to it. */
   private def filesToWrite: Seq[FileEntry] =
     val primary = unit.primaryFile.toSeq
     val headers = unit.files.values.toSeq.sortBy(_.id).filter { f =>
@@ -94,7 +98,7 @@ class AstCreator(
   private def relativePath(f: FileEntry): String =
       if f.id == 0L then filename
       else
-        val p = Paths.get(f.path)
+        val p = AstCreator.realPath(Paths.get(f.path))
         if p.startsWith(root) then root.relativize(p).toString else f.path
 
   private def fileAst(file: FileEntry): Ast =
@@ -875,3 +879,8 @@ class AstCreator(
     diffGraph.addNode(tag)
     diffGraph.addEdge(node, tag, io.shiftleft.codepropertygraph.generated.EdgeTypes.TAGGED_BY)
 end AstCreator
+
+object AstCreator:
+  /** A path as the file system resolves it, links followed; normalised when it does not exist. */
+  def realPath(path: Path): Path =
+      scala.util.Try(path.toRealPath()).getOrElse(path.toAbsolutePath.normalize)
