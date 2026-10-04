@@ -80,8 +80,9 @@ class AstCreator(
   private val sourceLines = mutable.HashMap.empty[Long, Option[Array[String]]]
 
   def createAst(): DiffGraphBuilder =
-    val files = filesToWrite
-    files.foreach(f => Ast.storeInDiffGraph(fileAst(f), diffGraph))
+    val files   = filesToWrite
+    val written = files.map(_.id).toSet
+    files.foreach(f => Ast.storeInDiffGraph(fileAst(f, written), diffGraph))
     usedTypes.foreach(t => CGlobal.usedTypes.putIfAbsent(t, true))
     diffGraph
 
@@ -101,7 +102,7 @@ class AstCreator(
         val p = AstCreator.realPath(Paths.get(f.path))
         if p.startsWith(root) then root.relativize(p).toString else f.path
 
-  private def fileAst(file: FileEntry): Ast =
+  private def fileAst(file: FileEntry, written: Set[Long]): Ast =
     val path = relativePath(file)
     currentPath = path
     val fullName = s"$path:${NamespaceTraversal.globalNamespaceName}"
@@ -143,9 +144,10 @@ class AstCreator(
     val routines = unit.routines.filter { r =>
         inFile(r) && !r.flag("implicit") && isWritten(r) && !definedInClass(r)
     }.flatMap(routineAst(_, path))
-    val lambdas = lambdaAsts.toSeq
+    val instances = if file.id == 0L then foreignInstanceAsts(written) else Seq.empty
+    val lambdas   = lambdaAsts.toSeq
     lambdaAsts.clear()
-    val children = typeDecls ++ globals ++ routines ++ lambdas
+    val children = typeDecls ++ globals ++ routines ++ instances ++ lambdas
     setArgumentIndices(children)
     scope.popScope()
     val methodReturn = NewMethodReturn().code("RET").typeFullName(registerType(X2CpgDefines.Any))
@@ -157,6 +159,27 @@ class AstCreator(
       )
     )
   end fileAst
+
+  /** The template instances this unit uses from project headers another unit writes. Which
+    * instances a unit has depends on what it uses, so each unit writes its own and
+    * DuplicateDefinitionPass keeps one copy of each. An instance class is written with its members,
+    * its member functions on their own: the copy kept is the one with the most member functions.
+    */
+  private def foreignInstanceAsts(written: Set[Long]): Seq[Ast] =
+    def foreignFile(v: Value): Option[FileEntry] =
+        v.position.flatMap(p => unit.files.get(p.file)).filter(f =>
+            f.id != 0L && f.inRoot && !f.system && !written.contains(f.id)
+        )
+    val types = unit.types.values.toSeq.sortBy(_("id").num).filter { t =>
+        t.flag("templateInstance") && isDefinedRecordOrTypedef(t) && !isClosure(t)
+    }.flatMap(t =>
+        foreignFile(t).flatMap(f => typeDeclAst(t, relativePath(f), withMethods = false))
+    )
+    val routines = unit.routines.filter { r =>
+        r.flag("templateInstance") && r.field("body").isDefined && !r.flag("implicit") &&
+        isWritten(r)
+    }.flatMap(r => foreignFile(r).flatMap(f => routineAst(r, relativePath(f))))
+    types ++ routines
 
   /** A routine of the project, or a library routine the unit calls: lambda bodies belong to the
     * routine they are written in.
@@ -432,7 +455,7 @@ class AstCreator(
 
   private def isClosure(t: Value): Boolean = t.flag("closure")
 
-  private def typeDeclAst(t: Value, path: String): Option[Ast] =
+  private def typeDeclAst(t: Value, path: String, withMethods: Boolean = true): Option[Ast] =
       t.string("kind") match
         case Some("typeref") =>
             val name  = t.string("typedef").getOrElse("")
@@ -465,7 +488,7 @@ class AstCreator(
             // its member functions: those defined in its braces, and a declaration of each other
             val id = t("id").num.toLong
             val methods = unit.routines.filter { r =>
-                r.long("class").contains(id) && !r.flag("implicit") && isWritten(r)
+                withMethods && r.long("class").contains(id) && !r.flag("implicit") && isWritten(r)
             }.flatMap { r =>
                 if definedInClass(r) then routineAst(r, path, parent = Some(fullName))
                 else routineAst(r, path, parent = Some(fullName), stub = true)

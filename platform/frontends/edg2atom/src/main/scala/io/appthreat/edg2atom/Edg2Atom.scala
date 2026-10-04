@@ -11,7 +11,7 @@ import io.appthreat.c2cpg.passes.{
     TypeDeclNodePass
 }
 import io.appthreat.edg2atom.parser.EdgaRunner
-import io.appthreat.edg2atom.passes.{EdgAstCreationPass, FrontendTagPass}
+import io.appthreat.edg2atom.passes.{DuplicateDefinitionPass, EdgAstCreationPass, FrontendTagPass}
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -68,6 +68,7 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
                     files.map(relative)
                   else Nil
               edg.map(_ -> FrontendTagPass.Edg).toMap ++ cdt.map(_ -> FrontendTagPass.Cdt)
+        new DuplicateDefinitionPass(cpg).createAndApply()
         new FrontendTagPass(cpg, frontendOf).createAndApply()
         TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
         new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation).createAndApply()

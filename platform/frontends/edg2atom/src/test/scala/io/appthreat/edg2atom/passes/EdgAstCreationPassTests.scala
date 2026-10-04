@@ -68,6 +68,37 @@ class EdgAstCreationPassTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "a template instance from a project header" should {
+      val header = "clamp.hpp" ->
+          """template <typename T> T clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
+          |template <typename T> struct Box { T item; T get() const { return item; } };
+          |""".stripMargin
+      val ints =
+          "a.cpp" -> "#include \"clamp.hpp\"\nint a(int v) { Box<int> b{v}; return clamp(b.get(), 0, 9); }\n"
+      val shorts =
+          "b.cpp" -> "#include \"clamp.hpp\"\nshort b(short v) { Box<short> s{v}; return clamp<short>(s.get(), 0, 9) + clamp(1, 0, 9); }\n"
+
+      "be in the graph once, whichever units use it" in {
+          assume(edga.isDefined, "edga is not installed")
+          project(header, ints, shorts) { dir =>
+              graph(dir) { cpg =>
+                val clamps = cpg.method.nameExact("clamp").filter(_.block.astChildren.nonEmpty).l
+                clamps.map(_.fullName).sorted shouldBe List(
+                  "clamp:int(int,int,int)",
+                  "clamp:short(short,short,short)"
+                )
+                cpg.method.nameExact("get").filter(_.block.astChildren.nonEmpty).fullName.l.sorted shouldBe
+                    List("Box<int>.get:int()", "Box<short>.get:short()")
+                cpg.typeDecl.isExternal(false).fullName("Box<.*").fullName.l.sorted shouldBe List(
+                  "Box<int>",
+                  "Box<short>"
+                )
+                clamps.map(_.filename).distinct shouldBe List("clamp.hpp")
+              }
+          }
+      }
+  }
+
   "a unit edga cannot export" should {
       "be left out without the fallback" in {
           assume(edga.isDefined, "edga is not installed")
