@@ -242,4 +242,79 @@ class ProbeGatedIngestionTests extends AnyWordSpec with Matchers with BeforeAndA
           results.head.phpFile.children.head shouldBe a[NopStmt]
       }
   }
+
+  "Batch ingestion through a Node generator named by PHP_ASTGEN_BIN" should {
+
+      "probe and batch through node even when the per-file parser is a php script" in {
+          cancelUnlessRunnable()
+
+          val scenario = (workRoot / "nodegen").createDirectoryIfNotExists()
+          val inputDir = (scenario / "in").createDirectoryIfNotExists()
+          (inputDir / "a.php").writeText("<?php ;")
+
+          // The per-file stub mimics the vendored php-parse: it knows neither
+          // --parser-info nor -i/-o, so probing it (the historic behaviour)
+          // cannot yield batch support.
+          val perFileStub = writeStub(
+            scenario / "gen",
+            s"""${phpArgHelpers}
+          |exit(1);
+          |""".stripMargin
+          )
+
+          // The Node stub mimics phpastgen.js: answers --parser-info and batches -i/-o.
+          val argsFile = scenario / "batch-args.json"
+          val nodeGen  = scenario / "gen" / "phpastgen.js"
+          nodeGen.writeText(
+            s"""const args = process.argv.slice(2);
+             |if (args.includes("--parser-info")) {
+             |  console.log("Parser backend: nikic/php-parser@5.8.0");
+             |  console.log("Generator version: 2.0.0");
+             |  process.exit(0);
+             |}
+             |const outIdx = args.indexOf("-o");
+             |if (args.includes("-i") && outIdx !== -1) {
+             |  const fs = require("fs");
+             |  const path = require("path");
+             |  fs.writeFileSync(${ujson.write(
+                ujson.Str(argsFile.canonicalPath)
+              )}, JSON.stringify(args));
+             |  const out = args[outIdx + 1];
+             |  fs.mkdirSync(out, { recursive: true });
+             |  fs.writeFileSync(path.join(out, "a.json"), JSON.stringify(${wrapperJsonJs(
+                "a.php"
+              )}));
+             |  process.exit(0);
+             |}
+             |process.exit(1);
+             |""".stripMargin
+          )
+
+          val parser =
+              PhpParser.fromPaths(perFileStub, iniPath, Some(nodeGen.canonicalPath))
+
+          // The probe runs the Node generator, not the per-file php stub.
+          parser.supportsBatch shouldBe true
+
+          val results = parser.parseDirectory(
+            inputDir.canonicalPath,
+            (scenario / "out").canonicalPath
+          )
+          (results should have).length(1)
+          results.head.sourcePath should endWith("a.php")
+          results.head.phpFile.children.head shouldBe a[NopStmt]
+          results.head.phpFile.provenance.generatorVersion shouldBe Some("2.0.0")
+
+          // The batch asks for the whole tree: dependency code included, no default exclusions.
+          val batchArgs = ujson.read(argsFile.contentAsString).arr.map(_.str)
+          batchArgs.containsSlice(PhpParser.CompleteTreeArgs) shouldBe true
+      }
+  }
+
+  /** The wrapper object as a JavaScript object literal, for the Node stub generator. */
+  private def wrapperJsonJs(relFilePath: String): String =
+      s"""{ ast: [ { nodeType: "Stmt_Nop", attributes: { startLine: 1, startFilePos: 0, kind: 1 } } ],
+       |  parser_backend: "nikic/php-parser@5.8.0", generator_version: "2.0.0",
+       |  php_version: "8.4.1", target_version: "8.4", rel_file_path: "$relFilePath" }"""
+          .stripMargin
 end ProbeGatedIngestionTests
