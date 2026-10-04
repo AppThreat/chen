@@ -133,7 +133,7 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     // it implements, without an error for the attempted redefinition
     Seq("--clear_flag=use_predefined_macro_file", "--diag_suppress=46") ++ dialect ++ standard ++
         Seq("--preinclude_macros", predefinedFile.toString) ++ includes ++ userDefines ++ libcxx ++
-        forced
+        EdgaRunner.float128Shim(this.identity, macros, cpp) ++ forced
   end arguments
 
   private def macroFile(macros: Map[String, String]): Path =
@@ -242,6 +242,22 @@ object EdgaRunner:
     else if IncludeAutoDiscovery.clangAvailable() then
       Some(CompilerIdentity("clang", CompilerFamily.Clang, language, std))
     else None
+
+  /** glibc's `_Float128` is a type of the compiler's own from GCC 7 (G++ 13) on, and a typedef of
+    * `long double` before. A front end built without float128 support - edga on aarch64 Linux,
+    * where the front end's own floating point cannot use the x86-only quadmath library - has no
+    * such type; on aarch64 `long double` is that binary128 type, so the name stands for it. Only
+    * where the headers take the type as the compiler's: as a macro the typedef would read `typedef
+    * long double long double`.
+    */
+  def float128Shim(edgaIdentity: String, macros: Map[String, String], cpp: Boolean): Seq[String] =
+    val withoutFloat128 = edgaIdentity.linesIterator.exists(l =>
+        l.startsWith("configuration ") && l.split("\\s+").lift(1).contains("linux-aarch64")
+    )
+    val compilersType = !macros.contains("__clang__") &&
+        macros.get("__GNUC__").flatMap(_.trim.toIntOption).exists(g => g >= (if cpp then 13 else 7))
+    if withoutFloat128 && compilersType then Seq("--define_macro", "_Float128=long double")
+    else Seq.empty
 
   /** The front end's emulation of the compiler the macros came from. */
   def dialectOptions(macros: Map[String, String], cpp: Boolean): Seq[String] =
