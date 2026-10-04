@@ -41,12 +41,11 @@ class PhpParser private (
 
   /** Milliseconds a capability probe may run before it is killed.
     *
-    * The probe is one `node` cold start, but it races the first wave of AST
-    * cache misses (thousands of file reads and hashes) on worker threads that
-    * start as soon as the pass does; five seconds was regularly lost to that
-    * contention on loaded runners, silently demoting whole-directory batch
-    * ingestion to the per-file fallback. Thirty seconds still bounds a wedged
-    * generator while leaving room for a busy machine.
+    * The probe is one `node` cold start, but it races the first wave of AST cache misses (thousands
+    * of file reads and hashes) on worker threads that start as soon as the pass does; five seconds
+    * was regularly lost to that contention on loaded runners, silently demoting whole-directory
+    * batch ingestion to the per-file fallback. Thirty seconds still bounds a wedged generator while
+    * leaving room for a busy machine.
     */
   private val ProbeTimeoutMs = 30000L
 
@@ -59,23 +58,23 @@ class PhpParser private (
     * `-i/-o`, so probing it can only fail and, worse, leaves the frontend grinding through one
     * interpreter spawn per file (hours for a vendored PHP project on Windows). Resolution order:
     *
-    *   1. the `PHP_ASTGEN_BIN` environment variable naming an existing generator (cdxgen
-    *      forwards the installed `phpastgen.js`), launched as [[generatorInvocation]] says;
-    *   2. a phpParserPath that already names phpastgen (a Node script, or the bare name);
-    *   3. otherwise the configured parser script, probed through the php wrapper: the vendored
-    *      php-parse fails the probe and the caller parses file by file, while a custom generator
-    *      that keeps the php shape still batches.
+    *   - first, the `PHP_ASTGEN_BIN` environment variable naming an existing generator (cdxgen
+    *     forwards the installed `phpastgen.js`), launched as [[generatorInvocation]] says;
+    *   - then a phpParserPath that already names phpastgen (a Node script, or the bare name);
+    *   - otherwise the configured parser script, probed through the php wrapper: the vendored
+    *     php-parse fails the probe and the caller parses file by file, while a custom generator
+    *     that keeps the php shape still batches.
     *
     * The result is an ARGUMENT VECTOR rather than a shell string: the probe and the batch
-    * invocation are executed through [[ExternalCommand.runWithResult]] (a `ProcessBuilder`), so
-    * no shell ever parses these paths. A project directory containing spaces, quotes, backticks
-    * or `$(...)` is therefore passed through verbatim and cannot be word-split or injected.
+    * invocation are executed through [[ExternalCommand.runWithResult]] (a `ProcessBuilder`), so no
+    * shell ever parses these paths. A project directory containing spaces, quotes, backticks or
+    * `$(...)` is therefore passed through verbatim and cannot be word-split or injected.
     *
     * Windows note: `ProcessBuilder` cannot launch the bare name `phpastgen` (`CreateProcess`
     * appends `.exe` only, while the bin shims are `.cmd`), so the bare name is resolved once
-    * through `where phpastgen` — preferring the package's `phpastgen.js` under `node`, which
-    * keeps the batch invocation shell-free — and, failing that, run through `cmd /c`, which
-    * resolves the shim. POSIX executes the bare name directly.
+    * through `where phpastgen` — preferring the package's `phpastgen.js` under `node`, which keeps
+    * the batch invocation shell-free — and, failing that, run through `cmd /c`, which resolves the
+    * shim. POSIX executes the bare name directly.
     */
   private lazy val batchCommandPrefix: Option[Seq[String]] =
       batchGeneratorOverride
@@ -104,11 +103,12 @@ class PhpParser private (
     *
     * A project shim `<node_modules>/.bin/phpastgen.cmd` puts the package at
     * `<node_modules>/@appthreat/atom-parsetools/phpastgen.js`; a global-prefix shim
-    * `<prefix>/phpastgen.cmd` puts it at `<prefix>/node_modules/@appthreat/atom-parsetools/phpastgen.js`.
+    * `<prefix>/phpastgen.cmd` puts it at
+    * `<prefix>/node_modules/@appthreat/atom-parsetools/phpastgen.js`.
     */
   private def phpastgenJsNear(shimPath: String): Option[String] =
-    val shim       = File(shimPath)
-    val shimDir    = shim.parent
+    val shim    = File(shimPath)
+    val shimDir = shim.parent
     val candidates = Seq(
       shimDir.parent / "@appthreat" / "atom-parsetools" / "phpastgen.js",
       shimDir / "node_modules" / "@appthreat" / "atom-parsetools" / "phpastgen.js"
@@ -117,32 +117,32 @@ class PhpParser private (
 
   /** Argument-vector head for the bare `phpastgen` name (see [[batchCommandPrefix]]). */
   private def resolveBarePhpastgen(): Seq[String] =
-    if !scala.util.Properties.isWin then Seq("phpastgen")
-    else
-      val resolved  = ExternalCommand.runWithResult(
-        Seq("where", "phpastgen"),
-        ".",
-        timeoutMillis = ProbeTimeoutMs
-      )
-      val shimPath  = resolved.stdOut
-          .map(_.trim)
-          .filter(p => p.toLowerCase.endsWith(".cmd") || p.toLowerCase.endsWith(".bat"))
-          .headOption
-      shimPath match
-        case Some(shim) =>
-            phpastgenJsNear(shim) match
-              case Some(script) => Seq("node", script)
-              case None         => Seq("cmd", "/c", File(shim).canonicalPath)
-        case None =>
-            // Last resort: let the shell resolve the name from PATH.
-            Seq("cmd", "/c", "phpastgen")
+      if !scala.util.Properties.isWin then Seq("phpastgen")
+      else
+        val resolved = ExternalCommand.runWithResult(
+          Seq("where", "phpastgen"),
+          ".",
+          timeoutMillis = ProbeTimeoutMs
+        )
+        val shimPath = resolved.stdOut
+            .map(_.trim)
+            .filter(p => p.toLowerCase.endsWith(".cmd") || p.toLowerCase.endsWith(".bat"))
+            .headOption
+        shimPath match
+          case Some(shim) =>
+              phpastgenJsNear(shim) match
+                case Some(script) => Seq("node", script)
+                case None         => Seq("cmd", "/c", File(shim).canonicalPath)
+          case None =>
+              // Last resort: let the shell resolve the name from PATH.
+              Seq("cmd", "/c", "phpastgen")
 
   /** Argument vector for the capability probe, when a batch generator is available. */
   private def parserInfoCommand: Option[Seq[String]] =
-    batchCommandPrefix.map(_ :+ "--parser-info")
+      batchCommandPrefix.map(_ :+ "--parser-info")
 
-  /** Argument vector for batch mode: `<bin> -i <inputDir> -o <outputDir>`, asking the generator
-    * for every PHP file under the input (see [[PhpParser.CompleteTreeArgs]]).
+  /** Argument vector for batch mode: `<bin> -i <inputDir> -o <outputDir>`, asking the generator for
+    * every PHP file under the input (see [[PhpParser.CompleteTreeArgs]]).
     *
     * A generator reached through `cmd /c` has its arguments re-parsed by `cmd`, so a directory
     * whose name holds a character `cmd` interprets is never handed to it: the files are parsed one
@@ -151,7 +151,7 @@ class PhpParser private (
   private def batchCommand(inputDir: String, outputDir: String): Option[Seq[String]] =
       batchCommandPrefix.flatMap { prefix =>
           if prefix.headOption.contains("cmd") &&
-              Seq(inputDir, outputDir).exists(_.exists(PhpParser.CmdMetaChars.contains))
+            Seq(inputDir, outputDir).exists(_.exists(PhpParser.CmdMetaChars.contains))
           then
             logger.debug(
               s"Not batching '$inputDir' through cmd: the path holds characters cmd would interpret."
@@ -170,18 +170,18 @@ class PhpParser private (
     *   - the probe not returning within [[ProbeTimeoutMs]] (the process is destroyed).
     */
   def supportsBatch: Boolean =
-    parserInfoCommand match
-      case Some(command) =>
-          val result = ExternalCommand.runWithResult(command, ".", timeoutMillis = ProbeTimeoutMs)
-          if result.timedOut then
+      parserInfoCommand match
+        case Some(command) =>
+            val result = ExternalCommand.runWithResult(command, ".", timeoutMillis = ProbeTimeoutMs)
+            if result.timedOut then
               logger.debug(
                 s"Capability probe timed out after ${ProbeTimeoutMs}ms: ${command.mkString(" ")}"
               )
               false
-          else
+            else
               result.exitCode == 0 && result.stdOut.exists(_.contains("Generator version:"))
-      case None =>
-          false
+        case None =>
+            false
 
   /** Directory-batch ingestion with per-file isolation.
     *
@@ -375,8 +375,8 @@ object PhpParser:
 
   val PhpParserBinEnvVar = "PHP_PARSER_BIN"
 
-  /** Environment variable naming the batch-capable generator, usually the installed
-    * `phpastgen.js`, forwarded by callers such as cdxgen that know where it is installed. Unlike
+  /** Environment variable naming the batch-capable generator, usually the installed `phpastgen.js`,
+    * forwarded by callers such as cdxgen that know where it is installed. Unlike
     * [[PhpParserBinEnvVar]], which names the per-file `php-parse`, this one selects the generator
     * used for batch ingestion. Unset means "resolve phpastgen from PATH/the default".
     */
@@ -394,7 +394,8 @@ object PhpParser:
   val CompleteTreeArgs: Seq[String] = Seq("--include-vendor", "--exclude", "\\b\\B")
 
   /** Characters `cmd.exe` interprets on a command line. */
-  private[parser] val CmdMetaChars: Set[Char] = Set('&', '|', '<', '>', '^', '%', '!', '"', '(', ')')
+  private[parser] val CmdMetaChars: Set[Char] =
+      Set('&', '|', '<', '>', '^', '%', '!', '"', '(', ')')
 
   private[parser] def isNodeScript(path: String): Boolean =
       Seq(".js", ".mjs", ".cjs").exists(path.toLowerCase.endsWith)
@@ -470,5 +471,5 @@ object PhpParser:
     phpIniPath: String,
     batchGeneratorOverride: Option[String] = None
   ): PhpParser =
-    new PhpParser(phpParserPath, phpIniPath, batchGeneratorOverride)
+      new PhpParser(phpParserPath, phpIniPath, batchGeneratorOverride)
 end PhpParser

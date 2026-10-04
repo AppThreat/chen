@@ -276,10 +276,14 @@ class ProbeGatedIngestionTests extends AnyWordSpec with Matchers with BeforeAndA
              |if (args.includes("-i") && outIdx !== -1) {
              |  const fs = require("fs");
              |  const path = require("path");
-             |  fs.writeFileSync(${ujson.write(ujson.Str(argsFile.canonicalPath))}, JSON.stringify(args));
+             |  fs.writeFileSync(${ujson.write(
+                ujson.Str(argsFile.canonicalPath)
+              )}, JSON.stringify(args));
              |  const out = args[outIdx + 1];
              |  fs.mkdirSync(out, { recursive: true });
-             |  fs.writeFileSync(path.join(out, "a.json"), JSON.stringify(${wrapperJsonJs("a.php")}));
+             |  fs.writeFileSync(path.join(out, "a.json"), JSON.stringify(${wrapperJsonJs(
+                "a.php"
+              )}));
              |  process.exit(0);
              |}
              |process.exit(1);

@@ -85,8 +85,8 @@ object ExternalCommand:
           Failure(new RuntimeException(allOutput.mkString(System.lineSeparator())))
   end runMultiple
 
-  /** Milliseconds `waitFor` grants a process started by [[runWithResult]] past its
-    * `timeoutMillis` before the exit value is read with a fallback, after it was destroyed.
+  /** Milliseconds `waitFor` grants a process started by [[runWithResult]] past its `timeoutMillis`
+    * before the exit value is read with a fallback, after it was destroyed.
     */
   private val DESTROY_SETTLE_MS = 5000L
 
@@ -118,15 +118,15 @@ object ExternalCommand:
       val timedOut =
           if timeoutMillis > 0 then !process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
           else
-              process.waitFor()
-              false
+            process.waitFor()
+            false
       if timedOut then
-          // Its children first: a launcher (`cmd /c`, node running php) dies alone otherwise and
-          // leaves them running.
-          process.descendants().forEach(child => child.destroyForcibly())
-          process.destroyForcibly()
-          // Give the OS a moment to reap it before reading the exit value.
-          process.waitFor(DESTROY_SETTLE_MS, TimeUnit.MILLISECONDS)
+        // Its children first: a launcher (`cmd /c`, node running php) dies alone otherwise and
+        // leaves them running.
+        process.descendants().forEach(child => child.destroyForcibly())
+        process.destroyForcibly()
+        // Give the OS a moment to reap it before reading the exit value.
+        process.waitFor(DESTROY_SETTLE_MS, TimeUnit.MILLISECONDS)
       val returnValue = Try(process.exitValue()).getOrElse(1)
 
       val stdOut = IOUtils.readLinesInFile(stdOutFile.toPath)
@@ -138,6 +138,7 @@ object ExternalCommand:
     finally
       stdOutFile.delete()
       stdErrFile.foreach(_.delete())
+    end try
   end runWithResult
 
   /** Finds the absolute path to the executable directory (e.g. `/path/to/javasrc2cpg/bin`). Based

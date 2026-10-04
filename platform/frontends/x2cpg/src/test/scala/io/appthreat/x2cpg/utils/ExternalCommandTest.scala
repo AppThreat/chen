@@ -34,3 +34,4 @@ class ExternalCommandTest extends AnyWordSpec with Matchers:
           }
       }
   }
+end ExternalCommandTest
