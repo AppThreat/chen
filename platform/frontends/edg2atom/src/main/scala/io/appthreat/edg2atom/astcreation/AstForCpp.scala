@@ -655,9 +655,10 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
             val tpe    = registerType(types(v.long("t")))
             val local  = localNode(s, name, s"$tpe $name", tpe)
             val target = identifierNode(s, name, name, tpe)
+            val value  = expressionAst(v)
             val store = callNode(
               s,
-              s"$name = ${code(v)}",
+              s"$name = ${codeOfAst(value)}",
               Operators.assignment,
               Operators.assignment,
               DispatchTypes.STATIC_DISPATCH,
@@ -665,7 +666,7 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
               Some(tpe)
             )
             val storeAst =
-                callAst(store, Seq(Ast(target).withRefEdge(target, local), expressionAst(v)))
+                callAst(store, Seq(Ast(target).withRefEdge(target, local), value))
             val read = identifierNode(s, name, name, tpe)
             val ret  = returnNode(s, code(s))
             val retAst =
@@ -814,16 +815,18 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
           start.column - 1
         ))
     }.getOrElse(name)
-    // up to the end of the declarator: a top-level `,` or `;`
+    // up to the end of the declarator: a top-level `,` or `;`, or the bracket that closes what it
+    // is declared in (the last enumerator's `}`)
     var depth = 0
     var i     = 0
     var done  = false
     while i < text.length && !done do
       text(i) match
-        case '(' | '{' | '[' | '<'   => depth += 1
-        case ')' | '}' | ']' | '>'   => depth -= 1
-        case ',' | ';' if depth <= 0 => done = true
-        case _                       =>
+        case '(' | '{' | '[' | '<'         => depth += 1
+        case ')' | '}' | ']' if depth == 0 => done = true
+        case ')' | '}' | ']' | '>'         => depth -= 1
+        case ',' | ';' if depth <= 0       => done = true
+        case _                             =>
       if !done then i += 1
     val declarator = text.take(i).trim
     if declarator.startsWith(name) then declarator else name

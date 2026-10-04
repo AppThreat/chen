@@ -3,7 +3,7 @@ package io.appthreat.edg2atom.astcreation
 import io.appthreat.edg2atom.testfixtures.EdgCodeToCpgSuite
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Literal}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Literal}
 import io.shiftleft.semanticcpg.language.*
 
 /** What C declares beyond the code: function attributes, `cleanup`, and the calls that return twice
@@ -103,6 +103,36 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
           // the folded value is kept on the expression as written
           cpg.assignment.code("table_size = .*").argument(2).tag
               .nameExact(X2CpgDefines.ConstValueTag).value.l shouldBe List("64")
+      }
+  }
+
+  "an enumerator" should {
+      val cpg = code(
+        """enum mode { MODE_READ = 1, MODE_WRITE, MODE_BOTH = MODE_READ | MODE_WRITE };
+        |static const char *const names[4] = {"none", "read", "write", "both"};
+        |int open_as(int how);
+        |int open_both(void) { return open_as(MODE_BOTH); }
+        |const char *name_of(enum mode m) { return names[m]; }
+        |""".stripMargin
+      )
+
+      "be named where it is used, with its value" in {
+          requireEdga()
+          inside(cpg.call.nameExact("open_as").argument(1).l) { case List(arg: Identifier) =>
+              arg.name shouldBe "MODE_BOTH"
+              arg.tag.nameExact(X2CpgDefines.ConstValueTag).value.l shouldBe List("3")
+          }
+      }
+
+      "be a member of its enumeration's TYPE_DECL, declared as written" in {
+          requireEdga()
+          val mode = cpg.typeDecl.nameExact("mode").head
+          mode.code should startWith("enum mode {")
+          mode.member.code.l shouldBe List(
+            "MODE_READ = 1",
+            "MODE_WRITE",
+            "MODE_BOTH = MODE_READ | MODE_WRITE"
+          )
       }
   }
 end CShapesTests

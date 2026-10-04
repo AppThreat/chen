@@ -70,9 +70,9 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
           types.signatureType(Some(13L)) shouldBe "geo.Point *"
       }
 
-      "tighten an unqualified one" in {
-          types.signatureType(Some(12L)) shouldBe "int&"
+      "tighten an unqualified pointer, but not a reference" in {
           types.signatureType(Some(14L)) shouldBe "char**"
+          types.signatureType(Some(12L)) shouldBe "int &"
       }
   }
 

@@ -78,19 +78,20 @@ final class TypeNames(unit: EdgaUnit):
           t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag")).map(dotted)
               .getOrElse(X2CpgDefines.Any)
       case "integer" if t.flag("enum") =>
-          t.string("tag").filter(_.nonEmpty).map(dotted).getOrElse(cleaned(t.string("name")))
+          t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag").filter(_.nonEmpty))
+              .map(dotted).getOrElse(cleaned(t.string("name")))
       case _ => cleaned(t.string("name"))
     end match
   end nameOf
 
   /** A type as a C++ function's full name spells it, as the CDT frontend does: a pointer `T *`, a
-    * reference `T &`, qualifiers dropped; the spaces before `*` and `&` are kept only for a
-    * qualified name (`geo.Point &`, but `int&`).
+    * reference `T &`, qualifiers dropped; the space before a `*` is kept only for a qualified name
+    * (`geo.Point *`, but `char*`), the one before a `&` always (`int &`).
     */
   def signatureType(id: Option[Long]): String =
     val spelled = id.map(spelledForSignature(_, 0)).getOrElse(X2CpgDefines.Any)
     val base    = spelled.takeWhile(c => c != ' ' && c != '*' && c != '&')
-    if base.contains('.') then spelled else spelled.replace(" *", "*").replace(" &", "&")
+    if base.contains('.') then spelled else spelled.replace(" *", "*")
 
   private def spelledForSignature(id: Long, depth: Int): String =
       unit.types.get(id) match

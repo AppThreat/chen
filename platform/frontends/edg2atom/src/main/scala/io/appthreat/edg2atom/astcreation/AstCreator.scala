@@ -137,7 +137,7 @@ class AstCreator(
 
     val inFile = (v: Value) => v.position.exists(_.file == file.id)
     val typeDecls = unit.types.values.toSeq.sortBy(_("id").num).filter { t =>
-        isDefinedRecordOrTypedef(t) && inFile(t) && !isClosure(t)
+        (isDefinedRecordOrTypedef(t) || isNamedEnum(t)) && inFile(t) && !isClosure(t)
     }.flatMap(typeDeclAst(_, path))
     val globals = unit.globals.filter(inFile).flatMap(globalAst)
     // a member function defined in its class is written in the class's TYPE_DECL
@@ -459,45 +459,73 @@ class AstCreator(
 
   private def isClosure(t: Value): Boolean = t.flag("closure")
 
+  /** A class's or an enumeration's specifier as written, `enum Color { Red, Green }`. */
+  private def specifierText(t: Value): Option[String] =
+      t.field("span").map(_.arr.toSeq.flatMap(EdgaUnit.pos)).filter(_.size == 2)
+          .flatMap(s => textOf(s(0), s(1))).map(_.trim).filter(_.nonEmpty)
+
+  /** An enumeration the program names: its enumerators as members, each with its declarator (`kLock
+    * \= 0`), the shape the enum rules read.
+    */
+  private def isNamedEnum(t: Value): Boolean =
+      t.string("kind").contains("integer") && t.flag("enum") && t.string("tag").exists(
+        _.nonEmpty
+      ) &&
+          t.field("enumerators").isDefined
+
+  private def enumDeclAst(t: Value, path: String): Ast =
+    val fullName = registerType(types(t("id").num.toLong))
+    val name     = t.string("tag").getOrElse("")
+    val decl     = typeDeclNode(t, name, fullName, path, specifierText(t).getOrElse(s"enum $name"))
+    val members = t.list("enumerators").map { e =>
+        Ast(memberNode(e, e.string("name").getOrElse(""), declaratorText(e), fullName))
+    }
+    Ast(decl).withChildren(members)
+
   private def typeDeclAst(t: Value, path: String, withMethods: Boolean = true): Option[Ast] =
-      t.string("kind") match
-        case Some("typeref") =>
-            val name  = t.string("typedef").getOrElse("")
-            val alias = registerType(types(t.long("of")))
-            Some(Ast(typeDeclNode(
-              t,
-              name,
-              registerType(types(t.long("id"))),
-              path,
-              s"typedef $name",
-              alias = Some(alias)
-            )))
-        case _ =>
-            val name     = types(t("id").num.toLong)
-            val fullName = registerType(name)
-            val inherits = t.list("bases").flatMap(_.long("type")).map(b => registerType(types(b)))
-            val decl =
-                typeDeclNode(
-                  t,
-                  unqualifiedTypeName(name),
-                  fullName,
-                  path,
-                  name,
-                  inherits = inherits
-                )
-            val members = t.list("fields").map { f =>
-              val fname = f.string("name").getOrElse("")
-              Ast(memberNode(f, fname, fname, registerType(types(f.long("type")))))
-            }
-            // its member functions: those defined in its braces, and a declaration of each other
-            val id = t("id").num.toLong
-            val methods = unit.routines.filter { r =>
-                withMethods && r.long("class").contains(id) && !r.flag("implicit") && isWritten(r)
-            }.flatMap { r =>
-                if definedInClass(r) then routineAst(r, path, parent = Some(fullName))
-                else routineAst(r, path, parent = Some(fullName), stub = true)
-            }
-            Some(Ast(decl).withChildren(inSourceOrder(members ++ methods)))
+    if isNamedEnum(t) then return Some(enumDeclAst(t, path))
+    t.string("kind") match
+      case Some("typeref") =>
+          val name  = t.string("typedef").getOrElse("")
+          val alias = registerType(types(t.long("of")))
+          Some(Ast(typeDeclNode(
+            t,
+            name,
+            registerType(types(t.long("id"))),
+            path,
+            s"typedef $name",
+            alias = Some(alias)
+          )))
+      case _ =>
+          val name     = types(t("id").num.toLong)
+          val fullName = registerType(name)
+          val inherits = t.list("bases").flatMap(_.long("type")).map(b => registerType(types(b)))
+          val decl =
+              typeDeclNode(
+                t,
+                unqualifiedTypeName(name),
+                fullName,
+                path,
+                specifierText(t).getOrElse(name),
+                inherits = inherits
+              )
+          // a member's code is its declarator as written (`buf[N]`, `n = 0`), as the CDT
+          // frontend writes it
+          val members = t.list("fields").map { f =>
+            val fname = f.string("name").getOrElse("")
+            Ast(memberNode(f, fname, declaratorText(f), registerType(types(f.long("type")))))
+          }
+          // its member functions: those defined in its braces, and a declaration of each other
+          val id = t("id").num.toLong
+          val methods = unit.routines.filter { r =>
+              withMethods && r.long("class").contains(id) && !r.flag("implicit") && isWritten(r)
+          }.flatMap { r =>
+              if definedInClass(r) then routineAst(r, path, parent = Some(fullName))
+              else routineAst(r, path, parent = Some(fullName), stub = true)
+          }
+          Some(Ast(decl).withChildren(inSourceOrder(members ++ methods)))
+    end match
+  end typeDeclAst
 
   /** A class's members and member functions in the order they are written. */
   private def inSourceOrder(asts: Seq[Ast]): Seq[Ast] =
@@ -527,10 +555,16 @@ class AstCreator(
         case "return" if s.flag("implicit") && s.field("expr").isEmpty => Ast()
         case "return"                                                  => returnStatementAst(s)
         case "if"                                                      => ifAst(s)
-        case "while"                                                   => whileStatementAst(s)
-        case "end_test_while"                                          => doWhileStatementAst(s)
-        case "for"                                                     => forStatementAst(s)
-        case "switch"                                                  => switchAst(s)
+        // `if constexpr` with a known condition, in an instance: the branch it takes
+        case "constexpr_if" =>
+            s.field("value") match
+              case Some(ujson.Bool(taken)) =>
+                  s.field(if taken then "then" else "else").map(statementAst).getOrElse(Ast())
+              case _ => ifAst(s)
+        case "while"          => whileStatementAst(s)
+        case "end_test_while" => doWhileStatementAst(s)
+        case "for"            => forStatementAst(s)
+        case "switch"         => switchAst(s)
         case "switch_case" =>
             val name = if s.flag("default") then "default" else "case"
             val code = if s.flag("default") then "default:"
@@ -595,6 +629,19 @@ class AstCreator(
             case Some(_) => Seq.empty
             // a variable the front end made for itself
             case None if d.flag("implicit") => Seq.empty
+            // `auto [a, b] = f();`: the object the declaration initialises, named by its
+            // bindings, then each binding as a local assigned the part it names
+            case None if d.flag("bindingContainer") =>
+                val bindings = d.list("bindings")
+                val named = d match
+                  case o: ujson.Obj =>
+                      val copy = ujson.Obj.from(o.value)
+                      copy("name") = bindings.flatMap(_.string("name")).mkString("[", ", ", "]")
+                      copy.value.remove("bindingContainer")
+                      copy
+                  case other => other
+                declarationAsts(ujson.Obj("decls" -> ujson.Arr(named))) ++
+                    bindings.flatMap(bindingAsts)
             case None =>
                 val name  = d.string("name").getOrElse("")
                 val tpe   = registerType(types(d.long("type")))
@@ -622,6 +669,20 @@ class AstCreator(
                 do cleansUpAtScopeEnd(id, name, routine)
                 Ast(local) +: init.toSeq
       }
+
+  /** A structured binding: a local holding the part of the object it names (`a = [a, b].first`),
+    * or, for a tuple-like object, the reference its own initialiser binds.
+    */
+  private def bindingAsts(b: Value): Seq[Ast] =
+    val name  = b.string("name").getOrElse("")
+    val tpe   = registerType(types(b.long("type")))
+    val local = localNode(b, name, s"$tpe $name", tpe)
+    b.long("id").foreach(id => variables(id) = local)
+    scope.addToScope(name, (local, tpe))
+    val init = b.field("bound").map(bound => ujson.Obj("k" -> "expression", "expr" -> bound))
+        .orElse(b.field("init"))
+    b.long("id").filter(_ => init.isDefined).foreach(initializedAtDeclaration.add)
+    Ast(local) +: init.map(initializerAssignment(b, local, tpe, _)).toSeq
 
   /** A local's initialisation the front end placed after other statements. */
   private def initStatementAsts(s: Value): Seq[Ast] =
@@ -764,7 +825,11 @@ class AstCreator(
       val over    = s.field("over").flatMap(_.field("expr"))
       val overAst = over.map(expressionAst).getOrElse(Ast())
       val variable = s.field("variable").toSeq.map { v =>
-        val name  = v.string("name").getOrElse("")
+        // `for (auto [k, v] : m)`: the element object, named by its bindings
+        val name =
+            if v.flag("bindingContainer") then
+              v.list("bindings").flatMap(_.string("name")).mkString("[", ", ", "]")
+            else v.string("name").getOrElse("")
         val tpe   = registerType(types(v.long("type")))
         val local = localNode(v, name, s"$tpe $name", tpe)
         v.long("id").foreach(id => variables(id) = local)

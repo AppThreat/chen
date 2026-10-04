@@ -163,12 +163,87 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       if e.long("var").exists(thisVariables.contains) then
         Ast(literalNode(e, "this", registerType(types.signatureType(e.long("t")))))
       else
-        val name = e.string("name").getOrElse("")
-        val id   = identifierNode(e, name, name, typeOf(e))
-        val ast  = Ast(id)
-        e.long("var").flatMap(variables.get).orElse(scope.lookupVariable(name).map(_._1)) match
-          case Some(target) => ast.withRefEdge(id, target)
-          case None         => ast
+        val declared = e.long("var").flatMap(variables.get)
+        // a variable without a name: the object of a structured binding, by the name its
+        // declaration gave it, or the function name the front end predefines, as written
+        // (`__func__`)
+        val name = e.string("name").filter(_.nonEmpty)
+            .orElse(declared.collect { case l: NewLocal => l.name })
+            .orElse(sourceText(e).map(_.trim).filter(_.matches("[A-Za-z_][A-Za-z0-9_]*")))
+            .getOrElse("__func__")
+        sourceText(e).filter(_.contains("::")).flatMap(qualifiedVariableAst(e, _, name)).getOrElse {
+            val id  = identifierNode(e, name, name, typeOf(e))
+            val ast = Ast(id)
+            // a variable the front end names but this graph does not declare (a library's)
+            // is not a same-named local
+            declared.orElse(
+              Option.when(e.long("var").isEmpty)(scope.lookupVariable(name).map(_._1)).flatten
+            ) match
+              case Some(target) => ast.withRefEdge(id, target)
+              case None         => ast
+        }
+
+  /** A variable named with its scope, as the CDT frontend writes it: `ns::v` the access of member
+    * `v` of `ns`, `a::b::v` of `a::b` (the inner qualifier an identifier), `::v` of `<global>`,
+    * `Limits<long>::digits` of the class.
+    */
+  private def qualifiedVariableAst(e: Value, text: String, name: String): Option[Ast] =
+    val segments = splitQualified(text)
+    Option.when(segments.size > 1 && segments.last == name) {
+        def qualifier(segment: String, written: String): Ast =
+            if segment.isEmpty then Ast(literalNode(e, "<global>", registerType(X2CpgDefines.Any)))
+            else
+              val tpe = registerType(segment.takeWhile(_ != '<').trim)
+              Ast(identifierNode(e, segment, written, tpe))
+        val prefixes = segments.init
+        val base =
+            prefixes.drop(1).foldLeft((qualifier(prefixes.head, prefixes.head), prefixes.head)) {
+                case ((acc, written), segment) =>
+                    val code = s"$written::$segment"
+                    val access = callNode(
+                      e,
+                      code,
+                      Operators.fieldAccess,
+                      Operators.fieldAccess,
+                      DispatchTypes.STATIC_DISPATCH,
+                      None,
+                      Some(registerType(X2CpgDefines.Any))
+                    )
+                    (callAst(access, Seq(acc, qualifier(segment, segment))), code)
+            }
+        val access = callNode(
+          e,
+          text.trim,
+          Operators.fieldAccess,
+          Operators.fieldAccess,
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(typeOf(e))
+        )
+        callAst(access, Seq(base._1, Ast(fieldIdentifierNode(e, name, name))))
+    }
+  end qualifiedVariableAst
+
+  /** `a::b<c::d>::v` as `a`, `b<c::d>`, `v`: the `::` outside template arguments. */
+  private def splitQualified(text: String): Seq[String] =
+    val parts = scala.collection.mutable.ArrayBuffer.empty[String]
+    val part  = new StringBuilder
+    var depth = 0
+    var i     = 0
+    val t     = text.trim
+    while i < t.length do
+      val c = t(i)
+      if c == '<' then depth += 1
+      if c == '>' then depth -= 1
+      if depth == 0 && t.startsWith("::", i) then
+        parts += part.toString.trim
+        part.clear()
+        i += 2
+      else
+        part.append(c)
+        i += 1
+    parts += part.toString.trim
+    parts.toSeq
 
   private def operationAst(e: Value): Ast =
     val op       = e.string("op").getOrElse("")
@@ -284,8 +359,15 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
     val dispatch =
         if name == Operators.indirectFieldAccess then DispatchTypes.DYNAMIC_DISPATCH
         else DispatchTypes.STATIC_DISPATCH
-    val call = callNode(e, code(e), name, name, dispatch, None, Some(typeOf(e)))
     val args = operands.map(expressionAst)
+    // an access the front end made (a structured binding's part) has no text: as it would be
+    // written
+    val written = code(e) match
+      case "" if name == Operators.fieldAccess || name == Operators.indirectFieldAccess =>
+          val separator = if name == Operators.fieldAccess then "." else "->"
+          args.map(codeOfAst).mkString(separator)
+      case text => text
+    val call = callNode(e, written, name, name, dispatch, None, Some(typeOf(e)))
     callAst(call, args)
 
   /** A call: to the routine the front end resolved, through a pointer otherwise. An operator
@@ -380,7 +462,27 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
                   Ast(literalNode(e, text, tpe))
               case _ =>
                   val text = sourceText(e).getOrElse(literalText(e))
-                  Ast(literalNode(e, text, typeOf(e)))
+                  namedConstantAst(e, text).getOrElse(Ast(literalNode(e, text, typeOf(e))))
+
+  /** A constant written as a name (an enumerator, `kLock`, or `Shade::Dark`), as the CDT frontend
+    * writes it: the name, with the value the front end gave it.
+    */
+  private def namedConstantAst(e: Value, text: String): Option[Ast] =
+    val name = text.trim
+    val ast =
+        if NamedConstantKeywords.contains(name) then None
+        else if name.matches("[A-Za-z_][A-Za-z0-9_]*") then
+          Some(Ast(identifierNode(e, name, name, typeOf(e))))
+        else if name.contains("::") then
+          splitQualified(name).lastOption.filter(_.matches("[A-Za-z_][A-Za-z0-9_]*"))
+              .flatMap(last => qualifiedVariableAst(e, name, last))
+        else None
+    ast.foreach(a =>
+        e.string("value").foreach(v => a.root.foreach(tagNode(_, X2CpgDefines.ConstValueTag, v)))
+    )
+    ast
+
+  private val NamedConstantKeywords = Set("true", "false", "nullptr", "NULL", "__null")
 
   private def literalText(e: Value): String =
       e.string("ck") match

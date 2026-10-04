@@ -202,6 +202,8 @@ class CppShapesTests extends EdgCodeToCpgSuite:
           destroyedBy("return s + c.x;") shouldBe List("c.~Point()", "b.~Point()", "a.~Point()")
           // a return value that could observe them is computed first
           cpg.method.nameExact("use").local.nameExact("<return-value>").size shouldBe 2
+          cpg.method.nameExact("use").assignment.code("<return-value> = .*").code.l.sorted shouldBe
+              List("<return-value> = inner.sum()", "<return-value> = s + c.x")
       }
   }
 
@@ -301,6 +303,40 @@ class CppShapesTests extends EdgCodeToCpgSuite:
           inside(thrown.argument(1)) { case ctor: Call =>
               ctor.methodFullName shouldBe "Error.Error:void(int)"
           }
+      }
+  }
+
+  "a structured binding" should {
+      val cpg = code(
+        """
+        |struct Span { char *data; unsigned long size; };
+        |Span make_span(char *p, unsigned long n);
+        |void note(const char *where);
+        |unsigned long split(char *p, unsigned long n) {
+        |  note(__func__);
+        |  auto [data, size] = make_span(p, n);
+        |  return data[0] + size;
+        |}
+        |""".stripMargin
+      )
+
+      "declare its object, named by the bindings, and assign each binding its part" in {
+          requireEdga()
+          val split = cpg.method.nameExact("split").head
+          split.local.name.l shouldBe List("[data, size]", "data", "size")
+          split.assignment.code.l shouldBe List(
+            "[data, size] = make_span(p, n)",
+            "data = [data, size].data",
+            "size = [data, size].size"
+          )
+          split.ast.isIdentifier.nameExact("data").refsTo.l.map(_.label).distinct shouldBe List(
+            "LOCAL"
+          )
+      }
+
+      "leave the function name the front end predefines spelled as written" in {
+          requireEdga()
+          cpg.call.nameExact("note").argument(1).code.l shouldBe List("__func__")
       }
   }
 
