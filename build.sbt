@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "4.0.0"
 ThisBuild / scalaVersion := "3.9.0"
 
-val cpgVersion = "3.0.5"
+val cpgVersion = "3.0.6"
 
 lazy val platform          = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss
@@ -16,6 +16,7 @@ lazy val javasrc2cpg       = Projects.javasrc2cpg
 lazy val jimple2cpg        = Projects.jimple2cpg
 lazy val php2atom          = Projects.php2atom
 lazy val ruby2atom         = Projects.ruby2atom
+lazy val edg2atom          = Projects.edg2atom
 
 lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   platform,
@@ -29,6 +30,7 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   jimple2cpg,
   php2atom,
   ruby2atom,
+  edg2atom,
 )
 
 ThisBuild / libraryDependencies ++= Seq(

@@ -78,6 +78,13 @@ object MemApiVocab:
     *   `s->nb_streams`. JSON `"increments": {"arg": 1, "field": "nb_streams"}`. The counter's
     *   definitions sit inside the callee, so no in-method walk can find them; a callee whose body
     *   is in the tree is inferred instead ([[MemorySemanticsPass]]).
+    * @param api
+    *   the API this entry is a spelling of, when that is another entry: a FORTIFY wrapper
+    *   (`__memcpy_chk`) or a compiler builtin (`__builtin_memcpy`) is `memcpy`. Tags are valued
+    *   with it, so a rule reads the wrapper's arguments exactly as the API's.
+    * @param objectSize
+    *   the argument a FORTIFY wrapper receives the destination's size in, as the compiler worked it
+    *   out (`(size_t)-1` when it could not).
     */
   final case class MemApiEntry(
     name: String,
@@ -94,8 +101,13 @@ object MemApiVocab:
     nullableReturn: Boolean = false,
     returnRange: Option[(BigInt, BigInt)] = None,
     returnBits: Option[Int] = None,
-    increments: Option[(Int, String)] = None
-  )
+    increments: Option[(Int, String)] = None,
+    api: Option[String] = None,
+    objectSize: Option[Int] = None
+  ):
+    /** The API name the entry's tags are valued with. */
+    def apiName: String = api.getOrElse(name)
+  end MemApiEntry
 
   private def decodeEntry(json: io.circe.Json): Option[MemApiEntry] =
       for
@@ -123,7 +135,9 @@ object MemApiVocab:
               arg <- obj.get("arg").flatMap(_.as[Int].toOption)
               fld <- obj.get("field").flatMap(_.as[String].toOption)
               if arg >= 1 && fld.nonEmpty
-            yield (arg, fld)
+            yield (arg, fld),
+        api = json.hcursor.get[String]("api").toOption.filter(_.nonEmpty),
+        objectSize = json.hcursor.get[Int]("objectSize").toOption
       )
 
   /** @return
@@ -157,7 +171,29 @@ object MemApiVocab:
                 List.empty
       case None => List.empty
     val merged = builtin.filterNot(b => external.exists(_.name == b.name)) ++ external
-    merged.map(e => e.name -> e).toMap
+    withBuiltinSpellings(merged.map(e => e.name -> e).toMap)
+
+  /** The compiler builtin `__builtin_X` of every entry X that is a function: the same arguments and
+    * roles, valued as X. An entry that declares the builtin itself keeps its own roles.
+    */
+  private def withBuiltinSpellings(entries: Map[String, MemApiEntry]): Map[String, MemApiEntry] =
+      entries ++ entries.values.collect {
+          case e if !e.name.startsWith("<") && !entries.contains(BuiltinPrefix + e.name) =>
+              (BuiltinPrefix + e.name) -> e.copy(
+                name = BuiltinPrefix + e.name,
+                api = Some(e.apiName)
+              )
+      }
+
+  private final val BuiltinPrefix = "__builtin_"
+
+  private lazy val builtinInventory: Map[String, MemApiEntry] = inventory(None)
+
+  /** The API a call name spells: `memcpy` for `__builtin_memcpy`, `__memcpy_chk` and
+    * `__builtin___memcpy_chk`; the name itself when it spells no other entry.
+    */
+  def apiOf(callName: String): String =
+      builtinInventory.get(callName).map(_.apiName).getOrElse(callName)
 
   /** The built-in vocabulary, for tests and diagnostics. */
   def builtInInventory: List[MemApiEntry] = builtin

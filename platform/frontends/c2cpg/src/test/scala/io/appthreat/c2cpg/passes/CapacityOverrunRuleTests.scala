@@ -53,6 +53,19 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     |    snprintf(dest, sizeof(dest), "%s", userInput);
     |}
     |
+    |/* two buffers of one name in different blocks: each copy is measured against the
+    |   buffer it writes, not the first one the function declares */
+    |void good_same_name_buffers(const char *userInput, int wide)
+    |{
+    |    if (wide) {
+    |        char buf[8];
+    |        memcpy(buf, userInput, 8);
+    |    } else {
+    |        char buf[200];
+    |        memcpy(buf, userInput, 150);
+    |    }
+    |}
+    |
     |/* the CWE-122 shapes: a constant length past an allocation's size. The extent is
     |   `unknown` unless ExtentPass looks through the cast. */
     |void bad_const_past_alloc(const char *userInput)
@@ -174,6 +187,10 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the source's length is guarded" in {
         findingsIn("good_checked_strcpy") shouldBe empty
+    }
+
+    "measure a copy against the buffer of that name it writes" in {
+        findingsIn("good_same_name_buffers") should not contain "MS-BOUND-006"
     }
 
     "stay silent when the copy declares its own bound" in {

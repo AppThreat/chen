@@ -1,14 +1,15 @@
 package io.appthreat.c2cpg.astcreation
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
+import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.appthreat.x2cpg.datastructures.Stack.*
-import scala.util.Try
+import scala.annotation.tailrec
 
 trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
@@ -124,9 +125,27 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
               typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = false, index)
           val node = localNode(declarator, name, s"$codeTpe $name", tpe)
           scope.addToScope(name, (node, tpe))
+          registerArrayTypedef(declarator, tpe)
           localAst(declaration, node)
     end match
   end astForDeclarator
+
+  /** Records `tpe` as an array behind a typedef when the declared variable's type is one. */
+  private def registerArrayTypedef(declarator: IASTDeclarator, tpe: String): Unit =
+    @scala.annotation.tailrec
+    def isArray(t: IType): Boolean = t match
+      case td: ITypedef      => isArray(td.getType)
+      case q: IQualifierType => isArray(q.getType)
+      case _: IArrayType     => true
+      case _                 => false
+    val typedefArray = CdtQuery(declarator.getName.resolveBinding()).toOption.collect {
+        case v: IVariable => v.getType
+    }.exists {
+        case td: ITypedef      => isArray(td)
+        case q: IQualifierType => q.getType.isInstanceOf[ITypedef] && isArray(q)
+        case _                 => false
+    }
+    if typedefArray then registerRecord(CGlobal.arrayTypedefRecord(tpe))
 
   /** A local's AST. A declaration with static storage duration (`static char buf[32];` inside a
     * function) tags its local `storage-class=static`: the storage class is otherwise only in the
@@ -136,21 +155,37 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     */
   private def localAst(declaration: IASTSimpleDeclaration, node: NewLocal): Ast =
     if declaration.getDeclSpecifier.getStorageClass == IASTDeclSpecifier.sc_static then
-      diffGraph.addEdge(
+      tagNode(
         node,
-        NewTag().name(io.appthreat.x2cpg.Defines.StorageClassTag)
-            .value(io.appthreat.x2cpg.Defines.StorageClassStatic),
-        EdgeTypes.TAGGED_BY
+        io.appthreat.x2cpg.Defines.StorageClassTag,
+        io.appthreat.x2cpg.Defines.StorageClassStatic
       )
     Ast(node)
 
   protected def astForInitializer(declarator: IASTDeclarator, init: IASTInitializer): Ast =
       init match
+        case i: IASTEqualsInitializer if copyInitializingConstructor(declarator, i).isDefined =>
+            // `Text t = "x"` and `Text t = {"x", 1}` call a constructor, as `Text t("x")` does
+            val (constructor, linked) = copyInitializingConstructor(declarator, i).get
+            val args = i.getInitializerClause match
+              case list: IASTInitializerList => list.getClauses.toList.map(astForNode)
+              case clause                    => List(astForNode(clause))
+            constructionAst(
+              declarator,
+              constructor,
+              linked,
+              args,
+              code(i.getInitializerClause)
+            )
         case i: IASTEqualsInitializer =>
             val operatorName = Operators.assignment
             val left         = astForNode(effectiveDeclaratorName(declarator))
-            val right        = astForNode(i.getInitializerClause)
-            val code         = i.getInitializerClause.getRawSignature
+            // designated initializers in the list assign into the declared object
+            val right = withInitializedObject(
+              i.getInitializerClause,
+              () => astForNode(effectiveDeclaratorName(declarator))
+            )(astForNode(i.getInitializerClause))
+            val code = i.getInitializerClause.getRawSignature
             val dispatchType =
                 if code.nonEmpty && (code.startsWith("&") || code.contains("->")) then
                   DispatchTypes.DYNAMIC_DISPATCH
@@ -161,7 +196,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                   nodeSignature(declarator),
                   operatorName,
                   operatorName,
-                  dispatchType
+                  dispatchType,
+                  None,
+                  Some(declaredType(declarator))
                 )
             callAst(callNode_, List(left, right))
         case i: ICPPASTConstructorInitializer =>
@@ -173,22 +210,32 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
               case decl: IASTSimpleDeclaration =>
                   registerType(cleanType(typeForDeclSpecifier(decl.getDeclSpecifier)))
               case _ => Defines.anyTypeName
-            val simpleTypeName = lastNameOfQualifiedName(typeFullName)
-            val name =
-                if simpleTypeName.nonEmpty && simpleTypeName != Defines.anyTypeName then
-                  simpleTypeName
-                else ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
-            val callNode_ = callNode(
-              declarator,
-              nodeSignature(declarator),
-              name,
-              name,
-              DispatchTypes.STATIC_DISPATCH,
-              signature = None,
-              typeFullName = Some(typeFullName)
-            )
             val args = i.getArguments.toList.map(x => astForNode(x))
-            callAst(callNode_, args)
+            linkedConstructor(declarator) match
+              case Some((constructor, linked)) =>
+                  constructionAst(declarator, constructor, linked, args, nodeSignature(declarator))
+              case None =>
+                  val simpleTypeName = lastNameOfQualifiedName(typeFullName)
+                  val name =
+                      if simpleTypeName.nonEmpty && simpleTypeName != Defines.anyTypeName then
+                        simpleTypeName
+                      else ASTStringUtil.getSimpleName(effectiveDeclaratorName(declarator))
+                  val callNode_ = callNode(
+                    declarator,
+                    nodeSignature(declarator),
+                    name,
+                    name,
+                    DispatchTypes.STATIC_DISPATCH,
+                    signature = None,
+                    typeFullName = Some(typeFullName)
+                  )
+                  callAst(callNode_, args)
+            end match
+        case i: IASTInitializerList if linkedConstructor(declarator).isDefined =>
+            // `Point p{1, 2}` calls a constructor, as `Point p(1, 2)` does
+            val (constructor, linked) = linkedConstructor(declarator).get
+            val args                  = i.getClauses.toList.map(x => astForNode(x))
+            constructionAst(declarator, constructor, linked, args, nodeSignature(declarator))
         case i: IASTInitializerList =>
             val operatorName = Operators.assignment
             val callNode_ =
@@ -197,12 +244,93 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                   nodeSignature(declarator),
                   operatorName,
                   operatorName,
-                  DispatchTypes.STATIC_DISPATCH
+                  DispatchTypes.STATIC_DISPATCH,
+                  None,
+                  Some(declaredType(declarator))
                 )
-            val left  = astForNode(declarator.getName)
-            val right = astForNode(i)
+            val left = astForNode(declarator.getName)
+            val right =
+                withInitializedObject(i, () => astForNode(declarator.getName))(astForNode(i))
             callAst(callNode_, List(left, right))
         case _ => astForNode(init)
+
+  /** A variable a constructor initialises: the assignment of the constructor call to the variable,
+    * so the variable holds what the constructor builds from its arguments.
+    */
+  private def constructionAst(
+    declarator: IASTDeclarator,
+    constructor: ICPPFunction,
+    linked: ICPPFunction,
+    args: List[Ast],
+    callCode: String
+  ): Ast =
+    val typeFullName = declaredType(declarator)
+    val (_, constructorCall) =
+        linkedCallAst(declarator, constructor, linked, typeFullName, None, args, Some(callCode))
+    val assignment = callNode(
+      declarator,
+      nodeSignature(declarator),
+      Operators.assignment,
+      Operators.assignment,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(typeFullName)
+    )
+    callAst(assignment, List(astForNode(effectiveDeclaratorName(declarator)), constructorCall))
+  end constructionAst
+
+  /** The constructor a copy-initialisation (`T t = x`, `T t = {a, b}`) calls, when the graph holds
+    * its METHOD. None when the initialiser is already a `T` value that becomes the variable itself
+    * (`T t = T(x)`, `T t = make()`): no constructor runs for the variable then.
+    */
+  private def copyInitializingConstructor(
+    declarator: IASTDeclarator,
+    init: IASTEqualsInitializer
+  ): Option[(ICPPFunction, ICPPFunction)] =
+    val initialisesInPlace = init.getInitializerClause match
+      case e: IASTExpression =>
+          CdtQuery(e.getValueCategory == IASTExpression.ValueCategory.PRVALUE).getOrElse(false) &&
+          CdtQuery(effectiveDeclaratorName(declarator).resolveBinding()).toOption.exists {
+              case v: IVariable =>
+                  CdtQuery(sameClass(v.getType, e.getExpressionType)).getOrElse(false)
+              case _ => false
+          }
+      case _ => false
+    if initialisesInPlace then None else linkedConstructor(declarator)
+
+  private def sameClass(a: IType, b: IType): Boolean =
+    @tailrec def unwrap(t: IType): IType = t match
+      case td: ITypedef      => unwrap(td.getType)
+      case q: IQualifierType => unwrap(q.getType)
+      case other             => other
+    (unwrap(a), unwrap(b)) match
+      case (x: ICPPClassType, y: ICPPClassType) => x.isSameType(y)
+      case _                                    => false
+
+  /** The type of the variable a declarator declares, as CDT resolves it: an initialisation is an
+    * assignment of that type.
+    */
+  private def declaredType(declarator: IASTDeclarator): String =
+      CdtQuery(effectiveDeclaratorName(declarator).resolveBinding()).toOption.collect {
+          // a reference is modelled as the type it refers to, as the variable's LOCAL is
+          case v: IVariable => registerType(typeNameOf(v.getType).stripSuffix("&").stripSuffix("&"))
+      }.getOrElse(registerType(Defines.anyTypeName))
+
+  /** `Guard g;` default-constructs `g`: the call to the default constructor assigned to `g`, when
+    * the graph holds its METHOD. A member declarator inside a class body is constructed by the
+    * class's own constructors, not where it is declared.
+    */
+  protected def defaultConstructionAst(
+    declaration: IASTSimpleDeclaration,
+    declarator: IASTDeclarator
+  ): Option[Ast] =
+      if declarator.getInitializer != null || parentIsClassDef(declaration) ||
+        declarator.isInstanceOf[IASTFunctionDeclarator]
+      then None
+      else
+        linkedConstructor(declarator).map { (constructor, linked) =>
+            constructionAst(declarator, constructor, linked, Nil, nodeSignature(declarator))
+        }
 
   protected def handleUsingDeclaration(usingDecl: ICPPASTUsingDeclaration): Seq[Ast] =
     val simpleName = ASTStringUtil.getSimpleName(usingDecl.getName)
@@ -263,6 +391,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   end astForStructuredBindingDeclaration
 
   protected def astsForDeclaration(decl: IASTDeclaration): Seq[Ast] =
+      withOverflowRecovery(decl, Seq(_))(declarationAsts(decl))
+
+  private def declarationAsts(decl: IASTDeclaration): Seq[Ast] =
     val declAsts = decl match
       case sb: ICPPASTStructuredBindingDeclaration =>
           Seq(astForStructuredBindingDeclaration(sb))
@@ -324,6 +455,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           declaration.getDeclarators.toList.map {
               case d: IASTDeclarator if d.getInitializer != null =>
                   astForInitializer(d, d.getInitializer)
+              case d: IASTDeclarator if !d.isInstanceOf[IASTArrayDeclarator] =>
+                  defaultConstructionAst(declaration, d).getOrElse(Ast())
               case arrayDecl: IASTArrayDeclarator =>
                   val op = Operators.arrayInitializer
                   val initCallNode = callNode(
@@ -342,7 +475,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           }
       case _ => Nil
     declAsts ++ initAsts
-  end astsForDeclaration
+  end declarationAsts
 
   private def astsForLinkageSpecification(l: ICPPASTLinkageSpecification): Seq[Ast] =
       l.getDeclarations.toList.flatMap { d =>
@@ -383,7 +516,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             // AST spelling.  This preserves template parameters on base classes while
             // still gaining namespace qualification for non-template bases.
             val astSpelling = s.getNameSpecifier.toString
-            val bindingName = Try(s.getNameSpecifier.resolveBinding()).toOption
+            val bindingName = CdtQuery(s.getNameSpecifier.resolveBinding()).toOption
                 .collect { case b: ICPPBinding => b.getQualifiedName.mkString(".") }
                 .filter(_.length >= astSpelling.length)
                 .getOrElse(astSpelling)

@@ -1,0 +1,13 @@
+# Reviewed differences between the CDT frontend's graph and edga's for basics.c.
+# An enumerator is an int in C; the CDT frontend leaves its type unresolved.
+-   classify IDENTIFIER BLUE: ANY
++   classify IDENTIFIER BLUE: int
+-   classify IDENTIFIER GREEN: ANY
++   classify IDENTIFIER GREEN: int
+-   classify IDENTIFIER RED: ANY
++   classify IDENTIFIER RED: int
+# A character constant is an int in C (a char only in C++); the CDT frontend types it char.
+-   copy_into LITERAL '\0': char
++   copy_into LITERAL '\0': int
+-   count_red IDENTIFIER RED: ANY
++   count_red IDENTIFIER RED: int

@@ -156,6 +156,67 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "handlers.cpp"
+  ).moreCode(
+    """
+    |class Key {
+    | public:
+    |  Key() : n(0) {}
+    |  void Clear() { n = 0; }
+    | private:
+    |  int n;
+    |};
+    |struct Output { unsigned long number; Key smallest, largest; };
+    |struct Batch { Output outputs[2]; };
+    |struct Plain { unsigned long number; unsigned long size; };
+    |int init_ok_constructed_member(unsigned long v)
+    |{
+    |    Output out;
+    |    out.number = v;
+    |    out.smallest.Clear();
+    |    out.largest.Clear();
+    |    return (int)out.number;
+    |}
+    |int init_ok_constructed_array_member(unsigned long v)
+    |{
+    |    Batch b;
+    |    b.outputs[0].smallest.Clear();
+    |    return (int)v;
+    |}
+    |struct Block { unsigned int s[4]; unsigned int tag; };
+    |extern "C" void *memcpy(void *, const void *, unsigned long);
+    |Block init_ok_array_member_filled(const void *from)
+    |{
+    |    Block result;
+    |    memcpy(result.s, from, sizeof(result.s));
+    |    result.tag = result.s[0];
+    |    return result;
+    |}
+    |int init_ok_written_by_lambda(int key)
+    |{
+    |    int index;
+    |    bool inserted;
+    |    [&]() {
+    |        index = key * 2;
+    |        inserted = true;
+    |    }();
+    |    return inserted ? index : -1;
+    |}
+    |struct Moments { unsigned long n = 0; double mean{0.0}; };
+    |double init_ok_default_initialised(double x)
+    |{
+    |    Moments m;
+    |    m.n++;
+    |    m.mean += x;
+    |    return m.mean / (double)m.n;
+    |}
+    |int init_bad_plain_member(unsigned long v)
+    |{
+    |    Plain p;
+    |    p.number = v;
+    |    return (int)p.size;
+    |}
+    |""".stripMargin,
+    "members.cpp"
   )
 
   new MemorySemanticsPass(cpg).createAndApply()
@@ -217,4 +278,51 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
             .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-INIT-001"))
             .name.l shouldBe List("y")
     }
+    "leave a struct whose members a constructor initialises alone, but not a plain one" in {
+        findingsIn("init_ok_constructed_member") should not contain "MS-INIT-001"
+        findingsIn("init_ok_constructed_array_member") should not contain "MS-INIT-001"
+        findingsIn("init_bad_plain_member") should contain("MS-INIT-001")
+    }
+    "leave a local a lambda captures alone" in {
+        findingsIn("init_ok_written_by_lambda") should not contain "MS-INIT-001"
+    }
+    "leave a struct holding an array, or one whose members have initialisers, alone" in {
+        findingsIn("init_ok_array_member_filled") should not contain "MS-INIT-001"
+        findingsIn("init_ok_default_initialised") should not contain "MS-INIT-001"
+    }
 end InitAndFormatRulesTests
+
+/** A printf-family function defined as a macro over its checked builtin, as C libraries do under
+  * `_FORTIFY_SOURCE`: one finding, on the macro's call.
+  */
+class FortifiedFormatTests extends DataFlowCodeToCpgSuite:
+
+  private val cpg = code(
+    """
+      |typedef unsigned long size_t;
+      |int __builtin___snprintf_chk(char *, size_t, int, size_t, const char *, ...);
+      |#define snprintf(buf, len, ...) \
+      |    __builtin___snprintf_chk(buf, len, 0, __builtin_object_size(buf, 0), __VA_ARGS__)
+      |void fortified(const char *userInput) {
+      |    char buf[64];
+      |    snprintf(buf, sizeof(buf), userInput);
+      |}
+      |""".stripMargin,
+    "fortified.c"
+  )
+
+  new MemorySemanticsPass(cpg).createAndApply()
+  new MemoryApiPass(cpg).createAndApply()
+  new ExtentPass(cpg).createAndApply()
+  new GuardPass(cpg).createAndApply()
+  new ValueOriginPass(cpg).createAndApply()
+  new AllocationStatePass(cpg).createAndApply()
+  new MemorySafetyFindingPass(cpg).createAndApply()
+
+  "a non-constant format through the macro" should {
+      "be reported once" in {
+          cpg.method.nameExact("fortified").ast.collectAll[StoredNode]
+              .flatMap(_.tag.nameExact("ms-finding").value.l).l.count(_ == "MS-FMT-001") shouldBe 1
+      }
+  }
+end FortifiedFormatTests

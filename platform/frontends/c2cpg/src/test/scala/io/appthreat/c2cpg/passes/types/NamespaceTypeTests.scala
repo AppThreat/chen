@@ -373,12 +373,18 @@ class NamespaceTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_E
                   finalClasses.name shouldBe "FinalClasses"
                   finalClasses.fullName shouldBe "FinalClasses"
           }
+          // the pointer types come from the typed declarations and `new` expressions
           cpg.typ.name("A").derivedTypeTransitive.typeDeclFullName.sorted.l shouldBe List(
             "FinalClasses.C11",
+            "FinalClasses.C11*",
             "FinalClasses.C12",
+            "FinalClasses.C12*",
             "FinalClasses.C21",
+            "FinalClasses.C21*",
             "FinalClasses.C22",
+            "FinalClasses.C22*",
             "FinalClasses.C23",
+            "FinalClasses.C23*",
             "IntermediateClasses.B1",
             "IntermediateClasses.B1*",
             "IntermediateClasses.B2",

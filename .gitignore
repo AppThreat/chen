@@ -22,6 +22,8 @@ platform/workspace
 .bloop
 null
 /.bsp
+.bsp/
+.scala-build/
 /gnupg-*
 /platform/${sys:LOG_DIR}/
 .local

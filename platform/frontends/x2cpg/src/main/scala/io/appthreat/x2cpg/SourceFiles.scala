@@ -12,6 +12,7 @@ import java.nio.file.Paths
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Files
 import scala.jdk.CollectionConverters.SetHasAsJava
+import scala.util.Try
 import scala.util.matching.Regex
 
 object SourceFiles:
@@ -300,8 +301,9 @@ object SourceFiles:
       case p                            => Paths.get(rootPath, p.toString)
     absolutePath.normalize().toString
 
-  /** Constructs a relative path against rootPath. If the given path is not inside rootPath, path is
-    * returned unaltered. Otherwise, the path relative to rootPath is returned.
+  /** Constructs a relative path against rootPath. If the given path is not inside rootPath, or no
+    * relative path leads to it (another drive on Windows), path is returned unaltered. Otherwise,
+    * the path relative to rootPath is returned.
     */
   def toRelativePath(path: String, rootPath: String): String =
       if path.startsWith(rootPath) then
@@ -310,7 +312,7 @@ object SourceFiles:
         if absolutePath.compareTo(projectPath) == 0 then
           absolutePath.getFileName.toString
         else
-          projectPath.relativize(absolutePath).toString
+          Try(projectPath.relativize(absolutePath).toString).getOrElse(path)
       else
         path
 end SourceFiles

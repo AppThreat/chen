@@ -138,7 +138,7 @@ class AstCacheFingerprintTests extends AnyWordSpec with Matchers:
           base.withFunctionBodies(true),
           base.withParseInactiveCode(true),
           base.withIncludeComments(true),
-          base.withImageLocations(true),
+          base.withImageLocations(false),
           base.withIncludeTrivialExpressions(true),
           base.withCppStandard("c++20"),
           base.withIncludePathsAutoDiscovery(true),

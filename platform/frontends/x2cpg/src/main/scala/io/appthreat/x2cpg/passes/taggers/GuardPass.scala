@@ -1,6 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -121,8 +122,8 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
   private def statementRootOf(node: CfgNode): CfgNode = GuardPass.statementRootOf(node)
 
   /** The variable key a length argument reduces to when it is `v * k`, `k * v` or `v / k` with k a
-    * literal or a sizeof - the scaling shapes whose bound travels from the variable to the whole
-    * expression.
+    * constant (a literal, a sizeof, an enumerator, a macro constant) - the scaling shapes whose
+    * bound travels from the variable to the whole expression.
     */
   private def scaledKeyOf(arg: Expression): Option[String] = arg match
     case c: Call =>
@@ -139,9 +140,9 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     case _ => None
 
   private def isScaleOperand(e: Expression): Boolean = e match
-    case _: Literal => true
-    case c: Call    => c.name.startsWith("<operator>.sizeOf")
-    case _          => false
+    case _: Literal                                        => true
+    case c: Call if c.name.startsWith("<operator>.sizeOf") => true
+    case other                                             => IndexRange.literal(other).isDefined
 
   /** Facts from clamping assignments: `x = a < b ? a : b`, an INLINED macro expansion of it, or a
     * vocabulary clamp call. Tagged at the definition and at the memory-operation arguments that use
@@ -343,8 +344,81 @@ object GuardPass:
             valueSources(u, stopAt = Some(g.id())).exists(_.forall {
                 case d: CfgNode => !d.dominatedBy.exists(_.id() == g.id())
                 case _          => true
-            })
+            }) && !changedThroughAlias(g, u)
         case _ => true
+
+  /** Can a variable whose address was taken ([[io.appthreat.x2cpg.Defines.ReferenceKindTag]]) have
+    * changed between the guard and the use without being named? Yes when a call that receives its
+    * address (`f(&n)`, or `f(p)` for a `p` that holds `&n`) or a write through such a pointer (`*p
+    * \= x`, `p[i] = x`, `p->f = x`) can run in between.
+    */
+  private def changedThroughAlias(g: Identifier, u: Identifier): Boolean =
+    val variable = OverlayFacts.declOf(u)
+    val addressTaken = variable.exists(
+      _.tag.nameExact(io.appthreat.x2cpg.Defines.ReferenceKindTag).value.l.contains(
+        AddressTakenKind
+      )
+    )
+    if !addressTaken then false
+    else
+      val method = u.method
+      def namesVariable(e: Expression): Boolean = withoutCasts(e) match
+        case i: Identifier => OverlayFacts.declOf(i).map(_.id()) == variable.map(_.id())
+        case c: Call if c.name == "<operator>.fieldAccess" || c.name.endsWith("ndexAccess") =>
+            c.argumentOption(1).collect { case x: Expression => x }.exists(namesVariable)
+        case _ => false
+      def isAddressOf(e: Expression): Boolean = withoutCasts(e) match
+        case c: Call if c.name == "<operator>.addressOf" =>
+            c.argumentOption(1).collect { case x: Expression => x }.exists(namesVariable)
+        case _ => false
+      // the pointer variables that are given its address
+      val aliases = method.ast.isCall.nameExact("<operator>.assignment").l.flatMap { a =>
+          for
+            lhs  <- a.argumentOption(1).collect { case i: Identifier => i }
+            rhs  <- a.argumentOption(2).collect { case e: Expression => e } if isAddressOf(rhs)
+            decl <- OverlayFacts.declOf(lhs)
+          yield decl.id()
+      }.toSet
+      def isAlias(e: Expression): Boolean = withoutCasts(e) match
+        case i: Identifier => OverlayFacts.declOf(i).exists(d => aliases.contains(d.id()))
+        case _             => false
+      val writers = method.ast.isCall.l.filter { c =>
+          if !c.name.startsWith("<operator>") then
+            c.argument.l.exists(a =>
+                isAddressOf(a) || isAlias(a) || (namesVariable(a) && bindsToMutableReference(c, a))
+            )
+          else if OverlayFacts.isAssignmentOperator(c.name) then
+            c.argumentOption(1).collect { case t: Call => t }.exists { target =>
+                (target.name == "<operator>.indirection" ||
+                    target.name == "<operator>.indirectIndexAccess" ||
+                    target.name == "<operator>.indirectFieldAccess") &&
+                target.argumentOption(1).collect { case x: Expression => x }.exists(isAlias)
+            }
+          else false
+      }
+      // a writer that runs after the guard and before the use, on some path
+      writers.exists { w =>
+          w.id() != g.id() &&
+          cfgReachesAvoiding(g._cfgOut.collectAll[CfgNode].l, w.id(), Set.empty) &&
+          cfgReachesAvoiding(w._cfgOut.collectAll[CfgNode].l, u.id(), Set(g.id()))
+      }
+    end if
+  end changedThroughAlias
+
+  private val AddressTakenKind = "address-taken"
+
+  /** An argument bound to a non-const reference parameter of the function the call links to: the
+    * callee can write the variable. The parameter's declaration says (`int &n`, `const int &n`); a
+    * call with no linked function to ask keeps the guard.
+    */
+  private def bindsToMutableReference(c: Call, arg: Expression): Boolean =
+      arg.argumentIndex >= 1 && c._callOut.collectAll[Method].exists { m =>
+          m.parameter.l.find(_.index == arg.argumentIndex).exists { p =>
+            val declared = p.code.trim.stripSuffix(p.name).trim
+            declared.endsWith("&") && !declared.endsWith("&&") &&
+            !declared.startsWith("const ") && !declared.contains(" const ")
+          }
+      }
 
   private def withoutCasts(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" =>
@@ -391,7 +465,7 @@ object GuardPass:
   private[taggers] def isDefinitionSite(i: Identifier): Boolean =
       i._astIn.collectFirst { case c: Call => c }.exists { c =>
         val isTarget = c.argumentOption(1).exists(_.id() == i.id())
-        (isTarget && (c.name.startsWith("<operator>.assignment") ||
+        (isTarget && (OverlayFacts.isAssignmentOperator(c.name) ||
             c.name.matches("<operator>\\.(pre|post)(In|De)crement"))) ||
         c.name == "<operator>.addressOf"
       }
@@ -411,7 +485,18 @@ object GuardPass:
             expr.argumentOption(1).collect { case c: Call => c }.flatMap(conjuncts(_, !holds))
         case "<operator>.logicalAnd" if holds => andThen(expr, holds)
         case "<operator>.logicalOr" if !holds => andThen(expr, holds)
-        case _                                => None
+        // a condition written as a macro (`IDX_VALID(i) ? a[i] : 0`) is its expansion
+        case _ if expr.dispatchType == DispatchTypes.INLINED =>
+            macroExpansion(expr).flatMap(conjuncts(_, holds))
+        case _ => None
+
+  /** The expression a macro invocation stands for: the last expression of the expansion block under
+    * the INLINED call.
+    */
+  private[taggers] def macroExpansion(invocation: Call): Option[Call] =
+      invocation.astChildren.collect { case b: Block => b }.lastOption
+          .flatMap(_.astChildren.collect { case e: Expression => e }.lastOption)
+          .collect { case c: Call => c }
 
   private def andThen(expr: Call, holds: Boolean): Option[List[(Call, Boolean)]] =
     // a non-comparison operand (an integer's truthiness, `audio_roll_distance`) yields no
@@ -422,7 +507,8 @@ object GuardPass:
       case Some(c: Call)
           if comparisonOps.contains(c.name) ||
               c.name == "<operator>.logicalNot" || c.name == "<operator>.logicalAnd" ||
-              c.name == "<operator>.logicalOr" => conjuncts(c, holds)
+              c.name == "<operator>.logicalOr" || c.dispatchType == DispatchTypes.INLINED =>
+          conjuncts(c, holds).orElse(Option.when(c.dispatchType == DispatchTypes.INLINED)(Nil))
       // any other operand - an integer's truthiness, a field read - yields no comparison
       // facts of its own and does not block the sibling's
       case Some(_) => Some(Nil)

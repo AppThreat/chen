@@ -3,9 +3,9 @@ package io.appthreat.dataflowengineoss.passes.reachingdef
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
 import io.appthreat.dataflowengineoss.{globalFromLiteral, identifierToFirstUsages}
 import io.appthreat.dataflowengineoss.queryengine.AccessPathUsage.toTrackedBaseAndAccessPathSimple
-import io.appthreat.dataflowengineoss.semanticsloader.Semantics
+import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators, PropertyNames}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.accesspath.MatchResult
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -101,8 +101,11 @@ class DdgGenerator(semantics: Semantics):
       }
 
       // This handles `foo(new Bar())`, which is lowered to
-      // `foo({Bar tmp = Bar.alloc(); tmp.init(); tmp})`
-      call.argument.isBlock.foreach { block => addEdgeForBlock(block, call) }
+      // `foo({Bar tmp = Bar.alloc(); tmp.init(); tmp})`. A macro invocation's value is its
+      // expansion's, the block it holds: `CMD` for `#define CMD data` is `data`.
+      val blocks = call.argument.isBlock.l ++
+          (if call.dispatchType == DispatchTypes.INLINED then call.astChildren.isBlock.l else Nil)
+      blocks.distinct.foreach { block => addEdgeForBlock(block, call) }
     end addEdgesToCallSite
 
     def addEdgesToReturn(ret: Return): Unit =
@@ -267,12 +270,15 @@ private class UsageAnalyzer(
   val numberToNode: Map[Definition, StoredNode] =
       problem.flowGraph.asInstanceOf[ReachingDefFlowGraph].numberToNode
 
+  // `*p` reaches the object `p` points to as `p[0]` does: a read of `*p` uses `p`'s definition,
+  // and a write through `*p` reaches later uses of `p`
   private val containerSet =
       Set(
         Operators.fieldAccess,
         Operators.indexAccess,
         Operators.indirectIndexAccess,
-        Operators.indirectFieldAccess
+        Operators.indirectFieldAccess,
+        Operators.indirection
       )
   private val indirectionAccessSet = Set(Operators.addressOf, Operators.indirection)
   val usedIncomingDefs: Map[StoredNode, Map[StoredNode, Set[Definition]]] = initUsedIncomingDefs()
@@ -305,7 +311,9 @@ private class UsageAnalyzer(
       ) || isAlias(use, inElemNode)
 
   /** Determine whether the node `use` describes a container for `inElement`, e.g., use = `ptr`
-    * while inElement = `ptr->foo`.
+    * while inElement = `ptr->foo`, or use = `buf` while inElement = `buf + len`: a call that writes
+    * through a pointer moved by pointer arithmetic (`strncat(buf + len, src, n)`) writes the object
+    * the pointer operand points to.
     */
   private def isContainer(use: StoredNode, inElement: StoredNode): Boolean =
       inElement match
@@ -313,7 +321,36 @@ private class UsageAnalyzer(
             call.argument.headOption.exists { base =>
                 nodeToString(use) == nodeToString(base)
             }
+        case call: Call =>
+            pointerOperandOf(call).exists { base =>
+              val written = nodeToString(base)
+              nodeToString(use) == written || addressOrCastOf(use).exists(
+                nodeToString(_) == written
+              )
+            }
         case _ => false
+
+  /** The pointer a use passes on unchanged but for its address or type: `&buf` (a callee that is
+    * given `&buf` reads the buffer through `*p`) or `(char *)buf`.
+    */
+  private def addressOrCastOf(use: StoredNode): Option[Expression] =
+      use match
+        case c: Call if c.name == Operators.addressOf => c.argument.l.headOption
+        case c: Call if c.name == Operators.cast =>
+            c.argument.l.lastOption.flatMap(inner => addressOrCastOf(inner).orElse(Some(inner)))
+        case _ => None
+
+  /** The pointer operand of a pointer addition or subtraction, as the C/C++ frontend tags it
+    * (`add:<i>`/`sub:<i>`, the argument index of the pointer), also under casts (`(char *)(buf +
+    * len)`); the distance between two pointers (`diff`) points to no object.
+    */
+  private def pointerOperandOf(call: Call): Option[Expression] =
+      if call.name == Operators.cast then
+        call.argument.l.lastOption.collect { case c: Call => c }.flatMap(pointerOperandOf)
+      else
+        call.tag.nameExact(Defines.PointerArithmeticTag).value.collectFirst {
+            case v if v.startsWith("add:") || v.startsWith("sub:") => v.drop(4).toIntOption
+        }.flatten.flatMap(call.argumentOption)
 
   /** Determine whether `use` is a part of `inElement`, e.g., use = `argv[0]` while inElement =
     * `argv`

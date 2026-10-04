@@ -440,6 +440,9 @@ class OptimizedReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
                 call.argument.isIdentifier
                     .filterNot(i => paramAndLocalNames.contains(i.name))
                     .filterNot(i => identifiersInReturns.contains(i.name))
+                    // a global is declared elsewhere and read by other methods: its definitions
+                    // here must reach them (`GlobalVariableDefUsePass`)
+                    .filterNot(i => i._refOut.exists(_.isInstanceOf[Local]))
                     .map(arg => (arg.name, call, arg))
               catch
                 case _: Exception => List.empty[(String, Call, Identifier)]

@@ -26,15 +26,17 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPClosureType,
     CPPField,
     CPPFunction,
-    CPPFunctionType
+    CPPFunctionType,
+    CPPImplicitFunction
 }
-
-import scala.util.Try
 
 trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
   protected def astForExpression(expression: IASTExpression): Ast =
+      withOverflowRecovery(expression, identity)(expressionAst(expression))
+
+  private def expressionAst(expression: IASTExpression): Ast =
     val r = expression match
       case lit: IASTLiteralExpression                  => astForLiteral(lit)
       case un: IASTUnaryExpression                     => astForUnaryExpression(un)
@@ -55,8 +57,12 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case cExpr: IGNUASTCompoundStatementExpression   => astForCompoundStatementExpression(cExpr)
       case pExpr: ICPPASTPackExpansionExpression       => astForPackExpansionExpression(pExpr)
       case _                                           => notHandledYet(expression)
-    asChildOfMacroCall(expression, r)
-  end astForExpression
+    tagConstantValue(expression, r)
+    r.root.foreach(root => expressionRoots.put(expression, root))
+    val inMacro = asChildOfMacroCall(expression, r)
+    if inMacro ne r then tagConstantValue(expression, inMacro)
+    inMacro
+  end expressionAst
 
   protected def astForStaticAssert(a: ICPPASTStaticAssertDeclaration): Ast =
     val name  = "static_assert"
@@ -67,58 +73,120 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astForBinaryExpression(bin: IASTBinaryExpression): Ast =
     val op = bin.getOperator match
-      case IASTBinaryExpression.op_multiply         => Operators.multiplication
-      case IASTBinaryExpression.op_divide           => Operators.division
-      case IASTBinaryExpression.op_modulo           => Operators.modulo
-      case IASTBinaryExpression.op_plus             => Operators.addition
-      case IASTBinaryExpression.op_minus            => Operators.subtraction
-      case IASTBinaryExpression.op_shiftLeft        => Operators.shiftLeft
-      case IASTBinaryExpression.op_shiftRight       => Operators.arithmeticShiftRight
-      case IASTBinaryExpression.op_lessThan         => Operators.lessThan
-      case IASTBinaryExpression.op_greaterThan      => Operators.greaterThan
-      case IASTBinaryExpression.op_lessEqual        => Operators.lessEqualsThan
-      case IASTBinaryExpression.op_greaterEqual     => Operators.greaterEqualsThan
-      case IASTBinaryExpression.op_binaryAnd        => Operators.and
-      case IASTBinaryExpression.op_binaryXor        => Operators.xor
-      case IASTBinaryExpression.op_binaryOr         => Operators.or
-      case IASTBinaryExpression.op_logicalAnd       => Operators.logicalAnd
-      case IASTBinaryExpression.op_logicalOr        => Operators.logicalOr
-      case IASTBinaryExpression.op_assign           => Operators.assignment
-      case IASTBinaryExpression.op_multiplyAssign   => Operators.assignmentMultiplication
-      case IASTBinaryExpression.op_divideAssign     => Operators.assignmentDivision
-      case IASTBinaryExpression.op_moduloAssign     => Operators.assignmentModulo
-      case IASTBinaryExpression.op_plusAssign       => Operators.assignmentPlus
-      case IASTBinaryExpression.op_minusAssign      => Operators.assignmentMinus
-      case IASTBinaryExpression.op_shiftLeftAssign  => Operators.assignmentShiftLeft
+      case IASTBinaryExpression.op_multiply  => Operators.multiplication
+      case IASTBinaryExpression.op_divide    => Operators.division
+      case IASTBinaryExpression.op_modulo    => Operators.modulo
+      case IASTBinaryExpression.op_plus      => Operators.addition
+      case IASTBinaryExpression.op_minus     => Operators.subtraction
+      case IASTBinaryExpression.op_shiftLeft => Operators.shiftLeft
+      case IASTBinaryExpression.op_shiftRight if isUnsignedOperand(bin.getOperand1) =>
+          Operators.logicalShiftRight
+      case IASTBinaryExpression.op_shiftRight      => Operators.arithmeticShiftRight
+      case IASTBinaryExpression.op_lessThan        => Operators.lessThan
+      case IASTBinaryExpression.op_greaterThan     => Operators.greaterThan
+      case IASTBinaryExpression.op_lessEqual       => Operators.lessEqualsThan
+      case IASTBinaryExpression.op_greaterEqual    => Operators.greaterEqualsThan
+      case IASTBinaryExpression.op_binaryAnd       => Operators.and
+      case IASTBinaryExpression.op_binaryXor       => Operators.xor
+      case IASTBinaryExpression.op_binaryOr        => Operators.or
+      case IASTBinaryExpression.op_logicalAnd      => Operators.logicalAnd
+      case IASTBinaryExpression.op_logicalOr       => Operators.logicalOr
+      case IASTBinaryExpression.op_assign          => Operators.assignment
+      case IASTBinaryExpression.op_multiplyAssign  => Operators.assignmentMultiplication
+      case IASTBinaryExpression.op_divideAssign    => Operators.assignmentDivision
+      case IASTBinaryExpression.op_moduloAssign    => Operators.assignmentModulo
+      case IASTBinaryExpression.op_plusAssign      => Operators.assignmentPlus
+      case IASTBinaryExpression.op_minusAssign     => Operators.assignmentMinus
+      case IASTBinaryExpression.op_shiftLeftAssign => Operators.assignmentShiftLeft
+      case IASTBinaryExpression.op_shiftRightAssign if isUnsignedOperand(bin.getOperand1) =>
+          Operators.assignmentLogicalShiftRight
       case IASTBinaryExpression.op_shiftRightAssign => Operators.assignmentArithmeticShiftRight
       case IASTBinaryExpression.op_binaryAndAssign  => Operators.assignmentAnd
       case IASTBinaryExpression.op_binaryXorAssign  => Operators.assignmentXor
       case IASTBinaryExpression.op_binaryOrAssign   => Operators.assignmentOr
       case IASTBinaryExpression.op_equals           => Operators.equals
       case IASTBinaryExpression.op_notequals        => Operators.notEquals
-      case IASTBinaryExpression.op_pmdot            => Operators.indirectFieldAccess
-      case IASTBinaryExpression.op_pmarrow          => Operators.indirectFieldAccess
+      case IASTBinaryExpression.op_pmdot            => Defines.operatorPointerToMember
+      case IASTBinaryExpression.op_pmarrow          => Defines.operatorIndirectPointerToMember
       case IASTBinaryExpression.op_max              => "<operator>.max"
       case IASTBinaryExpression.op_min              => "<operator>.min"
       case IASTBinaryExpression.op_ellipses         => "<operator>.op_ellipses"
       case _                                        => "<operator>.unknown"
 
-    val callNode_ = callNode(bin, code(bin), op, op, DispatchTypes.STATIC_DISPATCH)
-    val left      = nullSafeAst(bin.getOperand1)
-    val right     = nullSafeAst(bin.getOperand2)
-    callAst(callNode_, List(left, right))
+    val overloaded = bin match
+      case cpp: ICPPASTBinaryExpression => linkedOverload(cpp.getOverload)
+      case _                            => None
+    overloaded match
+      case Some((overload, linked)) =>
+          val operands = List(nullSafeAst(bin.getOperand1), nullSafeAst(bin.getOperand2))
+          overloadedOperatorAst(bin, overload, linked, op, operands)
+      case None =>
+          val callNode_ = callNode(
+            bin,
+            code(bin),
+            op,
+            op,
+            DispatchTypes.STATIC_DISPATCH,
+            None,
+            Some(expressionType(bin))
+          )
+          val left  = nullSafeAst(bin.getOperand1)
+          val right = nullSafeAst(bin.getOperand2)
+          pointerArithmeticOf(bin).foreach(tagNode(callNode_, X2CpgDefines.PointerArithmeticTag, _))
+          callAst(callNode_, List(left, right))
   end astForBinaryExpression
+
+  /** A pointer or an array, through typedefs and qualifiers: what pointer arithmetic moves. */
+  private def isAddressOperand(e: IASTExpression): Boolean =
+    @scala.annotation.tailrec
+    def unwrap(t: IType): IType = t match
+      case td: ITypedef      => unwrap(td.getType)
+      case q: IQualifierType => unwrap(q.getType)
+      case other             => other
+    e != null && CdtQuery(unwrap(e.getExpressionType)).toOption.exists {
+        case _: IPointerType | _: IArrayType => true
+        case _                               => false
+    }
+
+  /** The [[X2CpgDefines.PointerArithmeticTag]] value of `+`, `-`, `+=` and `-=` over a pointer. */
+  private def pointerArithmeticOf(bin: IASTBinaryExpression): Option[String] =
+    val (p1, p2) = (isAddressOperand(bin.getOperand1), isAddressOperand(bin.getOperand2))
+    bin.getOperator match
+      case IASTBinaryExpression.op_plus if p1 && !p2 => Some("add:1")
+      case IASTBinaryExpression.op_plus if p2 && !p1 => Some("add:2")
+      case IASTBinaryExpression.op_minus if p1 && p2 => Some("diff")
+      case IASTBinaryExpression.op_minus if p1       => Some("sub:1")
+      case IASTBinaryExpression.op_plusAssign if p1  => Some("add:1")
+      case IASTBinaryExpression.op_minusAssign if p1 => Some("sub:1")
+      case _                                         => None
 
   private def astForExpressionList(exprList: IASTExpressionList): Ast =
     val name = "<operator>.expressionList"
     val callNode_ =
-        callNode(exprList, code(exprList), name, name, DispatchTypes.STATIC_DISPATCH)
+        callNode(
+          exprList,
+          code(exprList),
+          name,
+          name,
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(expressionType(exprList))
+        )
     val childAsts = exprList.getExpressions.map(nullSafeAst)
     callAst(callNode_, childAsts.toIndexedSeq)
 
   private def astForCppCallExpression(call: ICPPASTFunctionCallExpression): Ast =
+      linkedConstructor(call) match
+        case Some((constructor, linked)) =>
+            // a functional cast that constructs an object: `Vec2(x, y)`
+            val args = call.getArguments.toList.map(a => astForNode(a))
+            val tpe  = registerType(cleanType(safeGetType(call.getExpressionType)))
+            linkedCallAst(call, constructor, linked, tpe, None, args)._2
+        case None => astForCppCallExpressionByCallee(call)
+
+  private def astForCppCallExpressionByCallee(call: ICPPASTFunctionCallExpression): Ast =
     val functionNameExpr = call.getFunctionNameExpression
-    val typ              = Try(functionNameExpr.getExpressionType).getOrElse(null)
+    val typ              = CdtQuery(functionNameExpr.getExpressionType).getOrElse(null)
     typ match
       case _: TypeOfDependentExpression =>
           astForCppCallExpressionUntyped(call)
@@ -130,7 +198,18 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 val binding = idExpr.getName.getBinding
                 // Check if binding is ICPPFunction.
                 // It could be a CPPParameter (function pointer argument) or a variable.
-                if binding != null && binding.isInstanceOf[ICPPFunction] then
+                val templateDefinition = binding match
+                  case f: ICPPFunction => graphFunction(f).filter(_ ne f).map(f -> _)
+                  case _               => None
+                if templateDefinition.isDefined then
+                  // a template instance: the call reaches the generic definition's METHOD
+                  val (function, linked) = templateDefinition.get
+                  val args               = call.getArguments.toList.map(a => astForNode(a))
+                  val tpe = registerType(cleanType(safeGetType(call.getExpressionType)))
+                  val (callCpgNode, ast) = linkedCallAst(call, function, linked, tpe, None, args)
+                  tagCallAttributes(callCpgNode, function)
+                  ast
+                else if binding != null && binding.isInstanceOf[ICPPFunction] then
                   val function = binding.asInstanceOf[ICPPFunction]
                   val name     = idExpr.getName.getLastName.toString
                   val signature =
@@ -139,8 +218,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                       else
                         functionTypeToSignature(functionType)
 
+                  // a compiler builtin has C linkage: named as in C, so its summaries apply
+                  val builtin = function.isInstanceOf[CPPImplicitFunction] &&
+                      CBuiltins.isBuiltinName(name)
                   val fullName =
-                      if function.isExternC then
+                      if function.isExternC || builtin then
                         name
                       else
                         val fullNameNoSig = function.getQualifiedName.mkString(".")
@@ -167,7 +249,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 end if
 
             case fieldRefExpr: ICPPASTFieldReference =>
-                val instanceAst = astForExpression(fieldRefExpr.getFieldOwner)
+                val instanceAst = fieldOwnerAst(fieldRefExpr)
                 val args        = call.getArguments.toList.map(a => astForNode(a))
 
                 val name      = fieldRefExpr.getFieldName.toString
@@ -178,62 +260,98 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
                 fieldRefExpr.getFieldName.resolveBinding()
                 val binding = fieldRefExpr.getFieldName.getBinding
-                val (dispatchType, receiver) =
-                    if binding != null && binding.isInstanceOf[ICPPMethod] then
-                      val method = binding.asInstanceOf[ICPPMethod]
-                      if method.isVirtual || method.isPureVirtual then
-                        (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
-                      else
-                        (DispatchTypes.STATIC_DISPATCH, None)
-                    else
-                      (DispatchTypes.STATIC_DISPATCH, None)
-                val callCpgNode = callNode(
-                  call,
-                  code(call),
-                  name,
-                  fullName,
-                  dispatchType,
-                  Some(signature),
-                  Some(cleanType(safeGetType(call.getExpressionType)))
-                )
+                val linkedMethod = binding match
+                  case m: ICPPMethod => graphFunction(m).map(m -> _)
+                  case _             => None
+                // a method of the project: named after the class that declares it, which is
+                // where its METHOD is (an inherited method, a member of a template instance)
+                linkedMethod match
+                  case Some((method, linked)) =>
+                      val tpe = cleanType(safeGetType(call.getExpressionType))
+                      linkedCallAst(call, method, linked, tpe, Some(instanceAst), args)._2
+                  case None =>
+                      val (dispatchType, receiver) =
+                          if binding != null && binding.isInstanceOf[ICPPMethod] then
+                            val method = binding.asInstanceOf[ICPPMethod]
+                            if method.isVirtual || method.isPureVirtual then
+                              (DispatchTypes.DYNAMIC_DISPATCH, Some(instanceAst))
+                            else
+                              (DispatchTypes.STATIC_DISPATCH, None)
+                          else
+                            (DispatchTypes.STATIC_DISPATCH, None)
+                      val callCpgNode = callNode(
+                        call,
+                        code(call),
+                        name,
+                        fullName,
+                        dispatchType,
+                        Some(signature),
+                        Some(cleanType(safeGetType(call.getExpressionType)))
+                      )
 
-                createCallAst(callCpgNode, args, base = Some(instanceAst), receiver)
+                      createCallAst(callCpgNode, args, base = Some(instanceAst), receiver)
+                end match
             case unaryExpr: IASTUnaryExpression =>
                 astForCppCallExpressionUntyped(call)
             case _ =>
                 astForCppCallExpressionUntyped(call)
       case classType: ICPPClassType =>
-          val evaluation = call.getEvaluation
+          val evaluation = CdtQuery(call.getEvaluation).getOrElse(null)
           evaluation match
             case evalFuncCall: EvalFunctionCall =>
-                val overloadOpt: Option[ICPPFunction] =
-                    try
-                      val overload = evalFuncCall.getOverload
-                      Option(overload)
-                    catch
-                      case _: NullPointerException => // CDT parsing bugs
-                          None
+                val overloadOpt: Option[(ICPPFunction, IFunctionType)] =
+                    CdtQuery(Option(evalFuncCall.getOverload).map(o => o -> o.getType)).toOption
+                        .flatten.filter(_._2 != null)
                 overloadOpt match
-                  case Some(overload) =>
-                      val functionType = overload.getType
-                      val signature    = functionTypeToSignature(functionType)
-                      val name         = "<operator>()"
+                  case Some((overload, functionType)) =>
+                      val signature = functionTypeToSignature(functionType)
+                      val name      = "<operator>()"
                       classType match
                         case closureType: CPPClosureType =>
-                            val fullName     = s"$name:$signature"
-                            val dispatchType = DispatchTypes.DYNAMIC_DISPATCH
-                            val callCpgNode = callNode(
-                              call,
-                              code(call),
-                              name,
-                              fullName,
-                              dispatchType,
-                              Some(signature),
-                              Some(cleanType(safeGetType(call.getExpressionType)))
-                            )
+                            // the receiver first: an immediately invoked lambda builds its
+                            // METHOD there
                             val receiverAst = astForExpression(functionNameExpr)
                             val args        = call.getArguments.toList.map(a => astForNode(a))
-                            createCallAst(callCpgNode, args, receiver = Some(receiverAst))
+                            val callType    = expressionType(call)
+                            lambdaMethodOf(closureType) match
+                              case Some((lambdaName, lambdaFullName)) =>
+                                  val callCpgNode = callNode(
+                                    call,
+                                    code(call),
+                                    lambdaName,
+                                    lambdaFullName,
+                                    DispatchTypes.STATIC_DISPATCH,
+                                    Some(signature),
+                                    Some(callType)
+                                  )
+                                  tagCall(callCpgNode, X2CpgDefines.OperatorCallTag, name)
+                                  createCallAst(callCpgNode, args, receiver = Some(receiverAst))
+                              case None =>
+                                  val callCpgNode = callNode(
+                                    call,
+                                    code(call),
+                                    name,
+                                    s"$name:$signature",
+                                    DispatchTypes.DYNAMIC_DISPATCH,
+                                    Some(signature),
+                                    Some(callType)
+                                  )
+                                  createCallAst(callCpgNode, args, receiver = Some(receiverAst))
+                            end match
+                        case _ if graphFunction(overload).isDefined =>
+                            val operands = astForExpression(functionNameExpr) ::
+                                call.getArguments.toList.map(a => astForNode(a))
+                            overloadedOperatorAst(
+                              call,
+                              overload,
+                              graphFunction(overload).get,
+                              name,
+                              operands
+                            )
+                        // a class that converts to a pointer to function is called through the
+                        // pointer: CDT's overload is then a surrogate function, not a member
+                        case _ if !overload.isInstanceOf[ICPPMethod] =>
+                            astForCppCallExpressionUntyped(call)
                         case _ =>
                             val classFullName = cleanType(safeGetType(classType))
                             val fullName      = s"$classFullName.$name:$signature"
@@ -277,14 +395,14 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case _ =>
           astForCppCallExpressionUntyped(call)
     end match
-  end astForCppCallExpression
+  end astForCppCallExpressionByCallee
 
   private def astForCppCallExpressionUntyped(call: ICPPASTFunctionCallExpression): Ast =
     val functionNameExpr = call.getFunctionNameExpression
 
     functionNameExpr match
       case fieldRefExpr: ICPPASTFieldReference =>
-          val instanceAst = astForExpression(fieldRefExpr.getFieldOwner)
+          val instanceAst = fieldOwnerAst(fieldRefExpr)
           val args        = call.getArguments.toList.map(a => astForNode(a))
 
           val name      = fieldRefExpr.getFieldName.toString
@@ -305,19 +423,31 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case idExpr: CPPASTIdExpression =>
           val args = call.getArguments.toList.map(a => astForNode(a))
 
-          val name      = idExpr.getName.getLastName.toString
-          val signature = X2CpgDefines.UnresolvedSignature
-          val fullName  = s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature(${args.size})"
-
-          val callCpgNode = callNode(
-            call,
-            code(call),
-            name,
-            fullName,
-            DispatchTypes.STATIC_DISPATCH,
-            Some(signature),
-            Some(X2CpgDefines.Any)
-          )
+          val name = idExpr.getName.getLastName.toString
+          // a builtin the parser does not declare (`__builtin___memcpy_chk`) is known by name
+          val callCpgNode = CBuiltins.get(name) match
+            case Some(builtin) =>
+                callNode(
+                  call,
+                  code(call),
+                  name,
+                  name,
+                  DispatchTypes.STATIC_DISPATCH,
+                  Some(builtin.signature),
+                  Some(registerType(builtin.returnType))
+                )
+            case None =>
+                val signature = X2CpgDefines.UnresolvedSignature
+                val fullName = s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature(${args.size})"
+                callNode(
+                  call,
+                  code(call),
+                  name,
+                  fullName,
+                  DispatchTypes.STATIC_DISPATCH,
+                  Some(signature),
+                  Some(X2CpgDefines.Any)
+                )
 
           createCallAst(callCpgNode, args)
       case other =>
@@ -383,6 +513,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             val fallbackSignature = ""
             (fallbackSignature, s"$name:$fallbackSignature")
 
+    // a builtin the parser does not declare (`__builtin___memcpy_chk`) has its known signature
+    val builtin      = CBuiltins.get(name).filter(_ => callTypeFullName == X2CpgDefines.Any)
     val dispatchType = DispatchTypes.STATIC_DISPATCH
     val callCpgNode = callNode(
       call,
@@ -390,8 +522,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       name,
       name,
       dispatchType,
-      Some(signature),
-      Some(callTypeFullName)
+      Some(builtin.map(_.signature).getOrElse(signature)),
+      Some(builtin.map(b => registerType(b.returnType)).getOrElse(callTypeFullName))
     )
     idExpr.getName.getBinding match
       case function: IFunction => tagCallAttributes(callCpgNode, function)
@@ -469,16 +601,40 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     then
       nullSafeAst(unary.getOperand)
     else
-      val cpgUnary =
-          callNode(
-            unary,
-            code(unary),
-            operatorMethod,
-            operatorMethod,
-            DispatchTypes.STATIC_DISPATCH
-          )
-      val operand = nullSafeAst(unary.getOperand)
-      callAst(cpgUnary, List(operand))
+      val overloaded = unary match
+        case cpp: ICPPASTUnaryExpression => linkedOverload(cpp.getOverload)
+        case _                           => None
+      overloaded match
+        case Some((overload, linked)) =>
+            overloadedOperatorAst(
+              unary,
+              overload,
+              linked,
+              operatorMethod,
+              List(nullSafeAst(unary.getOperand))
+            )
+        case None =>
+            val cpgUnary =
+                callNode(
+                  unary,
+                  code(unary),
+                  operatorMethod,
+                  operatorMethod,
+                  DispatchTypes.STATIC_DISPATCH,
+                  None,
+                  Some(expressionType(unary))
+                )
+            val operand = nullSafeAst(unary.getOperand)
+            if isAddressOperand(unary.getOperand) then
+              unary.getOperator match
+                case IASTUnaryExpression.op_prefixIncr | IASTUnaryExpression.op_postFixIncr =>
+                    tagNode(cpgUnary, X2CpgDefines.PointerArithmeticTag, "add:1")
+                case IASTUnaryExpression.op_prefixDecr | IASTUnaryExpression.op_postFixDecr =>
+                    tagNode(cpgUnary, X2CpgDefines.PointerArithmeticTag, "sub:1")
+                case _ =>
+            callAst(cpgUnary, List(operand))
+      end match
+    end if
   end astForUnaryExpression
 
   private def astForTypeIdExpression(typeId: IASTTypeIdExpression): Ast =
@@ -491,9 +647,18 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case _                                           => None
     operatorMethod match
       case Some(name) =>
-          val call = callNode(typeId, code(typeId), name, name, DispatchTypes.STATIC_DISPATCH)
+          val call = callNode(
+            typeId,
+            code(typeId),
+            name,
+            name,
+            DispatchTypes.STATIC_DISPATCH,
+            None,
+            Some(expressionType(typeId))
+          )
           callAst(call, List(astForTypeIdOperand(typeId.getTypeId)))
       case None => notHandledYet(typeId)
+  end astForTypeIdExpression
 
   /** The type a `sizeof(T)`-style operator is applied to. A plain type name keeps the identifier
     * that names it. When the type id has an abstract declarator, the identifier spells the whole
@@ -516,7 +681,15 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astForConditionalExpression(expr: IASTConditionalExpression): Ast =
     val name = Operators.conditional
-    val call = callNode(expr, code(expr), name, name, DispatchTypes.STATIC_DISPATCH)
+    val call = callNode(
+      expr,
+      code(expr),
+      name,
+      name,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(expressionType(expr))
+    )
 
     val condAst = nullSafeAst(expr.getLogicalConditionExpression)
     val posAst  = nullSafeAst(expr.getPositiveResultExpression)
@@ -527,18 +700,43 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def astForArrayIndexExpression(arrayIndexExpression: IASTArraySubscriptExpression): Ast =
     val name = Operators.indirectIndexAccess
-    val cpgArrayIndexing =
-        callNode(
-          arrayIndexExpression,
-          code(arrayIndexExpression),
-          name,
-          name,
-          DispatchTypes.STATIC_DISPATCH
+    val overloaded = arrayIndexExpression match
+      case cpp: ICPPASTArraySubscriptExpression => linkedImplicitOperator(cpp)
+      case _                                    => None
+    // `i[a]` is `a[i]`: the pointer or array is the base whichever side it is written on
+    val swapped = overloaded.isEmpty &&
+        !isAddressOperand(arrayIndexExpression.getArrayExpression) &&
+        (arrayIndexExpression.getArgument match
+          case e: IASTExpression => isAddressOperand(e)
+          case _                 => false
         )
-
-    val expr = astForExpression(arrayIndexExpression.getArrayExpression)
-    val arg  = astForNode(arrayIndexExpression.getArgument)
-    callAst(cpgArrayIndexing, List(expr, arg))
+    val (expr, arg) =
+        if swapped then
+          (
+            astForNode(arrayIndexExpression.getArgument),
+            astForExpression(arrayIndexExpression.getArrayExpression)
+          )
+        else
+          (
+            astForExpression(arrayIndexExpression.getArrayExpression),
+            astForNode(arrayIndexExpression.getArgument)
+          )
+    overloaded match
+      case Some((overload, linked)) =>
+          overloadedOperatorAst(arrayIndexExpression, overload, linked, name, List(expr, arg))
+      case None =>
+          val cpgArrayIndexing =
+              callNode(
+                arrayIndexExpression,
+                code(arrayIndexExpression),
+                name,
+                name,
+                DispatchTypes.STATIC_DISPATCH,
+                None,
+                Some(expressionType(arrayIndexExpression))
+              )
+          callAst(cpgArrayIndexing, List(expr, arg))
+  end astForArrayIndexExpression
 
   private def astForCastExpression(castExpression: IASTCastExpression): Ast =
     val cpgCastExpression =
@@ -547,7 +745,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
           code(castExpression),
           Operators.cast,
           Operators.cast,
-          DispatchTypes.STATIC_DISPATCH
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(expressionType(castExpression))
         )
 
     val expr    = astForExpression(castExpression.getOperand)
@@ -556,9 +756,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
     callAst(cpgCastExpression, List(Ast(arg), expr))
 
+  /** The arguments a `new` expression hands to the constructor: `new T(a, b)` and `new T{a, b}`. */
   private def astsForConstructorInitializer(initializer: IASTInitializer): List[Ast] =
       initializer match
         case init: ICPPASTConstructorInitializer => init.getArguments.toList.map(x => astForNode(x))
+        case init: IASTInitializerList           => init.getClauses.toList.map(x => astForNode(x))
         case _                                   => Nil // null or unexpected type
 
   private def astsForInitializerPlacements(initializerPlacements: Array[IASTInitializerClause])
@@ -566,50 +768,158 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       if initializerPlacements != null then initializerPlacements.toList.map(x => astForNode(x))
       else Nil
 
+  /** `new T(args)`: an `<operator>.new` call of the allocated type (argument 1), tagged with its
+    * form. When the graph holds the constructor's METHOD, argument 2 is the call to it, which takes
+    * the constructor arguments; otherwise they follow the type directly. The extents of an array
+    * allocation follow the type (`new char[need]` allocates `need` elements), then the call to the
+    * element constructor. Placement arguments come last, inside a call to the user-defined
+    * `operator new` that receives them when the graph holds its METHOD.
+    */
   private def astForNewExpression(newExpression: ICPPASTNewExpression): Ast =
     val name = "<operator>.new"
     val cpgNewExpression =
-        callNode(newExpression, code(newExpression), name, name, DispatchTypes.STATIC_DISPATCH)
+        callNode(
+          newExpression,
+          code(newExpression),
+          name,
+          name,
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(expressionType(newExpression))
+        )
 
-    val typeId = newExpression.getTypeId
-    if newExpression.isArrayAllocation then
-      val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
-      // the array size IS part of the allocation's meaning: `new char[need]` allocates
-      // `need` bytes, and the self-sized-copy reading needs that size on the graph - it
-      // must not be dropped here, or every sized new[] copy is unprovable
-      val sizeArgs = Option(typeId.getAbstractDeclarator).toList.collect {
-          case ad: ast.IASTArrayDeclarator => ad.getArrayModifiers.toList
-      }.flatten.filter(_.getConstantExpression != null).map(astForNode)
-      if sizeArgs.isEmpty then
-        Ast(cpgNewExpression).withChild(cpgTypeId).withArgEdge(cpgNewExpression, cpgTypeId.root.get)
-      else callAst(cpgNewExpression, List(cpgTypeId) ++ sizeArgs)
-    else
-      val cpgTypeId = astForIdentifier(typeId.getDeclSpecifier)
-      val args = astsForConstructorInitializer(newExpression.getInitializer) ++
-          astsForInitializerPlacements(newExpression.getPlacementArguments)
-      callAst(cpgNewExpression, List(cpgTypeId) ++ args)
+    val typeId     = newExpression.getTypeId
+    val placements = Option(newExpression.getPlacementArguments).toList.flatten
+    val form =
+        if newExpression.isArrayAllocation then X2CpgDefines.AllocFormArray
+        else if placements.nonEmpty then X2CpgDefines.AllocFormPlacement
+        else X2CpgDefines.AllocFormScalar
+    tagCall(cpgNewExpression, X2CpgDefines.AllocFormTag, form)
+
+    val cpgTypeId   = astForIdentifier(typeId.getDeclSpecifier)
+    val constructor = linkedConstructor(newExpression)
+    def constructorCall(args: List[Ast]): Option[Ast] = constructor.map { (ctor, linked) =>
+      val constructed = ctor match
+        case c: ICPPConstructor => registerType(cleanType(safeGetType(c.getClassOwner)))
+        case _                  => Defines.anyTypeName
+      val ctorCode =
+          if newExpression.isArrayAllocation then s"${nodeSignature(typeId.getDeclSpecifier)}()"
+          else
+            s"${nodeSignature(typeId)}${Option(newExpression.getInitializer).map(nodeSignature).getOrElse("()")}"
+      linkedCallAst(typeId, ctor, linked, constructed, None, args, Some(ctorCode))._2
+    }
+    val placementArgs = astsForInitializerPlacements(newExpression.getPlacementArguments)
+    val allocation = linkedImplicitOperator(newExpression) match
+      case Some((operatorNew, linked)) =>
+          val tpe = registerType(cleanType(safeGetType(operatorNew.getType.getReturnType)))
+          List(
+            linkedCallAst(
+              newExpression,
+              operatorNew,
+              linked,
+              tpe,
+              None,
+              placementArgs,
+              Some(s"operator new(${placements.map(nodeSignature).mkString(", ")})")
+            )._2
+          )
+      case None => placementArgs
+
+    val args =
+        if newExpression.isArrayAllocation then
+          // the array size IS part of the allocation's meaning: `new char[need]` allocates
+          // `need` bytes, and the self-sized-copy reading needs that size on the graph - it
+          // must not be dropped here, or every sized new[] copy is unprovable
+          val sizeArgs = Option(typeId.getAbstractDeclarator).toList.collect {
+              case ad: ast.IASTArrayDeclarator => ad.getArrayModifiers.toList
+          }.flatten.filter(_.getConstantExpression != null).map(astForNode)
+          sizeArgs ++ constructorCall(Nil).toList ++ allocation
+        else
+          val ctorArgs = astsForConstructorInitializer(newExpression.getInitializer)
+          constructorCall(ctorArgs).map(List(_)).getOrElse(ctorArgs) ++ allocation
+    callAst(cpgNewExpression, cpgTypeId :: args)
   end astForNewExpression
 
+  /** `delete p`: an `<operator>.delete` call of the pointer (argument 1), tagged with its form,
+    * followed by the call to the destructor and to the user-defined `operator delete` it runs when
+    * the graph holds their METHODs.
+    */
   private def astForDeleteExpression(delExpression: ICPPASTDeleteExpression): Ast =
     val name = Operators.delete
     val cpgDeleteNode =
-        callNode(delExpression, code(delExpression), name, name, DispatchTypes.STATIC_DISPATCH)
-    val arg = astForExpression(delExpression.getOperand)
-    callAst(cpgDeleteNode, List(arg))
+        callNode(
+          delExpression,
+          code(delExpression),
+          name,
+          name,
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(registerType(Defines.voidTypeName))
+        )
+    tagCall(
+      cpgDeleteNode,
+      X2CpgDefines.AllocFormTag,
+      if delExpression.isVectored then X2CpgDefines.AllocFormArray
+      else X2CpgDefines.AllocFormScalar
+    )
+    val operand = delExpression.getOperand
+    val arg     = astForExpression(operand)
+    // CDT names the destructor of a scalar delete; an array delete destroys elements of the
+    // pointee's class
+    val destructor =
+        if delExpression.isVectored then
+          CdtQuery(operand.getExpressionType).toOption.collect { case p: IPointerType => p.getType }
+              .flatMap(destructorOf)
+        else
+          CdtQuery(delExpression.getImplicitNames.toList).getOrElse(Nil).filterNot(_.isOperator)
+              .flatMap(n => CdtQuery(n.resolveBinding()).toOption)
+              .collectFirst { case m: ICPPMethod if m.isDestructor => m }
+    val destructorCall = destructor.flatMap { d =>
+        destructorCallAst(delExpression, d, s"${nodeSignature(operand)}->${d.getName}()")
+    }
+    val operatorDelete = linkedImplicitOperator(delExpression).map { (operator, linked) =>
+        linkedCallAst(
+          delExpression,
+          operator,
+          linked,
+          registerType(Defines.voidTypeName),
+          None,
+          Nil,
+          Some(s"operator delete(${nodeSignature(operand)})")
+        )._2
+    }
+    callAst(cpgDeleteNode, arg :: destructorCall.toList ++ operatorDelete.toList)
+  end astForDeleteExpression
 
   private def astForTypeIdInitExpression(typeIdInit: IASTTypeIdInitializerExpression): Ast =
     val name = Operators.cast
     val cpgCastExpression =
-        callNode(typeIdInit, code(typeIdInit), name, name, DispatchTypes.STATIC_DISPATCH)
+        callNode(
+          typeIdInit,
+          code(typeIdInit),
+          name,
+          name,
+          DispatchTypes.STATIC_DISPATCH,
+          None,
+          Some(expressionType(typeIdInit))
+        )
 
     val typeAst = unknownNode(typeIdInit.getTypeId, code(typeIdInit.getTypeId))
     val expr    = astForNode(typeIdInit.getInitializer)
     callAst(cpgCastExpression, List(Ast(typeAst), expr))
 
   private def astForConstructorExpression(c: ICPPASTSimpleTypeConstructorExpression): Ast =
-    val name      = c.getDeclSpecifier.toString
-    val callNode_ = callNode(c, code(c), name, name, DispatchTypes.STATIC_DISPATCH)
-    val arg       = astForNode(c.getInitializer)
+    val name = c.getDeclSpecifier.toString
+    val callNode_ = callNode(
+      c,
+      code(c),
+      name,
+      name,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(expressionType(c))
+    )
+    val arg = astForNode(c.getInitializer)
     callAst(callNode_, List(arg))
 
   private def astForCompoundStatementExpression(

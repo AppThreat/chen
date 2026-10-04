@@ -26,7 +26,10 @@ class AstCreator(
   val filename: String,
   val config: Config,
   val cdtAst: IASTTranslationUnit,
-  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]]
+  val file2OffsetTable: ConcurrentHashMap[String, Array[Int]],
+  /** A file's content as the parser read it, for line and column numbers. */
+  val sourceText: java.nio.file.Path => Array[Char] =
+      io.appthreat.c2cpg.parser.CdtParser.readFileChars
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(filename)
     with AstForTypesCreator
@@ -37,6 +40,9 @@ class AstCreator(
     with AstNodeBuilder
     with AstCreatorHelper
     with MacroHandler
+    with CppCallResolution
+    with CppScopeExits
+    with ConstantValues
     with X2CpgAstNodeBuilder[IASTNode, AstCreator]:
 
   protected val logger: Logger = LoggerFactory.getLogger(classOf[AstCreator])
@@ -54,7 +60,8 @@ class AstCreator(
     * creator's own diff graph. Caching is handled separately by the AST creation pass.
     */
   def createAst(): DiffGraphBuilder =
-    Ast.storeInDiffGraph(generateAst(cdtAst), diffGraph)
+    storeAst(generateAst(cdtAst))
+    flushTags()
     diffGraph
 
   def generateAst(iASTTranslationUnit: IASTTranslationUnit): Ast =

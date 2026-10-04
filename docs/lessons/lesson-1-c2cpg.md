@@ -21,12 +21,14 @@ records where every expansion came from. `c2cpg` uses those records to keep macr
 visible in the graph (see [Macros](#macros)), and inactive `#ifdef` branches can optionally be
 retained and analysed.
 
-Translation units are `.c` (C) and `.cc`, `.cpp`, `.cxx`, `.c++`, `.C` (C++). Headers are `.h`,
-`.i`, `.h.in` and `.tmh` (C) and `.hpp`, `.hh`, `.hxx`, `.h++`, `.H`, `.ipp`, `.inl`, `.tcc` (C++).
-The extensions longer than one letter also match in upper case (`.CPP`). Every header is also parsed
-on its own, so code in headers that no parsed source includes still reaches the graph. The `atom`
-CLI selects `C2Cpg` for `-l c` and `-l cpp`; for `-l h`, `-l hpp` and `-l i` it runs `C2Atom`, the
-same AST pass without function bodies or overlays.
+Translation units are `.c` (C), `.cc`, `.cpp`, `.cxx`, `.c++`, `.C` (C++) and the C++20 module
+interface units `.cppm`, `.ccm`, `.cxxm`, `.c++m`, `.ixx`, `.mxx`. Headers are `.h`, `.i`, `.h.in`,
+`.tmh`, `.hpp`, `.hh`, `.hxx`, `.h++`, `.H`, `.ipp`, `.inl` and `.tcc`. The extensions longer than
+one letter also match in upper case (`.CPP`). Every header is also parsed on its own, so code in
+headers that no parsed source includes still reaches the graph (see
+[How each file is parsed](#how-each-file-is-parsed) for its language). The `atom` CLI selects
+`C2Cpg` for `-l c` and `-l cpp`; for `-l h`, `-l hpp` and `-l i` it runs `C2Atom`, the same AST pass
+without function bodies or overlays.
 
 The default output file is `app.atom` (an MVStore binary, the overflowdb2 storage format). The
 fragment-cache mechanism (`enableAstCache = true` by default) stores one serialised AST fragment per
@@ -60,7 +62,9 @@ final case class Config(
   onlyAstCache: Boolean                   = false,       // warm the cache only, skip CPG output
   autoDefines: Boolean                    = false,       // define the macro census's build options
   macroCensusReport: String               = "",          // write the census to <file>.json/.h
-  macroCensusOnly: Boolean                = false        // write the census and stop: no CPG
+  macroCensusOnly: Boolean                = false,       // write the census and stop: no CPG
+  compileCommands: String                 = "",          // compile_commands.json, or its directory
+  compileCommandsOnly: Boolean            = false        // parse only the database's units
 ) extends X2CpgConfig[Config]
 ```
 
@@ -73,7 +77,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 1. **MetaDataPass** — writes the `MetaData` node (language = `NEWC`, root path).
 2. **IncludeAutoDiscovery** — if `includePathsAutoDiscovery = true`, guesses the project's own
    include directories and merges them into `Config.includePaths` before parsing. The same flag
-   makes the parser ask `gcc` and `clang` (`-E -v`) for the compiler's system include paths.
+   makes the parser ask the host's `gcc` (or `clang`) for its predefined macros and system include
+   path (see [How each file is parsed](#how-each-file-is-parsed)).
 3. **Macro census** — with `autoDefines`, scans the tree for build-option macros and defines them.
 4. **AstCreationPass** — drives Eclipse CDT over every source and header file; writes `METHOD`,
    `TYPE_DECL`, `CALL`, `LOCAL`, `LITERAL`, `CONTROL_STRUCTURE`, etc. Supports parallel file
@@ -86,8 +91,13 @@ recovery pass). Every field has a corresponding `withX` builder method that call
    creation (skipped when `onlyAstCache = true`).
 7. **TypeDeclNodePass** — creates `TYPE_DECL` stubs for types seen but not declared in the parsed
    files (skipped when `onlyAstCache = true`).
-8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers with their value
-   (`const-value`).
+8. **ConstantTagPass** — tags reads of header `const`/`constexpr` integers the frontend could not
+   evaluate in place with their value (`const-value`).
+9. **ReferenceKindPass** — tags every local, parameter and global with how it is referenced
+   (`ref`): `address-taken` (the operand of `&`, an array passed to a call, an argument bound to a
+   non-const reference), `modified` (written after its declaration, also through a member or an
+   element of an array), or `read-only`. A guard on an address-taken variable is not trusted
+   across a call that receives its address or a write through a pointer to it.
 
 `createCpgWithOverlays` additionally applies the four default overlays defined in `X2Cpg.scala`:
 **Base**, **ControlFlow**, **TypeRelations**, **CallGraph**.
@@ -115,6 +125,8 @@ recovery pass). Every field has a corresponding `withX` builder method that call
 | `--only-ast-cache`                      | `onlyAstCache`              |
 | `--auto-defines`                        | `autoDefines`               |
 | `--macro-census <file>`                 | `macroCensusReport`         |
+| `--compile-commands <file\|dir>`        | `compileCommands`           |
+| `--compile-commands-only`               | `compileCommandsOnly`       |
 
 ## atom CLI (`-l cpp` / `-l c`)
 
@@ -129,8 +141,117 @@ atom -l cpp \
 
 `atom --frontend-args-keys -l cpp` prints every key the C and C++ frontends accept, with its type
 and default (`defines`, `includes`/`include-paths`, `include-files`, `macro-files`,
-`cpp-standard`, `auto-defines`, `macro-census`, `function-bodies`, `parse-inactive-code`,
-`enable-ast-cache`, `ast-cache-dir`, …).
+`cpp-standard`, `compile-commands`, `compile-commands-only`, `auto-defines`, `macro-census`,
+`function-bodies`, `parse-inactive-code`, `enable-ast-cache`, `ast-cache-dir`, …). A compilation
+database also has its own flag: `atom -l cpp --compile-commands build/ -o app.atom .`.
+
+## How each file is parsed
+
+**With a compilation database** (`--compile-commands`, a `compile_commands.json` or a directory
+holding one, also its `build/` subdirectory), each translation unit is parsed with its own compile
+command: the include directories (`-I`, `-iquote`, `-isystem`, `-idirafter`, `/I`), macros (`-D`,
+`-U`, `/D`, `/U`, in order), forced files (`-include`, `-imacros`, `/FI`) and language (`-x`, `/TP`,
+`/TC`, a C++ driver such as `g++`). A `command` string is split with POSIX quoting, or the Windows
+rules for `cl.exe` and `clang-cl`. Only the database's units and the project's headers are parsed
+(only the units with `--compile-commands-only`); a relative path is taken from the working
+directory, then from the project root. The user's `--define`s and `--include`s still apply on top.
+
+**Headers** take the language, and with a database the flags, of the first unit that includes
+them, found from the project's `#include` lines: a `.h` file included from a C++ file is parsed as
+C++. A header no unit includes is C in a project without C++ sources, C++ in one without C sources,
+and otherwise C++ when it declares a class, a namespace or a template.
+
+**Predefined macros** come from the unit's real compiler: `<cc> <options> -x <lang> -dM -E -v -`
+runs once per compiler and option set (target, sysroot, `-m`, `-O`, `-f`, `-std` options), and also
+gives the compiler's system include path, in its search order. Results are kept for the process and
+under `.chen/compilers/` keyed by the compiler's `--version`. A database's compiler is run only
+when it names a GCC or Clang driver (`gcc`, `g++`, `cc`, `c++`, `clang`, `clang++`, or a prefixed or
+suffixed form such as `aarch64-linux-gnu-gcc`), and only when it is a command on the `PATH` or an
+absolute path outside the project tree: a database can come with the code it describes, so a
+compiler inside the tree, one named by a relative path, or a program of any other name is never
+run. Without a database the host's `gcc`
+(or `clang`) is used when include discovery is on, asked for C++17 unless `--cpp-standard` says
+otherwise. A compiler that cannot be run (a database from another machine, or MSVC's `cl.exe`,
+which cannot list its macros) falls back to a table for its family and target, generated from real
+compilers by `tools/predefined-macros/generate.sh`; with no compiler at all, a GCC identity
+(`__GNUC__` 4.9) stands in so headers still see the attributes they gate on it, with the host's
+type sizes (`__SIZEOF_LONG__` and the rest: LLP64 on Windows, LP64 elsewhere). The feature tests
+the parser does not evaluate (`__has_builtin`, `__has_feature`, `__has_attribute`, …) read as 0, and
+MSVC's keywords (`__declspec`, `__cdecl`, …) are spelled out only for MSVC or an unknown compiler.
+
+**C++20 modules.** Module interface units are parsed by their extensions, and the module syntax of
+every C++ unit is rewritten line by line before parsing (line numbers do not change):
+
+| Source | Read as |
+|---|---|
+| `import <vector>;`, `import "a.h";` | `#include <vector>`, `#include "a.h"` |
+| `import hello;`, `import :part;`, `export import ...;` | `#include` of the interface unit that declares the module or partition, found in the project |
+| `module hello;` (an implementation unit) | `#include` of the primary interface |
+| `export module hello;` | `#pragma once` |
+| `module;`, `module :private;`, `import std;` | nothing |
+| `export { ... }`, `export int f();` | the declarations, without `export` |
+
+So calls into an imported module resolve and link to the module's units. Outside a module unit,
+`import name;` is a module import only when the project declares `name`.
+
+The AST cache key includes each file's language, macros, include path and forced files.
+
+**Includes.** Each `#include` of a file becomes an IMPORT node (and a DEPENDENCY named after the
+header as written). The IMPORT node is tagged with the file the include resolved to
+(`include-resolved-path`, an absolute path) and, for a `<...>` include, `include-system=true`;
+an include that did not resolve has no path tag. A call to a function that only a header
+declares is tagged with that header (`callee-declared-in`, an absolute path). The resolved file
+tells which package provides the header far better than its name, and the declaring header which
+package's API a call uses: atom's `usages` slices carry both for SBOM tools.
+
+**Constant values.** Every integer constant expression that is more than a literal carries its
+value as a `const-value` tag (decimal), computed by CDT as the target's compiler would: `sizeof`
+and `alignof`, enumerators, `const` integers with a known initializer, and arithmetic, casts and
+conditionals over them. A macro constant's INLINED call carries the value of its expansion
+(`#define N (4 * 8)` is 32). Type sizes come from the unit's predefined macros, so `sizeof(long)` is
+4 for an MSVC unit and 8 for an LP64 one, and an unsigned result wraps at its type's width
+(`(unsigned int)-1` is 4294967295). The memory-safety passes read a tagged expression as they read
+a literal: a known copy length, allocation size, guard scale or stored value.
+
+**Pointer arithmetic.** An addition, subtraction, compound assignment or increment that moves a
+pointer or an array is tagged `ptr-arith`: `add:<i>` or `sub:<i>` with the argument index of the
+pointer operand (`p + n` is `add:1`, `n + p` is `add:2`, `p -= n` and `p--` are `sub:1`), and `diff`
+for the distance between two pointers. The type is CDT's, so a typedef'd pointer counts. `i[a]` is
+written as `a[i]`: the pointer or array is always the base, argument 1. The memory-safety passes
+take the buffer and the offset from the tag rather than from type names or operand order.
+
+**CDT's own log.** CDT reports internal conditions (an ambiguity it resolved another way, an
+evaluation it gave up on) through its plugin's log, which normally exists only inside Eclipse.
+`c2cpg` sets that log up when it first parses, so such a report no longer fails the file, and
+sends the messages to the debug log (`io.appthreat.c2cpg.parser.CdtLogging`) rather than standard
+output.
+
+**When CDT's semantics fail.** CDT throws on some code it does not model (an `auto` it cannot
+deduce), and its template instantiation and return-type deduction can recurse without bound on
+self-referential code: a variable template initialised with itself, nested generic lambdas that
+fold a pack they capture. Questions to CDT go through `CdtQuery`, which fails the one question, a
+`StackOverflowError` included (Scala's `Try` lets it through). An overflow anywhere else costs the
+expression, statement or declaration being built: it becomes an UNKNOWN node with its code, and
+the scopes it opened are put back. A function whose return type CDT cannot deduce keeps its METHOD
+with an `ANY` return type and its parameter types. The rest of the file keeps its AST: c2cpg parses
+every file of EDG's C/C++ front-end test suite.
+
+## Compiler builtins and FORTIFY
+
+The C library's `_FORTIFY_SOURCE` wrappers (`__memcpy_chk`, `__sprintf_chk`, `__read_chk`, …), the
+compiler's spellings of them (`__builtin___memcpy_chk`) and the builtins of library functions
+(`__builtin_memcpy`, `__builtin_strlen`) are read as the functions they stand for: the
+memory-safety tags are valued as the function (`mem-dst=memcpy`), the data-flow summaries are the
+function's with the arguments moved past the inserted ones, and the printf-family format positions
+follow. A wrapper's destination size is tagged `mem-object-size`; a constant other than `(size_t)-1`,
+or `__builtin_object_size(p, k)`, gives the destination's `extent` when nothing else does. When a
+header defines a function as a macro over its builtin (`#define alloca(n) __builtin_alloca(n)`), the
+macro's call carries the tags.
+
+A call to a builtin the parser does not declare (the FORTIFY builtins, or `__memcpy_chk` without
+its header) gets its signature and return type from `builtin-functions.txt`, generated from the EDG
+C/C++ front end's builtin definitions by `tools/builtins/generate.py`. In C++ a builtin is named as
+in C (`__builtin_memcpy`, no signature in the full name), so its summary applies.
 
 ## Real Commands and Code Examples
 
@@ -215,13 +336,94 @@ Each top-level macro invocation becomes a `CALL` with dispatch type `INLINED`:
 
 - `name` is the macro name; `methodFullName` encodes where the macro is defined,
   `<file>:<line>:<lineEnd>:<NAME>:<argc>` (plain `NULL` keeps its name).
-- The invocation's arguments are matched by their source text inside the expansion and copied
-  under the call as arguments `1..argc`, so data flows into the macro's value.
-- The expansion itself is the call's last AST child, a block after the arguments, and the CFG runs
-  through it, so guards written as macros (`MIN`, `MAX`, `CLAMP`) take part in data flow.
+- The invocation's arguments are found in the expansion by where CDT says their tokens came from
+  (image locations, on by default): the widest expression whose names are all tokens of one
+  argument, written once. An object-like macro argument (`LIMIT`) is the literal it expands to; an
+  argument with no names is matched by its text. Each is copied under the call as arguments
+  `1..argc` (the AST is a tree), every node of the copy tagged `macro-argument-copy`, so data flows
+  into the macro's value and a rule can tell the copy from the expansion.
+- The expansion itself is the call's last AST child, a block after the arguments. It always runs:
+  the CFG goes through it and only out of it, so a guard written as a macro (`CHECK(i, n)`,
+  `MIN`, `CLAMP`) stands between what precedes and what follows the invocation.
+- Each invocation of a file has an index: the INLINED call and the nodes of its expansion carry
+  `macro-invocation=<index>`. An argument that is itself a macro invocation (`MIN(a, MAX(b, c))`)
+  is nested in it: its expansion's nodes carry their own index and `macro-parent=<index>`. A node
+  whose name a macro's definition wrote carries `macro-origin=<file>:<line>:<column>` there.
 
-Only the outermost invocation of nested macros is represented, and `#define` directives are not
-nodes.
+Only the outermost invocation is an INLINED call, and `#define` directives are not nodes.
+
+## Designated Initializers
+
+A designated initializer assigns into the object its list initialises. `struct S s = { .a.b = v,
+.c[2] = w };` gives the assignments `s.a.b = v` and `s.c[2] = w`, built from
+`<operator>.fieldAccess` (with a `FIELD_IDENTIFIER` for the member) and
+`<operator>.indirectIndexAccess`. A GNU range `[3 ... 9] = v` indexes with the range. A nested
+list (`.a = { .b = 1 }`) assigns into `s.a`. A compound literal that is the whole initializer
+(`T v = (T){ .a = 1 }`) assigns into `v`, also when a macro writes the declaration.
+
+A compound literal used anywhere else, or a C++ temporary, has no name. Its designated
+initializers stay assignments to the bare designator, a `FIELD_IDENTIFIER` for a member, so they
+never read or write a variable that has the same name.
+
+CDT 12.6 does not accept designators in a C++ direct-list-initialization (`Point p{ .x = 1 };`).
+At file scope the declaration is left unparsed; in a function body it is read as an expression.
+`Point p = { .x = 1 };` parses and is lowered as above.
+
+## C++ Calls the Source Does Not Spell
+
+C++ calls functions the source never writes as calls. CDT resolves each of them, and c2cpg emits a
+`CALL` whose `methodFullName` is the METHOD the graph holds, so the call graph and data flow reach
+the body:
+
+| Source | CALL |
+|---|---|
+| `a + b` on a class with `operator+` | `operator +` → `Vec2.operator +:Vec2(Vec2 &)`, `a` as argument 0 (member operator) or `a`, `b` as arguments 1, 2 (free operator), tagged `operator-call=<operator>.addition` |
+| `p->m()` on a smart pointer | the `operator ->` call on `p` is the receiver of `m`; the method call dispatches to the overrides |
+| `Point a(1, 2)`, `Point a{1, 2}`, `Point a;`, `Point(1, 2)` | `Point` → `Point.Point:void(int,int)` (the default constructor for `Point a;`) |
+| `new T(args)` | `<operator>.new`: argument 1 is the type, argument 2 the constructor call holding `args`; tagged `alloc-form=scalar`, `array` (`new T[n]`, the extents follow the type) or `placement` (the placement arguments go to a project's `operator new`) |
+| `delete p`, `delete[] p` | `<operator>.delete`: argument 1 is the pointer, argument 2 the destructor call; tagged `alloc-form=scalar` or `array` |
+| leaving a scope | one destructor call per object with a destructor, the last constructed first: where control falls out of a block, a catch handler or a statement's declarations, and before each `return`, `break`, `continue` and `goto` that leaves it early |
+| `clampAdd<short>(x, 7)` | `clampAdd:ANY(ANY,ANY)`, the generic definition, tagged `template-instance=short int(short int,short int)`; an explicit specialization keeps its own name |
+| `f(x)` where `f` holds a lambda | `anonymous_lambda_0` → the lambda's METHOD, `f` as the receiver |
+
+A declared object whose constructor the graph holds (`Point a(1, 2)`, `Point a{1, 2}`, `Point a;`,
+`Point a = 5;`, `Point a = {1, 2};`) is an assignment of the constructor call to the variable, so
+data flow carries the constructor's arguments into it; copy-initialisation calls the converting
+constructor, or the copy constructor the class declares. A value of the variable's own type
+initialises it in place (`Point a = Point(1, 2);`, `Point a = make();`): the right-hand side is
+the only call.
+
+A callee is linked only when the graph holds its METHOD: a function the compiler generates (an
+implicit copy assignment) or one declared only in a library header keeps the shape it has
+otherwise, and an operator then stays the built-in `<operator>.*` call. Constructors and
+destructors are named with a `void` return type (`Point.Point:void(int,int)`,
+`Point.~Point:void()`), and every constructor carries the `CONSTRUCTOR` modifier.
+
+Scope exits: objects are destroyed innermost scope first, and only those constructed before the
+exit. A loop's condition variable and a range-based `for`'s loop variable are destroyed at the end
+of each iteration and at `continue`; variables an `if`, `switch` or `while` declares in its
+condition or init statement, after the statement. A `return` whose value could observe a destroyed
+object (it calls a function, reads through a pointer or names one of the objects) stores the value
+in a local `<return-value>` first, then destroys, then returns it. No calls follow a block that ends
+in a jump. Temporaries are not covered: CDT's tree does not show the temporaries implicit
+conversions create, so their destruction is left to a frontend that does.
+
+Operator calls carry the type CDT gives the expression (`p->name[1]` is `char`), `>>` on an
+unsigned operand is `<operator>.logicalShiftRight`, and `obj.*pm` / `ptr->*pm` are
+`<operator>.pointerToMember` / `<operator>.indirectPointerToMember`.
+
+## Functions and Types Across Files
+
+A function declared in a header and defined in another file is one function: c2cpg builds a
+METHOD for each declaring file (an empty block marks the prototype), the call linkers pick the
+definition, the definition carries the attributes its prototypes declare, and flow summaries come
+from the definition. A `static` function and anything in a C++ unnamed namespace have internal
+linkage: a call reaches only its own file's definition. A `static` file-scope variable is its own
+file's.
+
+A struct that two headers define differently keeps one layout per header (headers that agree give
+one), and a member access sees the layout of a header its file includes, directly or through other
+includes, by the resolved include paths.
 
 ## Notes for Security Analysts
 

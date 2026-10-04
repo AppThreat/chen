@@ -6,12 +6,14 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newModifierNode
 import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, ModifierTypes}
+import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{
     ICPPASTFunctionDeclarator,
     ICPPASTFunctionWithTryBlock,
-    ICPPASTLambdaExpression
+    ICPPASTLambdaExpression,
+    ICPPConstructor,
+    ICPPMethod
 }
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.{
@@ -21,7 +23,7 @@ import org.eclipse.cdt.internal.core.dom.parser.c.{
 }
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPASTFunctionDeclarator,
-    CPPASTFunctionDefinition,
+    CPPClosureType,
     CPPASTParameterDeclaration,
     ICPPInternalBinding
 }
@@ -57,31 +59,39 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     node: IASTNode,
     fullName: String
   ): List[NewModifier] =
-    val insideClass = Iterator.iterate(node.getParent)(_.getParent).takeWhile(_ != null)
-        .exists(_.isInstanceOf[IASTCompositeTypeSpecifier])
+    val ancestors   = Iterator.iterate(node.getParent)(_.getParent).takeWhile(_ != null).toList
+    val insideClass = ancestors.exists(_.isInstanceOf[IASTCompositeTypeSpecifier])
     val declaredStatic = declSpecifier != null &&
         declSpecifier.getStorageClass == IASTDeclSpecifier.sc_static
+    // a C++ unnamed namespace gives everything in it internal linkage, as `static` does
+    val inAnonymousNamespace = ancestors.exists {
+        case ns: org.eclipse.cdt.core.dom.ast.cpp.ICPPASTNamespaceDefinition =>
+            ns.getName.toString.isEmpty
+        case _ => false
+    }
     if insideClass then Nil
-    else if declaredStatic || internalLinkageNames.contains(fullName) then
+    else if declaredStatic || inAnonymousNamespace || internalLinkageNames.contains(fullName) then
       internalLinkageNames += fullName
       List(newModifierNode(ModifierTypes.STATIC))
     else Nil
+  end internalLinkageModifiers
 
   protected def astForMethodRefForLambda(lambdaExpression: ICPPASTLambdaExpression): Ast =
     val filename = fileName(lambdaExpression)
 
-    val returnType = lambdaExpression.getDeclarator match
-      case declarator: IASTDeclarator =>
-          declarator.getTrailingReturnType match
-            case id: IASTTypeId => typeForDeclSpecifier(id.getDeclSpecifier)
-            case null           => Defines.anyTypeName
-      case null => Defines.anyTypeName
+    // the trailing return type when the lambda writes one, else the type CDT deduces for its
+    // call operator from the body
+    val returnType = Option(lambdaExpression.getDeclarator)
+        .flatMap(d => Option(d.getTrailingReturnType))
+        .map(id => typeForDeclSpecifier(id.getDeclSpecifier))
+        .getOrElse(deducedLambdaReturnType(lambdaExpression))
     val (name, fullname) = uniqueName("lambda", "", fullName(lambdaExpression))
     val signature =
         s"$returnType ${parameterListSignature(lambdaExpression)}"
     val code = nodeSignature(lambdaExpression)
     val methodNode_ =
         methodNode(lambdaExpression, name, code, fullname, Some(signature), filename)
+    registerLambdaMethod(lambdaExpression, name, fullname)
 
     scope.pushNewScope(methodNode_)
     val parameterNodes = withIndex(parameters(lambdaExpression.getDeclarator)) { (p, i) =>
@@ -99,10 +109,17 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     )
     val typeDeclAst =
         createFunctionTypeAndTypeDecl(lambdaExpression, methodNode_, name, fullname, signature)
-    Ast.storeInDiffGraph(astForLambda.merge(typeDeclAst), diffGraph)
+    storeAst(astForLambda.merge(typeDeclAst))
 
     Ast(methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName))
   end astForMethodRefForLambda
+
+  private def deducedLambdaReturnType(lambdaExpression: ICPPASTLambdaExpression): String =
+      CdtQuery(lambdaExpression.getExpressionType).toOption
+          .collect { case closure: CPPClosureType => closure.getFunctionCallOperator }
+          .flatMap(op => Option(op).flatMap(o => Option(o.getType)))
+          .map(t => typeNameOf(t.getReturnType))
+          .getOrElse(Defines.anyTypeName)
 
   /** A function declarator does not always declare a function: `int (*op)(int, int)` is a
     * function-*pointer* variable whose name resolves to an `IVariable`, not an `IFunction`.
@@ -180,40 +197,35 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   ): Unit =
     val tagged = methodAttributes.getOrElseUpdate(method.fullName, mutable.HashSet.empty)
     gccAttributes(owners ++ Option(binding).toSeq.flatMap(declarationOwners)).foreach { attr =>
-        if tagged.add(attr) then
-          diffGraph.addEdge(
-            method,
-            NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr),
-            EdgeTypes.TAGGED_BY
-          )
+        if tagged.add(attr) then tagNode(method, X2CpgDefines.FunctionAttributeTag, attr)
     }
 
   /** The attributes already on each METHOD (by full name), so none is tagged twice. */
   private val methodAttributes = mutable.HashMap.empty[String, mutable.HashSet[String]]
-
-  /** One tag node per attribute per translation unit, shared by every call that carries it. */
-  private val callAttributeTags = mutable.HashMap.empty[String, NewTag]
 
   /** The declared attributes of the function a direct call resolves to, on the CALL: when the
     * declaration sits in a header outside the analysed input no METHOD is built from it (it is an
     * included node of every translation unit), and the call is where its semantics survive.
     */
   protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
-      gccAttributes(declarationOwners(function)).foreach { attr =>
-        val tag = callAttributeTags.getOrElseUpdate(
-          attr,
-          NewTag().name(X2CpgDefines.FunctionAttributeTag).value(attr)
-        )
-        diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
-      }
+    val owners = declarationOwners(function)
+    gccAttributes(owners).foreach(attr => tagNode(call, X2CpgDefines.FunctionAttributeTag, attr))
+    // the header a function is declared in, when this file does not declare it: what tells an
+    // SBOM which package's API the call uses
+    if owners.nonEmpty && owners.forall(isIncludedNode) then
+      owners.flatMap(o => Option(o.getFileLocation).flatMap(l => Option(l.getFileName)))
+          .headOption.foreach(header => tagNode(call, Defines.CalleeDeclaredInTag, header))
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =
     val binding = funcDecl.getName.resolveBinding()
     binding match
       case function: IFunction =>
-          val returnType = typeForDeclSpecifier(
-            funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
-          )
+          val returnType =
+              if isConstructorOrDestructorBinding(function) then Defines.voidTypeName
+              else
+                typeForDeclSpecifier(
+                  funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier
+                )
           val name     = shortName(funcDecl)
           val fullname = fullName(funcDecl)
           val fixedName = if name.isEmpty then
@@ -262,7 +274,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                   methodNode_,
                   parameterNodes,
                   newMethodReturnNode(funcDecl, registerType(returnType)),
-                  internalLinkageModifiers(
+                  constructorModifiers(function) ++ internalLinkageModifiers(
                     funcDecl.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier,
                     funcDecl,
                     fixedFullName
@@ -302,20 +314,9 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   protected def astForFunctionDefinition(funcDef: IASTFunctionDefinition): Ast =
     val filename = fileName(funcDef)
-    val returnType = if isCppConstructor(funcDef) then
-      // A constructor has no explicit return type. We approximate it with the type of the
-      // first base/member initializer (e.g. `FooT(...) : Bar::Foo(a, b) {}` yields `Bar.Foo`).
-      // typeFor can, however, return a method-signature-like string for some initializer
-      // expressions (e.g. a member initialized via a call), which must not leak into the
-      // constructor's return type / signature. Fall back to the ANY type in that case, which
-      // is also what the fullName's signature uses (see functionTypeToSignature).
-      val cppFunc = funcDef.asInstanceOf[CPPASTFunctionDefinition]
-      val candidate = cppFunc.getMemberInitializers.headOption
-          .map(m => typeFor(m.getInitializer))
-          .getOrElse(Defines.anyTypeName)
-      if candidate.isEmpty || candidate.contains("(") || candidate.contains(":") then
-        Defines.anyTypeName
-      else candidate
+    val binding  = funcDef.getDeclarator.getName.resolveBinding()
+    // a constructor or destructor declares no return type: `void`, as its full name says
+    val returnType = if isConstructorOrDestructorBinding(binding) then Defines.voidTypeName
     else
       val fromSpec = typeForDeclSpecifier(funcDef.getDeclSpecifier)
       // Trailing return type: `auto f(...) -> RealType`. The declaration specifier is `auto`
@@ -342,7 +343,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     tagFunctionAttributes(
       methodNode_,
       Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier),
-      funcDef.getDeclarator.getName.resolveBinding()
+      binding
     )
     methodAstParentStack.push(methodNode_)
     scope.pushNewScope(methodNode_)
@@ -352,12 +353,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     }
     setVariadic(parameterNodes, funcDef)
     val modifiers =
-        (if isCppConstructor(funcDef) then
-           List(
-             newModifierNode(ModifierTypes.CONSTRUCTOR),
-             newModifierNode(ModifierTypes.PUBLIC)
-           )
-         else Nil) ++
+        constructorModifiers(binding) ++
             internalLinkageModifiers(funcDef.getDeclSpecifier, funcDef, fullname)
     val astForMethod = methodAst(
       methodNode_,
@@ -399,7 +395,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
           astParentType,
           astParentFullName
         )
-        Ast.storeInDiffGraph(Ast(typeDeclNode_), diffGraph)
+        storeAst(Ast(typeDeclNode_))
         typeDeclNode_
     }
 
@@ -453,23 +449,30 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def fullNameWithoutLocation(fullName: String) = fullName.split(":").last
 
-  private def isCppConstructor(funcDef: IASTFunctionDefinition): Boolean =
-      funcDef match
-        case cppFunc: CPPASTFunctionDefinition => cppFunc.getMemberInitializers.nonEmpty
-        case _                                 => false
+  private def isConstructorOrDestructorBinding(binding: IBinding): Boolean = binding match
+    case _: ICPPConstructor => true
+    case m: ICPPMethod      => m.isDestructor
+    case _                  => false
+
+  /** Every constructor is marked as one, with or without a member initializer list. */
+  private def constructorModifiers(binding: IBinding): List[NewModifier] = binding match
+    case _: ICPPConstructor =>
+        List(newModifierNode(ModifierTypes.CONSTRUCTOR), newModifierNode(ModifierTypes.PUBLIC))
+    case _ => Nil
 
   private def parameterNode(parameter: IASTNode, paramIndex: Int): NewMethodParameterIn =
     val (name, code, tpe, variadic) = parameter match
+      // a pointer to function, `void (*callback)(char *)`, is named by its nested declarator
       case p: CASTParameterDeclaration =>
           (
-            ASTStringUtil.getSimpleName(p.getDeclarator.getName),
+            ASTStringUtil.getSimpleName(effectiveDeclaratorName(p.getDeclarator)),
             nodeSignature(p),
             cleanType(typeForDeclSpecifier(p.getDeclSpecifier)),
             false
           )
       case p: CPPASTParameterDeclaration =>
           (
-            ASTStringUtil.getSimpleName(p.getDeclarator.getName),
+            ASTStringUtil.getSimpleName(effectiveDeclaratorName(p.getDeclarator)),
             nodeSignature(p),
             cleanType(typeForDeclSpecifier(p.getDeclSpecifier)),
             p.getDeclarator.declaresParameterPack()

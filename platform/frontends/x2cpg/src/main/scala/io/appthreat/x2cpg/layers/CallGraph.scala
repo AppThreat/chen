@@ -2,7 +2,12 @@ package io.appthreat.x2cpg.layers
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.CpgPassBase
-import io.appthreat.x2cpg.passes.callgraph.{DynamicCallLinker, MethodRefLinker, StaticCallLinker}
+import io.appthreat.x2cpg.passes.callgraph.{
+    DynamicCallLinker,
+    FunctionPointerCallLinker,
+    MethodRefLinker,
+    StaticCallLinker
+}
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext, LayerCreatorOptions}
 
 object CallGraph:
@@ -11,7 +16,12 @@ object CallGraph:
   def defaultOpts         = new LayerCreatorOptions()
 
   def passes(cpg: Cpg): Iterator[CpgPassBase] =
-      Iterator(new MethodRefLinker(cpg), new StaticCallLinker(cpg), new DynamicCallLinker(cpg))
+      Iterator(
+        new MethodRefLinker(cpg),
+        new StaticCallLinker(cpg),
+        new DynamicCallLinker(cpg),
+        new FunctionPointerCallLinker(cpg)
+      )
 
 class CallGraph extends LayerCreator:
   override val overlayName: String     = CallGraph.overlayName

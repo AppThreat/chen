@@ -4,6 +4,8 @@ import io.appthreat.dataflowengineoss.DefaultSemantics
 import io.appthreat.dataflowengineoss.passes.reachingdef.{
     FluxReachingDefPass,
     ReachingDefPass,
+    GlobalVariableDefUsePass,
+    MemberDefUsePass,
     StaticMemberDefUsePass
 }
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
@@ -57,7 +59,13 @@ class OssDataFlow(opts: OssDataFlowOptions)(implicit
           )
     // After the reaching-def pass: it adds edges BETWEEN methods, which per-method reaching-def
     // computation cannot see and does not need to.
-    val enhancementExecList = Iterator(reachingDefPass, new StaticMemberDefUsePass(cpg))
+    val enhancementExecList =
+        Iterator(
+          reachingDefPass,
+          new StaticMemberDefUsePass(cpg),
+          new GlobalVariableDefUsePass(cpg),
+          new MemberDefUsePass(cpg)
+        )
     enhancementExecList.zipWithIndex.foreach { case (pass, index) =>
         runPass(pass, context, storeUndoInfo, index)
     }

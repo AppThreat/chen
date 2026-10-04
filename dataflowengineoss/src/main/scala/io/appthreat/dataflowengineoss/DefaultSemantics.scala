@@ -1,7 +1,14 @@
 package io.appthreat.dataflowengineoss
 
 import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
-import io.appthreat.dataflowengineoss.semanticsloader.{FlowSemantic, PassThroughMapping, Semantics}
+import io.appthreat.dataflowengineoss.semanticsloader.{
+    FlowMapping,
+    FlowNode,
+    FlowSemantic,
+    ParameterNode,
+    PassThroughMapping,
+    Semantics
+}
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 
 import scala.annotation.unused
@@ -115,6 +122,9 @@ object DefaultSemantics:
     F(Operators.indexAccess, List((1, -1))),
     F(Operators.indirectComputedMemberAccess, List((1, -1))),
     F(Operators.indirectFieldAccess, List((1, -1))),
+    // C++ `obj.*pm` and `ptr->*pm`: like a member access, the value comes from the object
+    F("<operator>.pointerToMember", List((1, -1))),
+    F("<operator>.indirectPointerToMember", List((1, -1))),
     F(Operators.indirectIndexAccess, List((1, -1), (2, 1))),
     F(Operators.indirectMemberAccess, List((1, -1))),
     F(Operators.indirection, List((1, -1))),
@@ -159,7 +169,39 @@ object DefaultSemantics:
     PTF("<operator>.dictLiteral"),
     PTF("<operator>.setLiteral"),
     PTF("<operator>.listLiteral")
-  )
+  ) ++ valueOperatorFlows
+
+  /** Operators that compute a value from their operands and write none of them: each operand flows
+    * into the result and into no other operand. Without a semantic an operator passes taint between
+    * its operands too, so `fgets(buf, n, stdin) != NULL` tainted the `NULL` and every later use of
+    * it.
+    */
+  private def valueOperatorFlows: List[FlowSemantic] =
+    val binary = List(
+      Operators.subtraction,
+      Operators.multiplication,
+      Operators.division,
+      Operators.exponentiation,
+      Operators.modulo,
+      Operators.shiftLeft,
+      Operators.logicalShiftRight,
+      Operators.arithmeticShiftRight,
+      Operators.and,
+      Operators.or,
+      Operators.xor,
+      Operators.logicalAnd,
+      Operators.logicalOr,
+      Operators.equals,
+      Operators.notEquals,
+      Operators.lessThan,
+      Operators.greaterThan,
+      Operators.lessEqualsThan,
+      Operators.greaterEqualsThan,
+      Operators.compare
+    )
+    val unary = List(Operators.not, Operators.logicalNot, Operators.minus, Operators.plus)
+    binary.map(op => F(op, List((1, -1), (2, -1)))) ++ unary.map(op => F(op, List((1, -1))))
+  end valueOperatorFlows
 
   /** Semantic summaries for common external C/C++ calls.
     *
@@ -181,7 +223,11 @@ object DefaultSemantics:
     *   href="https://www.ibm.com/docs/en/i/7.3?topic=extensions-standard-c-library-functions-table-by-name">Standard
     *   C Library Functions</a>
     */
-  def cFlows: List[FlowSemantic] = List(
+  def cFlows: List[FlowSemantic] =
+      libraryCFlows ++ fortifyFlows ++ builtinSpellings(libraryCFlows ++ fortifyFlows) ++
+          clampingMacroFlows ++ cppResolvedCallFlows
+
+  private val libraryCFlows: List[FlowSemantic] = List(
     F("abs", List((1, 1), (1, -1))),
     F("abort", List.empty[(Int, Int)]),
     F("accept", List((1, 1), (2, 2), (3, 3), (1, 2), (1, 3), (1, -1))),
@@ -258,7 +304,90 @@ object DefaultSemantics:
     F("strtok_r", List((1, 1), (2, 2), (3, 3), (1, 3), (1, -1))),
     F("vsnprintf", List((1, 1), (2, 2), (3, 3), (4, 4), (3, 1), (4, 1), (1, -1), (3, -1), (4, -1))),
     F("vsprintf", List((1, 1), (2, 2), (3, 3), (2, 1), (3, 1), (1, -1), (2, -1), (3, -1)))
-  ) ++ clampingMacroFlows
+  )
+
+  /** The wrappers the C library's `_FORTIFY_SOURCE` turns a call into (`memcpy` becomes
+    * `__memcpy_chk`): each takes its function's arguments with some inserted - the destination's
+    * size, and for the printf family a flag - at the given positions of its own signature.
+    */
+  private val fortifyWrappers: List[(String, String, List[Int])] = List(
+    ("__memcpy_chk", "memcpy", List(4)),
+    ("__memmove_chk", "memmove", List(4)),
+    ("__mempcpy_chk", "mempcpy", List(4)),
+    ("__strcpy_chk", "strcpy", List(3)),
+    ("__stpcpy_chk", "stpcpy", List(3)),
+    ("__strcat_chk", "strcat", List(3)),
+    ("__strncpy_chk", "strncpy", List(4)),
+    ("__strncat_chk", "strncat", List(4)),
+    ("__sprintf_chk", "sprintf", List(2, 3)),
+    ("__vsprintf_chk", "vsprintf", List(2, 3)),
+    ("__snprintf_chk", "snprintf", List(3, 4)),
+    ("__vsnprintf_chk", "vsnprintf", List(3, 4)),
+    ("__read_chk", "read", List(4)),
+    ("__pread_chk", "pread", List(5)),
+    ("__recv_chk", "recv", List(4)),
+    ("__recvfrom_chk", "recvfrom", List(4)),
+    ("__fgets_chk", "fgets", List(2)),
+    ("__gets_chk", "gets", List(2)),
+    ("__readlink_chk", "readlink", List(4))
+  )
+
+  /** A FORTIFY wrapper carries what its function carries, with the arguments moved past the
+    * inserted ones; an inserted argument keeps its own definition and carries nothing.
+    */
+  private def fortifyFlows: List[FlowSemantic] =
+    val byName = libraryCFlows.map(f => f.methodFullName -> f).toMap
+    fortifyWrappers.flatMap { (wrapper, function, inserted) =>
+      def moved(index: Int): Int =
+          if index < 1 then index
+          else inserted.sorted.foldLeft(index)((i, p) => if p <= i then i + 1 else i)
+      def node(n: FlowNode): FlowNode = n match
+        case ParameterNode(index, name) => ParameterNode(moved(index), name)
+        case other                      => other
+      byName.get(function).map { base =>
+        val mappings = base.mappings.map {
+            case FlowMapping(src, dst) => FlowMapping(node(src), node(dst))
+            case other                 => other
+        } ++ inserted.map(p => FlowMapping(p, p))
+        FlowSemantic(wrapper, mappings)
+      }
+    }
+
+  /** The compiler builtin `__builtin_f` of each function `f` takes `f`'s arguments and does what it
+    * does (`__builtin_memcpy`, and the compiler's FORTIFY wrappers `__builtin___memcpy_chk`).
+    */
+  private def builtinSpellings(flows: List[FlowSemantic]): List[FlowSemantic] =
+      flows.filterNot(_.regex).map(f => f.copy(methodFullName = s"__builtin_${f.methodFullName}"))
+
+  /** Semantics for the C++ calls the frontend links to a method the graph holds although the source
+    * does not spell them as calls: constructors and user-defined operators.
+    *
+    * The graph has no `this` parameter, so a member's body cannot show what reaches the object it
+    * runs on. These summaries keep what the expression itself says: the value a constructor builds
+    * is made from its arguments, an operator's result from its operands (the object a member
+    * operator is called on is argument 0), and an assignment operator stores its right operand in
+    * its left one, keeping what the left already held when it is compound. The bodies are still
+    * explored from the inside, so a sink in a constructor or an operator is reached from its
+    * parameters.
+    *
+    * The METHOD full names follow the frontend's convention: a constructor is
+    * `<class>.<class>:void(<params>)`, an operator `<scope>.operator <symbol>:<signature>`.
+    * Operators named with a word (`operator new`, `operator bool`) are left to their bodies.
+    */
+  private def cppResolvedCallFlows: List[FlowSemantic] =
+    val assignment = "(?:.*\\.)?operator =:.*"
+    val compound   = "(?:.*\\.)?operator (?:\\+|-|\\*|/|%|\\^|&|\\||<<|>>)=:.*"
+    val operator = "(?:.*\\.)?operator (?!(?:\\+|-|\\*|/|%|\\^|&|\\||<<|>>)?=:)[^A-Za-z_:][^:]*:.*"
+    List(
+      FlowSemantic("(?:.*\\.)?([^.:]+)\\.\\1:void\\(.*\\)", List(PassThroughMapping), regex = true),
+      FlowSemantic.from(assignment, List((1, 0), (1, -1), (2, 1), (2, -1)), regex = true),
+      FlowSemantic.from(
+        compound,
+        List((0, 0), (1, 0), (0, -1), (1, -1), (1, 1), (2, 1), (2, -1)),
+        regex = true
+      ),
+      FlowSemantic.from(operator, List((0, -1), (1, -1), (2, -1)), regex = true)
+    )
 
   /** Semantics for the common clamping macros (`FFMIN`, `FFMAX`, `FFABS`, `av_clip`), so that a
     * clamp the frontend left unexpanded as an opaque call still propagates "the result is derived

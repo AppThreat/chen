@@ -82,6 +82,23 @@ class SelfSizedDestinationTests extends DataFlowCodeToCpgSuite:
     |        dst = new char[need];
     |    memcpy(dst, bytes, n);
     |}
+    |
+    |/* the length handed to a constructor is not the size of what `new` allocates */
+    |struct Wrapper { char *data; explicit Wrapper(unsigned n); };
+    |void constructor_argument_is_not_a_size(const char *bytes, unsigned n, char **out)
+    |{
+    |    char *dst = (char *)new Wrapper(n);
+    |    memcpy(dst, bytes, n);
+    |    *out = dst;
+    |}
+    |
+    |/* the extent of an array allocation is */
+    |void array_new_of_the_length(const char *bytes, unsigned n, char **out)
+    |{
+    |    char *dst = new char[n];
+    |    memcpy(dst, bytes, n);
+    |    *out = dst;
+    |}
     |""".stripMargin,
     "self_sized.cpp"
   )
@@ -117,5 +134,11 @@ class SelfSizedDestinationTests extends DataFlowCodeToCpgSuite:
     }
     "stay silent when a dominating guard proves the fixed buffer large enough" in {
         findingsIn("guard_covers") shouldBe empty
+    }
+    "not read a constructor argument as the size of a scalar allocation" in {
+        findingsIn("constructor_argument_is_not_a_size") should not be empty
+    }
+    "read an array allocation's extent as its size" in {
+        findingsIn("array_new_of_the_length") shouldBe empty
     }
 end SelfSizedDestinationTests

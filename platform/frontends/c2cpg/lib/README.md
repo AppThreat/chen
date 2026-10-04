@@ -1,6 +1,6 @@
 org.eclipse.cdt jars were downloaded from
 
-https://download.eclipse.org/tools/cdt/releases/12.5/cdt-12.5.0/plugins/
+https://download.eclipse.org/tools/cdt/releases/12.6/cdt-12.6.0/plugins/
 
-The same core bundle, `org.eclipse.cdt.core_9.3.100.202512101642.jar`, ships in CDT 12.4 and 12.5;
-the `.ABOUT` file records the 12.4 download URL.
+The `.ABOUT` file records the download URL of `org.eclipse.cdt.core_9.3.200.202607131546.jar`
+(CDT 12.6), and the `.sha512` file its checksum.

@@ -592,9 +592,7 @@ object MemorySemanticsPass:
     // of an assignment (`*out = v` writes through the parameter, it does not read it)
     val isStoreTarget: Call => Boolean = c =>
         c._astIn.collectFirst { case a: Call => a }.exists { a =>
-            (a.name.startsWith("<operator>.assignment") || a.name.startsWith(
-              "<operators>.assignment"
-            )) &&
+            OverlayFacts.isAssignmentOperator(a.name) &&
             a.argumentOption(1).exists(_.id == c.id)
         }
     val readParams = method.call
@@ -606,10 +604,7 @@ object MemorySemanticsPass:
     else
       val stored = mutable.LinkedHashSet.empty[Int]
       method.call
-          .filter(a =>
-              a.name.startsWith("<operator>.assignment") ||
-                  a.name.startsWith("<operators>.assignment")
-          )
+          .filter(a => OverlayFacts.isAssignmentOperator(a.name))
           .l.foreach { a =>
               // `*out = v` and the compound `*out |= v` both store through the parameter
               a.argumentOption(1).collect { case e: Expression => e }.foreach { lhs =>

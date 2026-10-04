@@ -108,9 +108,9 @@ class CppClassesTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EXT)
 
       "not leak the method fullName into a constructor's return type (regression)" in {
           val ctor = cpg.method.nameExact("number_generator").head
-          ctor.methodReturn.typeFullName shouldBe "ANY"
+          ctor.methodReturn.typeFullName shouldBe "void"
           (ctor.signature should not).include(ctor.fullName)
-          ctor.signature shouldBe "ANY (int,int)"
+          ctor.signature shouldBe "void (int,int)"
       }
 
       "flag constructors with the CONSTRUCTOR modifier" in {

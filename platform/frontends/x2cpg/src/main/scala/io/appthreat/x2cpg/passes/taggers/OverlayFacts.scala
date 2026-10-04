@@ -90,9 +90,56 @@ private[taggers] object OverlayFacts:
         .flatMap(td => membersOfTypeDecl(td).map(m => (td.filename, m)))
         .filter { case (_, m) => m.name == memberName }
     val sameFile = candidates.collect { case (f, m) if f == inFile => m }
-    val ordered = if sameFile.nonEmpty then sameFile
-    else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
+    // the definition a header the file includes gives it, when two headers define the name
+    lazy val included = decls.headOption.map(td => includedBy(Cpg(td.graph), inFile))
+        .getOrElse(Set.empty)
+    lazy val fromIncludes = candidates.collect { case (f, m) if included.contains(f) => m }
+    val ordered =
+        if sameFile.nonEmpty then sameFile
+        else if candidates.map(_._1).distinct.sizeIs > 1 && fromIncludes.nonEmpty then
+          fromIncludes.sortBy(_.typeFullName)
+        else candidates.sortBy { case (f, m) => (f, m.typeFullName) }.map(_._2)
     ordered.distinctBy(_.id)
+
+  /** The include graph of each graph, between its FILE names: a file -> the files its includes
+    * resolved to. An include records the absolute path it resolved to; it names the graph's file
+    * whose (project-relative) name that path ends with.
+    */
+  private val includeGraphs =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Cpg, Map[
+        String,
+        Set[String]
+      ]]())
+
+  private def includeGraph(cpg: Cpg): Map[String, Set[String]] =
+    val known = includeGraphs.get(cpg)
+    if known != null then known
+    else
+      val byBaseName = cpg.file.name.l.groupBy(n => n.replace('\\', '/').split('/').last)
+      def fileNamed(path: String): String =
+        val p = path.replace('\\', '/')
+        byBaseName.getOrElse(p.split('/').last, Nil)
+            .filter(f => p == f.replace('\\', '/') || p.endsWith("/" + f.replace('\\', '/')))
+            .maxByOption(_.length).getOrElse(path)
+      val graph = cpg.imports.l.flatMap { imp =>
+          for
+            file <- imp.file.name.headOption
+            path <- imp.tag.nameExact("include-resolved-path").value.headOption
+          yield file -> fileNamed(path)
+      }.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
+      includeGraphs.put(cpg, graph)
+      graph
+
+  /** Every file `file` includes, directly or through other includes. */
+  def includedBy(cpg: Cpg, file: String): Set[String] =
+    val graph = includeGraph(cpg)
+    val seen  = mutable.LinkedHashSet.empty[String]
+    var next  = graph.getOrElse(file, Set.empty).toList
+    while next.nonEmpty do
+      val f = next.head
+      next = next.tail
+      if seen.add(f) then next = graph.getOrElse(f, Set.empty).toList ++ next
+    seen.toSet
 
   /** The member an implicit-this read names (`space_` inside a method). c2cpg types that identifier
     * with the OWNER class (`leveldb.LookupKey`, `leveldb..PosixWritableFile` in an anonymous
@@ -133,6 +180,32 @@ private[taggers] object OverlayFacts:
     * capacity) parameter pair.
     */
   def isPointer(t: String): Boolean = t.endsWith("*") || t.endsWith("[]")
+
+  /** Any assignment: `=` and every compound form. The schema spells six compound forms
+    * `<operators>.assignment...` (`%=`, `<<=`, `>>=`, `&=`, `|=`, `^=`), the rest
+    * `<operator>.assignment...`.
+    */
+  def isAssignmentOperator(name: String): Boolean =
+      name.startsWith("<operator>.assignment") || name.startsWith("<operators>.assignment")
+
+  /** Pointer arithmetic, as the frontend tagged it
+    * ([[io.appthreat.x2cpg.Defines.PointerArithmeticTag]]): the kind (`add`, `sub`, `diff`) and the
+    * argument index of the pointer operand (1 for `diff`).
+    */
+  def pointerArithmeticOf(c: Call): Option[(String, Int)] =
+      c.tag.nameExact(io.appthreat.x2cpg.Defines.PointerArithmeticTag).value.headOption.flatMap {
+          v =>
+              v.split(':') match
+                case Array("diff")      => Some(("diff", 1))
+                case Array(kind, index) => index.toIntOption.map(i => (kind, i))
+                case _                  => None
+      }
+
+  /** The pointer operand of `p + n`, `n + p` or `p - n`: the buffer the arithmetic moves within. */
+  def pointerOperandOf(c: Call): Option[Expression] =
+      pointerArithmeticOf(c).filter(_._1 != "diff").flatMap((_, i) =>
+          c.argumentOption(i).collect { case e: Expression => e }
+      )
 
   private val integralTypes = Set(
     "int",
@@ -186,12 +259,15 @@ private[taggers] object OverlayFacts:
     * this object normalises to the canonical order first. The bare spellings `unsigned` and
     * `signed` are `unsigned int` and `int` in C - libavformat's `unsigned count` parameters carry
     * the bare word, and without this every integral lookup on them would conclude nothing (the
-    * one-sided bounds arm's `param:` extent and the unsigned-index check both read it).
+    * one-sided bounds arm's `param:` extent and the unsigned-index check both read it). The `int`
+    * of `short int`, `long int` and `long long int` is dropped: CDT spells the types of expressions
+    * that way, declarations usually do not.
     */
   def normalizeTypeName(t: String): String =
     val words = t.stripPrefix("const ").trim.split("\\s+").toList
     val sign  = words.find(w => w == "unsigned" || w == "signed")
-    val rest  = words.filterNot(w => sign.contains(w))
+    val sized = words.exists(w => w == "short" || w == "long")
+    val rest  = words.filterNot(w => sign.contains(w) || (sized && w == "int"))
     val norm  = (sign.toList ::: rest).mkString(" ")
     norm match
       case "unsigned" => "unsigned int"
@@ -444,7 +520,7 @@ private[taggers] object OverlayFacts:
     val code   = spelled(field)
     val baseId = baseOf(field)
     val stores = field.method.ast.isCall.l.filter { a =>
-        a.name.startsWith("<operator>.assignment") &&
+        isAssignmentOperator(a.name) &&
         a.argumentOption(1).exists {
             case lhs: Call =>
                 (lhs.name == "<operator>.fieldAccess" || lhs
@@ -466,7 +542,7 @@ private[taggers] object OverlayFacts:
     def namesBase(e: Expression): Boolean = withoutCastsE(e) match
       case i: Identifier => declOf(i).exists(d => baseDecls.contains(d.id()))
       case c: Call if c.name == "<operator>.addition" =>
-          c.argumentOption(1).collect { case x: Expression => x }.exists(namesBase)
+          pointerOperandOf(c).exists(namesBase)
       case c: Call if c.name == "<operator>.addressOf" =>
           c.argumentOption(1).collect { case x: Expression => x }.exists(x =>
               x.ast.isIdentifier.l.exists(i => declOf(i).exists(d => baseDecls.contains(d.id())))

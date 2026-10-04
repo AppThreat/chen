@@ -188,6 +188,7 @@ class ContainerIndexBoundsTests extends DataFlowCodeToCpgSuite:
     |#include <array>
     |#include <cstdlib>
     |#include <iostream>
+    |#include <string>
     |
     |void bad_vector_index(const std::vector<int> &v, const char *userInput)
     |{
@@ -207,6 +208,40 @@ class ContainerIndexBoundsTests extends DataFlowCodeToCpgSuite:
     |    {
     |        std::cout << v[idx] << "\n";
     |    }
+    |}
+    |
+    |void good_grown_append(std::string &dst, std::size_t n)
+    |{
+    |    const std::size_t old = dst.size();
+    |    dst.resize(old + n, 0);
+    |    char *p = &dst[old];
+    |    p[0] = 1;
+    |}
+    |
+    |void bad_resized_elsewhere(std::string &dst, std::size_t n)
+    |{
+    |    const std::size_t old = dst.size();
+    |    dst.resize(n, 0);
+    |    char *p = &dst[old];
+    |    p[0] = 1;
+    |}
+    |
+    |int good_array_of_vectors(const std::vector<int> files[], int level)
+    |{
+    |    return (int)files[level].size();
+    |}
+    |
+    |int good_pointer_to_vector(const std::vector<int> *files, int level)
+    |{
+    |    return (int)files[level].size();
+    |}
+    |
+    |void bad_index_moved(std::string &dst, std::size_t n, std::size_t k)
+    |{
+    |    std::size_t old = dst.size();
+    |    dst.resize(old + n, 0);
+    |    old += k;
+    |    dst[old] = 1;
     |}
     |""".stripMargin,
     "container_index.cpp"
@@ -236,5 +271,19 @@ class ContainerIndexBoundsTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the index is bounded above" in {
         findingsIn("good_at", "MS-BOUND-003") shouldBe empty
+    }
+
+    "stay silent when the container was resized past the index first" in {
+        findingsIn("good_grown_append", "MS-BOUND-003") shouldBe empty
+    }
+
+    "leave an array of containers, or a pointer to one, to the array arms" in {
+        findingsIn("good_array_of_vectors", "MS-BOUND-003") shouldBe empty
+        findingsIn("good_pointer_to_vector", "MS-BOUND-003") shouldBe empty
+    }
+
+    "report an index a resize did not grow the container past" in {
+        findingsIn("bad_resized_elsewhere", "MS-BOUND-003") should not be empty
+        findingsIn("bad_index_moved", "MS-BOUND-004") should not be empty
     }
 end ContainerIndexBoundsTests

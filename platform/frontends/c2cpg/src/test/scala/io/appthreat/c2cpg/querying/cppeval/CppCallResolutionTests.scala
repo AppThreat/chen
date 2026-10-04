@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.querying.cppeval
 
 import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
@@ -73,11 +74,15 @@ class CppCallResolutionTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.C
           mfnOf("overloaded(7)") shouldBe "overloaded:int(int)"
           mfnOf("overloaded(7.5)") shouldBe "overloaded:double(double)"
       }
+      // a template instance reaches the generic definition, the METHOD the graph holds; the
+      // instance's own signature is kept in a tag
       "resolve an explicit template instantiation" in {
-          mfnOf("tmax<int>(8, 9)") shouldBe "tmax:int(int,int)"
+          mfnOf("tmax<int>(8, 9)") shouldBe "tmax:ANY(ANY,ANY)"
+          cpg.method.nameExact("caller").call.codeExact("tmax<int>(8, 9)").tag
+              .nameExact(X2CpgDefines.TemplateInstanceTag).value.l shouldBe List("int(int,int)")
       }
       "resolve a deduced template instantiation" in {
-          mfnOf("tmax(10, 11)") shouldBe "tmax:int(int,int)"
+          mfnOf("tmax(10, 11)") shouldBe "tmax:ANY(ANY,ANY)"
       }
       "resolve a recursive self-call" in {
           mfnOf("recurse(3)") shouldBe "recurse:int(int)"
@@ -93,6 +98,7 @@ class CppCallResolutionTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.C
             "ns.S.mem:int(int)",
             "ns.S.stat:int(int)",
             "ns.S.vf:int(int)",
+            "tmax:ANY(ANY,ANY)",
             "recurse:int(int)"
           )
       }

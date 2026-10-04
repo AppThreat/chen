@@ -116,8 +116,9 @@ class DataflowTest extends DataFlowCodeToCpgSuite:
       val sink   = cpg.method(".*nested").ast.isReturn
       val flows  = sink.reachableByFlows(source)
 
+      // the nested conditions read `a` and do not redefine it
       flows.map(flowToResultPairs).toSetMutable shouldBe
-          Set(List(("a < 10", 5), ("a < 5", 6), ("a < 2", 7), ("x = a", 8), ("return x", 14)))
+          Set(List(("a < 10", 5), ("x = a", 8), ("return x", 14)))
   }
 
   "Flow with nested if-statements to `return x`" in {

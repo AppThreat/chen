@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
@@ -51,8 +52,29 @@ object InitAndFormatRules:
     "av_log"      -> 3,
     "av_vlog"     -> 3,
     "av_bprintf"  -> 2,
-    "av_asprintf" -> 1
+    "av_asprintf" -> 1,
+    // the C library's _FORTIFY_SOURCE wrappers take a flag (and a destination size) first
+    "__printf_chk"    -> 2,
+    "__vprintf_chk"   -> 2,
+    "__fprintf_chk"   -> 3,
+    "__vfprintf_chk"  -> 3,
+    "__dprintf_chk"   -> 3,
+    "__vdprintf_chk"  -> 3,
+    "__asprintf_chk"  -> 3,
+    "__vasprintf_chk" -> 3,
+    "__syslog_chk"    -> 3,
+    "__vsyslog_chk"   -> 3,
+    "__sprintf_chk"   -> 4,
+    "__vsprintf_chk"  -> 4,
+    "__snprintf_chk"  -> 5,
+    "__vsnprintf_chk" -> 5
   )
+
+  /** The format argument of a printf-family call, in any spelling: a compiler builtin
+    * (`__builtin_sprintf`, `__builtin___sprintf_chk`) takes the arguments of the function it names.
+    */
+  def formatArgIndex(callName: String): Option[Int] =
+      FormatArgIndex.get(callName).orElse(FormatArgIndex.get(callName.stripPrefix("__builtin_")))
 
   private def unwrapCasts(e: Expression): Expression = e match
     case c: Call if c.name == "<operator>.cast" =>
@@ -70,33 +92,44 @@ object InitAndFormatRules:
           p.typeFullName.contains("va_list") || p.code.contains("...") || p.isVariadic
       ) || Option(m.signature).exists(_.contains("..."))
 
+  /** The call a printf-family macro expands to (`snprintf` defined as `__builtin___snprintf_chk`
+    * under `_FORTIFY_SOURCE`): the macro's call carries the format, on the arguments as written;
+    * checking both would report every finding twice.
+    */
+  private def expandsFormatMacro(call: Call): Boolean =
+      call.dispatchType != DispatchTypes.INLINED &&
+          call.inAst.collectAll[Call].exists(m =>
+              m.dispatchType == DispatchTypes.INLINED && formatArgIndex(m.name).isDefined
+          )
+
   def formatString(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
-      atom.call.filter(c => FormatArgIndex.contains(c.name)).foreach { call =>
-          call.argumentOption(FormatArgIndex(call.name)).collect { case e: Expression => e }
-              .map(unwrapCasts)
-              .foreach {
-                  case i: Identifier if !isStringLiteral(i) =>
-                      val method = call.method
-                      method.parameter.nameExact(i.name).l.headOption match
-                        case Some(param) =>
-                            if !isForwarder(method) && someCallerPassesNonLiteral(
-                                method,
-                                param.index
-                              )
-                            then record(i, MemorySafetyFindingPass.RuleFormatString)
-                        case None if method.local.nameExact(i.name).nonEmpty =>
-                            val defs = OverlayFacts.reachingDefsIn(i)
-                                .collect { case d: Identifier => d }
-                                .flatMap(_._astIn.collectFirst {
-                                    case a: Call if a.name == "<operator>.assignment" => a
-                                })
-                                .flatMap(_.argumentOption(2))
-                                .collect { case e: Expression => e }
-                            if defs.nonEmpty && !defs.forall(isStringLiteral) then
-                              record(i, MemorySafetyFindingPass.RuleFormatString)
-                        case None => () // a global table or a macro constant
-                  case _ => ()
-              }
+      atom.call.filter(c => formatArgIndex(c.name).isDefined && !expandsFormatMacro(c)).foreach {
+          call =>
+              call.argumentOption(formatArgIndex(call.name).get).collect { case e: Expression => e }
+                  .map(unwrapCasts)
+                  .foreach {
+                      case i: Identifier if !isStringLiteral(i) =>
+                          val method = call.method
+                          method.parameter.nameExact(i.name).l.headOption match
+                            case Some(param) =>
+                                if !isForwarder(method) && someCallerPassesNonLiteral(
+                                    method,
+                                    param.index
+                                  )
+                                then record(i, MemorySafetyFindingPass.RuleFormatString)
+                            case None if method.local.nameExact(i.name).nonEmpty =>
+                                val defs = OverlayFacts.reachingDefsIn(i)
+                                    .collect { case d: Identifier => d }
+                                    .flatMap(_._astIn.collectFirst {
+                                        case a: Call if a.name == "<operator>.assignment" => a
+                                    })
+                                    .flatMap(_.argumentOption(2))
+                                    .collect { case e: Expression => e }
+                                if defs.nonEmpty && !defs.forall(isStringLiteral) then
+                                  record(i, MemorySafetyFindingPass.RuleFormatString)
+                            case None => () // a global table or a macro constant
+                      case _ => ()
+                  }
       }
 
   /** A method nobody in the tree calls is an entry point: its caller is outside and passes
@@ -115,11 +148,65 @@ object InitAndFormatRules:
 
   private def isPointer(t: String): Boolean = t.trim.endsWith("*")
 
-  /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own. */
+  /** A plain-old-data struct: a TYPE_DECL with members and no methods of its own, none of them an
+    * array (a fill loop or a `memcpy(s.buf, ...)` initialises what this cannot see), a member with
+    * a default initialiser (`size_t n = 0;`: the implicit constructor runs it), or an object a
+    * constructor initialises. The member's code is its declarator as written.
+    */
+  /** A type's methods: those in its TYPE_DECL, and those written on their own (a class template
+    * instance's member functions, kept once for the whole tree), by the full name they are members
+    * of.
+    */
+  private def hasMethods(atom: Cpg, td: TypeDecl): Boolean =
+      td.method.nonEmpty || methodOwners(atom).contains(td.fullName)
+
+  private val methodOwnersOf = new java.util.WeakHashMap[Cpg, Set[String]]()
+
+  private def methodOwners(atom: Cpg): Set[String] = methodOwnersOf.synchronized {
+      Option(methodOwnersOf.get(atom)).getOrElse {
+          val owners = atom.method.isExternal(false).fullName.l.flatMap { fullName =>
+            val qualified = fullName.takeWhile(_ != ':')
+            var depth     = 0
+            var last      = -1
+            qualified.indices.foreach { i =>
+                qualified(i) match
+                  case '<'               => depth += 1
+                  case '>'               => depth -= 1
+                  case '.' if depth == 0 => last = i
+                  case _                 =>
+            }
+            Option.when(last > 0)(qualified.substring(0, last))
+          }.toSet
+          methodOwnersOf.put(atom, owners)
+          owners
+      }
+  }
+
   private def isPodStruct(atom: Cpg, t: String): Boolean =
     val name = t.trim.stripPrefix("struct ").trim
-    podCandidates(atom, name).exists(td =>
-        OverlayFacts.membersOfTypeDecl(td).nonEmpty && td.method.isEmpty && !td.isExternal
+    podCandidates(atom, name).exists { td =>
+      val members = OverlayFacts.membersOfTypeDecl(td)
+      members.nonEmpty && !hasMethods(atom, td) && !td.isExternal &&
+      !members.exists(m =>
+          m.typeFullName.trim.endsWith("]") || hasDefaultInitializer(m) ||
+              isConstructed(atom, m.typeFullName, Set(name))
+      )
+    }
+
+  private def hasDefaultInitializer(m: Member): Boolean =
+    val rest = m.code.trim.stripPrefix(m.name).trim
+    rest.startsWith("=") || rest.startsWith("{")
+
+  /** An object of type `t` (or an array of them) is initialised by a constructor: its class has
+    * methods of its own, or a member that is. A struct holding one (`struct Output { uint64_t
+    * number; InternalKey smallest; }`) gets an implicit constructor that runs it.
+    */
+  private def isConstructed(atom: Cpg, t: String, seen: Set[String]): Boolean =
+    val name = t.trim.stripPrefix("struct ").replaceAll("""(\s*\[[^\]]*\])+$""", "").trim
+    !name.endsWith("*") && !seen.contains(name) && podCandidates(atom, name).exists(td =>
+        !td.isExternal && (hasMethods(atom, td) || OverlayFacts.membersOfTypeDecl(td).exists(m =>
+            isConstructed(atom, m.typeFullName, seen + name)
+        ))
     )
 
   /** The type declarations `name` may denote: a full-name match when one exists, else the bare
@@ -173,7 +260,7 @@ object InitAndFormatRules:
       )
 
   private def isLhsOf(n: AstNode, c: Call): Boolean =
-      c.name.startsWith("<operator>.assignment") && c.argumentOption(1).exists(_.id == n.id)
+      OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists(_.id == n.id)
 
   /** `s.b` / `s->b` with `s` an identifier: (base, field). */
   private def fieldPath(c: Call): Option[(String, String)] =
@@ -204,14 +291,11 @@ object InitAndFormatRules:
               c.name == "sizeof" || c.name == "offsetof"
       ) || insideMacroArgument(n)
 
-  /** Inside a macro invocation - an INLINED call, its argument copies or its expansion. The
-    * arguments are copies (`GET_UTF16(val, ...)` assigns val in its expansion; the copy is no read)
-    * and the expansion's CFG is stitched in, not built from the source: its locals and loops
-    * (GET_UTF8, FFSWAP, DEFINE_CKSUM_LINE) would dominate the reports on FFmpeg. A
-    * must-uninitialised claim there is not one this rule can make.
+  /** A copy of a macro argument (the frontend marks each node of the INLINED call's argument
+    * subtrees): the expansion holds the same expression, and the copy is not a second read.
     */
   private def insideMacroArgument(n: AstNode): Boolean =
-      n.inAst.collectAll[Call].exists(_.dispatchType == "INLINED")
+      n.tag.nameExact(io.appthreat.x2cpg.Defines.MacroArgumentCopyTag).nonEmpty
 
   /** `x = x` - FFmpeg's `av_uninit(x)`, the compiler-warning silencer: a declaration, not a read.
     */
@@ -227,13 +311,12 @@ object InitAndFormatRules:
   def uninitialisedReads(atom: Cpg, record: (StoredNode, String) => Unit): Unit =
       atom.method.isExternal(false).foreach { method =>
         val locals = method.local.l
-        // a macro may assign what it is handed (`GET_V(count, ...)`, `bn_hex2bn(p, hex, ret)`)
-        // and its expansion's CFG is stitched, not built: a name a macro invocation mentions,
-        // or a local its body declares, is out of reach. So is a name declared twice (an inner
-        // scope's `int i` shadowing another) or shadowing a parameter - a name is the key here
-        val inlined    = method.ast.collectAll[Call].filter(_.dispatchType == "INLINED").l
-        val macroNames = inlined.flatMap(_.ast.collectAll[Identifier].name.l).toSet
-        val params     = method.parameter.name.toSet
+        // a macro's expansion is on the path (an assignment it makes to what it is handed,
+        // `GET_V(count, ...)`, is a definition) and its argument copies are marked, so a name a
+        // macro mentions is analysed like any other; a local a macro's body declares is not, nor
+        // a name declared twice (an inner scope's `int i` shadowing another) or shadowing a
+        // parameter - a name is the key here
+        val params = method.parameter.name.toSet
         val declaredTwice =
             locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
         val candidates = locals
@@ -242,12 +325,22 @@ object InitAndFormatRules:
             )
             .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
             .map(_.name)
-            .toSet -- macroNames -- params -- declaredTwice
+            .toSet -- params -- declaredTwice -- capturedByLambdas(method)
         // declared on the line it is read on: hand-written C does not do that, a macro that
         // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
         val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap
         if candidates.nonEmpty then analyse(method, candidates, declLine, record)
       }
+
+  /** The names the method's lambdas use from it: a capture by reference may write the local (`[&] {
+    * inserted = true; }()`), out of this method's sight.
+    */
+  private def capturedByLambdas(method: Method): Set[String] =
+      method.ast.isMethodRef.l.flatMap(_._refOut.collectFirst { case m: Method => m }).flatMap {
+          lambda =>
+            val own = (lambda.local.name ++ lambda.parameter.name).toSet
+            lambda.ast.isIdentifier.name.filterNot(own.contains).l
+      }.toSet
 
   private def analyse(
     method: Method,
@@ -261,7 +354,7 @@ object InitAndFormatRules:
     val gen   = mutable.LongMap.empty[Set[String]]
     val reads = mutable.ListBuffer.empty[(CfgNode, String, Set[String])] // node, shown, accepted
     nodes.foreach {
-        case c: Call if c.name.startsWith("<operator>.assignment") =>
+        case c: Call if OverlayFacts.isAssignmentOperator(c.name) =>
             c.argumentOption(1).foreach {
                 case i: Identifier if candidates.contains(i.name) =>
                     gen(c.id()) = Set(i.name)

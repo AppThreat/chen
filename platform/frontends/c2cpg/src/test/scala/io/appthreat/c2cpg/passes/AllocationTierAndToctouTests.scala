@@ -270,6 +270,85 @@ class ToctouCppTests extends DataFlowCodeToCpgSuite:
     |    std::lock_guard<std::mutex> lk(g_mutex);
     |    g_counter++;
     |}
+    |
+    |// the standard guard, declared as <mutex> does
+    |namespace std {
+    |template <class M> class lock_guard {
+    | public:
+    |  explicit lock_guard(M &m);
+    |  ~lock_guard();
+    |};
+    |}
+    |
+    |namespace flags {
+    |int g_pending = 0;
+    |class MutexLock {
+    | public:
+    |  explicit MutexLock(std::mutex &m) : m_(m) { m_.lock(); }
+    |  ~MutexLock() { m_.unlock(); }
+    | private:
+    |  std::mutex &m_;
+    |};
+    |void bad_namespaced_check_then_act()
+    |{
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |void good_std_guard()
+    |{
+    |    std::lock_guard<std::mutex> lk(g_mutex);
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |void good_scoped_guard()
+    |{
+    |    MutexLock l(g_mutex);
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |void good_caller_holds_lock() __attribute__((exclusive_locks_required(g_mutex)))
+    |{
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |namespace inner {
+    |class Holder {
+    | public:
+    |  explicit Holder(std::mutex &m) : m_(m) { m_.lock(); }
+    |  ~Holder() { m_.unlock(); }
+    | private:
+    |  std::mutex &m_;
+    |};
+    |}
+    |class Holder2 : public std::lock_guard<std::mutex> {
+    | public:
+    |  explicit Holder2(std::mutex &m) : std::lock_guard<std::mutex>(m) {}
+    |};
+    |void good_guard_derived_from_lock_guard()
+    |{
+    |    Holder2 h(g_mutex);
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |void good_guard_named_from_its_scope()
+    |{
+    |    inner::Holder h(g_mutex);
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |static void good_only_called_locked()
+    |{
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |static void bad_also_called_unlocked()
+    |{
+    |    if (g_pending == 0) { g_pending = 1; }
+    |}
+    |void locked_caller()
+    |{
+    |    MutexLock l(g_mutex);
+    |    good_only_called_locked();
+    |    bad_also_called_unlocked();
+    |}
+    |void unlocked_caller()
+    |{
+    |    bad_also_called_unlocked();
+    |}
+    |}
     |""".stripMargin,
     "toctou.cpp"
   )
@@ -294,5 +373,24 @@ class ToctouCppTests extends DataFlowCodeToCpgSuite:
 
     "stay silent behind a lock" in {
         findingsIn("good_locked", "MS-TOCTOU-001") shouldBe empty
+    }
+
+    "read a namespace's variables as globals" in {
+        findingsIn("bad_namespaced_check_then_act", "MS-TOCTOU-001") should not be empty
+    }
+
+    "stay silent behind a scoped guard, or where the callers hold the lock" in {
+        Seq(
+          "good_std_guard",
+          "good_scoped_guard",
+          "good_caller_holds_lock",
+          "good_guard_named_from_its_scope",
+          "good_guard_derived_from_lock_guard"
+        ).foreach { m => withClue(m) { findingsIn(m, "MS-TOCTOU-001") shouldBe empty } }
+    }
+
+    "stay silent where every caller holds a lock, but not where one does not" in {
+        findingsIn("good_only_called_locked", "MS-TOCTOU-001") shouldBe empty
+        findingsIn("bad_also_called_unlocked", "MS-TOCTOU-001") should not be empty
     }
 end ToctouCppTests

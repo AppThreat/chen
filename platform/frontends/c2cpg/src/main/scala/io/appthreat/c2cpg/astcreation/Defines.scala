@@ -15,13 +15,25 @@ object Defines:
   val operatorParameterPackSize = "<operator>.parameterPackSize"
   val operatorNoexcept          = "<operator>.noexcept"
   val operatorLabelAddress      = "<operator>.labelAddress"
-  val operatorMax               = "<operator>.max"
-  val operatorMin               = "<operator>.min"
-  val operatorEllipses          = "<operator>.op_ellipses"
-  val operatorUnknown           = "<operator>.unknown"
-  val operatorCall              = "<operator>()"
-  val operatorExpressionList    = "<operator>.expressionList"
-  val operatorNew               = "<operator>.new"
-  val operatorThrow             = "<operator>.throw"
-  val operatorBracketedPrimary  = "<operator>.bracketedPrimary"
+  // `obj.*pm` and `ptr->*pm`: a member selected through a pointer to member, not a named field
+  val operatorPointerToMember         = "<operator>.pointerToMember"
+  val operatorIndirectPointerToMember = "<operator>.indirectPointerToMember"
+  val operatorMax                     = "<operator>.max"
+  val operatorMin                     = "<operator>.min"
+  val operatorEllipses                = "<operator>.op_ellipses"
+  val operatorUnknown                 = "<operator>.unknown"
+  val operatorCall                    = "<operator>()"
+  val operatorExpressionList          = "<operator>.expressionList"
+  val operatorNew                     = "<operator>.new"
+  val operatorThrow                   = "<operator>.throw"
+  val operatorBracketedPrimary        = "<operator>.bracketedPrimary"
+
+  /** On an `#include`'s IMPORT node: the file the include resolved to (absolute). */
+  val IncludeResolvedPathTag = "include-resolved-path"
+
+  /** On an `#include`'s IMPORT node: `true` when it names a system header (`<...>`). */
+  val IncludeSystemTag = "include-system"
+
+  /** On a call to a function declared only in another file (a header): that file (absolute). */
+  val CalleeDeclaredInTag = "callee-declared-in"
 end Defines

@@ -15,4 +15,5 @@ object Projects {
   lazy val jimple2cpg  = project.in(frontendsRoot / "jimple2cpg")
   lazy val php2atom    = project.in(frontendsRoot / "php2atom")
   lazy val ruby2atom   = project.in(frontendsRoot / "ruby2atom")
+  lazy val edg2atom    = project.in(frontendsRoot / "edg2atom")
 }

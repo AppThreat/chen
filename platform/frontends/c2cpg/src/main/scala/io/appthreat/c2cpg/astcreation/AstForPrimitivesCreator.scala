@@ -8,8 +8,6 @@ import org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{CPPASTQualifiedName, ICPPInternalBinding}
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
-import scala.util.Try
-
 trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
@@ -20,20 +18,26 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     val tpe = cleanType(safeGetType(lit.getExpressionType))
     Ast(literalNode(lit, nodeSignature(lit), registerType(tpe)))
 
+  /** The full name and return type of the function a binding names, from its definition, else from
+    * its first declaration: a function the file only declares (`void run(char *);`, defined in
+    * another file) is still a function when its name is used as a value.
+    */
   private def namesForBinding(binding: ICInternalBinding | ICPPInternalBinding)
     : (Option[String], Option[String]) =
-    val definition = binding match
+    val (definition, declarations) = binding match
       // sadly, there is no common interface defining .getDefinition
-      case b: ICInternalBinding   => b.getDefinition
-      case b: ICPPInternalBinding => b.getDefinition
-    if definition == null then
-      (None, None)
-    else
-      val functionDeclarator = definition.asInstanceOf[IASTFunctionDeclarator]
-      val typeFullName = functionDeclarator.getParent match
-        case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
-        case _                         => None
-      (Some(this.fullName(functionDeclarator)), typeFullName)
+      case b: ICInternalBinding   => (b.getDefinition, Option(b.getDeclarations).toSeq.flatten)
+      case b: ICPPInternalBinding => (b.getDefinition, Option(b.getDeclarations).toSeq.flatten)
+    (Option(definition).toSeq ++ declarations).collectFirst { case d: IASTFunctionDeclarator =>
+        d
+    } match
+      case None => (None, None)
+      case Some(functionDeclarator) =>
+          val typeFullName = functionDeclarator.getParent match
+            case d: IASTFunctionDefinition => Some(typeForDeclSpecifier(d.getDeclSpecifier))
+            case d: IASTSimpleDeclaration  => Some(typeForDeclSpecifier(d.getDeclSpecifier))
+            case _                         => None
+          (Some(this.fullName(functionDeclarator)), typeFullName)
 
   private def maybeMethodRefForIdentifier(ident: IASTNode): Option[NewMethodRef] =
       ident match
@@ -42,13 +46,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             if binding == null then return None
 
             val (mayBeFullName, mayBeTypeFullName) = binding match
-              case b: ICInternalBinding
-                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(b)
-              case b: ICPPInternalBinding
-                  if b.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
-                  namesForBinding(b)
-              case _ => (None, None)
+              case b: ICInternalBinding if b.isInstanceOf[IFunction]   => namesForBinding(b)
+              case b: ICPPInternalBinding if b.isInstanceOf[IFunction] => namesForBinding(b)
+              case _                                                   => (None, None)
             for
               fullName     <- mayBeFullName
               typeFullName <- mayBeTypeFullName
@@ -66,7 +66,9 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                   id.getBinding.getName
               case id: IASTName if ASTStringUtil.getSimpleName(id).isEmpty =>
                   uniqueName("name", "", "")._1
-              case _ => code(ident)
+              // the name as spelled: inside a macro expansion the node's code is the invocation's text
+              case id: IASTName => id.toString
+              case _            => code(ident)
             val variableOption = scope.lookupVariable(identifierName)
             if variableOption.isEmpty then registerConstantRead(ident)
             val identifierTypeName = variableOption match
@@ -82,7 +84,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
                                 // `safeGetType`) rather than `IType.toString`, which yields internal
                                 // debug spellings that downstream `cleanType` cannot normalise and
                                 // often degrade to ANY.
-                                Try(v.getType).getOrElse(null) match
+                                CdtQuery(v.getType).getOrElse(null) match
                                   case f: IFunctionType       => safeGetType(f.getReturnType)
                                   case other if other != null => safeGetType(other)
                                   case _                      => Defines.anyTypeName
@@ -113,10 +115,12 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       op,
       op,
       if fieldRef.isPointerDereference then DispatchTypes.DYNAMIC_DISPATCH
-      else DispatchTypes.STATIC_DISPATCH
+      else DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(expressionType(fieldRef))
     )
-    val owner = astForExpression(fieldRef.getFieldOwner)
-    Try(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
+    val owner = fieldOwnerAst(fieldRef)
+    CdtQuery(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
         .flatMap(f => Option(f.getCompositeTypeOwner))
         .foreach(registerMembersOf)
     val member = fieldIdentifierNode(

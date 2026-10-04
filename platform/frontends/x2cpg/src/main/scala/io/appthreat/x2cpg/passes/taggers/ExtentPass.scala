@@ -16,6 +16,8 @@ import scala.collection.mutable
   *     `int[16]` is in `typeFullName`);
   *   - `const:N-k` - a copy into `buf + k` for a literal k: the remaining capacity of the same
   *     buffer from the write's start;
+  *   - `const:N` too for the destination size a FORTIFY wrapper (`__memcpy_chk`) was given, when
+  *     the compiler knew it, and the extent of the object `__builtin_object_size(p, k)` names;
   *   - `offset:<extent>` - somewhere inside (or, for `base - k`, before) a buffer whose extent is
   *     `<extent>`, reduced by an unknown amount. NOT an extent: a rule that needs a capacity must
   *     reject it exactly as it rejects `unknown`. It exists so a later rule can tell "inside a
@@ -75,7 +77,8 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                     if dstKey == lenKey
                   yield s"$ValueSizeof:${operand.code}"
 
-              extentOf(dst, call.method, sizeofInCopy) match
+              extentOf(dst, call.method, sizeofInCopy)
+                  .orElse(objectSizeExtentOf(call, dst, call.method)) match
                 case Some((value, decls)) =>
                     argExtents(dst) = value
                     decls.foreach(d => declExtents(d) = value)
@@ -203,10 +206,11 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     *
     * A count-by-size allocator tags BOTH factors `mem-len`, and then NO single argument is the
     * capacity - `calloc(n, sizeof(x))` holds `n * sizeof(x)` bytes, and naming either factor
-    * reports a capacity the buffer does not have. Only a product of literals can be named, so the
-    * rest answer `unknown`: an extent that is one element wide would present as a known capacity to
-    * the index rules, which is the shape the overlay never emits (a fact we do not have, dressed as
-    * one we do).
+    * reports a capacity the buffer does not have. When every factor is a constant the allocation is
+    * still named (`alloc:`), and a reader multiplies its size arguments into bytes; `const:` would
+    * read as a declared array's element count. The rest answer `unknown`: an extent that is one
+    * element wide would present as a known capacity to the index rules, which is the shape the
+    * overlay never emits (a fact we do not have, dressed as one we do).
     */
   private def sizeArgValueOf(alloc: Call): Option[String] =
     val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
@@ -217,18 +221,39 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       case Nil        => None
       case List(only) => Some(valueOf(only))
       case several    =>
-          // every factor a literal: the product IS knowable, and it is a const extent
-          val literals = several.map {
-              case l: Literal => l.code.trim.toLongOption
-              case _          => None
-          }
-          Option.when(literals.forall(_.isDefined))(
-            s"$ValueConst:${literals.flatten.product}"
+          // every factor a constant: the product IS knowable, in bytes, from the allocation
+          Option.when(several.forall(IndexRange.literal(_).isDefined))(
+            s"$ValueAlloc:${several.head.id}"
           )
 
   private def isAllocationCall(c: Call): Boolean =
       c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty ||
           c.tag.name(MemoryApiPass.TagRealloc).l.nonEmpty
+
+  /** The capacity a FORTIFY wrapper (`__memcpy_chk`) was given for its destination: a constant is
+    * the size the compiler worked out (`(size_t)-1` when it could not, which is no capacity), and
+    * `__builtin_object_size(p, k)` (or the dynamic form) is the capacity of the object it names.
+    */
+  private def objectSizeExtentOf(
+    call: Call,
+    dst: Expression,
+    method: Method
+  ): Option[(String, List[StoredNode])] =
+    def withoutCasts(e: AstNode): AstNode = e match
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.lastOption.map(withoutCasts).getOrElse(c)
+      case other => other
+    call.argument.l.find(_.tag.name(MemoryApiPass.TagObjectSize).nonEmpty).map(withoutCasts)
+        .flatMap {
+            case c: Call if ObjectSizeBuiltins.contains(c.name) =>
+                c.argumentOption(1).collect { case e: Expression => e }
+                    .filterNot(_ == dst)
+                    .flatMap(extentOf(_, method, None))
+            case other =>
+                IndexRange.literal(other).filter(v => v > 0 && v < MaxObjectSize)
+                    .map(v => (s"$ValueConst:$v", List.empty[StoredNode]))
+        }
+  end objectSizeExtentOf
 
   /** Resolve the capacity of a `mem-dst` argument expression. Returns the extent value and, where
     * one exists, the declaration nodes it was derived from.
@@ -260,26 +285,23 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         case _ =>
             sizeofInCopy.map(v => (v, List.empty[StoredNode]))
 
-  /** Pointer arithmetic over a buffer. `base + k` for a literal k shrinks a known capacity by k
-    * (`const:N` -> `const:N-k`); every other shape - a non-literal offset, a subtraction whose
-    * start may be negative, a literal offset at or past the capacity - says only "at an unknown
-    * distance inside `<base extent>`": the `offset:` value, never presented as a capacity. A base
-    * that itself resolves to nothing stays `unknown`: there is no capacity to reduce.
+  /** Pointer arithmetic over a buffer, as the frontend tagged it: the pointer operand is the base.
+    * `base + k` for a constant k shrinks a known capacity by k (`const:N` -> `const:N-k`); every
+    * other shape - a non-constant offset, a subtraction whose start may be negative, a constant
+    * offset at or past the capacity - says only "at an unknown distance inside `<base extent>`":
+    * the `offset:` value, never presented as a capacity. A base that itself resolves to nothing
+    * stays `unknown`: there is no capacity to reduce, and neither is there for arithmetic that
+    * moves no pointer.
     */
   private def additiveExtentOf(
     arith: Call,
     method: Method,
     sizeofInCopy: Option[String]
   ): Option[(String, List[StoredNode])] =
-    def literalOf(e: Option[Expression]): Option[Long] = e.flatMap {
-        case l: Literal => l.code.toLongOption
-        case _          => None
-    }
-    val (base, offset) =
-        (arith.argumentOption(1), arith.argumentOption(2)) match
-          case (b, o) if literalOf(o).isDefined => (b, literalOf(o))
-          case (b, o) if literalOf(b).isDefined => (o, literalOf(b))
-          case (b, _)                           => (b, None)
+    val base = OverlayFacts.pointerOperandOf(arith)
+    val offset = OverlayFacts.pointerArithmeticOf(arith).flatMap((_, i) =>
+        arith.argumentOption(3 - i).collect { case e: Expression => e }
+    ).flatMap(IndexRange.literal).filter(_.isValidLong).map(_.toLong)
     base.flatMap(extentOf(_, method, sizeofInCopy)).map { case (baseValue, _) =>
         // the distance the write starts inside the capacity; a subtraction or a negative
         // literal may start BEFORE the buffer, which no capacity describes
@@ -309,22 +331,31 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     method: Method,
     sizeofInCopy: Option[String]
   ): Option[(String, List[StoredNode])] =
-      // A declared array beats everything else: the size is in the type.
-      method.local.name(name).headOption.flatMap { local =>
-          arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
-      }.orElse {
-          // A buffer parameter with an adjacent capacity parameter. The
-          // parameter declaration carries the extent so guards can match against it.
-          for
-            param <- method.parameter.name(name).headOption
-            cap   <- paramExtentOf(param)
-          yield (s"$ValueParam:$cap", List(param))
-      }.orElse {
-          sizeofInCopy.map(v => (v, List.empty))
-      }.orElse {
-          // A pointer whose definition is an inventoried allocation.
-          allocExtentOf(use).map(v => (v, List.empty))
-      }
+    // A declared array beats everything else: the size is in the type. The declaration is the
+    // method's own one the use refers to: a function may declare two buffers of one name in two
+    // blocks
+    val declared = use match
+      case i: Identifier =>
+          i.refsTo.collectFirst { case l: Local => l }.filter(l =>
+              method.local.exists(_.id == l.id)
+          )
+      case _ => None
+    declared.orElse(method.local.name(name).headOption).flatMap { local =>
+        arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
+    }.orElse {
+        // A buffer parameter with an adjacent capacity parameter. The
+        // parameter declaration carries the extent so guards can match against it.
+        for
+          param <- method.parameter.name(name).headOption
+          cap   <- paramExtentOf(param)
+        yield (s"$ValueParam:$cap", List(param))
+    }.orElse {
+        sizeofInCopy.map(v => (v, List.empty))
+    }.orElse {
+        // A pointer whose definition is an inventoried allocation.
+        allocExtentOf(use).map(v => (v, List.empty))
+    }
+  end extentOfVariable
 
   /** The capacity parameter beside a buffer parameter: adjacency in the signature plus the
     * pointer/integral type pattern. Names are deliberately not consulted.
@@ -397,5 +428,11 @@ object ExtentPass:
   final val ValueParam   = "param"
   final val ValueField   = "field"
   final val ValueUnknown = "unknown"
+
+  /** The compiler builtins that evaluate to the size of the object a pointer addresses. */
+  final val ObjectSizeBuiltins = Set("__builtin_object_size", "__builtin_dynamic_object_size")
+
+  /** A FORTIFY object size at or above this (`(size_t)-1`) says the compiler did not know it. */
+  private[taggers] val MaxObjectSize = BigInt(Long.MaxValue)
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)

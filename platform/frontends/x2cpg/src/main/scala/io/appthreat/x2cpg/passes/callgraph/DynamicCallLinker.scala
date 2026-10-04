@@ -2,8 +2,21 @@ package io.appthreat.x2cpg.passes.callgraph
 
 import io.appthreat.x2cpg.Defines.DynamicCallUnknownFullName
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, TypeDecl}
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    Call,
+    Expression,
+    Identifier,
+    Local,
+    Method,
+    TypeDecl
+}
+import io.shiftleft.codepropertygraph.generated.{
+    DispatchTypes,
+    EdgeTypes,
+    Languages,
+    Operators,
+    PropertyNames
+}
 import io.appthreat.x2cpg.passes.linking.SymbolIndex
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -19,6 +32,8 @@ import scala.jdk.CollectionConverters.*
   *   exactly, so frontends that run this pass standalone are unaffected.
   */
 class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) extends CpgPass(cpg):
+
+  import DynamicCallLinker.*
 
   private lazy val typeMap: Map[String, TypeDecl] =
       symbolIndex.map(_.typeDeclMap).getOrElse(cpg.typeDecl.map(td => td.fullName -> td).toMap)
@@ -114,6 +129,10 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
     */
   private def staticLookup(subclass: String, baseMethod: Method): Option[String] =
       typeMap.get(subclass) match
+        case Some(sc) if isCppDestructor(baseMethod) =>
+            // a C++ destructor is overridden by the subclass's destructor, which is named after
+            // the subclass
+            sc._methodViaAstOut.filter(isCppDestructor).fullName.headOption
         case Some(sc) =>
             val sameName = sc._methodViaAstOut.nameExact(baseMethod.name).l
             sameName.find(_.signature == baseMethod.signature).map(_.fullName).orElse {
@@ -126,6 +145,9 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
                   case _            => None
             }
         case None => None
+
+  private def isCppDestructor(method: Method): Boolean =
+      method.name.startsWith("~") && method.name.length > 1
 
   /** The number of parameters a `returnType(paramType, ..)` signature declares. */
   private def parameterCount(signature: String): Int =
@@ -227,10 +249,15 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
           val targetMethods = targets.flatMap(resolveMethod).toSet
 
           val (externalMethods, internalMethods) = targetMethods.partition(_.isExternal)
-          val finalTargets = if externalMethods.nonEmpty && internalMethods.nonEmpty then
+          val allTargets = if externalMethods.nonEmpty && internalMethods.nonEmpty then
             internalMethods
           else
             targetMethods
+          // a receiver created as one class reaches that class's override alone
+          val finalTargets = constructedClassOf(call)
+              .flatMap(cls => overrideFor(cls, allTargets))
+              .map(Set(_))
+              .getOrElse(allTargets)
 
           finalTargets.foreach { tgt =>
               if !existingEdges.contains(tgt.fullName) then
@@ -240,7 +267,51 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
           }
       case None =>
           fallbackToStaticResolution(call, dstGraph)
+    end match
   end linkDynamicCall
+
+  private lazy val isCpp: Boolean =
+      cpg.metaData.language.headOption.exists(l => l == Languages.NEWC || l == Languages.C)
+
+  private lazy val classesByName: Map[String, String] =
+      cpg.typeDecl.isExternal(false).l.groupBy(_.name).collect { case (name, List(td)) =>
+          name -> td.fullName
+      }
+
+  /** In C++, the class the receiver of a virtual call was created as, when every value its variable
+    * is given in the function creates an object of one class: `Base *b = new Derived;`, `const Base
+    * &b = Derived();`.
+    */
+  private def constructedClassOf(call: Call): Option[String] =
+      if !isCpp then None
+      else
+        call.argumentOption(0).collect { case id: Identifier => id }.flatMap { receiver =>
+            receiver._refOut.collectFirst { case l: Local => l }.flatMap { local =>
+              val created = receiver.method.ast.isCall.nameExact(Operators.assignment).filter(
+                _.argumentOption(1).exists {
+                    case target: Identifier => target._refOut.exists(_ == local)
+                    case _                  => false
+                }
+              ).map(_.argumentOption(2).flatMap(classCreatedBy)).l.distinct
+              created match
+                case List(Some(cls)) => Some(cls)
+                case _               => None
+            }
+        }
+
+  private def classCreatedBy(value: Expression): Option[String] =
+      value match
+        case c: Call if c.name == CppNew =>
+            Option(c.typeFullName).map(_.stripSuffix("*").trim).filter(typeMap.contains)
+        // `Derived()`, a temporary of the class
+        case c: Call => classesByName.get(c.name)
+        case _       => None
+
+  /** The target declared by the class or by the nearest of its base classes that declares one. */
+  private def overrideFor(cls: String, targets: Set[Method]): Option[Method] =
+      allSuperClasses(cls).iterator.flatMap(owner =>
+          targets.find(t => t.fullName.takeWhile(_ != ':').stripSuffix(s".${t.name}") == owner)
+      ).nextOption()
 
   private def isValidCall(call: Call): Boolean =
       call.methodFullName != "<empty>" &&
@@ -263,3 +334,7 @@ class DynamicCallLinker(cpg: Cpg, symbolIndex: Option[SymbolIndex] = None) exten
   private def nodesWithFullName(name: String): Iterable[NodeRef[? <: NodeDb]] =
       cpg.graph.indexManager.lookup(PropertyNames.FULL_NAME, name).asScala
 end DynamicCallLinker
+
+object DynamicCallLinker:
+  /** The call the C++ frontend writes for a `new` expression, typed as a pointer to the class. */
+  private val CppNew = "<operator>.new"

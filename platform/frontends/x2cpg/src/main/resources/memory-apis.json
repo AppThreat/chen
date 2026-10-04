@@ -27,7 +27,12 @@
     "The str*-search family reads through its HAYSTACK, which is argument 1 (`src: 1`), not the ",
     "needle/char, so passing a pointer to be searched counts as a read-through; `strlen` is a ",
     "reader of the same shape. These are the entries that decide whether handing a possibly-null ",
-    "pointer to a call is a dereference."
+    "pointer to a call is a dereference.",
+    "FORTIFY and builtin spellings: a `__builtin_X` call is the API X itself (same arguments), which the",
+    "loader derives for every entry. The `_chk` wrappers the C library's _FORTIFY_SOURCE turns calls",
+    "into (`__memcpy_chk`, and the compiler's `__builtin___memcpy_chk`) take an extra argument, the",
+    "destination size the compiler worked out, and some move their other arguments: each has its own",
+    "entry, with `api` naming the API its tags are valued with and `objectSize` that argument."
   ],
   "apis": [
     {
@@ -85,7 +90,7 @@
       "name": "memccpy",
       "dst": 1,
       "src": 2,
-      "len": 3
+      "len": 4
     },
     {
       "name": "bcopy",
@@ -383,6 +388,168 @@
     {
       "name": "getchar",
       "returnRange": [-1, 255]
+    },
+    {
+      "name": "__memcpy_chk",
+      "api": "memcpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__memmove_chk",
+      "api": "memmove",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__mempcpy_chk",
+      "api": "mempcpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__memccpy_chk",
+      "api": "memccpy",
+      "dst": 1,
+      "src": 2,
+      "len": 4,
+      "objectSize": 5
+    },
+    {
+      "name": "__memset_chk",
+      "api": "memset",
+      "dst": 1,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__strcpy_chk",
+      "api": "strcpy",
+      "dst": 1,
+      "src": 2,
+      "objectSize": 3
+    },
+    {
+      "name": "__stpcpy_chk",
+      "api": "stpcpy",
+      "dst": 1,
+      "src": 2,
+      "objectSize": 3
+    },
+    {
+      "name": "__strcat_chk",
+      "api": "strcat",
+      "dst": 1,
+      "src": 2,
+      "objectSize": 3
+    },
+    {
+      "name": "__strncpy_chk",
+      "api": "strncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__stpncpy_chk",
+      "api": "stpncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__strncat_chk",
+      "api": "strncat",
+      "dst": 1,
+      "src": 2,
+      "len": 3,
+      "objectSize": 4
+    },
+    {
+      "name": "__sprintf_chk",
+      "api": "sprintf",
+      "dst": 1,
+      "src": 4,
+      "objectSize": 3
+    },
+    {
+      "name": "__vsprintf_chk",
+      "api": "vsprintf",
+      "dst": 1,
+      "src": 5,
+      "objectSize": 3
+    },
+    {
+      "name": "__snprintf_chk",
+      "api": "snprintf",
+      "dst": 1,
+      "src": 5,
+      "len": 2,
+      "objectSize": 4
+    },
+    {
+      "name": "__vsnprintf_chk",
+      "api": "vsnprintf",
+      "dst": 1,
+      "src": 6,
+      "len": 2,
+      "objectSize": 4
+    },
+    {
+      "name": "__read_chk",
+      "api": "read",
+      "len": 3,
+      "untrustedRead": 2,
+      "objectSize": 4
+    },
+    {
+      "name": "__pread_chk",
+      "api": "pread",
+      "len": 3,
+      "untrustedRead": 2,
+      "objectSize": 5
+    },
+    {
+      "name": "__recv_chk",
+      "api": "recv",
+      "len": 3,
+      "untrustedRead": 2,
+      "objectSize": 4
+    },
+    {
+      "name": "__recvfrom_chk",
+      "api": "recvfrom",
+      "len": 3,
+      "untrustedRead": 2,
+      "objectSize": 4
+    },
+    {
+      "name": "__fgets_chk",
+      "api": "fgets",
+      "len": 3,
+      "untrustedRead": 1,
+      "objectSize": 2
+    },
+    {
+      "name": "__gets_chk",
+      "api": "gets",
+      "untrustedRead": 1,
+      "objectSize": 2
+    },
+    {
+      "name": "__readlink_chk",
+      "api": "readlink",
+      "len": 3,
+      "untrustedRead": 2,
+      "objectSize": 4
     }
   ]
 }

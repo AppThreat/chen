@@ -5,7 +5,12 @@ import io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode
 import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.appthreat.x2cpg.utils.StringUtils
 import io.appthreat.x2cpg.{Ast, SourceFiles, ValidationMode}
-import io.shiftleft.codepropertygraph.generated.nodes.{ExpressionNew, NewCall, NewNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    ExpressionNew,
+    NewCall,
+    NewIdentifier,
+    NewNode
+}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 import io.shiftleft.utils.IOUtils
 import org.eclipse.cdt.core.dom.ast.*
@@ -29,7 +34,6 @@ import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import java.nio.file.{Path, Paths}
 import scala.annotation.nowarn
 import scala.collection.mutable
-import scala.util.Try
 
 object AstCreatorHelper:
 
@@ -60,19 +64,27 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   protected def registerMembersOf(owner: IType): Unit =
       unwrapCompositeType(owner).foreach { ct =>
         val spelled =
-            Try(safeGetType(owner)).toOption.toList ++ Try(safeGetType(ct)).toOption.toList
+            CdtQuery(safeGetType(owner)).toOption.toList ++ CdtQuery(safeGetType(ct)).toOption.toList
         val names = spelled
             .map(t =>
                 fixQualifiedName(StringUtils.normalizeSpace(cleanType(t))).stripSuffix("*").trim
             )
             .filter(n => n.nonEmpty && n != Defines.anyTypeName)
             .distinct
-        val fields = Try(ct.getFields.toList).getOrElse(Nil)
+        val fields = CdtQuery(ct.getFields.toList).getOrElse(Nil)
+        // the header that defines the composite: same-named structs differ by it
+        val definedIn = (ct match
+          case b: org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding =>
+              Option(b.getDefinition)
+          case b: org.eclipse.cdt.internal.core.dom.parser.cpp.ICPPInternalBinding =>
+              Option(b.getDefinition)
+          case _ => None
+        ).flatMap(d => Option(d.getFileLocation)).flatMap(l => Option(l.getFileName)).getOrElse("")
         names.filter(localMemberOwners.add).foreach { ownerName =>
             fields.zipWithIndex.foreach { (f, i) =>
               val tpe = fieldDeclarationType(f)
                   .getOrElse(declarationSpelling(cleanType(safeGetType(f.getType))))
-              val record = CGlobal.memberRecord(ownerName, i + 1, f.getName, tpe)
+              val record = CGlobal.memberRecord(ownerName, definedIn, i + 1, f.getName, tpe)
               CGlobal.usedTypes.putIfAbsent(record, true)
               localUsedTypes.add(record)
             }
@@ -99,7 +111,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         d =>
             d.getParent match
               case decl: IASTSimpleDeclaration =>
-                  Try {
+                  CdtQuery {
                       d match
                         case _: IASTArrayDeclarator => typeFor(d)
                         case _ =>
@@ -125,19 +137,19 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     */
   protected def registerConstantRead(ident: IASTNode): Unit =
     val binding = ident match
-      case id: IASTIdExpression => Try(id.getName.resolveBinding()).toOption
-      case n: IASTName          => Try(n.resolveBinding()).toOption
+      case id: IASTIdExpression => CdtQuery(id.getName.resolveBinding()).toOption
+      case n: IASTName          => CdtQuery(n.resolveBinding()).toOption
       case _                    => None
     binding.collect { case v: IVariable if !v.isInstanceOf[IParameter] => v }.foreach { v =>
-      val constant = Try(v.getType).toOption.exists {
+      val constant = CdtQuery(v.getType).toOption.exists {
           case q: IQualifierType => q.isConst
           case _                 => false
       } || (v match
-        case c: ICPPVariable => Try(c.isConstexpr).getOrElse(false)
+        case c: ICPPVariable => CdtQuery(c.isConstexpr).getOrElse(false)
         case _               => false
       )
       val value =
-          Try(Option(v.getInitialValue).flatMap(iv => Option(iv.numericalValue()))).toOption.flatten
+          CdtQuery(Option(v.getInitialValue).flatMap(iv => Option(iv.numericalValue()))).toOption.flatten
       if constant then
         value.foreach { n =>
           val record = CGlobal.constRecord(v.getName, n.longValue)
@@ -154,6 +166,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           case Some(e: EvalMemberAccess) => registerMembersOf(e.getOwnerType)
           case _                         => ()
     case _ => ()
+
+  /** Registers a side-channel record (member layouts, constants, array typedefs) the way a used
+    * type is registered, so an AST cache hit replays it.
+    */
+  protected def registerRecord(record: String): Unit =
+    CGlobal.usedTypes.putIfAbsent(record, true)
+    localUsedTypes.add(record)
 
   /** The distinct type names this creator registered, for caching. */
   def usedTypes: Seq[String] =
@@ -271,12 +290,23 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val column = offset - lineStartOffset + 1
     column
 
+  /** The 1-based line and column of `offset` in the file at `path` (absolute, as CDT names it). */
+  protected def positionIn(path: String, offset: Int): Option[(Int, Int)] =
+      CdtQuery {
+          val table =
+              file2OffsetTable.computeIfAbsent(path, _ => genFileOffsetTable(Paths.get(path)))
+          val index = java.util.Arrays.binarySearch(table, offset)
+          val line  = if index < 0 then -(index + 1) else index + 1
+          val start = if line == 0 then 0 else table(line - 1)
+          (line + 1, offset - start + 1)
+      }.toOption
+
   private def fileOffsetTable(node: IASTNode): Array[Int] =
     val path = SourceFiles.toAbsolutePath(fileName(node), config.inputPath)
     file2OffsetTable.computeIfAbsent(path, _ => genFileOffsetTable(Paths.get(path)))
 
   private def genFileOffsetTable(absolutePath: Path): Array[Int] =
-    val asCharArray = IOUtils.readLinesInFile(absolutePath).mkString("\n").toCharArray
+    val asCharArray = sourceText(absolutePath)
     val offsets     = mutable.ArrayBuffer.empty[Int]
 
     for i <- Range(0, asCharArray.length) do
@@ -479,8 +509,11 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     * unresolved `?` placeholders, CDT-internal template indices) are canonicalised consistently
     * with all other type names in the graph.
     */
-  protected def functionTypeToSignature(typ: IFunctionType): String =
-    val returnType     = cleanType(safeGetType(typ.getReturnType))
+  protected def functionTypeToSignature(
+    typ: IFunctionType,
+    returnTypeOverride: Option[String] = None
+  ): String =
+    val returnType     = returnTypeOverride.getOrElse(cleanType(safeGetType(typ.getReturnType)))
     val parameterTypes = typ.getParameterTypes.map(t => cleanType(safeGetType(t)))
     s"$returnType(${parameterTypes.mkString(",")})"
 
@@ -495,15 +528,9 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
 
         node match
           case declarator: CPPASTFunctionDeclarator =>
-              declarator.getName.resolveBinding() match
+              CdtQuery(declarator.getName.resolveBinding()).getOrElse(null) match
                 case function: ICPPFunction =>
-                    val fullNameNoSig = function.getQualifiedName.mkString(".")
-                    val fn =
-                        if function.isExternC then
-                          function.getName
-                        else
-                          s"$fullNameNoSig:${functionTypeToSignature(function.getType)}"
-                    return fn
+                    return methodFullNameOf(function)
                 case field: ICPPField =>
                 case _: IProblemBinding =>
                     val fullNameNoSig = ASTStringUtil.getQualifiedName(declarator.getName)
@@ -650,6 +677,12 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
       val importNode      = newImportNode(nodeSignature(include), name, name, include)
       diffGraph.addNode(_dependencyNode)
       diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+      // the file the include resolved to, which names the package that provides it far better
+      // than the header name, and whether it was written as a system include
+      Option(include.getPath).filter(p => include.isResolved && p.nonEmpty).foreach { path =>
+          tagNode(importNode, Defines.IncludeResolvedPathTag, path)
+      }
+      if include.isSystemInclude then tagNode(importNode, Defines.IncludeSystemTag, "true")
       Ast(importNode)
     }
 
@@ -767,10 +800,39 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   end typeForDeclSpecifier
 
   private def safeGetEvaluation(expr: ICPPASTExpression): Option[ICPPEvaluation] =
-      Try(expr.getEvaluation).toOption
+      CdtQuery(expr.getEvaluation).toOption
 
   protected def safeGetType(tpe: IType): String =
-      Try(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
+      CdtQuery(ASTTypeUtil.getType(tpe)).getOrElse(Defines.anyTypeName)
+
+  /** The name of a type CDT resolved, normalised like every other type in the graph. A closure or
+    * an anonymous struct (spelled with braces) has no name worth recording: normalising it would
+    * mint a fresh anonymous name from the counter the lambdas of the file are numbered with.
+    */
+  protected def typeNameOf(tpe: IType): String =
+    val raw = safeGetType(tpe)
+    if raw == null || raw.contains("{") || raw.contains("}") then Defines.anyTypeName
+    else tightenTypePunctuation(cleanType(raw))
+
+  /** The type CDT gives an expression, normalised and registered like every other type. */
+  protected def expressionType(expression: IASTExpression): String =
+      registerType(CdtQuery(expression.getExpressionType).map(typeNameOf).getOrElse(
+        Defines.anyTypeName
+      ))
+
+  /** An operand of unsigned integer type, through typedefs and qualifiers: `>>` on it shifts in
+    * zeros.
+    */
+  protected def isUnsignedOperand(operand: IASTExpression): Boolean =
+    @scala.annotation.tailrec
+    def unwrap(t: IType): IType = t match
+      case td: ITypedef      => unwrap(td.getType)
+      case q: IQualifierType => unwrap(q.getType)
+      case other             => other
+    CdtQuery(unwrap(operand.getExpressionType)).toOption.exists {
+        case b: IBasicType => b.isUnsigned
+        case _             => false
+    }
 
   /** The qualified name (`kv::LookupKey`) of a C++ class or enum written as a plain name inside its
     * namespace or class. The member layouts, implicit-this owners and resolved calls all spell the
@@ -782,7 +844,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
   private def bindingQualifiedName(name: IASTName): Option[String] = name match
     case _: ICPPASTQualifiedName | _: ICPPASTTemplateId => None
     case _ =>
-        Try(name.resolveBinding()).toOption
+        CdtQuery(name.resolveBinding()).toOption
             .collect {
                 case _: IProblemBinding        => None
                 case _: ICPPTemplateDefinition => None
@@ -796,7 +858,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             .filter(q => q.endsWith(s"${Defines.qualifiedNameSeparator}${name.toString}"))
 
   protected def safeGetNodeType(node: IASTNode): String =
-      Try(ASTTypeUtil.getNodeType(node)).getOrElse(Defines.anyTypeName)
+      CdtQuery(ASTTypeUtil.getNodeType(node)).getOrElse(Defines.anyTypeName)
 
   private def notHandledText(node: IASTNode): String =
       s"""Node '${node.getClass.getSimpleName}' not handled yet!
@@ -817,7 +879,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             if s.getType == IASTSimpleDeclSpecifier.t_auto ||
                 s.getType == IASTSimpleDeclSpecifier.t_decltype_auto ||
                 s.getType == IASTSimpleDeclSpecifier.t_decltype =>
-            Try {
+            CdtQuery {
                 Option(parentDecl).flatMap { d =>
                     d.getName.resolveBinding() match
                       case v: IVariable if v.getType != null =>
@@ -870,35 +932,155 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val operand  = nullSafeAst(decl.getDecltypeExpression)
     callAst(cpgUnary, List(operand))
 
+  /** The object an initializer list initialises, innermost last: `s` while `{ .a = 1 }` of `struct
+    * S s = { .a = 1 }` is created, `s.a` inside `{ .a = { .b = 1 } }`. Each entry builds a fresh
+    * AST of that object.
+    */
+  private val initializedObjects = mutable.Stack.empty[(IASTNode, () => Ast)]
+
+  /** Creates `body` with `target` as the object the designated initializers of `list` assign into.
+    * Only that list's own designated initializers use it: a compound literal nested in the
+    * initializer initialises another object. When the whole initializer is a compound literal, as
+    * in `T v = (T){ .a = 1 }`, the literal is copied into the object, so its list assigns into it
+    * as well.
+    */
+  protected def withInitializedObject[T](list: IASTNode, target: () => Ast)(body: => T): T =
+      list match
+        case l: IASTInitializerList =>
+            initializedObjects.push((l, target))
+            try body
+            finally initializedObjects.pop()
+        case c: IASTTypeIdInitializerExpression =>
+            withInitializedObject(c.getInitializer, target)(body)
+        case _ => body
+
+  /** Builds the AST of one expression, statement or declaration. CDT's semantics can recurse
+    * without bound on self-referential code (see [[CdtQuery]]) at any question an AST asks of it:
+    * the overflow then costs that construct, which becomes an UNKNOWN node with its code, and not
+    * the file. The scopes and AST parents the construct pushed or declared into are put back, so no
+    * later name refers to a variable whose declaration was dropped.
+    */
+  protected def withOverflowRecovery[T](node: IASTNode, recovered: Ast => T)(build: => T): T =
+    val scopes  = scope.snapshot
+    val parents = methodAstParentStack.size
+    try build
+    catch
+      case _: StackOverflowError =>
+          scope.restore(scopes)
+          methodAstParentStack.remove(0, methodAstParentStack.size - parents)
+          logger.debug(s"CDT recursed without bound on '${nodeSignature(node)}' in $filename")
+          recovered(Ast(unknownNode(node, nodeSignature(node))))
+
+  /** The object's code for a member access built on it: a variable by its name, since inside a
+    * macro expansion an identifier's code is the invocation's text.
+    */
+  private def rootCode(ast: Ast): String =
+      ast.root.collect {
+          case i: NewIdentifier => i.name
+          case n: ExpressionNew => n.code
+      }.getOrElse("")
+
+  /** `base.field`, `base[index]` or `base[low ... high]` for one designator. */
+  private def designatorAccessAst(base: Ast, designator: IASTNode): Ast =
+      designator match
+        case f: ICASTFieldDesignator   => fieldDesignatorAst(base, f, f.getName)
+        case f: ICPPASTFieldDesignator => fieldDesignatorAst(base, f, f.getName)
+        case a: ICASTArrayDesignator =>
+            indexDesignatorAst(base, a, nullSafeAst(a.getSubscriptExpression))
+        case a: ICPPASTArrayDesignator =>
+            indexDesignatorAst(base, a, nullSafeAst(a.getSubscriptExpression))
+        case r: CASTArrayRangeDesignator   => indexDesignatorAst(base, r, astForNode(r))
+        case r: CPPASTArrayRangeDesignator => indexDesignatorAst(base, r, astForNode(r))
+        case other                         => indexDesignatorAst(base, other, astForNode(other))
+
+  private def fieldDesignatorAst(base: Ast, designator: IASTNode, name: IASTName): Ast =
+    val field = name.toString
+    val tpe = CdtQuery(name.resolveBinding()).toOption.collect { case v: IVariable => v.getType }
+        .map(t => registerType(cleanType(safeGetType(t)))).getOrElse(Defines.anyTypeName)
+    val op = Operators.fieldAccess
+    val access = callNode(
+      designator,
+      s"${rootCode(base)}.$field",
+      op,
+      op,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(tpe)
+    )
+    callAst(access, List(base, Ast(fieldIdentifierNode(designator, field, field))))
+
+  private def indexDesignatorAst(base: Ast, designator: IASTNode, index: Ast): Ast =
+    val op = Operators.indirectIndexAccess
+    // `[1]` or `[3 ... 9]`, as written
+    val access = callNode(
+      designator,
+      s"${rootCode(base)}${nodeSignature(designator)}",
+      op,
+      op,
+      DispatchTypes.STATIC_DISPATCH
+    )
+    callAst(access, List(base, index))
+
+  /** A designated initializer (`.a.b[2] = v` in an initializer list) assigns `v` to the designated
+    * member of the object the list initialises: `s.a.b[2] = v`. A nested list (`.a = { .b = 1 }`)
+    * initialises that member in turn. Outside a declaration's initializer (a compound literal, a
+    * C++ temporary) the object has no name: the assignment's target is the designator itself, a
+    * FIELD_IDENTIFIER for a member.
+    */
+  private def astForDesignatedInitializer(
+    d: IASTNode,
+    designators: Seq[IASTNode],
+    operand: IASTInitializerClause
+  ): Ast =
+      initializedObjects.headOption.filter((list, _) => list eq d.getParent)
+          .map(_._2).orElse(declaredObjectOf(d.getParent)) match
+        case Some(target) =>
+            val member = () => designators.foldLeft(target())(designatorAccessAst)
+            val right  = withInitializedObject(operand, member)(astForNode(operand))
+            val op     = Operators.assignment
+            val assignment =
+                callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
+            callAst(assignment, List(member(), right))
+        case None =>
+            val node = blockNode(d, Defines.empty, Defines.voidTypeName)
+            scope.pushNewScope(node)
+            val op = Operators.assignment
+            val calls = withIndex(designators.toArray) { (des, o) =>
+              val callNode_ =
+                  callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
+                      .argumentIndex(o)
+              // a member of the unnamed object, never a variable of the same name
+              val left = des match
+                case f: ICASTFieldDesignator =>
+                    Ast(fieldIdentifierNode(f, f.getName.toString, f.getName.toString))
+                case f: ICPPASTFieldDesignator =>
+                    Ast(fieldIdentifierNode(f, f.getName.toString, f.getName.toString))
+                case _ => astForNode(des)
+              val right = astForNode(operand)
+              callAst(callNode_, List(left, right))
+            }
+            scope.popScope()
+            blockAst(node, calls.toList)
+
+  /** The object a declaration's initializer list initialises, whatever form the initializer takes
+    * (`T v = {...}`, `T v{...}`, `T v({...})`).
+    */
+  private def declaredObjectOf(list: IASTNode): Option[() => Ast] =
+      list match
+        case l: IASTInitializerList =>
+            val declarator = l.getParent match
+              case d: IASTDeclarator => Some(d)
+              case i: IASTInitializer =>
+                  Option(i.getParent).collect { case d: IASTDeclarator => d }
+              case _ => None
+            declarator.map(d => () => astForNode(effectiveDeclaratorName(d)))
+        case _ => None
+
   private def astForCASTDesignatedInitializer(d: ICASTDesignatedInitializer): Ast =
-    val node = blockNode(d, Defines.empty, Defines.voidTypeName)
-    scope.pushNewScope(node)
-    val op = Operators.assignment
-    val calls = withIndex(d.getDesignators) { (des, o) =>
-      val callNode_ =
-          callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
-              .argumentIndex(o)
-      val left  = astForNode(des)
-      val right = astForNode(d.getOperand)
-      callAst(callNode_, List(left, right))
-    }
-    scope.popScope()
-    blockAst(node, calls.toList)
+      astForDesignatedInitializer(d, d.getDesignators.toSeq, d.getOperand)
 
   private def astForCPPASTDesignatedInitializer(d: ICPPASTDesignatedInitializer): Ast =
-    val node = blockNode(d, Defines.empty, Defines.voidTypeName)
-    scope.pushNewScope(node)
-    val op = Operators.assignment
-    val calls = withIndex(d.getDesignators) { (des, o) =>
-      val callNode_ =
-          callNode(d, nodeSignature(d), op, op, DispatchTypes.STATIC_DISPATCH)
-              .argumentIndex(o)
-      val left  = astForNode(des)
-      val right = astForNode(d.getOperand)
-      callAst(callNode_, List(left, right))
-    }
-    scope.popScope()
-    blockAst(node, calls.toList)
+      astForDesignatedInitializer(d, d.getDesignators.toSeq, d.getOperand)
 
   private def astForCPPASTConstructorInitializer(c: ICPPASTConstructorInitializer): Ast =
     val name = "<operator>.constructorInitializer"

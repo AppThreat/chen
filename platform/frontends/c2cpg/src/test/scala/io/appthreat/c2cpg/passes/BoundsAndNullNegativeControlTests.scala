@@ -136,6 +136,19 @@ class BoundsAndNullNegativeControlTests extends DataFlowCodeToCpgSuite:
     |    }
     |    return 0;
     |}
+    |
+    |/* a condition written as a macro bounds the index in the arm where it holds */
+    |#define IDX_VALID(i) (((i) >= 0) && ((i) < 2))
+    |struct conn { int *filters[2]; };
+    |int *good_macro_guard(struct conn *c, int i, int n)
+    |{
+    |    return (n > 0 && IDX_VALID(i)) ? c->filters[i] : 0;
+    |}
+    |
+    |int *bad_macro_guard(struct conn *c, int i, int n)
+    |{
+    |    return (n > 0 && IDX_VALID(i)) ? 0 : c->filters[i];
+    |}
     |""".stripMargin,
     "bounds_null_controls.c"
   )
@@ -185,6 +198,10 @@ class BoundsAndNullNegativeControlTests extends DataFlowCodeToCpgSuite:
     "not report a static pointer local as non-heap or leaked" in {
         findingsIn("good_static_cache") should not contain "MS-ALLOC-005"
         findingsIn("good_static_cache") should not contain "MS-ALLOC-003"
+    }
+    "read a macro condition's expansion as the guard" in {
+        findingsIn("good_macro_guard") should not contain "MS-BOUND-003"
+        findingsIn("bad_macro_guard") should contain("MS-BOUND-003")
     }
     "narrow an assignment-in-condition on the right branch" in {
         // MS-ALLOC-008 (a caller-param size, `low`) is the only finding either may carry

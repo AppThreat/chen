@@ -51,9 +51,12 @@ object FlowSummaryComputer:
     cpg: Cpg,
     semantics: Semantics = Semantics.empty
   ): Map[String, MethodFlowSummary] =
-    val methods    = cpg.method.internal.l
-    val byFullName = methods.groupBy(_.fullName)
-    val cache      = mutable.Map.empty[String, MethodFlowSummary]
+    // one summary per function: a C/C++ prototype is a METHOD of the same full name with an
+    // empty body, and the definition speaks for it
+    val byFullName = cpg.method.internal.l.groupBy(_.fullName)
+    val methods = byFullName.values.toList.map(ms => ms.find(hasBody).getOrElse(ms.head))
+        .sortBy(_.fullName)
+    val cache = mutable.Map.empty[String, MethodFlowSummary]
     def lookup(name: String): Option[MethodFlowSummary] = cache.get(name)
 
     def summaryOf(m: Method): MethodFlowSummary =
@@ -85,6 +88,9 @@ object FlowSummaryComputer:
     }
     cache.toMap
   end computeAll
+
+  private def hasBody(m: Method): Boolean =
+      m.block.exists(b => b.lineNumber.isDefined || b.astChildren.nonEmpty)
 
   /** Successor function over the call graph restricted to the internal methods we summarise. */
   private def calleesOf(internalNames: Set[String])(node: Node): Iterator[Node] =
