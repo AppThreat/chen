@@ -52,9 +52,22 @@ final case class Config(
   fullResolver: Boolean      = false,         // whole-program analysis mode
   recurse: Boolean           = false,         // recursively unpack nested JARs
   depth: Int                 = 1,             // max nesting depth for recursive unpacking
-  onlyClasses: Boolean       = false          // only process .class files (skip resources)
+  onlyClasses: Boolean       = false,         // only process .class files (skip resources)
+  jdkPath: Option[String]    = None           // JDK home whose classes resolve the JDK types
 ) extends X2CpgConfig[Config]
 ```
+
+### JDK classes
+
+Soot resolves JDK types (`java.lang.Object`, `java.security.MessageDigest`, ...) through the
+running JVM's `jrt:/` file system. A GraalVM native image has no usable `jrt:/`, so there
+`JdkClassSource` reads the classes of an installed JDK straight from its `lib/modules` jimage
+(`JImage`, a pure-Scala reader), or from `rt.jar` for JDK 8. It looks in `jdkPath`,
+`ATOM_JAVA_HOME`, `JAVA_HOME`, `JDK_HOME`, `-Djava.home`, the `java` on `PATH` and common install
+locations. With no JDK, the graph is still built and the JDK types stay phantom.
+
+`-Dchen.jimple.jdk-classes` (or `CHEN_JIMPLE_JDK_CLASSES`) overrides the choice: `auto` (default),
+`image` (always an installed JDK, also on the JVM), `platform` (Soot's `jrt:/`) or `none`.
 
 No `TypeRecoveryParserConfig` mixin — bytecode types are fully resolved by Soot.
 
@@ -89,6 +102,7 @@ JVM binary inputs. For Scala artifacts, it also sets `scalaSdk` and `onlyClasses
 | `--recurse`                    | `recurse`      |
 | `--dynamic-dirs <d1>,<d2>,...` | `dynamicDirs`  |
 | `--dynamic-pkgs <p1>,<p2>,...` | `dynamicPkgs`  |
+| `--jdk-path <path>`            | `jdkPath`      |
 
 ## atom CLI (`-l jar` / `-l apk` / `-l dex` / `-l android`)
 
