@@ -89,8 +89,11 @@ object FlowSummaryComputer:
     cache.toMap
   end computeAll
 
+  /** Whether the method has a body. Not `m.block`: it assumes a BLOCK child, and a frontend may
+    * leave a bodyless method (a native or stubbed one) without one.
+    */
   private def hasBody(m: Method): Boolean =
-      m.block.exists(b => b.lineNumber.isDefined || b.astChildren.nonEmpty)
+      m.astChildren.isBlock.exists(b => b.lineNumber.isDefined || b.astChildren.nonEmpty)
 
   /** Successor function over the call graph restricted to the internal methods we summarise. */
   private def calleesOf(internalNames: Set[String])(node: Node): Iterator[Node] =

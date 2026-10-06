@@ -14,7 +14,8 @@ final case class Config(
   fullResolver: Boolean = false,
   recurse: Boolean = false,
   depth: Int = 1,
-  onlyClasses: Boolean = false
+  onlyClasses: Boolean = false,
+  jdkPath: Option[String] = None
 ) extends X2CpgConfig[Config]:
   def withAndroid(android: String): Config =
       copy(android = Some(android)).withInheritedFields(this)
@@ -32,6 +33,8 @@ final case class Config(
       copy(depth = value).withInheritedFields(this)
   def withOnlyClasses(value: Boolean): Config =
       copy(onlyClasses = value).withInheritedFields(this)
+  def withJdkPath(value: String): Config =
+      copy(jdkPath = Option(value).map(_.trim).filter(_.nonEmpty)).withInheritedFields(this)
 end Config
 
 private object Frontend:
@@ -62,6 +65,11 @@ private object Frontend:
             "enables whole program analysis and full transitive resolution of all references found in all classes that are resolved"
           )
           .action((_, config) => config.withFullResolver(true)),
+      opt[String]("jdk-path")
+          .text(
+            "JDK home whose classes resolve the JDK types. Defaults to the running JVM; a native image searches ATOM_JAVA_HOME, JAVA_HOME, JDK_HOME, PATH and common install locations."
+          )
+          .action((jdkPath, config) => config.withJdkPath(jdkPath)),
       opt[Unit]("recurse")
           .text("recursively unpack jars")
           .action((_, config) => config.withRecurse(true)),

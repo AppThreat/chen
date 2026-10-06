@@ -3,11 +3,13 @@ package io.appthreat.jimple2cpg
 import better.files.File
 import io.appthreat.jimple2cpg.passes.{AstCreationPass, ConfigFileCreationPass, SootAstCreationPass}
 import io.appthreat.jimple2cpg.util.ProgramHandlingUtil.{ClassFile, extractClassesInPackageLayout}
+import io.appthreat.jimple2cpg.util.{JdkClassSource, JdkClasses}
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.appthreat.x2cpg.datastructures.Global
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
 import io.shiftleft.codepropertygraph.Cpg
+import org.slf4j.LoggerFactory
 import soot.options.Options
 import soot.{G, Scene}
 
@@ -17,6 +19,8 @@ import scala.util.Try
 
 object Jimple2Cpg:
   val language = "JAVA"
+
+  private val logger = LoggerFactory.getLogger(classOf[Jimple2Cpg])
 
   def apply(): Jimple2Cpg = new Jimple2Cpg()
 
@@ -105,19 +109,18 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
     *   Scala library jar for parsing scala-built jars
     * @param onlyClasses
     *   Include only .class files
+    * @param jdk
+    *   Where the JDK classes are read from
     */
   private def sootLoad(
     input: File,
     tmpDir: File,
     recurse: Boolean,
     scalaSdk: Option[String],
-    onlyClasses: Boolean
+    onlyClasses: Boolean,
+    jdk: JdkClasses
   ): List[ClassFile] =
-    var sClassPath = tmpDir.canonicalPath
-    if scalaSdk.nonEmpty then
-      sClassPath = sClassPath + java.io.File.pathSeparator + scalaSdk.get
-    Options.v().set_soot_classpath(sClassPath)
-    Options.v().set_prepend_classpath(true)
+    JdkClassSource.configureSoot(jdk, tmpDir.canonicalPath +: scalaSdk.toSeq)
     val classFiles               = loadClassFiles(input, tmpDir, recurse, onlyClasses)
     val fullyQualifiedClassNames = classFiles.flatMap(_.fullyQualifiedClassName)
     fullyQualifiedClassNames.foreach { fqcn =>
@@ -125,7 +128,6 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
       Try(Scene.v().loadClassAndSupport(fqcn)).getOrElse(null)
     }
     classFiles
-  end sootLoad
 
   /** Apply the soot passes
     * @param tmpDir
@@ -153,7 +155,14 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
           }
       case _ =>
           val classFiles =
-              sootLoad(input, tmpDir, config.recurse, config.scalaSdk, config.onlyClasses)
+              sootLoad(
+                input,
+                tmpDir,
+                config.recurse,
+                config.scalaSdk,
+                config.onlyClasses,
+                resolveJdkClasses(config)
+              )
           { () =>
             val astCreator = AstCreationPass(classFiles, cpg, config)
             astCreator.createAndApply()
@@ -167,6 +176,22 @@ class Jimple2Cpg extends X2CpgFrontend[Config]:
         .createAndApply()
     new ConfigFileCreationPass(cpg).createAndApply()
   end cpgApplyPasses
+
+  /** Where the JDK classes come from. A native image cannot use Soot's jrt:/ lookup, so it reads
+    * the classes of an installed JDK instead; without one, the JDK types stay phantom.
+    */
+  private def resolveJdkClasses(config: Config): JdkClasses =
+    val jdk = JdkClassSource.resolve(config.jdkPath)
+    jdk match
+      case JdkClasses.Platform => logger.debug(s"JDK classes from ${jdk.describe}")
+      case missing: JdkClasses.Missing =>
+          logger.warn(
+            s"No JDK found to resolve the JDK types (${missing.describe}). JDK classes will be " +
+                "phantom, so type hierarchies above them are incomplete. Set JAVA_HOME or pass " +
+                "--jdk-path to a JDK 8 or later."
+          )
+      case _ => logger.info(s"JDK classes from ${jdk.describe}")
+    jdk
 
   override def createCpg(config: Config): Try[Cpg] =
       try

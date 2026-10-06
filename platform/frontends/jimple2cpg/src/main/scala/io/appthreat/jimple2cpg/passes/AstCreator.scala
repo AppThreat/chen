@@ -163,12 +163,19 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
     })
   end astForField
 
+  /** Whether Soot can produce a body for the method. A native method has none; Soot reports a dex
+    * native method as concrete but keeps no method source, so retrieving its body throws.
+    */
+  private def hasBodySource(method: SootMethod): Boolean =
+      !method.isNative && (method.hasActiveBody || method.getSource != null)
+
   private def astForMethod(methodDeclaration: SootMethod, typeDecl: RefType, childNum: Int): Ast =
     val methodNode = createMethodNode(methodDeclaration, typeDecl, childNum)
     try
-      if !methodDeclaration.isConcrete then
+      if !methodDeclaration.isConcrete || !hasBodySource(methodDeclaration) then
         // Soot is not able to parse origin parameter names of abstract methods
         // https://github.com/soot-oss/soot/issues/1517
+        // Native methods have no body either: dex keeps no method source for them.
         val locals = methodDeclaration.getParameterTypes.asScala.zipWithIndex
             .map { case (typ, index) => new JimpleLocal(s"param${index + 1}", typ) }
         val parameterAsts =
@@ -242,9 +249,11 @@ class AstCreator(filename: String, cls: SootClass, global: Global)(implicit
               s"Unexpected runtime exception while parsing method body! Will stub the method '${methodNode.fullName}''",
               e
             )
+          // A METHOD always has a BLOCK: passes and queries (`method.block`) rely on it.
           Ast(methodNode)
               .withChildren(astsForModifiers(methodDeclaration))
               .withChildren(astsForHostTags(methodDeclaration))
+              .withChild(Ast(NewBlock()))
               .withChild(astForMethodReturn(methodDeclaration))
     finally
       // Join all targets with CFG edges - this seems to work from what is seen on DotFiles
