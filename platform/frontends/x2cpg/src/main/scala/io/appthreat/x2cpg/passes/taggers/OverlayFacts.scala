@@ -91,7 +91,7 @@ private[taggers] object OverlayFacts:
         .filter { case (_, m) => m.name == memberName }
     val sameFile = candidates.collect { case (f, m) if f == inFile => m }
     // the definition a header the file includes gives it, when two headers define the name
-    lazy val included = decls.headOption.map(td => includedBy(Cpg(td.graph), inFile))
+    lazy val included = decls.headOption.map(td => includedBy(Cpg(using td.graph), inFile))
         .getOrElse(Set.empty)
     lazy val fromIncludes = candidates.collect { case (f, m) if included.contains(f) => m }
     val ordered =

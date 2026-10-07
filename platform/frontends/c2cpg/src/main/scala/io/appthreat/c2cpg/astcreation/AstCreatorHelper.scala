@@ -148,8 +148,10 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         case c: ICPPVariable => CdtQuery(c.isConstexpr).getOrElse(false)
         case _               => false
       )
-      val value =
-          CdtQuery(Option(v.getInitialValue).flatMap(iv => Option(iv.numericalValue()))).toOption.flatten
+      // `numberValue` narrowed to Long: the same result the deprecated `numericalValue` gave
+      val value = CdtQuery(Option(v.getInitialValue).flatMap(iv =>
+          Option(iv.numberValue()).collect { case l: java.lang.Long => l }
+      )).toOption.flatten
       if constant then
         value.foreach { n =>
           val record = CGlobal.constRecord(v.getName, n.longValue)

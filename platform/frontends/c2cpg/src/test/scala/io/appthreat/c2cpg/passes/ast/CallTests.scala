@@ -263,7 +263,7 @@ class CallTests extends CCodeToCpgSuite:
           call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
           call.typeFullName shouldBe "void"
           call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List("<operator>()")
-          call.callee(NoResolve).fullName.l shouldBe List("outer:void().anonymous_lambda_0")
+          call.callee(using NoResolve).fullName.l shouldBe List("outer:void().anonymous_lambda_0")
 
           val List(arg1) = call.argument.l
           arg1.code shouldBe "1"
@@ -334,7 +334,9 @@ class CallTests extends CCodeToCpgSuite:
           call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
           call.typeFullName shouldBe "void"
           call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List("<operator>()")
-          call.callee(NoResolve).fullName.l shouldBe List("NNN.Callable.operator ():void(int)")
+          call.callee(using NoResolve).fullName.l shouldBe List(
+            "NNN.Callable.operator ():void(int)"
+          )
 
           val List(instArg, arg1) = call.argument.l
           instArg.code shouldBe "a.foo"

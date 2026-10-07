@@ -465,11 +465,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * the structure walk is: a method boundary stops it.
     */
   private def isWithinSubtree(node: AstNode, root: AstNode): Boolean =
-    var cursor: Option[StoredNode] = node match
-      case s: StoredNode => Some(s)
-      case _             => None
-    var found   = false
-    var walking = true
+    var cursor: Option[StoredNode] = Some(node)
+    var found                      = false
+    var walking                    = true
     while walking do
       cursor match
         case Some(n) =>
@@ -517,7 +515,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     */
   private def isConstructorCall(e: Expression): Boolean = e match
     case c: Call =>
-        c.callee(NoResolve).modifier.modifierTypeExact(ModifierTypes.CONSTRUCTOR).nonEmpty
+        c.callee(using NoResolve).modifier.modifierTypeExact(ModifierTypes.CONSTRUCTOR).nonEmpty
     case _ => false
 
   /** `new T[n]` released by a scalar `delete`, or `new T` released by `delete[]`. */
@@ -2756,8 +2754,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     off <- IndexRange.literal(k) if off >= 0
                   yield (key, off)
               case _ => None
-        case f: Expression => OverlayFacts.variableKey(f).map(_ -> BigInt(0))
-        case _             => None
+        case f => OverlayFacts.variableKey(f).map(_ -> BigInt(0))
 
   /** Does the loop's own condition bound the field above by a constant the capacity admits? The
     * bound is re-read every iteration, so `while (count < N)` really does stop the count at N. It
