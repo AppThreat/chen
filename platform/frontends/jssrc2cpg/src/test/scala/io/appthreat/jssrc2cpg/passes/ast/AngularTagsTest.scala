@@ -6,8 +6,8 @@ import io.appthreat.x2cpg.passes.taggers.{ChennaiTagsPass, EasyTagsPass}
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 
-/** Angular boundary semantics: decorator-declared inputs/outputs, the `Routes` config array, and
-  * `ActivatedRoute` parameter reads.
+/** Angular boundary semantics: decorator-declared inputs/outputs, signal inputs, the `Routes`
+  * config array, and `ActivatedRoute` parameter reads.
   */
 class AngularTagsTest extends DataFlowCodeToCpgSuite:
 
@@ -85,6 +85,100 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
 
           cpg.tag.name("framework-output").call
               .name(".*bypassSecurityTrust.*").l should not be empty
+      }
+  }
+
+  "Angular signal inputs" should {
+
+      "tag input() and input.required() members and their reads as framework-input" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input, signal } from '@angular/core';
+          |@Component({ selector: 'app-bio' })
+          |export class BioComponent {
+          |  bio = input<string>('');
+          |  name = input.required<string>();
+          |  count = signal(0);
+          |  greet() { return this.bio() + this.name() + this.count(); }
+          |}
+          |""".stripMargin,
+            "bio.component.ts"
+          ))
+
+          // count is component state, not an input, although it is read the same way
+          cpg.tag.name("framework-input").member.name.l.sorted shouldBe List("bio", "name")
+          cpg.tag.name("framework-input").call.code.l.sorted shouldBe List("this.bio", "this.name")
+      }
+
+      "close a flow from a signal input read to a sanitizer bypass" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |import { DomSanitizer } from '@angular/platform-browser';
+          |@Component({ selector: 'app-bio' })
+          |export class BioComponent {
+          |  bio = input<string>('');
+          |  constructor(private sanitizer: DomSanitizer) {}
+          |  html() {
+          |    const raw = this.bio();
+          |    return this.sanitizer.bypassSecurityTrustHtml(raw);
+          |  }
+          |}
+          |""".stripMargin,
+            "bio.component.ts"
+          ))
+
+          val sources = cpg.tag.name("framework-input").call.codeExact("this.bio").l
+          val sinks   = cpg.tag.name("framework-output").call.l
+          sources should not be empty
+          sinks should not be empty
+          sinks.iterator.reachableByFlows(sources.iterator).size should be > 0
+      }
+
+      "not tag a member initialised by an input function that is not Angular's" in {
+          val cpg = tagged(code(
+            """
+          |import { Component } from '@angular/core';
+          |import { input } from './prompt';
+          |@Component({ selector: 'app-local' })
+          |export class LocalComponent {
+          |  bio = input('');
+          |  read() { return this.bio(); }
+          |}
+          |""".stripMargin,
+            "local.component.ts"
+          ).moreCode(
+            """
+          |export function input(initial: string): () => string {
+          |  return () => initial;
+          |}
+          |""".stripMargin,
+            "prompt.ts"
+          ))
+
+          cpg.call.codeExact("this.bio()").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe empty
+          cpg.tag.name("framework-input").call.code.l shouldBe empty
+      }
+
+      "not tag a member that shares its name with the condition of a conditional initialiser" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input, signal } from '@angular/core';
+          |declare const wide: boolean;
+          |@Component({ selector: 'app-size' })
+          |export class SizeComponent {
+          |  wide = signal(false);
+          |  size = wide ? input(1) : input(2);
+          |  isWide() { return this.wide(); }
+          |}
+          |""".stripMargin,
+            "size.component.ts"
+          ))
+
+          cpg.call.codeExact("this.wide()").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe empty
+          cpg.tag.name("framework-input").call.code.l shouldBe empty
       }
   }
 

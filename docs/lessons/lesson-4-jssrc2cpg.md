@@ -294,6 +294,14 @@ exactly, so an `@Input() id` does not taint `this.idx`), `@Output()` members are
 `paramMap.get(...)`), and a `bypassSecurityTrust*` call — the sanitizer escape hatch that feeds
 `[innerHTML]`-style bindings — is output.
 
+Signal inputs are inputs too. A member initialised with `input()` or `input.required()` from
+`@angular/core` is `framework-input`, and so is every access `this.x` in the class. That is the
+node an `@Input()` read gets, and it covers a read `this.x()` as well as a signal handed on
+without being called. The initialiser is matched on its resolved full name, so a renamed import
+still counts and a local function that happens to be called `input` does not. `model()` and
+`output()` are not tagged. Neither is an input initialised with `input() as T`, `input()!` or a
+conditional, or one assigned with `this.x = input()` in the constructor body.
+
 **Next.js and Nuxt** file conventions are keyed off the file name, like SvelteKit: an app-router
 `route.ts` tags its HTTP-verb exports, a `pages/api` handler tags every export, `middleware.ts`
 and the `getServerSideProps`/`getStaticProps`/`generateMetadata` loaders are entrypoints; Nuxt
