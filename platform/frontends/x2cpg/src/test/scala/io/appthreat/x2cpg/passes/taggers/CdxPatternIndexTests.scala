@@ -69,5 +69,17 @@ class CdxPatternIndexTests extends AnyWordSpec with Matchers:
       "match nothing when empty" in {
           CdxPatternIndex(Nil).matching("anything") shouldBe empty
       }
+
+      "return ids ascending across exact, prefix and regex buckets" in {
+          // Ids deliberately inverted against bucket order: regex lowest, exact highest.
+          val index = CdxPatternIndex(
+            Seq(
+              CdxPatternMatcher("dj.*go\\..*") -> 0,
+              CdxPatternMatcher("django\\..*") -> 1,
+              CdxPatternMatcher("django.http") -> 2
+            )
+          )
+          index.matching("django.http") shouldBe IndexedSeq(0, 1, 2)
+      }
   }
 end CdxPatternIndexTests

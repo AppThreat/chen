@@ -1,7 +1,7 @@
 package io.appthreat.dataflowengineoss.passes.reachingdef
 
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
-import io.appthreat.dataflowengineoss.{globalFromLiteral, identifierToFirstUsages}
+import io.appthreat.dataflowengineoss.globalFromLiteral
 import io.appthreat.dataflowengineoss.queryengine.AccessPathUsage.toTrackedBaseAndAccessPathSimple
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.nodes.*
@@ -14,7 +14,7 @@ import scala.collection.{Set, mutable}
 
 /** Creation of data dependence edges based on solution of the ReachingDefProblem.
   */
-class DdgGenerator(semantics: Semantics):
+class DdgGenerator(semantics: Semantics, sharedCache: DdgSharedCache = new DdgSharedCache()):
 
   implicit val s: Semantics = semantics
 
@@ -166,30 +166,10 @@ class DdgGenerator(semantics: Semantics):
       }
 
     def addEdgesToCapturedIdentifiersAndParameters(): Unit =
-      // Every identifier of a variable resolves to the same declarations, and the usages captured
-      // from them - a walk over the whole AST of every closure that captures the variable - are
-      // the same for all of them. In a Python `<module>`, where every function captures the
-      // module's variables, recomputing them per identifier was most of this pass. They are
-      // computed once per declaration list here; the result per identifier is unchanged.
-      val usagesByDecls =
-          mutable.HashMap.empty[List[Declaration], List[Identifier]]
       def firstUsages(identifier: Identifier): List[Identifier] =
-        val decls = identifier.refsTo.l
-        if decls.isEmpty then Nil
-        else usagesByDecls.getOrElseUpdate(decls, identifierToFirstUsages(identifier))
-      val firstLastByDecls =
-          mutable.HashMap.empty[List[Declaration], List[(Identifier, Identifier)]]
+          sharedCache.firstUsages(identifier)
       def firstAndLastUsages(identifier: Identifier): List[(Identifier, Identifier)] =
-        val decls = identifier.refsTo.l
-        if decls.isEmpty then Nil
-        else
-          firstLastByDecls.getOrElseUpdate(
-            decls,
-            firstUsages(identifier).groupBy(_.method).values
-                .filter(_.nonEmpty)
-                .map(x => (x.head, x.last))
-                .toList
-          )
+          sharedCache.firstAndLastUsages(identifier)
 
       val identifierDestPairs =
           method._identifierViaContainsOut.flatMap { identifier =>
@@ -219,12 +199,10 @@ class DdgGenerator(semantics: Semantics):
       }
 
       // `globalFromLiteral` walks each literal up to its enclosing method and keeps it only when
-      // that is a `<module>`/`:package` method. Every such enclosing method lies in this method's
-      // AST, so without one there, no literal can qualify and the upward walks are skipped.
-      val hasGlobalScope =
-          method.ast.isMethod.exists(m => m.name == "<module>" || m.name == ":package")
+      // that is a global-scope method. Every such enclosing method lies in this method's AST, so
+      // without one there no literal can qualify and the walks are skipped.
       val globalIdentifiers =
-          if !hasGlobalScope then Nil
+          if !sharedCache.hasGlobalScopeInAst(method) then Nil
           else method.ast.isLiteral.flatMap(globalFromLiteral).collectAll[Identifier].l
       globalIdentifiers
           .foreach { global =>

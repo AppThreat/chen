@@ -21,6 +21,9 @@ class ReachingDefPass(
   // If there are any regex method full names, load them early
   s.loadRegexSemantics(cpg)
 
+  // One per pass, shared by all of its (concurrent) parts: see DdgSharedCache.
+  private val ddgSharedCache = new DdgSharedCache()
+
   override def generateParts(): Array[Method] = cpg.method.toArray
 
   override def runOnPart(dstGraph: DiffGraphBuilder, method: Method): Unit =
@@ -35,7 +38,7 @@ class ReachingDefPass(
       return
 
     val solution     = new DataFlowSolver().calculateMopSolutionForwards(problem)
-    val ddgGenerator = new DdgGenerator(s)
+    val ddgGenerator = new DdgGenerator(s, ddgSharedCache)
     ddgGenerator.addReachingDefEdges(dstGraph, method, problem, solution)
 
   /** Before we start propagating definitions in the graph, which is the bulk of the work, we check
