@@ -524,8 +524,11 @@ private class RecoverForPythonFile(
         val viaSymbols = symbolTable.get(LocalVar(name)).filterNot(_ == Constants.ANY)
         if viaSymbols.nonEmpty then viaSymbols
         else
-          val short    = name.split("[.]").lastOption.getOrElse(name)
-          val declared = cpg.typeDecl.nameExact(short).fullName.toSet
+          val short = name.split("[.]").lastOption.getOrElse(name)
+          val declared = state.typeDeclFullNamesByName.getOrElseUpdate(
+            short,
+            cpg.typeDecl.nameExact(short).fullName.toSet
+          )
           if declared.nonEmpty then declared else Set(name)
   end resolveBareTypeName
 

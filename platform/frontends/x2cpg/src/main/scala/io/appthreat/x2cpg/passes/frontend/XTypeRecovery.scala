@@ -42,13 +42,23 @@ case class XTypeRecoveryState(
   currentIteration: Int = 0,
   isFieldCache: TrieMap[Long, Boolean] = TrieMap.empty[Long, Boolean],
   changesWereMade: AtomicBoolean = new AtomicBoolean(false),
-  stopEarly: AtomicBoolean
+  stopEarly: AtomicBoolean,
+  /** Graph-wide name lookups that are a scan of every MEMBER / TYPE_DECL per call. Type recovery
+    * never adds, renames or re-parents members or type declarations - it writes types - so the
+    * answers are the same for every compilation unit and every iteration of one recovery run.
+    */
+  memberParentsByName: TrieMap[String, Set[String]] = TrieMap.empty[String, Set[String]],
+  typeDeclFullNamesByName: TrieMap[String, Set[String]] = TrieMap.empty[String, Set[String]]
 ):
   lazy val isFinalIteration: Boolean = currentIteration == config.iterations - 1
 
   lazy val isFirstIteration: Boolean = currentIteration == 0
 
-  def clear(): Unit = isFieldCache.clear()
+  def clear(): Unit =
+    isFieldCache.clear()
+    memberParentsByName.clear()
+    typeDeclFullNamesByName.clear()
+end XTypeRecoveryState
 
 /** In order to propagate types across compilation units, but avoid the poor scalability of a
   * fixed-point algorithm, the number of iterations can be configured using the iterations
@@ -507,7 +517,10 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
     */
   protected def getFieldParents(fa: FieldAccess): Set[String] =
     val fieldName = getFieldName(fa).split(pathSep).last
-    cpg.member.nameExact(fieldName).typeDecl.fullName.filterNot(_.contains("ANY")).toSet
+    state.memberParentsByName.getOrElseUpdate(
+      fieldName,
+      cpg.member.nameExact(fieldName).typeDecl.fullName.filterNot(_.contains("ANY")).toSet
+    )
 
   /** Associates the types with the identifier. This may sometimes be an identifier that should be
     * considered a field which this method uses [[isField]] to determine.
