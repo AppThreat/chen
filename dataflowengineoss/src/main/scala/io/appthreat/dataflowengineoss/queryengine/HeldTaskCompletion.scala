@@ -105,19 +105,28 @@ class HeldTaskCompletion(
     val initialPath = heldTask.initialPath
     parentTasks
         .map { parentTask =>
-          val stopIndex = initialPath
-              .map(x => (x.node, x.callSiteStack))
-              .indexOf((parentTask.sink, parentTask.callSiteStack)) + 1
+          val stopIndex = initialPath.indexWhere(x =>
+              x.node == parentTask.sink && x.callSiteStack == parentTask.callSiteStack
+          ) + 1
           val initialPathOnlyUpToSink = initialPath.slice(0, stopIndex)
           val newPath                 = result.path ++ initialPathOnlyUpToSink
           (parentTask, TableEntry(newPath))
         }
         .filter { case (_, tableEntry) => containsCycle(tableEntry) }
 
+  /** NB: true when the path has NO repeated element - the name has it backwards.
+    *
+    * Two elements can only be equal when their nodes are, so a path whose nodes are all distinct -
+    * nearly every path - is answered from node ids alone, without building and hashing a tuple of
+    * (node, call-site stack, ...) per element.
+    */
   private def containsCycle(tableEntry: TableEntry): Boolean =
-    val pathSeq =
-        tableEntry.path.map(x => (x.node, x.callSiteStack, x.isOutputArg, x.outEdgeLabel))
-    pathSeq.distinct.size == pathSeq.size
+    val path    = tableEntry.path
+    val nodeIds = new java.util.HashSet[java.lang.Long](path.size * 2)
+    if path.forall(x => nodeIds.add(x.node.id())) then true
+    else
+      val pathSeq = path.map(x => (x.node, x.callSiteStack, x.isOutputArg, x.outEdgeLabel))
+      pathSeq.distinct.size == pathSeq.size
 
   private def addCompletedTasksToMainTable(results: List[(TaskFingerprint, TableEntry)]): Unit =
       results.groupBy(_._1).foreach { case (fingerprint, resultList) =>
@@ -144,37 +153,40 @@ class HeldTaskCompletion(
     *     representation.
     */
   private def deduplicateTableEntries(list: List[TableEntry]): List[TableEntry] =
-      list
-          .groupBy { result =>
-            val head =
-                result.path.headOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
-            val last =
-                result.path.lastOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
-            (head, last)
-          }
-          .map { case (_, list) =>
-              val lenIdPathPairs = list.map(x => (x.path.length, x))
-              val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match
-                case Nil    => Nil
-                case h :: t => h :: t.takeWhile(y => y._1 == h._1)
-              ).map(_._2)
+      // One entry is its own group (and the grouping below would return it unchanged).
+      if list.sizeIs <= 1 then list
+      else
+        list
+            .groupBy { result =>
+              val head =
+                  result.path.headOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
+              val last =
+                  result.path.lastOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
+              (head, last)
+            }
+            .map { case (_, list) =>
+                val lenIdPathPairs = list.map(x => (x.path.length, x))
+                val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match
+                  case Nil    => Nil
+                  case h :: t => h :: t.takeWhile(y => y._1 == h._1)
+                ).map(_._2)
 
-              if withMaxLength.length == 1 then
-                withMaxLength.head
-              else
-                withMaxLength.minBy { x =>
-                    x.path
-                        .map(x =>
-                            (
-                              x.node.id,
-                              x.callSiteStack.map(_.id),
-                              x.visible,
-                              x.isOutputArg,
-                              x.outEdgeLabel
-                            ).toString
-                        )
-                        .mkString("-")
-                }
-          }
-          .toList
+                if withMaxLength.length == 1 then
+                  withMaxLength.head
+                else
+                  withMaxLength.minBy { x =>
+                      x.path
+                          .map(x =>
+                              (
+                                x.node.id,
+                                x.callSiteStack.map(_.id),
+                                x.visible,
+                                x.isOutputArg,
+                                x.outEdgeLabel
+                              ).toString
+                          )
+                          .mkString("-")
+                  }
+            }
+            .toList
 end HeldTaskCompletion

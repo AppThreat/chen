@@ -3,10 +3,10 @@ package io.appthreat.dataflowengineoss.queryengine
 import io.appthreat.dataflowengineoss.globalFromLiteral
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.{GeneratedNodeStarterExt, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.semanticcpg.language.operatorextension.allAssignmentTypes
+import io.shiftleft.semanticcpg.language.operatorextension.{allAssignmentTypes, allFieldAccessTypes}
 import io.shiftleft.semanticcpg.utils.MemberAccess.isFieldAccess
 import org.slf4j.LoggerFactory
 
@@ -131,27 +131,68 @@ class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode
           val usagesInSameClass =
               nonConstructorMethods.flatMap { m => firstUsagesOf(astNode, m, typeDecl) }
 
-          val usagesInOtherClasses = cpg.method.flatMap { m =>
-              m.fieldAccess
-                  .or(
-                    _.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName),
-                    _.argument(1).isTypeRef.typeFullNameExact(typeDecl.fullName)
-                  )
-                  .where { x =>
-                      astNode match
-                        case identifier: Identifier =>
-                            x.argument(2).isFieldIdentifier.canonicalNameExact(identifier.name)
-                        case fieldIdentifier: FieldIdentifier =>
-                            x.argument(2).isFieldIdentifier.canonicalNameExact(
-                              fieldIdentifier.canonicalName
-                            )
-                        case _ => Iterator.empty
-                  }
-                  .takeWhile(notLeftHandOfAssignment)
-                  .headOption
-          }.l
+          // Only a method whose AST holds a field access naming the field can contribute, and
+          // those are found by walking up from the field's identifiers rather than down the AST
+          // of every method in the graph, for every member a source initialises. The surviving
+          // methods are still visited in `cpg.method` order with the original per-method query,
+          // so the result is unchanged.
+          val fieldName = astNode match
+            case identifier: Identifier           => Some(identifier.name)
+            case fieldIdentifier: FieldIdentifier => Some(fieldIdentifier.canonicalName)
+            case _                                => None
+          val candidateMethods = fieldName.map(methodsWithFieldAccessNaming).getOrElse(Set.empty)
+          val usagesInOtherClasses =
+              if candidateMethods.isEmpty then Nil
+              else
+                cpg.method.filter(m => candidateMethods.contains(m.id())).flatMap { m =>
+                    m.fieldAccess
+                        .or(
+                          _.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName),
+                          _.argument(1).isTypeRef.typeFullNameExact(typeDecl.fullName)
+                        )
+                        .where { x =>
+                            astNode match
+                              case identifier: Identifier =>
+                                  x.argument(2).isFieldIdentifier.canonicalNameExact(
+                                    identifier.name
+                                  )
+                              case fieldIdentifier: FieldIdentifier =>
+                                  x.argument(2).isFieldIdentifier.canonicalNameExact(
+                                    fieldIdentifier.canonicalName
+                                  )
+                              case _ => Iterator.empty
+                        }
+                        .takeWhile(notLeftHandOfAssignment)
+                        .headOption
+                }.l
           usagesInSameClass ++ usagesInOtherClasses
       }
+
+  /** Ids of the methods whose AST (`m.ast`, nested methods included) contains a field-access call
+    * one of whose arguments is a field identifier with this canonical name - a superset of the
+    * methods `usages` can find a usage in, since it requires `argument(2)` to be such an
+    * identifier.
+    */
+  private def methodsWithFieldAccessNaming(name: String): Set[Long] =
+    val visited = scala.collection.mutable.HashSet.empty[Long]
+    val methods = Set.newBuilder[Long]
+    val work    = scala.collection.mutable.Stack.empty[AstNode]
+    GeneratedNodeStarterExt(cpg).fieldIdentifier.canonicalNameExact(name).foreach { fi =>
+        fi._argumentIn.foreach {
+            case c: Call if allFieldAccessTypes.contains(c.name) => work.push(c)
+            case _                                               =>
+        }
+    }
+    while work.nonEmpty do
+      val node = work.pop()
+      if visited.add(node.id()) then
+        if node.isInstanceOf[Method] then methods += node.id()
+        node._astIn.foreach {
+            case parent: AstNode => work.push(parent)
+            case _               =>
+        }
+    methods.result()
+  end methodsWithFieldAccessNaming
 
   /** For given method, determine the first usage of the given expression.
     */
