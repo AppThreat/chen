@@ -255,14 +255,14 @@ class CdxPass(
     dstGraph: DiffGraphBuilder,
     tagCallMethods: Boolean = false
   ): Unit =
-    // `tagCallMethods` is only set by the pypi path, whose language always lands in tagGeneric.
-    language match
-      case lang if lang == Languages.RUBYSRC =>
-          tagRuby(bpkg, purl, compType, dstGraph)
-      case lang if lang == Languages.NEWC || lang == Languages.C =>
-          tagCpp(bpkg, purl, compType, descTags, dstGraph)
-      case _ =>
-          tagGeneric(bpkg, purl, compType, descTags, tagCallMethods)
+      // `tagCallMethods` is only set by the pypi path, whose language always lands in tagGeneric.
+      language match
+        case lang if lang == Languages.RUBYSRC =>
+            tagRuby(bpkg, purl, compType, dstGraph)
+        case lang if lang == Languages.NEWC || lang == Languages.C =>
+            tagCpp(bpkg, purl, compType, descTags, dstGraph)
+        case _ =>
+            tagGeneric(bpkg, purl, compType, descTags, tagCallMethods)
   end tagByLanguage
 
   private def tagRuby(
@@ -334,7 +334,6 @@ class CdxPass(
       compTypeTag = Option.when(compType != "library")(compType),
       descTags = descTags
     )
-  end tagGeneric
 
   /** One `tagGeneric` request, applied later by [[applyGenericJobs]]. */
   private case class GenericJob(
@@ -357,8 +356,8 @@ class CdxPass(
     * serves the common literal-prefix patterns (`django\..*`) from a hash map.
     *
     * The tags each node receives, and their order on that node, are exactly those of the former
-    * per-job scans: jobs are applied in queue order and, within a job, a call gets its
-    * method-name purl before its type-name tags.
+    * per-job scans: jobs are applied in queue order and, within a job, a call gets its method-name
+    * purl before its type-name tags.
     */
   private def applyGenericJobs(dstGraph: DiffGraphBuilder): Unit =
     if genericJobs.isEmpty then return
@@ -389,13 +388,13 @@ class CdxPass(
         }
     }
     atom.identifier.foreach { id =>
-      typeIndex.matching(id.typeFullName).foreach(i => tagJob(id, jobs(i), withCompType = false))
+        typeIndex.matching(id.typeFullName).foreach(i => tagJob(id, jobs(i), withCompType = false))
     }
     atom.method.parameter.foreach { p =>
-      typeIndex.matching(p.typeFullName).foreach(i => tagJob(p, jobs(i), withCompType = true))
+        typeIndex.matching(p.typeFullName).foreach(i => tagJob(p, jobs(i), withCompType = true))
     }
     atom.method.foreach { m =>
-      methodIndex.matching(m.fullName).foreach(i => tagJob(m, jobs(i), withCompType = true))
+        methodIndex.matching(m.fullName).foreach(i => tagJob(m, jobs(i), withCompType = true))
     }
     genericJobs.clear()
   end applyGenericJobs

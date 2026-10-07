@@ -193,19 +193,19 @@ class DdgGenerator(semantics: Semantics):
 
       val identifierDestPairs =
           method._identifierViaContainsOut.flatMap { identifier =>
-            firstAndLastUsages(identifier)
-                .flatMap { case (firstUsage, lastUsage) =>
-                    (
-                      identifier.lineNumber,
-                      firstUsage.lineNumber,
-                      lastUsage.lineNumber
-                    ) match
-                      case (Some(iNo), Some(fNo), _) if iNo <= fNo =>
-                          Some(identifier, firstUsage)
-                      case (Some(iNo), _, Some(lNo)) if iNo >= lNo =>
-                          Some(lastUsage, identifier)
-                      case _ => None
-                }
+              firstAndLastUsages(identifier)
+                  .flatMap { case (firstUsage, lastUsage) =>
+                      (
+                        identifier.lineNumber,
+                        firstUsage.lineNumber,
+                        lastUsage.lineNumber
+                      ) match
+                        case (Some(iNo), Some(fNo), _) if iNo <= fNo =>
+                            Some(identifier, firstUsage)
+                        case (Some(iNo), _, Some(lNo)) if iNo >= lNo =>
+                            Some(lastUsage, identifier)
+                        case _ => None
+                  }
           }.distinct
 
       identifierDestPairs

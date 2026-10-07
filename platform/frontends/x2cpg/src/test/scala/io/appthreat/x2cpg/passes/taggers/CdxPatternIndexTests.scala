@@ -42,32 +42,32 @@ class CdxPatternIndexTests extends AnyWordSpec with Matchers:
   )
 
   "CdxPatternMatcher" should {
-    "classify literal-prefix patterns" in {
-      CdxPatternMatcher("django\\..*") shouldBe Prefix("django.")
-      CdxPatternMatcher("a\\.b.*") shouldBe Prefix("a.b")
-      CdxPatternMatcher("requests") shouldBe Exact("requests")
-      CdxPatternMatcher("org.spring.*") shouldBe a[Regex]
-      CdxPatternMatcher("php\\\\Foo.*") shouldBe a[Regex]
-    }
+      "classify literal-prefix patterns" in {
+          CdxPatternMatcher("django\\..*") shouldBe Prefix("django.")
+          CdxPatternMatcher("a\\.b.*") shouldBe Prefix("a.b")
+          CdxPatternMatcher("requests") shouldBe Exact("requests")
+          CdxPatternMatcher("org.spring.*") shouldBe a[Regex]
+          CdxPatternMatcher("php\\\\Foo.*") shouldBe a[Regex]
+      }
 
-    "agree with regex semantics on every pattern and value" in {
-      for p <- patterns; v <- values do
-        withClue(s"pattern=$p value=$v: ") {
-          CdxPatternMatcher(p).matches(v) shouldBe reference(p, v)
-        }
-    }
+      "agree with regex semantics on every pattern and value" in {
+          for p <- patterns; v <- values do
+            withClue(s"pattern=$p value=$v: ") {
+                CdxPatternMatcher(p).matches(v) shouldBe reference(p, v)
+            }
+      }
   }
 
   "CdxPatternIndex" should {
-    "return the ids of exactly the matching patterns, in ascending order" in {
-      val index = CdxPatternIndex(patterns.map(CdxPatternMatcher(_)).zipWithIndex)
-      for v <- values do
-        val expected = patterns.indices.filter(i => reference(patterns(i), v))
-        withClue(s"value=$v: ")(index.matching(v) shouldBe expected)
-    }
+      "return the ids of exactly the matching patterns, in ascending order" in {
+          val index = CdxPatternIndex(patterns.map(CdxPatternMatcher(_)).zipWithIndex)
+          for v <- values do
+            val expected = patterns.indices.filter(i => reference(patterns(i), v))
+            withClue(s"value=$v: ")(index.matching(v) shouldBe expected)
+      }
 
-    "match nothing when empty" in {
-      CdxPatternIndex(Nil).matching("anything") shouldBe empty
-    }
+      "match nothing when empty" in {
+          CdxPatternIndex(Nil).matching("anything") shouldBe empty
+      }
   }
 end CdxPatternIndexTests

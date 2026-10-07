@@ -6,8 +6,8 @@ import java.util.regex.Pattern
 import scala.collection.mutable
 
 /** A compiled name pattern with the exact semantics of the generated property steps
-  * (`.typeFullName(p)`, `.fullName(p)`, ...): a string without regex characters is an exact
-  * match, anything else is a full `(?s)` regex match.
+  * (`.typeFullName(p)`, `.fullName(p)`, ...): a string without regex characters is an exact match,
+  * anything else is a full `(?s)` regex match.
   */
 sealed trait CdxPatternMatcher:
   def matches(value: String): Boolean
@@ -66,12 +66,13 @@ final class CdxPatternIndex(entries: Seq[(CdxPatternMatcher, Int)]):
   private val regexes  = mutable.ArrayBuffer.empty[(Regex, Int)]
 
   entries.foreach {
-    case (Exact(v), id)  => exact.getOrElseUpdate(v, mutable.ArrayBuffer.empty) += id
-    case (Prefix(p), id) => prefixes.getOrElseUpdate(p, mutable.ArrayBuffer.empty) += id
-    case (r: Regex, id)  => regexes += (r -> id)
+      case (Exact(v), id)  => exact.getOrElseUpdate(v, mutable.ArrayBuffer.empty) += id
+      case (Prefix(p), id) => prefixes.getOrElseUpdate(p, mutable.ArrayBuffer.empty) += id
+      case (r: Regex, id)  => regexes += (r -> id)
   }
 
-  private val prefixLengths: Array[Int] = prefixes.keysIterator.map(_.length).toArray.distinct.sorted
+  private val prefixLengths: Array[Int] =
+      prefixes.keysIterator.map(_.length).toArray.distinct.sorted
 
   val isEmpty: Boolean = entries.isEmpty
 
