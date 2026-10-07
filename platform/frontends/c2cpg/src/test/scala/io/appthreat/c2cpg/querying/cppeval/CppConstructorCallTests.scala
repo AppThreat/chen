@@ -33,7 +33,7 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           call.name shouldBe "Point"
           call.methodFullName shouldBe "Point.Point:void(int,int)"
           call.typeFullName shouldBe "Point"
-          call.callee(NoResolve).fullName.l shouldBe List("Point.Point:void(int,int)")
+          call.callee(using NoResolve).fullName.l shouldBe List("Point.Point:void(int,int)")
       }
 
       "pass the constructor arguments" in {
@@ -103,7 +103,7 @@ class CppConstructorCallTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.
           val List(call) = cpg.method.nameExact("main").call.codeExact("a + b").l
           call.name shouldBe "operator +"
           call.methodFullName shouldBe "Point.operator +:Point(Point &)"
-          call.callee(NoResolve).fullName.l shouldBe List("Point.operator +:Point(Point &)")
+          call.callee(using NoResolve).fullName.l shouldBe List("Point.operator +:Point(Point &)")
           call.tag.nameExact(X2CpgDefines.OperatorCallTag).value.l shouldBe List(Operators.addition)
           call.argument.map(a => a.argumentIndex -> a.code).l shouldBe List(0 -> "a", 1 -> "b")
       }
