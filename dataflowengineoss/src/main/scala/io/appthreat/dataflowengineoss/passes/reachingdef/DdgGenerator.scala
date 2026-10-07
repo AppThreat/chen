@@ -166,13 +166,34 @@ class DdgGenerator(semantics: Semantics):
       }
 
     def addEdgesToCapturedIdentifiersAndParameters(): Unit =
-      val identifierDestPairs =
-          method._identifierViaContainsOut.flatMap { identifier =>
-            val firstAndLastUsageByMethod =
-                identifierToFirstUsages(identifier).groupBy(_.method)
-            firstAndLastUsageByMethod.values
+      // Every identifier of a variable resolves to the same declarations, and the usages captured
+      // from them - a walk over the whole AST of every closure that captures the variable - are
+      // the same for all of them. In a Python `<module>`, where every function captures the
+      // module's variables, recomputing them per identifier was most of this pass. They are
+      // computed once per declaration list here; the result per identifier is unchanged.
+      val usagesByDecls =
+          mutable.HashMap.empty[List[Declaration], List[Identifier]]
+      def firstUsages(identifier: Identifier): List[Identifier] =
+        val decls = identifier.refsTo.l
+        if decls.isEmpty then Nil
+        else usagesByDecls.getOrElseUpdate(decls, identifierToFirstUsages(identifier))
+      val firstLastByDecls =
+          mutable.HashMap.empty[List[Declaration], List[(Identifier, Identifier)]]
+      def firstAndLastUsages(identifier: Identifier): List[(Identifier, Identifier)] =
+        val decls = identifier.refsTo.l
+        if decls.isEmpty then Nil
+        else
+          firstLastByDecls.getOrElseUpdate(
+            decls,
+            firstUsages(identifier).groupBy(_.method).values
                 .filter(_.nonEmpty)
                 .map(x => (x.head, x.last))
+                .toList
+          )
+
+      val identifierDestPairs =
+          method._identifierViaContainsOut.flatMap { identifier =>
+            firstAndLastUsages(identifier)
                 .flatMap { case (firstUsage, lastUsage) =>
                     (
                       identifier.lineNumber,
@@ -197,11 +218,17 @@ class DdgGenerator(semantics: Semantics):
           }
       }
 
+      // `globalFromLiteral` walks each literal up to its enclosing method and keeps it only when
+      // that is a `<module>`/`:package` method. Every such enclosing method lies in this method's
+      // AST, so without one there, no literal can qualify and the upward walks are skipped.
+      val hasGlobalScope =
+          method.ast.isMethod.exists(m => m.name == "<module>" || m.name == ":package")
       val globalIdentifiers =
-          method.ast.isLiteral.flatMap(globalFromLiteral).collectAll[Identifier].l
+          if !hasGlobalScope then Nil
+          else method.ast.isLiteral.flatMap(globalFromLiteral).collectAll[Identifier].l
       globalIdentifiers
           .foreach { global =>
-              identifierToFirstUsages(global).map { identifier =>
+              firstUsages(global).foreach { identifier =>
                   addEdge(global, identifier, nodeToEdgeLabel(global))
               }
           }
