@@ -132,6 +132,11 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private val ANGULAR_SANITIZER_BYPASS_REGEX =
       ".*bypassSecurityTrust(HTML|Html|SCRIPT|Script|STYLE|Style|URL|Url|RESOURCE_URL|ResourceUrl).*"
 
+  // What `input()` and `input.required()` resolve to through the import, so a renamed import
+  // matches and a local function called `input` does not.
+  private val ANGULAR_SIGNAL_INPUT_FULL_NAMES =
+      Seq("@angular/core:input", "@angular/core:input:required")
+
   // Route tables in Vue (`createRouter({ routes })`), Angular
   // (`RouterModule.forRoot(routes)`, `provideRouter(routes)`) and React Router
   // (`createBrowserRouter([{ path, element }])`) all lower to the same shape:
@@ -603,6 +608,26 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
                 dstGraph
               )
           case _ =>
+    }
+
+    // Signal inputs: the field initialiser `bio = input<string>('')` is lowered into the
+    // constructor as an assignment to `bio`, so its left-hand side names the member. The field
+    // access is tagged, as for `@Input()`: it is under every read `this.bio()` and it is all
+    // there is when the signal is handed on without being called.
+    atom.call.methodFullNameExact(ANGULAR_SIGNAL_INPUT_FULL_NAMES*).foreach { initialiser =>
+        for
+          assignment <- initialiser.inCall.nameExact(Operators.assignment)
+          target     <- assignment.argumentOption(1).collect { case i: Identifier => i }
+          typeDecl   <- initialiser.method.typeDecl
+          member     <- typeDecl.member.nameExact(target.name)
+        do
+          storeTag(Iterator(member), FRAMEWORK_INPUT, dstGraph)
+          storeTag(
+            typeDecl.method.flatMap(_.ast.isCall).nameExact(Operators.fieldAccess)
+                .codeExact(s"this.${member.name}"),
+            FRAMEWORK_INPUT,
+            dstGraph
+          )
     }
 
     // NB: class-level inventory tagging of @Component/@Injectable classes was deliberately
