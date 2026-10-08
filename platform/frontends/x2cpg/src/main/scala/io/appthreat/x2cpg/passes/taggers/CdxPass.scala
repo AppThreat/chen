@@ -3,8 +3,8 @@ package io.appthreat.x2cpg.passes.taggers
 import io.circe.*
 import io.circe.parser.*
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.Languages
-import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Languages}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewTag, StoredNode}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -43,6 +43,7 @@ class CdxPass(
                 components.foreach(
                   processComponent(_, donePkgs, unambiguousJvmGroups, dstGraph)
                 )
+                applyGenericJobs(dstGraph)
             case Left(error) =>
                 System.err.println(s"Failed to parse cdx json: $error")
       }
@@ -177,8 +178,7 @@ class CdxPass(
                 // component implies - the purl on types and parameters, the component
                 // type, the description tags - is the same work `processProperties`
                 // does, so it is applied from one place for both paths.
-                atom.call.where(_.methodFullName(bpkg)).newTagNode(purl).store()(using dstGraph)
-                tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
+                tagByLanguage(bpkg, purl, compType, descTags, dstGraph, tagCallMethods = true)
           }
         }
   end processPypiComponent
@@ -252,15 +252,18 @@ class CdxPass(
     purl: String,
     compType: String,
     descTags: List[String],
-    dstGraph: DiffGraphBuilder
+    dstGraph: DiffGraphBuilder,
+    tagCallMethods: Boolean = false
   ): Unit =
+      // `tagCallMethods` is only set by the pypi path, whose language always lands in tagGeneric.
       language match
         case lang if lang == Languages.RUBYSRC =>
             tagRuby(bpkg, purl, compType, dstGraph)
         case lang if lang == Languages.NEWC || lang == Languages.C =>
             tagCpp(bpkg, purl, compType, descTags, dstGraph)
         case _ =>
-            tagGeneric(bpkg, purl, compType, descTags, dstGraph)
+            tagGeneric(bpkg, purl, compType, descTags, tagCallMethods)
+  end tagByLanguage
 
   private def tagRuby(
     bpkg: String,
@@ -319,42 +322,82 @@ class CdxPass(
     purl: String,
     compType: String,
     descTags: List[String],
-    dstGraph: DiffGraphBuilder
+    tagCallMethods: Boolean
   ): Unit =
     val isRegex       = containsRegex(bpkg)
-    val pattern       = if isRegex then Pattern.quote(bpkg) else bpkg
-    val typePattern   = if isRegex then bpkg else pattern
-    val methodPattern = if isRegex then bpkg else s"$pattern.*"
+    val methodPattern = if isRegex then bpkg else s"$bpkg.*"
+    genericJobs += GenericJob(
+      typeMatcher = CdxPatternMatcher(bpkg),
+      methodMatcher = CdxPatternMatcher(methodPattern),
+      callMethodMatcher = Option.when(tagCallMethods)(CdxPatternMatcher(bpkg)),
+      purl = purl,
+      compTypeTag = Option.when(compType != "library")(compType),
+      descTags = descTags
+    )
 
-    // Each node set is matched once and reused for every tag below. Each match is a regex over
-    // every call, identifier, parameter or method of the graph, and the purl, the component type
-    // and every description tag used to repeat it - per component, which on a project with a
-    // few hundred dependencies made this pass a visible share of the whole run. The tags are
-    // added in the same order as before.
-    val calls       = atom.call.typeFullName(typePattern).l
-    val identifiers = atom.identifier.typeFullName(typePattern).l
-    val parameters  = atom.method.parameter.typeFullName(typePattern).l
-    val methods     = atom.method.fullName(methodPattern).l
-    def tag(nodes: List[StoredNode], name: String): Unit =
-        nodes.iterator.newTagNode(name).store()(using dstGraph)
+  /** One `tagGeneric` request, applied later by [[applyGenericJobs]]. */
+  private case class GenericJob(
+    typeMatcher: CdxPatternMatcher,
+    methodMatcher: CdxPatternMatcher,
+    callMethodMatcher: Option[CdxPatternMatcher],
+    purl: String,
+    compTypeTag: Option[String],
+    descTags: List[String]
+  )
 
-    tag(calls, purl)
-    tag(identifiers, purl)
-    tag(parameters, purl)
-    tag(methods, purl)
+  private val genericJobs = mutable.ArrayBuffer.empty[GenericJob]
 
-    if compType != "library" then
-      tag(calls, compType)
-      tag(parameters, compType)
-      tag(methods, compType)
+  /** Applies every queued `tagGeneric` request in one scan per node kind.
+    *
+    * Tagging used to run four full-graph regex scans per (component, namespace form) - plus a
+    * `where(_.methodFullName(..))` scan on the pypi path that recompiled its regex for every call
+    * node - which on DefectDojo (155 components) was ~1,500 graph scans and 190 GB of allocation.
+    * Here each node is visited once and its name is looked up in a [[CdxPatternIndex]], which
+    * serves the common literal-prefix patterns (`django\..*`) from a hash map.
+    *
+    * The tags each node receives, and their order on that node, are exactly those of the former
+    * per-job scans: jobs are applied in queue order and, within a job, a call gets its method-name
+    * purl before its type-name tags.
+    */
+  private def applyGenericJobs(dstGraph: DiffGraphBuilder): Unit =
+    if genericJobs.isEmpty then return
+    val jobs        = genericJobs.toArray
+    val typeIndex   = CdxPatternIndex(jobs.iterator.map(_.typeMatcher).zipWithIndex.toSeq)
+    val methodIndex = CdxPatternIndex(jobs.iterator.map(_.methodMatcher).zipWithIndex.toSeq)
+    val callMethodIndex = CdxPatternIndex(
+      jobs.iterator.zipWithIndex.flatMap((j, i) => j.callMethodMatcher.map(_ -> i)).toSeq
+    )
 
-    descTags.foreach { descTag =>
-      tag(calls, descTag)
-      tag(identifiers, descTag)
-      tag(parameters, descTag)
-      tag(methods, descTag)
+    def tag(node: StoredNode, name: String): Unit =
+      val t = NewTag().name(name).value("")
+      dstGraph.addNode(t)
+      dstGraph.addEdge(node, t, EdgeTypes.TAGGED_BY)
+
+    def tagJob(node: StoredNode, job: GenericJob, withCompType: Boolean): Unit =
+      tag(node, job.purl)
+      if withCompType then job.compTypeTag.foreach(tag(node, _))
+      job.descTags.foreach(tag(node, _))
+
+    atom.call.foreach { call =>
+      val byMethod = callMethodIndex.matching(call.methodFullName)
+      val byType   = typeIndex.matching(call.typeFullName)
+      if byMethod.nonEmpty || byType.nonEmpty then
+        (byMethod ++ byType).distinct.sorted.foreach { i =>
+          if byMethod.contains(i) then tag(call, jobs(i).purl)
+          if byType.contains(i) then tagJob(call, jobs(i), withCompType = true)
+        }
     }
-  end tagGeneric
+    atom.identifier.foreach { id =>
+        typeIndex.matching(id.typeFullName).foreach(i => tagJob(id, jobs(i), withCompType = false))
+    }
+    atom.method.parameter.foreach { p =>
+        typeIndex.matching(p.typeFullName).foreach(i => tagJob(p, jobs(i), withCompType = true))
+    }
+    atom.method.foreach { m =>
+        methodIndex.matching(m.fullName).foreach(i => tagJob(m, jobs(i), withCompType = true))
+    }
+    genericJobs.clear()
+  end applyGenericJobs
 
   private def containsRegex(str: String): Boolean =
     val reChars = "[](){}*+&|?.,\\$"

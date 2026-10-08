@@ -235,7 +235,9 @@ object Engine:
                   // Methods the walk treats as a descendable callee (internal, or external
                   // with a body): the call site is a boundary the walk reports at, rather than
                   // an opaque call whose permissive in-edges are followed.
-                  val internalMethodsForCall =
+                  // Lazy: only asked when the semantic does not already decide visibility -
+                  // resolving callees and checking their bodies is the costlier half.
+                  lazy val internalMethodsForCall =
                       parentCallOpt.map(methodsForCall).getOrElse(Nil)
                           .filter(MethodExplorability.stopsWalkAtCallSite)
                   (semanticExists && parentNode.isDefined) || internalMethodsForCall.isEmpty

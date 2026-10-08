@@ -127,49 +127,52 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
           case _ => None
 
     def deduplicateWithinTask(vec: Vector[ReachableByResult]): Vector[ReachableByResult] =
-        vec
-            .groupBy { result =>
-              val head = result.path.headOption.map(x =>
-                  (x.node, x.callSiteStack, x.isOutputArg)
-              ).get
-              val last = result.path.lastOption.map(x =>
-                  (x.node, x.callSiteStack, x.isOutputArg)
-              ).get
-              (head, last, result.partial, result.callDepth)
-            }
-            .map { case (_, list) =>
-                val lenIdPathPairs = list.map(x => (x.path.length, x)).toList
-                val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match
-                  case Nil    => Nil
-                  case h :: t => h :: t.takeWhile(y => y._1 == h._1)
-                ).map(_._2)
+        // One result is its own group (and the grouping below would return it unchanged).
+        if vec.sizeIs <= 1 then vec
+        else
+          vec
+              .groupBy { result =>
+                val head = result.path.headOption.map(x =>
+                    (x.node, x.callSiteStack, x.isOutputArg)
+                ).get
+                val last = result.path.lastOption.map(x =>
+                    (x.node, x.callSiteStack, x.isOutputArg)
+                ).get
+                (head, last, result.partial, result.callDepth)
+              }
+              .map { case (_, list) =>
+                  val lenIdPathPairs = list.map(x => (x.path.length, x)).toList
+                  val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match
+                    case Nil    => Nil
+                    case h :: t => h :: t.takeWhile(y => y._1 == h._1)
+                  ).map(_._2)
 
-                if withMaxLength.length == 1 then
-                  withMaxLength.head
-                else
-                  withMaxLength.minBy { x =>
-                      x.callDepth.toString + " " +
-                          x.taskStack
-                              .map(x =>
-                                  x.sink.id.toString + ":" + x.callSiteStack.map(
-                                    _.id
-                                  ).mkString("|")
-                              )
-                              .toString + " " + x.path
-                              .map(x =>
-                                  (
-                                    x.node.id,
-                                    x.callSiteStack.map(_.id),
-                                    x.visible,
-                                    x.isOutputArg,
-                                    x.outEdgeLabel
-                                  ).toString
-                              )
-                              .mkString("-")
-                  }
-                end if
-            }
-            .toVector
+                  if withMaxLength.length == 1 then
+                    withMaxLength.head
+                  else
+                    withMaxLength.minBy { x =>
+                        x.callDepth.toString + " " +
+                            x.taskStack
+                                .map(x =>
+                                    x.sink.id.toString + ":" + x.callSiteStack.map(
+                                      _.id
+                                    ).mkString("|")
+                                )
+                                .toString + " " + x.path
+                                .map(x =>
+                                    (
+                                      x.node.id,
+                                      x.callSiteStack.map(_.id),
+                                      x.visible,
+                                      x.isOutputArg,
+                                      x.outEdgeLabel
+                                    ).toString
+                                )
+                                .mkString("-")
+                    }
+                  end if
+              }
+              .toVector
 
     def createResultsFromCacheOrCompute(elemToPrepend: PathElement, path: Vector[PathElement]) =
       val cachedResult =

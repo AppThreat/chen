@@ -23,6 +23,10 @@ class FluxReachingDefPass(
 
   s.loadRegexSemantics(cpg)
 
+  // One per pass, shared by all of its (concurrent) parts: see DdgSharedCache.
+
+  private val ddgSharedCache = new DdgSharedCache()
+
   override def generateParts(): Array[Method] = cpg.method.toArray
 
   override def runOnPart(dstGraph: DiffGraphBuilder, method: Method): Unit =
@@ -37,7 +41,7 @@ class FluxReachingDefPass(
       return
 
     val solution     = new FluxSolver().calculateMopSolutionForwards(problem)
-    val ddgGenerator = new DdgGenerator(s)
+    val ddgGenerator = new DdgGenerator(s, ddgSharedCache)
     ddgGenerator.addReachingDefEdges(dstGraph, method, problem, solution)
 
   private def shouldBailOut(

@@ -1,20 +1,24 @@
 package io.appthreat.dataflowengineoss.passes.reachingdef
 
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
-import io.appthreat.dataflowengineoss.{globalFromLiteral, identifierToFirstUsages}
+import io.appthreat.dataflowengineoss.{GlobalScopeMethodNames, globalFromLiteral}
 import io.appthreat.dataflowengineoss.queryengine.AccessPathUsage.toTrackedBaseAndAccessPathSimple
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators, PropertyNames}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.accesspath.MatchResult
+import io.shiftleft.semanticcpg.language.operatorextension.allAssignmentTypes
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.{Set, mutable}
 
 /** Creation of data dependence edges based on solution of the ReachingDefProblem.
   */
-class DdgGenerator(semantics: Semantics):
+class DdgGenerator(
+  semantics: Semantics,
+  sharedCache: DdgSharedCache = new DdgSharedCache(sharedAcrossMethods = false)
+):
 
   implicit val s: Semantics = semantics
 
@@ -166,25 +170,26 @@ class DdgGenerator(semantics: Semantics):
       }
 
     def addEdgesToCapturedIdentifiersAndParameters(): Unit =
+      def firstUsages(identifier: Identifier): List[Identifier] =
+          sharedCache.firstUsages(identifier)
+      def firstAndLastUsages(identifier: Identifier): List[(Identifier, Identifier)] =
+          sharedCache.firstAndLastUsages(identifier)
+
       val identifierDestPairs =
           method._identifierViaContainsOut.flatMap { identifier =>
-            val firstAndLastUsageByMethod =
-                identifierToFirstUsages(identifier).groupBy(_.method)
-            firstAndLastUsageByMethod.values
-                .filter(_.nonEmpty)
-                .map(x => (x.head, x.last))
-                .flatMap { case (firstUsage, lastUsage) =>
-                    (
-                      identifier.lineNumber,
-                      firstUsage.lineNumber,
-                      lastUsage.lineNumber
-                    ) match
-                      case (Some(iNo), Some(fNo), _) if iNo <= fNo =>
-                          Some(identifier, firstUsage)
-                      case (Some(iNo), _, Some(lNo)) if iNo >= lNo =>
-                          Some(lastUsage, identifier)
-                      case _ => None
-                }
+              firstAndLastUsages(identifier)
+                  .flatMap { case (firstUsage, lastUsage) =>
+                      (
+                        identifier.lineNumber,
+                        firstUsage.lineNumber,
+                        lastUsage.lineNumber
+                      ) match
+                        case (Some(iNo), Some(fNo), _) if iNo <= fNo =>
+                            Some(identifier, firstUsage)
+                        case (Some(iNo), _, Some(lNo)) if iNo >= lNo =>
+                            Some(lastUsage, identifier)
+                        case _ => None
+                  }
           }.distinct
 
       identifierDestPairs
@@ -197,11 +202,26 @@ class DdgGenerator(semantics: Semantics):
           }
       }
 
+      // `globalFromLiteral(lit)` is non-empty only when an assignment among the literal's AST
+      // ancestors (up to the nearest METHOD) belongs to a global-scope method. The literals that can
+      // qualify are therefore those in the AST of such an assignment, without crossing into a
+      // nested METHOD - found by walking down from the few qualifying assignments, instead of
+      // walking up from every literal of the file. Survivors are visited in the original AST order
+      // and still go through `globalFromLiteral`, so the result is unchanged.
       val globalIdentifiers =
-          method.ast.isLiteral.flatMap(globalFromLiteral).collectAll[Identifier].l
+          if !sharedCache.hasGlobalScopeInAst(method) then Nil
+          else
+            val candidates = literalsUnderGlobalAssignments(method)
+            if candidates.isEmpty then Nil
+            else
+              method.ast.isLiteral
+                  .filter(lit => candidates.contains(lit.id()))
+                  .flatMap(globalFromLiteral)
+                  .collectAll[Identifier]
+                  .l
       globalIdentifiers
           .foreach { global =>
-              identifierToFirstUsages(global).map { identifier =>
+              firstUsages(global).foreach { identifier =>
                   addEdge(global, identifier, nodeToEdgeLabel(global))
               }
           }
@@ -219,6 +239,24 @@ class DdgGenerator(semantics: Semantics):
     addEdgesToExitNode(method.methodReturn)
     addEdgesFromLoneIdentifiersToExit(method)
   end addReachingDefEdges
+
+  /** Ids of the literals in the AST of an assignment, in `method`'s AST, that belongs to a
+    * global-scope method - not descending into nested METHODs, where an upward walk from a literal
+    * would stop before reaching the assignment.
+    */
+  private def literalsUnderGlobalAssignments(method: Method): Set[Long] =
+    val out  = Set.newBuilder[Long]
+    val work = mutable.Stack.empty[AstNode]
+    method.ast.isCall
+        .filter(c => allAssignmentTypes.contains(c.name))
+        .filter(c => Option(c.method).exists(m => GlobalScopeMethodNames.contains(m.name)))
+        .foreach(work.push)
+    while work.nonEmpty do
+      work.pop() match
+        case _: Method    =>
+        case lit: Literal => out += lit.id()
+        case node         => node._astOut.foreach { case c: AstNode => work.push(c); case _ => }
+    out.result()
 
   private def addEdge(fromNode: StoredNode, toNode: StoredNode, variable: String = "")(implicit
     dstGraph: DiffGraphBuilder
