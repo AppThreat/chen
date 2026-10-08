@@ -1,13 +1,14 @@
 package io.appthreat.dataflowengineoss.passes.reachingdef
 
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
-import io.appthreat.dataflowengineoss.globalFromLiteral
+import io.appthreat.dataflowengineoss.{GlobalScopeMethodNames, globalFromLiteral}
 import io.appthreat.dataflowengineoss.queryengine.AccessPathUsage.toTrackedBaseAndAccessPathSimple
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators, PropertyNames}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.accesspath.MatchResult
+import io.shiftleft.semanticcpg.language.operatorextension.allAssignmentTypes
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.{Set, mutable}
@@ -198,12 +199,23 @@ class DdgGenerator(semantics: Semantics, sharedCache: DdgSharedCache = new DdgSh
           }
       }
 
-      // `globalFromLiteral` walks each literal up to its enclosing method and keeps it only when
-      // that is a global-scope method. Every such enclosing method lies in this method's AST, so
-      // without one there no literal can qualify and the walks are skipped.
+      // `globalFromLiteral(lit)` is non-empty only when an assignment among the literal's AST
+      // ancestors (up to the nearest METHOD) belongs to a global-scope method. The literals that can
+      // qualify are therefore those in the AST of such an assignment, without crossing into a
+      // nested METHOD - found by walking down from the few qualifying assignments, instead of
+      // walking up from every literal of the file. Survivors are visited in the original AST order
+      // and still go through `globalFromLiteral`, so the result is unchanged.
       val globalIdentifiers =
           if !sharedCache.hasGlobalScopeInAst(method) then Nil
-          else method.ast.isLiteral.flatMap(globalFromLiteral).collectAll[Identifier].l
+          else
+            val candidates = literalsUnderGlobalAssignments(method)
+            if candidates.isEmpty then Nil
+            else
+              method.ast.isLiteral
+                  .filter(lit => candidates.contains(lit.id()))
+                  .flatMap(globalFromLiteral)
+                  .collectAll[Identifier]
+                  .l
       globalIdentifiers
           .foreach { global =>
               firstUsages(global).foreach { identifier =>
@@ -224,6 +236,24 @@ class DdgGenerator(semantics: Semantics, sharedCache: DdgSharedCache = new DdgSh
     addEdgesToExitNode(method.methodReturn)
     addEdgesFromLoneIdentifiersToExit(method)
   end addReachingDefEdges
+
+  /** Ids of the literals in the AST of an assignment, in `method`'s AST, that belongs to a
+    * global-scope method - not descending into nested METHODs, where an upward walk from a literal
+    * would stop before reaching the assignment.
+    */
+  private def literalsUnderGlobalAssignments(method: Method): Set[Long] =
+    val out  = Set.newBuilder[Long]
+    val work = mutable.Stack.empty[AstNode]
+    method.ast.isCall
+        .filter(c => allAssignmentTypes.contains(c.name))
+        .filter(c => Option(c.method).exists(m => GlobalScopeMethodNames.contains(m.name)))
+        .foreach(work.push)
+    while work.nonEmpty do
+      work.pop() match
+        case _: Method    =>
+        case lit: Literal => out += lit.id()
+        case node         => node._astOut.foreach { case c: AstNode => work.push(c); case _ => }
+    out.result()
 
   private def addEdge(fromNode: StoredNode, toNode: StoredNode, variable: String = "")(implicit
     dstGraph: DiffGraphBuilder
