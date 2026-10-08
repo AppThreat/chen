@@ -15,7 +15,10 @@ import scala.collection.{Set, mutable}
 
 /** Creation of data dependence edges based on solution of the ReachingDefProblem.
   */
-class DdgGenerator(semantics: Semantics, sharedCache: DdgSharedCache = new DdgSharedCache()):
+class DdgGenerator(
+  semantics: Semantics,
+  sharedCache: DdgSharedCache = new DdgSharedCache(sharedAcrossMethods = false)
+):
 
   implicit val s: Semantics = semantics
 

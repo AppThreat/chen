@@ -13,8 +13,13 @@ import java.util.concurrent.ConcurrentHashMap
   *
   * Only valid while the AST, REF and CAPTURE edges it reads stay unchanged, which holds for a
   * reaching-definition pass: it adds REACHING_DEF edges only.
+  *
+  * @param sharedAcrossMethods
+  *   false for the per-method instance a [[DdgGenerator]] creates when it is given none: the
+  *   graph-wide precomputation of [[hasGlobalScopeInAst]] only pays off when amortised over a pass,
+  *   so such an instance answers it from the method's own AST instead.
   */
-final class DdgSharedCache:
+final class DdgSharedCache(sharedAcrossMethods: Boolean = true):
 
   private val usagesByDecls = new ConcurrentHashMap[List[Declaration], List[Identifier]]()
   private val firstLastByDecls =
@@ -60,6 +65,8 @@ final class DdgSharedCache:
     * overwhelming majority of methods that hold no global scope.
     */
   def hasGlobalScopeInAst(method: Method): Boolean =
+    if !sharedAcrossMethods then
+      return method.ast.isMethod.exists(m => GlobalScopeMethodNames.contains(m.name))
     var holders = globalScopeHolders
     if holders == null then
       holders = computeGlobalScopeHolders(Cpg(using method.graph()))
