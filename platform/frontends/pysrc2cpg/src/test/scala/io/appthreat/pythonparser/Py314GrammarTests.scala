@@ -8,8 +8,8 @@ import org.scalatest.matchers.should.Matchers
   *
   * Oracle for every expectation here: CPython 3.14.6 (`python3 --version`) - notably that `except
   * A, B as e:` is a SyntaxError in 3.14 ("multiple exception types must be parenthesized when using
-  * 'as'"; the unparenthesised `as` form is 3.15 material), while `except A, B:`, `except A, B,:`
-  * and `except* A, B:` are legal.
+  * 'as'"; still a SyntaxError in 3.15.0), while `except A, B:`, `except A, B,:` and `except* A, B:`
+  * are legal.
   *
   * Every probe asserts AST SHAPE through the printer, not just absence of a parse error: a grammar
   * that accepts `except A, B:` by silently reusing the Python 2 `except E, name:` arm ends up
@@ -79,9 +79,9 @@ class Py314GrammarTests extends AnyFreeSpec with Matchers:
           parseWithoutErrors("try:\n    pass\nexcept A, B,:\n    pass\n")
       }
 
-      "except A, B as e: parses with e bound (3.15-lenient)" in {
-          // Rejected by 3.14.6, accepted here deliberately: the grammar is not a validator,
-          // and 3.15 un-parenthesises this form.
+      "except A, B as e: parses with e bound (lenient)" in {
+          // Rejected by 3.14.6 and by 3.15.0 alike; accepted here deliberately because the
+          // grammar is not a validator.
           print("try:\n    pass\nexcept A, B as e:\n    pass\n") should include("as e")
       }
 
@@ -115,11 +115,10 @@ class Py314GrammarTests extends AnyFreeSpec with Matchers:
   "Python 3.15 lazy imports (contextual keyword)" - {
 
       "lazy import and lazy from keep `lazy` a soft keyword" in {
-          // Oracle: SyntaxError on 3.14.6; the CPython 3.15 branch grammar accepts
-          // lazy="lazy"? before both import forms. The flag only defers loading at runtime,
-          // so the AST is an ordinary Import/ImportFrom.
-          print("lazy import os.path\n") should include("import os.path")
-          print("lazy from os import path\n") should include("from os import path")
+          // Oracle: SyntaxError on 3.14.6; CPython 3.15.0 accepts lazy="lazy"? before both import
+          // forms and records it as Import.is_lazy / ImportFrom.is_lazy (see Py315GrammarTests).
+          print("lazy import os.path\n") shouldBe "lazy import os.path"
+          print("lazy from os import path\n") shouldBe "lazy from os import path"
       }
 
       "lazy as a plain name still parses everywhere" in {

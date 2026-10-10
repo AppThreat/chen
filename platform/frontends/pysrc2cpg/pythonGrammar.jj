@@ -311,11 +311,17 @@ TOKEN_MGR_DECLS:
 
   // CPython NFKC-normalises identifiers after tokenising (PEP 3131), so `ﬁle` and `file`, or
   // `ｘ` and `x`, name the same variable. Only non-ASCII images need the (comparatively costly)
-  // normalisation; positions are computed from the raw image before this runs.
+  // normalisation; positions are computed from the raw image before this runs. Normalisation
+  // needs the JDK's ICU data (`nfkc.nrm`); should a stripped runtime (a native image without the
+  // resource) be unable to load it, the raw spelling is kept rather than failing the lexer.
   static String normalizeIdentifier(String image) {
     for (int i = 0; i < image.length(); i++) {
       if (image.charAt(i) > 0x7F) {
-        return java.text.Normalizer.normalize(image, java.text.Normalizer.Form.NFKC);
+        try {
+          return java.text.Normalizer.normalize(image, java.text.Normalizer.Form.NFKC);
+        } catch (RuntimeException | Error e) {
+          return image;
+        }
       }
     }
     return image;
@@ -4244,7 +4250,7 @@ iexpr setOrDictOrSetCompOrDictComp(): {
             (
               <COLON> dictValueExpr = expression()
               {
-                if (doubleStarExpr != null) {
+                if (doubleStarExpr != null || walrusValueExpr != null) {
                   throw new ParseException("TODO");
                 }
               }

@@ -30,6 +30,10 @@ class PyCorpusRegressionTests extends AnyFreeSpec with Matchers:
   private val ControlStructure = """control-structure (\w+) count=(\d+)""".r
   private val NodeAbsent       = """node-absent (\w+).*""".r
   private val ParseErrorsCount = """parse-errors count=(\d+)""".r
+  // `tag <name> count=N`: N nodes wear a TAG of that name (e.g. lazy-import on import calls)
+  private val TagCount = """tag ([\w-]+) count=(\d+)""".r
+  // `call <name> count=N`: N CALL nodes with exactly that name
+  private val CallCount = """call ([\w.<>-]+) count=(\d+)""".r
 
   private def expectations(code: String): Seq[Expectation] =
       code.linesIterator.zipWithIndex.collect {
@@ -67,6 +71,10 @@ class PyCorpusRegressionTests extends AnyFreeSpec with Matchers:
         case ControlStructure(csType, n) =>
             cpgFor(file, code).controlStructure.controlStructureType.l
                 .count(_.toString == csType) == n.toInt
+        case TagCount(tagName, n) =>
+            cpgFor(file, code).tag.nameExact(tagName).flatMap(_._taggedByIn).size == n.toInt
+        case CallCount(callName, n) =>
+            cpgFor(file, code).call.nameExact(callName).size == n.toInt
         case other =>
             fail(s"Assertion kind not supported by the in-repo harness: $other")
 
