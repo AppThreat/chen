@@ -8,13 +8,12 @@ name := "jssrc2cpg"
 dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
-  "io.appthreat"              %% "cpg2" % Versions.cpg,
-  "com.lihaoyi"               %% "upickle"           % Versions.upickle,
-  "com.typesafe"               % "config"            % Versions.typeSafeConfig,
-  "com.michaelpollmeier"       % "versionsort"       % "1.0.17",
-  "org.scalatest"             %% "scalatest"         % Versions.scalatest % Test
+  "io.appthreat"        %% "cpg2"        % Versions.cpg,
+  "com.lihaoyi"         %% "upickle"     % Versions.upickle,
+  "com.typesafe"         % "config"      % Versions.typeSafeConfig,
+  "com.michaelpollmeier" % "versionsort" % "1.0.17",
+  "org.scalatest"       %% "scalatest"   % Versions.scalatest % Test
 )
-
 
 compile / javacOptions ++= Seq("-Xlint:all", "-Xlint:-cast", "-g")
 Test / fork := false
@@ -23,12 +22,12 @@ enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 
 Universal / packageName       := name.value
 Universal / topLevelDirectory := None
-githubOwner := "appthreat"
-githubRepository := "chen"
+githubOwner                   := "appthreat"
+githubRepository              := "chen"
 credentials +=
-  Credentials(
-    "GitHub Package Registry",
-    "maven.pkg.github.com",
-    "appthreat",
-    sys.env.getOrElse("GITHUB_TOKEN", "N/A")
-  )
+    Credentials(
+      "GitHub Package Registry",
+      "maven.pkg.github.com",
+      "appthreat",
+      sys.env.getOrElse("GITHUB_TOKEN", "N/A")
+    )

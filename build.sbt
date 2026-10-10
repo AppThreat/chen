@@ -30,12 +30,12 @@ lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
   jimple2cpg,
   php2atom,
   ruby2atom,
-  edg2atom,
+  edg2atom
 )
 
 ThisBuild / libraryDependencies ++= Seq(
-  "org.slf4j"                % "slf4j-api"         % "2.0.18",
-  "org.slf4j"                % "slf4j-nop"         % "2.0.18" % Optional,
+  "org.slf4j" % "slf4j-api" % "2.0.18",
+  "org.slf4j" % "slf4j-nop" % "2.0.18" % Optional
 )
 
 ThisBuild / excludeDependencies ++= Seq(
@@ -48,10 +48,10 @@ ThisBuild / compile / javacOptions ++= Seq(
   "-Xlint",
   "--release=23"
 ) ++ {
-  // fail early if users with JDK8 try to run this
-  val javaVersion = sys.props("java.specification.version").toFloat
-  assert(javaVersion.toInt >= 23, s"this build requires JDK23+ - you're using $javaVersion")
-  Nil
+    // fail early if users with JDK8 try to run this
+    val javaVersion = sys.props("java.specification.version").toFloat
+    assert(javaVersion.toInt >= 23, s"this build requires JDK23+ - you're using $javaVersion")
+    Nil
 }
 
 ThisBuild / scalacOptions ++= Seq(
@@ -60,45 +60,44 @@ ThisBuild / scalacOptions ++= Seq(
   "23"
 )
 
-
 enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
 
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
 createDistribution := {
-  val distributionFile = file("target/chen.zip")
-  val zip              = (platform / Universal / packageBin).value
-  IO.copyFile(zip, distributionFile)
-  println(s"created distribution - resulting files: $distributionFile")
-  distributionFile
+    val distributionFile = file("target/chen.zip")
+    val zip              = (platform / Universal / packageBin).value
+    IO.copyFile(zip, distributionFile)
+    println(s"created distribution - resulting files: $distributionFile")
+    distributionFile
 }
 
 ThisBuild / resolvers ++= Seq(
   Resolver.mavenLocal,
-  "Sonatype OSS" at "https://oss.sonatype.org/content/repositories/public",
-  "Atlassian" at "https://packages.atlassian.com/mvn/maven-atlassian-external",
-  "Gradle Releases" at "https://repo.gradle.org/gradle/libs-releases/"
+  "Sonatype OSS".at("https://oss.sonatype.org/content/repositories/public"),
+  "Atlassian".at("https://packages.atlassian.com/mvn/maven-atlassian-external"),
+  "Gradle Releases".at("https://repo.gradle.org/gradle/libs-releases/")
 )
 
 ThisBuild / assemblyMergeStrategy := {
-  case PathList("javax", "servlet", xs @ _*)         => MergeStrategy.first
-  case PathList(ps @ _*) if ps.last endsWith ".html" => MergeStrategy.first
-  case "application.conf"                            => MergeStrategy.concat
-  case "unwanted.txt"                                => MergeStrategy.discard
-  case x => MergeStrategy.preferProject
+    case PathList("javax", "servlet", xs*)          => MergeStrategy.first
+    case PathList(ps*) if ps.last.endsWith(".html") => MergeStrategy.first
+    case "application.conf"                         => MergeStrategy.concat
+    case "unwanted.txt"                             => MergeStrategy.discard
+    case x                                          => MergeStrategy.preferProject
 }
 
 ThisBuild / versionScheme := Some("early-semver")
 
-ThisBuild / Test / fork := true
+ThisBuild / Test / fork       := true
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-publish / skip := true // don't publish the root project
+publish / skip   := true // don't publish the root project
 githubOwner      := "appthreat"
 githubRepository := "chen"
 
 // Avoids running root tasks on the benchmarks project
 lazy val root = project
-  .in(file("."))
-  .aggregate(aggregatedProjects*)
+    .in(file("."))
+    .aggregate(aggregatedProjects*)
 
 ThisBuild / Test / packageBin / publishArtifact := true
