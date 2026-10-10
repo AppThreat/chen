@@ -84,10 +84,15 @@ trait PythonAstVisitorHelpers:
     controlStructureNode
   end createTryStar
 
+  /** Lowers an import statement to one `name = import(from, name[, asName])` assignment per alias.
+    * `lazyTag` gives, per alias, the PEP 810 laziness of that binding (see [[PythonLazyImports]]):
+    * when defined, the import call is tagged `lazy-import` with that value.
+    */
   protected def createTransformedImport(
     from: String,
     names: Iterable[ast.Alias],
-    lineAndCol: LineAndColumn
+    lineAndCol: LineAndColumn,
+    lazyTag: ast.Alias => Option[String] = _ => None
   ): NewNode =
     val importAssignNodes =
         names.map { alias =>
@@ -112,6 +117,12 @@ trait PythonAstVisitorHelpers:
                 arguments,
                 Nil
               )
+          lazyTag(alias).foreach { value =>
+              edgeBuilder.taggedByEdge(
+                importCallNode,
+                nodeBuilder.tagNode(PythonLazyImports.Tag, value)
+              )
+          }
 
           val assignNode =
               createAssignment(importAssignLhsIdentifierNode, importCallNode, lineAndCol)

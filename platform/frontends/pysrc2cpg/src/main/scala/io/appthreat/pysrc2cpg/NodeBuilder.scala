@@ -13,6 +13,12 @@ class NodeBuilder(diffGraph: DiffGraphBuilder):
     diffGraph.addNode(node)
     node
 
+  // One TAG node per (name, value) per file: every lazy import of a module shares it.
+  private val tagNodes = scala.collection.mutable.HashMap.empty[(String, String), nodes.NewTag]
+
+  def tagNode(name: String, value: String): nodes.NewTag =
+      tagNodes.getOrElseUpdate((name, value), addNodeToDiff(nodes.NewTag().name(name).value(value)))
+
   def callNode(
     code: String,
     name: String,

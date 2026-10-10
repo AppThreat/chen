@@ -45,6 +45,9 @@ class PythonAstVisitor(
 
   private var memOpMap: AstNodeToMemoryOperationMap = scala.compiletime.uninitialized
 
+  // Import statements made lazy by `__lazy_modules__` (PEP 810), with their lazy alias names.
+  private var lazyModuleAliases = new java.util.IdentityHashMap[ast.istmt, Set[String]]()
+
   private val members = mutable.Map.empty[NewTypeDecl, List[String]]
 
   // As key only ast.FunctionDef and ast.AsyncFunctionDef are used but there
@@ -76,6 +79,10 @@ class PythonAstVisitor(
     val memOpCalculator = new MemoryOperationCalculator()
     module.accept(memOpCalculator)
     memOpMap = memOpCalculator.astNodeToMemOp
+    lazyModuleAliases = PythonLazyImports.lazyModuleAliases(
+      module,
+      PythonLazyImports.packageOf(relFileName, dottedModuleName)
+    )
 
     val fileNode = nodeBuilder.fileNode(relFileName)
     val namespaceBlockNode =
@@ -1630,7 +1637,12 @@ class PythonAstVisitor(
   //     y = import("", "y")
   //   }
   def convert(importStmt: ast.Import): NewNode =
-      createTransformedImport("", importStmt.names, lineAndColOf(importStmt))
+      createTransformedImport(
+        "",
+        importStmt.names,
+        lineAndColOf(importStmt),
+        lazyTagOf(importStmt, importStmt.is_lazy)
+      )
 
   // Lowering of from x import y:
   //   y = import("x", "y")
@@ -1648,7 +1660,21 @@ class PythonAstVisitor(
       moduleName = moduleName.appended('.')
     moduleName += importFrom.module.getOrElse("")
 
-    createTransformedImport(moduleName, importFrom.names, lineAndColOf(importFrom))
+    createTransformedImport(
+      moduleName,
+      importFrom.names,
+      lineAndColOf(importFrom),
+      lazyTagOf(importFrom, importFrom.is_lazy)
+    )
+
+  /** PEP 810 laziness of each alias an import statement binds: the `lazy` keyword makes every alias
+    * lazy, `__lazy_modules__` the ones [[PythonLazyImports.lazyModuleAliases]] found.
+    */
+  private def lazyTagOf(stmt: ast.istmt, isLazyKeyword: Boolean): ast.Alias => Option[String] =
+    val fromLazyModules = Option(lazyModuleAliases.get(stmt)).getOrElse(Set.empty[String])
+    alias =>
+        if isLazyKeyword then Some(PythonLazyImports.Keyword)
+        else Option.when(fromLazyModules.contains(alias.name))(PythonLazyImports.LazyModules)
 
   // `global x, y` / `nonlocal x, y` are scope declarations: the names are
   // registered with the context stack (which drives identifier REF/CLOSURE
@@ -1936,8 +1962,33 @@ class PythonAstVisitor(
 
     callNode
 
+  /** The per-element call of a comprehension lowering: `tmp.<addMethod>(elt)`, or - for a PEP 798
+    * (3.15) unpacking element `*xs` - `tmp.<addAllMethod>(xs)`, adding every item of the operand
+    * rather than an unpack operator over it.
+    */
+  private def createComprehensionElementCall(
+    tmpVariableName: String,
+    elt: ast.iexpr,
+    addMethod: String,
+    addAllMethod: String,
+    comprehension: ast.iattributes
+  ): NewNode =
+    val (method, argument) = elt match
+      case starred: ast.Starred => (addAllMethod, convert(starred.value))
+      case other                => (addMethod, convert(other))
+    createXDotYCall(
+      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(comprehension)),
+      method,
+      xMayHaveSideEffects = false,
+      lineAndColOf(comprehension),
+      argument :: Nil,
+      Nil
+    )
+
   /** Lowering of [x for y in l for x in y]: { tmp = [] <loweringOf>( for y in l: for x in y:
-    * tmp.append(x) ) tmp }
+    * tmp.append(x) ) tmp }. A PEP 798 (3.15) unpacking element `[*L for L in ls]` adds every item
+    * of `L`, so it lowers to `tmp.extend(L)` - the same call `[x for L in ls for x in L]` amounts
+    * to - instead of appending an unpack operator.
     */
   // TODO test
   def convert(listComp: ast.ListComp): NewNode =
@@ -1950,15 +2001,9 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, listOperatorCall, lineAndColOf(listComp))
 
-    // Create tmp.append(x)
-    val listVarAppendCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(listComp)),
-      "append",
-      xMayHaveSideEffects = false,
-      lineAndColOf(listComp),
-      convert(listComp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.append(x) / tmp.extend(L)
+    val listVarAppendCallNode =
+        createComprehensionElementCall(tmpVariableName, listComp.elt, "append", "extend", listComp)
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -1974,7 +2019,7 @@ class PythonAstVisitor(
   end convert
 
   /** Lowering of {x for y in l for x in y}: { tmp = {} <loweringOf>( for y in l: for x in y:
-    * tmp.add(x) ) tmp }
+    * tmp.add(x) ) tmp }. A PEP 798 unpacking element `{*s for s in ss}` lowers to `tmp.update(s)`.
     */
   // TODO test
   def convert(setComp: ast.SetComp): NewNode =
@@ -1986,15 +2031,9 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, setOperatorCall, lineAndColOf(setComp))
 
-    // Create tmp.add(x)
-    val setVarAddCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(setComp)),
-      "add",
-      xMayHaveSideEffects = false,
-      lineAndColOf(setComp),
-      convert(setComp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.add(x) / tmp.update(s)
+    val setVarAddCallNode =
+        createComprehensionElementCall(tmpVariableName, setComp.elt, "add", "update", setComp)
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2010,7 +2049,8 @@ class PythonAstVisitor(
   end convert
 
   /** Lowering of {k:v for y in l for k, v in y}: { tmp = {} <loweringOf>( for y in l: for k, v in
-    * y: tmp[k] = v ) tmp }
+    * y: tmp[k] = v ) tmp }. A PEP 798 unpacking comprehension `{**d for d in ds}` (CPython's
+    * DictComp with value = None) merges each mapping: `tmp.update(d)`.
     */
   // TODO test
   def convert(dictComp: ast.DictComp): NewNode =
@@ -2022,16 +2062,27 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, dictOperatorCall, lineAndColOf(dictComp))
 
-    // Create tmp[k] = v
-    val dictAssigNode = createAssignment(
-      createIndexAccess(
-        createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
-        convert(dictComp.key),
-        lineAndColOf(dictComp)
-      ),
-      convert(dictComp.value),
-      lineAndColOf(dictComp)
-    )
+    // Create tmp[k] = v / tmp.update(d)
+    val dictAssigNode = dictComp.value match
+      case Some(value) =>
+          createAssignment(
+            createIndexAccess(
+              createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
+              convert(dictComp.key),
+              lineAndColOf(dictComp)
+            ),
+            convert(value),
+            lineAndColOf(dictComp)
+          )
+      case None =>
+          createXDotYCall(
+            () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
+            "update",
+            xMayHaveSideEffects = false,
+            lineAndColOf(dictComp),
+            convert(dictComp.key) :: Nil,
+            Nil
+          )
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2072,15 +2123,15 @@ class PythonAstVisitor(
           lineAndColOf(generatorExp)
         )
 
-    // Create tmp.append(x)
-    val genExpAppendCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(generatorExp)),
-      "append",
-      xMayHaveSideEffects = false,
-      lineAndColOf(generatorExp),
-      convert(generatorExp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.append(x) / tmp.extend(L) for a PEP 798 unpacking element `(*L for L in ls)`
+    val genExpAppendCallNode =
+        createComprehensionElementCall(
+          tmpVariableName,
+          generatorExp.elt,
+          "append",
+          "extend",
+          generatorExp
+        )
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2644,7 +2695,7 @@ object PythonAstVisitor:
   )
 
   // This list contains all functions from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // Updated for Python 3.13
+  // Updated for Python 3.15 (diffed against dir(builtins) on CPython 3.15.0)
   val builtinFunctionsV3: Iterable[String] = Iterable(
     "abs",
     "aiter",
@@ -2703,7 +2754,7 @@ object PythonAstVisitor:
   )
 
   // This list contains all classes from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // Updated for Python 3.13
+  // Updated for Python 3.15 (diffed against dir(builtins) on CPython 3.15.0)
   val builtinClassesV3: Iterable[String] = Iterable(
     "bool",
     "bytearray",
@@ -2787,7 +2838,17 @@ object PythonAstVisitor:
     "RuntimeWarning",
     "SyntaxWarning",
     "UnicodeWarning",
-    "UserWarning"
+    "UserWarning",
+    // Missing from the 3.13 refresh (checked against dir(builtins) on CPython 3.15.0)
+    "EncodingWarning",         // 3.10
+    "ExceptionGroup",          // 3.11
+    "PythonFinalizationError", // 3.13
+    "EnvironmentError",        // alias of OSError
+    "IOError",                 // alias of OSError
+    // Python 3.15
+    "frozendict",      // PEP 814
+    "sentinel",        // PEP 661
+    "ImportCycleError" // PEP 810, a subclass of ImportError
   )
 
   // This list contains all functions from https://docs.python.org/2.7/library/functions.html
