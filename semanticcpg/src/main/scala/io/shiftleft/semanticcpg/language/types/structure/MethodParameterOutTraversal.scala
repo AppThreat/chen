@@ -2,6 +2,7 @@ package io.shiftleft.semanticcpg.language.types.structure
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 
 import scala.jdk.CollectionConverters.*
 
@@ -23,12 +24,12 @@ class MethodParameterOutTraversal(val traversal: Iterator[MethodParameterOut]) e
   def indexTo(num: Int): Iterator[MethodParameterOut] =
       traversal.filter(_.index <= num)
 
+  /** The arguments bound to the parameter, by index or by name (see [[ArgumentBinding]]). */
   def argument: Iterator[Expression] =
       for
         paramOut <- traversal
-        method = paramOut.method
-        call <- method.callIn
-        arg  <- call.argumentOut.collectAll[Expression]
-        if paramOut.parameterLinkIn.index.headOption.contains(arg.argumentIndex)
+        paramIn  <- paramOut.parameterLinkIn.headOption.iterator
+        call     <- paramOut.method.callIn
+        arg      <- ArgumentBinding.argumentsBinding(call, paramIn)
       yield arg
 end MethodParameterOutTraversal

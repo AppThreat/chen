@@ -15,6 +15,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
 }
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import org.slf4j.{Logger, LoggerFactory}
 
 /** Creation of new tasks from results of completed tasks.
@@ -91,11 +92,12 @@ class TaskCreator(context: EngineContext):
     else
       args
 
+  // Named and unpacked arguments bind by name, not by index (see ArgumentBinding).
   private def paramToArgsOfCallers(param: MethodParameterIn): List[Expression] =
       NoResolve
           .getMethodCallsites(param.method)
           .collectAll[Call]
-          .argument(param.index)
+          .flatMap(ArgumentBinding.argumentsBinding(_, param))
           .l
 
   /** Expand to receiver objects of calls that reference the method of the parameter, e.g., if

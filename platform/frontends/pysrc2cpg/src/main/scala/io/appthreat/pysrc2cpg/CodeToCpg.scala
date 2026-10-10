@@ -128,7 +128,7 @@ object CodeToCpg:
     * a pysrc2cpg that parsed or lowered that content differently would otherwise be served as is.
     * Change it whenever the grammar or the lowering changes what a file turns into.
     */
-  val LoweringRevision: String = "py315-2"
+  val LoweringRevision: String = "py315-3"
 
   /** One failed statement: the file, the line it starts at (0 when the whole file failed), and the
     * parser message.

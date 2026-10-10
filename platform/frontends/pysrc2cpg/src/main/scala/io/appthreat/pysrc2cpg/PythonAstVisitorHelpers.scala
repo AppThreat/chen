@@ -2,6 +2,7 @@ package io.appthreat.pysrc2cpg
 
 import io.appthreat.pysrc2cpg.memop.{Load, MemoryOperation, Store}
 import io.appthreat.pythonparser.ast
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
 
@@ -376,7 +377,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -414,7 +415,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -499,7 +500,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -567,6 +568,27 @@ trait PythonAstVisitorHelpers:
 
     callNode
 
+  /** The code of a keyword argument; a `**mapping` argument is its own code. */
+  protected def keywordArgumentCode(keyword: String, argumentNode: NewNode): String =
+      if keyword == ArgumentBinding.MappingUnpackName then codeOf(argumentNode)
+      else keyword + " = " + codeOf(argumentNode)
+
+  /** `f(**opts)`: the mapping is unpacked into the keyword arguments. It is passed as a keyword
+    * argument named [[ArgumentBinding.MappingUnpackName]], which binds any parameter a keyword can.
+    */
+  protected def createDictUnpackOperatorCall(
+    unpackOperand: NewNode,
+    lineAndColumn: LineAndColumn
+  ): (String, NewNode) =
+    val callNode = nodeBuilder.callNode(
+      "**" + codeOf(unpackOperand),
+      "<operator>.dictUnpack",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColumn
+    )
+    addAstChildrenAsArguments(callNode, 1, unpackOperand)
+    (ArgumentBinding.MappingUnpackName, callNode)
+
   protected def createStarredUnpackOperatorCall(
     unpackOperand: NewNode,
     lineAndColumn: LineAndColumn
@@ -625,7 +647,8 @@ trait PythonAstVisitorHelpers:
   protected def createAssignment(
     lhsNode: NewNode,
     rhsNode: NewNode,
-    lineAndColumn: LineAndColumn
+    lineAndColumn: LineAndColumn,
+    considerAsGlobal: Boolean = true
   ): NewNode =
     val code = codeOf(lhsNode) + " = " + codeOf(rhsNode)
     val callNode = nodeBuilder.callNode(
@@ -637,7 +660,9 @@ trait PythonAstVisitorHelpers:
 
     addAstChildrenAsArguments(callNode, 1, lhsNode, rhsNode)
     // Do not include imports or function pointers
-    if !codeOf(rhsNode).startsWith("import(") && codeOf(rhsNode) != s"def ${codeOf(lhsNode)}(...)"
+    if
+      considerAsGlobal && !codeOf(rhsNode).startsWith("import(") &&
+      codeOf(rhsNode) != s"def ${codeOf(lhsNode)}(...)"
     then
       contextStack.considerAsGlobalVariable(lhsNode)
 

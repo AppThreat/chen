@@ -250,6 +250,8 @@ class PythonAstVisitor(
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
     val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
+    val (defaultAssignments, defaults) =
+        convertParameterDefaults(functionDef.name, functionDef.args)
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -257,7 +259,7 @@ class PythonAstVisitor(
         functionDef.args,
         isStaticMethod(functionDef.decorator_list)
       ),
-      () => functionDef.body.map(convert),
+      () => parameterDefaultPrologue(defaults) ++ functionDef.body.map(convert),
       functionDef.returns,
       typeParamNames = typeParamNames,
       isAsync = false,
@@ -272,7 +274,11 @@ class PythonAstVisitor(
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)
 
-    createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef))
+    withDefaults(
+      defaultAssignments,
+      createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef)),
+      lineAndColOf(functionDef)
+    )
   end convert
 
   /*
@@ -433,6 +439,8 @@ class PythonAstVisitor(
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
     val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
+    val (defaultAssignments, defaults) =
+        convertParameterDefaults(functionDef.name, functionDef.args)
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -440,7 +448,7 @@ class PythonAstVisitor(
         functionDef.args,
         isStaticMethod(functionDef.decorator_list)
       ),
-      () => functionDef.body.map(convert),
+      () => parameterDefaultPrologue(defaults) ++ functionDef.body.map(convert),
       functionDef.returns,
       typeParamNames = typeParamNames,
       isAsync = true,
@@ -455,7 +463,11 @@ class PythonAstVisitor(
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)
 
-    createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef))
+    withDefaults(
+      defaultAssignments,
+      createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef)),
+      lineAndColOf(functionDef)
+    )
   end convert
 
   private def isStaticMethod(decoratorList: Iterable[ast.iexpr]): Boolean =
@@ -806,7 +818,6 @@ class PythonAstVisitor(
     * p1))
     * @return
     */
-  // TODO handle kwArg
   private def createMetaClassAdapterMethod(
     adaptedMethodName: String,
     adaptedMethodFullName: String,
@@ -880,6 +891,14 @@ class PythonAstVisitor(
           createIdentifierNode(arg.arg, Load, lineAndColumn)
         ))
     }
+    arguments.kw_arg.foreach { arg =>
+        convertedKeywordArgs.append(
+          createDictUnpackOperatorCall(
+            createIdentifierNode(arg.arg, Load, lineAndColumn),
+            lineAndColumn
+          )
+        )
+    }
 
     (convertedArgs, convertedKeywordArgs)
   end createArguments
@@ -922,7 +941,6 @@ class PythonAstVisitor(
     * def <metaClassCallHandler>(p1): return DYNAMIC_CALL(receiver=TYPE_REF(meta class).<fakeNew>,
     * instance \= TYPE_REF(meta class), p1)
     */
-  // TODO handle kwArg
   private def createMetaClassCallHandlerMethod(
     initParameters: ast.Arguments,
     metaTypeDeclName: String,
@@ -981,7 +999,6 @@ class PythonAstVisitor(
     * looks like: def <fakeNew>(cls, p1): __newInstance = STATIC_CALL(<operator>.alloc)
     * cls.__init__(__newIstance, p1) return __newInstance
     */
-  // TODO handle kwArg
   private def createFakeNewMethod(
     initParameters: ast.Arguments,
     instanceTypeDeclFullName: String,
@@ -1883,19 +1900,112 @@ class PythonAstVisitor(
         else
           lambdaCounter.toString
 
-    val name = "<lambda>" + lambdaNumberSuffix
+    val name                           = "<lambda>" + lambdaNumberSuffix
+    val (defaultAssignments, defaults) = convertParameterDefaults(name, lambda.args)
     val (_, methodRefNode) = createMethodAndMethodRef(
       name,
       Some(name),
       createParameterProcessingFunction(lambda.args, isStatic = false),
-      () => Iterable.single(convert(new ast.Return(lambda.body, lambda.attributeProvider))),
+      () =>
+          parameterDefaultPrologue(defaults) :+
+              convert(new ast.Return(lambda.body, lambda.attributeProvider)),
       returns = None,
       typeParamNames = List.empty,
       isAsync = false,
       lineAndColOf(lambda)
     )
-    methodRefNode
+    withDefaults(defaultAssignments, methodRefNode, lineAndColOf(lambda))
   end convert
+
+  /** A parameter default and the hidden variable its value was evaluated into. */
+  private case class ParameterDefault(
+    parameter: String,
+    variable: String,
+    lineAndColumn: LineAndColumn
+  )
+
+  private val defaultVariableCounts = mutable.Map.empty[String, Int]
+
+  /** Python evaluates a function's defaults once, where the `def` (or `lambda`) is, in that scope:
+    * `def f(x=x)` reads the enclosing `x`, and a mutable default is shared by every call. Each
+    * default is lowered there into an assignment to a hidden variable named `<default>f.x` (made
+    * unique per definition), which the function captures and its body's prologue (see
+    * [[parameterDefaultPrologue]]) applies to the parameter. Positional defaults belong to the last
+    * positional parameters; keyword-only ones line up with their parameters, `None` where a
+    * parameter has no default.
+    */
+  private def convertParameterDefaults(
+    functionName: String,
+    arguments: ast.Arguments
+  ): (Seq[NewNode], Seq[ParameterDefault]) =
+    val positional = (arguments.posonlyargs ++ arguments.args).toSeq
+    val withDefaults =
+        positional.takeRight(arguments.defaults.size).zip(arguments.defaults) ++
+            arguments.kwonlyargs.zip(arguments.kw_defaults).collect { case (arg, Some(default)) =>
+                (arg, default)
+            }
+    withDefaults.map { (arg, default) =>
+      val lineAndColumn = lineAndColOf(default)
+      val baseName      = s"<default>$functionName.${arg.arg}"
+      val seen          = defaultVariableCounts.getOrElse(baseName, 0)
+      defaultVariableCounts(baseName) = seen + 1
+      val variable = if seen == 0 then baseName else s"$baseName#$seen"
+      val value    = convert(default)
+      val target   = createIdentifierNode(variable, Store, lineAndColumn)
+      // a method defined in a class body must still see it
+      contextStack.exposeToNestedScopes(variable)
+      (
+        createAssignment(target, value, lineAndColumn, considerAsGlobal = false),
+        ParameterDefault(arg.arg, variable, lineAndColumn)
+      )
+    }.unzip
+  end convertParameterDefaults
+
+  /** The first statements of a function with defaults, one per defaulted parameter: `x = x if x
+    * passed else <default>f.x` - a caller's argument, or the captured default.
+    */
+  private def parameterDefaultPrologue(defaults: Seq[ParameterDefault]): Seq[NewNode] =
+      defaults.map { case ParameterDefault(parameter, variable, lineAndColumn) =>
+          val passed = nodeBuilder.callNode(
+            s"$parameter passed",
+            "<operator>.argumentPassed",
+            DispatchTypes.STATIC_DISPATCH,
+            lineAndColumn
+          )
+          addAstChildrenAsArguments(
+            passed,
+            1,
+            createIdentifierNode(parameter, Load, lineAndColumn)
+          )
+          val choice = nodeBuilder.callNode(
+            s"$parameter if $parameter passed else $variable",
+            Operators.conditional,
+            DispatchTypes.STATIC_DISPATCH,
+            lineAndColumn
+          )
+          addAstChildrenAsArguments(
+            choice,
+            1,
+            passed,
+            createIdentifierNode(parameter, Load, lineAndColumn),
+            createIdentifierNode(variable, Load, lineAndColumn)
+          )
+          createAssignment(
+            createIdentifierNode(parameter, Store, lineAndColumn),
+            choice,
+            lineAndColumn,
+            considerAsGlobal = false
+          )
+      }
+
+  /** `node`, preceded by the evaluation of the defaults when there are any. */
+  private def withDefaults(
+    defaultAssignments: Seq[NewNode],
+    node: NewNode,
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+      if defaultAssignments.isEmpty then node
+      else createBlock(defaultAssignments :+ node, lineAndColumn)
 
   // TODO test
   def convert(ifExp: ast.IfExp): NewNode =
@@ -2340,9 +2450,8 @@ class PythonAstVisitor(
           )
           Some((keyword.arg.get, valueNode))
         else
-          // keyword.arg == None. This is the case for func(**dict) style arguments.
-          // TODO implement handling for this case.
-          None
+          // `func(**mapping)`
+          Some(createDictUnpackOperatorCall(convert(keyword.value), lineAndColOf(keyword)))
     }
 
     call.func match
@@ -2662,18 +2771,20 @@ class PythonAstVisitor(
       convertArg(arg, isVariadic = false, Option(index.getAndInc))
 
   def convertVarArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
-      convertArg(arg, isVariadic = true, Option(index.getAndInc))
+      convertArg(arg, isVariadic = true, Option(index.getAndInc), prefix = "*")
 
   def convertKeywordOnlyArg(arg: ast.Arg): nodes.NewMethodParameterIn =
       convertArg(arg, isVariadic = false, None)
 
+  // `**kwargs`, written with `**`, is keyword-variadic (ArgumentBinding.isKeywordVariadic)
   def convertKwArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      convertArg(arg, isVariadic = false, None)
+      convertArg(arg, isVariadic = true, None, prefix = "**")
 
   private def convertArg(
     arg: ast.Arg,
     isVariadic: Boolean,
-    index: Option[Int]
+    index: Option[Int],
+    prefix: String = ""
   ): nodes.NewMethodParameterIn =
     val parameter =
         nodeBuilder.methodParameterNode(
@@ -2681,7 +2792,8 @@ class PythonAstVisitor(
           isVariadic,
           lineAndColOf(arg),
           index,
-          arg.annotation
+          arg.annotation,
+          Option.when(prefix.nonEmpty)(prefix + arg.arg)
         )
     tagFoldedSpelling(parameter, arg.arg, argNameCode(arg))
     parameter

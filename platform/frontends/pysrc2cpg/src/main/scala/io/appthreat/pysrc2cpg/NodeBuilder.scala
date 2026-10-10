@@ -168,12 +168,13 @@ class NodeBuilder(diffGraph: DiffGraphBuilder):
     isVariadic: Boolean,
     lineAndColumn: LineAndColumn,
     index: Option[Int] = None,
-    typeHint: Option[ast.iexpr] = None
+    typeHint: Option[ast.iexpr] = None,
+    code: Option[String] = None
   ): nodes.NewMethodParameterIn =
     val methodParameterNode = nodes
         .NewMethodParameterIn()
         .name(name)
-        .code(name)
+        .code(code.getOrElse(name))
         .evaluationStrategy(EvaluationStrategies.BY_SHARING)
         .typeFullName(extractTypesFromHint(typeHint).getOrElse(Constants.ANY))
         .isVariadic(isVariadic)
