@@ -19,6 +19,35 @@ trait PythonAstVisitorHelpers:
       // behind the last symbol.
       LineAndColumn(node.lineno, node.col_offset, node.end_lineno, node.end_col_offset - 1)
 
+  // A maximal run of characters that can belong to an identifier (anything but whitespace,
+  // operators, delimiters, quotes and comment/continuation characters).
+  private val IdentifierRun = """[^\s.,;:()\[\]{}=+\-*/%&|^~<>!@'"#\\`$?]+""".r
+
+  /** The identifiers spelled in `rawCode` that CPython NFKC-normalises to a different name (PEP
+    * 3131), keyed by that name: eval written in fullwidth (U+FF45..) or mathematical bold
+    * (U+1D41E..) letters calls `eval`.
+    */
+  protected def foldedSpellings(rawCode: String): Map[String, String] =
+      if rawCode.forall(_ <= 0x7f) then Map.empty
+      else
+        IdentifierRun.findAllIn(rawCode).filter(_.exists(_ > 0x7f)).flatMap { raw =>
+          val name = io.appthreat.pythonparser.PythonParserTokenManager.normalizeIdentifier(raw)
+          Option.when(name != raw)(name -> raw)
+        }.toMap
+
+  /** The CPG carries normalised names, so a file that writes eval in fullwidth letters reads as
+    * `eval` everywhere downstream - exactly what Python executes, and exactly what a reviewer or a
+    * grep for `eval` does not see. The node named `name` is tagged `unicode-confusable`, valued
+    * with the spelling the file uses, when `rawCode` spells it differently.
+    */
+  protected def tagFoldedSpelling(node: NewNode, name: String, rawCode: String): Unit =
+      foldedSpellings(rawCode).get(name).foreach { raw =>
+          edgeBuilder.taggedByEdge(
+            node,
+            nodeBuilder.tagNode(io.appthreat.x2cpg.Defines.UnicodeConfusableTag, raw)
+          )
+      }
+
   private var tmpCounter = 0
 
   protected def getUnusedName(prefix: String = null): String =
@@ -92,13 +121,27 @@ trait PythonAstVisitorHelpers:
     from: String,
     names: Iterable[ast.Alias],
     lineAndCol: LineAndColumn,
-    lazyTag: ast.Alias => Option[String] = _ => None
+    lazyTag: ast.Alias => Option[String] = _ => None,
+    rawCode: String = ""
   ): NewNode =
+    val folded = foldedSpellings(rawCode)
     val importAssignNodes =
         names.map { alias =>
           val importedAsIdentifierName = alias.asName.getOrElse(alias.name)
           val importAssignLhsIdentifierNode =
               createIdentifierNode(importedAsIdentifierName, Store, lineAndCol)
+          // the bound name is tagged with every folded spelling of the module path, the imported
+          // name and the alias (`from os import system` with fullwidth letters binds system)
+          val spellings =
+              (from.split('.') ++ alias.name.split('.') ++ alias.asName).flatMap(folded.get)
+          if spellings.nonEmpty then
+            edgeBuilder.taggedByEdge(
+              importAssignLhsIdentifierNode,
+              nodeBuilder.tagNode(
+                io.appthreat.x2cpg.Defines.UnicodeConfusableTag,
+                spellings.distinct.mkString(",")
+              )
+            )
 
           val arguments = Seq(
             nodeBuilder.stringLiteralNode(from, lineAndCol),
@@ -415,7 +458,8 @@ trait PythonAstVisitorHelpers:
     xMayHaveSideEffects: Boolean,
     lineAndColumn: LineAndColumn,
     argumentNodes: Iterable[NewNode],
-    keywordArguments: Iterable[(String, NewNode)]
+    keywordArguments: Iterable[(String, NewNode)],
+    rawFieldCode: String = ""
   ): NewNode =
       if xMayHaveSideEffects then
         val tmpVarName    = getUnusedName()
@@ -424,7 +468,8 @@ trait PythonAstVisitorHelpers:
             createFieldAccess(
               createIdentifierNode(tmpVarName, Load, lineAndColumn),
               y,
-              lineAndColumn
+              lineAndColumn,
+              rawFieldCode
             )
         val instanceNode = createIdentifierNode(tmpVarName, Load, lineAndColumn)
         val instanceCallNode =
@@ -438,7 +483,7 @@ trait PythonAstVisitorHelpers:
             )
         createBlock(tmpAssignCall :: instanceCallNode :: Nil, lineAndColumn)
       else
-        val receiverNode = createFieldAccess(x(), y, lineAndColumn)
+        val receiverNode = createFieldAccess(x(), y, lineAndColumn, rawFieldCode)
         createInstanceCall(receiverNode, x(), y, lineAndColumn, argumentNodes, keywordArguments)
 
   // NOTE: The argument indicies start from 0!
@@ -673,9 +718,11 @@ trait PythonAstVisitorHelpers:
   protected def createFieldAccess(
     baseNode: NewNode,
     fieldName: String,
-    lineAndColumn: LineAndColumn
+    lineAndColumn: LineAndColumn,
+    rawFieldCode: String = ""
   ): NewCall =
     val fieldIdNode = nodeBuilder.fieldIdentifierNode(fieldName, lineAndColumn)
+    tagFoldedSpelling(fieldIdNode, fieldName, rawFieldCode)
 
     val code = codeOf(baseNode) + "." + codeOf(fieldIdNode)
     val callNode = nodeBuilder.callNode(

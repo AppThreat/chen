@@ -64,12 +64,16 @@ class SourceIntegrityPass(cpg: Cpg) extends CpgPass(cpg):
     }
   end run
 
-  /** The named nodes of each file: identifiers, and the declarations they name. */
+  /** The named nodes of each file: identifiers, and the declarations they name. A TYPE_DECL cannot
+    * carry a TAGGED_BY edge in the schema (writing one fails the whole pass), so its name only
+    * takes part in the comparison; the identifiers and members spelling it are tagged.
+    */
   private def confusables(tag: (StoredNode, String, String) => Unit): Unit =
     val byFile = mutable.LinkedHashMap.empty[String, mutable.ListBuffer[(String, StoredNode)]]
     def add(file: String, name: String, node: StoredNode): Unit =
         if name.nonEmpty then
           byFile.getOrElseUpdate(file, mutable.ListBuffer.empty) += ((name, node))
+    def taggable(node: StoredNode): Boolean = !node.isInstanceOf[TypeDecl]
     cpg.method.isExternal(false).foreach { m =>
       val file = m.filename
       add(file, m.name, m)
@@ -87,7 +91,10 @@ class SourceIntegrityPass(cpg: Cpg) extends CpgPass(cpg):
           val namesBySkeleton = named.map(_._1).distinct.groupBy(UnicodeSkeleton.skeleton)
           named.foreach { (name, node) =>
             val lookalikes = namesBySkeleton(UnicodeSkeleton.skeleton(name)).filterNot(_ == name)
-            if lookalikes.nonEmpty && (lookalikes :+ name).exists(n => !UnicodeSkeleton.isAscii(n))
+            if lookalikes.nonEmpty && (lookalikes :+ name).exists(n =>
+                  !UnicodeSkeleton.isAscii(n)
+              ) &&
+              taggable(node)
             then tag(node, Defines.UnicodeConfusableTag, lookalikes.sorted.mkString(","))
           }
     }

@@ -665,20 +665,19 @@ case class Call(
 
 // In addition to the CPython version of this class we also stored
 // whether the value expression was followed by "=" in "equalSign".
-// In deviation to CPython format_spec is of type String and not
-// a JoinedString itself. This way we do not have to handle recursive
-// format string parsing yet.
+// As in CPython, format_spec is a JoinedString (with empty quote and prefix) of the spec's
+// literal text and its nested replacement fields, e.g. `>{width}.{precision}f`.
 case class FormattedValue(
   value: iexpr,
   conversion: Int,
-  format_spec: Option[String],
+  format_spec: Option[JoinedString],
   equalSign: Boolean,
   attributeProvider: AttributeProvider
 ) extends iexpr:
   def this(
     value: iexpr,
     conversion: Int,
-    format_spec: String,
+    format_spec: JoinedString,
     equalSign: Boolean,
     attributeProvider: AttributeProvider
   ) =
@@ -708,19 +707,19 @@ case class JoinedString(
 /** PEP 750 (Python 3.14) t-string interpolation. Mirrors [[FormattedValue]] - CPython's
   * `Interpolation` carries the same parts - but is a distinct node so the CPG can keep the
   * t-string's "interpolations held unevaluated" semantics apart from f-string concatenation.
-  * `format_spec` stays a plain String for the same reason as in FormattedValue.
+  * `format_spec` is a JoinedString as in FormattedValue.
   */
 case class Interpolation(
   value: iexpr,
   conversion: Int,
-  format_spec: Option[String],
+  format_spec: Option[JoinedString],
   equalSign: Boolean,
   attributeProvider: AttributeProvider
 ) extends iexpr:
   def this(
     value: iexpr,
     conversion: Int,
-    format_spec: String,
+    format_spec: JoinedString,
     equalSign: Boolean,
     attributeProvider: AttributeProvider
   ) =

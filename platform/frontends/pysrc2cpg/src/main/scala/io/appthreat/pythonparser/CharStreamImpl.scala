@@ -3,6 +3,7 @@ package io.appthreat.pythonparser
 import CharStreamImpl.{defaultInputBufferSize, defaultMinimumReadSize}
 
 import java.io.{IOException, InputStream, InputStreamReader}
+import java.nio.charset.StandardCharsets
 
 object CharStreamImpl:
   private val defaultInputBufferSize = 4096
@@ -10,7 +11,7 @@ object CharStreamImpl:
 
 class CharStreamImpl(inputStream: InputStream, inputBufferSize: Int, minimumReadSize: Int)
     extends CharStream:
-  private val inputReader = new InputStreamReader(inputStream)
+  private val inputReader = new InputStreamReader(inputStream, StandardCharsets.UTF_8)
 
   private var inputBuffer       = new Array[Char](inputBufferSize)
   private var posToLine         = new Array[Int](inputBufferSize)

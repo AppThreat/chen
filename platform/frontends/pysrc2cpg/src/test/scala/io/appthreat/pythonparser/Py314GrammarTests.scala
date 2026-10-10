@@ -79,10 +79,11 @@ class Py314GrammarTests extends AnyFreeSpec with Matchers:
           parseWithoutErrors("try:\n    pass\nexcept A, B,:\n    pass\n")
       }
 
-      "except A, B as e: parses with e bound (lenient)" in {
-          // Rejected by 3.14.6 and by 3.15.0 alike; accepted here deliberately because the
-          // grammar is not a validator.
-          print("try:\n    pass\nexcept A, B as e:\n    pass\n") should include("as e")
+      "except A, B as e: is rejected, as in CPython 3.14 and 3.15" in {
+          // "multiple exception types must be parenthesized when using 'as'"
+          val parser = new PyParser()
+          parser.parse("try:\n    pass\nexcept A, B as e:\n    pass\n")
+          parser.errors should not be empty
       }
 
       "except* A, B: is a tuple of types (PEP 654 + 758)" in {

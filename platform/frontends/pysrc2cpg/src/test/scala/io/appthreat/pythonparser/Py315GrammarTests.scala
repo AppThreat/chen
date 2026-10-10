@@ -35,6 +35,22 @@ class Py315GrammarTests extends AnyFreeSpec with Matchers:
     parser.parse(code)
     parser.errors
 
+  /** A format spec as its parts: literal text, or a nested field's value printed in braces. */
+  private def specParts(spec: Option[JoinedString]): Seq[String] =
+      spec.toSeq.flatMap(_.values).map {
+          case Constant(JoinedStringConstant(text), _) => text
+          case FormattedValue(value, _, _, _, _) => "{" + new AstPrinter("  ").print(value) + "}"
+          case other                             => fail(s"unexpected spec part: $other")
+      }
+
+  private def onlyField(code: String): FormattedValue =
+      valueOf(code) match
+        case JoinedString(values, _, _, _) =>
+            values.collect { case f: FormattedValue => f }.toSeq match
+              case Seq(field) => field
+              case other      => fail(s"expected one replacement field: $other")
+        case other => fail(s"not an f-string: $other")
+
   "PEP 810 lazy imports keep their flag" - {
 
       "lazy import" in {
@@ -331,17 +347,13 @@ class Py315GrammarTests extends AnyFreeSpec with Matchers:
 
       "':=' at the top of a field is a format spec, not a walrus" in {
           // FormattedValue(value=Name(id='x'), format_spec=JoinedStr([Constant(value='=10')]))
-          valueOf("y = f'{x:=10}'") match
-            case JoinedString(values, _, _, _) =>
-                values.toSeq match
-                  case Seq(FormattedValue(Name("x", _), -1, Some("=10"), false, _)) =>
-                  case other => fail(s"unexpected values: $other")
+          onlyField("y = f'{x:=10}'") match
+            case field @ FormattedValue(Name("x", _), -1, _, false, _) =>
+                specParts(field.format_spec) shouldBe Seq("=10")
             case other => fail(s"unexpected: $other")
-          valueOf("y = f'{x!r:=^10}'") match
-            case JoinedString(values, _, _, _) =>
-                values.toSeq match
-                  case Seq(FormattedValue(_, 114, Some("=^10"), _, _)) =>
-                  case other => fail(s"unexpected values: $other")
+          onlyField("y = f'{x!r:=^10}'") match
+            case field @ FormattedValue(_, 114, _, _, _) =>
+                specParts(field.format_spec) shouldBe Seq("=^10")
             case other => fail(s"unexpected: $other")
           // a parenthesised walrus is still a walrus
           valueOf("y = f'{(x := 10)}'") match
@@ -354,6 +366,61 @@ class Py315GrammarTests extends AnyFreeSpec with Matchers:
           // f'{2:{"{"}>10}' used to make the lexer run to the end of the file (a fatal error)
           print("x = f'{2:{\"{\"}>10}'\ny = 1\n") should include("y = 1")
           print("x = f'{v:{\"}\"}}'\ny = 1\n") should include("y = 1")
+          // format_spec=JoinedStr([FormattedValue(Constant('{')), Constant('>10')])
+          specParts(onlyField("x = f'{2:{\"{\"}>10}'").format_spec) shouldBe Seq("{\"{\"}", ">10")
+      }
+
+      "format specs are JoinedStrings with their nested replacement fields parsed" in {
+          // f'{x:>{w}.{p}f}' -> format_spec=JoinedStr([Constant('>'), FormattedValue(Name('w')),
+          //                                           Constant('.'), FormattedValue(Name('p')), Constant('f')])
+          specParts(onlyField("s = f'{x:>{w}.{p}f}'").format_spec) shouldBe
+              Seq(">", "{w}", ".", "{p}", "f")
+          specParts(onlyField("s = f'{x:{w}{p}}'").format_spec) shouldBe Seq("{w}", "{p}")
+          specParts(onlyField("s = f'{x:{w}:{p}}'").format_spec) shouldBe Seq("{w}", ":", "{p}")
+          specParts(onlyField("s = f'{x:{a + b}x}'").format_spec) shouldBe Seq("{a + b}", "x")
+          // an empty spec is an empty JoinedStr; a literal spec keeps its text, colons included
+          onlyField("s = f'{x:}'").format_spec.map(_.values.size) shouldBe Some(0)
+          specParts(onlyField("s = f'{x:%H:%M}'").format_spec) shouldBe Seq("%H:%M")
+          // subscripts and slices inside a nested field
+          specParts(onlyField("s = f\"{d['k']:{width}}\"").format_spec) shouldBe Seq("{width}")
+          specParts(onlyField("s = f'{x:{d[1:2]}}'").format_spec) shouldBe Seq("{d[1:2]}")
+          // the text and fields after a nested spec are lexed normally again
+          print("s = f'{x:{w}} and {y!r}'\nt = 2\n") shouldBe "s = f'{x:{w}} and {y!r}'\nt = 2"
+      }
+
+      "nested fields keep their own conversion, debug '=' and spec" in {
+          // f'{x:{y:>3}}' -> FormattedValue(Name('y'), format_spec=JoinedStr([Constant('>3')]))
+          onlyField("s = f'{x:{y:>3}}'").format_spec.get.values.toSeq match
+            case Seq(inner: FormattedValue) => specParts(inner.format_spec) shouldBe Seq(">3")
+            case other                      => fail(s"unexpected: $other")
+          // f'{x:{y:{z}}}' nests twice
+          onlyField("s = f'{x:{y:{z}}}'").format_spec.get.values.toSeq match
+            case Seq(inner: FormattedValue) => specParts(inner.format_spec) shouldBe Seq("{z}")
+            case other                      => fail(s"unexpected: $other")
+          onlyField("s = f'{x:{w!r}}'").format_spec.get.values.toSeq match
+            case Seq(FormattedValue(Name("w", _), 114, None, false, _)) =>
+            case other => fail(s"unexpected: $other")
+          onlyField("s = f'{x:{w=}}'").format_spec.get.values.toSeq match
+            case Seq(FormattedValue(Name("w", _), _, None, true, _)) =>
+            case other                                               => fail(s"unexpected: $other")
+          // an f-string inside a nested field
+          print("s = f'{x:{f\"{y}\"}}'\n") shouldBe "s = f'{x:{f\"{y}\"}}'"
+      }
+
+      "t-string interpolations carry their spec the same way" in {
+          // Interpolation(Name('x'), format_spec=JoinedStr([Constant('>'), FormattedValue(Name('w'))]))
+          valueOf("s = t'{x:>{w}}'") match
+            case TemplateStr(values, _, _, _) =>
+                values.toSeq match
+                  case Seq(interpolation: Interpolation) =>
+                      specParts(interpolation.format_spec) shouldBe Seq(">", "{w}")
+                  case other => fail(s"unexpected values: $other")
+            case other => fail(s"unexpected: $other")
+      }
+
+      "triple-quoted and raw f-strings with nested spec fields" in {
+          print("s = f'''{x:{\n w}}'''\n") shouldBe "s = f'''{x:{w}}'''"
+          specParts(onlyField("s = rf'{x:{w}\\d}'").format_spec) shouldBe Seq("{w}", "\\d")
       }
   }
 
@@ -383,6 +450,17 @@ class Py315GrammarTests extends AnyFreeSpec with Matchers:
           print("\ufb01le = 1") shouldBe "file = 1"
           print("\uff58 = \uff58 + 1") shouldBe "x = x + 1"
       }
+
+      "supplementary-plane identifiers" in {
+          // ast.parse(<U+1D431 MATHEMATICAL BOLD SMALL X> + ' = 1').body[0].targets[0].id == 'x'
+          print("\ud835\udc31 = 1\nprint(x)\n") shouldBe "x = 1\nprint(x)"
+          // Fraktur f, o, o (U+1D523, U+1D52C) fold to foo; U+1D7D9 DOUBLE-STRUCK DIGIT ONE continues
+          print("\ud835\udd23\ud835\udd2c\ud835\udd2c = x\ud835\udfd9\n") shouldBe "foo = x1"
+          // CJK Unified Ideographs Extension B (U+20000, U+20001) have no NFKC decomposition
+          print("class \ud840\udc00:\n    \ud840\udc01 = 2\n") should include("\ud840\udc01 = 2")
+          // an emoji is not an identifier character: only its statement is lost
+          errorsOf("a = 1\n\ud83d\ude00 = 2\nc = 3\n") should have size 1
+      }
   }
 
   "lexer robustness" - {
@@ -410,9 +488,15 @@ class Py315GrammarTests extends AnyFreeSpec with Matchers:
       }
   }
 
-  "except A, B as e stays lenient" in {
-      // CPython 3.14 and 3.15 both reject this ("multiple exception types must be parenthesized
-      // when using 'as'"); chen accepts it, binding e, because the grammar is not a validator.
-      print("try:\n    pass\nexcept A, B as e:\n    pass\n") should include("as e")
+  "a bound except clause takes one expression" in {
+      // CPython 3.14 and 3.15: "multiple exception types must be parenthesized when using 'as'"
+      errorsOf("try:\n    pass\nexcept A, B as e:\n    pass\n") should not be empty
+      errorsOf("try:\n    pass\nexcept* A, B as e:\n    pass\n") should not be empty
+      errorsOf("try:\n    pass\nexcept A, as e:\n    pass\n") should not be empty
+      // the parenthesised tuple, a conditional and the unbound PEP 758 tuple are all fine
+      print("try:\n    pass\nexcept (A, B) as e:\n    pass\n") should include("as e")
+      print("try:\n    pass\nexcept A if c else B as e:\n    pass\n") should include("as e")
+      print("try:\n    pass\nexcept* A as e:\n    pass\n") should include("as e")
+      print("try:\n    pass\nexcept A, B:\n    pass\n") should include("except (A,B):")
   }
 end Py315GrammarTests

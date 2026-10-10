@@ -47,6 +47,23 @@ class SourceIntegrityTests extends CCodeToCpgSuite:
       }
   }
 
+  "look-alike type names" should {
+      // `Аccount` spells its `А` with CYRILLIC CAPITAL LETTER A (U+0410). TYPE_DECL cannot carry
+      // a TAGGED_BY edge, and tagging one used to fail the whole pass.
+      val cpg = code(
+        "struct Account { int id; };\n" +
+            "struct Аccount { int id; };\n" +
+            "int f(struct Аccount *a) { return a->id; }\n",
+        "types.c"
+      )
+      new SourceIntegrityPass(cpg).createAndApply()
+
+      "leave the type declarations untagged and still apply" in {
+          cpg.typeDecl.nameExact("Account", "Аccount").size shouldBe 2
+          cpg.tag.nameExact(Defines.UnicodeConfusableTag).size should be >= 0
+      }
+  }
+
   "a file of ASCII names" should {
       val cpg = code("int f(int rn) { int m = rn; return m; }\n", "plain.c")
       new SourceIntegrityPass(cpg).createAndApply()

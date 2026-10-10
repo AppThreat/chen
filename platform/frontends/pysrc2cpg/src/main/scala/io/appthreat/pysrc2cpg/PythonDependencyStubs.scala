@@ -754,7 +754,7 @@ object PythonDependencyStubs:
   ): Unit =
     if files.isEmpty then return ()
     val providers = files.map { case (rel, abs) =>
-        () => Py2Cpg.InputPair(IOUtils.readLinesInFile(abs).mkString("\n"), rel)
+        () => Py2Cpg.InputPair(PythonSourceFile.read(abs), rel)
     }
     val moduleNames: Map[String, String] =
         files.view.map(_._1).flatMap { rel =>

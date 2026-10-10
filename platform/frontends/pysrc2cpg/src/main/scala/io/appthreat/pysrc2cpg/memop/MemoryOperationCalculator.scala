@@ -350,15 +350,18 @@ class MemoryOperationCalculator extends AstVisitor[Unit]:
     accept(call.args)
     accept(call.keywords)
 
+  // The nested replacement fields of a format spec (`{x:>{width}}`) are evaluated too.
   override def visit(formattedValue: FormattedValue): Unit =
     assert(stack.head == Load)
     accept(formattedValue.value)
+    formattedValue.format_spec.foreach(accept)
 
   // PEP 750 t-strings: the value expressions are evaluated (Load context), exactly like an
   // f-string's; only the substitution into a string is deferred.
   override def visit(interpolation: Interpolation): Unit =
     assert(stack.head == Load)
     accept(interpolation.value)
+    interpolation.format_spec.foreach(accept)
 
   override def visit(joinedString: JoinedString): Unit =
     assert(stack.head == Load)

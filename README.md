@@ -40,7 +40,7 @@ Because it follows data rather than matching on names and patterns, chen disting
   constructor bodies, virtual threads and the FFM API) and JAR bytecode
 - Android APK and split bundles (`.apkm`, `.apks`, `.xapk`), which require the Android SDK via `ANDROID_HOME` or the container image
 - JavaScript, TypeScript, and Flow, including Vue and Svelte/SvelteKit single-file components (the Svelte template is modelled as JSX-equivalent structure with exact source offsets)
-- Python, from 3.x through 3.14
+- Python, from 3.x through 3.15 (PEP 263 source encodings, Unicode 17 identifiers including the supplementary planes)
 - PHP, from 7.0 through 8.5 with limited 5.x support, 7.4 and newer recommended
 - Ruby, supporting 1.8 through 4.0.x syntax
 

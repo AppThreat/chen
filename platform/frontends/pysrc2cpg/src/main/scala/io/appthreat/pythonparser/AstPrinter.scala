@@ -446,7 +446,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       case 97  => "!a"
 
     val formatSpecStr = formattedValue.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
+      case Some(formatSpec) => ":" + print(formatSpec)
       case None             => ""
 
     "{" + print(formattedValue.value) +
@@ -468,7 +468,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       case 97  => "!a"
 
     val formatSpecStr = interpolation.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
+      case Some(formatSpec) => ":" + print(formatSpec)
       case None             => ""
 
     "{" + print(interpolation.value) +

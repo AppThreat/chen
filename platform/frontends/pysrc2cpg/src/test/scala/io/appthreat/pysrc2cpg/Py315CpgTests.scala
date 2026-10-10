@@ -257,6 +257,97 @@ class Py315CpgTests extends PySrc2CpgFixture(withOssDataflow = true):
           cpg.all.label("UNKNOWN").size shouldBe 0
       }
 
+      "keep a file that deletes through a list target" in {
+          // Delete(targets=[Tuple([Name('a'), List([Name('b'), Name('c')])])]) - CPython 3.15
+          val cpg = code("a = b = c = 1\ndel a, [b, c]\ndel [a]\ndef after():\n    return 1\n")
+          cpg.method.nameExact("after").size shouldBe 1
+          cpg.call.nameExact("<operator>.listLiteral").size shouldBe 2
+      }
+
+      "keep a class whose __init__ binds nothing positionally" in {
+          val cpg = code(
+            """class A:
+              |    def __init__():
+              |        pass
+              |class B:
+              |    def __init__(*, key):
+              |        self.key = key
+              |def after():
+              |    return B(key=1)
+              |""".stripMargin
+          )
+          cpg.method.nameExact("after").size shouldBe 1
+          cpg.method.nameExact("<metaClassCallHandler>").size shouldBe 2
+      }
+
+      "lower nested format-spec fields as a second formattedValue argument" in {
+          // CPython evaluates `source` too: f"{value:>{source}}" pads with its value
+          val cpg = code(
+            """import helpers
+              |def handle(source, value):
+              |    text = f"{value:>{source}}"
+              |    plain = f"{value:>10}"
+              |    helpers.sink(text)
+              |""".stripMargin
+          )
+          val nested =
+              cpg.call.nameExact("<operator>.formattedValue").code("\\{value:>\\{source\\}\\}").l
+          nested should have size 1
+          nested.head.argument.argumentIndex.l shouldBe List(1, 2)
+          val spec = nested.argument.argumentIndex(2).isCall.l
+          spec.name.l shouldBe List("<operator>.formatString")
+          spec.head.code shouldBe ">{source}"
+          spec.ast.isIdentifier.name.l shouldBe List("source")
+          // a spec of literal text only evaluates nothing and adds no argument
+          val plain = cpg.call.nameExact("<operator>.formattedValue").code("\\{value:>10\\}").l
+          plain.argument.argumentIndex.l shouldBe List(1)
+          // and the spec's names take part in data flow
+          val source = cpg.parameter.name("source")
+          val sink   = cpg.call.name("sink").argument(1)
+          sink.reachableByFlows(source).size should be >= 1
+      }
+
+      "tag names the file spells with characters NFKC folds away" in {
+          // CPython runs eval, os.system and verify=False here; a reader or a grep does not see them
+          val cpg = code(
+            "import requests\n" +
+                "from \uff4f\uff53 import \uff53\uff59\uff53\uff54\uff45\uff4d\n" +
+                "def \ud835\udc1f(\ud835\udc31):\n" +
+                "    \uff45\uff56\uff41\uff4c(\ud835\udc31)\n" +
+                "    requests.\uff47\uff45\uff54(\ud835\udc31, \uff56\uff45\uff52\uff49\uff46\uff59=False)\n" +
+                "class \uff23:\n" +
+                "    pass\n" +
+                "plain = eval\n"
+          )
+          val confusable = io.appthreat.x2cpg.Defines.UnicodeConfusableTag
+          def spellings(
+            nodes: Iterator[? <: io.shiftleft.codepropertygraph.generated.nodes.StoredNode]
+          ) =
+              nodes.flatMap(_.tag.nameExact(confusable).value).toSet
+          // the names are the normalised ones Python resolves
+          cpg.call.nameExact("eval").size shouldBe 1
+          cpg.method.nameExact("f").size shouldBe 1
+          // each node keeps the file's spelling in its tag
+          spellings(cpg.identifier.nameExact("eval")) shouldBe Set("\uff45\uff56\uff41\uff4c")
+          spellings(cpg.identifier.nameExact("system")) shouldBe Set(
+            "\uff4f\uff53,\uff53\uff59\uff53\uff54\uff45\uff4d"
+          )
+          spellings(cpg.identifier.nameExact("x")) shouldBe Set("\ud835\udc31")
+          spellings(cpg.parameter.nameExact("x")) shouldBe Set("\ud835\udc31")
+          spellings(cpg.method.nameExact("f")) shouldBe Set("\ud835\udc1f")
+          spellings(cpg.fieldAccess.fieldIdentifier.canonicalNameExact("get")) shouldBe Set(
+            "\uff47\uff45\uff54"
+          )
+          // a TYPE_DECL cannot carry a tag: the name the class statement binds does
+          spellings(cpg.identifier.nameExact("C")) shouldBe Set("\uff23")
+          spellings(cpg.literal.codeExact("False")) shouldBe Set(
+            "\uff56\uff45\uff52\uff49\uff46\uff59"
+          )
+          // names written in ASCII are left alone
+          cpg.identifier.nameExact("plain").tag.nameExact(confusable).size shouldBe 0
+          cpg.identifier.nameExact("requests").tag.nameExact(confusable).size shouldBe 0
+      }
+
       "keep every statement after an identifier with a combining mark" in {
           // used to be a lexical error that dropped the whole file
           val cpg = code("cafe\u0301 = 1\ndef after():\n    return cafe\u0301\n")
