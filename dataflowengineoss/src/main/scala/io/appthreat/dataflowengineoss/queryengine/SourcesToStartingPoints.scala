@@ -23,12 +23,20 @@ object SourcesToStartingPoints:
     : List[StartingPointWithSource] =
     val fjp = new ForkJoinPool(Runtime.getRuntime.availableProcessors() / 2)
     try
-      fjp.invoke(new SourceTravsToStartingPointsTask(sourceTravs*)).distinct
+      val points = fjp.invoke(new SourceTravsToStartingPointsTask(sourceTravs*))
+      // Dedup with the same keep-first-occurrence semantics as `List.distinct`, but into a set
+      // sized for the list: the list can reach tens of thousands of entries, and a default
+      // capacity set rehashes the whole content roughly every doubling.
+      val seen = new java.util.LinkedHashSet[StartingPointWithSource](points.size * 2)
+      points.foreach(p => seen.add(p))
+      import scala.jdk.CollectionConverters.*
+      seen.asScala.toList
     catch
       case e: RejectedExecutionException =>
           log.error("Unable to execute 'SourceTravsToStartingPoints` task", e); List()
     finally
       fjp.shutdown()
+end SourcesToStartingPoints
 
 class SourceTravsToStartingPointsTask[NodeType](sourceTravs: IterableOnce[NodeType]*)
     extends RecursiveTask[List[StartingPointWithSource]]:

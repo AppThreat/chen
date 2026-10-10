@@ -1,6 +1,10 @@
 package io.shiftleft.semanticcpg.language
 
 import io.shiftleft.codepropertygraph.generated.nodes.{Method, Return}
+import overflowdb.Graph
+
+import java.util.concurrent.ConcurrentHashMap
+import java.util.{Collections, Map as JMap, WeakHashMap}
 
 /** The two meanings `isExternal` has always carried, made explicit.
   *
@@ -18,6 +22,33 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Method, Return}
   */
 object MethodExplorability:
 
+  /** Both predicates sit in the query engine's innermost loop and each answer walks the callee's
+    * CONTAINS edges (or its stub status). Each answer depends only on graph content that exists
+    * from frontend AST creation onward - no later pass adds, removes or moves a method's body or
+    * RETURNs - so they are cached per method id, scoped to the method's graph. The two predicates
+    * have separate caches: for an internal stub they legitimately answer differently
+    * (stopsWalkAtCallSite true, isExplorable false), and one shared cache would let the first
+    * question asked overwrite the other's answer. Node ids are only unique within a graph, which is
+    * why the graph key is mandatory; it is weak so a closed or unreferenced graph drops out of the
+    * map and takes its answers along, keeping test JVMs that build graph after graph from
+    * accumulating them.
+    */
+  private val explorableByGraph: JMap[Graph, ConcurrentHashMap[Long, Boolean]] =
+      Collections.synchronizedMap(new WeakHashMap[Graph, ConcurrentHashMap[Long, Boolean]]())
+  private val stopsWalkByGraph: JMap[Graph, ConcurrentHashMap[Long, Boolean]] =
+      Collections.synchronizedMap(new WeakHashMap[Graph, ConcurrentHashMap[Long, Boolean]]())
+
+  private def cached(
+    cache: JMap[Graph, ConcurrentHashMap[Long, Boolean]],
+    method: Method
+  )(answer: => Boolean): Boolean =
+    val perGraph =
+        cache.computeIfAbsent(method.graph, _ => new ConcurrentHashMap[Long, Boolean]())
+    perGraph.computeIfAbsent(
+      method.id,
+      _ => if answer then java.lang.Boolean.TRUE else java.lang.Boolean.FALSE
+    )
+
   /** True when the engine can find real data-flow paths through this method's own statements: an
     * internal method with a body, or an external method parsed with its body. A stub, a bodyless
     * signature and a signature-only `.pyi` stub (`def f() -> str: ...`) are opaque — the engine's
@@ -30,8 +61,9 @@ object MethodExplorability:
     * approximation found.
     */
   def isExplorable(method: Method): Boolean =
-      if !method.isExternal then method.start.isStub.isEmpty
-      else hasReturn(method)
+      cached(explorableByGraph, method):
+        if !method.isExternal then method.start.isStub.isEmpty
+        else hasReturn(method)
 
   /** True when the backward walk stops at a call site to this method (`TaskSolver` cases 3/4 and
     * the visibility calculation in `Engine.elemForEdge`): every internal method, plus external
@@ -40,7 +72,8 @@ object MethodExplorability:
     * here and excluded from [[isExplorable]], where the permissive default applies to them instead.
     */
   def stopsWalkAtCallSite(method: Method): Boolean =
-      !method.isExternal || hasReturn(method)
+      cached(stopsWalkByGraph, method):
+        !method.isExternal || hasReturn(method)
 
   /** Does this method's own body contain a RETURN?
     *

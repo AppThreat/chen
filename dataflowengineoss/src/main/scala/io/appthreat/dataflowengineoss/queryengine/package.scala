@@ -43,6 +43,17 @@ package object queryengine:
 
     def callDepth: Int = fingerprint.callDepth
 
+    /** Grouping key of `TaskSolver.deduplicateWithinTask`, cached so that repeated hashing does not
+      * re-walk the endpoints' call-site stacks. See [[ResultKey]] for why the hash must be exactly
+      * the bare tuple's.
+      */
+    private[queryengine] lazy val resultDedupKey: ResultKey = ResultKey(
+      path.headOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get,
+      path.lastOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get,
+      partial,
+      callDepth
+    )
+
     def startingPoint: CfgNode = path.head.node.asInstanceOf[CfgNode]
 
     /** If the result begins in an output argument, return it.
@@ -118,5 +129,49 @@ package object queryengine:
     tableEntries: Vector[(TaskFingerprint, TableEntry)],
     followupTasks: Vector[ReachableByTask]
   )
-  case class TableEntry(path: Vector[PathElement])
+  case class TableEntry(path: Vector[PathElement]):
+    /** Grouping key of the result-table deduplication, shared by every re-deduplication round. A
+      * wrapper class rather than the bare tuple only so that the tuple's hash is computed once per
+      * entry: the result table is regrouped on every round of held-task completion, and re-hashing
+      * walked each endpoint's call-site stack again every time. The hash is exactly the tuple's -
+      * the iteration order of the grouped map, and with it the order of the deduplicated list,
+      * depends on the key hashes.
+      */
+    private[queryengine] lazy val dedupKey: TableEntryKey = TableEntryKey(
+      path.headOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get,
+      path.lastOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
+    )
+
+  /** The grouping key of `HeldTaskCompletion.deduplicateTableEntries`: the path's head and last
+    * (node, call-site stack, is-output-arg) tuples. A wrapper class rather than the bare tuple so
+    * that the tuple's hash is computed once per entry instead of on every regrouping: the result
+    * table is re-deduplicated on every round of held-task completion. The hash is exactly the
+    * tuple's because the iteration order of the grouped map - and with it the order of the
+    * deduplicated list - depends on the key hashes.
+    */
+  private[queryengine] final class TableEntryKey(
+    val head: (AstNode, List[Call], Boolean),
+    val last: (AstNode, List[Call], Boolean)
+  ):
+    override val hashCode: Int = (head, last).hashCode
+    override def equals(other: Any): Boolean = other match
+      case that: TableEntryKey => this.head == that.head && this.last == that.last
+      case _                   => false
+
+  /** The grouping key of `TaskSolver.deduplicateWithinTask`: a result's path endpoints plus its
+    * partial flag and call depth. Same rationale as [[TableEntryKey]]: the hash is the bare
+    * tuple's, computed once per result.
+    */
+  private[queryengine] final class ResultKey(
+    val head: (AstNode, List[Call], Boolean),
+    val last: (AstNode, List[Call], Boolean),
+    val partial: Boolean,
+    val callDepth: Int
+  ):
+    override val hashCode: Int = (head, last, partial, callDepth).hashCode
+    override def equals(other: Any): Boolean = other match
+      case that: ResultKey =>
+          this.head == that.head && this.last == that.last && this.partial == that.partial && this
+              .callDepth == that.callDepth
+      case _ => false
 end queryengine

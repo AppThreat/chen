@@ -119,14 +119,33 @@ class HeldTaskCompletion(
     * Two elements can only be equal when their nodes are, so a path whose nodes are all distinct -
     * nearly every path - is answered from node ids alone, without building and hashing a tuple of
     * (node, call-site stack, ...) per element.
+    *
+    * This runs once per candidate result of every round of held-task completion, so the common case
+    * (short path, all ids distinct) is an allocation-free pairwise id scan rather than a boxed Long
+    * hash set per entry. Only a path that actually repeats a node id pays for the precise tuple
+    * comparison, and only a path too long for the quadratic scan pays for the hash set.
     */
-  private def containsCycle(tableEntry: TableEntry): Boolean =
-    val path    = tableEntry.path
-    val nodeIds = new java.util.HashSet[java.lang.Long](path.size * 2)
-    if path.forall(x => nodeIds.add(x.node.id())) then true
+  private[queryengine] def containsCycle(tableEntry: TableEntry): Boolean =
+    val path = tableEntry.path
+    val n    = path.length
+    if n <= 32 then
+      var repeated = false
+      var i        = 0
+      while i < n && !repeated do
+        val idI = path(i).node.id()
+        var j   = i + 1
+        while j < n && !repeated do
+          if path(j).node.id() == idI then repeated = true
+          j += 1
+        i += 1
+      if !repeated then true else allElementsDistinct(path)
     else
-      val pathSeq = path.map(x => (x.node, x.callSiteStack, x.isOutputArg, x.outEdgeLabel))
-      pathSeq.distinct.size == pathSeq.size
+      val nodeIds = new java.util.HashSet[java.lang.Long](n * 2)
+      if path.forall(x => nodeIds.add(x.node.id())) then true else allElementsDistinct(path)
+
+  private def allElementsDistinct(path: Vector[PathElement]): Boolean =
+    val pathSeq = path.map(x => (x.node, x.callSiteStack, x.isOutputArg, x.outEdgeLabel))
+    pathSeq.distinct.size == pathSeq.size
 
   private def addCompletedTasksToMainTable(results: List[(TaskFingerprint, TableEntry)]): Unit =
       results.groupBy(_._1).foreach { case (fingerprint, resultList) =>
@@ -157,13 +176,7 @@ class HeldTaskCompletion(
       if list.sizeIs <= 1 then list
       else
         list
-            .groupBy { result =>
-              val head =
-                  result.path.headOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
-              val last =
-                  result.path.lastOption.map(x => (x.node, x.callSiteStack, x.isOutputArg)).get
-              (head, last)
-            }
+            .groupBy(_.dedupKey)
             .map { case (_, list) =>
                 val lenIdPathPairs = list.map(x => (x.path.length, x))
                 val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match

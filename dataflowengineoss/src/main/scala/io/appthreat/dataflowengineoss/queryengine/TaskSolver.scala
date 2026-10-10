@@ -131,15 +131,7 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
         if vec.sizeIs <= 1 then vec
         else
           vec
-              .groupBy { result =>
-                val head = result.path.headOption.map(x =>
-                    (x.node, x.callSiteStack, x.isOutputArg)
-                ).get
-                val last = result.path.lastOption.map(x =>
-                    (x.node, x.callSiteStack, x.isOutputArg)
-                ).get
-                (head, last, result.partial, result.callDepth)
-              }
+              .groupBy(_.resultDedupKey)
               .map { case (_, list) =>
                   val lenIdPathPairs = list.map(x => (x.path.length, x)).toList
                   val withMaxLength = (lenIdPathPairs.sortBy(_._1).reverse match

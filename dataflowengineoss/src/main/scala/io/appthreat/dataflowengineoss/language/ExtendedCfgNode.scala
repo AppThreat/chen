@@ -54,6 +54,16 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
     context: EngineContext
   ): Iterator[Path] =
     val sources = sourceTravsToStartingPoints(sourceTrav +: sourceTravs*)
+    reachableByFlowsFromStartingPoints(sources)
+
+  /** As [[reachableByFlows]], for callers that run the same source set against several sink sets -
+    * atom's reachables slicing queries the same sources once per sink node kind. The expansion is
+    * deterministic in the graph and the sources, so computing it once and reusing the list here
+    * yields the same flows, in the same order, as expanding it per call.
+    */
+  def reachableByFlowsFromStartingPoints(sources: List[StartingPointWithSource])(implicit
+    context: EngineContext
+  ): Iterator[Path] =
     // A set, not the list: it is probed once per element of every result path, and a scan of the
     // list per probe grew with sources times path elements on a large project.
     val startingPoints = sources.iterator.map(_.startingPoint).toSet[AstNode]
@@ -83,7 +93,7 @@ class ExtendedCfgNode(val traversal: Iterator[CfgNode]) extends AnyVal:
         .flatten
         .toVector
     paths.iterator
-  end reachableByFlows
+  end reachableByFlowsFromStartingPoints
 
   def reachableByDetailed[NodeType](
     sourceTrav: Iterator[NodeType],
