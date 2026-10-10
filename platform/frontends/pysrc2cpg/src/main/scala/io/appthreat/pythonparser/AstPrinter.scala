@@ -310,7 +310,8 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       "assert " + print(assert.test) + assert.msg.map(m => ", " + print(m)).getOrElse("")
 
   override def visit(importStmt: Import): String =
-      "import " + importStmt.names.map(print).mkString(", ")
+      (if importStmt.is_lazy then "lazy " else "") +
+          "import " + importStmt.names.map(print).mkString(", ")
 
   override def visit(importFrom: ImportFrom): String =
     val relativeImportDots =
@@ -318,7 +319,8 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
           " " + "." * importFrom.level
         else
           ""
-    "from" + relativeImportDots + importFrom.module.map(m => " " + m).getOrElse("") +
+    (if importFrom.is_lazy then "lazy " else "") +
+        "from" + relativeImportDots + importFrom.module.map(m => " " + m).getOrElse("") +
         " import " + importFrom.names.map(print).mkString(", ")
 
   override def visit(global: Global): String =
@@ -399,8 +401,10 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       "{" + print(setComp.elt) + setComp.generators.map(print).mkString("") + "}"
 
   override def visit(dictComp: DictComp): String =
-      "{" + print(dictComp.key) + ":" + print(dictComp.value) +
-          dictComp.generators.map(print).mkString("") + "}"
+    val element = dictComp.value match
+      case Some(value) => print(dictComp.key) + ":" + print(value)
+      case None        => "**" + print(dictComp.key)
+    "{" + element + dictComp.generators.map(print).mkString("") + "}"
 
   override def visit(generatorExp: GeneratorExp): String =
       "(" + print(generatorExp.elt) + generatorExp.generators.map(print).mkString("") + ")"
@@ -442,7 +446,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       case 97  => "!a"
 
     val formatSpecStr = formattedValue.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
+      case Some(formatSpec) => ":" + print(formatSpec)
       case None             => ""
 
     "{" + print(formattedValue.value) +
@@ -464,7 +468,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String]:
       case 97  => "!a"
 
     val formatSpecStr = interpolation.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
+      case Some(formatSpec) => ":" + print(formatSpec)
       case None             => ""
 
     "{" + print(interpolation.value) +

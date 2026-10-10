@@ -45,6 +45,9 @@ class PythonAstVisitor(
 
   private var memOpMap: AstNodeToMemoryOperationMap = scala.compiletime.uninitialized
 
+  // Import statements made lazy by `__lazy_modules__` (PEP 810), with their lazy alias names.
+  private var lazyModuleAliases = new java.util.IdentityHashMap[ast.istmt, Set[String]]()
+
   private val members = mutable.Map.empty[NewTypeDecl, List[String]]
 
   // As key only ast.FunctionDef and ast.AsyncFunctionDef are used but there
@@ -76,6 +79,10 @@ class PythonAstVisitor(
     val memOpCalculator = new MemoryOperationCalculator()
     module.accept(memOpCalculator)
     memOpMap = memOpCalculator.astNodeToMemOp
+    lazyModuleAliases = PythonLazyImports.lazyModuleAliases(
+      module,
+      PythonLazyImports.packageOf(relFileName, dottedModuleName)
+    )
 
     val fileNode = nodeBuilder.fileNode(relFileName)
     val namespaceBlockNode =
@@ -243,6 +250,8 @@ class PythonAstVisitor(
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
     val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
+    val (defaultAssignments, defaults) =
+        convertParameterDefaults(functionDef.name, functionDef.args)
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -250,20 +259,26 @@ class PythonAstVisitor(
         functionDef.args,
         isStaticMethod(functionDef.decorator_list)
       ),
-      () => functionDef.body.map(convert),
+      () => parameterDefaultPrologue(defaults) ++ functionDef.body.map(convert),
       functionDef.returns,
       typeParamNames = typeParamNames,
       isAsync = false,
       lineAndColOf(functionDef)
     )
     functionDefToMethod.put(functionDef, methodNode)
+    tagFoldedSpelling(methodNode, functionDef.name, definedNameCode(functionDef, "def"))
+    tagFoldedSpelling(methodIdentifierNode, functionDef.name, definedNameCode(functionDef, "def"))
 
     addDecoratorAnnotations(methodNode, functionDef.decorator_list)
 
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)
 
-    createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef))
+    withDefaults(
+      defaultAssignments,
+      createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef)),
+      lineAndColOf(functionDef)
+    )
   end convert
 
   /*
@@ -424,6 +439,8 @@ class PythonAstVisitor(
     val methodIdentifierNode =
         createIdentifierNode(functionDef.name, Store, lineAndColOf(functionDef))
     val typeParamNames: List[String] = functionDef.type_params.map(convertTypeParam).toList
+    val (defaultAssignments, defaults) =
+        convertParameterDefaults(functionDef.name, functionDef.args)
     val (methodNode, methodRefNode) = createMethodAndMethodRef(
       functionDef.name,
       Some(functionDef.name),
@@ -431,20 +448,26 @@ class PythonAstVisitor(
         functionDef.args,
         isStaticMethod(functionDef.decorator_list)
       ),
-      () => functionDef.body.map(convert),
+      () => parameterDefaultPrologue(defaults) ++ functionDef.body.map(convert),
       functionDef.returns,
       typeParamNames = typeParamNames,
       isAsync = true,
       lineAndColOf(functionDef)
     )
     functionDefToMethod.put(functionDef, methodNode)
+    tagFoldedSpelling(methodNode, functionDef.name, definedNameCode(functionDef, "def"))
+    tagFoldedSpelling(methodIdentifierNode, functionDef.name, definedNameCode(functionDef, "def"))
 
     addDecoratorAnnotations(methodNode, functionDef.decorator_list)
 
     val wrappedMethodRefNode =
         wrapMethodRefWithDecorators(methodRefNode, functionDef.decorator_list)
 
-    createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef))
+    withDefaults(
+      defaultAssignments,
+      createAssignment(methodIdentifierNode, wrappedMethodRefNode, lineAndColOf(functionDef)),
+      lineAndColOf(functionDef)
+    )
   end convert
 
   private def isStaticMethod(decoratorList: Iterable[ast.iexpr]): Boolean =
@@ -685,7 +708,8 @@ class PythonAstVisitor(
           initParameters,
           metaTypeDeclName,
           metaTypeDeclFullName,
-          instanceTypeDeclFullName
+          instanceTypeDeclFullName,
+          lineAndColOf(classDef)
         )
 
     createBinding(metaClassCallHandlerMethod, metaTypeDeclNode)
@@ -694,7 +718,8 @@ class PythonAstVisitor(
     // We do this to model the __init__ call in a visible way for the data flow tracker.
     // This is done because very often the __init__ call is hidden in a super().__new__ call
     // and we cant yet handle super().
-    val fakeNewMethod = createFakeNewMethod(initParameters, instanceTypeDeclFullName)
+    val fakeNewMethod =
+        createFakeNewMethod(initParameters, instanceTypeDeclFullName, lineAndColOf(classDef))
 
     val fakeNewMember = nodeBuilder.memberNode("<fakeNew>", fakeNewMethod.fullName)
     edgeBuilder.astEdge(fakeNewMember, metaTypeDeclNode, contextStack.order.getAndInc)
@@ -735,8 +760,11 @@ class PythonAstVisitor(
         createCall(methodRefNode, "", lineAndColOf(classDef), Nil, Nil)
     val metaTypeRefNode =
         createTypeRef(metaTypeDeclName, metaTypeDeclFullName, lineAndColOf(classDef))
+    // a TYPE_DECL cannot carry a tag; the name the class statement binds can
+    val classIdentifierNode = createIdentifierNode(classDef.name, Store, lineAndColOf(classDef))
+    tagFoldedSpelling(classIdentifierNode, classDef.name, definedNameCode(classDef, "class"))
     val classIdentifierAssignNode =
-        createAssignmentToIdentifier(classDef.name, metaTypeRefNode, lineAndColOf(classDef))
+        createAssignment(classIdentifierNode, metaTypeRefNode, lineAndColOf(classDef))
 
     val classBlock = createBlock(
       callToClassBodyFunction :: classIdentifierAssignNode :: Nil,
@@ -790,7 +818,6 @@ class PythonAstVisitor(
     * p1))
     * @return
     */
-  // TODO handle kwArg
   private def createMetaClassAdapterMethod(
     adaptedMethodName: String,
     adaptedMethodFullName: String,
@@ -864,6 +891,14 @@ class PythonAstVisitor(
           createIdentifierNode(arg.arg, Load, lineAndColumn)
         ))
     }
+    arguments.kw_arg.foreach { arg =>
+        convertedKeywordArgs.append(
+          createDictUnpackOperatorCall(
+            createIdentifierNode(arg.arg, Load, lineAndColumn),
+            lineAndColumn
+          )
+        )
+    }
 
     (convertedArgs, convertedKeywordArgs)
   end createArguments
@@ -873,8 +908,10 @@ class PythonAstVisitor(
     *   Parameters without first positional parameter and adjusted line and column number
     *   information.
     */
-  private def stripFirstPositionalParameter(initParameters: ast.Arguments)
-    : (ast.Arguments, LineAndColumn) =
+  private def stripFirstPositionalParameter(
+    initParameters: ast.Arguments,
+    classLineAndColumn: LineAndColumn
+  ): (ast.Arguments, LineAndColumn) =
       if initParameters.posonlyargs.nonEmpty then
         (
           initParameters.copy(posonlyargs = initParameters.posonlyargs.tail),
@@ -887,8 +924,14 @@ class PythonAstVisitor(
         )
       else if initParameters.vararg.nonEmpty then
         (initParameters, lineAndColOf(initParameters.vararg.get))
-      else
+      else if initParameters.kw_arg.nonEmpty then
         (initParameters, lineAndColOf(initParameters.kw_arg.get))
+      else
+        // `def __init__():` or `def __init__(*, key):` - nothing positional to strip
+        (
+          initParameters,
+          initParameters.kwonlyargs.headOption.map(lineAndColOf).getOrElse(classLineAndColumn)
+        )
 
   /** Creates the method which handles a call to the meta class object. This process is also known
     * as creating a new instance object, e.g. obj = MyClass(p1). The purpose of the generated
@@ -898,19 +941,20 @@ class PythonAstVisitor(
     * def <metaClassCallHandler>(p1): return DYNAMIC_CALL(receiver=TYPE_REF(meta class).<fakeNew>,
     * instance \= TYPE_REF(meta class), p1)
     */
-  // TODO handle kwArg
   private def createMetaClassCallHandlerMethod(
     initParameters: ast.Arguments,
     metaTypeDeclName: String,
     metaTypeDeclFullName: String,
-    instanceTypeDeclFullName: String
+    instanceTypeDeclFullName: String,
+    classLineAndColumn: LineAndColumn
   ): nodes.NewMethod =
     val methodName     = "<metaClassCallHandler>"
     val methodFullName = calculateFullNameFromContext(methodName)
 
     // We need to drop the "self" parameter either from the position only or normal parameters
     // because "self" is not passed through but rather created in __new__.
-    val (parametersWithoutSelf, lineAndColumn) = stripFirstPositionalParameter(initParameters)
+    val (parametersWithoutSelf, lineAndColumn) =
+        stripFirstPositionalParameter(initParameters, classLineAndColumn)
 
     createMethod(
       methodName,
@@ -955,17 +999,18 @@ class PythonAstVisitor(
     * looks like: def <fakeNew>(cls, p1): __newInstance = STATIC_CALL(<operator>.alloc)
     * cls.__init__(__newIstance, p1) return __newInstance
     */
-  // TODO handle kwArg
   private def createFakeNewMethod(
     initParameters: ast.Arguments,
-    instanceTypeDeclFullName: String
+    instanceTypeDeclFullName: String,
+    classLineAndColumn: LineAndColumn
   ): nodes.NewMethod =
     val newMethodName         = "<fakeNew>"
     val newMethodStubFullName = calculateFullNameFromContext(newMethodName)
 
     // We need to drop the "self" parameter either from the position only or normal parameters
     // because "self" is not passed through but rather created in __new__.
-    val (parametersWithoutSelf, lineAndColumn) = stripFirstPositionalParameter(initParameters)
+    val (parametersWithoutSelf, lineAndColumn) =
+        stripFirstPositionalParameter(initParameters, classLineAndColumn)
 
     createMethod(
       newMethodName,
@@ -1630,7 +1675,13 @@ class PythonAstVisitor(
   //     y = import("", "y")
   //   }
   def convert(importStmt: ast.Import): NewNode =
-      createTransformedImport("", importStmt.names, lineAndColOf(importStmt))
+      createTransformedImport(
+        "",
+        importStmt.names,
+        lineAndColOf(importStmt),
+        lazyTagOf(importStmt, importStmt.is_lazy),
+        nodeToCode.getCode(importStmt)
+      )
 
   // Lowering of from x import y:
   //   y = import("x", "y")
@@ -1648,7 +1699,22 @@ class PythonAstVisitor(
       moduleName = moduleName.appended('.')
     moduleName += importFrom.module.getOrElse("")
 
-    createTransformedImport(moduleName, importFrom.names, lineAndColOf(importFrom))
+    createTransformedImport(
+      moduleName,
+      importFrom.names,
+      lineAndColOf(importFrom),
+      lazyTagOf(importFrom, importFrom.is_lazy),
+      nodeToCode.getCode(importFrom)
+    )
+
+  /** PEP 810 laziness of each alias an import statement binds: the `lazy` keyword makes every alias
+    * lazy, `__lazy_modules__` the ones [[PythonLazyImports.lazyModuleAliases]] found.
+    */
+  private def lazyTagOf(stmt: ast.istmt, isLazyKeyword: Boolean): ast.Alias => Option[String] =
+    val fromLazyModules = Option(lazyModuleAliases.get(stmt)).getOrElse(Set.empty[String])
+    alias =>
+        if isLazyKeyword then Some(PythonLazyImports.Keyword)
+        else Option.when(fromLazyModules.contains(alias.name))(PythonLazyImports.LazyModules)
 
   // `global x, y` / `nonlocal x, y` are scope declarations: the names are
   // registered with the context stack (which drives identifier REF/CLOSURE
@@ -1834,19 +1900,112 @@ class PythonAstVisitor(
         else
           lambdaCounter.toString
 
-    val name = "<lambda>" + lambdaNumberSuffix
+    val name                           = "<lambda>" + lambdaNumberSuffix
+    val (defaultAssignments, defaults) = convertParameterDefaults(name, lambda.args)
     val (_, methodRefNode) = createMethodAndMethodRef(
       name,
       Some(name),
       createParameterProcessingFunction(lambda.args, isStatic = false),
-      () => Iterable.single(convert(new ast.Return(lambda.body, lambda.attributeProvider))),
+      () =>
+          parameterDefaultPrologue(defaults) :+
+              convert(new ast.Return(lambda.body, lambda.attributeProvider)),
       returns = None,
       typeParamNames = List.empty,
       isAsync = false,
       lineAndColOf(lambda)
     )
-    methodRefNode
+    withDefaults(defaultAssignments, methodRefNode, lineAndColOf(lambda))
   end convert
+
+  /** A parameter default and the hidden variable its value was evaluated into. */
+  private case class ParameterDefault(
+    parameter: String,
+    variable: String,
+    lineAndColumn: LineAndColumn
+  )
+
+  private val defaultVariableCounts = mutable.Map.empty[String, Int]
+
+  /** Python evaluates a function's defaults once, where the `def` (or `lambda`) is, in that scope:
+    * `def f(x=x)` reads the enclosing `x`, and a mutable default is shared by every call. Each
+    * default is lowered there into an assignment to a hidden variable named `<default>f.x` (made
+    * unique per definition), which the function captures and its body's prologue (see
+    * [[parameterDefaultPrologue]]) applies to the parameter. Positional defaults belong to the last
+    * positional parameters; keyword-only ones line up with their parameters, `None` where a
+    * parameter has no default.
+    */
+  private def convertParameterDefaults(
+    functionName: String,
+    arguments: ast.Arguments
+  ): (Seq[NewNode], Seq[ParameterDefault]) =
+    val positional = (arguments.posonlyargs ++ arguments.args).toSeq
+    val withDefaults =
+        positional.takeRight(arguments.defaults.size).zip(arguments.defaults) ++
+            arguments.kwonlyargs.zip(arguments.kw_defaults).collect { case (arg, Some(default)) =>
+                (arg, default)
+            }
+    withDefaults.map { (arg, default) =>
+      val lineAndColumn = lineAndColOf(default)
+      val baseName      = s"<default>$functionName.${arg.arg}"
+      val seen          = defaultVariableCounts.getOrElse(baseName, 0)
+      defaultVariableCounts(baseName) = seen + 1
+      val variable = if seen == 0 then baseName else s"$baseName#$seen"
+      val value    = convert(default)
+      val target   = createIdentifierNode(variable, Store, lineAndColumn)
+      // a method defined in a class body must still see it
+      contextStack.exposeToNestedScopes(variable)
+      (
+        createAssignment(target, value, lineAndColumn, considerAsGlobal = false),
+        ParameterDefault(arg.arg, variable, lineAndColumn)
+      )
+    }.unzip
+  end convertParameterDefaults
+
+  /** The first statements of a function with defaults, one per defaulted parameter: `x = x if x
+    * passed else <default>f.x` - a caller's argument, or the captured default.
+    */
+  private def parameterDefaultPrologue(defaults: Seq[ParameterDefault]): Seq[NewNode] =
+      defaults.map { case ParameterDefault(parameter, variable, lineAndColumn) =>
+          val passed = nodeBuilder.callNode(
+            s"$parameter passed",
+            "<operator>.argumentPassed",
+            DispatchTypes.STATIC_DISPATCH,
+            lineAndColumn
+          )
+          addAstChildrenAsArguments(
+            passed,
+            1,
+            createIdentifierNode(parameter, Load, lineAndColumn)
+          )
+          val choice = nodeBuilder.callNode(
+            s"$parameter if $parameter passed else $variable",
+            Operators.conditional,
+            DispatchTypes.STATIC_DISPATCH,
+            lineAndColumn
+          )
+          addAstChildrenAsArguments(
+            choice,
+            1,
+            passed,
+            createIdentifierNode(parameter, Load, lineAndColumn),
+            createIdentifierNode(variable, Load, lineAndColumn)
+          )
+          createAssignment(
+            createIdentifierNode(parameter, Store, lineAndColumn),
+            choice,
+            lineAndColumn,
+            considerAsGlobal = false
+          )
+      }
+
+  /** `node`, preceded by the evaluation of the defaults when there are any. */
+  private def withDefaults(
+    defaultAssignments: Seq[NewNode],
+    node: NewNode,
+    lineAndColumn: LineAndColumn
+  ): NewNode =
+      if defaultAssignments.isEmpty then node
+      else createBlock(defaultAssignments :+ node, lineAndColumn)
 
   // TODO test
   def convert(ifExp: ast.IfExp): NewNode =
@@ -1936,8 +2095,33 @@ class PythonAstVisitor(
 
     callNode
 
+  /** The per-element call of a comprehension lowering: `tmp.<addMethod>(elt)`, or - for a PEP 798
+    * (3.15) unpacking element `*xs` - `tmp.<addAllMethod>(xs)`, adding every item of the operand
+    * rather than an unpack operator over it.
+    */
+  private def createComprehensionElementCall(
+    tmpVariableName: String,
+    elt: ast.iexpr,
+    addMethod: String,
+    addAllMethod: String,
+    comprehension: ast.iattributes
+  ): NewNode =
+    val (method, argument) = elt match
+      case starred: ast.Starred => (addAllMethod, convert(starred.value))
+      case other                => (addMethod, convert(other))
+    createXDotYCall(
+      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(comprehension)),
+      method,
+      xMayHaveSideEffects = false,
+      lineAndColOf(comprehension),
+      argument :: Nil,
+      Nil
+    )
+
   /** Lowering of [x for y in l for x in y]: { tmp = [] <loweringOf>( for y in l: for x in y:
-    * tmp.append(x) ) tmp }
+    * tmp.append(x) ) tmp }. A PEP 798 (3.15) unpacking element `[*L for L in ls]` adds every item
+    * of `L`, so it lowers to `tmp.extend(L)` - the same call `[x for L in ls for x in L]` amounts
+    * to - instead of appending an unpack operator.
     */
   // TODO test
   def convert(listComp: ast.ListComp): NewNode =
@@ -1950,15 +2134,9 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, listOperatorCall, lineAndColOf(listComp))
 
-    // Create tmp.append(x)
-    val listVarAppendCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(listComp)),
-      "append",
-      xMayHaveSideEffects = false,
-      lineAndColOf(listComp),
-      convert(listComp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.append(x) / tmp.extend(L)
+    val listVarAppendCallNode =
+        createComprehensionElementCall(tmpVariableName, listComp.elt, "append", "extend", listComp)
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -1974,7 +2152,7 @@ class PythonAstVisitor(
   end convert
 
   /** Lowering of {x for y in l for x in y}: { tmp = {} <loweringOf>( for y in l: for x in y:
-    * tmp.add(x) ) tmp }
+    * tmp.add(x) ) tmp }. A PEP 798 unpacking element `{*s for s in ss}` lowers to `tmp.update(s)`.
     */
   // TODO test
   def convert(setComp: ast.SetComp): NewNode =
@@ -1986,15 +2164,9 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, setOperatorCall, lineAndColOf(setComp))
 
-    // Create tmp.add(x)
-    val setVarAddCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(setComp)),
-      "add",
-      xMayHaveSideEffects = false,
-      lineAndColOf(setComp),
-      convert(setComp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.add(x) / tmp.update(s)
+    val setVarAddCallNode =
+        createComprehensionElementCall(tmpVariableName, setComp.elt, "add", "update", setComp)
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2010,7 +2182,8 @@ class PythonAstVisitor(
   end convert
 
   /** Lowering of {k:v for y in l for k, v in y}: { tmp = {} <loweringOf>( for y in l: for k, v in
-    * y: tmp[k] = v ) tmp }
+    * y: tmp[k] = v ) tmp }. A PEP 798 unpacking comprehension `{**d for d in ds}` (CPython's
+    * DictComp with value = None) merges each mapping: `tmp.update(d)`.
     */
   // TODO test
   def convert(dictComp: ast.DictComp): NewNode =
@@ -2022,16 +2195,27 @@ class PythonAstVisitor(
     val variableAssignNode =
         createAssignmentToIdentifier(tmpVariableName, dictOperatorCall, lineAndColOf(dictComp))
 
-    // Create tmp[k] = v
-    val dictAssigNode = createAssignment(
-      createIndexAccess(
-        createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
-        convert(dictComp.key),
-        lineAndColOf(dictComp)
-      ),
-      convert(dictComp.value),
-      lineAndColOf(dictComp)
-    )
+    // Create tmp[k] = v / tmp.update(d)
+    val dictAssigNode = dictComp.value match
+      case Some(value) =>
+          createAssignment(
+            createIndexAccess(
+              createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
+              convert(dictComp.key),
+              lineAndColOf(dictComp)
+            ),
+            convert(value),
+            lineAndColOf(dictComp)
+          )
+      case None =>
+          createXDotYCall(
+            () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(dictComp)),
+            "update",
+            xMayHaveSideEffects = false,
+            lineAndColOf(dictComp),
+            convert(dictComp.key) :: Nil,
+            Nil
+          )
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2072,15 +2256,15 @@ class PythonAstVisitor(
           lineAndColOf(generatorExp)
         )
 
-    // Create tmp.append(x)
-    val genExpAppendCallNode = createXDotYCall(
-      () => createIdentifierNode(tmpVariableName, Load, lineAndColOf(generatorExp)),
-      "append",
-      xMayHaveSideEffects = false,
-      lineAndColOf(generatorExp),
-      convert(generatorExp.elt) :: Nil,
-      Nil
-    )
+    // Create tmp.append(x) / tmp.extend(L) for a PEP 798 unpacking element `(*L for L in ls)`
+    val genExpAppendCallNode =
+        createComprehensionElementCall(
+          tmpVariableName,
+          generatorExp.elt,
+          "append",
+          "extend",
+          generatorExp
+        )
 
     val comprehensionBlockNode = createComprehensionLowering(
       tmpVariableName,
@@ -2257,11 +2441,17 @@ class PythonAstVisitor(
     val argumentNodes = call.args.map(convert).toSeq
     val keywordArgNodes = call.keywords.flatMap { keyword =>
         if keyword.arg.isDefined then
-          Some((keyword.arg.get, convert(keyword.value)))
+          val valueNode = convert(keyword.value)
+          // `verify=False` with verify in fullwidth letters: the argument carries the tag
+          tagFoldedSpelling(
+            valueNode,
+            keyword.arg.get,
+            nodeToCode.getCode(keyword).takeWhile(_ != '=')
+          )
+          Some((keyword.arg.get, valueNode))
         else
-          // keyword.arg == None. This is the case for func(**dict) style arguments.
-          // TODO implement handling for this case.
-          None
+          // `func(**mapping)`
+          Some(createDictUnpackOperatorCall(convert(keyword.value), lineAndColOf(keyword)))
     }
 
     call.func match
@@ -2272,7 +2462,8 @@ class PythonAstVisitor(
             xMayHaveSideEffects = !attribute.value.isInstanceOf[ast.Name],
             lineAndColOf(call),
             argumentNodes,
-            keywordArgNodes
+            keywordArgNodes,
+            rawFieldCode(attribute)
           )
       case _ =>
           val receiverNode = convert(call.func)
@@ -2292,9 +2483,7 @@ class PythonAstVisitor(
       case 114 => "!r"
       case 97  => "!a"
 
-    val formatSpecStr = formattedValue.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
-      case None             => ""
+    val (formatSpecStr, formatSpecNode) = convertFormatSpec(formattedValue.format_spec)
 
     val code = "{" + codeOf(valueNode) + equalSignStr + conversionStr + formatSpecStr + "}"
 
@@ -2306,9 +2495,30 @@ class PythonAstVisitor(
     )
 
     addAstChildrenAsArguments(callNode, 1, valueNode)
+    formatSpecNode.foreach(addAstChildrenAsArguments(callNode, 2, _))
 
     callNode
   end convert
+
+  /** The format spec of a replacement field as the `:spec` suffix of the field's code, plus - when
+    * the spec has nested replacement fields (`{x:>{width}.{precision}f}`) - an
+    * `<operator>.formatString` call over its parts, which becomes the field's second argument so
+    * the expressions it evaluates are part of the CPG like any other. A spec of literal text only
+    * evaluates nothing and stays in the code alone.
+    */
+  private def convertFormatSpec(
+    formatSpec: Option[ast.JoinedString]
+  ): (String, Option[nodes.NewNode]) =
+      formatSpec match
+        case None => ("", None)
+        case Some(spec) if spec.values.forall(_.isInstanceOf[ast.Constant]) =>
+            val text = spec.values.collect {
+                case ast.Constant(ast.JoinedStringConstant(value), _) => value
+            }.mkString
+            (":" + text, None)
+        case Some(spec) =>
+            val specNode = convert(spec)
+            (":" + codeOf(specNode), Some(specNode))
 
   def convert(joinedString: ast.JoinedString): nodes.NewNode =
     val argumentNodes = joinedString.values.map(convert)
@@ -2343,9 +2553,7 @@ class PythonAstVisitor(
       case 114 => "!r"
       case 97  => "!a"
 
-    val formatSpecStr = interpolation.format_spec match
-      case Some(formatSpec) => ":" + formatSpec
-      case None             => ""
+    val (formatSpecStr, formatSpecNode) = convertFormatSpec(interpolation.format_spec)
 
     val code = "{" + codeOf(valueNode) + equalSignStr + conversionStr + formatSpecStr + "}"
 
@@ -2357,6 +2565,7 @@ class PythonAstVisitor(
     )
 
     addAstChildrenAsArguments(callNode, 1, valueNode)
+    formatSpecNode.foreach(addAstChildrenAsArguments(callNode, 2, _))
 
     callNode
   end convert
@@ -2420,7 +2629,7 @@ class PythonAstVisitor(
     val fieldName  = attribute.attr
     val lineAndCol = lineAndColOf(attribute)
 
-    val fieldAccess = createFieldAccess(baseNode, fieldName, lineAndCol)
+    val fieldAccess = createFieldAccess(baseNode, fieldName, lineAndCol, rawFieldCode(attribute))
 
     attribute.value match
       case name: ast.Name if name.id == "self" =>
@@ -2461,16 +2670,17 @@ class PythonAstVisitor(
   def convert(name: ast.Name): nodes.NewNode =
     val memoryOperation = memOpMap.get(name).get
     val identifier      = createIdentifierNode(name.id, memoryOperation, lineAndColOf(name))
+    tagFoldedSpelling(identifier, name.id, nodeToCode.getCode(name))
     if contextStack.isClassContext && memoryOperation == Store then
       createAndRegisterMember(identifier.name, lineAndColOf(name))
     identifier
 
   // TODO test
   def convert(list: ast.List): nodes.NewNode =
-    // Must be a List as part of a Load memory operation because a List literal
-    // is not permitted as argument to a Del and List as part of a Store does not
-    // reach here.
-    assert(memOpMap.get(list).get == Load)
+    // Must be a List as part of a Load or Del memory operation: `del [a, b]` and
+    // `del a, [b, c]` delete the listed names, like a tuple target does. A List as
+    // part of a Store does not reach here.
+    assert(memOpMap.get(list).get == Load || memOpMap.get(list).get == Del)
     val listElementNodes = list.elts.map(convert)
     val code             = listElementNodes.map(codeOf).mkString("[", ", ", "]")
 
@@ -2555,49 +2765,53 @@ class PythonAstVisitor(
   // will all be slightly different in the future when we can represent the
   // different types in the cpg.
   def convertPosOnlyArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(
-        arg.arg,
-        isVariadic = false,
-        lineAndColOf(arg),
-        Option(index.getAndInc),
-        arg.annotation
-      )
+      convertArg(arg, isVariadic = false, Option(index.getAndInc))
 
   def convertNormalArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(
-        arg.arg,
-        isVariadic = false,
-        lineAndColOf(arg),
-        Option(index.getAndInc),
-        arg.annotation
-      )
+      convertArg(arg, isVariadic = false, Option(index.getAndInc))
 
   def convertVarArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(
-        arg.arg,
-        isVariadic = true,
-        lineAndColOf(arg),
-        Option(index.getAndInc),
-        arg.annotation
-      )
+      convertArg(arg, isVariadic = true, Option(index.getAndInc), prefix = "*")
 
   def convertKeywordOnlyArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(
-        arg.arg,
-        isVariadic = false,
-        lineAndColOf(arg),
-        None,
-        arg.annotation
-      )
+      convertArg(arg, isVariadic = false, None)
 
+  // `**kwargs`, written with `**`, is keyword-variadic (ArgumentBinding.isKeywordVariadic)
   def convertKwArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      nodeBuilder.methodParameterNode(
-        arg.arg,
-        isVariadic = false,
-        lineAndColOf(arg),
-        None,
-        arg.annotation
-      )
+      convertArg(arg, isVariadic = true, None, prefix = "**")
+
+  private def convertArg(
+    arg: ast.Arg,
+    isVariadic: Boolean,
+    index: Option[Int],
+    prefix: String = ""
+  ): nodes.NewMethodParameterIn =
+    val parameter =
+        nodeBuilder.methodParameterNode(
+          arg.arg,
+          isVariadic,
+          lineAndColOf(arg),
+          index,
+          arg.annotation,
+          Option.when(prefix.nonEmpty)(prefix + arg.arg)
+        )
+    tagFoldedSpelling(parameter, arg.arg, argNameCode(arg))
+    parameter
+
+  /** The source text after an attribute's base expression: `.attr`, whitespace around the dot. */
+  private def rawFieldCode(attribute: ast.Attribute): String =
+      nodeToCode.getCode(attribute).drop(attribute.value.end_input_offset - attribute.input_offset)
+
+  /** The source text of the name a `def` or `class` statement binds (decorators may precede it). */
+  private def definedNameCode(stmt: ast.iattributes, keyword: String): String =
+      s"(?:^|\\s)$keyword\\s+([^\\s(\\[:]+)".r
+          .findFirstMatchIn(nodeToCode.getCode(stmt))
+          .map(_.group(1))
+          .getOrElse("")
+
+  /** The source text of a parameter's name: an annotation, if any, follows a colon. */
+  private def argNameCode(arg: ast.Arg): String =
+      nodeToCode.getCode(arg).takeWhile(c => c != ':' && c != '=')
 
   def convert(keyword: ast.Keyword): NewNode = ???
 
@@ -2644,7 +2858,7 @@ object PythonAstVisitor:
   )
 
   // This list contains all functions from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // Updated for Python 3.13
+  // Updated for Python 3.15 (diffed against dir(builtins) on CPython 3.15.0)
   val builtinFunctionsV3: Iterable[String] = Iterable(
     "abs",
     "aiter",
@@ -2703,7 +2917,7 @@ object PythonAstVisitor:
   )
 
   // This list contains all classes from https://docs.python.org/3/library/functions.html#built-in-funcs
-  // Updated for Python 3.13
+  // Updated for Python 3.15 (diffed against dir(builtins) on CPython 3.15.0)
   val builtinClassesV3: Iterable[String] = Iterable(
     "bool",
     "bytearray",
@@ -2787,7 +3001,17 @@ object PythonAstVisitor:
     "RuntimeWarning",
     "SyntaxWarning",
     "UnicodeWarning",
-    "UserWarning"
+    "UserWarning",
+    // Missing from the 3.13 refresh (checked against dir(builtins) on CPython 3.15.0)
+    "EncodingWarning",         // 3.10
+    "ExceptionGroup",          // 3.11
+    "PythonFinalizationError", // 3.13
+    "EnvironmentError",        // alias of OSError
+    "IOError",                 // alias of OSError
+    // Python 3.15
+    "frozendict",      // PEP 814
+    "sentinel",        // PEP 661
+    "ImportCycleError" // PEP 810, a subclass of ImportError
   )
 
   // This list contains all functions from https://docs.python.org/2.7/library/functions.html

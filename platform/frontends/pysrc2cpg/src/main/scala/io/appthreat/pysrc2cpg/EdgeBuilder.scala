@@ -56,6 +56,9 @@ class EdgeBuilder(diffGraph: DiffGraphBuilder):
   def bindsEdge(dstNode: nodes.NewNode, srcNode: nodes.NewNode): Unit =
       diffGraph.addEdge(srcNode, dstNode, EdgeTypes.BINDS)
 
+  def taggedByEdge(taggedNode: nodes.NewNode, tagNode: nodes.NewTag): Unit =
+      diffGraph.addEdge(taggedNode, tagNode, EdgeTypes.TAGGED_BY)
+
   private def addOrder(node: nodes.NewNode, order: Int): Unit = node match
     case n: NewTypeDecl          => n.order = order
     case n: NewBlock             => n.order = order

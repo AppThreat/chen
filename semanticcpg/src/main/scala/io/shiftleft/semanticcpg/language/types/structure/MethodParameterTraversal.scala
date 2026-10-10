@@ -2,6 +2,7 @@ package io.shiftleft.semanticcpg.language.types.structure
 
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import overflowdb.traversal.help
 
 import scala.jdk.CollectionConverters.*
@@ -26,13 +27,13 @@ class MethodParameterTraversal(val traversal: Iterator[MethodParameterIn]) exten
   def indexTo(num: Int): Iterator[MethodParameterIn] =
       traversal.filter(_.index <= num)
 
-  /** Traverse to arguments (actual parameters) associated with this formal parameter
+  /** Traverse to arguments (actual parameters) associated with this formal parameter: by index, or
+    * by name for named and unpacked arguments (see [[ArgumentBinding]]).
     */
   def argument(implicit callResolver: ICallResolver): Iterator[Expression] =
       for
         paramIn <- traversal
-        call    <- callResolver.getMethodCallsites(paramIn.method)
-        arg     <- call._argumentOut.collectAll[Expression]
-        if arg.argumentIndex == paramIn.index
+        call    <- callResolver.getMethodCallsites(paramIn.method).collectAll[Call]
+        arg     <- ArgumentBinding.argumentsBinding(call, paramIn)
       yield arg
 end MethodParameterTraversal

@@ -2,6 +2,7 @@ package io.appthreat.pysrc2cpg
 
 import io.appthreat.pysrc2cpg.memop.{Load, MemoryOperation, Store}
 import io.appthreat.pythonparser.ast
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
 
@@ -18,6 +19,35 @@ trait PythonAstVisitorHelpers:
       // node.end_col_offset - 1 because the end column offset of the parser points
       // behind the last symbol.
       LineAndColumn(node.lineno, node.col_offset, node.end_lineno, node.end_col_offset - 1)
+
+  // A maximal run of characters that can belong to an identifier (anything but whitespace,
+  // operators, delimiters, quotes and comment/continuation characters).
+  private val IdentifierRun = """[^\s.,;:()\[\]{}=+\-*/%&|^~<>!@'"#\\`$?]+""".r
+
+  /** The identifiers spelled in `rawCode` that CPython NFKC-normalises to a different name (PEP
+    * 3131), keyed by that name: eval written in fullwidth (U+FF45..) or mathematical bold
+    * (U+1D41E..) letters calls `eval`.
+    */
+  protected def foldedSpellings(rawCode: String): Map[String, String] =
+      if rawCode.forall(_ <= 0x7f) then Map.empty
+      else
+        IdentifierRun.findAllIn(rawCode).filter(_.exists(_ > 0x7f)).flatMap { raw =>
+          val name = io.appthreat.pythonparser.PythonParserTokenManager.normalizeIdentifier(raw)
+          Option.when(name != raw)(name -> raw)
+        }.toMap
+
+  /** The CPG carries normalised names, so a file that writes eval in fullwidth letters reads as
+    * `eval` everywhere downstream - exactly what Python executes, and exactly what a reviewer or a
+    * grep for `eval` does not see. The node named `name` is tagged `unicode-confusable`, valued
+    * with the spelling the file uses, when `rawCode` spells it differently.
+    */
+  protected def tagFoldedSpelling(node: NewNode, name: String, rawCode: String): Unit =
+      foldedSpellings(rawCode).get(name).foreach { raw =>
+          edgeBuilder.taggedByEdge(
+            node,
+            nodeBuilder.tagNode(io.appthreat.x2cpg.Defines.UnicodeConfusableTag, raw)
+          )
+      }
 
   private var tmpCounter = 0
 
@@ -84,16 +114,35 @@ trait PythonAstVisitorHelpers:
     controlStructureNode
   end createTryStar
 
+  /** Lowers an import statement to one `name = import(from, name[, asName])` assignment per alias.
+    * `lazyTag` gives, per alias, the PEP 810 laziness of that binding (see [[PythonLazyImports]]):
+    * when defined, the import call is tagged `lazy-import` with that value.
+    */
   protected def createTransformedImport(
     from: String,
     names: Iterable[ast.Alias],
-    lineAndCol: LineAndColumn
+    lineAndCol: LineAndColumn,
+    lazyTag: ast.Alias => Option[String] = _ => None,
+    rawCode: String = ""
   ): NewNode =
+    val folded = foldedSpellings(rawCode)
     val importAssignNodes =
         names.map { alias =>
           val importedAsIdentifierName = alias.asName.getOrElse(alias.name)
           val importAssignLhsIdentifierNode =
               createIdentifierNode(importedAsIdentifierName, Store, lineAndCol)
+          // the bound name is tagged with every folded spelling of the module path, the imported
+          // name and the alias (`from os import system` with fullwidth letters binds system)
+          val spellings =
+              (from.split('.') ++ alias.name.split('.') ++ alias.asName).flatMap(folded.get)
+          if spellings.nonEmpty then
+            edgeBuilder.taggedByEdge(
+              importAssignLhsIdentifierNode,
+              nodeBuilder.tagNode(
+                io.appthreat.x2cpg.Defines.UnicodeConfusableTag,
+                spellings.distinct.mkString(",")
+              )
+            )
 
           val arguments = Seq(
             nodeBuilder.stringLiteralNode(from, lineAndCol),
@@ -112,6 +161,12 @@ trait PythonAstVisitorHelpers:
                 arguments,
                 Nil
               )
+          lazyTag(alias).foreach { value =>
+              edgeBuilder.taggedByEdge(
+                importCallNode,
+                nodeBuilder.tagNode(PythonLazyImports.Tag, value)
+              )
+          }
 
           val assignNode =
               createAssignment(importAssignLhsIdentifierNode, importCallNode, lineAndCol)
@@ -322,7 +377,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -360,7 +415,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -404,7 +459,8 @@ trait PythonAstVisitorHelpers:
     xMayHaveSideEffects: Boolean,
     lineAndColumn: LineAndColumn,
     argumentNodes: Iterable[NewNode],
-    keywordArguments: Iterable[(String, NewNode)]
+    keywordArguments: Iterable[(String, NewNode)],
+    rawFieldCode: String = ""
   ): NewNode =
       if xMayHaveSideEffects then
         val tmpVarName    = getUnusedName()
@@ -413,7 +469,8 @@ trait PythonAstVisitorHelpers:
             createFieldAccess(
               createIdentifierNode(tmpVarName, Load, lineAndColumn),
               y,
-              lineAndColumn
+              lineAndColumn,
+              rawFieldCode
             )
         val instanceNode = createIdentifierNode(tmpVarName, Load, lineAndColumn)
         val instanceCallNode =
@@ -427,7 +484,7 @@ trait PythonAstVisitorHelpers:
             )
         createBlock(tmpAssignCall :: instanceCallNode :: Nil, lineAndColumn)
       else
-        val receiverNode = createFieldAccess(x(), y, lineAndColumn)
+        val receiverNode = createFieldAccess(x(), y, lineAndColumn, rawFieldCode)
         createInstanceCall(receiverNode, x(), y, lineAndColumn, argumentNodes, keywordArguments)
 
   // NOTE: The argument indicies start from 0!
@@ -443,7 +500,7 @@ trait PythonAstVisitorHelpers:
         argumentNodes.map(codeOf).mkString(", ") +
         (if argumentNodes.nonEmpty && keywordArguments.nonEmpty then ", " else "") +
         keywordArguments
-            .map { case (keyword: String, argNode) => keyword + " = " + codeOf(argNode) }
+            .map { case (keyword: String, argNode) => keywordArgumentCode(keyword, argNode) }
             .mkString(", ") +
         ")"
     val callNode =
@@ -511,6 +568,27 @@ trait PythonAstVisitorHelpers:
 
     callNode
 
+  /** The code of a keyword argument; a `**mapping` argument is its own code. */
+  protected def keywordArgumentCode(keyword: String, argumentNode: NewNode): String =
+      if keyword == ArgumentBinding.MappingUnpackName then codeOf(argumentNode)
+      else keyword + " = " + codeOf(argumentNode)
+
+  /** `f(**opts)`: the mapping is unpacked into the keyword arguments. It is passed as a keyword
+    * argument named [[ArgumentBinding.MappingUnpackName]], which binds any parameter a keyword can.
+    */
+  protected def createDictUnpackOperatorCall(
+    unpackOperand: NewNode,
+    lineAndColumn: LineAndColumn
+  ): (String, NewNode) =
+    val callNode = nodeBuilder.callNode(
+      "**" + codeOf(unpackOperand),
+      "<operator>.dictUnpack",
+      DispatchTypes.STATIC_DISPATCH,
+      lineAndColumn
+    )
+    addAstChildrenAsArguments(callNode, 1, unpackOperand)
+    (ArgumentBinding.MappingUnpackName, callNode)
+
   protected def createStarredUnpackOperatorCall(
     unpackOperand: NewNode,
     lineAndColumn: LineAndColumn
@@ -569,7 +647,8 @@ trait PythonAstVisitorHelpers:
   protected def createAssignment(
     lhsNode: NewNode,
     rhsNode: NewNode,
-    lineAndColumn: LineAndColumn
+    lineAndColumn: LineAndColumn,
+    considerAsGlobal: Boolean = true
   ): NewNode =
     val code = codeOf(lhsNode) + " = " + codeOf(rhsNode)
     val callNode = nodeBuilder.callNode(
@@ -581,7 +660,9 @@ trait PythonAstVisitorHelpers:
 
     addAstChildrenAsArguments(callNode, 1, lhsNode, rhsNode)
     // Do not include imports or function pointers
-    if !codeOf(rhsNode).startsWith("import(") && codeOf(rhsNode) != s"def ${codeOf(lhsNode)}(...)"
+    if
+      considerAsGlobal && !codeOf(rhsNode).startsWith("import(") &&
+      codeOf(rhsNode) != s"def ${codeOf(lhsNode)}(...)"
     then
       contextStack.considerAsGlobalVariable(lhsNode)
 
@@ -662,9 +743,11 @@ trait PythonAstVisitorHelpers:
   protected def createFieldAccess(
     baseNode: NewNode,
     fieldName: String,
-    lineAndColumn: LineAndColumn
+    lineAndColumn: LineAndColumn,
+    rawFieldCode: String = ""
   ): NewCall =
     val fieldIdNode = nodeBuilder.fieldIdentifierNode(fieldName, lineAndColumn)
+    tagFoldedSpelling(fieldIdNode, fieldName, rawFieldCode)
 
     val code = codeOf(baseNode) + "." + codeOf(fieldIdNode)
     val callNode = nodeBuilder.callNode(

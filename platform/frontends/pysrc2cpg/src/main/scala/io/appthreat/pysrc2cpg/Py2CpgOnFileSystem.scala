@@ -3,7 +3,6 @@ package io.appthreat.pysrc2cpg
 import io.appthreat.x2cpg.passes.frontend.TypeRecoveryParserConfig
 import io.appthreat.x2cpg.{PythonDepsMode, SourceFiles, X2Cpg, X2CpgConfig, X2CpgFrontend}
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.utils.IOUtils
 import org.slf4j.LoggerFactory
 
 import java.nio.file.*
@@ -203,7 +202,7 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                     }.toMap
 
                 val inputProviders = files.map { f => () =>
-                  val content = IOUtils.readLinesInFile(f.abs).mkString("\n")
+                  val content = PythonSourceFile.read(f.abs)
                   Py2Cpg.InputPair(content, f.rel)
                 }
                 val py2Cpg = new Py2Cpg(

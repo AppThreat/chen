@@ -402,16 +402,24 @@ case class Assert(test: iexpr, msg: Option[iexpr], attributeProvider: AttributeP
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
-case class Import(names: CollType[Alias], attributeProvider: AttributeProvider) extends istmt:
+// `is_lazy` mirrors CPython 3.15's `Import(alias* names, int? is_lazy)` (PEP 810): true for
+// `lazy import x`. Imports made lazy at runtime by `__lazy_modules__` keep is_lazy = false here,
+// exactly as in CPython's AST; the frontend derives those separately.
+case class Import(names: CollType[Alias], is_lazy: Boolean, attributeProvider: AttributeProvider)
+    extends istmt:
   def this(names: util.ArrayList[Alias], attributeProvider: AttributeProvider) =
-      this(names.asScala, attributeProvider)
+      this(names.asScala, false, attributeProvider)
+  def this(names: util.ArrayList[Alias], isLazy: Boolean, attributeProvider: AttributeProvider) =
+      this(names.asScala, isLazy, attributeProvider)
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
+// CPython 3.15: `ImportFrom(identifier? module, alias* names, int? level, int? is_lazy)`.
 case class ImportFrom(
   module: Option[String],
   names: CollType[Alias],
   level: Int,
+  is_lazy: Boolean,
   attributeProvider: AttributeProvider
 ) extends istmt:
   def this(
@@ -420,9 +428,18 @@ case class ImportFrom(
     level: Int,
     attributeProvider: AttributeProvider
   ) =
-      this(Option(module), names.asScala, level, attributeProvider)
+      this(Option(module), names.asScala, level, false, attributeProvider)
+  def this(
+    module: String,
+    names: util.ArrayList[Alias],
+    level: Int,
+    isLazy: Boolean,
+    attributeProvider: AttributeProvider
+  ) =
+      this(Option(module), names.asScala, level, isLazy, attributeProvider)
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
+end ImportFrom
 
 case class Global(names: CollType[String], attributeProvider: AttributeProvider) extends istmt:
   def this(names: util.ArrayList[String], attributeProvider: AttributeProvider) =
@@ -563,9 +580,12 @@ case class SetComp(
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
+// CPython 3.15: `DictComp(expr key, expr? value, comprehension* generators)`. A PEP 798
+// unpacking comprehension `{**d for d in ds}` has value = None and `key` holds the unpacked
+// mapping expression (`d`).
 case class DictComp(
   key: iexpr,
-  value: iexpr,
+  value: Option[iexpr],
   generators: CollType[Comprehension],
   attributeProvider: AttributeProvider
 ) extends iexpr:
@@ -575,7 +595,7 @@ case class DictComp(
     generators: util.ArrayList[Comprehension],
     attributeProvider: AttributeProvider
   ) =
-      this(key, value, generators.asScala, attributeProvider)
+      this(key, Option(value), generators.asScala, attributeProvider)
   override def accept[T](visitor: AstVisitor[T]): T =
       visitor.visit(this)
 
@@ -645,20 +665,19 @@ case class Call(
 
 // In addition to the CPython version of this class we also stored
 // whether the value expression was followed by "=" in "equalSign".
-// In deviation to CPython format_spec is of type String and not
-// a JoinedString itself. This way we do not have to handle recursive
-// format string parsing yet.
+// As in CPython, format_spec is a JoinedString (with empty quote and prefix) of the spec's
+// literal text and its nested replacement fields, e.g. `>{width}.{precision}f`.
 case class FormattedValue(
   value: iexpr,
   conversion: Int,
-  format_spec: Option[String],
+  format_spec: Option[JoinedString],
   equalSign: Boolean,
   attributeProvider: AttributeProvider
 ) extends iexpr:
   def this(
     value: iexpr,
     conversion: Int,
-    format_spec: String,
+    format_spec: JoinedString,
     equalSign: Boolean,
     attributeProvider: AttributeProvider
   ) =
@@ -688,19 +707,19 @@ case class JoinedString(
 /** PEP 750 (Python 3.14) t-string interpolation. Mirrors [[FormattedValue]] - CPython's
   * `Interpolation` carries the same parts - but is a distinct node so the CPG can keep the
   * t-string's "interpolations held unevaluated" semantics apart from f-string concatenation.
-  * `format_spec` stays a plain String for the same reason as in FormattedValue.
+  * `format_spec` is a JoinedString as in FormattedValue.
   */
 case class Interpolation(
   value: iexpr,
   conversion: Int,
-  format_spec: Option[String],
+  format_spec: Option[JoinedString],
   equalSign: Boolean,
   attributeProvider: AttributeProvider
 ) extends iexpr:
   def this(
     value: iexpr,
     conversion: Int,
-    format_spec: String,
+    format_spec: JoinedString,
     equalSign: Boolean,
     attributeProvider: AttributeProvider
   ) =

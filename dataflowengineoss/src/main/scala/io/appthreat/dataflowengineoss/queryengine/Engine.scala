@@ -9,6 +9,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Properties}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import overflowdb.Edge
 
 import java.util.concurrent.*
@@ -299,8 +300,8 @@ object Engine:
           .toVector
 
   def argToOutputParams(arg: Expression): Iterator[MethodParameterOut] =
-      argToMethods(arg).parameter
-          .index(arg.argumentIndex)
+      argToMethods(arg).iterator
+          .flatMap(method => ArgumentBinding.parametersBound(arg, method.parameter.l))
           .asOutput
 
   def argToMethods(arg: Expression): List[Method] =

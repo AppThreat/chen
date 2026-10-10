@@ -40,6 +40,9 @@ class ContextStack:
     val variables: mutable.Map[String, nodes.NewNode] = mutable.Map.empty,
     val globalVariables: mutable.Set[String] = mutable.Set.empty,
     val nonLocalVariables: mutable.Set[String] = mutable.Set.empty,
+    // Variables of a class body that the functions defined in it may capture, against Python's
+    // scoping rule: the frontend's own hidden variables, e.g. parameter defaults.
+    val exposedVariables: mutable.Set[String] = mutable.Set.empty,
     var lambdaCounter: Int = 0
   ) extends Context:
     // Set by the visitor once the METHOD_RETURN node of this method exists;
@@ -311,7 +314,10 @@ class ContextStack:
         case methodContext: MethodContext =>
             // Context is only relevant for linking if it is not a class body methods context
             // or the identifier/reference itself is from the class body method context.
-            if !methodContext.isClassBodyMethod || methodContext == startContext then
+            if
+              !methodContext.isClassBodyMethod || methodContext == startContext ||
+              methodContext.exposedVariables.contains(name)
+            then
               contextHasVariable = context.variables.contains(name)
 
               val closureBindingId =
@@ -385,6 +391,12 @@ class ContextStack:
   def addSpecialVariable(local: nodes.NewLocal): Unit =
     assert(stack.head.isInstanceOf[SpecialBlockContext])
     stack.head.variables.put(local.name, local)
+
+  /** Lets the functions defined in the current scope capture `name` even when that scope is a class
+    * body (whose variables Python functions never see).
+    */
+  def exposeToNestedScopes(name: String): Unit =
+      findEnclosingMethodContext(stack).exposedVariables.add(name)
 
   def addGlobalVariable(name: String): Unit =
       findEnclosingMethodContext(stack).globalVariables.add(name)

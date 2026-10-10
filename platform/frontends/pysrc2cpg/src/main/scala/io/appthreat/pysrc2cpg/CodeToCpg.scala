@@ -36,9 +36,11 @@ class CodeToCpg(
 
   // The cached fragment carries the full-name shape it was built with; without this,
   // switching modes on a warm cache would serve fragments in the other shape. The extra
-  // fingerprint distinguishes AST-transformed builds (dependency signatures) from plain ones.
+  // fingerprint distinguishes AST-transformed builds (dependency signatures) from plain ones,
+  // and the lowering revision retires fragments a frontend with different lowering wrote.
   private val cacheFingerprint =
       Seq(
+        CodeToCpg.LoweringRevision,
         if moduleNames.isEmpty then "" else "dotted-full-names",
         extraCacheFingerprint
       ).filter(_.nonEmpty).mkString("+")
@@ -122,6 +124,12 @@ end CodeToCpg
 object CodeToCpg:
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** Part of every cache fingerprint. The cache is keyed on file content, so a fragment written by
+    * a pysrc2cpg that parsed or lowered that content differently would otherwise be served as is.
+    * Change it whenever the grammar or the lowering changes what a file turns into.
+    */
+  val LoweringRevision: String = "py315-3"
+
   /** One failed statement: the file, the line it starts at (0 when the whole file failed), and the
     * parser message.
     */
@@ -134,3 +142,4 @@ object CodeToCpg:
     val tail  = if errors.size > 20 then List(s"  ... and ${errors.size - 20} more") else Nil
     (s"${errors.size} statements failed to parse across ${files.size} files:" :: body ::: tail)
         .mkString(System.lineSeparator)
+end CodeToCpg
