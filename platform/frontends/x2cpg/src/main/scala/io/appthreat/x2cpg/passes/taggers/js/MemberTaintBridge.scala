@@ -46,8 +46,9 @@ object MemberTaintBridge:
     while grew && round < MaxRounds do
       grew = false
       round += 1
+      val withSources = ctx.methodsWithSources
       writes.foreach { case (td, member, value) =>
-          if !done.contains((td.fullName, member)) then
+          if !done.contains((td.fullName, member)) && withSources.contains(value.method.id()) then
             sourceTagOf(ctx, value).foreach { tagName =>
                 done += ((td.fullName, member))
                 grew = true
@@ -114,6 +115,14 @@ object MemberTaintBridge:
     * nothing.
     */
   private[js] def sourceTagOf(ctx: JsContext, value: Expression): Option[String] =
+      sourceTagThrough(ctx, value)._1
+
+  /** [[sourceTagOf]], and whether the source was found behind a reactive derivation - a wrapper
+    * holding what its callback returns (`useActionState(fn)`, `computed(() => ...)`), which no
+    * dataflow edge connects to its result.
+    */
+  private[js] def sourceTagThrough(ctx: JsContext, value: Expression): (Option[String], Boolean) =
+    var derived = false
     def tagOf(n: StoredNode): Option[String] =
         SourceTags.find(t => ctx.tagger.has(n.id(), t)).orElse(
           n.tag.name.find(SourceTags.contains)
@@ -149,10 +158,19 @@ object MemberTaintBridge:
                 c.argumentOption(2).foreach(queue.enqueue(_))
             // what comes out of a sanitiser or a predicate is not the source any more
             case c: Call if JsTags.neutralises(ctx.tagger, c) =>
+            // a derivation holds what its callback returns
+            case c: Call if ReactiveBridge.isDerivationCall(c) =>
+                ReactiveBridge.derivationCallback(c).foreach { cb =>
+                    derived = true
+                    cb.ast.isReturn.astChildren.foreach {
+                      case e: Expression if e.method.id() == cb.id() => queue.enqueue(e)
+                      case _                                          =>
+                    }
+                }
             case c: Call     => c.astChildren.foreach(queue.enqueue(_))
             case b: Block    => b.astChildren.foreach(queue.enqueue(_))
             case _           =>
     end while
-    found
-  end sourceTagOf
+    (found, derived && found.nonEmpty)
+  end sourceTagThrough
 end MemberTaintBridge

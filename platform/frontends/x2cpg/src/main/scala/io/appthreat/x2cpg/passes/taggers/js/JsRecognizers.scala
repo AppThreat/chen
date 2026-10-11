@@ -13,6 +13,24 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
 
   lazy val project: JsProject = JsProject(cpg)
 
+  /** Methods holding a node tagged as a source - by this run so far, or by an earlier pass. Not
+    * cached: the bridges consult it again after tagging more.
+    */
+  def methodsWithSources: Set[Long] =
+    val tagged = tagger.taggedIds(JsTags.INPUT, JsTags.INGRESS).flatMap(id =>
+        cpg.graph.node(id) match
+          case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => Some(n.method.id())
+          case p: io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn =>
+              Some(p.method.id())
+          case _ => None
+    )
+    val earlier = cpg.tag.name(s"${JsTags.INPUT}|${JsTags.INGRESS}")._taggedByIn.collect {
+        case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => n.method.id()
+        case p: io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn =>
+            p.method.id()
+    }
+    (tagged ++ earlier).toSet
+
   /** Calls and field reads are queried by most recognizers; materialised once per run. */
   lazy val fieldAccesses: List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
       cpg.call.nameExact(io.shiftleft.codepropertygraph.generated.Operators.fieldAccess).l
@@ -56,6 +74,7 @@ object JsRecognizers:
 
   /** Runs every applicable recognizer, emitting through `tagger`. */
   def run(cpg: Cpg, tagger: JsTagger): Unit =
+    JsIndexes.clear()
     val ctx = JsContext(cpg, JsModules(cpg), tagger)
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)

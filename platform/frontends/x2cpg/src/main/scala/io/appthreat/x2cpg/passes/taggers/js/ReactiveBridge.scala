@@ -28,15 +28,37 @@ import JsShapes.*
   */
 object ReactiveBridge:
 
-  private val Derivations =
-      Set("computed", "useMemo", "createMemo", "useComputed$", "linkedSignal", "derived", "toRef")
+  private val Derivations = Set(
+    "computed",
+    "useMemo",
+    "createMemo",
+    "useComputed$",
+    "linkedSignal",
+    "derived",
+    "toRef",
+    // React 19: the state is what the action returned
+    "useActionState",
+    "useFormState"
+  )
+
+  def isDerivationCall(c: Call): Boolean = Derivations.contains(callName(c))
+
+  /** The callback a derivation evaluates: its first argument. */
+  def derivationCallback(c: Call): Option[Method] =
+      c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
+          .flatMap(callbackMethod)
 
   private val Watchers = Set("watch")
 
   private val MaxRounds = 4
 
   def run(ctx: JsContext): Unit =
-    val assignments = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+    // A local can only be tainted where its own method holds a source (the search for one stays
+    // inside the method), or it is a derivation whose callback does.
+    val withSources = ctx.methodsWithSources
+    val assignments = ctx.cpg.call.nameExact(Operators.assignment).filter(a =>
+        withSources.contains(a.method.id()) || isDerivation(a.argumentOption(2).getOrElse(a))
+    ).l.flatMap { a =>
         (a.argumentOption(1), a.argumentOption(2)) match
           case (Some(id: Identifier), Some(v)) if !id.name.startsWith("_tmp_") && id.name != "this" =>
               Some((a.method, id.name, v))
@@ -51,13 +73,14 @@ object ReactiveBridge:
       round += 1
       assignments.foreach { case (method, name, value) =>
           if !done.contains((method.id(), name)) then
-            taintOf(ctx, value).foreach { tagName =>
+            val (tainted, viaDerivation) = taintOf(ctx, value)
+            tainted.foreach { tagName =>
                 done += ((method.id(), name))
                 grew = true
                 ctx.tagger.tag(capturedReads(ctx, method, name), tagName)
                 // A derived value is a new value in its own method too: `const c = computed(...)`
                 // and every later `c.value` there start from the wrapper call.
-                if isDerivation(value) then ctx.tagger.tag(readsIn(method, name), tagName)
+                if viaDerivation then ctx.tagger.tag(readsIn(method, name), tagName)
             }
       }
       // watch(source, (value) => ...)
@@ -67,7 +90,7 @@ object ReactiveBridge:
             val tainted = args.head match
               case id: Identifier => readTag(ctx, id)
               case other =>
-                  callbackMethod(other).flatMap(returnTaint(ctx, _)).orElse(taintOf(ctx, other))
+                  callbackMethod(other).flatMap(returnTaint(ctx, _)).orElse(taintOf(ctx, other)._1)
             tainted.foreach { tagName =>
                 val params = callbacksIn(args(1)).flatMap(firstParam)
                 if params.exists(p => !ctx.tagger.has(p.id(), tagName)) then
@@ -86,12 +109,16 @@ object ReactiveBridge:
   /** The source tag of a value: what reaches it in its method, or - for a reactive derivation - what
     * its callback returns.
     */
-  private def taintOf(ctx: JsContext, value: Expression): Option[String] =
+  private def taintOf(ctx: JsContext, value: Expression): (Option[String], Boolean) =
       JsShapes.unwrap(value) match
         case c: Call if Derivations.contains(callName(c)) =>
-            c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
-                .flatMap(a => callbackMethod(a).flatMap(returnTaint(ctx, _)).orElse(MemberTaintBridge.sourceTagOf(ctx, a)))
-        case _ => MemberTaintBridge.sourceTagOf(ctx, value)
+            val tag = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
+                .flatMap(a =>
+                    callbackMethod(a).flatMap(returnTaint(ctx, _))
+                        .orElse(MemberTaintBridge.sourceTagOf(ctx, a))
+                )
+            (tag, tag.nonEmpty)
+        case _ => MemberTaintBridge.sourceTagThrough(ctx, value)
 
   private def returnTaint(ctx: JsContext, m: Method): Option[String] =
       m.ast.isReturn.astChildren.collect { case e: Expression => e }.l.iterator
@@ -103,8 +130,7 @@ object ReactiveBridge:
 
   /** Reads of `name` in the functions nested in `method` that capture it. */
   private def capturedReads(ctx: JsContext, method: Method, name: String): Iterator[Identifier] =
-    val prefix = method.fullName + ":"
-    ctx.cpg.method.fullName(s"${java.util.regex.Pattern.quote(prefix)}.*").l.iterator
+    nestedMethods(method).iterator
         .filterNot(n => declares(n, name))
         .flatMap(n => readsIn(n, name))
 

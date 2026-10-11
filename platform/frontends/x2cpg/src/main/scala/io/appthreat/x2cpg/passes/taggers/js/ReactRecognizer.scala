@@ -106,6 +106,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     tagDataFunctions(ctx)
     tagNext(ctx)
     tagServerFunctions(ctx)
+    tagFormActions(ctx)
     tagQwik(ctx)
     tagRouteElements(ctx)
     tagNavigation(ctx)
@@ -237,6 +238,18 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
         .l.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
     ctx.tagger.tag(solidFns.flatMap(params).iterator, INPUT)
+
+  /** React 19 form actions: `useActionState(fn, initial)` and `<form action={fn}>` call `fn` with
+    * the submitted form (`fn(previousState, formData)` for the hook, `fn(formData)` for the form).
+    */
+  private def tagFormActions(ctx: JsContext): Unit =
+    val viaHook = ctx.cpg.call.nameExact("useActionState", "useFormState").l
+        .flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
+    val viaForm = ctx.cpg.templateDom.nameExact("JSXAttribute")
+        .filter(a => a.code.startsWith("action=") || a.code.startsWith("formAction="))
+        .flatMap(_.ast.isIdentifier).l
+        .flatMap(callbackMethod)
+    ctx.tagger.tag((viaHook ++ viaForm).flatMap(params).iterator, INPUT)
 
   /** Qwik City: routeLoader$((requestEvent) => ...), routeAction$((data, requestEvent) => ...),
     * server$((...args) => ...).

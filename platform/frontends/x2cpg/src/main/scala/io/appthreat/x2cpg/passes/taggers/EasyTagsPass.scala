@@ -57,10 +57,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   /** A client/SDK action, as the callee of a call: `s3.upload`, `sqs.send`, `lambda.invoke`. The
     * receiver must be an instance (`client`, `this.queue`): `Object.create` and other capitalised
-    * receivers are static helpers, and `this.send` is the class's own method.
+    * receivers are static helpers, `this.send` is the class's own method, and a lowering temporary
+    * (`_tmp_3.create`) stands for some other expression.
     */
   private val JsSdkVerb = java.util.regex.Pattern.compile(
-    "(?s)(?!this\\.[\\w$]+$)(this\\.)?[a-z_$][\\w$]*(\\.[\\w$]+)*\\.(list|create|upload|delete|execute|command|invoke|submit|send)"
+    "(?s)(?!this\\.[\\w$]+$)(?!_tmp_)(this\\.)?[a-z_$][\\w$]*(\\.[\\w$]+)*\\.(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
   // NB: there is no filename-keyed PY_REQUEST_PATTERNS heuristic

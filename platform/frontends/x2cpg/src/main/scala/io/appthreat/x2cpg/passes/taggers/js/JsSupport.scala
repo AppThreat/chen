@@ -75,6 +75,10 @@ final class JsTagger(
           }
       }
 
+  /** Ids of the nodes this run tagged with any of `names`. */
+  def taggedIds(names: String*): Iterator[Long] =
+      memo.iterator.collect { case (id, n) if names.contains(n) => id }
+
   /** True when this run has tagged the node with `name`. */
   def has(nodeId: Long, name: String): Boolean = memo.contains((nodeId, name))
 
@@ -255,6 +259,12 @@ final class JsProject(cpg: Cpg):
           }
           .toMap
 
+  /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
+  def majorVersionOf(name: String): Option[Int] =
+      dependencies.get(name).flatMap(range =>
+          "(\\d+)".r.findFirstMatchIn(range.dropWhile(c => !c.isDigit)).map(_.group(1).toInt)
+      )
+
   def dependsOn(names: String*): Boolean =
       names.exists(n => dependencies.keys.exists(d => d == n || d.startsWith(s"$n/")))
 
@@ -303,10 +313,8 @@ object JsShapes:
 
   /** The value most recently assigned to a temporary in the same method. */
   private def tempDefinition(id: Identifier): Option[Expression] =
-      Iterator(id.method).assignment
-          .filter(a => a.argumentOption(1).exists(t => isTemp(t) && t.code == id.name))
-          .filter(a => a.lineNumber.zip(id.lineNumber).forall((x, y) => x.intValue <= y.intValue))
-          .flatMap(_.argumentOption(2))
+      JsIndexes.assignedValues(id.method, id.name)
+          .filter(v => v.lineNumber.zip(id.lineNumber).forall((x, y) => x.intValue <= y.intValue))
           .lastOption
 
   /** A member read and the reads that continue it (`a.b` -> `a.b.c`, `a.b.c['d']`), up to the first
@@ -563,7 +571,10 @@ object JsShapes:
   /** The methods of a class, with the arrow functions nested in them (whose `this` is the class's).
     */
   def classMethods(td: TypeDecl): List[Method] =
-      Cpg(using td.graph).method.fullName(s"${java.util.regex.Pattern.quote(td.fullName)}:.*").l
+      JsIndexes.methodsUnder(td.graph, td.fullName + ":")
+
+  /** The functions nested in a method (closures, handlers), by full-name prefix. */
+  def nestedMethods(m: Method): List[Method] = JsIndexes.methodsUnder(m.graph, m.fullName + ":")
 
   /** The simple name of a type full name (`@angular/router:ActivatedRoute` -> `ActivatedRoute`,
     * `ActivatedRoute<T>` -> `ActivatedRoute`).
@@ -583,6 +594,52 @@ object JsShapes:
       Option.when(t.nonEmpty)(t)
 end JsShapes
 
+/** Per-graph and per-method lookups the recognizers make repeatedly, built once. A method's
+  * full-name prefix query used to be a regex scan of every method of the graph, and a local's
+  * assignments a walk of its method's whole AST - per query.
+  */
+object JsIndexes:
+  private val methodIndexes =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[overflowdb.Graph, java.util.TreeMap[String, List[Method]]]()
+      )
+  private val assignmentIndexes =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[Method, Map[String, List[Expression]]]()
+      )
+
+  /** Methods whose full name starts with `prefix`. */
+  def methodsUnder(graph: overflowdb.Graph, prefix: String): List[Method] =
+    val index = methodIndexes.computeIfAbsent(
+      graph,
+      _ =>
+        val tree = new java.util.TreeMap[String, List[Method]]()
+        Cpg(using graph).method.foreach { m =>
+            tree.merge(m.fullName, List(m), (a, b) => a ++ b)
+        }
+        tree
+    )
+    import scala.jdk.CollectionConverters.*
+    index.subMap(prefix, true, prefix + Char.MaxValue, true).values().asScala.flatten.toList
+
+  /** What a method assigns to a plain variable, by name (`x = v` -> v). */
+  def assignedValues(m: Method, name: String): List[Expression] =
+      assignmentIndexes.computeIfAbsent(
+        m,
+        method =>
+          Iterator(method).assignment.l.flatMap { a =>
+              (a.argumentOption(1), a.argumentOption(2)) match
+                case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
+                case _                              => None
+          }.groupMap(_._1)(_._2)
+      ).getOrElse(name, Nil)
+
+  /** Forget everything built for a graph (between runs over a mutated graph). */
+  def clear(): Unit =
+    methodIndexes.clear()
+    assignmentIndexes.clear()
+end JsIndexes
+
 /** Where values come from and where asynchronous values go. */
 object JsValues:
 
@@ -596,14 +653,8 @@ object JsValues:
     else
       e match
         case id: Identifier if id.name != "this" =>
-            val defs = Iterator(id.method).assignment
-                .filter(_.argumentOption(1).exists {
-                    case t: Identifier => t.name == id.name
-                    case _             => false
-                })
-                .l
-            defs match
-              case single :: Nil => single.argumentOption(2).map(origin(_, depth - 1)).getOrElse(e)
+            JsIndexes.assignedValues(id.method, id.name) match
+              case single :: Nil => origin(single, depth - 1)
               case _             => e
         case _ => e
 

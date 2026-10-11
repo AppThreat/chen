@@ -343,17 +343,37 @@ object DomRecognizer extends JsFrameworkRecognizer:
           .stripPrefix(".")
           .toLowerCase
 
+  /** React 19 replaces a `javascript:` URL in `href`, `src`, `action` and `formAction` with an
+    * error-throwing one, so in a project on React 19 or later those JSX attributes are no sinks.
+    * Markup attributes stay sinks everywhere; Vue, Svelte, Solid, Preact and Lit sanitise nothing.
+    */
+  private def reactBlocksScriptUrls(ctx: JsContext, file: String): Boolean =
+      (file.endsWith(".jsx") || file.endsWith(".tsx")) &&
+          ctx.project.majorVersionOf("react").exists(_ >= 19) &&
+          !ctx.modules.uses("preact", "solid-js", "@builder.io/qwik", "@qwik.dev")
+
   private def tagTemplateSinks(ctx: JsContext): Unit =
     val attributes = ctx.cpg.templateDom.nameExact("JSXAttribute").filter { attr =>
         val name = attributeName(attr.code)
-        MarkupAttributes.contains(name) || UrlBindingAttributes.contains(name) ||
+        MarkupAttributes.contains(name) ||
+        (UrlBindingAttributes.contains(name) && !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
         (name == "src" && attr.astParent.isInstanceOf[TemplateDom] && {
           val element = attr.astParent.asInstanceOf[TemplateDom].code.drop(1)
               .takeWhile(c => c.isLetterOrDigit || c == '-').toLowerCase
           DocumentLoaders.contains(element)
         })
     }.l
-    val bound = attributes.iterator.flatMap(_.ast.collectAll[Call]).dedup.l
+    // The attribute's value - its outermost expression, not every read nested inside it - and only
+    // when the code does not anchor it: `href="/profile/@{name}"` can never become `javascript:`.
+    val bound = attributes.iterator.flatMap { attr =>
+        attr.ast.collectAll[Call].filterNot(c => c.astParent.isInstanceOf[Call]).l
+    }.filter { value =>
+        // a template interpolation is wrapped: `<operator>.interpolation(expr)`
+        val expr =
+            if value.name == "<operator>.interpolation" then value.argumentOption(1).getOrElse(value)
+            else value
+        !hasFixedOrigin(expr)
+    }.dedup.l
     ctx.tagger.tag(bound.iterator, HtmlSink*)
 
   private def tagNavigationSinks(ctx: JsContext): Unit =
@@ -423,14 +443,21 @@ object DomRecognizer extends JsFrameworkRecognizer:
         .filter(_.code.startsWith("new Function("))
     ctx.tagger.tag(functionCtors, CodeSink*)
     // String timers evaluate their first argument; a function argument is just a callback.
+    // Only a value that is a string is evaluated: a computed string, or a variable holding one. A
+    // parameter or a function reference (`setTimeout(resolve, 500)`) is a callback.
+    def isStringValue(e: Expression): Boolean =
+        e match
+          case c: Call =>
+              c.name == Operators.addition || c.name == Operators.formatString ||
+              !c.name.startsWith("<operator>")
+          case _ => false
     val stringTimers = ctx.cpg.call
         .filter(c => isGlobalCall(c, Set("setTimeout", "setInterval", "setImmediate")))
         .filter(_.argument.filter(_.argumentIndex == 1).headOption.exists {
-            case _: MethodRef => false
             case id: Identifier =>
-                callbackMethod(id).isEmpty && !id.name.startsWith("_tmp_")
-            case _: Literal => false
-            case _          => true
+                !id.name.startsWith("_tmp_") && callbackMethod(id).isEmpty &&
+                isStringValue(JsValues.origin(id))
+            case other => isStringValue(other)
         })
     ctx.tagger.tag(stringTimers, CodeSink*)
     // `import(url)` with a computed specifier loads and runs code from it.

@@ -124,6 +124,44 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   private val ROUTER_PACKAGES = Seq("vue-router", "@angular", "react-router", "nuxt")
 
+  private val NODE_SERVER_PACKAGES = Seq(
+    "express",
+    "koa",
+    "@koa",
+    "fastify",
+    "@hapi",
+    "hapi",
+    "restify",
+    "polka",
+    "connect",
+    "micro",
+    "@nestjs",
+    "hono",
+    "@feathersjs",
+    "sails",
+    "loopback",
+    "@loopback"
+  )
+
+  private val FRONTEND_PACKAGES = Seq(
+    "react",
+    "react-dom",
+    "vue",
+    "@angular",
+    "svelte",
+    "@sveltejs",
+    "solid-js",
+    "preact",
+    "lit",
+    "@builder.io/qwik",
+    "@qwik.dev",
+    "@ember",
+    "jquery",
+    "next",
+    "nuxt",
+    "astro"
+  )
+
   /** True when any import comes from one of the given npm packages. ESM imports lower to
     * `<package>:<name>` and `require(...)` to the bare specifier, so the package is the text before
     * the first colon.
@@ -221,17 +259,26 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
               Iterator(params(1)).newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
           }
     }
-    val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
-        .method
-        .internal
-        .filterNot(_.name.contains("<"))
-    // Through storeTag: the Next.js/Nuxt file conventions below reach the same parameters, and
-    // duplicate TAG nodes would surface in downstream output.
-    storeTag(
-      controllerMethods.parameter.filterNot(_.name == "this"),
-      FRAMEWORK_INPUT,
-      dstGraph
-    )
+    // Every parameter of a function in a file whose path mentions a route, controller or api is
+    // web-facing: the Node server convention (`routes/users.js`, `controllers/`). In a frontend
+    // project the same words name API CLIENTS (`lib/api-client.ts`, `album-api.ts`) and router
+    // directories, whose parameters are the app's own values; there the framework recognizers
+    // find the real entry points, so the heuristic runs only alongside a Node server framework or
+    // where no frontend framework is in sight.
+    val nodeServer = usesPackages(NODE_SERVER_PACKAGES*)
+    val frontend   = usesPackages(FRONTEND_PACKAGES*)
+    if nodeServer || !frontend then
+      val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
+          .method
+          .internal
+          .filterNot(_.name.contains("<"))
+      // Through storeTag: the framework recognizers reach some of the same parameters, and
+      // duplicate TAG nodes would surface in downstream output.
+      storeTag(
+        controllerMethods.parameter.filterNot(_.name == "this"),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
     tagRouteTableRecords(dstGraph)
     // Framework sources, sinks and sanitisers (browser platform, Angular, ...), sharing this pass's
     // tag memo so a node reached here and above is tagged once.
