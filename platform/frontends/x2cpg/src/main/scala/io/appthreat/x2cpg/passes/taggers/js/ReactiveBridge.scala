@@ -8,24 +8,25 @@ import scala.collection.mutable
 
 import JsShapes.*
 
-/** Carries a source into the closures that capture it, and through reactive derivations.
+/** Carries a source through reactive derivations, which hold the value their callback returns -
+  * a flow no call edge carries.
   *
-  * A component reads the URL once, at its top level - `const route = useRoute()`, `const
-  * [params] = useSearchParams()`, `const location = useLocation()` - and uses it in the event
-  * handlers and effects it defines (`function go() { location.href = route.query.next }`). The
-  * dataflow engine does not follow the captured variable into the closure, so the read inside it
-  * starts an untainted value. A local of an enclosing function whose value comes from a source makes
-  * its reads inside nested functions sources of the same kind, unless the nested function declares
-  * its own variable of that name.
+  * `computed(() => route.params.id)` (Vue, Angular), `useMemo` (React), `createMemo` (Solid),
+  * `useComputed$` (Qwik), `linkedSignal` (Angular): the wrapper's result is a source when its
+  * callback's return value is, and so are its reads in the function that made it and in the
+  * closures that capture it. `watch(source, (value) => ...)` hands the watched value to its
+  * callback.
   *
-  * Reactive wrappers hold the value their callback returns: `computed(() => route.params.id)`
-  * (Vue, Angular), `useMemo` (React), `createMemo` (Solid), `useComputed$` (Qwik), `linkedSignal`
-  * (Angular). Their result is a source when that return value is. `watch(source, (value) => ...)`
-  * hands the watched value to its callback.
+  * Captured variables: the dataflow engine links an outer variable to its reads inside closures
+  * where the frontend records the capture, but a module-level binding - all of a Vue
+  * `<script setup>` block, a plain script's top level - is no closure binding, and its reads inside
+  * functions start untainted. A local whose value comes from a source makes its captured reads
+  * sources of the same kind. Where the engine does link the capture, the flow from the read is a
+  * suffix of the full flow and is deduplicated away by reachables.
   *
-  * Repeats until nothing new is found, since a captured value may itself feed a derivation.
+  * Repeats until nothing new is found, since a derived value may feed another.
   */
-object CaptureBridge:
+object ReactiveBridge:
 
   private val Derivations =
       Set("computed", "useMemo", "createMemo", "useComputed$", "linkedSignal", "derived", "toRef")
@@ -122,4 +123,4 @@ object CaptureBridge:
                 case _              => false
               }
           )
-end CaptureBridge
+end ReactiveBridge

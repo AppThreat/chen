@@ -46,6 +46,7 @@ class DdgGenerator(
     val gen = solution.problem.transferFunction.asInstanceOf[ReachingDefTransferFunction].gen
 
     val allNodes         = in.keys.toList
+    // JavaScript-only refinements of the def-use edges: nested member reads and closure captures.
     val nestedContainers = sharedCache.isJavaScript(method)
     val usageAnalyzer    = new UsageAnalyzer(problem, in, nestedContainers)
 
@@ -208,6 +209,20 @@ class DdgGenerator(
           .foreach { case (src, dst) =>
               addEdge(src, dst, nodeToEdgeLabel(src))
           }
+      // JavaScript: every read of a captured variable inside the closure sees the outer value, not
+      // only the first one. Components define their handlers and effects as closures over what
+      // they read at the top (`const next = params.get('next'); useEffect(() => { if (next)
+      // location.href = next })`), and a use in the closure defines nothing for a later use to be
+      // reached from, so an edge to the first read alone (the `if (next)` test) left the read in
+      // the sink unconnected.
+      if nestedContainers then
+        method._identifierViaContainsOut.foreach { identifier =>
+            firstUsages(identifier).foreach { usage =>
+                if usage.method != method &&
+                  identifier.lineNumber.zip(usage.lineNumber).exists((i, u) => i.intValue <= u.intValue)
+                then addEdge(identifier, usage, nodeToEdgeLabel(identifier))
+            }
+        }
       method.parameter.foreach { param =>
           param.capturedByMethodRef.referencedMethod.ast.isIdentifier.foreach { identifier =>
               addEdge(param, identifier, nodeToEdgeLabel(param))
