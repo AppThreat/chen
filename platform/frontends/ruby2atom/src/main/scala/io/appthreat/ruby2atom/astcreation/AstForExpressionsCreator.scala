@@ -1128,6 +1128,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
           RubyOperators.splat,
           DispatchTypes.STATIC_DISPATCH
         )
+    // `**opts` unpacks into the keywords: named like Python's `f(**opts)` (ArgumentBinding)
+    if splattingCall.code.startsWith("**") then splattingCall.argumentName = Option("**")
     val argumentAst = astsForStatement(node.target)
     callAst(splattingCall, argumentAst)
 

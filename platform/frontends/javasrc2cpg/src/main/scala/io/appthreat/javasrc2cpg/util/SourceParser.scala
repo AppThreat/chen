@@ -4,6 +4,7 @@ import better.files.File
 import Delombok.DelombokMode
 import Delombok.DelombokMode.*
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.utils.SourceDecoding
 import com.github.javaparser.{JavaParser, ParserConfiguration}
 import com.github.javaparser.ParserConfiguration.LanguageLevel
 import com.github.javaparser.ast.CompilationUnit
@@ -58,14 +59,31 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
   def doesTypesFileExist(relativeFilename: String): Boolean =
       File(typesRoot.resolve(relativeFilename)).isRegularFile
 
+  private val encodings = new SourceEncoding(originalInputPath)
+
+  /** The file decoded with the charset its build compiles it with (see [[SourceEncoding]]). A
+    * delomboked copy is found by its original's path.
+    */
+  private def textOf(file: File): String =
+    val original = Try(originalInputPath.resolve(analysisRoot.relativize(file.path)))
+        .filter(_ => file.path.startsWith(analysisRoot))
+        .getOrElse(file.path)
+    SourceDecoding.read(file.path, encodings.forFile(original)).text
+
   private def parse(file: File, storeTokens: Boolean): Option[CompilationUnit] =
+    val text = textOf(file)
+    // Unicode escapes are translated before lexing, as javac does (JLS 3.3): `// \u000a code()`
+    // compiles code() and `int \u0061b` declares ab. Node positions stay those of the file.
+    // Lexical preservation cannot follow the translation, and nothing reads it back.
+    val hasEscapes = text.contains("\\u")
     val javaParserConfig =
         new ParserConfiguration()
             .setLanguageLevel(LanguageLevel.BLEEDING_EDGE)
             .setAttributeComments(false)
-            .setLexicalPreservationEnabled(true)
+            .setLexicalPreservationEnabled(!hasEscapes)
             .setStoreTokens(storeTokens)
-    val parseResult = new JavaParser(javaParserConfig).parse(file.toJava)
+            .setPreprocessUnicodeEscapes(hasEscapes)
+    val parseResult = new JavaParser(javaParserConfig).parse(text)
 
     parseResult.getResult.toScala match
       case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)

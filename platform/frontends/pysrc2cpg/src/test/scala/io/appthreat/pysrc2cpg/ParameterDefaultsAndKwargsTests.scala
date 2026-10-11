@@ -3,6 +3,7 @@ package io.appthreat.pysrc2cpg
 import io.appthreat.dataflowengineoss.language.toExtendedCfgNode
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 
 /** Parameter defaults and keyword/unpacked arguments in the CPG and in data flow.
   *
@@ -156,6 +157,44 @@ class ParameterDefaultsAndKwargsTests extends PySrc2CpgFixture(withOssDataflow =
           sink.reachableByFlows(source).size shouldBe 0
       }
 
+      "not bind a positional-only parameter, which a keyword cannot name" in {
+          val cpg = code(
+            """import helpers
+              |def run(cmd, /, **opts):
+              |    helpers.sink(cmd)
+              |    helpers.sink2(opts)
+              |def handle(source):
+              |    run("ls", cmd=source)
+              |""".stripMargin
+          )
+          cpg.parameter.nameExact("cmd").tag.nameExact(ArgumentBinding.ParameterKindTag)
+              .value.l shouldBe List(ArgumentBinding.PositionalOnly)
+          cpg.call.nameExact("run").argument.argumentNameExact("cmd").parameter.name.l shouldBe
+              List("opts")
+          def source = cpg.parameter.nameExact("source")
+          cpg.call.nameExact("sink").argument(1).reachableByFlows(source).size shouldBe 0
+          cpg.call.nameExact("sink2").argument(1).reachableByFlows(source).size should be >= 1
+      }
+
+      "leave a keyword-only parameter to keywords, not to a positional at its index" in {
+          val cpg = code(
+            """import helpers
+              |def run(cmd, *rest, shell=False):
+              |    helpers.sink(shell)
+              |    helpers.sink2(rest)
+              |def handle(source):
+              |    run("ls", 1, source)
+              |""".stripMargin
+          )
+          cpg.parameter.nameExact("shell").tag.nameExact(ArgumentBinding.ParameterKindTag)
+              .value.l shouldBe List(ArgumentBinding.KeywordOnly)
+          cpg.parameter.nameExact("shell").index.l shouldBe List(3)
+          cpg.call.nameExact("run").argument(3).parameter.name.l shouldBe List("rest")
+          def source = cpg.parameter.nameExact("source")
+          cpg.call.nameExact("sink").argument(1).reachableByFlows(source).size shouldBe 0
+          cpg.call.nameExact("sink2").argument(1).reachableByFlows(source).size should be >= 1
+      }
+
       "land in **kwargs when no parameter has the name" in {
           val cpg = code(
             """import helpers
@@ -218,6 +257,58 @@ class ParameterDefaultsAndKwargsTests extends PySrc2CpgFixture(withOssDataflow =
           def source = cpg.parameter.nameExact("source")
           cpg.call.nameExact("sink").argument(1).reachableByFlows(source).size should be >= 1
           cpg.call.nameExact("sink2").argument(1).reachableByFlows(source).size should be >= 1
+      }
+
+      "not bind a parameter the call passes otherwise" in {
+          val cpg = code(
+            """import helpers
+              |def run(cmd, mode="x", **rest):
+              |    helpers.sink(cmd)
+              |    helpers.sink2(mode)
+              |def handle(source, opts):
+              |    run(source, mode="fast", **opts)
+              |""".stripMargin
+          )
+          cpg.call.nameExact("run").argument.argumentNameExact("**").parameter.name.l shouldBe
+              List("rest")
+          def opts = cpg.parameter.nameExact("opts")
+          cpg.call.nameExact("sink").argument(1).reachableByFlows(opts).size shouldBe 0
+          cpg.call.nameExact("sink2").argument(1).reachableByFlows(opts).size shouldBe 0
+      }
+
+      "reach a **kwargs read only by the key it was passed under" in {
+          val cpg = code(
+            """import helpers
+              |def by_get(**opts):
+              |    helpers.sink(opts.get("cmd"))
+              |def by_subscript(**opts):
+              |    helpers.sink2(opts["mode"])
+              |def by_pop(**opts):
+              |    helpers.sink3(opts.pop("cmd", None))
+              |def handle(source):
+              |    by_get(cmd=source, mode="fast")
+              |    by_subscript(cmd=source, mode="fast")
+              |    by_pop(cmd=source, mode="fast")
+              |""".stripMargin
+          )
+          def source = cpg.parameter.nameExact("source")
+          cpg.call.nameExact("sink").argument(1).reachableByFlows(source).size should be >= 1
+          cpg.call.nameExact("sink3").argument(1).reachableByFlows(source).size should be >= 1
+          cpg.call.nameExact("sink2").argument(1).reachableByFlows(source).size shouldBe 0
+      }
+
+      "keep what a read leaves in the **kwargs it passes on" in {
+          val cpg = code(
+            """import helpers
+              |def dispatch(**kwargs):
+              |    countdown = kwargs.pop("countdown", 0)
+              |    helpers.sink(kwargs)
+              |def handle(source):
+              |    dispatch(cmd=source, countdown=5)
+              |""".stripMargin
+          )
+          def source = cpg.parameter.nameExact("source")
+          cpg.call.nameExact("sink").argument(1).reachableByFlows(source).size should be >= 1
       }
 
       "reach __init__'s **kwargs through the class call" in {

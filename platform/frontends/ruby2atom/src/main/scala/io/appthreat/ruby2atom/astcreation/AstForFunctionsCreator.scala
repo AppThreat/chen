@@ -311,7 +311,8 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
               name = node.name,
               code = code(node),
               index = index,
-              isVariadic = false,
+              // `def foo(...)` takes every argument, positional, keyword and block
+              isVariadic = node.name == "...",
               evaluationStrategy = EvaluationStrategies.BY_REFERENCE,
               typeFullName = None
             )

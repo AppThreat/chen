@@ -78,6 +78,7 @@ class Ruby2Atom extends X2CpgFrontend[Config]:
         AstCreationPass(cpg, astCreators).createAndApply()
         ImportsPass(cpg).createAndApply()
         ImplicitRequirePass(cpg).createAndApply()
+        RubyCallLinker(cpg).createAndApply()
         TypeNodePass.withTypesFromCpg(cpg).createAndApply()
       }
 end Ruby2Atom

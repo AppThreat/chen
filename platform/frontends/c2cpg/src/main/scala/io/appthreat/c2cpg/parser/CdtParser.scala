@@ -2,7 +2,7 @@ package io.appthreat.c2cpg.parser
 
 import better.files.File
 import io.appthreat.c2cpg.Config
-import io.shiftleft.utils.IOUtils
+import io.appthreat.x2cpg.utils.SourceDecoding
 import org.eclipse.cdt.core.CCorePlugin
 import org.eclipse.cdt.core.dom.ast.gnu.c.GCCLanguage
 import org.eclipse.cdt.core.dom.ast.gnu.cpp.GPPLanguage
@@ -33,11 +33,16 @@ object CdtParser:
     failure: Option[Throwable] = None
   )
 
-  /** Reads and UTF-8-decodes a file into an immutable `char[]` of source. Kept separate so the
-    * shared header content cache in [[CustomFileContentProvider]] can memoise the decoded array.
+  /** Reads and decodes a file into an immutable `char[]` of source, its lines joined with `\n`. A
+    * byte-order mark decides the charset (MSVC projects keep UTF-16 sources), else UTF-8, else
+    * windows-1252 (see [[SourceDecoding]]). Kept separate so the shared header content cache in
+    * [[CustomFileContentProvider]] can memoise the decoded array.
     */
   def readFileChars(path: Path): Array[Char] =
-      IOUtils.readLinesInFile(path).mkString("\n").toArray
+    val text = SourceDecoding.read(path).text
+    new java.io.BufferedReader(new java.io.StringReader(text)).lines().iterator().asScala
+        .mkString("\n")
+        .toArray
 
   /** A parser log service that also exposes CDT's cooperative cancellation hook.
     *

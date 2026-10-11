@@ -26,11 +26,16 @@ object BabelJsonParser:
     else
       Map.empty[Int, String]
 
-    val jsonContent       = IOUtils.readEntireFile(file)
-    val json              = ujson.read(jsonContent)
-    val filename          = json("relativeName").str
-    val fullPath          = Paths.get(rootPath.toString, filename)
-    val sourceFileContent = IOUtils.readEntireFile(fullPath)
-    ParseResult(filename, fullPath.toString, json, sourceFileContent, typeMap)
+    val jsonContent = IOUtils.readEntireFile(file)
+    val json        = ujson.read(jsonContent)
+    val filename    = json("relativeName").str
+    val fullPath    = Paths.get(rootPath.toString, filename)
+    ParseResult(filename, fullPath.toString, json, sourceAsAstgenReadsIt(fullPath), typeMap)
+
+  /** astgen's offsets index the file as Node's `readFileSync(file, "utf-8")` returns it: a UTF-8
+    * byte-order mark stays, as its first character, and malformed bytes become U+FFFD.
+    */
+  def sourceAsAstgenReadsIt(path: Path): String =
+      new String(java.nio.file.Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8)
 
 end BabelJsonParser

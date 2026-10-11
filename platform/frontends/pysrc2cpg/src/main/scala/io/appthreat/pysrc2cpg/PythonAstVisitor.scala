@@ -11,6 +11,7 @@ import PythonAstVisitor.{builtinPrefix, metaClassSuffix}
 import io.appthreat.pythonparser.ast
 import io.appthreat.pysrc2cpg.memop.*
 import io.appthreat.x2cpg.ValidationMode
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import io.shiftleft.codepropertygraph.generated.*
 import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewIdentifier, NewNode, NewTypeDecl}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -2761,11 +2762,14 @@ class PythonAstVisitor(
         parameters.kwonlyargs.map(convertKeywordOnlyArg) ++
         parameters.kw_arg.map(convertKwArg)
 
-  // TODO for now the different arg convert functions are all the same but
-  // will all be slightly different in the future when we can represent the
-  // different types in the cpg.
+  // The schema has no parameter kind: the parameters before `/` and after `*` carry it as a tag,
+  // so a keyword binds no positional-only parameter and a positional argument no keyword-only one
+  // (ArgumentBinding).
   def convertPosOnlyArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
-      convertArg(arg, isVariadic = false, Option(index.getAndInc))
+      withKind(
+        convertArg(arg, isVariadic = false, Option(index.getAndInc)),
+        ArgumentBinding.PositionalOnly
+      )
 
   def convertNormalArg(arg: ast.Arg, index: AutoIncIndex): nodes.NewMethodParameterIn =
       convertArg(arg, isVariadic = false, Option(index.getAndInc))
@@ -2774,7 +2778,14 @@ class PythonAstVisitor(
       convertArg(arg, isVariadic = true, Option(index.getAndInc), prefix = "*")
 
   def convertKeywordOnlyArg(arg: ast.Arg): nodes.NewMethodParameterIn =
-      convertArg(arg, isVariadic = false, None)
+      withKind(convertArg(arg, isVariadic = false, None), ArgumentBinding.KeywordOnly)
+
+  private def withKind(
+    parameter: nodes.NewMethodParameterIn,
+    kind: String
+  ): nodes.NewMethodParameterIn =
+    edgeBuilder.taggedByEdge(parameter, nodeBuilder.tagNode(ArgumentBinding.ParameterKindTag, kind))
+    parameter
 
   // `**kwargs`, written with `**`, is keyword-variadic (ArgumentBinding.isKeywordVariadic)
   def convertKwArg(arg: ast.Arg): nodes.NewMethodParameterIn =

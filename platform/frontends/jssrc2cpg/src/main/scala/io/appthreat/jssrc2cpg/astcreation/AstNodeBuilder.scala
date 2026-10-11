@@ -1,10 +1,11 @@
 package io.appthreat.jssrc2cpg.astcreation
 
-import io.appthreat.jssrc2cpg.parser.BabelNodeInfo
+import io.appthreat.jssrc2cpg.parser.{BabelAst, BabelNodeInfo}
 import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.x2cpg
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.utils.NodeBuilders.newMethodReturnNode
+import io.appthreat.x2cpg.utils.UnicodeSkeleton
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.Operators
@@ -151,14 +152,16 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
   protected def createVoidCallNode(line: Option[Integer], column: Option[Integer]): NewCall =
       createCallNode("void 0", "<operator>.void", DispatchTypes.STATIC_DISPATCH, line, column)
 
+  /** `code` is the property as written (`\u0065val`), `name` as the program means it (`eval`). */
   protected def createFieldIdentifierNode(
     name: String,
     line: Option[Integer],
-    column: Option[Integer]
+    column: Option[Integer],
+    code: Option[String] = None
   ): NewFieldIdentifier =
     val cleanedName = stripQuotes(name)
     NewFieldIdentifier()
-        .code(cleanedName)
+        .code(code.map(stripQuotes).getOrElse(cleanedName))
         .canonicalName(cleanedName)
         .lineNumber(line)
         .columnNumber(column)
@@ -215,14 +218,23 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
       case "console" => Option(Defines.Console)
       case "Math"    => Option(Defines.Math)
       case _         => None
-    identifierNode(node, name, name, Defines.Any, dynamicInstanceTypeOption.toList)
+    identifierNode(node, name, spelling(node, name), Defines.Any, dynamicInstanceTypeOption.toList)
 
   protected def identifierNode(
     node: BabelNodeInfo,
     name: String,
     dynamicTypeHints: Seq[String]
   ): NewIdentifier =
-      identifierNode(node, name, name, Defines.Any, dynamicTypeHints)
+      identifierNode(node, name, spelling(node, name), Defines.Any, dynamicTypeHints)
+
+  /** The code of an identifier named `name`: its name, or the spelling with Unicode escapes the
+    * file uses (`\u0065val`), which SourceIntegrityPass tags.
+    */
+  private def spelling(node: BabelNodeInfo, name: String): String =
+      if node.node == BabelAst.Identifier && node.code != name && node.code.contains("\\u") &&
+        UnicodeSkeleton.decodeEscapes(node.code) == name
+      then node.code
+      else name
 
   protected def createStaticCallNode(
     code: String,

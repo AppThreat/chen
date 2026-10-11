@@ -94,10 +94,14 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     usedVariableNames.put(variableName, counter)
     currentVariableName
 
+  // a UTF-8 byte-order mark is the content's first character (BabelJsonParser), not code
+  private lazy val bomLength = if parserResult.fileContent.startsWith("\uFEFF") then 1 else 0
+
   protected def code(node: Value): String =
-    val startIndex = start(node).getOrElse(0)
+    val startIndex = Math.max(start(node).getOrElse(0), bomLength)
     val endIndex   = Math.min(end(node).getOrElse(0), parserResult.fileContent.length)
-    parserResult.fileContent.substring(startIndex, endIndex).trim
+    if startIndex >= endIndex then ""
+    else parserResult.fileContent.substring(startIndex, endIndex).trim
 
   /** Source text spanning from the start of `fromNode` to the end of `toNode`. Used to reconstruct
     * the code of a synthesized node (e.g. one segment of a `namespace A.B.C {}` qualified path).

@@ -81,6 +81,7 @@ object Ruby2AtomFixture:
       // TypeNodePass then materializes, so TypeNodePass runs last.
       new io.appthreat.x2cpg.frontendspecific.ruby2atom.ImportsPass(cpg).createAndApply()
       new io.appthreat.x2cpg.frontendspecific.ruby2atom.ImplicitRequirePass(cpg).createAndApply()
+      new io.appthreat.x2cpg.frontendspecific.ruby2atom.RubyCallLinker(cpg).createAndApply()
       TypeNodePass.withTypesFromCpg(cpg).createAndApply()
       X2Cpg.applyDefaultOverlays(cpg)
       BuiltFixture(cpg, allUnknowns.toMap)

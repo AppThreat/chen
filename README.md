@@ -33,11 +33,13 @@ Because it follows data rather than matching on names and patterns, chen disting
 
 - C and C++, including headers and pre-processed `.i` files through the `H` frontend, with the
   Eclipse CDT parser ([c2cpg](platform/frontends/c2cpg)) or the EDG front end
-  ([edg2atom](platform/frontends/edg2atom))
+  ([edg2atom](platform/frontends/edg2atom)); UTF-16 sources by their byte-order mark
 - Java source from Java 8 through Java 26 syntax (records, sealed types, pattern matching for
   `instanceof` and `switch` with guards and record patterns, switch expressions with `yield`,
   text blocks, unnamed variables, local classes and records, module imports, flexible
-  constructor bodies, virtual threads and the FFM API) and JAR bytecode
+  constructor bodies, virtual threads and the FFM API) and JAR bytecode. Sources are read in the
+  encoding the Maven, Gradle or Ant build compiles them with, and Unicode escapes are translated
+  as javac does
 - Android APK and split bundles (`.apkm`, `.apks`, `.xapk`), which require the Android SDK via `ANDROID_HOME` or the container image
 - JavaScript, TypeScript, and Flow, including Vue and Svelte/SvelteKit single-file components (the Svelte template is modelled as JSX-equivalent structure with exact source offsets)
 - Python, from 3.x through 3.15 (PEP 263 source encodings, Unicode 17 identifiers including the supplementary planes)

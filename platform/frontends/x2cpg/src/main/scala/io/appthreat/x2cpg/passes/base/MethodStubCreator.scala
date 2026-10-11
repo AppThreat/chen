@@ -105,9 +105,12 @@ object MethodStubCreator:
 
     (firstParameterIndex to parameterCount).foreach { parameterOrder =>
       val nameAndCode = s"p$parameterOrder"
+      // indexed here: a stub created after ParameterIndexCompatPass (XTypeHintCallLinker's) would
+      // keep the default -1, which no positional argument binds
       val param = NewMethodParameterIn()
           .code(nameAndCode)
           .order(parameterOrder)
+          .index(parameterOrder)
           .name(nameAndCode)
           .evaluationStrategy(EvaluationStrategies.BY_VALUE)
           .typeFullName("ANY")

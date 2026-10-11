@@ -256,7 +256,9 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     val typeFullName = param.paramType.map(_.name).getOrElse(TypeConstants.Any)
 
     val byRefCodePrefix = if param.byRef then "&" else ""
-    val code            = s"$byRefCodePrefix$$${param.name}"
+    // `...$args` collects the positional and the named arguments no other parameter takes
+    val variadicPrefix = if param.isVariadic then "..." else ""
+    val code           = s"$byRefCodePrefix$variadicPrefix$$${param.name}"
     val paramNode = parameterInNode(
       param,
       param.name,
@@ -1119,11 +1121,12 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
                   ???
             )
 
+    // an unpacked argument's own code is `...$xs` and a named one's is its value
     val argsCode = arguments
-        .zip(call.args.collect { case x: PhpArg => x.unpack })
+        .zip(call.args)
         .map {
-            case (arg, true)  => s"...${arg.rootCodeOrEmpty}"
-            case (arg, false) => arg.rootCodeOrEmpty
+            case (arg, PhpArg(_, Some(name), _, _, _)) => s"$name: ${arg.rootCodeOrEmpty}"
+            case (arg, _)                              => arg.rootCodeOrEmpty
         }
         .mkString(",")
 
@@ -1189,10 +1192,30 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     callAst(callRoot, arguments, base = receiverAst)
   end astForCall
 
+  /** A named argument (`f(cmd: $x)`) keeps its position as index and is named after the parameter
+    * it binds; an unpacked one (`f(...$xs)`) is an `<operator>.unpack` of the iterable (see
+    * ArgumentBinding).
+    */
   private def astForCallArg(arg: PhpArgument): Ast =
       arg match
-        case PhpArg(expr, _, _, _, _) =>
-            astForExpr(expr)
+        case PhpArg(expr, parameterName, _, unpack, _) =>
+            val valueAst = astForExpr(expr)
+            val argAst =
+                if unpack then
+                  val unpackCall = newOperatorCallNode(
+                    PhpOperators.unpack,
+                    s"...${valueAst.rootCodeOrEmpty}",
+                    line = line(arg),
+                    column = column(arg)
+                  )
+                  callAst(unpackCall, valueAst :: Nil)
+                else valueAst
+            parameterName.foreach { name =>
+                argAst.root.collect { case argument: ExpressionNew =>
+                    argument.argumentName = Option(name)
+                }
+            }
+            argAst
 
         case _: PhpVariadicPlaceholder =>
             val identifier =

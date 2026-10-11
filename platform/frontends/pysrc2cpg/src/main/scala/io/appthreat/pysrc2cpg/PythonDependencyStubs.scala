@@ -16,6 +16,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
+import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import io.shiftleft.utils.IOUtils
 import org.slf4j.LoggerFactory
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -1245,6 +1246,12 @@ class PythonDependencySignaturePass(
                 .lineNumber(1).columnNumber(1)
             dstGraph.addNode(np)
             dstGraph.addEdge(method, np, EdgeTypes.AST)
+            // positional-only and keyword-only, as the target declares them (ArgumentBinding)
+            p.tag.nameExact(ArgumentBinding.ParameterKindTag).foreach { kind =>
+              val tag = NewTag().name(kind.name).value(kind.value)
+              dstGraph.addNode(tag)
+              dstGraph.addEdge(np, tag, EdgeTypes.TAGGED_BY)
+            }
           }
 
           val td = NewTypeDecl()
