@@ -132,6 +132,8 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private val ANGULAR_SANITIZER_BYPASS_REGEX =
       ".*bypassSecurityTrust(HTML|Html|SCRIPT|Script|STYLE|Style|URL|Url|RESOURCE_URL|ResourceUrl).*"
 
+  private val ANGULAR_SIGNAL_INPUT = "@angular/core:input"
+
   // Route tables in Vue (`createRouter({ routes })`), Angular
   // (`RouterModule.forRoot(routes)`, `provideRouter(routes)`) and React Router
   // (`createBrowserRouter([{ path, element }])`) all lower to the same shape:
@@ -571,6 +573,23 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         }
   end tagVueComponentInputs
 
+  /** Calls of Angular's `input(...)` and `input.required(...)`, found through the import of `input`
+    * and the shape of the call. Their full names cannot be used. Type recovery names
+    * `input.required()` after the type of `input`, and that is the import only until the TypeScript
+    * types of an installed `@angular/core` or a typed parameter or local called `input` replace it.
+    * It names `input()` after a method of the same file that is also called `input`.
+    */
+  private def angularSignalInputCalls: Iterator[Call] =
+      for
+        imported <- atom.imports.importedEntityExact(ANGULAR_SIGNAL_INPUT)
+        alias    <- imported.importedAs.iterator
+        call     <- imported.call.method.ast.isCall
+        isPlain = call.name == alias && call.receiver.isIdentifier.nameExact(alias).nonEmpty
+        isRequired = call.name == "required" &&
+            call.arguments(0).isIdentifier.nameExact(alias).nonEmpty
+        if isPlain || isRequired
+      yield call
+
   /** Angular decorators and route-parameter reads.
     *
     * `@Input()` members are the parent-to-child data boundary: the member and its `this.x` reads
@@ -603,6 +622,26 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
                 dstGraph
               )
           case _ =>
+    }
+
+    // Signal inputs: the field initialiser `bio = input<string>('')` is lowered into the
+    // constructor as an assignment to the identifier `bio` that has the code of the member, which
+    // is how the member is found. The field access is tagged, as for `@Input()`: it is under every
+    // read `this.bio()` and it is all there is when the signal is handed on without being called.
+    angularSignalInputCalls.foreach { initialiser =>
+        for
+          enclosing <- initialiser.inCall
+          if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
+          typeDecl <- initialiser.method.typeDecl
+          member   <- typeDecl.member.codeExact(enclosing.code)
+        do
+          storeTag(Iterator(member), FRAMEWORK_INPUT, dstGraph)
+          storeTag(
+            typeDecl.method.flatMap(_.ast.isCall).nameExact(Operators.fieldAccess)
+                .codeExact(s"this.${member.name}"),
+            FRAMEWORK_INPUT,
+            dstGraph
+          )
     }
 
     // NB: class-level inventory tagging of @Component/@Injectable classes was deliberately
