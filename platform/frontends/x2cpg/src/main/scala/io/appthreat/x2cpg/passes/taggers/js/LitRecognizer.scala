@@ -39,19 +39,38 @@ object LitRecognizer extends JsFrameworkRecognizer:
     val directives = ctx.cpg.call.nameExact(UnsafeDirectives.toSeq*)
         .filter(c => litFiles.contains(c.method.filename))
     ctx.tagger.tag(directives, HtmlSink*)
-    val bindings = ctx.cpg.call.nameExact("html", "svg")
+    val templates = ctx.cpg.call.nameExact("html", "svg")
         .filter(c => litFiles.contains(c.method.filename))
         .flatMap(_.argument.isCall.nameExact(Operators.formatString))
-        .filter(hasDangerousBinding)
-    ctx.tagger.tag(bindings, HtmlSink*)
-
-  private def hasDangerousBinding(template: Call): Boolean =
-    val parts = template.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
-    parts.sliding(2).exists {
-      case (quasi: Literal) :: value :: Nil =>
-          !value.isInstanceOf[Literal] && literalText(quasi).matches(DangerousBinding)
-      case _ => false
+        .l
+    templates.foreach { template =>
+        val (dangerous, safe) = boundValues(template).partition(_._2)
+        if dangerous.nonEmpty then
+          // The template call is where its values meet; tagged only when nothing else is bound
+          // in it, or a text interpolation next to the binding would be reported too.
+          if safe.isEmpty then ctx.tagger.tag(Iterator(template), HtmlSink*)
+          else
+            ctx.tagger.tag(dangerous.iterator.map(_._1).collect { case c: Call => c }, HtmlSink*)
+            ctx.tagger.tag(dangerous.iterator.map(_._1).collect { case i: Identifier => i }, HtmlSink*)
     }
+
+  /** The values bound in a template, each with whether its position is dangerous. */
+  private def boundValues(template: Call): List[(Expression, Boolean)] =
+    val parts = template.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
+    parts.zipWithIndex.collect {
+      case (value, i) if !value.isInstanceOf[Literal] =>
+          val before = if i > 0 then parts(i - 1) else value
+          val dangerous = before match
+            case quasi: Literal => literalText(quasi).matches(DangerousBinding)
+            case _              => false
+          // an unsafe directive is a sink of its own
+          val directive = value match
+            case c: Call => UnsafeDirectives.contains(c.name)
+            case _       => false
+          (value, dangerous && !directive)
+    }.filterNot((v, _) => v match
+      case c: Call => UnsafeDirectives.contains(c.name)
+      case _       => false)
 
   private def literalText(l: Literal): String =
       if l.code.length >= 2 && "\"'`".contains(l.code.head) then l.code.substring(1, l.code.length - 1)

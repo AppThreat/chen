@@ -258,6 +258,13 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     val fns = ctx.cpg.call.nameExact("routeLoader$", "routeAction$", "globalAction$", "server$")
         .l.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
     ctx.tagger.tag(fns.flatMap(params).iterator, INPUT)
+    // `throw redirect(302, url)` with the request event's `redirect`
+    val redirects = fns.flatMap(_.ast.isCall.nameExact("redirect").l).filter(c =>
+        c.argument.filter(_.argumentIndex == 2).headOption.exists(t =>
+            !isObjectLiteral(t) && !hasFixedOrigin(t)
+        )
+    )
+    ctx.tagger.tag(redirects.iterator, NavigationSink*)
 
   /** `<Route path="/profile" element={<Profile />} />`: the path is a route, the component it
     * renders a handler. Matched exactly on the tag name - a prefix would also take `<Routes>`.

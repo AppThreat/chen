@@ -622,6 +622,10 @@ object JsIndexes:
     import scala.jdk.CollectionConverters.*
     index.subMap(prefix, true, prefix + Char.MaxValue, true).values().asScala.flatten.toList
 
+  /** The method with exactly this full name. */
+  def methodByFullName(graph: overflowdb.Graph, fullName: String): Option[Method] =
+      methodsUnder(graph, fullName).find(_.fullName == fullName)
+
   /** What a method assigns to a plain variable, by name (`x = v` -> v). */
   def assignedValues(m: Method, name: String): List[Expression] =
       assignmentIndexes.computeIfAbsent(
@@ -655,8 +659,34 @@ object JsValues:
         case id: Identifier if id.name != "this" =>
             JsIndexes.assignedValues(id.method, id.name) match
               case single :: Nil => origin(single, depth - 1)
-              case _             => e
+              case Nil =>
+                  // a variable of an enclosing function, captured: `const navigate =
+                  // useNavigate()` at the top of a component, called in a handler
+                  enclosingAssignment(id.method, id.name).map(origin(_, depth - 1)).getOrElse(e)
+              case _ => e
         case _ => e
+
+  /** The single value an enclosing function (by full-name prefix, innermost first) assigns to
+    * `name`, for a closure that reads it without assigning it.
+    */
+  private def enclosingAssignment(m: Method, name: String): Option[Expression] =
+    if m.parameter.nameExact(name).nonEmpty then return None
+    val segments = m.fullName.split(':')
+    (segments.length - 1 to 1 by -1).iterator
+        .map(n => segments.take(n).mkString(":"))
+        .flatMap(prefix => JsIndexes.methodByFullName(m.graph, prefix))
+        .map(outer =>
+            if outer.parameter.nameExact(name).nonEmpty then Some(Nil)
+            else
+              JsIndexes.assignedValues(outer, name) match
+                case Nil => None
+                case vs  => Some(vs)
+        )
+        .collectFirst { case Some(vs) => vs }
+        .flatMap {
+          case single :: Nil => Some(single)
+          case _             => None
+        }
 
   /** rxjs operators whose callback receives each emitted value. */
   val ValueOperators: Set[String] = Set(

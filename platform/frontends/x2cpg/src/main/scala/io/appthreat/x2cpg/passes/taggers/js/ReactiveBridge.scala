@@ -52,7 +52,26 @@ object ReactiveBridge:
 
   private val MaxRounds = 4
 
+  /** `computed(() => DOMPurify.sanitize(x))`: a derivation whose callback returns a sanitiser's
+    * result holds a sanitised value, and is tagged as that sanitiser - the engine carries a value
+    * into the derivation through the variables its callback captures, past the sanitiser inside it.
+    */
+  private def tagSanitizingDerivations(ctx: JsContext): Unit =
+      ctx.cpg.call.filter(isDerivationCall).foreach { d =>
+          derivationCallback(d).foreach { cb =>
+              val returned = cb.ast.isReturn.astChildren.collect { case c: Call => c }
+                  .filter(_.method.id() == cb.id()).l
+              if returned.nonEmpty && returned.forall(r => JsTags.neutralises(ctx.tagger, r)) then
+                // categories this run gave the sanitiser are in the memo, not yet on the node
+                val categories = Seq(JsTags.XSS, JsTags.REDIRECT, JsTags.HTTP_CLIENT, "file-io")
+                    .map(JsTags.sanitizerFor)
+                    .filter(t => returned.forall(r => ctx.tagger.has(r.id(), t) || r.tag.name.exists(_ == t)))
+                ctx.tagger.tag(Iterator(d), (Seq(JsTags.SANITIZER) ++ categories)*)
+          }
+      }
+
   def run(ctx: JsContext): Unit =
+    tagSanitizingDerivations(ctx)
     // A local can only be tainted where its own method holds a source (the search for one stays
     // inside the method), or it is a derivation whose callback does.
     val withSources = ctx.methodsWithSources
