@@ -81,6 +81,12 @@ object Defines:
   val UnicodeConfusableTag  = "unicode-confusable"
   val UnicodeBidiControlTag = "unicode-bidi-control"
 
+  /** A Java Unicode escape that ends a line, a comment or a literal (`// \u000a code()` compiles
+    * code()): the code a reviewer reads as a comment or a string is compiled. On the method around
+    * it, valued `<line>:<escapes>`.
+    */
+  val UnicodeHiddenCodeTag = "unicode-hidden-code"
+
   /** On a CALL to a user-defined operator (`a + b` calling `Vec2::operator+`): the built-in
     * operator the expression is written with (`<operator>.addition`), so a consumer that matches
     * operator names still finds the expression after the frontend linked it to its method.

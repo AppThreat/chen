@@ -295,10 +295,13 @@ object SourceFiles:
     * is returned unaltered. Otherwise, "rootPath / path" is returned.
     */
   def toAbsolutePath(path: String, rootPath: String): String =
+    val root = Paths.get(rootPath)
     val absolutePath = Paths.get(path) match
-      case p if p.isAbsolute            => p
-      case _ if rootPath.endsWith(path) => Paths.get(rootPath)
-      case p                            => Paths.get(rootPath, p.toString)
+      case p if p.isAbsolute => p
+      // a single input file is its own root, and its relative path is its name: not the `f.c` of
+      // a root directory named `my-f.c`
+      case p if root.endsWith(p) && !Files.isDirectory(root) => root
+      case p                                                 => root.resolve(p)
     absolutePath.normalize().toString
 
   /** Constructs a relative path against rootPath. If the given path is not inside rootPath, or no

@@ -52,4 +52,19 @@ class SourceFilesTests extends AnyWordSpec with Matchers with Inside:
           }
       }
   }
+
+  "toAbsolutePath" should {
+      "resolve a file against a root directory whose name ends like it" in {
+          File.usingTemporaryDirectory("my-f.c") { dir =>
+            val root = dir.pathAsString
+            SourceFiles.toAbsolutePath("f.c", root) shouldBe dir.path.resolve("f.c").toString
+          }
+      }
+
+      "give a single input file for its own name" in {
+          File.usingTemporaryFile(suffix = ".c") { file =>
+              SourceFiles.toAbsolutePath(file.name, file.pathAsString) shouldBe file.pathAsString
+          }
+      }
+  }
 end SourceFilesTests

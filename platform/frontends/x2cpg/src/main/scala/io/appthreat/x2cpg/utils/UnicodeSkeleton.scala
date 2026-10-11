@@ -49,6 +49,35 @@ object UnicodeSkeleton:
 
   def isAscii(s: String): Boolean = s.forall(_ < 128)
 
+  // A name with Unicode escapes in it: `\u0065val` (Java, JavaScript), `\u{65}val` (JavaScript)
+  private val EscapedName =
+      "(?:[\\p{L}\\p{N}\\p{Mn}\\p{Mc}\\p{Pc}$]|\\\\u\\{[0-9a-fA-F]+\\}|\\\\u+[0-9a-fA-F]{4})+".r
+  private val Escape = "\\\\u(?:\\{([0-9a-fA-F]+)\\}|u*([0-9a-fA-F]{4}))".r
+
+  /** The spelling with Unicode escapes in `code` of the name `name`, if `code` has one. */
+  def escapedSpelling(code: String, name: String): Option[String] =
+      EscapedName.findAllIn(code).find(token =>
+          token.contains("\\u") && decodeEscapes(token) == name
+      )
+
+  /** The names in `text` spelled with Unicode escapes, with their offsets. */
+  def escapedNameTokens(text: String): List[(Int, String)] =
+      EscapedName.findAllMatchIn(text).filter(_.matched.contains("\\u")).map(m =>
+          m.start -> m.matched
+      ).toList
+
+  /** `\uXXXX`, `\uuXXXX` and `\u{X...}` decoded. */
+  def decodeEscapes(s: String): String =
+      Escape.replaceAllIn(
+        s,
+        m =>
+          val hex = Option(m.group(1)).getOrElse(m.group(2))
+          val cp  = scala.util.Try(Integer.parseInt(hex, 16)).getOrElse(-1)
+          scala.util.matching.Regex.quoteReplacement(
+            if Character.isValidCodePoint(cp) then new String(Character.toChars(cp)) else m.matched
+          )
+      )
+
   /** The bidirectional formatting characters a Trojan Source attack (CVE-2021-42574) hides code
     * with: the embeddings, overrides and isolates, and their terminators.
     */

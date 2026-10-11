@@ -23,8 +23,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     fullName: String
   ): Ast =
     val callName = callee.node match
-      case MemberExpression => code(callee.json("property"))
-      case _                => callee.code
+      case MemberExpression => nameOrCode(createBabelNodeInfo(callee.json("property")))
+      case _                => nameOrCode(callee)
     val callNode =
         createStaticCallNode(
           callExpr.code,
@@ -57,9 +57,17 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     callAst(callNode_, args, receiver = Option(receiverAst), base = Option(Ast(baseNode)))
   end handleCallNodeArgs
 
+  /** An identifier's name as the program means it: `\u0065val` is `eval`. Its code keeps the
+    * spelling, which SourceIntegrityPass tags.
+    */
+  protected def nameOrCode(node: BabelNodeInfo): String =
+      node.node match
+        case Identifier => safeStr(node.json, "name").getOrElse(node.code)
+        case _          => node.code
+
   protected def astForCallExpression(callExpr: BabelNodeInfo): Ast =
     val callee     = createBabelNodeInfo(callExpr.json("callee"))
-    val calleeCode = callee.code
+    val calleeCode = nameOrCode(callee)
 
     if callee.node == Import then
       val args     = astForNodes(callExpr.json("arguments").arr.toList)
@@ -89,7 +97,12 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             // ujson's apply throws on a missing key - which would abort the
             // whole file inside AstCreationPass.
             val memberCode =
-                if member.code.isEmpty then safeStr(member.json, "name").getOrElse("")
+                if member.code.isEmpty || member.node == Identifier && !safeBool(
+                    callee.json,
+                    "computed"
+                  ).contains(true)
+                then
+                  safeStr(member.json, "name").getOrElse(member.code)
                 else member.code
             base.node match
               case ThisExpression =>
@@ -100,8 +113,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   (receiverAst, baseNode, memberCode)
               case Identifier =>
                   val receiverAst = astForNodeWithFunctionReference(callee.json)
-                  val baseNode    = identifierNode(base, base.code)
-                  scope.addVariableReference(base.code, baseNode)
+                  val baseName    = nameOrCode(base)
+                  val baseNode    = identifierNode(base, baseName)
+                  scope.addVariableReference(baseName, baseNode)
                   (receiverAst, baseNode, memberCode)
               case _ =>
                   val tmpVarName  = generateUnusedVariableName(usedVariableNames, "_tmp")
@@ -225,9 +239,10 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     else
       val memberAst = Ast(
         createFieldIdentifierNode(
-          memberNodeInfo.code,
+          nameOrCode(memberNodeInfo),
           memberNodeInfo.lineNumber,
-          memberNodeInfo.columnNumber
+          memberNodeInfo.columnNumber,
+          Option(memberNodeInfo.code)
         )
       )
       createFieldAccessCallAst(
