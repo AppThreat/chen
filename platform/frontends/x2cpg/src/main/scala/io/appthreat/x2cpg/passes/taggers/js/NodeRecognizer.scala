@@ -243,9 +243,8 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     */
   private def isTaggedTemplate(e: Expression): Boolean =
       e match
-        case c: Call =>
-            c.name != Operators.formatString && c.code.matches("(?s)^[\\w$.]+`.*")
-        case _ => false
+        case c: Call => JsShapes.isTaggedTemplateCall(c)
+        case _       => false
 
   private def sqlArgument(c: Call): Option[Expression] =
       c.argument.filter(_.argumentIndex == 1).headOption
@@ -282,7 +281,7 @@ object NodeRecognizer extends JsFrameworkRecognizer:
                 // `knex.raw`, `prisma.$queryRawUnsafe`, `pool.query`, `db.exec` - never a DOM or
                 // RegExp receiver
                 !r.code.matches("(?s)^(document|window|this\\.document|/.*/[a-z]*)$")
-        ) && sqlArgument(c).exists(isSqlString)
+        ) && !JsShapes.isTaggedTemplateCall(c) && sqlArgument(c).exists(isSqlString)
     }
     // drizzle `sql.raw(x)` / postgres `sql.unsafe(x)` are covered by name above.
     ctx.tagger.tag(sqlCalls, "sql")

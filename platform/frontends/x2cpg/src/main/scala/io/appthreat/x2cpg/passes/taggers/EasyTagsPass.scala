@@ -48,9 +48,11 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   private val JsResponseWrite =
       java.util.regex.Pattern.compile("(?s)(ctx|context)\\.body\\s*=.*")
 
-  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`. */
+  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`. A tagged
+    * template (`` db.sql`...${x}` ``) binds its values as parameters and is not one.
+    */
   private val JsDatabaseCall = java.util.regex.Pattern.compile(
-    "(?s)(?i)(this\\.)?(db|dao|mongo|mongoclient)\\.[\\w$]+.*"
+    "(?s)(?i)(this\\.)?(db|dao|mongo|mongoclient)\\.[\\w$]+(\\.[\\w$]+|\\([^)]*\\))*\\s*\\(.*"
   )
 
   /** A client/SDK action, as the callee of a call: `s3.upload`, `sqs.send`, `lambda.invoke`. The
@@ -410,6 +412,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     rendered.iterator.newTagNode("xss").store()(using dstGraph)
   end tagRawHtmlTemplateSinks
 
+  /** `` db.sql`... ${x}` `` - lowered to `db.sql(<operator>.formatString(...))` - binds the values. */
+  private def isTaggedTemplate(c: Call): Boolean =
+      c.code.matches("(?s)^[\\w$.]+\\(<operator>\\.formatString\\(.*")
+
   private def tagJavaScriptPatterns(dstGraph: DiffGraphBuilder): Unit =
     def matches(p: java.util.regex.Pattern, c: Call) = p.matcher(c.code).matches()
     def isAssignment(c: Call)                        = c.name.startsWith("<operator>.assignment")
@@ -423,7 +429,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             if isAssignment(c) then matches(JsResponseWrite, c)
             else if c.name == Operators.fieldAccess then matches(JsSdkVerb, c)
             else !c.name.startsWith("<operator>") &&
-              (matches(JsResponseCall, c) || matches(JsDatabaseCall, c))
+              (matches(JsResponseCall, c) || matches(JsDatabaseCall, c) && !isTaggedTemplate(c))
         }
         .newTagNode("framework-output")
         .store()(using dstGraph)

@@ -209,8 +209,9 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     * with it makes that one.
     */
   private def tagServerFunctions(ctx: JsContext): Unit =
+    // The directive is the first statement; the block lists the function's locals before it.
     def opensWithDirective(m: Method): Boolean =
-        m.block.astChildren.headOption.exists {
+        m.block.astChildren.filterNot(_.isInstanceOf[Local]).headOption.exists {
           case l: Literal => l.code.matches("""^['"]use server['"]$""")
           case _          => false
         }
@@ -275,7 +276,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
 
   private def tagNavigation(ctx: JsContext): Unit =
     def target(c: Call): Option[Expression] = c.argument.filter(_.argumentIndex == 1).headOption
-    def unanchored(e: Expression): Boolean = !e.isInstanceOf[Block] && !hasFixedOrigin(e)
+    def unanchored(e: Expression): Boolean = !isObjectLiteral(e) && !hasFixedOrigin(e)
 
     // redirect(url) from react-router / next/navigation / @remix-run, permanentRedirect(url)
     val redirectPkgs =

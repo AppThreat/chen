@@ -174,7 +174,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
               case u: Call => u.name == "useRouter"
               case _       => false)
         ) && c.argument.filter(_.argumentIndex == 1).headOption.exists(t =>
-            !t.isInstanceOf[Block] && !hasFixedOrigin(t)
+            !isObjectLiteral(t) && !hasFixedOrigin(t)
         )
     }
     ctx.tagger.tag(pushes, NavigationSink*)

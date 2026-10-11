@@ -105,35 +105,53 @@ object MemberTaintBridge:
         case _ => false
 
   /** The source tag that reaches `value` inside its method, if any: a tagged node in the value
-    * itself, or one its reaching definitions lead back to.
+    * itself, or in what the variables it reads were last assigned.
+    *
+    * A variable is followed only to its assignments - and then into what they assign - and to
+    * parameters, never into other calls that merely took it as an argument: the reaching
+    * definitions count a call's identifier arguments as possibly redefined, and following those
+    * wanders off into whatever else that call touched. An import binding (`require(...)`) carries
+    * nothing.
     */
-  private def sourceTagOf(ctx: JsContext, value: Expression): Option[String] =
+  private[js] def sourceTagOf(ctx: JsContext, value: Expression): Option[String] =
     def tagOf(n: StoredNode): Option[String] =
         SourceTags.find(t => ctx.tagger.has(n.id(), t)).orElse(
           n.tag.name.find(SourceTags.contains)
         )
+    def isImport(e: AstNode): Boolean = e match
+      case c: Call => c.code.startsWith("require(")
+      case _       => false
     val seen  = mutable.HashSet.empty[Long]
-    val queue = mutable.Queue.empty[StoredNode]
+    val queue = mutable.Queue.empty[AstNode]
     queue.enqueue(value)
     var found: Option[String] = None
     while found.isEmpty && queue.nonEmpty && seen.size < MaxVisits do
       val node = queue.dequeue()
-      if seen.add(node.id()) then
+      if seen.add(node.id()) && !isImport(node) then
         found = tagOf(node)
         if found.isEmpty then
           node match
             case id: Identifier =>
                 id._reachingDefIn.foreach {
-                  case d: StoredNode => queue.enqueue(d)
+                  case p: MethodParameterIn => queue.enqueue(p)
+                  case a: Call if a.name.startsWith("<operator>.assignment") &&
+                        a.argumentOption(1).exists(_.code == id.name) =>
+                      a.argumentOption(2).foreach(queue.enqueue(_))
+                  // `x` assigned as `x = v` is the definition node `x` itself in some lowerings
+                  case d: Identifier if d.name == id.name && isAssignmentTarget(d) =>
+                      d.astParent match
+                        case a: Call => a.argumentOption(2).foreach(queue.enqueue(_))
+                        case _       =>
+                  case _ =>
                 }
-            case p: MethodParameterIn => // a parameter is a source only if tagged
-            case c: Call =>
-                // A definition is the assignment: what it assigns is what to follow.
-                if c.name.startsWith("<operator>.assignment") then
-                  c.argumentOption(2).foreach(queue.enqueue(_))
-                else c.astChildren.foreach(queue.enqueue(_))
-            case other: AstNode => other.astChildren.foreach(queue.enqueue(_))
-            case _              =>
+            case _: MethodParameterIn => // a source only if tagged
+            case c: Call if c.name.startsWith("<operator>.assignment") =>
+                c.argumentOption(2).foreach(queue.enqueue(_))
+            // what comes out of a sanitiser or a predicate is not the source any more
+            case c: Call if JsTags.neutralises(ctx.tagger, c) =>
+            case c: Call     => c.astChildren.foreach(queue.enqueue(_))
+            case b: Block    => b.astChildren.foreach(queue.enqueue(_))
+            case _           =>
     end while
     found
   end sourceTagOf

@@ -365,6 +365,8 @@ object DomRecognizer extends JsFrameworkRecognizer:
     def unanchored(v: Option[Expression]) = v.exists(t => !t.isInstanceOf[Literal] && !hasFixedOrigin(t))
     val locationWrites = ctx.cpg.call.nameExact(Operators.assignment).filter { a =>
         unanchored(assignedValue(a)) && !isDeclaration(a) &&
+        // a lowering temporary is written, not navigated: `(_tmp = location.href).substr(...)`
+        !a.argumentOption(1).exists(_.code.startsWith("_tmp_")) &&
         a.argumentOption(1).flatMap(memberPath).exists {
           // `location = url`, but not a class field called `location` (`private location =
           // inject(Location)` is lowered to an assignment to an identifier too)
@@ -500,7 +502,13 @@ object DomRecognizer extends JsFrameworkRecognizer:
     val checkedUrls = comparisons.flatMap(_.argument.isCall.l).filter(a => fieldName(a).contains("origin"))
         .flatMap(fieldBase).filterNot(b => memberPath(b).exists(p => isLocation(p) || isWindow(p)))
         .map(JsValues.origin(_))
-        .collect { case c: Call if c.code.startsWith("new URL(") || c.code.startsWith("URL.parse(") => c }
+        .flatMap {
+          // `new URL(raw, base)` is lowered to a block around the `<operator>.new` call
+          case b: Block if b.code.startsWith("new URL(") =>
+              b.ast.isCall.nameExact("<operator>.new").headOption
+          case c: Call if c.code.startsWith("new URL(") || c.code.startsWith("URL.parse(") => Some(c)
+          case _                                                                       => None
+        }
     ctx.tagger.tag(
       checkedUrls.iterator,
       SANITIZER,
@@ -508,6 +516,27 @@ object DomRecognizer extends JsFrameworkRecognizer:
       sanitizerFor(HTTP_CLIENT),
       sanitizerFor(XSS)
     )
+
+  private val Predicates = Set(
+    "hasOwn",
+    "hasOwnProperty",
+    "has",
+    "includes",
+    "startsWith",
+    "endsWith",
+    "test",
+    "isFinite",
+    "isInteger",
+    "isSafeInteger",
+    "isNaN",
+    "isArray",
+    "some",
+    "every",
+    "indexOf",
+    "lastIndexOf",
+    "localeCompare",
+    "contains"
+  )
 
   private def tagSanitizers(ctx: JsContext): Unit =
     tagOriginChecks(ctx)
@@ -549,6 +578,10 @@ object DomRecognizer extends JsFrameworkRecognizer:
     val objectUrls = ctx.cpg.call.nameExact("createObjectURL")
         .filter(c => receiverOf(c).flatMap(memberPath).contains(List("URL")))
     ctx.tagger.tag(objectUrls, SANITIZER)
+
+    // Predicates and position lookups: their result is a boolean or a number.
+    val predicates = ctx.cpg.call.filter(c => Predicates.contains(callName(c)))
+    ctx.tagger.tag(predicates, PREDICATE)
 
     // Numeric conversions leave nothing to inject, whatever the sink.
     val numeric = ctx.cpg.call.filter(c =>

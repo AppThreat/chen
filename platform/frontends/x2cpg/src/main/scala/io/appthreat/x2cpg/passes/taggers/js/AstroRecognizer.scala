@@ -42,7 +42,7 @@ object AstroRecognizer extends JsFrameworkRecognizer:
         ctx.cpg.file.name(".*\\.astro$").name.toSet
     def unanchored(c: Call) =
         c.argument.filter(_.argumentIndex == 1).headOption.exists(t =>
-            !t.isInstanceOf[Block] && !hasFixedOrigin(t)
+            !isObjectLiteral(t) && !hasFixedOrigin(t)
         )
     val redirects = ctx.cpg.call.nameExact("redirect")
         .filter(c => serverFiles.contains(c.method.filename) && unanchored(c))

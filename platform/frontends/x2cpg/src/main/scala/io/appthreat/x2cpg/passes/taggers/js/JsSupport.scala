@@ -31,6 +31,18 @@ object JsTags:
   val SANITIZER: String = "sanitizer"
   def sanitizerFor(category: String): String = s"sanitizer-$category"
 
+  /** A call that returns a boolean or a number about its arguments (`allow.has(x)`,
+    * `url.startsWith('/')`, `Number.isFinite(n)`): a value that comes OUT of it carries nothing to
+    * inject. Unlike a sanitiser, its arguments go on unchanged, so only a flow through the call's
+    * result is neutralised.
+    */
+  val PREDICATE: String = "predicate"
+
+  /** True for a call this run or an earlier pass tagged as neutralising. */
+  def neutralises(tagger: JsTagger, c: Call): Boolean =
+      tagger.has(c.id(), SANITIZER) || tagger.has(c.id(), PREDICATE) ||
+          c.tag.name.exists(n => n == SANITIZER || n == PREDICATE)
+
   /** Raw HTML reaching the DOM. */
   val HtmlSink: Seq[String] = Seq(OUTPUT, XSS)
 
@@ -420,7 +432,9 @@ object JsShapes:
         case c: Call if c.name == Operators.addition =>
             c.argument.sortBy(_.argumentIndex).l.flatMap(urlParts)
         case c: Call if c.name == Operators.formatString =>
+            // a template literal starts and ends with a quasi, empty when a value is at either end
             c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l.flatMap(urlParts)
+                .filterNot(p => literalValue(p).contains(""))
         case c: Call if c.name == "<operator>.formattedValue" =>
             c.argument.sortBy(_.argumentIndex).l.flatMap(urlParts)
         case other => List(other)
@@ -471,6 +485,15 @@ object JsShapes:
       case _ => List(call)
   end requestSinksFor
 
+  /** A tagged template call (`` sql`... ${x}` ``), lowered to a call of the tag with the template
+    * as `<operator>.formatString(...)`: the tag function receives the values separately - a SQL
+    * tag binds them as parameters.
+    */
+  def isTaggedTemplateCall(c: Call): Boolean =
+      c.name != Operators.formatString &&
+          (c.code.matches("(?s)^[\\w$.]+`.*") ||
+              c.code.matches("(?s)^[\\w$.]+\\(<operator>\\.formatString\\(.*"))
+
   /** True for the target of an assignment (`x.y` in `x.y = v`), which is written, not read. */
   def isAssignmentTarget(e: Expression): Boolean =
       e.astParent match
@@ -497,14 +520,29 @@ object JsShapes:
 
   def isServerFile(filename: String): Boolean = ServerFile.matches(filename)
 
-  /** Assignments (`=`, `+=`) whose target is a field access named one of `fields`. */
+  /** Assignments (`=`, `+=`) whose target is a field access named one of `fields`. An object
+    * literal's keys (`{ innerHTML: x }`, lowered to `_tmp_0.innerHTML = x`) are not writes to an
+    * object anyone renders, and are left out.
+    */
   def propertyWrites(cpg: Cpg, fields: Set[String]): Iterator[Call] =
       cpg.call
           .nameExact(Operators.assignment, Operators.assignmentPlus)
           .filter(_.argumentOption(1).exists {
-              case c: Call => fieldName(c).exists(fields.contains)
-              case _       => false
+              case c: Call =>
+                  fieldName(c).exists(fields.contains) && !fieldBase(c).exists {
+                    case id: Identifier => id.name.startsWith("_tmp_")
+                    case _              => false
+                  }
+              case _ => false
           })
+
+  /** An object literal argument (`{ path: '/x', query }`), lowered to a block of property writes -
+    * as opposed to the block a `new C(...)` is lowered to.
+    */
+  def isObjectLiteral(e: Expression): Boolean =
+      e match
+        case b: Block => b.code.trim.startsWith("{")
+        case _        => false
 
   /** The value written by an assignment. */
   def assignedValue(assignment: Call): Option[Expression] = assignment.argumentOption(2)

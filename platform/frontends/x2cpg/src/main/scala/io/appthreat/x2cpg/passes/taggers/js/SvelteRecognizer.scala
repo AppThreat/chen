@@ -118,7 +118,7 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(actions.flatMap(m => params(m).lift(1)), INPUT)
 
   private def tagNavigation(ctx: JsContext): Unit =
-    def unanchored(e: Expression): Boolean = !e.isInstanceOf[Block] && !hasFixedOrigin(e)
+    def unanchored(e: Expression): Boolean = !isObjectLiteral(e) && !hasFixedOrigin(e)
     // redirect(303, location) from @sveltejs/kit
     val redirects = ctx.cpg.call.nameExact("redirect").filter(c =>
         ctx.modules.localNamesOf(c.method.filename, "@sveltejs/kit", "redirect").contains(c.name) &&

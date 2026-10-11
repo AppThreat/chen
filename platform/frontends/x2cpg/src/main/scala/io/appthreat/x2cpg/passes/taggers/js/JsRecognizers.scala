@@ -60,8 +60,12 @@ object JsRecognizers:
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)
     }
-    // Over what the recognizers found: sources kept in a field and read by another method.
-    MemberTaintBridge.run(ctx)
+    // Over what the recognizers found: sources kept in a field and read by another method, and
+    // sources captured by closures or derived reactively. Each can feed the other, so twice.
+    (1 to 2).foreach { _ =>
+        MemberTaintBridge.run(ctx)
+        CaptureBridge.run(ctx)
+    }
 
   def isJavaScript(cpg: Cpg): Boolean =
       cpg.metaData.language.headOption.exists(l => l == Languages.JSSRC || l == Languages.JAVASCRIPT)
