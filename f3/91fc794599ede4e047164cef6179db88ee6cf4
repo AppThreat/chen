@@ -1,0 +1,27 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactiveBridge.scala
+  s_d1bd8c782538f7::t_e1b13fb4d3cfb7 55-72,74
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/DefaultSemantics.scala
+  s_d1bd8c782538f7::t_e1b13fb4d3cfb7 73-83
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_d1bd8c782538f7::t_3e094aa36dadcc 625-628,662-666,669-690
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/LitRecognizer.scala
+  s_d1bd8c782538f7::t_664436c073934d 42,45-55,57-58,60-73
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_d1bd8c782538f7::t_4bdcd84d334d2d 261-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f391fc794599ede4e047164cef6179db88ee6cf4",
+  "prompts": {},
+  "sessions": {
+    "s_d1bd8c782538f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6debb108-9d35-4adc-be40-7d01dd8e9337",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
