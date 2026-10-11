@@ -4,7 +4,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Local, StoredNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Literal, Local, StoredNode}
 import scala.util.matching.Regex
 
 /** Creates tags on nodes based on common patterns and language-specific conventions */
@@ -96,7 +96,223 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
             tagJavaPatterns(dstGraph)
         case _ =>
 
+  /** Ruby sink families, on the vocabulary of the Python and Java arms - until these existed a Ruby
+    * graph had no tagged sinks, and reachables found nothing in a Rails application. Kernel methods
+    * resolve to `__core.Kernel.<name>`; other calls mostly stay unresolved, so a class receiver is
+    * matched in the call's code, as written (`File.open(path)`) or lowered through a temporary
+    * (`(<tmp-0> = User).where(...)`).
+    */
+  private def tagRubySinkFamilies(dstGraph: DiffGraphBuilder): Unit =
+    def onReceivers(receivers: Seq[String], methods: Seq[String]): Iterator[Call] =
+      val pattern =
+          raw"""(?s)^(?:\(<tmp-\d+> = )?(?:::)?(?:${receivers.mkString("|")})\)?\.(?:${methods
+                  .mkString("|")})\b.*"""
+      atom.call.nameExact(methods*).code(pattern)
+    // a call without arguments or parentheses (`klass.constantize`) is lowered as a field access
+    def named(methods: String*): Iterator[Call] =
+        atom.call.nameExact(methods*) ++ atom.call.nameExact(Operators.fieldAccess).filter(
+          _.argument.argumentIndex(2).exists(f => methods.contains(f.code))
+        )
+    def kernel(methods: String*): Iterator[Call] =
+        atom.call.methodFullName(s"__core\\.Kernel\\.(${methods.mkString("|")})")
+    // the first argument is the query, the template or the target, not keywords (`where(id: x)`
+    // binds its value as a parameter)
+    def positionalFirst(calls: Iterator[Call]): Iterator[Call] =
+        calls.filter(_.argument.argumentIndex(1).exists(_.argumentName.isEmpty))
+    def nonLiteralFirst(calls: Iterator[Call]): Iterator[Call] =
+        calls.filter(_.argument.argumentIndex(1).exists(a => !a.isInstanceOf[Literal]))
+    def tag(calls: Iterator[Call], names: String*): Unit =
+      val sinks = calls.l
+      names.foreach(name => sinks.iterator.newTagNode(name).store()(using dstGraph))
+
+    // Commands: Kernel's, backticks and %x(), and the process libraries
+    tag(kernel("system", "exec", "spawn", "`"), "code-execution", "shell-exec")
+    tag(atom.call.nameExact("<operator>.backticks"), "code-execution", "shell-exec")
+    tag(
+      onReceivers(Seq("IO"), Seq("popen")) ++ onReceivers(Seq("Process"), Seq("spawn", "exec")) ++
+          onReceivers(Seq("PTY"), Seq("spawn")) ++
+          onReceivers(
+            Seq("Open3"),
+            Seq(
+              "capture2",
+              "capture2e",
+              "capture3",
+              "popen2",
+              "popen2e",
+              "popen3",
+              "pipeline_r",
+              "pipeline_w",
+              "pipeline_rw",
+              "pipeline"
+            )
+          ),
+      "code-execution",
+      "shell-exec"
+    )
+    // Kernel#open runs a command for a path starting with `|`
+    tag(kernel("open"), "file-io", "shell-exec")
+    // Code: eval and the *_eval/*_exec family on any receiver
+    tag(
+      kernel("eval", "instance_eval", "class_eval", "module_eval") ++
+          nonLiteralFirst(
+            atom.call.nameExact(
+              "instance_eval",
+              "class_eval",
+              "module_eval",
+              "instance_exec",
+              "class_exec"
+            )
+          ),
+      "code-execution"
+    )
+    // Reflection steered by data: a method or constant named by a non-literal
+    tag(
+      nonLiteralFirst(
+        atom.call.nameExact(
+          "send",
+          "public_send",
+          "__send__",
+          "const_get",
+          "method",
+          "instance_variable_get",
+          "instance_variable_set"
+        )
+      ) ++ named("constantize", "safe_constantize"),
+      "reflection"
+    )
+    // SQL: the connection's query methods, and ActiveRecord's query builders given SQL as text
+    tag(
+      atom.call.nameExact(
+        "find_by_sql",
+        "count_by_sql",
+        "execute",
+        "exec_query",
+        "exec_update",
+        "exec_delete",
+        "exec_insert",
+        "select_all",
+        "select_one",
+        "select_value",
+        "select_values",
+        "select_rows",
+        "sanitize_sql"
+      ) ++
+          positionalFirst(
+            atom.call.nameExact(
+              "where",
+              "rewhere",
+              "not",
+              "order",
+              "reorder",
+              "group",
+              "having",
+              "joins",
+              "from",
+              "select",
+              "pluck",
+              "lock",
+              "update_all",
+              "delete_all",
+              "destroy_all",
+              "exists?",
+              "find_by",
+              "calculate",
+              "sum",
+              "average",
+              "minimum",
+              "maximum"
+            )
+          ),
+      "sql"
+    )
+    // Files
+    tag(
+      onReceivers(
+        Seq("File", "IO"),
+        Seq(
+          "open",
+          "new",
+          "read",
+          "readlines",
+          "binread",
+          "write",
+          "binwrite",
+          "foreach",
+          "delete",
+          "unlink",
+          "rename",
+          "symlink",
+          "link",
+          "chmod",
+          "chown",
+          "truncate"
+        )
+      ) ++ onReceivers(
+        Seq("FileUtils"),
+        Seq(
+          "cp",
+          "cp_r",
+          "mv",
+          "rm",
+          "rm_r",
+          "rm_rf",
+          "rm_f",
+          "mkdir_p",
+          "ln_s",
+          "touch",
+          "copy",
+          "move",
+          "remove",
+          "remove_dir",
+          "install",
+          "chmod",
+          "chown"
+        )
+      ) ++ onReceivers(
+        Seq("Dir"),
+        Seq("glob", "entries", "children", "each_child", "mkdir", "rmdir")
+      )
+          ++ onReceivers(
+            Seq("YAML", "Psych"),
+            Seq("load_file", "safe_load_file", "unsafe_load_file")
+          ),
+      "file-io"
+    )
+    tag(atom.call.nameExact("send_file", "send_data"), "file-io", "framework-output")
+    // Deserialisation that instantiates objects from attacker-controlled bytes
+    tag(
+      onReceivers(Seq("Marshal"), Seq("load", "restore")) ++
+          onReceivers(Seq("YAML", "Psych"), Seq("load", "unsafe_load", "load_stream", "parse")) ++
+          onReceivers(Seq("Oj"), Seq("load", "object_load")) ++
+          onReceivers(Seq("JSON"), Seq("load", "restore")),
+      "unsafe-deserialization"
+    )
+    // Output: raw HTML, a template rendered from data, a redirect to a data-chosen target
+    tag(named("html_safe") ++ atom.call.nameExact("raw"), "framework-output")
+    tag(
+      atom.call.nameExact("render").filter(_.argument.exists(a =>
+          a.argumentName.exists(Set("inline", "html", "plain", "body"))
+      )),
+      "framework-output",
+      "template-injection"
+    )
+    // a redirect to a target the request chose: not a literal, not a route helper (`root_url`,
+    // `user_path(user)`), which are the application's own
+    // (an argument-less helper is lowered as a field access, so its code is matched)
+    val routeHelper = """(?s)^(?:[\w.]*\.)?\w+_(?:path|url)\b.*""".r
+    tag(
+      atom.call.nameExact("redirect_to", "redirect_back").filter(
+        _.argument.argumentIndex(1).exists {
+            case _: Literal => false
+            case target     => !routeHelper.matches(target.code)
+        }
+      ),
+      "framework-output"
+    )
+  end tagRubySinkFamilies
+
   private def tagRubyPatterns(dstGraph: DiffGraphBuilder): Unit =
+    tagRubySinkFamilies(dstGraph)
     val httpLibraries =
         Seq("URI", "Net::HTTP", "HTTParty", "RestClient", "Faraday", "HTTP", "Excon")
 
@@ -943,7 +1159,123 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     )
   end tagCPatterns
 
+  /** PHP sink families, on the vocabulary of the Python and Java arms. A built-in function's call
+    * carries its bare name as full name (`shell_exec`); a method call's full name ends in `->name`
+    * or `::name`.
+    */
+  private def tagPhpSinkFamilies(dstGraph: DiffGraphBuilder): Unit =
+    def builtin(names: String*): Iterator[Call] = atom.call.methodFullNameExact(names*)
+    def method(names: String*): Iterator[Call] =
+        atom.call.nameExact(names*).methodFullName(s".*(->|::)(${names.mkString("|")})")
+    def tag(calls: Iterator[Call], names: String*): Unit =
+      val sinks = calls.l
+      names.foreach(name => sinks.iterator.newTagNode(name).store()(using dstGraph))
+
+    tag(
+      builtin("exec", "shell_exec", "system", "passthru", "popen", "proc_open", "pcntl_exec") ++
+          atom.call.nameExact("<operator>.shellExec"),
+      "code-execution",
+      "shell-exec"
+    )
+    tag(builtin("eval", "assert", "create_function"), "code-execution")
+    // including a file runs it
+    tag(builtin("include", "include_once", "require", "require_once"), "code-execution", "file-io")
+    tag(
+      builtin(
+        "call_user_func",
+        "call_user_func_array",
+        "forward_static_call",
+        "forward_static_call_array",
+        "extract",
+        "parse_str"
+      ),
+      "reflection"
+    )
+    tag(
+      builtin(
+        "mysqli_query",
+        "mysqli_multi_query",
+        "mysqli_real_query",
+        "mysqli_prepare",
+        "mysql_query",
+        "mysql_unbuffered_query",
+        "mysql_db_query",
+        "pg_query",
+        "pg_send_query",
+        "pg_prepare",
+        "sqlite_query",
+        "sqlite_exec",
+        "db2_exec",
+        "oci_parse",
+        "odbc_exec",
+        "sqlsrv_query"
+      ) ++
+          method(
+            "query",
+            "exec",
+            "prepare",
+            "multi_query",
+            "real_query",
+            "unprepared",
+            "statement",
+            "raw",
+            "whereRaw",
+            "orWhereRaw",
+            "havingRaw",
+            "orderByRaw",
+            "selectRaw",
+            "groupByRaw",
+            "fromRaw"
+          ),
+      "sql"
+    )
+    tag(
+      builtin(
+        "fopen",
+        "file_get_contents",
+        "file_put_contents",
+        "readfile",
+        "file",
+        "fpassthru",
+        "unlink",
+        "copy",
+        "rename",
+        "move_uploaded_file",
+        "mkdir",
+        "rmdir",
+        "opendir",
+        "scandir",
+        "glob",
+        "parse_ini_file",
+        "highlight_file",
+        "show_source",
+        "tempnam",
+        "touch",
+        "chmod"
+      ),
+      "file-io"
+    )
+    tag(builtin("unserialize"), "unsafe-deserialization")
+    tag(
+      builtin("simplexml_load_string", "simplexml_load_file") ++ method("loadXML", "loadHTML"),
+      "xxe"
+    )
+    tag(
+      builtin("curl_exec", "curl_init", "fsockopen", "stream_socket_client", "get_headers"),
+      "http-client"
+    )
+    tag(builtin("ldap_search", "ldap_list", "ldap_read"), "ldap")
+    tag(builtin("mail"), "mail")
+    // what the response carries: the page, its headers
+    tag(
+      atom.call.nameExact("echo", "print") ++
+          builtin("printf", "vprintf", "print_r", "var_dump", "header", "setcookie"),
+      "framework-output"
+    )
+  end tagPhpSinkFamilies
+
   private def tagPhpPatterns(dstGraph: DiffGraphBuilder): Unit =
+    tagPhpSinkFamilies(dstGraph)
     // Request/Response patterns
     atom.parameter.name("request.*").newTagNode("framework-input").store()(using dstGraph)
     atom.parameter.name("response.*").newTagNode("framework-output").store()(using dstGraph)
