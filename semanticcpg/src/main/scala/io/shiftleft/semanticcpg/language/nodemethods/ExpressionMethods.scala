@@ -4,7 +4,7 @@ import io.shiftleft.Implicits.IterableOnceDeco
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.NodeExtension
 import io.shiftleft.semanticcpg.language.ICallResolver
-import io.shiftleft.semanticcpg.utils.MemberAccess
+import io.shiftleft.semanticcpg.utils.{ArgumentBinding, MemberAccess}
 import io.shiftleft.semanticcpg.language.*
 
 import scala.annotation.tailrec
@@ -55,12 +55,14 @@ class ExpressionMethods(val node: Expression) extends AnyVal with NodeExtension:
   def parameter(implicit callResolver: ICallResolver): Iterator[MethodParameterIn] =
       // Expressions can have incoming argument edges not just from CallRepr nodes but also
       // from Return nodes for which an expansion to parameter makes no sense. So we filter
-      // for CallRepr.
+      // for CallRepr. Named and unpacked arguments bind by name, not by index (see ArgumentBinding).
       for
         call          <- node._argumentIn if call.isInstanceOf[CallRepr]
         calledMethods <- callResolver.getCalledMethods(call.asInstanceOf[CallRepr])
-        paramIn       <- calledMethods._astOut.collectAll[MethodParameterIn]
-        if paramIn.index == node.argumentIndex
+        paramIn <- ArgumentBinding.parametersBound(
+          node,
+          calledMethods._astOut.collectAll[MethodParameterIn].toSeq
+        )
       yield paramIn
 
   def typ: Iterator[Type] =

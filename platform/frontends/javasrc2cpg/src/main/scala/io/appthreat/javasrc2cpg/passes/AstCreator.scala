@@ -1293,7 +1293,7 @@ class AstCreator(
               "java.lang.Double",
               "java.lang.Character",
               "java.lang.Boolean"
-            ).equals(z) => z
+            ).contains(z) => z
         case _ => s"${Defines.UnresolvedNamespace}.${initString}"
 
   private def astForAnnotationExpr(annotationExpr: AnnotationExpr): Ast =
@@ -4403,10 +4403,15 @@ class AstCreator(
         astsForExpression(arg, expectedType)
     }.toList
 
+    lazy val expectedVariadicTypeFullName =
+        getExpectedParamType(tryResolvedDecl, paramCount - 1).fullName
+    // `f(xs)` with `xs` already the array the varargs parameter is passes it as it is
+    def passesTheArray: Boolean =
+        argsAsts.size == paramCount && expectedVariadicTypeFullName.isDefined &&
+            argsAsts.last.rootType == expectedVariadicTypeFullName
+
     tryResolvedDecl match
-      case Success(_) if hasVariadicParameter =>
-          val expectedVariadicTypeFullName =
-              getExpectedParamType(tryResolvedDecl, paramCount - 1).fullName
+      case Success(_) if hasVariadicParameter && !passesTheArray =>
           val (regularArgs, varargs) = argsAsts.splitAt(paramCount - 1)
           val arrayInitializer = newOperatorCallNode(
             Operators.arrayInitializer,
@@ -4527,7 +4532,7 @@ class AstCreator(
             .fullName(parameter.getType)
             .orElse(scope.lookupType(parameter.getTypeAsString))
             .map(_ ++ maybeArraySuffix)
-            .getOrElse(guessTypeFullName(parameter.getTypeAsString))
+            .getOrElse(guessTypeFullName(parameter.getTypeAsString) ++ maybeArraySuffix)
     val evalStrat =
         if parameter.getType.isPrimitiveType then EvaluationStrategies.BY_VALUE
         else EvaluationStrategies.BY_SHARING
@@ -4539,6 +4544,7 @@ class AstCreator(
         .columnNumber(column(parameter))
         .evaluationStrategy(evalStrat)
         .typeFullName(typeFullName)
+        .isVariadic(parameter.isVarArgs)
         .index(childNum)
         .order(childNum)
     val annotationAsts = parameter.getAnnotations.asScala.map(astForAnnotationExpr)

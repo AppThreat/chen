@@ -5,6 +5,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{
     Call,
+    CfgNode,
     Expression,
     FieldIdentifier,
     Method,
@@ -56,6 +57,23 @@ class TaskCreator(context: EngineContext):
   private def tasksForParams(results: Vector[ReachableByResult]): Vector[ReachableByTask] =
       startsAtParameter(results).flatMap { result =>
         val param = result.path.head.node.asInstanceOf[MethodParameterIn]
+        // a `**kwargs` first read as `kwargs["cmd"]` holds only what a keyword `cmd` (or an
+        // unpacked mapping) passed it - unless the path leaves the callee through the parameter's
+        // out side, carrying the caller's argument past the call rather than reading it
+        val inCallee = result.path.iterator.drop(1).map(_.node).takeWhile {
+            case node: CfgNode => node.method == param.method
+            case _             => false
+        }.toList
+        val key = Option.when(
+          ArgumentBinding.isKeywordVariadic(param) &&
+              !inCallee.exists(_.isInstanceOf[MethodParameterOut])
+        )(inCallee.headOption.flatMap(ArgumentBinding.keyRead(_, inCallee.lift(1)))).flatten
+        def paramToArgs(param: MethodParameterIn): List[Expression] =
+            this.paramToArgs(param).filter(arg =>
+                key.forall(k =>
+                    arg.argumentName.forall(n => n == k || n == ArgumentBinding.MappingUnpackName)
+                )
+            )
         result.callSiteStack match
           case callSite :: tail =>
               // Case 1
