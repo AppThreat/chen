@@ -56,20 +56,24 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").call.code.l shouldBe List("this.id")
       }
 
-      "tag @Output members as framework-output" in {
+      "not tag @Output members as sinks" in {
+          // An emitted value goes to the parent component, not out of the application. Tagged as
+          // framework-output, every @Input read that reached an emit became a "flow".
           val cpg = tagged(code(
             """
-          |import { Component, Output, EventEmitter } from '@angular/core';
+          |import { Component, Input, Output, EventEmitter } from '@angular/core';
           |@Component({ selector: 'app-save' })
           |export class SaveComponent {
+          |  @Input() draft = '';
           |  @Output() saved = new EventEmitter<string>();
-          |  save() { this.saved.emit('ok'); }
+          |  save() { this.saved.emit(this.draft); }
           |}
           |""".stripMargin,
             "save.component.ts"
           ))
 
-          cpg.tag.name("framework-output").member.name.l shouldBe List("saved")
+          cpg.tag.name("framework-output").member.name.l shouldBe empty
+          cpg.tag.name("framework-output").call.code.l shouldBe empty
       }
 
       "tag DomSanitizer bypass calls as framework-output" in {

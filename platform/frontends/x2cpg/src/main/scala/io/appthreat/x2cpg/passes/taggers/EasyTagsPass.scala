@@ -26,16 +26,39 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     def matches(s: String): Boolean =
         requiredLiterals.forall(group => group.exists(s.contains)) && re.matches(s)
 
-  // Language-specific patterns
-  private val JS_REQUEST_PATTERNS = Array(
-    "(?s)(?i).*(req|ctx|context)\\.(originalUrl|path|protocol|route|secure|signedCookies|stale|subdomains|xhr|app|pipe|file|files|baseUrl|fresh|hostname|ip|url|ips|method|body|param|params|query|cookies|request).*"
+  // Node.js handler conventions (Express, Koa, Fastify-style `req`/`res`/`ctx`). Each pattern is
+  // matched from the START of a node's code, so it describes the node itself: the read `req.query`
+  // or the call `res.send(x)`. Unanchored (`.*req\.query.*`), they also matched every statement
+  // assigning such a read and every enclosing call whose callback merely mentioned one - the
+  // `app.get('/x', (req, res) => ...)` registration became both a source and a sink - and the
+  // receiver names were not delimited, so `expires.setFullYear` was a response call and anything
+  // spelled with `db` in it (`feedbackService`) a database sink.
+  private val JsRequestRead = java.util.regex.Pattern.compile(
+    "(?s)(req|ctx|context)\\.(originalUrl|path|protocol|route|secure|signedCookies|stale|subdomains|xhr|app|pipe|file|files|baseUrl|fresh|hostname|ip|url|ips|method|body|param|params|query|cookies|request)(?![\\w$]).*"
   )
 
-  private val JS_RESPONSE_PATTERNS = Array(
-    "(?s)(?i).*(res|ctx|context)\\.(append|attachment|body|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|vary).*",
-    "(?s)(?i).*res\\.(set|writeHead|setHeader).*",
-    "(?s)(?i).*(db|dao|mongo|mongoclient).*",
-    "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
+  /** A response method called with something to send, also after `res.status(code)`. A
+    * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing one.
+    */
+  private val JsResponseCall = java.util.regex.Pattern.compile(
+    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
+  )
+
+  /** Koa's response body is a property write: `ctx.body = data`. */
+  private val JsResponseWrite =
+      java.util.regex.Pattern.compile("(?s)(ctx|context)\\.body\\s*=.*")
+
+  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`. */
+  private val JsDatabaseCall = java.util.regex.Pattern.compile(
+    "(?s)(?i)(this\\.)?(db|dao|mongo|mongoclient)\\.[\\w$]+.*"
+  )
+
+  /** A client/SDK action, as the callee of a call: `s3.upload`, `sqs.send`, `lambda.invoke`. The
+    * receiver must be an instance (`client`, `this.queue`): `Object.create` and other capitalised
+    * receivers are static helpers, and `this.send` is the class's own method.
+    */
+  private val JsSdkVerb = java.util.regex.Pattern.compile(
+    "(?s)(?!this\\.[\\w$]+$)(this\\.)?[a-z_$][\\w$]*(\\.[\\w$]+)*\\.(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
   // NB: there is no filename-keyed PY_REQUEST_PATTERNS heuristic
@@ -380,22 +403,30 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
     // The interpolation wrapper, or the expression's own call when it already was one
     // (`{@html render()}`). Restricted to the sink site's own subtree so a nested element's
-    // interpolation is not tagged along with it.
-    sinkSites.iterator.ast
-        .collectAll[Call]
-        .dedup
-        .newTagNode("framework-output")
-        .store()(using dstGraph)
+    // interpolation is not tagged along with it. `xss` names the sink's category, so that a flow
+    // through an HTML sanitiser (`sanitizer-xss`, e.g. DOMPurify) is recognised as neutralised.
+    val rendered = sinkSites.iterator.ast.collectAll[Call].dedup.l
+    rendered.iterator.newTagNode("framework-output").store()(using dstGraph)
+    rendered.iterator.newTagNode("xss").store()(using dstGraph)
   end tagRawHtmlTemplateSinks
 
   private def tagJavaScriptPatterns(dstGraph: DiffGraphBuilder): Unit =
+    def matches(p: java.util.regex.Pattern, c: Call) = p.matcher(c.code).matches()
+    def isAssignment(c: Call)                        = c.name.startsWith("<operator>.assignment")
     // Request/Response patterns
-    JS_REQUEST_PATTERNS.foreach(p =>
-        atom.call.code(p).newTagNode("framework-input").store()(using dstGraph)
-    )
-    JS_RESPONSE_PATTERNS.foreach(p =>
-        atom.call.code(p).newTagNode("framework-output").store()(using dstGraph)
-    )
+    atom.call
+        .filter(c => !isAssignment(c) && matches(JsRequestRead, c))
+        .newTagNode("framework-input")
+        .store()(using dstGraph)
+    atom.call
+        .filter { c =>
+            if isAssignment(c) then matches(JsResponseWrite, c)
+            else if c.name == Operators.fieldAccess then matches(JsSdkVerb, c)
+            else !c.name.startsWith("<operator>") &&
+              (matches(JsResponseCall, c) || matches(JsDatabaseCall, c))
+        }
+        .newTagNode("framework-output")
+        .store()(using dstGraph)
 
     tagRawHtmlTemplateSinks(dstGraph)
 

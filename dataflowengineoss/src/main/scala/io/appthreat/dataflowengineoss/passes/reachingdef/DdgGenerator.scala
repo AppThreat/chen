@@ -45,8 +45,9 @@ class DdgGenerator(
     val in           = solution.in
     val gen = solution.problem.transferFunction.asInstanceOf[ReachingDefTransferFunction].gen
 
-    val allNodes      = in.keys.toList
-    val usageAnalyzer = new UsageAnalyzer(problem, in)
+    val allNodes         = in.keys.toList
+    val nestedContainers = sharedCache.isJavaScript(method)
+    val usageAnalyzer    = new UsageAnalyzer(problem, in, nestedContainers)
 
     /** Add an edge from the entry node to each node that does not have other incoming definitions.
       */
@@ -103,6 +104,17 @@ class DdgGenerator(
               addEdge(use, genNode, nodeToEdgeLabel(use))
           }
       }
+
+      // JavaScript: a read of a read (`route.query.next`, `e.data[k]`, `path.split('#')[1]`) takes
+      // its value from the inner expression. Field and index accesses generate no definition of
+      // their own, so that taint passes through them unharmed, and that also left an inner call
+      // with no edge into the access on its result: a value tagged at `route.query` never reached
+      // `route.query.next`.
+      if nestedContainers && usageAnalyzer.isContainerAccess(call) then
+        call.argument.headOption.foreach {
+          case inner: Call => addEdge(inner, call, nodeToEdgeLabel(inner))
+          case _           =>
+        }
 
       // This handles `foo(new Bar())`, which is lowered to
       // `foo({Bar tmp = Bar.alloc(); tmp.init(); tmp})`. A macro invocation's value is its
@@ -302,7 +314,8 @@ end DdgGenerator
   */
 private class UsageAnalyzer(
   problem: DataFlowProblem[StoredNode, mutable.BitSet],
-  in: Map[StoredNode, Set[Definition]]
+  in: Map[StoredNode, Set[Definition]],
+  nestedContainers: Boolean = false
 ):
 
   val numberToNode: Map[Definition, StoredNode] =
@@ -396,17 +409,26 @@ private class UsageAnalyzer(
   private def isPart(use: StoredNode, inElement: StoredNode): Boolean =
       use match
         case call: Call if containerSet.contains(call.name) =>
+            val bases = call.argument.headOption.toList.flatMap(baseChain)
             inElement match
               case param: MethodParameterIn =>
-                  call.argument.headOption.exists { base =>
-                      nodeToString(base).contains(param.name)
-                  }
+                  bases.exists(base => nodeToString(base).contains(param.name))
               case identifier: Identifier =>
-                  call.argument.headOption.exists { base =>
-                      nodeToString(base).contains(identifier.name)
-                  }
+                  bases.exists(base => nodeToString(base).contains(identifier.name))
               case _ => false
         case _ => false
+
+  def isContainerAccess(call: Call): Boolean = containerSet.contains(call.name)
+
+  /** The base of a container access, and - for JavaScript - the bases under it: `e.data.html` is a
+    * part of `e` as much as `e.data` is. Elsewhere only the immediate base counts, as it always
+    * has.
+    */
+  private def baseChain(base: Expression): List[Expression] =
+      base match
+        case inner: Call if nestedContainers && containerSet.contains(inner.name) =>
+            base :: inner.argument.headOption.toList.flatMap(baseChain)
+        case _ => List(base)
 
   private def isAlias(use: StoredNode, inElement: StoredNode): Boolean =
       use match

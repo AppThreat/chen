@@ -56,6 +56,22 @@ final class DdgSharedCache(sharedAcrossMethods: Boolean = true):
         val raced = firstLastByDecls.putIfAbsent(decls, computed)
         if raced != null then raced else computed
 
+  @volatile private var javaScriptGraph: Option[Boolean] = None
+
+  /** True when the graph is JavaScript/TypeScript, where member chains (`route.query.next`) are the
+    * everyday way to reach a value and nested container reads need edges of their own (see
+    * `UsageAnalyzer`). Answered once per graph.
+    */
+  def isJavaScript(method: Method): Boolean =
+      javaScriptGraph.getOrElse {
+        val js = Cpg(using method.graph).metaData.language.headOption.exists(l =>
+            l == io.shiftleft.codepropertygraph.generated.Languages.JSSRC ||
+                l == io.shiftleft.codepropertygraph.generated.Languages.JAVASCRIPT
+        )
+        javaScriptGraph = Some(js)
+        js
+      }
+
   @volatile private var globalScopeHolders: Set[Long] = null
 
   /** Whether a global-scope method (see [[GlobalScopeMethodNames]]) is `method` or lies in its AST.

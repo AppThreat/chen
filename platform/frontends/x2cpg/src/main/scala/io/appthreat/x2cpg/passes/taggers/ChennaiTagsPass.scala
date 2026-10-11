@@ -3,6 +3,7 @@ package io.appthreat.x2cpg.passes.taggers
 import io.circe.*
 import io.circe.parser.*
 import io.appthreat.x2cpg.passes.taggers.JavaFrameworks
+import io.appthreat.x2cpg.passes.taggers.js.{JsRecognizers, JsTagger}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import io.shiftleft.codepropertygraph.generated.Languages
@@ -69,39 +70,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // (methodFullName + code). `String.matches` recompiles the pattern on every call, which dominated
   // the juice-shop tagging phase (jstack: ChennaiTagsPass -> String.matches -> Pattern.compile).
   private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
-  private val VUE_ROUTE_INPUT_REGEX = ".*\\$route\\.(params|query|body).*"
-
-  // SvelteKit identifies route handlers by file name, not by a registration call: a
-  // `load` exported from `+page.server.ts` *is* the route handler, so there is no
-  // `app.get("/path", handler)` shape for the JS_ROUTES_CALL_REGEX above to match.
-  // Names follow https://svelte.dev/docs/kit/routing.
-  private val SVELTEKIT_DATA_FILE_REGEX     = ".*\\+(page|layout)(\\.server)?\\.(js|ts|mjs|mts)"
-  private val SVELTEKIT_ENDPOINT_FILE_REGEX = ".*\\+server\\.(js|ts|mjs|mts)"
-  private val SVELTEKIT_HOOKS_FILE_REGEX =
-      ".*hooks(\\.server|\\.client)?\\.(js|ts|mjs|mts)"
-  private val SVELTE_COMPONENT_FILE_REGEX = ".*\\.svelte"
-
-  /** Prefix of the lowered form of an ESM export (`export let data` -> `exports.data = data`). */
-  private val ExportsPrefix = "exports."
-
-  /** `load` runs per request and receives `{ params, url, request, cookies, fetch, locals }`. */
-  private val SVELTEKIT_DATA_ENTRYPOINTS = Set("load")
-
-  /** `+server.ts` exports one function per HTTP verb, plus `fallback` for the rest. */
-  private val SVELTEKIT_HTTP_ENTRYPOINTS =
-      Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "fallback")
-
-  /** `hooks.server.ts` / `hooks.ts` sit in front of every request. */
-  private val SVELTEKIT_HOOK_ENTRYPOINTS =
-      Set(
-        "handle",
-        "handleError",
-        "handleFetch",
-        "handleValidationError",
-        "init",
-        "reroute",
-        "transport"
-      )
 
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
@@ -117,22 +85,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // ---------------------------------------------------------------------
   // Angular / React / Vue recognizers
   // ---------------------------------------------------------------------
-
-  // React Router (and Next.js) expose the URL through hooks; the call result
-  // carries the request data, so the call itself is the source.
-  private val REACT_INPUT_HOOKS = Set("useParams", "useSearchParams", "useLocation")
-
-  // `route.` and `activatedRoute.` are both idiomatic field names for an ActivatedRoute, so the
-  // identifier segment is matched case-insensitively.
-  private val ANGULAR_ROUTE_INPUT_REGEX =
-      "(?is).*(this\\.)?route\\.(snapshot\\.)?(params|queryParams|paramMap|queryParamMap|fragment|url|data).*"
-
-  // Angular's DomSanitizer escape hatch: the returned value is rendered as
-  // raw markup by the [innerHTML]-style binding it is fed to.
-  private val ANGULAR_SANITIZER_BYPASS_REGEX =
-      ".*bypassSecurityTrust(HTML|Html|SCRIPT|Script|STYLE|Style|URL|Url|RESOURCE_URL|ResourceUrl).*"
-
-  private val ANGULAR_SIGNAL_INPUT = "@angular/core:input"
 
   // Route tables in Vue (`createRouter({ routes })`), Angular
   // (`RouterModule.forRoot(routes)`, `provideRouter(routes)`) and React Router
@@ -171,33 +123,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   private val ROUTE_RECORD_SIBLING_KEYS = ROUTE_RECORD_STRONG_KEYS ++ ROUTE_RECORD_WEAK_KEYS
 
   private val ROUTER_PACKAGES = Seq("vue-router", "@angular", "react-router", "nuxt")
-
-  // The HTTP verbs a Next.js app-router `route.ts` may export, the same
-  // convention SvelteKit's `+server.ts` uses.
-  private val NEXT_HTTP_ENTRYPOINTS =
-      Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
-
-  /** A path separator in a FILE name, either way round. File names reach the graph with the
-    * separator of the platform the atom was built on, so every segment of a file-convention regex
-    * has to accept both - a `/`-only segment silently stops matching on Windows.
-    */
-  private val Sep = "[/\\\\]"
-
-  private val NEXT_ROUTE_FILE_REGEX =
-      s"(.*$Sep)?app($Sep.+)?${Sep}route\\.(js|jsx|ts|tsx|mjs|mts)$$"
-  private val NEXT_API_FILE_REGEX =
-      s"(.*$Sep)?pages${Sep}api$Sep.*\\.(js|jsx|ts|tsx|mjs|mts)$$"
-  private val NEXT_ENTRYPOINT_NAMES =
-      Set("getServerSideProps", "getStaticProps", "generateMetadata")
-
-  private val NUXT_SERVER_FILE_REGEX =
-      s"(.*$Sep)?server$Sep(api|routes)$Sep.*\\.(js|ts|mjs|mts)$$"
-
-  /** h3/Nitro request readers: the first argument is the request event, the return value is request
-    * data.
-    */
-  private val H3_INPUT_CALLS =
-      Set("readBody", "readRawBody", "getRouterParam", "getRouterParams", "getQuery", "useQuery")
 
   /** True when any import comes from one of the given npm packages. ESM imports lower to
     * `<package>:<name>` and `require(...)` to the bare specifier, so the package is the text before
@@ -296,21 +221,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
               Iterator(params(1)).newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
           }
     }
-    // Cheap substring prefilter before the regex: the pattern can only match code containing the
-    // literal "$route", so this skips the regex engine for the vast majority of (bundled-JS) calls.
-    // The Vue `$route` input tagging is only meaningful when the project actually imports Vue.
-    // Checking imports once avoids scanning every call node's code on non-Vue projects, and the
-    // cheap `$route` substring prefilter avoids the regex engine for the remaining calls.
-    // `importedEntity` is the bare specifier for `require(...)` (e.g. "vue") and "<package>:<name>"
-    // for ESM imports (e.g. "vue-router:useRoute", "@vue/composition-api:ref"), so strip the
-    // ESM name suffix before matching the package.
-    val usesVue = usesPackages("vue", "@vue")
-    if usesVue then
-      atom.call
-          .filter(_.code.contains("$route"))
-          .code(VUE_ROUTE_INPUT_REGEX)
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(using dstGraph)
     val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
         .method
         .internal
@@ -323,12 +233,9 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       dstGraph
     )
     tagRouteTableRecords(dstGraph)
-    tagReactRouter(dstGraph)
-    tagVueComponentInputs(dstGraph)
-    tagAngular(dstGraph)
-    tagNextJsRoutes(dstGraph)
-    tagNuxtServerRoutes(dstGraph)
-    tagSvelteKitRoutes(dstGraph)
+    // Framework sources, sinks and sanitisers (browser platform, Angular, ...), sharing this pass's
+    // tag memo so a node reached here and above is tagged once.
+    JsRecognizers.run(atom, JsTagger(dstGraph, emittedTags))
   end tagJsRoutes
 
   /** Tag a handler method (a component or function a route renders) and its first parameter as the
@@ -470,367 +377,12 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     }
   end tagRouteTableRecords
 
-  /** React Router JSX routes and request hooks.
-    *
-    * `<Route path="/profile" element={<Profile />} />` is the JSX form of a route registration: the
-    * `path` attribute's literal is the route and the component the `element`/`component` attribute
-    * renders is the handler. The tag name is matched exactly - a prefix match would also fire on
-    * `<Routes>` and on user components like `<RouteGuard path=...>`. The URL itself reaches
-    * components through the `useParams`/`useSearchParams`/`useLocation` hooks, which are tagged as
-    * input.
-    *
-    * Function components receive their data through props: a capitalized method that renders a
-    * template (contains TEMPLATE_DOM) is a React component by the framework's own naming rule, so
-    * its first parameter is tagged `framework-input` - the same reasoning that makes a controller
-    * method's parameters web-facing. This is deliberately wide - every React component qualifies,
-    * including presentational leaves - because props are the only input boundary a function
-    * component has.
-    */
-  private def tagReactRouter(dstGraph: DiffGraphBuilder): Unit =
-    val usesReact =
-        usesPackages("react", "react-dom", "react-router", "next")
-    if !usesReact then return
 
-    REACT_INPUT_HOOKS.foreach { hook =>
-        storeTag(atom.call.nameExact(hook), FRAMEWORK_INPUT, dstGraph)
-    }
 
-    // The opening element carries the attributes; its code starts with the tag name.
-    atom.templateDom
-        .nameExact("JSXOpeningElement")
-        .filter(dom => jsxComponentName(dom.code) == Some("Route"))
-        .foreach { routeElem =>
-            routeElem.ast
-                .collectAll[io.shiftleft.codepropertygraph.generated.nodes.TemplateDom]
-                .nameExact("JSXAttribute")
-                .foreach { attr =>
-                    attr.code match
-                      case c if c.startsWith("path=") =>
-                          attr.ast.isLiteral.headOption
-                              .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
-                      case c if c.startsWith("element=") || c.startsWith("component=") =>
-                          attr.ast.isIdentifier
-                              .dedup
-                              .foreach { ident =>
-                                  resolveComponentMethod(ident)
-                                      .foreach(tagHandlerMethod(_, dstGraph))
-                              }
-                          // `element={<Profile />}` has no identifier - the component is the
-                          // JSX element's own tag name.
-                          attr.ast
-                              .collectAll[io.shiftleft.codepropertygraph.generated.nodes.TemplateDom]
-                              .nameExact("JSXElement")
-                              .code(".*")
-                              .foreach { elemDom =>
-                                  jsxComponentName(elemDom.code)
-                                      .flatMap(nm => atom.method.internal.nameExact(nm).headOption)
-                                      .foreach(tagHandlerMethod(_, dstGraph))
-                              }
-                      case _ =>
-                }
-        }
 
-    atom.method
-        .internal
-        .filter(m => m.name.nonEmpty && m.name.charAt(0).isUpper)
-        .filter(_.ast.isTemplateDom.nonEmpty)
-        .foreach { component =>
-            component.parameter
-                .filterNot(_.name == "this")
-                .headOption
-                .foreach(p => storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph))
-        }
-  end tagReactRouter
 
-  /** Vue component props boundary.
-    *
-    * Composition API: `defineProps()` / `withDefaults(defineProps(), {...})` is the props
-    * declaration - the call is tagged `framework-input`, the same treatment Svelte 5's `$props()`
-    * gets. Options API: `setup(props)` and `data(props)` receive the props as their first
-    * parameter. `useRoute()` (vue-router) returns the live route, whose `.params`/`.query` carry
-    * URL data.
-    */
-  private def tagVueComponentInputs(dstGraph: DiffGraphBuilder): Unit =
-    val usesVue = usesPackages("vue", "@vue", "vue-router")
-    if !usesVue then return
 
-    storeTag(
-      atom.call.name("defineProps|withDefaults|defineModel"),
-      FRAMEWORK_INPUT,
-      dstGraph
-    )
 
-    storeTag(atom.call.nameExact("useRoute"), FRAMEWORK_INPUT, dstGraph)
-
-    atom.method
-        .internal
-        .nameExact("setup")
-        .foreach { setup =>
-            setup.parameter
-                .filterNot(_.name == "this")
-                .headOption
-                .foreach(p => storeTag(Iterator(p), FRAMEWORK_INPUT, dstGraph))
-        }
-  end tagVueComponentInputs
-
-  /** Calls of Angular's `input(...)` and `input.required(...)`, found through the import of `input`
-    * and the shape of the call. Their full names cannot be used. Type recovery names
-    * `input.required()` after the type of `input`, and that is the import only until the TypeScript
-    * types of an installed `@angular/core` or a typed parameter or local called `input` replace it.
-    * It names `input()` after a method of the same file that is also called `input`.
-    */
-  private def angularSignalInputCalls: Iterator[Call] =
-      for
-        imported <- atom.imports.importedEntityExact(ANGULAR_SIGNAL_INPUT)
-        alias    <- imported.importedAs.iterator
-        call     <- imported.call.method.ast.isCall
-        isPlain = call.name == alias && call.receiver.isIdentifier.nameExact(alias).nonEmpty
-        isRequired = call.name == "required" &&
-            call.arguments(0).isIdentifier.nameExact(alias).nonEmpty
-        if isPlain || isRequired
-      yield call
-
-  /** Angular decorators and route-parameter reads.
-    *
-    * `@Input()` members are the parent-to-child data boundary: the member and its `this.x` reads
-    * are tagged `framework-input`. `@Output()` members (EventEmitter) are the child-to-parent
-    * boundary and are tagged `framework-output`. Classes annotated `@Component`/`@Directive`/
-    * `@Pipe`/`@Injectable` are tagged `framework` for inventory. URL data arrives via
-    * `ActivatedRoute` (`route.params`, `route.snapshot.queryParams`, `paramMap.get(...)`), and
-    * `bypassSecurityTrust*` marks values rendered as raw markup.
-    */
-  private def tagAngular(dstGraph: DiffGraphBuilder): Unit =
-    val usesAngular = usesPackages("@angular")
-    if !usesAngular then return
-
-    // @Input()/@Output() land as annotations on class members
-    val angularMembers = atom.annotation.nameExact("Input", "Output").l
-    angularMembers.foreach { annotation =>
-        annotation.astParent match
-          case member: io.shiftleft.codepropertygraph.generated.nodes.Member =>
-              val tag = if annotation.name == "Input" then FRAMEWORK_INPUT else FRAMEWORK_OUTPUT
-              storeTag(Iterator(member), tag, dstGraph)
-              // `this.<member>` field-access reads inside the class are the actual taint carriers.
-              // Matched by codeExact because the field access's code IS `this.<member>`: an
-              // unanchored substring match would bleed an `@Input() id` onto every read of
-              // `this.idx`/`this.idField`, and would also tag enclosing operator calls whose code
-              // merely contains the access.
-              storeTag(
-                member.typeDecl.method.flatMap(_.ast.isCall).nameExact(Operators.fieldAccess)
-                    .codeExact(s"this.${member.name}"),
-                tag,
-                dstGraph
-              )
-          case _ =>
-    }
-
-    // Signal inputs: the field initialiser `bio = input<string>('')` is lowered into the
-    // constructor as an assignment to the identifier `bio` that has the code of the member, which
-    // is how the member is found. The field access is tagged, as for `@Input()`: it is under every
-    // read `this.bio()` and it is all there is when the signal is handed on without being called.
-    angularSignalInputCalls.foreach { initialiser =>
-        for
-          enclosing <- initialiser.inCall
-          if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
-          typeDecl <- initialiser.method.typeDecl
-          member   <- typeDecl.member.codeExact(enclosing.code)
-        do
-          storeTag(Iterator(member), FRAMEWORK_INPUT, dstGraph)
-          storeTag(
-            typeDecl.method.flatMap(_.ast.isCall).nameExact(Operators.fieldAccess)
-                .codeExact(s"this.${member.name}"),
-            FRAMEWORK_INPUT,
-            dstGraph
-          )
-    }
-
-    // NB: class-level inventory tagging of @Component/@Injectable classes was deliberately
-    // dropped - neither TYPE_DECL nor ANNOTATION nodes support TAGGED_BY edges, and the
-    // @Input/@Output member tagging below is what carries the dataflow semantics.
-
-    // Cheap case-insensitive prefilter before the regex: `route.` and `Route.` both occur
-    // (`this.route.params`, `this.activatedRoute.snapshot.queryParams`), and this loop runs over
-    // every call in the graph.
-    storeTag(
-      atom.call
-          .filter(_.code.toLowerCase.contains("route."))
-          .code(ANGULAR_ROUTE_INPUT_REGEX),
-      FRAMEWORK_INPUT,
-      dstGraph
-    )
-
-    storeTag(
-      atom.call
-          .filter(_.code.contains("bypassSecurityTrust"))
-          .code(ANGULAR_SANITIZER_BYPASS_REGEX),
-      FRAMEWORK_OUTPUT,
-      dstGraph
-    )
-  end tagAngular
-
-  /** Next.js file-convention routes.
-    *
-    * An app-router `route.ts` (e.g. `app/api/users/route.ts`) exports one function per HTTP verb
-    * (the same convention as SvelteKit's `+server.ts`); every export of a `pages/api` file is a
-    * handler; `middleware.ts` intercepts every request; and
-    * `getServerSideProps`/`getStaticProps`/`generateMetadata` are the page-data loaders, whose
-    * context parameter carries request data.
-    */
-  private def tagNextJsRoutes(dstGraph: DiffGraphBuilder): Unit =
-    def tagExported(names: Set[String], fileRegex: String): Unit =
-      val methods = atom.file.name(fileRegex).method.internal.l
-      // An empty `names` (pages/api) means every export is a handler, named or anonymous.
-      val handlers =
-          if names.isEmpty then methods.filterNot(m => m.name.contains("<") || m.name == ":program")
-          else methods.filter(m => names.contains(m.name) || m.name.startsWith("anonymous"))
-      storeTag(handlers.iterator, FRAMEWORK_ROUTE, dstGraph)
-      storeTag(
-        handlers.iterator.parameter.filterNot(_.name == "this"),
-        FRAMEWORK_INPUT,
-        dstGraph
-      )
-
-    tagExported(NEXT_HTTP_ENTRYPOINTS, NEXT_ROUTE_FILE_REGEX)
-    tagExported(Set.empty, NEXT_API_FILE_REGEX)
-
-    // Page-data loaders and middleware, wherever they are defined
-    atom.method
-        .internal
-        .name(NEXT_ENTRYPOINT_NAMES.map(n => s"^$n$$").mkString("|"))
-        .foreach(tagHandlerMethod(_, dstGraph))
-    atom.method
-        .internal
-        .nameExact("middleware")
-        .where(_.filename(".*middleware\\.(js|ts|mjs|mts)$"))
-        .foreach(tagHandlerMethod(_, dstGraph))
-  end tagNextJsRoutes
-
-  /** Nuxt/Nitro server routes.
-    *
-    * Files under `server/api` and `server/routes` export handlers directly; elsewhere handlers are
-    * registered by wrapping them in `defineEventHandler(...)`/`eventHandler(...)`. The h3 request
-    * readers (`readBody`, `getRouterParam`, ...) return request data and are tagged as input.
-    *
-    * The directory layout alone is accepted as a Nuxt signal because Nuxt AUTO-imports
-    * `defineEventHandler` and friends - a real Nuxt server directory may contain no recognisable
-    * import at all. To keep a plain Express/Fastify project that happens to use the same layout
-    * from having every internal helper tagged, only handler-shaped exports are tagged there: a
-    * method that takes at least one parameter (the event) or is the anonymous/default export.
-    */
-  private def tagNuxtServerRoutes(dstGraph: DiffGraphBuilder): Unit =
-    val usesNuxt     = usesPackages("nuxt", "h3", "nitro")
-    val hasServerDir = atom.file.name(NUXT_SERVER_FILE_REGEX).nonEmpty
-    if !usesNuxt && !hasServerDir then return
-
-    atom.call.name("defineEventHandler|eventHandler|defineRouteHandler").foreach { call =>
-        call.argument
-            .flatMap(arg => arg.start.out(EdgeTypes.REF).collectFirst { case m: Method => m })
-            .dedup
-            .foreach(tagHandlerMethod(_, dstGraph))
-    }
-
-    val serverMethods = atom.file.name(NUXT_SERVER_FILE_REGEX).method.internal.l
-    val handlers = serverMethods
-        .filterNot(_.name.contains("<"))
-        .filter(m => m.name != ":program")
-        .filter(m =>
-            m.parameter.filterNot(_.name == "this").nonEmpty || m.name.startsWith("anonymous")
-        )
-    storeTag(handlers.iterator, FRAMEWORK_ROUTE, dstGraph)
-    storeTag(
-      handlers.iterator.parameter.filterNot(_.name == "this"),
-      FRAMEWORK_INPUT,
-      dstGraph
-    )
-
-    storeTag(
-      atom.call.name(H3_INPUT_CALLS.map(n => s"^$n$$").mkString("|")),
-      FRAMEWORK_INPUT,
-      dstGraph
-    )
-  end tagNuxtServerRoutes
-
-  /** SvelteKit route semantics.
-    *
-    * Two halves, because SvelteKit's request path crosses a file boundary that has no edge in the
-    * graph: the server's `load` return becomes the component's `data` prop by convention, not by a
-    * call or an import.
-    *
-    * Server half: the entrypoints in `+page.server.ts`, `+server.ts` and `hooks.server.ts` are
-    * tagged `framework-route`, and their parameters `framework-input`. The parameters are the
-    * request (`{ params, url, request, cookies }`), so this is what makes server-side flows such as
-    * `params.slug` reaching a query show up.
-    *
-    * Component half: `$props()` in a `.svelte` file is tagged `framework-input`. In a route
-    * component the `data` prop is whatever the server `load` returned; in any component the props
-    * come from outside it. Paired with the `framework-output` tag `EasyTagsPass` puts on a value
-    * rendered through `{@html}`, this closes a reportable props -> raw-HTML path inside the
-    * component without needing the cross-file edge.
-    *
-    * Anonymous methods in a server file are tagged alongside the named entrypoints: `export const
-    * actions = { default: async ({ request }) => ... }` compiles to an anonymous method, and it is
-    * a request handler like any other. Named helper functions in the same file are deliberately
-    * left alone - only the entrypoint names and the anonymous handlers are treated as web-facing.
-    *
-    * Svelte 4's `export let` props are not covered; `$props()` is the Svelte 5 form.
-    */
-  private def tagSvelteKitRoutes(dstGraph: DiffGraphBuilder): Unit =
-    def tagEntrypoints(fileRegex: String, entrypointNames: Set[String]): Unit =
-      val methods = atom.file.name(fileRegex).method.internal.l
-      if methods.isEmpty then return
-      // Anonymous handlers are numbered when a file has more than one (`anonymous`,
-      // `anonymous1`, ...), which is the normal case for an `actions` object.
-      val handlers = methods
-          .filter(m => entrypointNames.contains(m.name) || m.name.startsWith("anonymous"))
-          .distinctBy(_.id)
-      if handlers.isEmpty then return
-      handlers.iterator.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
-      handlers.iterator.parameter
-          .filterNot(_.name == "this")
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(using dstGraph)
-
-    tagEntrypoints(SVELTEKIT_DATA_FILE_REGEX, SVELTEKIT_DATA_ENTRYPOINTS)
-    tagEntrypoints(SVELTEKIT_ENDPOINT_FILE_REGEX, SVELTEKIT_HTTP_ENTRYPOINTS)
-    tagEntrypoints(SVELTEKIT_HOOKS_FILE_REGEX, SVELTEKIT_HOOK_ENTRYPOINTS)
-
-    val componentMethods = atom.file.name(SVELTE_COMPONENT_FILE_REGEX).method.internal.l
-    if componentMethods.isEmpty then return
-
-    // Svelte 5: props arrive from a `$props()` call, and taint flows from it through the
-    // destructuring into each prop binding.
-    componentMethods.iterator.call
-        .nameExact("$props")
-        .dedup
-        .newTagNode(FRAMEWORK_INPUT)
-        .store()(using dstGraph)
-
-    // Svelte 4: `export let data` lowers to `exports.data = data`, so the locals assigned into
-    // `exports.*` are the component's props. There is no producing call to tag - the parent
-    // component assigns the binding - so the prop's *reads* are tagged instead: a read of an
-    // externally supplied binding is a web-facing input read, the same reasoning that makes a
-    // controller method's parameters framework-input.
-    //
-    // When a prop is rendered directly (`{@html data.body}`) the read is both the source and
-    // inside the sink; `ReachableSlicing` already drops entries whose first and last node are the
-    // same, so that degenerate case needs no special handling here.
-    // Keyed on the exported name rather than on the assignment's right-hand identifier: that
-    // identifier carries no REF edge to the local, so a `refsTo` join finds nothing.
-    val exportedPropNames = componentMethods.iterator.call
-        .nameExact(Operators.assignment)
-        .flatMap(_.argumentOption(1))
-        .map(_.code)
-        .filter(_.startsWith(ExportsPrefix))
-        .map(_.stripPrefix(ExportsPrefix))
-        .toSet
-    if exportedPropNames.nonEmpty then
-      componentMethods.iterator.local
-          .filter(local => exportedPropNames.contains(local.name))
-          .referencingIdentifiers
-          .dedup
-          .newTagNode(FRAMEWORK_INPUT)
-          .store()(using dstGraph)
-  end tagSvelteKitRoutes
 
   // =============================================================================================
   // Java (javasrc2cpg and the JVM byte-code frontends). The shapes and collision gates are

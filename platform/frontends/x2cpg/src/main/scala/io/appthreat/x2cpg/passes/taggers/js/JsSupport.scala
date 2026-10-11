@@ -1,0 +1,638 @@
+package io.appthreat.x2cpg.passes.taggers.js
+
+import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
+import overflowdb.BatchedUpdate.DiffGraphBuilder
+
+import scala.collection.mutable
+
+/** Tag vocabulary of the JavaScript framework recognizers. The names are the pipeline-wide contract
+  * read by atom's reachables (`DEFAULT_SOURCE_TAGS` / `DEFAULT_SINK_TAGS`); the category tags
+  * (`xss`, `redirect`, ...) ride along on a sink so that a sanitiser declaring the same category
+  * (`sanitizer-xss`) neutralises exactly the flows it protects.
+  */
+object JsTags:
+  // Sources
+  val INPUT: String   = "framework-input"
+  val INGRESS: String = "service-ingress"
+  // Entry points
+  val ROUTE: String = "framework-route"
+  // Sinks
+  val OUTPUT: String      = "framework-output"
+  val CODE_EXEC: String   = "code-execution"
+  val HTTP_CLIENT: String = "http-client"
+  val SSRF: String        = "ssrf"
+  // Sink categories
+  val XSS: String      = "xss"
+  val REDIRECT: String = "redirect"
+  // Neutralisers
+  val SANITIZER: String = "sanitizer"
+  def sanitizerFor(category: String): String = s"sanitizer-$category"
+
+  /** Raw HTML reaching the DOM. */
+  val HtmlSink: Seq[String] = Seq(OUTPUT, XSS)
+
+  /** A URL the browser navigates to (open redirect, and `javascript:` execution). */
+  val NavigationSink: Seq[String] = Seq(OUTPUT, REDIRECT)
+
+  /** A string the JavaScript engine evaluates. */
+  val CodeSink: Seq[String] = Seq(CODE_EXEC)
+
+  /** A request whose target the caller does not fix. */
+  val RequestSink: Seq[String] = Seq(HTTP_CLIENT)
+end JsTags
+
+/** Emits tags, at most once per (node, tag) across every recognizer of one run.
+  *
+  * The recognizers reach the same node from several angles - a component's props are tagged as a
+  * routed handler and as a component, a `fetch` both as a request and as remote data - and a
+  * duplicate TAG node surfaces as a duplicate tag in downstream output. The memo is supplied by the
+  * caller so that a pass running other taggers first (ChennaiTagsPass) shares it.
+  */
+final class JsTagger(
+  dstGraph: DiffGraphBuilder,
+  memo: mutable.HashSet[(Long, String)] = mutable.HashSet.empty
+):
+  def tag[T <: StoredNode](nodes: IterableOnce[T], names: String*): Unit =
+      nodes.iterator.foreach { node =>
+          names.foreach { name =>
+              if memo.add((node.id(), name)) then
+                Iterator(node).newTagNode(name).store()(using dstGraph)
+          }
+      }
+
+  /** True when this run has tagged the node with `name`. */
+  def has(nodeId: Long, name: String): Boolean = memo.contains((nodeId, name))
+
+  def tagPair[T <: StoredNode](node: T, name: String, value: String): Unit =
+      if memo.add((node.id(), s"$name=$value")) then
+        Iterator(node).newTagNodePair(name, value).store()(using dstGraph)
+end JsTagger
+
+/** How an ESM specifier bound its local name. */
+enum ImportKind:
+  case Named, Default, Namespace, Require, SideEffect
+
+/** One local binding created by an import in one file.
+  *
+  * @param module
+  *   the module specifier as written (`@angular/core`, `./feedback.service`).
+  * @param imported
+  *   the exported name the binding refers to; for a default or namespace import, and for a
+  *   `require`, the local name (that is how the frontend records them).
+  */
+final case class JsImport(
+  file: String,
+  local: String,
+  module: String,
+  imported: String,
+  kind: ImportKind
+):
+  /** The npm package the specifier names (`@scope/pkg/sub` -> `@scope/pkg`), or None for a relative
+    * or absolute path.
+    */
+  def packageName: Option[String] = JsModules.packageOf(module)
+
+/** The imports of a graph, indexed by file and by package.
+  *
+  * The frontend lowers an ESM import to `"<module>:<name>"` with `importedAs` the local name - the
+  * exported name for a named import, the local name for a default or namespace one - and a
+  * `require(...)` to the bare specifier. Telling a named import from a default/namespace one needs
+  * the declaration's code, which the IMPORT node keeps.
+  */
+final class JsModules(cpg: Cpg):
+
+  val imports: Seq[JsImport] =
+      cpg.imports.l.flatMap { imp =>
+        val entity = imp.importedEntity.getOrElse("")
+        val local  = imp.importedAs.getOrElse("")
+        val file   = Iterator(imp).call.file.name.headOption.getOrElse("")
+        if entity.isEmpty then None
+        else
+          val (module, name) = JsModules.splitEntity(entity)
+          val kind =
+              if name.isEmpty then
+                if local.isEmpty || local == module then ImportKind.SideEffect
+                else ImportKind.Require
+              else JsModules.kindOf(imp.code, local)
+          Some(JsImport(file, if local.nonEmpty then local else name, module, name, kind))
+      }.distinct
+
+  private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
+
+  /** Every npm package imported anywhere in the graph. */
+  val packages: Set[String] = imports.flatMap(_.packageName).toSet
+
+  /** True when any file imports one of the packages, or a subpath of one (`@angular` matches every
+    * `@angular/...` package, `next` matches `next/navigation`).
+    */
+  def uses(pkgs: String*): Boolean =
+      packages.exists(p => pkgs.exists(q => JsModules.packageMatches(p, q)))
+
+  def importsOf(file: String): Seq[JsImport] = byFile.getOrElse(file, Nil)
+
+  /** The binding a local name refers to in a file, if it came from an import. */
+  def resolve(file: String, local: String): Option[JsImport] =
+      importsOf(file).find(_.local == local)
+
+  /** Local names bound in a file to `exported` of a module matching `pkg`. Covers renamed imports
+    * (`import { input as field }`).
+    */
+  def localNamesOf(file: String, pkg: String, exported: String): Set[String] =
+      importsOf(file)
+          .filter(i =>
+              i.kind == ImportKind.Named && i.imported == exported &&
+                  i.packageName.exists(JsModules.packageMatches(_, pkg))
+          )
+          .map(_.local)
+          .toSet
+
+  /** Local names bound in a file to the whole module - a default, namespace or `require` binding.
+    */
+  def moduleBindingsOf(file: String, pkg: String): Set[String] =
+      importsOf(file)
+          .filter(i =>
+              i.kind != ImportKind.Named && i.kind != ImportKind.SideEffect &&
+                  i.packageName.exists(JsModules.packageMatches(_, pkg))
+          )
+          .map(_.local)
+          .toSet
+
+  /** Files that import from a package matching one of `pkgs`. */
+  def filesImporting(pkgs: String*): Set[String] =
+      imports
+          .filter(i => i.packageName.exists(p => pkgs.exists(JsModules.packageMatches(p, _))))
+          .map(_.file)
+          .toSet
+end JsModules
+
+object JsModules:
+
+  /** `@angular/core:inject` -> (`@angular/core`, `inject`); `vue` -> (`vue`, ""). A Windows drive
+    * letter or a URL scheme is not a separator, so only the LAST colon counts, and only when what
+    * follows it is an identifier.
+    */
+  def splitEntity(entity: String): (String, String) =
+    val idx = entity.lastIndexOf(':')
+    if idx <= 0 then (entity, "")
+    else
+      val name = entity.substring(idx + 1)
+      if name.nonEmpty && name.forall(c => c.isLetterOrDigit || c == '_' || c == '$') then
+        (entity.substring(0, idx), name)
+      else (entity, "")
+
+  def packageOf(module: String): Option[String] =
+      if module.isEmpty || module.startsWith(".") || module.startsWith("/") ||
+        module.startsWith("#") || module.startsWith("~") || module.startsWith("$")
+      then
+        // `#imports`/`#app` (Nuxt), `~/x` and `$lib`/`$app` (SvelteKit) are aliases, not packages,
+        // but `$app/*` and `#app` name framework modules the recognizers care about; they are
+        // reported as their own pseudo-packages.
+        if module.startsWith("$app/") || module == "#imports" || module.startsWith("#app") then
+          Some(module.takeWhile(_ != '/'))
+        else None
+      else
+        val parts = module.split('/')
+        if module.startsWith("@") && parts.length >= 2 then Some(s"${parts(0)}/${parts(1)}")
+        else Some(parts(0).stripPrefix("node:"))
+
+  /** `@angular/core` matches `@angular`; `react-router-dom` matches `react-router-dom` only; `next`
+    * matches `next` (the package `next/navigation` resolves to).
+    */
+  def packageMatches(pkg: String, wanted: String): Boolean =
+      pkg == wanted || pkg.startsWith(s"$wanted/")
+
+  private val BraceContent = "\\{([^}]*)\\}".r
+
+  def kindOf(code: String, local: String): ImportKind =
+    val named = BraceContent
+        .findFirstMatchIn(code)
+        .exists(m =>
+            m.group(1).split(',').map(_.trim).exists { spec =>
+              val parts = spec.split("\\s+as\\s+").map(_.trim.stripPrefix("type "))
+              parts.lastOption.contains(local)
+            }
+        )
+    if named then ImportKind.Named
+    else if code.contains("* as") then ImportKind.Namespace
+    else ImportKind.Default
+end JsModules
+
+/** What the project's manifests declare: the dependencies of every `package.json` outside
+  * `node_modules`. Frameworks that auto-import their APIs (Nuxt, Nitro, SvelteKit's `$app`) leave no
+  * import to gate on, so the manifest is the evidence that the framework is there.
+  */
+final class JsProject(cpg: Cpg):
+  private val DependencyKeys =
+      Seq("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+
+  val dependencies: Map[String, String] =
+      cpg.configFile.l
+          .filter(f =>
+              (f.name == "package.json" || f.name.endsWith("/package.json") ||
+                  f.name.endsWith("\\package.json")) && !f.name.contains("node_modules")
+          )
+          .flatMap(f => io.circe.parser.parse(f.content).toOption)
+          .flatMap { json =>
+              DependencyKeys.flatMap(k =>
+                  json.hcursor.downField(k).as[Map[String, io.circe.Json]].toOption.toList
+                      .flatMap(_.toList.map((name, v) => name -> v.asString.getOrElse("")))
+              )
+          }
+          .toMap
+
+  def dependsOn(names: String*): Boolean =
+      names.exists(n => dependencies.keys.exists(d => d == n || d.startsWith(s"$n/")))
+
+  def hasFile(regex: String): Boolean = cpg.file.name(regex).nonEmpty
+end JsProject
+
+/** Structural helpers over the shapes jssrc2cpg lowers JavaScript to. */
+object JsShapes:
+
+  /** The method name of a call. An optional call (`a?.b.c(x)`) is lowered to a call whose NAME is the
+    * whole callee text, so the name is its last segment.
+    */
+  def callName(call: Call): String =
+      if call.name.startsWith("<") || !call.name.contains('.') then call.name
+      else call.name.substring(call.name.lastIndexOf('.') + 1)
+
+  /** `a.b` -> `b`; None for anything that is not a field access. */
+  def fieldName(call: Call): Option[String] =
+      if call.name != Operators.fieldAccess then None
+      else
+        call.argumentOption(2).map {
+          case f: FieldIdentifier => f.canonicalName
+          case other              => other.code
+        }
+
+  /** The receiver (`a` in `a.b`) of a field access. */
+  def fieldBase(call: Call): Option[Expression] =
+      if call.name != Operators.fieldAccess then None else call.argumentOption(1)
+
+  /** Looks through the temporaries the frontend introduces for chained receivers: `a.b().c` lowers
+    * to `(_tmp_0 = a.b()).c`, so the receiver of `.c` is the assignment, or the bare `_tmp_0` read
+    * in a later statement.
+    */
+  def unwrap(expr: Expression): Expression =
+      expr match
+        case c: Call if c.name == Operators.assignment && c.argumentOption(1).exists(isTemp) =>
+            c.argumentOption(2).map(unwrap).getOrElse(expr)
+        case id: Identifier if isTemp(id) =>
+            tempDefinition(id).map(unwrap).getOrElse(expr)
+        case _ => expr
+
+  private def isTemp(e: Expression): Boolean =
+      e match
+        case id: Identifier => id.name.startsWith("_tmp_")
+        case _              => false
+
+  /** The value most recently assigned to a temporary in the same method. */
+  private def tempDefinition(id: Identifier): Option[Expression] =
+      Iterator(id.method).assignment
+          .filter(a => a.argumentOption(1).exists(t => isTemp(t) && t.code == id.name))
+          .filter(a => a.lineNumber.zip(id.lineNumber).forall((x, y) => x.intValue <= y.intValue))
+          .flatMap(_.argumentOption(2))
+          .lastOption
+
+  /** A member read and the reads that continue it (`a.b` -> `a.b.c`, `a.b.c['d']`), up to the first
+    * one that is called rather than read. The dataflow engine does not carry a value from a field
+    * read into a read of one of its fields, so a source tag on `route.snapshot.queryParams` alone
+    * never reaches `route.snapshot.queryParams.q`; tagging the whole chain does.
+    */
+  def readChain(read: Call): List[Call] =
+      read :: (read.astParent match
+        case p: Call
+            if (p.name == Operators.fieldAccess || p.name == Operators.indexAccess) &&
+              p.argumentOption(1).exists(_.id() == read.id()) && p._receiverIn.isEmpty =>
+            readChain(p)
+        case _ => Nil)
+
+  /** [[readChain]] of every read. */
+  def readChains(reads: IterableOnce[Call]): Iterator[Call] = reads.iterator.flatMap(readChain)
+
+  /** The dotted path of a pure member chain (`window.location.hash` -> Seq(window, location,
+    * hash)), looking through temporaries. None when any link is a call or a computed index.
+    */
+  def memberPath(expr: Expression): Option[List[String]] =
+      unwrap(expr) match
+        case id: Identifier => Some(List(id.name))
+        case c: Call if c.name == Operators.fieldAccess =>
+            for
+              base  <- fieldBase(c)
+              path  <- memberPath(base)
+              field <- fieldName(c)
+            yield path :+ field
+        case _ => None
+
+  /** The method a callback argument refers to: an inline function (METHOD_REF) or a named function
+    * passed by reference.
+    */
+  def callbackMethod(arg: Expression): Option[Method] =
+      arg match
+        case ref: MethodRef => ref.out(EdgeTypes.REF).collectFirst { case m: Method => m }
+        case id: Identifier =>
+            // A function declaration is referenced directly; `const onMessage = (e) => ...` through
+            // the local it is assigned to.
+            id.out(EdgeTypes.REF).collectFirst { case m: Method => m }.orElse(
+              JsValues.origin(id) match
+                case ref: MethodRef if ref.id() != id.id() => callbackMethod(ref)
+                case _                                     => None
+            ).orElse(
+              // `function onMessage(e) {...}` declared at module level and passed from inside a
+              // function: the declaration's binding is in another method, so look it up by name.
+              id.method.file.method.nameExact(id.name).headOption
+            ).orElse(
+              // an imported function (`loader: previewLoader` in a router config): the one
+              // project function of that name, if it is unambiguous
+              Cpg(using id.graph).method.internal.nameExact(id.name).l match
+                case only :: Nil => Some(only)
+                case _           => None
+            )
+        case _ => None
+
+  /** Callbacks in an argument: the function itself, or each function-valued property of an object
+    * literal (`{ next: (v) => ..., error: ... }`, lowered to `_tmp.next = <ref>` assignments in a
+    * block) whose key is in `keys` (every key when empty).
+    */
+  def callbacksIn(arg: Expression, keys: Set[String] = Set.empty): List[Method] =
+      arg match
+        case b: Block =>
+            b.astChildren.isCall.nameExact(Operators.assignment).l.flatMap { a =>
+              val key = a.argumentOption(1).collect { case c: Call => fieldName(c) }.flatten
+              if keys.isEmpty || key.exists(keys.contains) then
+                a.argumentOption(2).flatMap(callbackMethod)
+              else None
+            }
+        case other => callbackMethod(other).toList
+
+  /** The first non-`this` parameter of a method - the value a callback receives. */
+  def firstParam(m: Method): Option[MethodParameterIn] =
+      m.parameter.filterNot(_.name == "this").sortBy(_.index).headOption
+
+  /** Every parameter but `this`. */
+  def params(m: Method): List[MethodParameterIn] =
+      m.parameter.filterNot(_.name == "this").sortBy(_.index).l
+
+  /** True for a string literal argument. */
+  def isStringLiteral(e: Expression): Boolean =
+      e match
+        case l: Literal => l.code.headOption.exists(c => c == '"' || c == '\'' || c == '`')
+        case _          => false
+
+  def literalValue(e: Expression): Option[String] =
+      e match
+        case l: Literal if isStringLiteral(l) && l.code.length >= 2 =>
+            Some(l.code.substring(1, l.code.length - 1))
+        case _ => None
+
+  /** The left-most operand of a string concatenation or template literal, for deciding whether a
+    * URL's origin is fixed by the code.
+    */
+  def leftmostOperand(e: Expression): Expression =
+      e match
+        case c: Call
+            if c.name == Operators.addition || c.name == Operators.formatString ||
+              c.name == "<operator>.formattedValue" =>
+            c.argumentOption(1).map(leftmostOperand).getOrElse(e)
+        case _ => e
+
+  /** True when a URL expression fixes its own origin: a constant, or a concatenation/template that
+    * starts with a same-origin path (`/api/...`) or an absolute URL with a path (`https://host/`).
+    * Such a request can carry attacker data but cannot be pointed somewhere else, so it is not a
+    * request-forgery sink.
+    */
+  def hasFixedOrigin(url: Expression): Boolean =
+      url match
+        case l: Literal => true
+        case _ =>
+            literalValue(leftmostOperand(url)).exists { prefix =>
+              (prefix.startsWith("/") && !prefix.startsWith("//")) ||
+              prefix.matches("(?i)^https?://[^/?#]+[/?#].*") ||
+              prefix.startsWith("./") || prefix.startsWith("../")
+            }
+
+  /** The parts of a string built by concatenation or a template literal, left to right. */
+  def urlParts(e: Expression): List[Expression] =
+      e match
+        case c: Call if c.name == Operators.addition =>
+            c.argument.sortBy(_.argumentIndex).l.flatMap(urlParts)
+        case c: Call if c.name == Operators.formatString =>
+            c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l.flatMap(urlParts)
+        case c: Call if c.name == "<operator>.formattedValue" =>
+            c.argument.sortBy(_.argumentIndex).l.flatMap(urlParts)
+        case other => List(other)
+
+  private def fixesOrigin(prefix: String): Boolean =
+      (prefix.startsWith("/") && !prefix.startsWith("//")) ||
+          prefix.matches("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+[/?#].*") ||
+          prefix.startsWith("./") || prefix.startsWith("../")
+
+  /** The nodes to tag as request sinks for a request to `url`.
+    *
+    *   - A constant URL, or a value placed only in the query or fragment of a URL whose origin the
+    *     code fixes (`/search?q=${q}`), is no sink.
+    *   - A variable that decides the origin - the whole URL, a prefix (`${base}/items`), or the
+    *     host after a bare scheme (`wss://${host}/live`) - makes the request a sink. Where the
+    *     variable is only the leading base, that base is the sink, so that data reaching the path
+    *     or query of `${this.apiUrl}/items?q=` is not request forgery.
+    *   - A variable in the PATH of an otherwise fixed URL (`/api/items/${id}`) is client-side path
+    *     traversal: `../` in it reaches another endpoint of the same origin with the page's
+    *     credentials. The request is a sink.
+    */
+  def requestSinksFor(call: Call, url: Expression): List[CfgNode] =
+    def isConstant(e: Expression) = e.isInstanceOf[Literal]
+    def variableInPath(parts: List[Expression], from: Int): Boolean =
+      var text = ""
+      parts.zipWithIndex.drop(from).exists { (part, i) =>
+        if isConstant(part) then
+          text += literalValue(part).getOrElse(part.code)
+          false
+        else !text.contains('?') && !text.contains('#')
+      }
+    url match
+      case _: Literal => Nil
+      case c: Call if c.name == Operators.addition || c.name == Operators.formatString =>
+          val parts    = urlParts(c)
+          val firstVar = parts.indexWhere(p => !isConstant(p))
+          if firstVar < 0 then Nil
+          else if firstVar == 0 then
+            parts.head match
+              case base: CfgNode =>
+                  // the base decides the origin; a later variable in the path is traversal
+                  base :: (if variableInPath(parts, 1) then List(call) else Nil)
+          else
+            val prefix = parts.take(firstVar).flatMap(literalValue).mkString
+            if !fixesOrigin(prefix) then List(call)
+            else if prefix.contains('?') || prefix.contains('#') then Nil
+            else List(call)
+      case _ => List(call)
+  end requestSinksFor
+
+  /** True for the target of an assignment (`x.y` in `x.y = v`), which is written, not read. */
+  def isAssignmentTarget(e: Expression): Boolean =
+      e.astParent match
+        case a: Call if a.name.startsWith("<operator>.assignment") =>
+            a.argumentOption(1).exists(_.id() == e.id())
+        case _ => false
+
+  /** Files whose code runs on the server of a meta-framework: Nitro/Nuxt `server/`, Next.js route
+    * handlers, API routes and middleware, SvelteKit `+server`/`*.server` modules and `$lib/server`,
+    * Astro endpoints and middleware, Remix/React Router `.server` modules. A request such code
+    * makes to a URL the caller chose is server-side request forgery.
+    */
+  private val ServerFile = (
+    "(?:.*[/\\\\])?(" +
+      "server[/\\\\](api|routes|middleware|plugins|tasks|utils)[/\\\\].*" +
+      "|app[/\\\\](.*[/\\\\])?route\\.[cm]?[jt]sx?" +
+      "|pages[/\\\\]api[/\\\\].*" +
+      "|(src[/\\\\])?middleware\\.[cm]?[jt]s" +
+      "|.*\\+(page|layout)\\.server\\.[cm]?[jt]s|.*\\+server\\.[cm]?[jt]s|hooks\\.server\\.[cm]?[jt]s" +
+      "|lib[/\\\\]server[/\\\\].*" +
+      "|.*\\.server\\.[cm]?[jt]sx?" +
+      ")"
+  ).r
+
+  def isServerFile(filename: String): Boolean = ServerFile.matches(filename)
+
+  /** Assignments (`=`, `+=`) whose target is a field access named one of `fields`. */
+  def propertyWrites(cpg: Cpg, fields: Set[String]): Iterator[Call] =
+      cpg.call
+          .nameExact(Operators.assignment, Operators.assignmentPlus)
+          .filter(_.argumentOption(1).exists {
+              case c: Call => fieldName(c).exists(fields.contains)
+              case _       => false
+          })
+
+  /** The value written by an assignment. */
+  def assignedValue(assignment: Call): Option[Expression] = assignment.argumentOption(2)
+
+  /** The receiver of a method call (`a.b(...)` -> `a`), looking through temporaries. */
+  def receiverOf(call: Call): Option[Expression] =
+      call.receiver.headOption.collect { case c: Call => c }.flatMap(fieldBase).map(unwrap)
+
+  /** The class a method - or an arrow function nested in one, whose `this` is the class's - belongs
+    * to. The `this` parameter's type is consulted first: every function gets a TYPE_DECL of its
+    * own, so the AST-defining declaration of a closure is the closure.
+    */
+  def enclosingTypeDecl(m: Method): Option[TypeDecl] =
+      m.parameter.nameExact("this").typeFullName.headOption
+          .flatMap(t => Cpg(using m.graph).typeDecl.fullNameExact(t).headOption)
+          .orElse(m.definingTypeDecl)
+
+  /** The methods of a class, with the arrow functions nested in them (whose `this` is the class's).
+    */
+  def classMethods(td: TypeDecl): List[Method] =
+      Cpg(using td.graph).method.fullName(s"${java.util.regex.Pattern.quote(td.fullName)}:.*").l
+
+  /** The simple name of a type full name (`@angular/router:ActivatedRoute` -> `ActivatedRoute`,
+    * `ActivatedRoute<T>` -> `ActivatedRoute`).
+    */
+  def simpleTypeName(fullName: String): String =
+    val noGenerics = fullName.takeWhile(_ != '<').trim
+    noGenerics.substring(math.max(noGenerics.lastIndexOf(':'), noGenerics.lastIndexOf('.')) + 1)
+
+  /** The annotated type in a declaration's code (`private route: ActivatedRoute` ->
+    * `ActivatedRoute`), for parameters and members whose type the frontend left unresolved.
+    */
+  def annotatedType(code: String): Option[String] =
+    val idx = code.indexOf(':')
+    if idx < 0 then None
+    else
+      val t = code.substring(idx + 1).trim.takeWhile(c => c.isLetterOrDigit || c == '_' || c == '$')
+      Option.when(t.nonEmpty)(t)
+end JsShapes
+
+/** Where values come from and where asynchronous values go. */
+object JsValues:
+
+  /** The expression a value was produced by: through the frontend's temporaries, and through a
+    * local that the method assigns exactly once (`const obs = this.http.get(...)`). A local assigned
+    * more than once is left alone - which assignment reaches a use is the dataflow engine's job.
+    */
+  def origin(expr: Expression, depth: Int = 4): Expression =
+    val e = JsShapes.unwrap(expr)
+    if depth <= 0 then e
+    else
+      e match
+        case id: Identifier if id.name != "this" =>
+            val defs = Iterator(id.method).assignment
+                .filter(_.argumentOption(1).exists {
+                    case t: Identifier => t.name == id.name
+                    case _             => false
+                })
+                .l
+            defs match
+              case single :: Nil => single.argumentOption(2).map(origin(_, depth - 1)).getOrElse(e)
+              case _             => e
+        case _ => e
+
+  /** rxjs operators whose callback receives each emitted value. */
+  val ValueOperators: Set[String] = Set(
+    "map",
+    "switchMap",
+    "mergeMap",
+    "concatMap",
+    "exhaustMap",
+    "flatMap",
+    "tap",
+    "filter",
+    "takeWhile",
+    "skipWhile",
+    "first",
+    "last",
+    "find"
+  )
+
+  /** rxjs combinators whose output carries every input's values. */
+  val Combinators: Set[String] =
+      Set("forkJoin", "combineLatest", "zip", "merge", "concat", "race", "from", "defer")
+
+  /** The callback parameters that receive the values a producer delivers, where the producer is a
+    * Promise (`p.then(cb)`) or an Observable (`o.subscribe(cb)`, `o.subscribe({ next: cb })`,
+    * `o.pipe(map(cb), ...)`), following the chain (`then` returns a promise of the callback's
+    * result, `pipe` an observable) and rxjs combinators (`forkJoin([a, b]).subscribe(cb)`).
+    *
+    * A promise awaited instead (`const r = await fetch(u)`) needs no help: the dataflow engine
+    * carries the awaited value from the producer call itself.
+    */
+  def consumersOf(producer: Expression, depth: Int = 6): List[MethodParameterIn] =
+    if depth <= 0 then return Nil
+    val method     = producer.method
+    val producerId = producer.id()
+    def fromProducer(e: Expression): Boolean = origin(e).id() == producerId
+    val calls = method.call.l
+    val chained = calls
+        .filter(c =>
+            (c.name == "then" || c.name == "subscribe" || c.name == "pipe") &&
+                JsShapes.receiverOf(c).exists(fromProducer)
+        )
+        .flatMap { c =>
+            c.name match
+              case "then" =>
+                  c.argument.filter(_.argumentIndex == 1).l
+                      .flatMap(a => JsShapes.callbacksIn(a))
+                      .flatMap(JsShapes.firstParam) ++ consumersOf(c, depth - 1)
+              case "subscribe" =>
+                  c.argument.filter(_.argumentIndex == 1).l
+                      .flatMap(a => JsShapes.callbacksIn(a, Set("next")))
+                      .flatMap(JsShapes.firstParam)
+              case _ =>
+                  c.argument.filter(_.argumentIndex >= 1).isCall
+                      .filter(op => ValueOperators.contains(op.name))
+                      .l
+                      .flatMap(op => op.argument.filter(_.argumentIndex >= 1).l)
+                      .flatMap(a => JsShapes.callbacksIn(a))
+                      .flatMap(JsShapes.firstParam) ++ consumersOf(c, depth - 1)
+        }
+    // `forkJoin([a, b])`, `combineLatest({ a, b })`: the array/object literal is lowered into a
+    // block of pushes or property writes, so the producer is found among the argument's reads.
+    val combined = calls
+        .filter(c => Combinators.contains(c.name))
+        .filter(_.argument.filter(_.argumentIndex >= 1).ast.isIdentifier.exists(fromProducer))
+        .flatMap(consumersOf(_, depth - 1))
+    (chained ++ combined).distinctBy(_.id())
+  end consumersOf
+end JsValues

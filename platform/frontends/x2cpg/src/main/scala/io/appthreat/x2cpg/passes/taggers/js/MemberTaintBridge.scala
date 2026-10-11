@@ -1,0 +1,140 @@
+package io.appthreat.x2cpg.passes.taggers.js
+
+import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
+
+import scala.collection.mutable
+
+import JsShapes.*
+import JsTags.*
+
+/** Carries a source across the methods of a class through the class's fields.
+  *
+  * Component code keeps what it read in a field and uses it later: `ngOnInit` stores
+  * `this.orderId = params.get('id')` and a click handler builds `window.open(...this.orderId...)`;
+  * a Vue `created()` hook keeps `this.q = this.$route.query.q` for a method to render. The dataflow
+  * engine follows a value through a field only within one method, so the read in the handler starts
+  * a new, untainted value and the flow is lost.
+  *
+  * The bridge closes that gap from the field's side: a field that some method of the class assigns
+  * from a source - checked along the reaching definitions inside that method - makes every read
+  * `this.<field>` in the class's other methods a source of the same kind. Writes through a signal
+  * or subject (`this.q.set(v)`, `this.q$.next(v)`) count as assignments.
+  *
+  * Runs after every recognizer, over the tags they emitted, and repeats until no new field is found
+  * (a field computed from another tainted field).
+  */
+object MemberTaintBridge:
+
+  private val SourceTags = Seq(INPUT, INGRESS)
+
+  /** Methods of a signal/subject that store their argument. */
+  private val StoringMethods = Set("set", "next")
+
+  private val MaxRounds = 4
+
+  /** Visits at most this many nodes per write when looking for a source. */
+  private val MaxVisits = 400
+
+  def run(ctx: JsContext): Unit =
+    val writes = memberWrites(ctx)
+    if writes.isEmpty then return
+    val done  = mutable.HashSet.empty[(String, String)]
+    var round = 0
+    var grew  = true
+    while grew && round < MaxRounds do
+      grew = false
+      round += 1
+      writes.foreach { case (td, member, value) =>
+          if !done.contains((td.fullName, member)) then
+            sourceTagOf(ctx, value).foreach { tagName =>
+                done += ((td.fullName, member))
+                grew = true
+                val reads = classMethods(td).iterator
+                    .flatMap(_.ast.isCall)
+                    .nameExact(Operators.fieldAccess)
+                    .codeExact(s"this.$member")
+                    .filterNot(isAssignmentTarget)
+                    .filterNot(isStoreReceiver)
+                ctx.tagger.tag(readChains(reads), tagName)
+            }
+      }
+    end while
+  end run
+
+  /** (class, field, value written) for every field write in a class. */
+  private def memberWrites(ctx: JsContext): List[(TypeDecl, String, Expression)] =
+    val assignments = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+        (a.argumentOption(1), a.argumentOption(2)) match
+          // this.x = v
+          case (Some(fa: Call), Some(v)) if fa.name == Operators.fieldAccess =>
+              (fieldBase(fa), fieldName(fa)) match
+                case (Some(b: Identifier), Some(field)) if b.name == "this" =>
+                    enclosingTypeDecl(a.method).map(td => (td, field, v))
+                case _ => None
+          // `x = v` in a constructor: a field initialiser, lowered with the member's code
+          case (Some(id: Identifier), Some(v)) if a.method.name == "<init>" =>
+              a.method.typeDecl.flatMap(td =>
+                  td.member.nameExact(id.name).codeExact(a.code).headOption.map(_ => (td, id.name, v))
+              )
+          case _ => None
+    }
+    val stores = ctx.cpg.call.filter(c => StoringMethods.contains(c.name)).l.flatMap { c =>
+        receiverOf(c) match
+          case Some(fa: Call) if fa.name == Operators.fieldAccess && fa.code.startsWith("this.") =>
+              (fieldName(fa), c.argument.filter(_.argumentIndex == 1).headOption) match
+                case (Some(field), Some(v)) =>
+                    enclosingTypeDecl(c.method).map(td => (td, field, v))
+                case _ => None
+          case _ => None
+    }
+    assignments ++ stores
+
+  /** `this.q` in `this.q.set(v)`: written through, not read. */
+  private def isStoreReceiver(fa: Call): Boolean =
+      fa.astParent match
+        case a: Call if a.name == Operators.assignment =>
+            // lowered through a temporary: `(_tmp = this.q).set(v)`
+            a.astParent match
+              case callee: Call if callee.name == Operators.fieldAccess =>
+                  fieldName(callee).exists(StoringMethods.contains)
+              case _ => false
+        case callee: Call if callee.name == Operators.fieldAccess =>
+            fieldName(callee).exists(StoringMethods.contains)
+        case _ => false
+
+  /** The source tag that reaches `value` inside its method, if any: a tagged node in the value
+    * itself, or one its reaching definitions lead back to.
+    */
+  private def sourceTagOf(ctx: JsContext, value: Expression): Option[String] =
+    def tagOf(n: StoredNode): Option[String] =
+        SourceTags.find(t => ctx.tagger.has(n.id(), t)).orElse(
+          n.tag.name.find(SourceTags.contains)
+        )
+    val seen  = mutable.HashSet.empty[Long]
+    val queue = mutable.Queue.empty[StoredNode]
+    queue.enqueue(value)
+    var found: Option[String] = None
+    while found.isEmpty && queue.nonEmpty && seen.size < MaxVisits do
+      val node = queue.dequeue()
+      if seen.add(node.id()) then
+        found = tagOf(node)
+        if found.isEmpty then
+          node match
+            case id: Identifier =>
+                id._reachingDefIn.foreach {
+                  case d: StoredNode => queue.enqueue(d)
+                }
+            case p: MethodParameterIn => // a parameter is a source only if tagged
+            case c: Call =>
+                // A definition is the assignment: what it assigns is what to follow.
+                if c.name.startsWith("<operator>.assignment") then
+                  c.argumentOption(2).foreach(queue.enqueue(_))
+                else c.astChildren.foreach(queue.enqueue(_))
+            case other: AstNode => other.astChildren.foreach(queue.enqueue(_))
+            case _              =>
+    end while
+    found
+  end sourceTagOf
+end MemberTaintBridge
