@@ -113,6 +113,34 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     tagRouteElements(ctx)
     tagNavigation(ctx)
     ValidationBridge.tagTanStackValidatedSearch(ctx)
+    linkPageProps(ctx)
+
+  /** Next.js pages router: the page component receives what `getServerSideProps` / `getStaticProps`
+    * return under `props`. Where a source reaches that object, the page's props parameter is that
+    * source's kind, with where the value came from - no call site joins them.
+    */
+  private def linkPageProps(ctx: JsContext): Unit =
+      (ctx.cpg.method.internal.nameExact("getServerSideProps", "getStaticProps").l ++
+          exportedFunctions(ctx, Set("getServerSideProps", "getStaticProps")).map(_._2))
+          .distinctBy(_.id()).foreach { gssp =>
+            val props = gssp.ast.isCall.nameExact(Operators.assignment).l.flatMap { a =>
+                (a.argumentOption(1), a.argumentOption(2)) match
+                  case (Some(fa: Call), Some(v)) if fieldName(fa).contains("props") => Some(v)
+                  case _                                                            => None
+            }
+            val page = defaultExportValue(ctx, gssp.filename).flatMap(callbackMethod)
+            page.foreach { component =>
+                props.iterator.flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v))
+                    .nextOption()
+                    .foreach { (found, value) =>
+                        ctx.tagger.tagVia(
+                          firstParam(component).iterator,
+                          found.tag,
+                          found.places(value)*
+                        )
+                    }
+            }
+          }
 
   private def tagHandler(ctx: JsContext, handler: Method): Unit =
     ctx.tagger.tag(Iterator(handler), ROUTE)
@@ -261,7 +289,11 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     // page-data loaders, middleware (`proxy` from Next 16) - named for Next.js, but not tied to an
     // import: the loaders are found by name in any React project, as they always were
     // `params`/`searchParams` pages, `cookies()` and `headers()` below need Next itself.
-    ctx.cpg.method.internal.nameExact(NextEntrypoints.toSeq*).foreach(tagHandler(ctx, _))
+    (ctx.cpg.method.internal.nameExact(NextEntrypoints.toSeq*).l ++
+        exportedFunctions(ctx, NextEntrypoints).map(_._2)).distinctBy(_.id()).foreach(tagHandler(
+      ctx,
+      _
+    ))
     ctx.cpg.method.internal.nameExact("middleware", "proxy")
         .filter(_.filename.matches(NextMiddlewareFile))
         .foreach(tagHandler(ctx, _))
@@ -308,15 +340,40 @@ object ReactRecognizer extends JsFrameworkRecognizer:
       ctx.tagger.tag(params(f).iterator, INPUT)
     }
     // SolidStart: action(async (formData) => ...), query(async (id) => ..., 'key')
-    val solidFns = ctx.cpg.call.nameExact("action", "query", "createServerFn")
+    val wrappers = ctx.cpg.call.nameExact("action", "query", "createServerFn")
         .filter(c =>
             ctx.modules.importsOf(c.method.filename).exists(i =>
                 i.packageName.exists(p => p == "@solidjs/router" || p.startsWith("@tanstack/"))
             )
-        )
-        .l.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
+        ).l
+    val solidFns =
+        wrappers.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
     ctx.tagger.tag(solidFns.flatMap(params).iterator, INPUT)
+    linkWrappedFunctions(ctx, wrappers)
   end tagServerFunctions
+
+  /** `const getUser = query(async (id) => ..., 'user')`: calling `getUser(id)` calls the wrapped
+    * function with the same arguments. The calls - in the defining module, or where it is imported
+    *   - are resolved to it, so a caller's value reaches its parameters.
+    */
+  private def linkWrappedFunctions(ctx: JsContext, wrappers: List[Call]): Unit =
+      wrappers.foreach { w =>
+          (w.astParent, w.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_))) match
+            case (a: Call, fn :: Nil) if a.name == Operators.assignment =>
+                a.argumentOption(1).collect { case id: Identifier => id.name }.foreach { name =>
+                  val defining = w.method.filename
+                  ctx.cpg.call.nameExact(name)
+                      .filter { c =>
+                        val file = c.method.filename
+                        file == defining || ctx.modules.resolve(file, name).exists(i =>
+                            i.module.startsWith(".") &&
+                                defining.startsWith(JsModules.resolveRelative(file, i.module))
+                        )
+                      }
+                      .foreach(c => ctx.tagger.resolveCall(c, fn))
+                }
+            case _ =>
+      }
 
   /** React 19 form actions: `useActionState(fn, initial)` and `<form action={fn}>` call `fn` with
     * the submitted form (`fn(previousState, formData)` for the hook, `fn(formData)` for the form).

@@ -225,10 +225,15 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
                   try
                     call -> {
                         val retVal = List(call).filter(_ != null)
-                        val args = call.argument
-                            .filter(hasValidGenType)
-                            .l
-                            .filter(_ != null)
+                        // a template's interpolation of a value, or the props object a component
+                        // element passes, reads its arguments and writes none of them
+                        val args =
+                            if ReachingDefGen.ReadOnlyTemplateOperators.contains(call.name) then Nil
+                            else
+                              call.argument
+                                  .filter(hasValidGenType)
+                                  .l
+                                  .filter(_ != null)
                         mutable.BitSet(
                           (retVal ++ args)
                               .collect {
@@ -487,3 +492,12 @@ class ReachingDefInit(gen: Map[StoredNode, mutable.BitSet])
           .withDefaultValue(mutable.BitSet())
 
   override def initOut: Map[StoredNode, mutable.BitSet] = gen
+
+object ReachingDefGen:
+  /** The template operators jssrc2cpg emits (`<operator>.interpolation`, `<operator>.jsxProps`):
+    * they only read their arguments. Counting those as redefined made a template's read of one
+    * field (`{{ data.q }}`) a definition that reached every later read off the same object. In an
+    * object, not a class field: generation runs while the transfer function is constructed.
+    */
+  val ReadOnlyTemplateOperators: Set[String] =
+      Set("<operator>.interpolation", "<operator>.jsxProps")

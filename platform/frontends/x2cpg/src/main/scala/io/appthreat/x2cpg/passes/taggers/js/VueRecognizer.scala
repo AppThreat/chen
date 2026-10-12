@@ -320,6 +320,61 @@ object VueRecognizer extends JsFrameworkRecognizer:
     }
   end bridgeDirectives
 
+  /** An object literal's own properties: `{ notice() {...}, msg: v }` lowers to writes `_tmp.notice
+    * \= notice` and `_tmp.msg = v` directly in its block.
+    */
+  private def literalProperties(literal: Expression): Map[String, Expression] =
+      literal.astChildren.isCall.nameExact(Operators.assignment).l.flatMap { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(fa: Call), Some(v)) if fieldBase(fa).exists(_.code.startsWith("_tmp_")) =>
+                fieldName(fa).map(_ -> v)
+            case _ => None
+      }.toMap
+
+  /** Options API: `export default defineComponent({ computed: { notice() {...} }, data() { return {
+    * msg: ... } } })`. The template reads computed properties and data by bare name, the
+    * component's methods as `this.<name>`; where a source reaches what a computed property returns
+    * or what `data()` holds under a key, those reads are that source's kind, with where the value
+    * came from. Runs with the bridges.
+    */
+  def bridgeOptionsApi(ctx: JsContext): Unit =
+      ctx.cpg.file.name(".*\\.vue").name.l.foreach { file =>
+        // `defineComponent({...})` (lowered beside the default export, which names the helper),
+        // or a plain `export default {...}`
+        val defined =
+            ctx.cpg.file.nameExact(file).method.flatMap(_.call.nameExact("defineComponent"))
+                .flatMap(_.argument.filter(_.argumentIndex == 1)).headOption
+        val options = defined.orElse(defaultExportValue(ctx, file).filter {
+            case id: Identifier => false
+            case _              => true
+        })
+        options.map(literalProperties).foreach { top =>
+          val computed = top.get("computed").map(literalProperties).getOrElse(Map.empty)
+              .flatMap((k, v) => callbackMethod(v).map(k -> _))
+          val data = top.get("data").flatMap(callbackMethod).toList
+              .flatMap(_.ast.isReturn.astChildren.collect { case e: Expression => e }.l)
+              .flatMap(e => literalProperties(e).toList).toMap
+          def reads(key: String): List[CfgNode] =
+              ctx.cpg.file.nameExact(file).method.l.flatMap(m =>
+                  m.ast.isIdentifier.nameExact(key).filterNot(isAssignmentTarget)
+                      .filter(id => JsIndexes.assignedValues(id.method, key).isEmpty)
+                      .filter(id => id.method.parameter.nameExact(key).isEmpty).l ++
+                      m.ast.isCall.nameExact(Operators.fieldAccess).codeExact(s"this.$key")
+                          .filterNot(isAssignmentTarget).l
+              )
+          computed.foreach { (key, m) =>
+              m.ast.isReturn.astChildren.collect { case e: Expression => e }.l.iterator
+                  .flatMap(e => MemberTaintBridge.sourceOf(ctx, e).map(_ -> e)).nextOption()
+                  .foreach((found, e) => ctx.tagger.tagVia(reads(key), found.tag, found.places(e)*))
+          }
+          data.foreach { (key, v) =>
+              MemberTaintBridge.sourceOf(ctx, v).foreach(found =>
+                  ctx.tagger.tagVia(reads(key), found.tag, found.places(v)*)
+              )
+          }
+        }
+      }
+
   /** Keys of an object literal argument whose value is computed: `{ innerHTML: x }` is lowered to
     * `_tmp.innerHTML = x` writes inside the argument.
     */

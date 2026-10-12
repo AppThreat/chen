@@ -549,11 +549,7 @@ object JsShapes:
         case l: Literal                   => true
         case c: Call if isConstantExpr(c) => true
         case _ =>
-            literalValue(leftmostOperand(url)).exists { prefix =>
-                (prefix.startsWith("/") && !prefix.startsWith("//")) ||
-                prefix.matches("(?i)^https?://[^/?#]+[/?#].*") ||
-                prefix.startsWith("./") || prefix.startsWith("../")
-            }
+            literalValue(leftmostOperand(url)).exists(fixesOrigin)
 
   /** The parts of a string built by concatenation or a template literal, left to right. */
   def urlParts(e: Expression): List[Expression] =
@@ -568,10 +564,16 @@ object JsShapes:
             c.argument.sortBy(_.argumentIndex).l.flatMap(urlParts)
         case other => List(other)
 
+  /** A literal URL prefix that keeps the request or link on a fixed origin: an absolute path, a URL
+    * with its host, a relative path (`./a`, `../a`, `assets/a` - a segment before any `:`), or a
+    * query or fragment of the current page (`?/deleteComment&id=`, `#top`).
+    */
   private def fixesOrigin(prefix: String): Boolean =
       (prefix.startsWith("/") && !prefix.startsWith("//")) ||
           prefix.matches("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+[/?#].*") ||
-          prefix.startsWith("./") || prefix.startsWith("../")
+          prefix.startsWith("./") || prefix.startsWith("../") ||
+          prefix.startsWith("?") || prefix.startsWith("#") ||
+          prefix.matches("^[\\w.~-]+/.*")
 
   /** The nodes to tag as request sinks for a request to `url`: the parts of the URL that decide
     * where the request goes, never the request call itself - what reaches its body, its options or
@@ -656,6 +658,26 @@ object JsShapes:
           .flatMap(_.ast.isCall.nameExact(Operators.assignment))
           .find(_.argumentOption(1).exists(_.code.matches("""exports\[["']default["']\]""")))
           .flatMap(_.argumentOption(2))
+
+  /** Functions exported under one of `names` - `export function getServerSideProps() {}`, and
+    * `export const getServerSideProps = (async (context) => {...}) satisfies GetServerSideProps`,
+    * whose function is anonymous - as (export name, function).
+    */
+  def exportedFunctions(ctx: JsContext, names: Set[String]): List[(String, Method)] =
+      ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(fa: Call), Some(v)) if fa.code.startsWith("exports.") =>
+                fieldName(fa).filter(names.contains).flatMap { name =>
+                  val value = JsValues.origin(v)
+                  callbackMethod(v).orElse(callbackMethod(value)).orElse(value match
+                    // a cast or `satisfies` around the function
+                    case c: Call if c.name.startsWith("<operator>.") =>
+                        c.argument.isMethodRef.headOption.flatMap(callbackMethod)
+                    case _ => None
+                  ).map(name -> _)
+                }
+            case _ => None
+      }.distinctBy(_._2.id())
 
   def hasDefaultExport(ctx: JsContext, file: String): Boolean =
       defaultExportValue(ctx, file).nonEmpty
@@ -789,7 +811,9 @@ object JsIndexes:
       assignmentIndexes.computeIfAbsent(
         m,
         method =>
-            Iterator(method).assignment.l.flatMap { a =>
+            // the method's own assignments: a nested function's are its own (a callback that
+            // destructures `([quantities, products])` binds new names, not the outer ones)
+            Iterator(method).assignment.filter(_.method.id() == method.id()).l.flatMap { a =>
                 (a.argumentOption(1), a.argumentOption(2)) match
                   case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
                   case _                              => None

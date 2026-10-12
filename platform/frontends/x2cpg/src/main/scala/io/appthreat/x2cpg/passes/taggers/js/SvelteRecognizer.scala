@@ -19,7 +19,7 @@ import JsTags.*
   * to `exports.x = x`, so the prop's reads are tagged); a route component's `data` prop is what its
   * `load` returned. The URL is also read from `page` (`$app/state`) or the legacy `$page` store
   * (`$app/stores`). An action used as `use:tooltip={value}` receives `value` as its second
-  * parameter.
+  * parameter - a source where the bound value is one ([[bridgeActions]]).
   *
   * Sinks: `{@html}` (EasyTagsPass) and `bind:innerHTML` (DomRecognizer), `redirect(status, url)`
   * from `@sveltejs/kit` and `goto(url)` from `$app/navigation` with a target the code does not
@@ -68,7 +68,6 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     tagEntrypoints(ctx, HooksFile, HookEntrypoints, data = false)
     tagComponentProps(ctx)
     tagPage(ctx)
-    tagActions(ctx)
     tagNavigation(ctx)
     linkLoadToData(ctx)
     tagTransformedChunks(ctx)
@@ -183,14 +182,39 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(readChains(pageReads), INPUT)
 
-  /** `use:tooltip={value}`: the action `tooltip(node, value)` receives the bound value. */
-  private def tagActions(ctx: JsContext): Unit =
-    val actionNames = ctx.cpg.templateDom.nameExact("JSXAttribute").code("use:.*").l
-        .map(_.code.stripPrefix("use:").takeWhile(c => c.isLetterOrDigit || c == '_' || c == '$'))
-        .toSet
-    if actionNames.isEmpty then return
-    val actions = ctx.cpg.method.internal.nameExact(actionNames.toSeq*)
-    ctx.tagger.tag(actions.flatMap(m => params(m).lift(1)), INPUT)
+  /** `use:tooltip={value}`: the action `tooltip(node, value)` receives the bound value. Where a
+    * template binds an action to a value a source reaches, the action's parameter is that source's
+    * kind, with where the value came from. The action is the function the name is bound to: by
+    * import, else the one project function of that name. Runs with the bridges.
+    */
+  def bridgeActions(ctx: JsContext): Unit =
+    if !applies(ctx) then return
+    val uses = ctx.cpg.templateDom.nameExact("JSXAttribute").code("use:.*").l
+    if uses.isEmpty then return
+    lazy val byName = ctx.cpg.method.internal.l.groupBy(_.name)
+    uses.foreach { attr =>
+      val name =
+          attr.code.stripPrefix("use:").takeWhile(c => c.isLetterOrDigit || c == '_' || c == '$')
+      val file       = attr.file.name.headOption.getOrElse("")
+      val candidates = byName.getOrElse(name, Nil)
+      // a relative import names the file; an alias (`$lib/actions/tooltip`) or none, the name
+      val action = ctx.modules.resolve(file, name) match
+        case Some(imp) if imp.module.startsWith(".") =>
+            val base = JsModules.resolveRelative(file, imp.module)
+            candidates.filter(_.filename.startsWith(base))
+        case _ => if candidates.size == 1 then candidates else Nil
+      if action.nonEmpty then
+        attr.ast.isCall.filterNot(_.astParent.isInstanceOf[Call]).l.iterator
+            .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v)).nextOption()
+            .foreach { (found, value) =>
+                ctx.tagger.tagVia(
+                  action.flatMap(m => params(m).lift(1)),
+                  found.tag,
+                  found.places(value)*
+                )
+            }
+    }
+  end bridgeActions
 
   private def tagNavigation(ctx: JsContext): Unit =
     def unanchored(e: Expression): Boolean = !isObjectLiteral(e) && !hasFixedOrigin(e)

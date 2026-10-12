@@ -82,6 +82,8 @@ object JsRecognizers:
     }
     // Template component elements, lowered to calls, resolved to the components they name.
     val singleFileElements = ComponentCallBridge.run(ctx)
+    // Functions kept in a Map and called after a lookup, resolved to what was put in it.
+    RegistryBridge.run(ctx)
     // Over what the recognizers found: sources kept in a field and read by another method, and
     // values derived reactively from a source. Each can feed the other, so twice.
     (1 to 2).foreach { _ =>
@@ -91,6 +93,9 @@ object JsRecognizers:
           ComponentCallBridge.bridgeProps(ctx, element, file)
       )
       VueRecognizer.bridgeDirectives(ctx)
+      SvelteRecognizer.bridgeActions(ctx)
+      AlpineRecognizer.bridge(ctx)
+      if VueRecognizer.applies(ctx) then VueRecognizer.bridgeOptionsApi(ctx)
     }
     // The npm package behind each sink, from the project's manifests - no SBOM needed.
     val typeOf =

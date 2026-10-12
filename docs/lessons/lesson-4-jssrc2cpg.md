@@ -395,11 +395,38 @@ so a bypassing pipe is reached through its own code. The template belongs to the
 bridge made sources, are sources; `[(ngModel)]="field"` makes the field's reads sources, since
 the control writes it with what the user typed.
 
+**More links no call site expresses.** Where the framework hands a value from one place to
+another by convention, a bridge joins them - and only where a source reaches the value, so an
+unrelated consumer is not made a source:
+
+- single-file components (`.vue`, `.svelte`, `.astro`) take what an element passes: the props
+  entry (`defineProps()`, `$props()`, `Astro.props`) and a Vue template's bare reads of declared
+  props;
+- a Vue directive's `binding` takes the value `v-name="..."` binds, a Svelte action's parameter
+  what `use:name={...}` binds;
+- an Alpine component's template reads (`x-html="highlighted"`, lowered to
+  `search_data.highlighted`) take that property's source, or a getter's return value - property by
+  property, so a sanitising getter stays clean;
+- a Vue Options API component's template takes what a `computed` property returns and what
+  `data()` holds;
+- a Next.js page takes what `getServerSideProps`/`getStaticProps` return under `props` (found by
+  export name - `export const getServerSideProps = (async (ctx) => ...) satisfies ...` is anonymous);
+- calls of a SolidStart `query`/`action` wrapper are resolved to the wrapped function, and a call of
+  a function taken out of a `Map` to the functions put into it (a hand-rolled router's
+  `routes.set(name, handler)` ... `routes.get(name)(outlet, current)`).
+
 **Provenance.** A bridge tags the reads it makes sources with where their value came from as
 well: `via:<file>#<line>` for the value it carried across (`context.locals.banner = <value>` in
 middleware) and for the source found behind it. A reported flow that starts at
 `Astro.locals.banner` in a layout says, in its first node's tags, that the value is the one
-middleware took from the query string.
+middleware took from the query string. The places include the call-site arguments the value
+crossed (`store.setTerm(route.query.term)`) and every source an object built from several carries.
+
+**Engine details these rely on.** A template's `<operator>.interpolation` and a component
+element's `<operator>.jsxProps` only read their arguments, so they generate no definition of
+them - otherwise a template's read of one field (`{{ data.q }}`) reached every later read off the
+same object. jssrc2cpg lowers `x satisfies T` as `x`, a function `x` as a reference to it, like
+`x as T`.
 
 **Responses.** A route endpoint's return value is its response, but most are data: a JSON
 response (`Response.json`, `NextResponse.json`, SvelteKit's `json`) is a neutraliser, and a

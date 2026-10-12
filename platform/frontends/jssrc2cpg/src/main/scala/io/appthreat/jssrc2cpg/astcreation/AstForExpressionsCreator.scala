@@ -628,6 +628,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   end astForObjectExpression
 
   protected def astForTSSatisfiesExpression(satisfiesExpr: BabelNodeInfo): Ast =
-      // Ignores the type, i.e. `x satisfies T` is understood as `x`.
-      astForNode(satisfiesExpr.json("expression"))
+      // Ignores the type, i.e. `x satisfies T` is understood as `x` - and a function `x` is a
+      // reference to it, as anywhere else a function is a value: `export const load = (async () =>
+      // {...}) satisfies PageServerLoad` assigns the function.
+      astForNodeWithFunctionReference(satisfiesExpr.json("expression"))
 end AstForExpressionsCreator

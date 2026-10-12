@@ -209,6 +209,163 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "Framework links" should {
+      "carry a Svelte action's bound value into the action, only where a source reaches it" in {
+          val cpg = tagged(code(
+            """<script>
+          |import { page } from '$app/state';
+          |import { tooltip } from './tooltip';
+          |</script>
+          |<span use:tooltip={page.url.searchParams.get('tip')}>?</span>
+          |<span use:tooltip={'Fixed help'}>?</span>
+          |""".stripMargin,
+            "src/routes/+page.svelte"
+          ).moreCode(
+            """
+          |export function tooltip(node, markup) { node.innerHTML = markup; }
+          |""".stripMargin,
+            "src/routes/tooltip.ts"
+          ).moreCode("""{ "dependencies": { "@sveltejs/kit": "^2.0.0" } }""", "package.json"))
+          cpg.method.nameExact("tooltip").parameter.nameExact("markup").tag.name.l should contain(
+            "via:src/routes/+page.svelte#5"
+          )
+      }
+
+      "resolve calls of a SolidStart query to the wrapped function" in {
+          val cpg = code(
+            """
+          |import { query } from '@solidjs/router';
+          |export const getUser = query(async (id) => {
+          |  const res = await fetch(`https://users.internal/v1/users/${id}`);
+          |  return res.json();
+          |}, 'user');
+          |""".stripMargin,
+            "src/lib/api.ts"
+          ).moreCode(
+            """
+          |import { useParams, createAsync } from '@solidjs/router';
+          |import { getUser } from '../lib/api';
+          |export default function Profile() {
+          |  const params = useParams();
+          |  const user = createAsync(() => getUser(params.id));
+          |  return <p>{user()?.name}</p>;
+          |}
+          |""".stripMargin,
+            "src/routes/profile.tsx"
+          )
+          tagged(cpg)
+          cpg.call.nameExact("getUser").callee(using NoResolve).isMethod.filename.l should contain(
+            "src/lib/api.ts"
+          )
+      }
+
+      "follow an Alpine component's properties, not a sanitising getter's siblings" in {
+          val cpg = tagged(code(
+            """
+          |import Alpine from 'alpinejs';
+          |import DOMPurify from 'dompurify';
+          |Alpine.data('search', () => ({
+          |  q: new URLSearchParams(window.location.search).get('q') ?? '',
+          |  get highlighted() { return `<mark>${this.q}</mark>`; },
+          |  get clean() { return DOMPurify.sanitize(this.q); },
+          |}));
+          |""".stripMargin,
+            "app.js"
+          ).moreCode(
+            """<section x-data="search">
+          |  <p x-html="highlighted"></p>
+          |  <p x-html="clean"></p>
+          |</section>
+          |""".stripMargin,
+            "index.html"
+          ).moreCode("""{ "dependencies": { "alpinejs": "^3.14.0" } }""", "package.json"))
+          val reads = cpg.call.code("search_data\\.(highlighted|clean)").l
+          reads.filter(_.code.endsWith("highlighted")).tag.name.l should contain("framework-input")
+          reads.filter(_.code.endsWith("clean")).tag.name.l should not contain "framework-input"
+      }
+
+      "take getServerSideProps' props, even through satisfies, into the page" in {
+          val cpg = tagged(code(
+            """
+          |import type { GetServerSideProps } from 'next';
+          |export const getServerSideProps = (async (context) => {
+          |  const notice = String(context.query.notice ?? '');
+          |  return { props: { notice } };
+          |}) satisfies GetServerSideProps;
+          |export default function Page({ notice }) {
+          |  return <div dangerouslySetInnerHTML={{ __html: notice }} />;
+          |}
+          |""".stripMargin,
+            "pages/legacy.tsx"
+          ).moreCode("""{ "dependencies": { "next": "^15.0.0" } }""", "package.json"))
+          cpg.method.nameExact("getServerSideProps").parameter.nameExact("context").tag.name.l should
+              contain("framework-input")
+          cpg.method.nameExact("Page").parameter.indexFrom(1).tag.name.l should contain(
+            "via:pages/legacy.tsx#4"
+          )
+      }
+
+      "carry an Options API computed property into the template" in {
+          val cpg = tagged(code(
+            """<template>
+          |  <div v-html="notice"></div>
+          |  <div v-html="fixed"></div>
+          |</template>
+          |<script lang="ts">
+          |import { defineComponent } from 'vue'
+          |export default defineComponent({
+          |  computed: {
+          |    notice(): string { return `<p>${this.$route.query.msg ?? ''}</p>` },
+          |    fixed(): string { return '<p>hello</p>' },
+          |  },
+          |})
+          |</script>
+          |""".stripMargin,
+            "src/views/Legacy.vue"
+          ).moreCode(
+            """{ "dependencies": { "vue": "^3.5.0", "vue-router": "^4.6.0" } }""",
+            "package.json"
+          ))
+          val reads =
+              cpg.identifier.nameExact("notice", "fixed").filter(_.lineNumber.exists(_ <= 3)).l
+          reads.filter(_.name == "notice").tag.name.l should contain("framework-input")
+          reads.filter(_.name == "fixed").tag.name.l should not contain "framework-input"
+      }
+
+      "resolve a handler looked up in a Map to the functions registered in it" in {
+          val cpg = code(
+            """
+          |const routes = new Map();
+          |export function route(name, handler) { routes.set(name, handler); }
+          |export function start(outlet) {
+          |  const current = { param: location.hash.slice(1) };
+          |  const handler = routes.get('home');
+          |  handler(outlet, current);
+          |}
+          |""".stripMargin,
+            "router.js"
+          ).moreCode(
+            """
+          |export function home(outlet, { param }) { outlet.innerHTML = param; }
+          |""".stripMargin,
+            "views.js"
+          ).moreCode(
+            """
+          |import { route } from './router.js';
+          |import * as views from './views.js';
+          |route('home', views.home);
+          |""".stripMargin,
+            "main.js"
+          )
+          tagged(cpg)
+          cpg.call.nameExact("handler").callee(using NoResolve).isMethod.name.l should contain(
+            "home"
+          )
+          val sink = cpg.call.nameExact(Operators.assignment).code("outlet\\.innerHTML = param")
+          show(sink.reachableByFlows(cpg.call.code("location\\.hash"))) should not be empty
+      }
+  }
+
   "Provenance" should {
       "name where a bridged source came from: Astro locals written by middleware" in {
           val cpg = tagged(code(

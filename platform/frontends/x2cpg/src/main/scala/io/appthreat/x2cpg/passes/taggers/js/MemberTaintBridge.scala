@@ -37,6 +37,10 @@ object MemberTaintBridge:
   /** Visits at most this many nodes per write when looking for a source. */
   private val MaxVisits = 400
 
+  /** How far the search goes on after the first source, and how many more it names. */
+  private val MaxVisitsAfterFound = 120
+  private val MaxOtherSources     = 6
+
   def run(ctx: JsContext): Unit =
     val classWrites = memberWrites(ctx)
     val localWrites = localRefWrites(ctx)
@@ -193,27 +197,34 @@ object MemberTaintBridge:
   /** A source found behind a value: its kind, the node that carries it, and the call-site arguments
     * the value crossed on the way (`setTerm(route.query.term)`).
     */
-  final case class Found(tag: String, at: StoredNode, hops: List[StoredNode] = Nil):
-    /** Where the value came from, for provenance: the source, the crossings, and `value`. */
-    def places(value: StoredNode): Seq[StoredNode] = (at :: hops) :+ value
+  final case class Found(
+    tag: String,
+    at: StoredNode,
+    hops: List[StoredNode] = Nil,
+    others: List[StoredNode] = Nil
+  ):
+    /** Where the value came from, for provenance: the source, the crossings, the other sources an
+      * object built from several carries (`{ props: { id, notice } }`), and `value`.
+      */
+    def places(value: StoredNode): Seq[StoredNode] = ((at :: hops) ++ others) :+ value
 
   /** [[sourceTagOf]], with the node the source was found at, for provenance. */
   private[js] def sourceOf(ctx: JsContext, value: Expression): Option[Found] =
-    val (tag, _, at, hops) = search(ctx, value)
-    tag.zip(at).map((t, a) => Found(t, a, hops))
+    val (tag, _, at, hops, others) = search(ctx, value)
+    tag.zip(at).map((t, a) => Found(t, a, hops, others))
 
   /** [[sourceTagOf]], and whether the source was found behind a reactive derivation - a wrapper
     * holding what its callback returns (`useActionState(fn)`, `computed(() => ...)`), which no
     * dataflow edge connects to its result.
     */
   private[js] def sourceTagThrough(ctx: JsContext, value: Expression): (Option[String], Boolean) =
-    val (tag, derived, _, _) = search(ctx, value)
+    val (tag, derived, _, _, _) = search(ctx, value)
     (tag, derived)
 
   private def search(
     ctx: JsContext,
     value: Expression
-  ): (Option[String], Boolean, Option[StoredNode], List[StoredNode]) =
+  ): (Option[String], Boolean, Option[StoredNode], List[StoredNode], List[StoredNode]) =
     var derived                = false
     var at: Option[StoredNode] = None
     // how each node was reached, and the call-site arguments a parameter was followed to: the
@@ -235,19 +246,25 @@ object MemberTaintBridge:
       if !prev.contains(n.id()) && n.id() != value.id() then prev.update(n.id(), current)
       queue.enqueue(n)
     var found: Option[String] = None
-    while found.isEmpty && queue.nonEmpty && seen.size < MaxVisits do
+    // after the first source, the search goes on a little to name the others an object carries
+    val others = mutable.ListBuffer.empty[StoredNode]
+    while queue.nonEmpty && seen.size < MaxVisits && others.size < MaxOtherSources &&
+      (found.isEmpty || seen.size < MaxVisitsAfterFound)
+    do
       val node = queue.dequeue()
       current = node
       if seen.add(node.id()) && !isImport(node) then
-        found = tagOf(node)
-        if found.isDefined then
+        val here = tagOf(node)
+        if here.isDefined && found.isDefined then others += node
+        else if here.isDefined then
+          found = here
           at = Some(node)
           // a tag on a derivation call is the derivation's own doing (ReactiveBridge tags the
           // wrapper): the value behind this one is still a derivation's result
           node match
             case c: Call if ReactiveBridge.isDerivationCall(c) => derived = true
             case _                                             =>
-        if found.isEmpty then
+        if here.isEmpty then
           node match
             // a definition reached through another read's definitions: what it was assigned
             case id: Identifier if isAssignmentTarget(id) =>
@@ -294,7 +311,8 @@ object MemberTaintBridge:
             // a derivation holds what its callback returns
             case c: Call if ReactiveBridge.isDerivationCall(c) =>
                 ReactiveBridge.derivationCallback(c).foreach { cb =>
-                  derived = true
+                  // only on the way to the first source: what `derived` reports
+                  if found.isEmpty then derived = true
                   cb.ast.isReturn.astChildren.foreach {
                       case e: Expression if e.method.id() == cb.id() => push(e)
                       case _                                         =>
@@ -310,6 +328,6 @@ object MemberTaintBridge:
         Iterator.iterate(prev.get(a.id()))(_.flatMap(n => prev.get(n.id()))).takeWhile(_.nonEmpty)
             .flatten.filter(n => crossed.contains(n.id())).toList
     }
-    (found, derived && found.nonEmpty, at, hops)
+    (found, derived && found.nonEmpty, at, hops, others.toList)
   end search
 end MemberTaintBridge

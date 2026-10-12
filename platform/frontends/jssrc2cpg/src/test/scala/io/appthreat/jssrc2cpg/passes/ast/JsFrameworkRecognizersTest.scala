@@ -90,6 +90,46 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           flows(cpg, "framework-output", "service-ingress") should be > 0
       }
 
+      "carry service responses combined by forkJoin to the subscriber" in {
+          val cpg = tagged(code(
+            """
+          |import { Component } from '@angular/core';
+          |import { forkJoin } from 'rxjs';
+          |import { ProductService } from './product.service';
+          |@Component({ selector: 'app-s', template: '' })
+          |export class SComponent {
+          |  constructor (private readonly productService: ProductService) {}
+          |  load () {
+          |    const products = this.productService.search('')
+          |    const counts = this.productService.counts()
+          |    forkJoin([counts, products]).subscribe({
+          |      next: ([counts, products]) => { this.render(products) }
+          |    })
+          |  }
+          |  render (p) {}
+          |}
+          |""".stripMargin,
+            "s.component.ts"
+          ).moreCode(
+            """
+          |import { Injectable } from '@angular/core';
+          |import { HttpClient } from '@angular/common/http';
+          |@Injectable({ providedIn: 'root' })
+          |export class ProductService {
+          |  constructor (private readonly http: HttpClient) {}
+          |  search (q: string) { return this.http.get(`/rest/products/search?q=${q}`) }
+          |  counts () { return this.http.get('/api/counts') }
+          |}
+          |""".stripMargin,
+            "product.service.ts"
+          ))
+          // the callback that destructures the combined values reuses the outer names; the outer
+          // `products` is still the service call's result
+          cpg.tag.name("service-ingress").parameter.method.filename.l should contain(
+            "s.component.ts"
+          )
+      }
+
       "tag Renderer2 and @HostListener('window:message') boundaries, and sanitize() as a sanitiser" in {
           val cpg = tagged(code(
             """

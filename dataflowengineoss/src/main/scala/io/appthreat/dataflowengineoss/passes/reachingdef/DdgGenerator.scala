@@ -115,9 +115,8 @@ class DdgGenerator(
       // identifier.
       if nestedContainers && usageAnalyzer.isContainerAccess(call) then
         call.argument.headOption.foreach {
-            case inner: Call       => addEdge(inner, call, nodeToEdgeLabel(inner))
-            case inner: Identifier => addEdge(inner, call, nodeToEdgeLabel(inner))
-            case _                 =>
+            case inner: Call => addEdge(inner, call, nodeToEdgeLabel(inner))
+            case _           =>
         }
 
       // This handles `foo(new Bar())`, which is lowered to
