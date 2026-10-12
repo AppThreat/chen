@@ -6,6 +6,7 @@ import io.appthreat.jimple2cpg.util.ProgramHandlingUtil
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.utils.ProjectRoot
+import io.appthreat.x2cpg.testfixtures.TestResources
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.must.Matchers
 import org.scalatest.matchers.should.Matchers.*
@@ -36,10 +37,10 @@ class JarUnpackingTests extends AnyWordSpec with Matchers with BeforeAndAfterAll
     slippyCpg = getUnpackingCpg("slippy.zip")
 
   private def getUnpackingCpg(path: String, recurse: Boolean = true, depths: Int = 1): Cpg =
-      Try(getClass.getResource(s"/unpacking/${path}").toURI) match
+      Try(TestResources.extractFile(s"/unpacking/${path}")(using getClass)) match
         case Success(x) =>
             implicit val config: Config = Config().withRecurse(recurse)
-            new Jimple2Cpg().createCpg(Paths.get(x).toString).get
+            new Jimple2Cpg().createCpg(x.toString).get
         case Failure(x: Throwable) =>
             fail("Unable to obtain test resources.", x)
 

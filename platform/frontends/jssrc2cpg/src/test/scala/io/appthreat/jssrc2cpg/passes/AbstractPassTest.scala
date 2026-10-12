@@ -5,6 +5,7 @@ import io.appthreat.jssrc2cpg.Config
 import io.appthreat.jssrc2cpg.utils.AstGenRunner
 import io.appthreat.x2cpg.ValidationMode
 import io.appthreat.x2cpg.X2Cpg.newEmptyCpg
+import io.appthreat.x2cpg.testfixtures.TestResources
 import io.shiftleft.codepropertygraph.Cpg
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -61,7 +62,7 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
     */
   protected object AstJsonFixture extends Fixture:
     def apply(resourceDir: String, tsTypes: Boolean = true)(f: Cpg => Unit): Unit =
-      val fixtureRoot = File(getClass.getResource(s"/$resourceDir").toURI)
+      val fixtureRoot = File(TestResources.extractDirectory(resourceDir)(using getClass))
       File.usingTemporaryDirectory("jssrc2cpgAstJson") { dir =>
         fixtureRoot.children.foreach(_.copyToDirectory(dir))
         val cpg = newEmptyCpg()

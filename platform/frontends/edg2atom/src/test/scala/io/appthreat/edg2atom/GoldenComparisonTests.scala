@@ -3,6 +3,7 @@ package io.appthreat.edg2atom
 import better.files.File
 import io.appthreat.c2cpg.{C2Cpg, Config}
 import io.appthreat.edg2atom.parser.EdgaRunner
+import io.appthreat.x2cpg.testfixtures.TestResources
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
@@ -25,7 +26,7 @@ class GoldenComparisonTests extends AnyWordSpec with Matchers:
   private val resources =
     val source = File("src/test/resources/golden")
     if source.exists then source
-    else File(getClass.getClassLoader.getResource("golden/basics.c").toURI).parent
+    else File(TestResources.extractDirectory("golden")(using getClass))
 
   "the two frontends" should {
       fixtures.foreach { fixture =>

@@ -92,6 +92,9 @@ ThisBuild / assemblyMergeStrategy := {
 ThisBuild / versionScheme := Some("early-semver")
 
 ThisBuild / Test / fork       := true
+// several frontends keep JVM-global state (soot's Scene, javaparser internals,
+// shared AST caches), which concurrent suites inside one forked JVM corrupt
+ThisBuild / Test / parallelExecution := false
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 publish / skip   := true // don't publish the root project
