@@ -66,6 +66,13 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   private val HttpVerbs =
       Set("get", "post", "put", "patch", "delete", "head", "options", "jsonp", "request")
 
+  /** The injected type of an expression (`this.sanitizer` -> DomSanitizer from
+    * `@angular/platform-browser`), for attributing calls on it to a package.
+    */
+  def injectedTypes(ctx: JsContext): Expression => Option[JsTypeRef] =
+    val di = Di(ctx)
+    e => di.typeOf(e)
+
   def run(ctx: JsContext): Unit =
     val di = Di(ctx)
     tagRouteSources(ctx, di)

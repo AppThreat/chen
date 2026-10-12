@@ -258,6 +258,45 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "Package attribution" should {
+      "name the npm package behind a sink from the project's manifests, without an SBOM" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, inject } from '@angular/core';
+          |import { ActivatedRoute } from '@angular/router';
+          |import { DomSanitizer } from '@angular/platform-browser';
+          |import axios from 'axios';
+          |import { exec } from 'node:child_process';
+          |@Component({ selector: 'app-p', template: '' })
+          |export class PComponent {
+          |  private route = inject(ActivatedRoute);
+          |  private sanitizer = inject(DomSanitizer);
+          |  load() {
+          |    const q = this.route.snapshot.queryParams.q;
+          |    this.html = this.sanitizer.bypassSecurityTrustHtml(q);
+          |    axios.get(q);
+          |    exec(q);
+          |  }
+          |}
+          |""".stripMargin,
+            "p.component.ts"
+          ).moreCode(
+            """{ "name": "p", "dependencies": { "@angular/core": "^20.3.0", "@angular/platform-browser": "^20.3.0", "axios": "~1.7.2" } }""",
+            "package.json"
+          ).moreCode(
+            """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/axios": { "version": "1.7.9" } } }""",
+            "package-lock.json"
+          ))
+          cpg.tag.name("pkg:npm/.*").call.map(c => s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}").l.sorted shouldBe
+              List(
+                "bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0",
+                "get pkg:npm/axios@1.7.9"
+              )
+          // a Node.js built-in is no package, and sources get no purl (it would make them sinks)
+          cpg.tag.name("pkg:npm/.*").call.name.l should not contain "exec"
+      }
+  }
+
   "Svelte, Lit, jQuery and Ember" should {
       "tag SvelteKit's page state and redirect" in {
           val cpg = tagged(code(

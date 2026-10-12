@@ -85,6 +85,11 @@ object JsRecognizers:
         MemberTaintBridge.run(ctx)
         ReactiveBridge.run(ctx)
     }
+    // The npm package behind each sink, from the project's manifests - no SBOM needed.
+    val typeOf =
+        if AngularRecognizer.applies(ctx) then AngularRecognizer.injectedTypes(ctx)
+        else (_: io.shiftleft.codepropertygraph.generated.nodes.Expression) => None
+    PackageAttribution.run(ctx, typeOf)
 
   def isJavaScript(cpg: Cpg): Boolean =
       cpg.metaData.language.headOption.exists(l => l == Languages.JSSRC || l == Languages.JAVASCRIPT)

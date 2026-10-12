@@ -211,7 +211,10 @@ object JsModules:
         else None
       else
         val parts = module.split('/')
-        if module.startsWith("@") && parts.length >= 2 then Some(s"${parts(0)}/${parts(1)}")
+        // `@/lib/db` and `@components/x` are path aliases (tsconfig `paths`), not scoped packages
+        if module.startsWith("@") && parts.length >= 2 && parts(0).length > 1 then
+          Some(s"${parts(0)}/${parts(1)}")
+        else if module.startsWith("@") then None
         else Some(parts(0).stripPrefix("node:"))
 
   /** `@angular/core` matches `@angular`; `react-router-dom` matches `react-router-dom` only; `next`
@@ -258,6 +261,42 @@ final class JsProject(cpg: Cpg):
               )
           }
           .toMap
+
+  /** The version each dependency resolved to: `package-lock.json` (lockfile v2/v3 `packages`, v1
+    * `dependencies`) where there is one, else the version a `package.json` range names (`^19.1.0`
+    * -> `19.1.0`). A range that names no version (`latest`, `workspace:*`, a URL) gives none.
+    */
+  lazy val resolvedVersions: Map[String, String] =
+    val fromRanges = dependencies.flatMap { (name, range) =>
+        "(\\d+\\.\\d+\\.\\d+[\\w.+-]*|\\d+\\.\\d+|\\d+)".r
+            .findFirstMatchIn(range.dropWhile(c => !c.isDigit))
+            .filter(_ => !range.contains(":") && !range.contains("/"))
+            .map(m => name -> m.group(1))
+    }
+    val fromLocks = cpg.configFile.l
+        .filter(f =>
+            (f.name == "package-lock.json" || f.name.endsWith("/package-lock.json") ||
+                f.name.endsWith("\\package-lock.json")) && !f.name.contains("node_modules")
+        )
+        .flatMap(f => io.circe.parser.parse(f.content).toOption)
+        .flatMap { json =>
+            val v2 = json.hcursor.downField("packages").as[Map[String, io.circe.Json]].toOption
+                .toList.flatMap(_.toList.flatMap { (path, entry) =>
+                    // the root package is keyed "", a nested copy "node_modules/a/node_modules/b"
+                    val marker = path.lastIndexOf("node_modules/")
+                    if marker < 0 || path.indexOf("node_modules/") != marker then None
+                    else
+                      entry.hcursor.downField("version").as[String].toOption
+                          .map(path.substring(marker + "node_modules/".length) -> _)
+                })
+            val v1 = json.hcursor.downField("dependencies").as[Map[String, io.circe.Json]].toOption
+                .toList.flatMap(_.toList.flatMap((name, entry) =>
+                    entry.hcursor.downField("version").as[String].toOption.map(name -> _)
+                ))
+            v2 ++ v1
+        }
+        .toMap
+    fromRanges ++ fromLocks
 
   /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
   def majorVersionOf(name: String): Option[Int] =
@@ -493,8 +532,16 @@ object JsShapes:
           else if firstVar == 0 then
             parts.head match
               case base: CfgNode =>
-                  // the base decides the origin; a later variable in the path is traversal
-                  base :: (if variableInPath(parts, 1) then List(call) else Nil)
+                  // The base decides the origin - unless it is configuration: a field
+                  // (`this.apiUrl`), a member of a config object (`environment.host`) or a
+                  // SCREAMING_CASE constant. A later variable in the path is traversal.
+                  val configured = base match
+                    case c: Call => c.name == Operators.fieldAccess
+                    case id: Identifier =>
+                        id.name.length > 1 && id.name.forall(ch => ch.isUpper || ch.isDigit || ch == '_')
+                    case _ => false
+                  (if configured then Nil else List(base)) ++
+                      (if variableInPath(parts, 1) then List(call) else Nil)
           else
             val prefix = parts.take(firstVar).flatMap(literalValue).mkString
             if !fixesOrigin(prefix) then List(call)

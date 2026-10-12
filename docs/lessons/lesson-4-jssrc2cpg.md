@@ -266,7 +266,7 @@ evidence instead.
 | `NitroRecognizer` | `defineEventHandler` events, h3 readers, task payloads | `sendRedirect`, `send`, markup returned by a handler, `proxyRequest`, server `$fetch`, `useStorage` keys |
 | `SvelteRecognizer` | `load`/endpoint/hook parameters, `$props()`, `export let`, `page`/`$page`, `use:` action values | `redirect()`, `goto()` |
 | `NodeRecognizer` | server HTTP client responses | `child_process` (also through `promisify`), `fs`, `vm`, computed `require`, SQL strings (pg, mysql2, sqlite3, `@appthreat/sqlite3`, better-sqlite3, `node:sqlite`, knex, prisma, db0, ...) |
-| `LitRecognizer`, `JQueryRecognizer`, `EmberRecognizer`, `AstroRecognizer` | `@property()`, ajax responses, `model(params)`, endpoint/middleware/action context | `unsafeHTML`, `.innerHTML=${}`, `$(html)`, `.html()`, `$.globalEval`, `htmlSafe`, `redirect()` |
+| `LitRecognizer`, `JQueryRecognizer`, `EmberRecognizer`, `AstroRecognizer` | `@property()`, ajax responses, `model(params)`, the `Astro` global, endpoint/middleware/action context | `unsafeHTML`, `.innerHTML=${}`, `$(html)`, `.html()`, `$.globalEval`, `htmlSafe`, `redirect()` |
 
 **Vocabulary.** Sources are `framework-input` (attacker data) or `service-ingress` (remote data).
 Sinks are `framework-output`, `code-execution`, `http-client` (`ssrf` on the server), `sql`,
@@ -290,6 +290,13 @@ it from a source (`ngOnInit` storing a route parameter that a click handler uses
 `ReactiveBridge` does the same for reactive derivations (`computed`, `useMemo`, `createMemo`,
 `useActionState`) and for the reads of a module-level variable inside functions, and makes a
 derivation that returns a sanitiser's result a sanitiser itself.
+
+**Package attribution.** Each sink the recognizers tag is also tagged with the `pkg:npm/...` purl
+of the package its callee is bound to - an import, a member of a module binding, a handle made from
+one (`pool = new pg.Pool()`), or for Angular the type a member was injected as - so reachable flows
+carry purls with no SBOM. Versions come from `package-lock.json` or else the `package.json` range;
+Node.js built-ins and modules no manifest declares (path aliases) get none. Sources are not
+attributed: a purl tag is a sink tag for reachables.
 
 **Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
 much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is
@@ -317,6 +324,16 @@ relative filesystem value (`./src`) is never a route.
 function that happens to be called `input` does not. Not covered: an initialiser wrapped in
 `as T`, `!` or a conditional, `this.x = input()` in the constructor body, and an `input` reached
 through `import * as ng` or a re-export.
+
+**Lowering details that matter for flows.** A directive prologue (`'use server'`, `'use client'`)
+is emitted as the string-literal statement it is in the source - Babel keeps it apart from the
+body. An optional member call (`form.get('next')?.toString()`) is a call on its object like any
+member call; it used to be lowered as a call of the whole callee text with `this` for a receiver,
+which cut the value off. Template literals map every part to the result and no part to another.
+
+**Astro.** astgen lowers an `.astro` component to its frontmatter's statements followed by its
+template as JSX (see atom-parsetools' `docs/ASTGEN.md`), so `Astro.url`/`Astro.params`/
+`Astro.cookies` reads are sources and `set:html={x}` is a markup sink like any other JSX attribute.
 
 ## Notes for Security Analysts
 
