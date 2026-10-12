@@ -67,7 +67,9 @@ object ReactRecognizer extends JsFrameworkRecognizer:
   def applies(ctx: JsContext): Boolean =
       ctx.modules.uses(ReactLike*) || ctx.project.dependsOn(ReactLike*) ||
           ctx.project.hasFile(s"$NextRouteFile|$NextApiFile|$NextMiddlewareFile") ||
-          ctx.cpg.method.nameExact(NextEntrypoints.toSeq*).nonEmpty
+          ctx.cpg.method.nameExact(NextEntrypoints.toSeq*).nonEmpty ||
+          // a `'use server'` directive declares React server functions by itself
+          ctx.cpg.literal.codeExact("\"use server\"").nonEmpty
 
   /** Hooks whose result is URL or route data. */
   private val RouteHooks = Set(
