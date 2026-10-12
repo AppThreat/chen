@@ -99,8 +99,7 @@ object AstroRecognizer extends JsFrameworkRecognizer:
             ctx.tagger.tagVia(
               readChains(reads.collect { case (`field`, fa) => fa }),
               found.tag,
-              found.at,
-              value
+              found.places(value)*
             )
         }
     }

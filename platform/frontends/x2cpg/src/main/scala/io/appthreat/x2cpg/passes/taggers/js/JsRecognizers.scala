@@ -81,18 +81,23 @@ object JsRecognizers:
         if recognizer.applies(ctx) then recognizer.run(ctx)
     }
     // Template component elements, lowered to calls, resolved to the components they name.
-    ComponentCallBridge.run(ctx)
+    val singleFileElements = ComponentCallBridge.run(ctx)
     // Over what the recognizers found: sources kept in a field and read by another method, and
     // values derived reactively from a source. Each can feed the other, so twice.
     (1 to 2).foreach { _ =>
       MemberTaintBridge.run(ctx)
       ReactiveBridge.run(ctx)
+      singleFileElements.foreach((element, file) =>
+          ComponentCallBridge.bridgeProps(ctx, element, file)
+      )
+      VueRecognizer.bridgeDirectives(ctx)
     }
     // The npm package behind each sink, from the project's manifests - no SBOM needed.
     val typeOf =
         if AngularRecognizer.applies(ctx) then AngularRecognizer.injectedTypes(ctx)
         else (_: io.shiftleft.codepropertygraph.generated.nodes.Expression) => None
     PackageAttribution.run(ctx, typeOf)
+  end run
 
   def isJavaScript(cpg: Cpg): Boolean =
       cpg.metaData.language.headOption.exists(l =>

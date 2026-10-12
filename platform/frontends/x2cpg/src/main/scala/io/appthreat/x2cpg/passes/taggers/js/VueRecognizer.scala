@@ -52,7 +52,6 @@ object VueRecognizer extends JsFrameworkRecognizer:
     tagRoute(ctx)
     tagProps(ctx)
     tagGuards(ctx)
-    tagDirectives(ctx)
     ctx.tagger.tag(ctx.cpg.call.nameExact(RequestComposables.toSeq*), INPUT)
     ctx.tagger.tag(ctx.cpg.call.nameExact(DataComposables.toSeq*), INGRESS)
     tagSinks(ctx)
@@ -181,8 +180,48 @@ object VueRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(readChains(routeReads), INPUT)
 
+  private val PropsTypeKeys = """([A-Za-z_$][\w$]*)\s*\??\s*:""".r
+
+  /** The props a `<script setup>` component declares: the keys of `defineProps<{ html: string
+    * }>()`'s type argument, of a `defineProps({ html: String })` object, or the names in
+    * `defineProps(['html'])`.
+    */
+  private def declaredProps(define: Call): Set[String] =
+    val typed = define.code.indexOf('<') match
+      case i if i >= 0 && define.code.startsWith("defineProps<") =>
+          val body = define.code.substring(i + 1).takeWhile(_ != '>')
+          PropsTypeKeys.findAllMatchIn(body).map(_.group(1)).toSet
+      case _ => Set.empty[String]
+    val runtime = define.argument.filter(_.argumentIndex == 1).l.flatMap { arg =>
+      val keys = arg.ast.isCall.nameExact(Operators.assignment).flatMap(_.argumentOption(1))
+          .collect { case fa: Call => fa }.flatMap(fieldName).l
+      if keys.nonEmpty then keys else arg.ast.isLiteral.flatMap(literalValue).l
+    }
+    (typed ++ runtime).filter(n =>
+        n.nonEmpty && n.forall(c => c.isLetterOrDigit || c == '_' || c == '$')
+    )
+
+  /** Reads of a single-file component's declared props by bare name, as its template uses them
+    * (`v-html="html"`) - not of a script binding that shadows one.
+    */
+  def templatePropReads(ctx: JsContext, file: String): List[Identifier] =
+    val methods = ctx.cpg.file.nameExact(file).method.l
+    val names   = methods.flatMap(_.call.nameExact("defineProps")).flatMap(declaredProps).toSet
+    if names.isEmpty then Nil
+    else
+      methods.flatMap(m =>
+          m.ast.isIdentifier.nameExact(names.toSeq*)
+              .filterNot(isAssignmentTarget)
+              .filter(id => JsIndexes.assignedValues(id.method, id.name).isEmpty)
+              .filter(id => id.method.parameter.nameExact(id.name).isEmpty)
+              .l
+      )
+
   private def tagProps(ctx: JsContext): Unit =
     ctx.tagger.tag(ctx.cpg.call.nameExact("defineProps", "withDefaults", "defineModel"), INPUT)
+    ctx.cpg.file.name(".*\\.vue").name.l.foreach(f =>
+        ctx.tagger.tag(templatePropReads(ctx, f), INPUT)
+    )
     // setup(props, ctx)
     ctx.tagger.tag(ctx.cpg.method.internal.nameExact("setup").flatMap(firstParam), INPUT)
     // Options API: `props: ['title']` or `props: { title: String }`, read as `this.title`
@@ -225,22 +264,61 @@ object VueRecognizer extends JsFrameworkRecognizer:
     val options = ctx.cpg.method.internal.nameExact("beforeRouteEnter", "beforeRouteUpdate").l
     ctx.tagger.tag((registered ++ perRoute ++ options).flatMap(firstParam).iterator, INPUT)
 
-  /** `app.directive('raw', { mounted(el, binding) {...} })`, `const vRaw = { mounted(el, binding)
-    * }` in `<script setup>`: `binding.value` is the template expression the directive is bound to.
+  /** Custom directives by the name a template uses them by - `app.directive('raw-html', hooks)`,
+    * and in `<script setup>` a `const vRawHtml = hooks` - with the hook functions (`mounted`,
+    * `updated`, ..., or one function for all).
     */
-  private def tagDirectives(ctx: JsContext): Unit =
-    val registered = ctx.cpg.call.nameExact("directive").l
-        .flatMap(_.argument.filter(_.argumentIndex == 2).l)
-        .flatMap(callbacksIn(_, DirectiveHooks))
+  private def directives(ctx: JsContext): Map[String, List[Method]] =
+    def hooks(arg: Expression): List[Method] =
+        callbacksIn(arg, DirectiveHooks) match
+          case Nil => callbackMethod(arg).toList
+          case hs  => hs
+    val registered = ctx.cpg.call.nameExact("directive").l.flatMap { c =>
+        (
+          c.argument.filter(_.argumentIndex == 1).headOption.flatMap(literalValue),
+          c.argument.filter(_.argumentIndex == 2).headOption
+        ) match
+          case (Some(name), Some(arg)) => Some(name -> hooks(arg))
+          case _                       => None
+    }
     val local = ctx.cpg.call.nameExact(Operators.assignment)
-        .filter(a =>
-            a.argumentOption(1).exists {
-                case id: Identifier => id.name.matches("v[A-Z]\\w*")
-                case _              => false
-            } && a.method.filename.endsWith(".vue")
-        )
-        .flatMap(_.argumentOption(2)).l.flatMap(callbacksIn(_, DirectiveHooks))
-    ctx.tagger.tag((registered ++ local).flatMap(m => params(m).lift(1)).iterator, INPUT)
+        .filter(_.method.filename.endsWith(".vue")).l
+        .flatMap { a =>
+            (a.argumentOption(1), a.argumentOption(2)) match
+              case (Some(id: Identifier), Some(arg)) if id.name.matches("v[A-Z]\\w*") =>
+                  // vRawHtml -> raw-html
+                  val name = id.name.drop(1).replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase
+                  Some(name -> hooks(arg))
+              case _ => None
+        }
+    (registered ++ local).groupMapReduce(_._1)(_._2)(_ ++ _)
+  end directives
+
+  /** A directive hook's `binding` holds what the template bound: `v-raw-html="$route.query.note"`
+    * hands `$route.query.note` to `binding.value`. Where a template binds a directive to a value a
+    * source reaches, the hooks' `binding` parameters are that source's kind, with where the value
+    * came from. Runs with the bridges, as the bound value may be one a bridge made a source.
+    */
+  def bridgeDirectives(ctx: JsContext): Unit =
+    if !applies(ctx) then return
+    val byName = directives(ctx)
+    if byName.isEmpty then return
+    ctx.cpg.templateDom.nameExact("JSXAttribute").l.foreach { attr =>
+      val name = attr.code.stripPrefix("v-").takeWhile(c => c != '=' && c != ':' && c != '.')
+      if attr.code.startsWith("v-") then
+        byName.get(name).foreach { hooks =>
+            attr.ast.isCall.filterNot(_.astParent.isInstanceOf[Call]).l.iterator
+                .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v)).nextOption()
+                .foreach { (found, value) =>
+                    ctx.tagger.tagVia(
+                      hooks.flatMap(m => params(m).lift(1)),
+                      found.tag,
+                      found.places(value)*
+                    )
+                }
+        }
+    }
+  end bridgeDirectives
 
   /** Keys of an object literal argument whose value is computed: `{ innerHTML: x }` is lowered to
     * `_tmp.innerHTML = x` writes inside the argument.

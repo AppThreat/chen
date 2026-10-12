@@ -170,6 +170,45 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "A single-file component" should {
+      "take a source an element passes into its props, with where it came from" in {
+          val cpg = tagged(code(
+            """<script setup lang="ts">
+          |const route = useRoute()
+          |const slug = computed(() => String(route.params.slug))
+          |const { data: article } = await useFetch(() => `/api/articles/${encodeURIComponent(slug.value)}`)
+          |</script>
+          |
+          |<template>
+          |  <article v-if="article">
+          |    <h1>{{ article.title }}</h1>
+          |    <ArticleBody :html="article.body" />
+          |  </article>
+          |</template>
+          |""".stripMargin,
+            "app/pages/article/[slug].vue"
+          ).moreCode(
+            """<script setup lang="ts">
+          |defineProps<{ html: string }>()
+          |</script>
+          |
+          |<template>
+          |  <div v-html="html"></div>
+          |</template>
+          |""".stripMargin,
+            "app/components/ArticleBody.vue"
+          ).moreCode("""{ "dependencies": { "nuxt": "^4.0.0" } }""", "package.json"))
+          val element = cpg.call.nameExact("ArticleBody").l
+          element.argument.isCall.nameExact("<operator>.jsxProps").argument.code.l shouldBe List(
+            "article.body"
+          )
+          val read =
+              cpg.identifier.nameExact("html").filter(_.method.filename.contains("ArticleBody")).l
+          read.tag.name.l should contain("service-ingress")
+          read.tag.name.l should contain("via:app/pages/article/[slug].vue#4")
+      }
+  }
+
   "Provenance" should {
       "name where a bridged source came from: Astro locals written by middleware" in {
           val cpg = tagged(code(

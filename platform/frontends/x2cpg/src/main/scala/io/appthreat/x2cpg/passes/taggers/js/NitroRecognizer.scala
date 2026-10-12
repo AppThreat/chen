@@ -165,8 +165,7 @@ object NitroRecognizer extends JsFrameworkRecognizer:
             ctx.tagger.tagVia(
               readChains(allReads.filter(fieldName(_).contains(field))),
               found.tag,
-              found.at,
-              value
+              found.places(value)*
             )
         }
     }

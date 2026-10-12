@@ -109,11 +109,11 @@ object ReactiveBridge:
               // the ENCLOSING method's dependence graph; a walk that starts at a sink inside
               // the closure never crosses that edge, so the captured read is a source of its
               // own.
-              ctx.tagger.tagVia(capturedReads(ctx, method, name), found.tag, found.at, value)
+              ctx.tagger.tagVia(capturedReads(ctx, method, name), found.tag, found.places(value)*)
               // A derived value is a new value in its own method too: `const c = computed(...)`
               // and every later `c.value` there start from the wrapper call.
               if viaDerivation then
-                ctx.tagger.tagVia(readsIn(method, name), found.tag, found.at, value)
+                ctx.tagger.tagVia(readsIn(method, name), found.tag, found.places(value)*)
             }
       }
       // watch(source, (value) => ...)
@@ -128,7 +128,7 @@ object ReactiveBridge:
             val params = callbacksIn(args(1)).flatMap(firstParam)
             if params.exists(p => !ctx.tagger.has(p.id(), found.tag)) then
               grew = true
-              ctx.tagger.tagVia(params.iterator, found.tag, found.at)
+              ctx.tagger.tagVia(params.iterator, found.tag, (found.at :: found.hops)*)
           }
       }
     end while
@@ -142,7 +142,7 @@ object ReactiveBridge:
       ctx.cpg.call.filter(isDerivationCall).foreach { d =>
           derivationCallback(d).foreach { cb =>
               returnTaint(ctx, cb).foreach(found =>
-                  ctx.tagger.tagVia(Iterator(d), found.tag, found.at)
+                  ctx.tagger.tagVia(Iterator(d), found.tag, (found.at :: found.hops)*)
               )
           }
       }
