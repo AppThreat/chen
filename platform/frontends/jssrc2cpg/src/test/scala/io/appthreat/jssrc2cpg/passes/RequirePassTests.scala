@@ -5,8 +5,6 @@ import io.appthreat.dataflowengineoss.language.*
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
-import java.io.File
-
 class RequirePassTests extends DataFlowCodeToCpgSuite:
 
   "methods imported via `require` should be resolved correctly" in {
@@ -86,18 +84,18 @@ class RequirePassTests extends DataFlowCodeToCpgSuite:
         |foo();
         |export function bar() {}
         |""".stripMargin,
-        Seq("d1", "d2", "bar.ts").mkString(File.separator)
+        Seq("d1", "d2", "bar.ts").mkString("/")
       ).moreCode(
         """
         |import { bar } from "./d2/bar.ts";
         |
         |bar();
         |""".stripMargin,
-        Seq("d1", "baz.ts").mkString(File.separator)
+        Seq("d1", "baz.ts").mkString("/")
       )
 
       cpg.call("bar").methodFullName.headOption shouldBe Some(
-        Seq("d1", "d2", "bar.ts::program:bar").mkString(File.separator)
+        Seq("d1", "d2", "bar.ts::program:bar").mkString("/")
       )
       cpg.call("foo").methodFullName.headOption shouldBe Some("foo.ts::program:foo")
   }
