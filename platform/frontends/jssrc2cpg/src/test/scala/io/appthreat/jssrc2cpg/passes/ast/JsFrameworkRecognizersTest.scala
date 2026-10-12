@@ -247,6 +247,76 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").parameter.name.l should contain("formData")
           cpg.tag.name("framework-input").identifier.name.l should contain("sig")
       }
+
+      "resolve useLoaderData to the loader its type argument names" in {
+          val cpg = tagged(code(
+            """
+          |import { useLoaderData } from 'react-router';
+          |export async function previewLoader({ request }) {
+          |  const url = new URL(request.url);
+          |  return { draft: url.searchParams.get('draft') ?? '' };
+          |}
+          |export function Preview() {
+          |  const { draft } = useLoaderData<typeof previewLoader>();
+          |  return <div dangerouslySetInnerHTML={{ __html: draft }} />;
+          |}
+          |""".stripMargin,
+            "preview.tsx"
+          ).moreCode(
+            """
+          |import { createBrowserRouter } from 'react-router';
+          |import { Preview, previewLoader } from './preview';
+          |export const router = createBrowserRouter([
+          |  { path: '/preview', loader: previewLoader, Component: Preview }
+          |]);
+          |""".stripMargin,
+            "router.tsx"
+          ))
+          // the hook is resolved to the loader: the engine carries the loader's return value out
+          val hook = cpg.call.nameExact("useLoaderData").l.head
+          hook.methodFullName shouldBe "preview.tsx::program:previewLoader"
+          flows(cpg, "framework-output") should be > 0
+      }
+
+      "tag history state read off useLocation" in {
+          val cpg = tagged(code(
+            """
+          |import { useLocation } from 'react-router';
+          |export function Go() {
+          |  const location = useLocation();
+          |  const state = location.state;
+          |  return <button onClick={() => window.open(state.returnTo)}>go</button>;
+          |}
+          |""".stripMargin,
+            "go.jsx"
+          ))
+          cpg.tag.name("framework-input").call.code.l should contain("location.state")
+      }
+
+      "neutralise members a zod validateSearch schema types as a number" in {
+          val cpg = tagged(code(
+            """
+          |import { createFileRoute } from '@tanstack/react-router';
+          |import { z } from 'zod';
+          |const searchSchema = z.object({
+          |  q: z.string().catch(''),
+          |  page: z.number().int().positive().catch(1),
+          |});
+          |export const Route = createFileRoute('/search')({
+          |  validateSearch: searchSchema,
+          |});
+          |function SearchComponent() {
+          |  const search = Route.useSearch();
+          |  const page = search.page;
+          |  const q = search.q;
+          |  return <div>{q}</div>;
+          |}
+          |""".stripMargin,
+            "search.tsx"
+          ))
+          // a number carries nothing to inject; a string schema neutralises nothing
+          cpg.tag.name("predicate").call.code.l shouldBe List("search.page")
+      }
   }
 
   "Vue, Nuxt and Nitro" should {
@@ -296,6 +366,65 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("file-io").call.name.l shouldBe List("getItem")
           cpg.tag.name("redirect").call.name.l shouldBe List("sendRedirect")
           cpg.ret.where(_.tag.name("xss")).code.l shouldBe List("return `<p>${data}</p>`")
+      }
+
+      "resolve inject to the callback behind provide's computed value" in {
+          val cpg = tagged(code(
+            """
+          |import { computed, provide, useRoute } from 'vue-router';
+          |import { AnnouncementKey } from './keys';
+          |export default {
+          |  setup() {
+          |    const route = useRoute();
+          |    const announcement = computed(() => String(route.query.announce ?? ''));
+          |    provide(AnnouncementKey, announcement);
+          |  }
+          |}
+          |""".stripMargin,
+            "app.vue"
+          ).moreCode(
+            """
+          |import { inject } from 'vue';
+          |import { AnnouncementKey } from './keys';
+          |export default {
+          |  setup() {
+          |    const announcement = inject(AnnouncementKey, '');
+          |    return { announcement };
+          |  }
+          |}
+          |""".stripMargin,
+            "bar.vue"
+          ))
+          val injectCall = cpg.call.nameExact("inject").l.head
+          injectCall.methodFullName should endWith("setup:anonymous")
+      }
+
+      "resolve a Nitro runTask call to the task file's run method" in {
+          val cpg = tagged(code(
+            """
+          |export default defineEventHandler(async (event) => {
+          |  const body = await readBody(event);
+          |  const { result } = await runTask('db:reindex', { payload: { index: body.index } });
+          |  return { result };
+          |});
+          |""".stripMargin,
+            "server/api/admin/reindex.post.ts"
+          ).moreCode(
+            """
+          |import { execSync } from 'node:child_process';
+          |export default defineTask({
+          |  meta: { name: 'db:reindex' },
+          |  run({ payload }) {
+          |    const output = execSync(`./bin/reindex --index ${payload.index}`).toString();
+          |    return { result: output };
+          |  }
+          |});
+          |""".stripMargin,
+            "server/tasks/db/reindex.ts"
+          ))
+          val runTaskCall = cpg.call.nameExact("runTask").l.head
+          runTaskCall.methodFullName shouldBe "server/tasks/db/reindex.ts::program:run"
+          flows(cpg, "shell-exec") should be > 0
       }
   }
 
@@ -418,6 +547,48 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           ))
           cpg.tag.name("framework-input").call.code.l should contain("page.url.searchParams")
           cpg.tag.name("redirect").call.code.l shouldBe List("redirect(303, next)")
+      }
+
+      "resolve a route component's $props to the sibling load and tag its request members" in {
+          val cpg = tagged(code(
+            """
+          |export const load = async ({ params, cookies }) => {
+          |  const slug = params.slug;
+          |  const motd = cookies.get('motd') ?? '';
+          |  return { heading: `Post ${slug}`, motd };
+          |};
+          |""".stripMargin,
+            "src/routes/posts/+page.server.ts"
+          ).moreCode(
+            """
+          |<script>
+          |let { data } = $props();
+          |</script>
+          |""".stripMargin,
+            "src/routes/posts/+page.svelte"
+          ))
+          val props = cpg.call.nameExact("$props").l.head
+          props.methodFullName shouldBe "src/routes/posts/+page.server.ts::program:load"
+          // the request members are sources where they are read, not only the whole parameter
+          (cpg.tag.name("framework-input").call.code.l should contain).allOf(
+            "params.slug",
+            "cookies.get"
+          )
+      }
+
+      "make a transformPageChunk callback's return value an HTML sink" in {
+          val cpg = tagged(code(
+            """
+          |export const handle = async ({ event, resolve }) => {
+          |  const lang = event.url.searchParams.get('lang') ?? 'en';
+          |  return resolve(event, {
+          |    transformPageChunk: ({ html }) => html.replace('%lang%', lang)
+          |  });
+          |};
+          |""".stripMargin,
+            "src/hooks.server.ts"
+          ))
+          cpg.tag.name("xss").call.code.l shouldBe List("html.replace('%lang%', lang)")
       }
 
       "tag Lit properties, unsafe directives and markup bindings" in {

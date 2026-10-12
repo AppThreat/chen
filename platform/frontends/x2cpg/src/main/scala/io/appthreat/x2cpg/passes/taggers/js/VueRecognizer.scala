@@ -56,6 +56,118 @@ object VueRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(ctx.cpg.call.nameExact(RequestComposables.toSeq*), INPUT)
     ctx.tagger.tag(ctx.cpg.call.nameExact(DataComposables.toSeq*), INGRESS)
     tagSinks(ctx)
+    linkProvideInject(ctx)
+    linkPiniaStores(ctx)
+    linkComposableReturns(ctx)
+
+  /** `provide(key, value)` / `inject(key)`: the injected value IS the provided one, keyed by the
+    * same InjectionKey or literal. The engine link is a resolved call from `inject(key)` to the
+    * method that produces the value - a derivation's callback for `provide(key, computed(() =>
+    * ...))`, the provided value being what that callback returns.
+    */
+  private def linkProvideInject(ctx: JsContext): Unit =
+    def keyOf(expr: Expression): Option[String] = expr match
+      case l: Literal => literalValue(l)
+      case id: Identifier =>
+          ctx.modules.resolve(id.method.filename, id.name).map(i =>
+              s"${VueRecognizer.normalisedModule(i.file, i.module)}:${i.imported}"
+          )
+      case _ => None
+    val providers = ctx.cpg.call.nameExact("provide").l.flatMap { call =>
+        for
+          key   <- call.argument.filter(_.argumentIndex == 1).headOption.flatMap(keyOf)
+          value <- call.argument.filter(_.argumentIndex == 2).headOption
+          producer <- JsValues.origin(value) match
+            case c: Call if ReactiveBridge.isDerivationCall(c) =>
+                ReactiveBridge.derivationCallback(c)
+            case _ => None
+        yield key -> producer
+    }.toMap
+    if providers.isEmpty then return
+    ctx.cpg.call.nameExact("inject").foreach { call =>
+        call.argument.filter(_.argumentIndex == 1).headOption.flatMap(keyOf)
+            .flatMap(providers.get)
+            .foreach(producer => ctx.tagger.resolveCall(call, producer))
+    }
+  end linkProvideInject
+
+  /** A Pinia store: `useSearchStore = defineStore('search', () => { ...; return { term, setTerm }
+    * })`. Every caller's `useSearchStore()` receives the setup's return value, so the call is
+    * resolved to the setup callback - carrying the store's derived state out - and its method calls
+    * (`store.setTerm(v)`) to the functions the setup returns, carrying the argument in. Names
+    * shared by more than one store are left alone.
+    */
+  private def linkPiniaStores(ctx: JsContext): Unit =
+    if !(ctx.modules.uses("pinia") || ctx.project.dependsOn("pinia")) then return
+    val setups = ctx.cpg.call.nameExact("defineStore").l.flatMap { call =>
+        call.argument.filter(_.argumentIndex >= 2).sortBy(_.argumentIndex).headOption
+            .map(a => JsShapes.callbacksIn(a)).getOrElse(Nil)
+    }
+    if setups.isEmpty then return
+    // `const useSearchStore = defineStore(...)` - the hook a store's file exports
+    val hookOf = ctx.cpg.call.nameExact(Operators.assignment)
+        .filter(a =>
+            a.argumentOption(2).exists {
+                case c: Call => c.name == "defineStore"
+                case _       => false
+            }
+        )
+        .flatMap(_.argumentOption(1)).collect { case id: Identifier => id }
+        .l
+        .flatMap(id => setups.find(s => s.filename == id.method.filename).map(s => id.name -> s))
+    val setupByHook = hookOf.groupMap(_._1)(_._2).collect {
+        case (name, setup :: Nil) => name -> setup
+    }
+    // the functions the setup's returned object holds, by the key they are returned under
+    val methodsOf = setups.flatMap { setup =>
+        setup.ast.isReturn.astChildren.l.flatMap {
+            case b: io.shiftleft.codepropertygraph.generated.nodes.Block =>
+                b.astChildren.isCall.nameExact(Operators.assignment).l.flatMap { a =>
+                    (a.argumentOption(1), a.argumentOption(2)) match
+                      case (Some(fa: Call), Some(fn: Expression)) =>
+                          fieldName(fa).toList.flatMap(k =>
+                              JsShapes.callbacksIn(fn).map(m => k -> m)
+                          )
+                      case _ => Nil
+                }
+            case _ => Nil
+        }
+    }.groupMap(_._1)(_._2).collect { case (name, m :: Nil) => name -> m }
+    // the store hooks' calls: useSearchStore() -> the setup
+    ctx.cpg.call.filter(c => setupByHook.contains(c.name))
+        .foreach(c => setupByHook.get(c.name).foreach(m => ctx.tagger.resolveCall(c, m)))
+    // store.setTerm(v) where the receiver is one of the store hooks' results -> the returned fn
+    ctx.cpg.call.filter(c =>
+        methodsOf.contains(c.name) &&
+            receiverOf(c).exists(r =>
+                JsValues.origin(r) match
+                  case h: Call => setupByHook.contains(h.name)
+                  case _       => false
+            )
+    ).foreach(c => methodsOf.get(c.name).foreach(m => ctx.tagger.resolveCall(c, m)))
+  end linkPiniaStores
+
+  /** A composable that returns a derived value (`return computed(() => route.query[name])`):
+    * resolving its callers' calls to the function carries the derivation - tagged as a source by
+    * the reactive bridge - out to every caller. Only functions that return a derivation are linked,
+    * so ordinary helper calls stay as they are.
+    */
+  private def linkComposableReturns(ctx: JsContext): Unit =
+    val returning = ctx.cpg.method.internal.l.filter(m =>
+        !m.isExternal && m.name != ":program" &&
+            m.ast.isReturn.astChildren.collect { case e: Expression => e }.exists { e =>
+                JsShapes.unwrap(e) match
+                  case c: Call => ReactiveBridge.isDerivationCall(c)
+                  case _       => false
+            }
+    )
+    if returning.isEmpty then return
+    val byName = returning.groupBy(_.name)
+    ctx.cpg.call.filter(c => byName.contains(c.name)).foreach { call =>
+        byName.get(call.name) match
+          case Some(only :: Nil) => ctx.tagger.resolveCall(call, only)
+          case _                 =>
+    }
 
   /** `useRoute()`, `this.$route...`, and `$route...` in a template. */
   private def tagRoute(ctx: JsContext): Unit =
@@ -139,6 +251,23 @@ object VueRecognizer extends JsFrameworkRecognizer:
             case (Some(fa: Call), Some(v)) if !v.isInstanceOf[Literal] => fieldName(fa)
             case _                                                     => None
       }.toSet
+
+  /** A relative import specifier written from its own file (`./keys`, `../keys`) names the same
+    * module from every importer; this normalises it to a project-relative path so two importers of
+    * one module produce one key.
+    */
+  private def normalisedModule(file: String, module: String): String =
+      if !module.startsWith(".") then module
+      else
+        val dir      = file.substring(0, math.max(file.lastIndexOf('/'), 0))
+        val parts    = (dir.split("/").toSeq ++ module.split("/").toSeq).filter(_.nonEmpty)
+        val resolved = scala.collection.mutable.ArrayBuffer.empty[String]
+        parts.foreach {
+            case "."  => ()
+            case ".." => if resolved.nonEmpty then resolved.trimEnd(1)
+            case p    => resolved += p
+        }
+        resolved.mkString("/", "/", "")
 
   private def tagSinks(ctx: JsContext): Unit =
     // navigateTo(url, { external: true }) - and `open: { target }`, which opens a window

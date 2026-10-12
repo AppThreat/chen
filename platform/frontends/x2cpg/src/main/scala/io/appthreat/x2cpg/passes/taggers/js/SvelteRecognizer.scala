@@ -69,6 +69,60 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     tagPage(ctx)
     tagActions(ctx)
     tagNavigation(ctx)
+    linkLoadToData(ctx)
+    tagTransformedChunks(ctx)
+
+  /** A route component's `data` prop is what the sibling `load` (`+page.server.ts`, or the
+    * universal `+page.ts`) returned. The hook `$props()` is resolved to that load function, so the
+    * engine carries the loader's return value - and the taint inside it - into `data.<field>`
+    * reads.
+    */
+  private def linkLoadToData(ctx: JsContext): Unit =
+    val loads = ctx.cpg.file.name(DataFile).method.internal.nameExact("load").l
+    if loads.isEmpty then return
+    ctx.cpg.file.name(Component).foreach { file =>
+      val name = file.name
+      val dir  = name.substring(0, name.lastIndexOf('/') + 1)
+      val stem = if name.contains("+page.") then "+page."
+      else if name.contains("+layout.")
+      then "+layout."
+      else ""
+      val loader =
+          loads.find(m => m.filename.startsWith(dir) && m.filename.contains(s"$stem.server."))
+              .orElse(loads.find(m => m.filename.startsWith(dir) && m.filename.contains(stem)))
+      loader.foreach { loader =>
+          ctx.cpg.file.nameExact(name).method.internal
+              .flatMap(_.call.nameExact("$props"))
+              .foreach(props => ctx.tagger.resolveCall(props, loader))
+      }
+    }
+  end linkLoadToData
+
+  /** `resolve(event, { transformPageChunk: ({ html }) => html.replace(marker, data) })`: the chunk
+    * the callback returns is written into the page the server sends, so its return value is an HTML
+    * sink - reflected markup with whatever the callback spliced in.
+    */
+  private def tagTransformedChunks(ctx: JsContext): Unit =
+    val chunks = ctx.cpg.call.nameExact(Operators.assignment)
+        .filter(_.argumentOption(1).exists {
+            case fa: Call => fieldName(fa).contains("transformPageChunk")
+            case _        => false
+        })
+        .flatMap(_.argumentOption(2)).l
+        .flatMap(callbacksIn(_))
+    val returned = chunks.flatMap { m =>
+      val explicit = m.ast.isReturn.astChildren
+          .collect { case e: Expression if e.method.id() == m.id() => e }.l
+      val implicitBody =
+          if explicit.nonEmpty then Nil
+          else
+            m.block.astChildren.collectFirst {
+                case e: Expression if e.method.id() == m.id() => e
+            }.toList
+      explicit ++ implicitBody
+    }
+    ctx.tagger.tag(returned.iterator, HtmlSink*)
+  end tagTransformedChunks
 
   private def tagEntrypoints(ctx: JsContext, fileRegex: String, names: Set[String]): Unit =
     // Anonymous handlers are numbered when a file has more than one (`anonymous`, `anonymous1`).
@@ -77,6 +131,35 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
         .l
     ctx.tagger.tag(handlers.iterator, ROUTE)
     ctx.tagger.tag(handlers.iterator.flatMap(params), INPUT)
+    tagHandlerMembers(ctx, handlers)
+
+  /** Reads of the request members a handler received - `params.slug`, `url.searchParams`,
+    * `cookies.get(name)` - are the request's own data, and tagging the read (not only the
+    * parameter) is what makes a flow START where the value entered: the parameter the whole object
+    * came from is a step further back than the corpus' labels.
+    */
+  private def tagHandlerMembers(ctx: JsContext, handlers: List[Method]): Unit =
+    val handlerIds = handlers.map(_.id()).toSet
+    val fromParam: Expression => Boolean = e =>
+        JsValues.origin(e) match
+          case fa: Call if fa.name == Operators.fieldAccess =>
+              fa.argumentOption(1).exists {
+                  case p: MethodParameterIn => handlerIds.contains(p.method.id())
+                  // a parameter used in its method's expression is referenced by name
+                  case id: Identifier =>
+                      fa.method.parameter.nameExact(id.name)
+                          .exists(p => handlerIds.contains(p.method.id()))
+                  case _ => false
+              }
+          case _ => false
+    val reads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
+        fieldName(fa).isDefined && fieldBase(fa).exists {
+            case id: Identifier => fromParam(id)
+            case _              => false
+        } && handlers.exists(h => h.filename == fa.method.filename)
+    }
+    ctx.tagger.tag(readChains(reads), INPUT)
+  end tagHandlerMembers
 
   private def tagComponentProps(ctx: JsContext): Unit =
     val componentMethods = ctx.cpg.file.name(Component).method.internal.l

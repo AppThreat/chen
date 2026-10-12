@@ -112,6 +112,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     tagQwik(ctx)
     tagRouteElements(ctx)
     tagNavigation(ctx)
+    ValidationBridge.tagTanStackValidatedSearch(ctx)
 
   private def tagHandler(ctx: JsContext, handler: Method): Unit =
     ctx.tagger.tag(Iterator(handler), ROUTE)
@@ -141,11 +142,56 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
     }
     ctx.tagger.tag(readChains(routerReads), INPUT)
+    // `location.state`: history state the previous page chose; `useLocation()` is the hook. The
+    // read must be tagged itself - the engine stops at the hook call otherwise.
+    val locationStateReads = ctx.fieldAccesses.filter { fa =>
+        fieldName(fa).contains("state") && fieldBase(fa).exists(b =>
+            JsValues.origin(b) match
+              case c: Call => c.name == "useLocation"
+              case _       => false
+        )
+    }
+    ctx.tagger.tag(readChains(locationStateReads), INPUT)
+    linkDataHooks(ctx)
+  end tagHooks
 
-  /** `export async function loader({ params, request })` in a route module, `loader: fn` on a route
-    * object or in TanStack's `createFileRoute(...)({ loader })`.
+  /** `useLoaderData()` returns what the route module's `loader` returned, `useActionData()` what
+    * its `action` returned. The link is framework magic - no call site exists - so the consumer
+    * hook is resolved to the producing data function and the dataflow engine carries the loader's
+    * return value (and the taint inside it) out to the hook's result. The producer is the one the
+    * hook's own type argument names (`useLoaderData<typeof articleLoader>()`), else the file's
+    * single data function.
     */
-  private def tagDataFunctions(ctx: JsContext): Unit =
+  private def linkDataHooks(ctx: JsContext): Unit =
+    val producers = dataFunctionMethods(ctx)
+    if producers.isEmpty then return
+    ctx.cpg.call
+        .filter(c => callName(c) == "useLoaderData" || callName(c) == "useActionData")
+        .foreach { hook =>
+          val file = hook.method.filename
+          val byTypeArg = "typeof\\s+([A-Za-z_$][\\w$]*)".r.findFirstMatchIn(hook.code)
+              .flatMap(m =>
+                  ctx.cpg.method.internal.nameExact(m.group(1)).filenameExact(file).headOption
+              )
+          val wanted =
+              if callName(hook) == "useLoaderData" then Seq("loader", "clientLoader")
+              else Seq("action", "clientAction")
+          val producer = byTypeArg.orElse {
+              val inFile = producers.filter(p => p.filename == file)
+              inFile.filter(p => wanted.contains(p.name)) match
+                case single :: Nil => Some(single)
+                case _ => inFile match
+                      case single :: Nil => Some(single)
+                      case _             => None
+          }
+          producer.foreach(p => ctx.tagger.resolveCall(hook, p))
+        }
+  end linkDataHooks
+
+  /** The methods that produce route data: exported `loader`/`action`/... functions of route
+    * modules, and the callbacks a route object's `loader:`/`action:` keys name anywhere.
+    */
+  private def dataFunctionMethods(ctx: JsContext): List[Method] =
     val routerFiles = ctx.modules.filesImporting(
       "react-router",
       "react-router-dom",
@@ -159,7 +205,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     val exported = ctx.cpg.method.internal.nameExact(DataFunctions.toSeq*)
         .filter(m =>
             routerFiles.contains(m.filename) || m.filename.matches("(?:.*[/\\\\])?routes?[/\\\\].*")
-        )
+        ).l
     val keyed = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(1).exists {
@@ -169,8 +215,14 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
         .flatMap(_.argumentOption(2)).l
         .flatMap(callbacksIn(_))
-    (exported ++ keyed).foreach(tagHandler(ctx, _))
-  end tagDataFunctions
+    (exported ++ keyed).distinctBy(_.id())
+  end dataFunctionMethods
+
+  /** `export async function loader({ params, request })` in a route module, `loader: fn` on a route
+    * object or in TanStack's `createFileRoute(...)({ loader })`.
+    */
+  private def tagDataFunctions(ctx: JsContext): Unit =
+      dataFunctionMethods(ctx).foreach(tagHandler(ctx, _))
 
   private def tagNext(ctx: JsContext): Unit =
     val usesNext = ctx.modules.uses("next") || ctx.project.dependsOn("next")

@@ -116,7 +116,56 @@ object NitroRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(tasks.flatMap(firstParam).iterator, INPUT)
 
     tagSinks(ctx, handlers ++ topLevel, inServer)
+    linkTasks(ctx, tasks)
+    bridgeEventContext(ctx, inServer)
   end run
+
+  /** `runTask('db:reindex', { payload })` runs the task whose FILE names it
+    * (`server/tasks/db/reindex.ts` -> `db:reindex`); resolving the call to its `run` method carries
+    * the payload the caller built into the task's `payload` parameter.
+    */
+  private def linkTasks(ctx: JsContext, taskRuns: List[Method]): Unit =
+    if taskRuns.isEmpty then return
+    val runByTaskName = taskRuns.map(m => m.filename -> m).toMap
+    ctx.cpg.call.nameExact("runTask", "runTaskAndWait").foreach { call =>
+        call.argument.filter(_.argumentIndex == 1).flatMap(literalValue).headOption.foreach {
+            taskName =>
+              val wanted = s"tasks/${taskName.replace(':', '/')}."
+              runByTaskName.find((file, _) => file.contains(wanted)).foreach((_, run) =>
+                  ctx.tagger.resolveCall(call, run)
+              )
+        }
+    }
+
+  /** Middleware populates `event.context.<field>` from the request; handlers read it back. The
+    * write and the read share no code path, so a middleware write of a field from a request reader
+    * makes the handler reads of that context field sources of the same kind.
+    */
+  private def bridgeEventContext(ctx: JsContext, inServer: CfgNode => Boolean): Unit =
+    val writes = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { w =>
+        (w.argumentOption(1), assignedValue(w)) match
+          case (Some(fa: Call), Some(v)) if fa.name == Operators.fieldAccess =>
+              for
+                field <- fieldName(fa)
+                if memberPath(fa).exists(p => p.length == 3 && p(1) == "context")
+                if inServer(w)
+              yield (field, v)
+          case _ => None
+    }
+    if writes.isEmpty then return
+    val fields = writes.map(_._1).toSet
+    // every read of a written context field in a server file
+    val allReads = ctx.fieldAccesses.filter { fa =>
+        fieldName(fa).exists(fields.contains) && !isAssignmentTarget(fa) &&
+        memberPath(fa).exists(p => p.length == 3 && p(1) == "context") &&
+        inServer(fa)
+    }
+    writes.foreach { (field, value) =>
+        MemberTaintBridge.sourceTagOf(ctx, value).foreach { tag =>
+            ctx.tagger.tag(readChains(allReads.filter(fieldName(_).contains(field))), tag)
+        }
+    }
+  end bridgeEventContext
 
   private def argumentAt(c: Call, index: Int): Option[Expression] =
       c.argument.filter(_.argumentIndex == index).headOption
