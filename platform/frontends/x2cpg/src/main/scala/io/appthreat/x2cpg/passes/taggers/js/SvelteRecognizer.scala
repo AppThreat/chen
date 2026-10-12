@@ -80,12 +80,13 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     val loads = allLoads(ctx)
     val dir   = component.substring(0, component.lastIndexOf('/') + 1)
     val own =
-        if component.contains("+layout.") then loads.filter(l => l.filename.startsWith(dir + "+layout."))
+        if component.contains("+layout.") then
+          loads.filter(l => l.filename.startsWith(dir + "+layout."))
         else loads.filter(l => l.filename.startsWith(dir + "+page."))
     val layouts = loads.filter { l =>
-        val ldir = l.filename.substring(0, l.filename.lastIndexOf('/') + 1)
-        l.filename.substring(ldir.length).startsWith("+layout.") && dir.startsWith(ldir) &&
-        !own.exists(_.id() == l.id())
+      val ldir = l.filename.substring(0, l.filename.lastIndexOf('/') + 1)
+      l.filename.substring(ldir.length).startsWith("+layout.") && dir.startsWith(ldir) &&
+      !own.exists(_.id() == l.id())
     }.sortBy(l => -l.filename.length)
     own ++ layouts
 
@@ -130,7 +131,7 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
                 case c: Call if c.name == "$props" => link(path)
                 // Svelte 4: `export let data`
                 case id: Identifier if exported.contains(id.name) => link(id.name :: path)
-                case _                                             => None,
+                case _                                            => None,
           id => exported.contains(id.name)
         )
       }
@@ -161,7 +162,7 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
             case (_: MethodParameterIn, "locals" :: key :: rest) =>
                 written.collect { case (k :: more, v) if k == key => (more, v) } match
                   case Nil => None
-                  case vs =>
+                  case vs  =>
                       // `locals.user.name` from `locals.user = { name }` - or from a write of
                       // `locals.user.name` itself
                       Some(DataLinkBridge.Link.Values(
@@ -225,9 +226,10 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     * value is the response; a `data` function's goes to the page and is no sink.
     *
     * The request is what an event's members hold - `url`, `params`, `request`, `cookies` - and not
-    * its `locals` (bridged from the hooks that write them, [[bridgeLocals]]), `parent()` or `fetch`.
-    * Where the handler reads the event member by member, those reads are the sources; where it
-    * hands the event on whole, the event is. `handleFetch` sees the app's own outgoing requests.
+    * its `locals` (bridged from the hooks that write them, [[bridgeLocals]]), `parent()` or
+    * `fetch`. Where the handler reads the event member by member, those reads are the sources;
+    * where it hands the event on whole, the event is. `handleFetch` sees the app's own outgoing
+    * requests.
     */
   private def tagEntrypoints(
     ctx: JsContext,
@@ -295,7 +297,6 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
             .flatMap(_.referencingIdentifiers),
         INPUT
       )
-  end tagComponentProps
 
   /** The props a Svelte 4 component declares with `export let`, lowered to `exports.x = x`. */
   def exportedProps(componentMethods: List[Method]): Set[String] =

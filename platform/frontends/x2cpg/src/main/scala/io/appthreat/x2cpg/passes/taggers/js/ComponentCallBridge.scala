@@ -56,8 +56,9 @@ object ComponentCallBridge:
           if target.nonEmpty then None
           else
             imported match
-              case Some(imp) if imp.module.startsWith(".") || imp.module.startsWith("$lib") ||
-                    imp.module.startsWith("@/") || imp.module.startsWith("~/") =>
+              case Some(imp)
+                  if imp.module.startsWith(".") || imp.module.startsWith("$lib") ||
+                      imp.module.startsWith("@/") || imp.module.startsWith("~/") =>
                   componentFile(ctx, file, imp.module)
               // registered globally (Nuxt's components/ directory): the one file of that name
               case None => sfcByName.get(call.name)
@@ -95,6 +96,7 @@ object ComponentCallBridge:
           case only :: Nil => Some(only)
           case _           => None
     )
+  end componentFile
 
   /** Adds the CALL edge from each function component element to its component. */
   def run(ctx: JsContext): Unit =

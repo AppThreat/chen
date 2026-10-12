@@ -103,8 +103,9 @@ object ValidationBridge:
                         case (root, path) =>
                             root.id() == parse.id() && (path match
                               case "data" :: k :: Nil => numeric.contains(k)
-                              case k :: Nil           => numeric.contains(k) && !callName(parse).startsWith("safe")
-                              case _                  => false
+                              case k :: Nil =>
+                                  numeric.contains(k) && !callName(parse).startsWith("safe")
+                              case _ => false
                             )
                     }
                 )

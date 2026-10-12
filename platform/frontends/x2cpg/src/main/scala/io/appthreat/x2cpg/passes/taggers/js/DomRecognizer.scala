@@ -458,14 +458,16 @@ object DomRecognizer extends JsFrameworkRecognizer:
       // an attribute sits in the element's opening tag
       val owner = attr.astParent match
         case opening: TemplateDom if opening.name == "JSXOpeningElement" => opening.astParent
-        case parent                                                       => parent
+        case parent                                                      => parent
       !rendered.contains(owner.id()) && (
-      !isAngularBinding(name) && MarkupAttributes.contains(name) ||
-      (UrlBindingAttributes.contains(name) && (!component || name == "href") &&
-          !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
-      (name == "src" && !component && DocumentLoaders.contains(element.toLowerCase)))
+        !isAngularBinding(name) && MarkupAttributes.contains(name) ||
+            (UrlBindingAttributes.contains(name) && (!component || name == "href") &&
+                !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
+            (name == "src" && !component && DocumentLoaders.contains(element.toLowerCase))
+      )
     }.l
     ctx.tagger.tag(boundValues(attributes), HtmlSink*)
+  end tagTemplateSinks
 
   /** The values attributes bind - each one's outermost expression, not every read nested inside it
     * \- where the code does not anchor them: `href="/profile/@{name}"` can never become
@@ -622,16 +624,16 @@ object DomRecognizer extends JsFrameworkRecognizer:
     */
   private val HtmlSanitizers: Seq[(String, Set[String])] = Seq(
     "@braintree/sanitize-url" -> Set("sanitizeUrl"),
-    "dompurify"            -> Set("sanitize"),
-    "isomorphic-dompurify" -> Set("sanitize"),
-    "sanitize-html"        -> Set("sanitizeHtml", "sanitize-html"),
-    "xss"                  -> Set("filterXSS", "xss"),
-    "escape-html"          -> Set("escapeHtml", "escape"),
-    "he"                   -> Set("encode", "escape"),
-    "validator"            -> Set("escape"),
-    "lodash"               -> Set("escape"),
-    "lodash-es"            -> Set("escape"),
-    "lodash.escape"        -> Set("escape")
+    "dompurify"               -> Set("sanitize"),
+    "isomorphic-dompurify"    -> Set("sanitize"),
+    "sanitize-html"           -> Set("sanitizeHtml", "sanitize-html"),
+    "xss"                     -> Set("filterXSS", "xss"),
+    "escape-html"             -> Set("escapeHtml", "escape"),
+    "he"                      -> Set("encode", "escape"),
+    "validator"               -> Set("escape"),
+    "lodash"                  -> Set("escape"),
+    "lodash-es"               -> Set("escape"),
+    "lodash.escape"           -> Set("escape")
   )
 
   /** `x.origin === location.origin` (or `!==`, or against a constant): a URL object whose origin

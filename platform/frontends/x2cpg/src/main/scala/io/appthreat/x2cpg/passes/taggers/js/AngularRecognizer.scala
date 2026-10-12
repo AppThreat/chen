@@ -63,6 +63,9 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   /** Hops from one route to another, or to its snapshot. */
   private val RouteHops = Set("snapshot", "parent", "root", "firstChild")
 
+  /** rxjs operators that replace each value with what an inner observable emits. */
+  private val SwitchingOperators = Set("switchMap", "mergeMap", "concatMap", "exhaustMap")
+
   private val HttpVerbs =
       Set("get", "post", "put", "patch", "delete", "head", "options", "jsonp", "request")
 
@@ -106,9 +109,10 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                 Selector.findFirstMatchIn(annotation.code).toList
                     .flatMap(_.group(1).split(',').map(_.trim))
                     .flatMap {
-                        case e if e.matches("[a-z][\\w-]*")    => Some(td -> Left(e))
-                        case a if a.matches("\\[[\\w$-]+\\]") => Some(td -> Right(a.drop(1).dropRight(1)))
-                        case _                                    => None
+                        case e if e.matches("[a-z][\\w-]*") => Some(td -> Left(e))
+                        case a if a.matches("\\[[\\w$-]+\\]") =>
+                            Some(td -> Right(a.drop(1).dropRight(1)))
+                        case _ => None
                     }
             case _ => None
       }
@@ -121,16 +125,16 @@ object AngularRecognizer extends JsFrameworkRecognizer:
         td -> ctx.cpg.templateDom.nameExact("JSXElement").where(_.file.nameExact(html)).code.l
             .mkString("\n")
     )
-    val inline = ctx.cpg.annotation.nameExact("Component").l.flatMap { annotation =>
+    val inlined = ctx.cpg.annotation.nameExact("Component").l.flatMap { annotation =>
         annotation.astParent match
           case td: TypeDecl if annotation.code.contains("template:") => Some(td -> annotation.code)
-          case _                                                      => None
+          case _                                                     => None
     }
-    external ++ inline
+    external ++ inlined
 
   /** The member each binding name of a class's inputs stands for: the member's own name, or the
-    * alias it is declared with (`@Input('promoHtml')`, `@Input({ alias: 'promoHtml' })`,
-    * `input('', { alias: 'promoHtml' })`).
+    * alias it is declared with (`@Input('promoHtml')`, `@Input({ alias: 'promoHtml' })`, `input('',
+    * { alias: 'promoHtml' })`).
     */
   private def inputNames(ctx: JsContext, td: TypeDecl): Map[String, String] =
     val initialisers = MemberTaintBridge.memberWrites(ctx).filter(_._1.id() == td.id())
@@ -146,8 +150,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
         .flatMap((name, code) => InputAlias.findFirstMatchIn(code).map(_.group(1) -> name))
         .toMap
 
-  /** The inputs a parent's template binds on another component or directive: (the child, the
-    * input member, the parent, the bound expression's text).
+  /** The inputs a parent's template binds on another component or directive: (the child, the input
+    * member, the parent, the bound expression's text).
     */
   private def templateBindings(ctx: JsContext): List[(TypeDecl, String, TypeDecl, String)] =
     val bySelector = selectors(ctx)
@@ -170,6 +174,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                     .map(b => (child, member(child, attribute), parent, b.group(1)))
         }
     }
+  end templateBindings
 
   /** True when a bound expression is a member of the parent - whose value the bridge can follow -
     * or a constant.
@@ -204,28 +209,28 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   def bridgeInputs(ctx: JsContext): Unit =
     val bindings = templateBindings(ctx)
     if bindings.isEmpty then return
-    val members = MemberTaintBridge.memberWrites(ctx).groupMap(w => (w._1.id(), w._2))(_._3)
+    val members        = MemberTaintBridge.memberWrites(ctx).groupMap(w => (w._1.id(), w._2))(_._3)
     lazy val templates = componentTemplates(ctx).groupMap(_._1.id())(_._2)
     bindings.filter(b => isFollowable(b._3, b._4))
         .groupMap(b => (b._1, b._2))(b => (b._3, b._4)).foreach { case ((child, input), from) =>
-        from.iterator.flatMap { (parent, expr) =>
-            LeadingName.findFirstMatchIn(expr).map(_.group(1)).toList
-                .flatMap(name => members.getOrElse((parent.id(), name), Nil))
-                .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v))
-        }.nextOption().foreach { (found, value) =>
-            val setters = classMethods(child).filter(_.name == input).flatMap(params)
-            val reads   = thisReads(child, input).toList
-            val inTemplate =
-                templates.getOrElse(child.id(), Nil).flatMap(templateReads(ctx, _, input))
-            ctx.tagger.tagVia(
-              readChains(reads) ++ setters ++ inTemplate,
-              found.tag,
-              found.places(value)*
-            )
+            from.iterator.flatMap { (parent, expr) =>
+                LeadingName.findFirstMatchIn(expr).map(_.group(1)).toList
+                    .flatMap(name => members.getOrElse((parent.id(), name), Nil))
+                    .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v))
+            }.nextOption().foreach { (found, value) =>
+              val setters = classMethods(child).filter(_.name == input).flatMap(params)
+              val reads   = thisReads(child, input).toList
+              val inTemplate =
+                  templates.getOrElse(child.id(), Nil).flatMap(templateReads(ctx, _, input))
+              ctx.tagger.tagVia(
+                readChains(reads) ++ setters ++ inTemplate,
+                found.tag,
+                found.places(value)*
+              )
+            }
         }
-    }
   end bridgeInputs
-  private val PipeName    = """name\s*:\s*['"`]([\w$-]+)['"`]""".r
+  private val PipeName = """name\s*:\s*['"`]([\w$-]+)['"`]""".r
 
   /** Components and their external templates: `@Component({ templateUrl: './x.component.html' })`,
     * the URL resolved from the component's own file. astgen lowers the template to the bindings'
@@ -449,6 +454,12 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(readChains(reads), INPUT)
     // The observables deliver to callbacks, which no dataflow edge reaches.
     reads.foreach(r => ctx.tagger.tag(JsValues.consumersOf(r).iterator, INPUT))
+    // and after a `map`, the next operator's callback receives what the map returned
+    reads.foreach(r =>
+        JsValues.mappedInto(r).foreach((param, returned) =>
+            ctx.tagger.tagVia(Iterator(param), INPUT, returned*)
+        )
+    )
   end tagRouteSources
 
   private def tagLocationSources(ctx: JsContext, di: Di): Unit =
@@ -489,16 +500,16 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     ctx.cpg.annotation.nameExact("Input")
         .filterNot(a => a.code.contains("numberAttribute") || a.code.contains("booleanAttribute"))
         .foreach { annotation =>
-          annotation.astParent match
-            case member: Member if bound(member.typeDecl, member.name) =>
-            case setter: Method if enclosingTypeDecl(setter).exists(bound(_, setter.name)) =>
-            case member: Member =>
-                ctx.tagger.tag(Iterator(member), INPUT)
-                ctx.tagger.tag(thisReads(member.typeDecl, member.name), INPUT)
-            case setter: Method =>
-                ctx.tagger.tag(params(setter).iterator, INPUT)
-            case _ =>
-      }
+            annotation.astParent match
+              case member: Member if bound(member.typeDecl, member.name)                     =>
+              case setter: Method if enclosingTypeDecl(setter).exists(bound(_, setter.name)) =>
+              case member: Member =>
+                  ctx.tagger.tag(Iterator(member), INPUT)
+                  ctx.tagger.tag(thisReads(member.typeDecl, member.name), INPUT)
+              case setter: Method =>
+                  ctx.tagger.tag(params(setter).iterator, INPUT)
+              case _ =>
+        }
 
   /** Signal inputs: `input()`, `input.required()`, `model()`, `model.required()` from
     * `@angular/core`.
@@ -521,40 +532,41 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   private def tagSignalInputs(ctx: JsContext): Unit =
     val (fed, unfollowable) = fedInputs(ctx)
     Seq("input", "model").foreach { exported =>
-          ctx.modules.imports
-              .filter(i =>
-                  i.kind == ImportKind.Named && i.imported == exported &&
-                      i.packageName.contains(CorePkg)
-              )
-              .foreach { imp =>
-                val alias = imp.local
-                val initialisers = ctx.cpg.file.nameExact(imp.file).method.ast.isCall.filter {
-                    call =>
-                      val isPlain = call.name == alias &&
-                          call.receiver.isIdentifier.nameExact(alias).nonEmpty
-                      val isRequired = call.name == "required" &&
-                          call.argumentOption(0).exists {
-                              case id: Identifier => id.name == alias
-                              case _              => false
-                          }
-                      isPlain || isRequired
-                }
-                initialisers.foreach { initialiser =>
-                    for
-                      enclosing <- initialiser.inCall.headOption
-                      if enclosing.name == Operators.assignment
-                      if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
-                      if !initialiser.code.matches("(?s).*\\b(numberAttribute|booleanAttribute)\\b.*")
-                      typeDecl <- initialiser.method.typeDecl
-                      member   <- typeDecl.member.codeExact(enclosing.code).headOption
-                      if !fed.contains(typeDecl.id()) ||
-                          unfollowable.contains(typeDecl.id() -> member.name)
-                    do
-                      ctx.tagger.tag(Iterator(member), INPUT)
-                      ctx.tagger.tag(thisReads(typeDecl, member.name), INPUT)
-                }
+        ctx.modules.imports
+            .filter(i =>
+                i.kind == ImportKind.Named && i.imported == exported &&
+                    i.packageName.contains(CorePkg)
+            )
+            .foreach { imp =>
+              val alias = imp.local
+              val initialisers = ctx.cpg.file.nameExact(imp.file).method.ast.isCall.filter {
+                  call =>
+                    val isPlain = call.name == alias &&
+                        call.receiver.isIdentifier.nameExact(alias).nonEmpty
+                    val isRequired = call.name == "required" &&
+                        call.argumentOption(0).exists {
+                            case id: Identifier => id.name == alias
+                            case _              => false
+                        }
+                    isPlain || isRequired
               }
-      }
+              initialisers.foreach { initialiser =>
+                  for
+                    enclosing <- initialiser.inCall.headOption
+                    if enclosing.name == Operators.assignment
+                    if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
+                    if !initialiser.code.matches("(?s).*\\b(numberAttribute|booleanAttribute)\\b.*")
+                    typeDecl <- initialiser.method.typeDecl
+                    member   <- typeDecl.member.codeExact(enclosing.code).headOption
+                    if !fed.contains(typeDecl.id()) ||
+                        unfollowable.contains(typeDecl.id() -> member.name)
+                  do
+                    ctx.tagger.tag(Iterator(member), INPUT)
+                    ctx.tagger.tag(thisReads(typeDecl, member.name), INPUT)
+              }
+            }
+    }
+  end tagSignalInputs
 
   /** `@HostListener('window:message', ['$event'])`: a message from any origin. Also the URL changes
     * (`window:hashchange`, `window:popstate`).
@@ -603,57 +615,70 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     val httpCalls = ctx.cpg.call.filter(c =>
         HttpVerbs.contains(c.name) && receiverOf(c).exists(isHttpClient)
     ).l
-    val producers = mutable.LinkedHashSet.from[Call](httpCalls)
+    // Each producer of response data, with the requests behind it - where the data came from.
+    val producers = mutable.LinkedHashMap.from[Call, List[Call]](httpCalls.map(c => c -> List(c)))
 
-    // A producer, or a `pipe`/`then` chain on one.
-    def isProducer(e: Expression, depth: Int = 6): Boolean =
-        depth > 0 && (JsValues.origin(e) match
-          case c: Call =>
-              producers.contains(c) ||
-              ((c.name == "pipe" || c.name == "then") &&
-                  receiverOf(c).exists(isProducer(_, depth - 1)))
-          case _ => false
-        )
+    // The requests behind a producer: a request, a service call returning one, or a `pipe`/`then`
+    // chain on one - or a pipe whose `switchMap(x => request)` swaps its values for a response.
+    def requestsBehind(e: Expression, depth: Int = 6): List[Call] =
+        if depth <= 0 then Nil
+        else
+          JsValues.origin(e) match
+            case c: Call if producers.contains(c) => producers(c)
+            case c: Call if c.name == "pipe" || c.name == "then" =>
+                receiverOf(c).toList.flatMap(requestsBehind(_, depth - 1)) ++
+                    c.argument.filter(_.argumentIndex >= 1).isCall
+                        .filter(op => SwitchingOperators.contains(op.name)).l
+                        .flatMap(_.argument.l.flatMap(callbacksIn(_)))
+                        .flatMap(_.ast.isReturn.astChildren.collect { case r: Expression => r }.l)
+                        .flatMap(requestsBehind(_, depth - 1))
+            case _ => Nil
+    def isProducer(e: Expression): Boolean = requestsBehind(e).nonEmpty
 
     // Service methods returning a producer, to a fixpoint (a method may return another's result).
     val serviceMethods = ctx.cpg.method.internal
         .filter(m => !m.name.startsWith("<") && !m.name.startsWith("anonymous"))
         .filter(_.ast.isReturn.nonEmpty)
         .l
-    val producerMethods = mutable.LinkedHashSet.empty[Method]
+    val producerMethods = mutable.LinkedHashMap.empty[Method, List[Call]]
     var changed         = true
     var rounds          = 0
     while changed && rounds < 4 do
       changed = false
       rounds += 1
       serviceMethods.filterNot(producerMethods.contains).foreach { m =>
-          if m.ast.isReturn.astChildren.collect { case e: Expression => e }.exists(isProducer(_))
-          then
-            producerMethods += m
-            changed = true
+        val behind = m.ast.isReturn.astChildren.collect { case e: Expression => e }.l
+            .flatMap(requestsBehind(_))
+        if behind.nonEmpty then
+          producerMethods.update(m, behind.distinctBy(_.id()))
+          changed = true
       }
       // Calls of the producer methods are producers themselves.
-      producerMethods.foreach { m =>
+      producerMethods.foreach { (m, behind) =>
         val owner = enclosingTypeDecl(m)
         ctx.cpg.call.nameExact(m.name).foreach { c =>
           val calledOnOwner = receiverOf(c).exists { r =>
               di.typeOf(r).exists(t => owner.exists(_.name == t.name) && t.pkg.isEmpty) ||
               (r.code == "this" && owner.exists(o => enclosingTypeDecl(c.method).contains(o)))
           }
-          if calledOnOwner && producers.add(c) then changed = true
+          if calledOnOwner && !producers.contains(c) then
+            producers.update(c, behind)
+            changed = true
         }
       }
     end while
     // The values reach the callbacks of the observable. The producing calls themselves are not
     // tagged: an Observable is not its values, and a tagged call is a source for everything its
     // arguments reach - including, through `this`, the body of the service method it calls.
-    producers.foreach(p => ctx.tagger.tag(JsValues.consumersOf(p).iterator, INGRESS))
+    producers.foreach((p, behind) =>
+        ctx.tagger.tagVia(JsValues.consumersOf(p).iterator, INGRESS, behind*)
+    )
     // ... except where rxjs turns the observable into its value: `await firstValueFrom(obs)`,
     // `toSignal(obs)`.
-    val unwrapped = ctx.cpg.call.nameExact("firstValueFrom", "lastValueFrom", "toSignal").filter(
-      _.argument.filter(_.argumentIndex == 1).exists(isProducer(_))
-    )
-    ctx.tagger.tag(unwrapped, INGRESS)
+    ctx.cpg.call.nameExact("firstValueFrom", "lastValueFrom", "toSignal").l.foreach { c =>
+      val behind = c.argument.filter(_.argumentIndex == 1).l.flatMap(requestsBehind(_))
+      if behind.nonEmpty then ctx.tagger.tagVia(Iterator(c), INGRESS, behind*)
+    }
 
     // A request whose URL is not fixed by the code.
     val requests = httpCalls.flatMap { c =>

@@ -131,12 +131,12 @@ class TaskCreator(context: EngineContext):
       else
         MethodRefIndex.referencing(param.graph(), param.method.fullName).iterator.inCall.l
             .flatMap { call =>
-              call.argument.filter(_.argumentIndex == 0).l match
-                case List(receiver) if ImplicitReceiver.matches(receiver) =>
-                    call.argument.filter(a =>
-                        a.argumentIndex > 0 && !a.isInstanceOf[MethodRef]
-                    ).l
-                case receivers => receivers
+                call.argument.filter(_.argumentIndex == 0).l match
+                  case List(receiver) if ImplicitReceiver.matches(receiver) =>
+                      call.argument.filter(a =>
+                          a.argumentIndex > 0 && !a.isInstanceOf[MethodRef]
+                      ).l
+                  case receivers => receivers
             }
 
   /** Create new tasks from all results that end in an output argument, including return arguments.
@@ -313,12 +313,15 @@ end TaskCreator
 /** The receiver JavaScript gives a plain call. jssrc2cpg lowers `f(x)` with `this` as argument 0,
   * but that `this` is neither the callee's nor a callback's: binding the two lets taint on the
   * caller's `this` - one tainted field of an instance, a hook's dependency array - reach every
-  * plain call any callee makes, `new Function(...)()` included. Java's unqualified call `m()` is
-  * a call on `this`, so only JavaScript graphs are concerned.
+  * plain call any callee makes, `new Function(...)()` included. Java's unqualified call `m()` is a
+  * call on `this`, so only JavaScript graphs are concerned.
   */
 object ImplicitReceiver:
   private val jsGraphs =
-      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[overflowdb.Graph, java.lang.Boolean]())
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[
+        overflowdb.Graph,
+        java.lang.Boolean
+      ]())
 
   def isJs(graph: overflowdb.Graph): Boolean =
       jsGraphs.computeIfAbsent(

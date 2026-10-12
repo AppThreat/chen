@@ -28,8 +28,8 @@ import JsTags.*
   *   - membership in a constant collection: `LIST.includes(x)`, `SET.has(x)`, `Object.hasOwn(MAP,
   *     x)`, `x in MAP`, `LIST.indexOf(x) !== -1`;
   *   - a regular expression anchored at both ends: `/^[\w-]+$/.test(x)`;
-  *   - equality with a constant, or of a URL's origin or host with a constant or the page's own:
-  *     `x === "a"`, `new URL(x).origin === location.origin`;
+  *   - equality with a constant, or of a URL's origin or host with a constant or the page's own: `x
+  *     \=== "a"`, `new URL(x).origin === location.origin`;
   *   - a function whose every return is such a check of its parameter (`isHelpTopic(x)`).
   *
   * Prefix checks (`x.startsWith("/")`) are not guards: `//evil.example` starts with a slash.
@@ -38,7 +38,7 @@ object GuardBridge:
 
   def run(ctx: JsContext): Unit =
     val predicates = mutable.HashMap.empty[Long, Option[Int]]
-    val guards = ctx.cpg.call.l.flatMap(c => guardOf(ctx, c, predicates, 2).map(c -> _))
+    val guards     = ctx.cpg.call.l.flatMap(c => guardOf(ctx, c, predicates, 2).map(c -> _))
     val guarded = guards.flatMap { case (c, (names, positive)) =>
         regions(c, positive).flatMap(r => readsIn(r, names, c))
     }
@@ -46,7 +46,9 @@ object GuardBridge:
     // The engine carries a ternary's result from the checked variable in its condition - the
     // guarded branch need not be on the path at all - so a ternary that can only produce the
     // checked value or a constant (`ALLOWED.includes(x) ? x : "/"`) is itself the sanitiser.
-    val choices = guards.flatMap { case (c, (names, positive)) => checkedChoice(c, names, positive) }
+    val choices = guards.flatMap { case (c, (names, positive)) =>
+        checkedChoice(c, names, positive)
+    }
     ctx.tagger.tag(choices.distinctBy(_.id()).iterator, SANITIZER)
 
   /** The ternary a guard decides, when the branch the guard admits yields only the checked value
@@ -70,10 +72,11 @@ object GuardBridge:
                 Some(cond -> pos)
             case _ => None
     decided(guard, positive, 0).filter { (cond, pos) =>
-        val (admitted, other) = if pos then (2, 3) else (3, 2)
-        cond.argument.filter(_.argumentIndex == admitted).exists(yieldsChecked) &&
-        cond.argument.filter(_.argumentIndex == other).forall(isConstant)
+      val (admitted, other) = if pos then (2, 3) else (3, 2)
+      cond.argument.filter(_.argumentIndex == admitted).exists(yieldsChecked) &&
+      cond.argument.filter(_.argumentIndex == other).forall(isConstant)
     }.map(_._1)
+  end checkedChoice
 
   // ---------------------------------------------------------------------------------------------
   // Guards
@@ -86,15 +89,16 @@ object GuardBridge:
     predicates: mutable.HashMap[Long, Option[Int]],
     depth: Int
   ): Option[(Set[String], Boolean)] =
-    def arg(i: Int)       = c.argument.filter(_.argumentIndex == i).headOption
-    def checked(e: Expr)  = Some(rootNames(e)).filter(_.nonEmpty)
+    def arg(i: Int)      = c.argument.filter(_.argumentIndex == i).headOption
+    def checked(e: Expr) = Some(rootNames(e)).filter(_.nonEmpty)
     callName(c) match
       case "test" if receiverOf(c).exists(isAnchoredRegex) =>
           arg(1).flatMap(checked).map(_ -> true)
       case "includes" | "has" if receiverOf(c).exists(isConstantCollection) =>
           arg(1).flatMap(checked).map(_ -> true)
-      case "hasOwn" if receiverOf(c).flatMap(memberPath).contains(List("Object")) &&
-            arg(1).exists(isConstantCollection) =>
+      case "hasOwn"
+          if receiverOf(c).flatMap(memberPath).contains(List("Object")) &&
+              arg(1).exists(isConstantCollection) =>
           arg(2).flatMap(checked).map(_ -> true)
       case "hasOwnProperty" if receiverOf(c).exists(isConstantCollection) =>
           arg(1).flatMap(checked).map(_ -> true)
@@ -113,8 +117,9 @@ object GuardBridge:
             case _ => None
       case Operators.greaterThan | Operators.greaterEqualsThan | Operators.lessThan =>
           (arg(1), arg(2)) match
-            case (Some(i: Call), Some(n: Literal)) if callName(i) == "indexOf" &&
-                  receiverOf(i).exists(isConstantCollection) =>
+            case (Some(i: Call), Some(n: Literal))
+                if callName(i) == "indexOf" &&
+                    receiverOf(i).exists(isConstantCollection) =>
                 val found = (c.name, n.code) match
                   case (Operators.greaterThan, "-1")      => Some(true)
                   case (Operators.greaterEqualsThan, "0") => Some(true)
@@ -140,8 +145,9 @@ object GuardBridge:
   /** `LIST.indexOf(x) !== -1` (or `=== -1`, its negation). */
   private def indexCheck(call: Expr, other: Expr, equal: Boolean): Option[(Set[String], Boolean)] =
       (call, other) match
-        case (i: Call, n: Literal) if callName(i) == "indexOf" && n.code == "-1" &&
-              receiverOf(i).exists(isConstantCollection) =>
+        case (i: Call, n: Literal)
+            if callName(i) == "indexOf" && n.code == "-1" &&
+                receiverOf(i).exists(isConstantCollection) =>
             i.argument.filter(_.argumentIndex == 1).headOption.map(rootNames)
                 .filter(_.nonEmpty).map(_ -> !equal)
         case _ => None
@@ -175,14 +181,14 @@ object GuardBridge:
     */
   private def predicateFunction(ctx: JsContext, c: Call): Option[Method] =
       c._callOut.collectFirst { case m: Method if !m.isExternal => m }.orElse {
-        val file = c.method.filename
-        ctx.cpg.file.nameExact(file).method.nameExact(c.name).headOption.orElse(
-          ctx.modules.resolve(file, c.name).filter(_.module.startsWith(".")).flatMap { imp =>
-            val base = JsModules.resolveRelative(file, imp.module)
-            ctx.cpg.method.internal.nameExact(imp.imported)
-                .find(m => m.filename == base || m.filename.startsWith(base + "."))
-          }
-        )
+          val file = c.method.filename
+          ctx.cpg.file.nameExact(file).method.nameExact(c.name).headOption.orElse(
+            ctx.modules.resolve(file, c.name).filter(_.module.startsWith(".")).flatMap { imp =>
+              val base = JsModules.resolveRelative(file, imp.module)
+              ctx.cpg.method.internal.nameExact(imp.imported)
+                  .find(m => m.filename == base || m.filename.startsWith(base + "."))
+            }
+          )
       }.filter(m => !m.isExternal && params(m).nonEmpty)
 
   /** A regular expression literal, or a local holding one, that matches whole strings only. */
@@ -201,8 +207,9 @@ object GuardBridge:
     */
   private def isConstantCollection(e: Expr): Boolean =
       stripCasts(JsValues.origin(stripCasts(e))) match
-        case id: Identifier => isScreamingCase(id.name) || moduleConstant(id).exists(isLiteralCollection)
-        case other          => isLiteralCollection(other)
+        case id: Identifier =>
+            isScreamingCase(id.name) || moduleConstant(id).exists(isLiteralCollection)
+        case other => isLiteralCollection(other)
 
   private def isLiteralCollection(e: Expr): Boolean =
       e.code.trim.matches(
@@ -212,9 +219,10 @@ object GuardBridge:
   /** What a module-level `const` holds, for a read inside a function. */
   private def moduleConstant(id: Identifier): Option[Expr] =
       id.method.file.method.nameExact(":program").headOption
-          .flatMap(p => JsIndexes.assignedValues(p, id.name) match
-            case single :: Nil => Some(stripCasts(single))
-            case _             => None
+          .flatMap(p =>
+              JsIndexes.assignedValues(p, id.name) match
+                case single :: Nil => Some(stripCasts(single))
+                case _             => None
           )
 
   private def isScreamingCase(name: String): Boolean =
@@ -239,7 +247,7 @@ object GuardBridge:
             memberPath(c).exists { path =>
               val owners = Set("location", "window", "self", "globalThis", "document")
               (path.lastOption.exists(Set("origin", "host", "hostname").contains) &&
-              path.dropRight(1).forall(owners.contains)) ||
+                  path.dropRight(1).forall(owners.contains)) ||
               path.headOption.contains("process") || c.code.startsWith("import.meta.env.") ||
               path.lastOption.exists(isScreamingCase)
             }
@@ -265,7 +273,8 @@ object GuardBridge:
             )
         case c: Call if fieldName(c).exists(Set("origin", "host", "hostname").contains) =>
             fieldBase(c).map(rootNames).getOrElse(Set.empty)
-        case c: Call if Set("trim", "toLowerCase", "toUpperCase", "normalize").contains(callName(c)) =>
+        case c: Call
+            if Set("trim", "toLowerCase", "toUpperCase", "normalize").contains(callName(c)) =>
             receiverOf(c).map(rootNames).getOrElse(Set.empty)
         case c: Call if c.name == "String" =>
             c.argument.filter(_.argumentIndex == 1).headOption.map(rootNames).getOrElse(Set.empty)
@@ -295,10 +304,12 @@ object GuardBridge:
       e.astParent match
         case not: Call if not.name == Operators.logicalNot => climb(not, neg, pos, hops + 1)
         case and: Call if and.name == Operators.logicalAnd =>
-            if isArg(and, e, 1) && pos then and.argument.filter(_.argumentIndex == 2).foreach(found += _)
+            if isArg(and, e, 1) && pos then
+              and.argument.filter(_.argumentIndex == 2).foreach(found += _)
             climb(and, pos, false, hops + 1)
         case or: Call if or.name == Operators.logicalOr =>
-            if isArg(or, e, 1) && neg then or.argument.filter(_.argumentIndex == 2).foreach(found += _)
+            if isArg(or, e, 1) && neg then
+              or.argument.filter(_.argumentIndex == 2).foreach(found += _)
             climb(or, false, neg, hops + 1)
         case cond: Call if cond.name == Operators.conditional && isArg(cond, e, 1) =>
             if pos then cond.argument.filter(_.argumentIndex == 2).foreach(found += _)
@@ -321,6 +332,8 @@ object GuardBridge:
                     .foreach(use => climb(use, pos, neg, hops + 1))
             }
         case _ =>
+      end match
+    end climb
     climb(guard, positive, !positive, 0)
     found.toList
   end regions
@@ -337,8 +350,8 @@ object GuardBridge:
   /** True when a branch always leaves: it returns, throws, or ends in doing so. */
   private def exits(branch: AstNode): Boolean =
       branch match
-        case _: Return                                   => true
-        case c: Call if c.name == "<operator>.throw"     => true
+        case _: Return                                 => true
+        case c: Call if c.name == "<operator>.throw"   => true
         case c: Call if Throwing.contains(callName(c)) => true
         case b: Block =>
             b.astChildren.filterNot(_.isInstanceOf[Local]).l.lastOption.exists(exits)

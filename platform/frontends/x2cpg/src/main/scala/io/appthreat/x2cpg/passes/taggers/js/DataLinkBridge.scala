@@ -9,9 +9,9 @@ import JsShapes.*
 /** Data a framework hands from a producer to a consumer member by member.
   *
   * A route component reads what its data functions returned - `loaderData.incident.body_html`, a
-  * SvelteKit page's `data.snippet`, a Pinia store's `session.returnUrl` - and no call site joins the
-  * two. Linking the consumer to the producer as a whole (one CALL edge, one tagged object) makes
-  * every member of the object as tainted as its most tainted one: a page that renders the
+  * SvelteKit page's `data.snippet`, a Pinia store's `session.returnUrl` - and no call site joins
+  * the two. Linking the consumer to the producer as a whole (one CALL edge, one tagged object)
+  * makes every member of the object as tainted as its most tainted one: a page that renders the
   * sanitised `data.snippetHtml` raw would be reported for the `data.q` beside it.
   *
   * Here a consumer read is followed back to its root and the member path below it - the props
@@ -27,9 +27,9 @@ object DataLinkBridge:
 
   /** A read's root and the member path below it: `incident.body_html`, after `const { incident } =
     * loaderData` and `{ loaderData }` destructured from the props parameter, is (the parameter,
-    * `[loaderData, incident, body_html]`). Temporaries, locals assigned once, literal index reads and
-    * the calls in [[Transparent]] are looked through; the root is a parameter (of the method or of
-    * one enclosing it), a call, or an identifier nothing more is known about.
+    * `[loaderData, incident, body_html]`). Temporaries, locals assigned once, literal index reads
+    * and the calls in [[Transparent]] are looked through; the root is a parameter (of the method or
+    * of one enclosing it), a call, or an identifier nothing more is known about.
     */
   def accessPath(
     e: Expression,
@@ -78,9 +78,9 @@ object DataLinkBridge:
           .flatMap(prefix => JsIndexes.methodByFullName(id.graph, prefix))
           .map(outer =>
               outer.parameter.nameExact(id.name).headOption match
-                case Some(p)                                                       => Some(Some(p))
+                case Some(p)                                                   => Some(Some(p))
                 case None if JsIndexes.assignedValues(outer, id.name).nonEmpty => Some(None)
-                case None                                                          => None
+                case None                                                      => None
           )
           .collectFirst { case Some(found) => found }
           .flatten
@@ -155,9 +155,15 @@ object DataLinkBridge:
               if (p.name == Operators.fieldAccess || p.name == Operators.indexAccess) &&
                   p.argumentOption(1).exists(_.id() == e.id()) =>
               p._receiverIn.isEmpty
+          // the value a local is assigned - unless the "local" is the temporary a method call on
+          // the value is lowered through: `(_tmp_2 = bootstrap.value).slice(n)`
           case a: Call if a.name == Operators.assignment =>
               a.argumentOption(2).exists(_.id() == e.id()) &&
-              a.argumentOption(1).exists(_.isInstanceOf[Identifier])
+              a.argumentOption(1).exists(_.isInstanceOf[Identifier]) &&
+              !(a.argumentOption(1).exists(_.code.startsWith("_tmp_")) && (a.astParent match
+                case fa: Call => fa.name == Operators.fieldAccess && fa._receiverIn.nonEmpty
+                case _        => false
+              ))
           case _ => false
     val all = methods.flatMap(m => m :: nestedMethods(m)).distinctBy(_.id())
     all.flatMap { m =>
@@ -171,11 +177,12 @@ object DataLinkBridge:
           .l
       (ids ++ members).filterNot(e => isAssignmentTarget(e) || isPassThrough(e))
     }
+  end leafReads
 
   /** Hooks and composables of the project - `use[A-Z]...` functions - that return an object: a
     * caller destructures it and reads one member at a time (`const { latest } = useLiveTicker()`,
-    * `latest.headline`). Each read is tagged with the source behind what the function returns
-    * under that member. Runs with the bridges.
+    * `latest.headline`). Each read is tagged with the source behind what the function returns under
+    * that member. Runs with the bridges.
     */
   def bridgeHookReturns(ctx: JsContext): Unit =
     val hooks = ctx.cpg.method.internal
@@ -188,8 +195,8 @@ object DataLinkBridge:
             }
         )
     if hooks.isEmpty then return
-    val byName = hooks.groupBy(_.name)
-    val calls  = ctx.cpg.call.filter(c => byName.contains(c.name)).l
+    val byName    = hooks.groupBy(_.name)
+    val calls     = ctx.cpg.call.filter(c => byName.contains(c.name)).l
     val consumers = calls.map(_.method).distinctBy(_.id())
     bridgeReads(
       ctx,

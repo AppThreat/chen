@@ -147,17 +147,17 @@ object ReactiveBridge:
     ctx.cpg.method.internal.filterNot(_.name == ":program").l.foreach { m =>
       lazy val nested = nestedMethods(m)
       params(m).foreach { p =>
-        if nested.nonEmpty then
-          val reads = capturedReads(ctx, m, p.name).toList
-          if reads.nonEmpty && !reads.forall(r => ctx.tagger.has(r.id(), JsTags.INPUT)) then
-            callersOf(ctx, m).iterator
-                .flatMap(_.argument.filter(_.argumentIndex == p.index).l)
-                .flatMap(arg => MemberTaintBridge.sourceOf(ctx, arg).map(_ -> arg))
-                .nextOption()
-                .foreach { (found, arg) =>
-                  if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
-                  ctx.tagger.tagVia(reads, found.tag, found.places(arg)*)
-                }
+          if nested.nonEmpty then
+            val reads = capturedReads(ctx, m, p.name).toList
+            if reads.nonEmpty && !reads.forall(r => ctx.tagger.has(r.id(), JsTags.INPUT)) then
+              callersOf(ctx, m).iterator
+                  .flatMap(_.argument.filter(_.argumentIndex == p.index).l)
+                  .flatMap(arg => MemberTaintBridge.sourceOf(ctx, arg).map(_ -> arg))
+                  .nextOption()
+                  .foreach { (found, arg) =>
+                    if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
+                    ctx.tagger.tagVia(reads, found.tag, found.places(arg)*)
+                  }
       }
     }
     grew
@@ -171,16 +171,16 @@ object ReactiveBridge:
   private def bridgeStateSetters(ctx: JsContext): Boolean =
     var grew = false
     ctx.cpg.call.nameExact(MemberTaintBridge.StateHooks.toSeq*).l.foreach { hook =>
-      if MemberTaintBridge.setterCalls(hook).nonEmpty then
-        stateVariable(hook).foreach { name =>
-          MemberTaintBridge.sourceOf(ctx, hook).foreach { found =>
-            val reads = (hook.method :: nestedMethods(hook.method))
-                .filterNot(m => m.id() != hook.method.id() && declares(m, name))
-                .flatMap(m => readsIn(m, name).l)
-            if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
-            ctx.tagger.tagVia(reads, found.tag, found.places(hook)*)
+        if MemberTaintBridge.setterCalls(hook).nonEmpty then
+          stateVariable(hook).foreach { name =>
+              MemberTaintBridge.sourceOf(ctx, hook).foreach { found =>
+                val reads = (hook.method :: nestedMethods(hook.method))
+                    .filterNot(m => m.id() != hook.method.id() && declares(m, name))
+                    .flatMap(m => readsIn(m, name).l)
+                if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
+                ctx.tagger.tagVia(reads, found.tag, found.places(hook)*)
+              }
           }
-        }
     }
     grew
 
@@ -201,8 +201,8 @@ object ReactiveBridge:
             }
         case _ => None
 
-  /** The calls of a function: resolved ones, and calls by name from its own file or from a file that
-    * imports it relatively or through an alias.
+  /** The calls of a function: resolved ones, and calls by name from its own file or from a file
+    * that imports it relatively or through an alias.
     */
   private def callersOf(ctx: JsContext, fn: Method): List[Call] =
     val resolved = fn._callIn.collect { case c: Call => c }.l ++ ctx.tagger.callSitesOf(fn)

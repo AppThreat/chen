@@ -179,7 +179,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     */
   def bridgeRouteProps(ctx: JsContext): Unit =
       routeModules(ctx).foreach { (_, component, fns) =>
-        val props = firstParam(component)
+        val props                 = firstParam(component)
         def named(names: String*) = fns.filter(f => names.contains(f.name))
         DataLinkBridge.bridgeReads(
           ctx,
@@ -228,11 +228,11 @@ object ReactRecognizer extends JsFrameworkRecognizer:
   end tagHooks
 
   /** `useLoaderData()` returns what the route module's `loader` returned, `useActionData()` what
-    * its `action` returned, `useRouteLoaderData(id)` what the loader of the route `id` returned, and
-    * `useFetcher()` holds what the action or loader it submitted to returned. The link is framework
-    * magic - no call site exists - so the consumer hook is resolved to the producing data function
-    * and the dataflow engine carries the producer's return value (and the taint inside it) out to
-    * the hook's result. The producer is the one the hook's own type argument names
+    * its `action` returned, `useRouteLoaderData(id)` what the loader of the route `id` returned,
+    * and `useFetcher()` holds what the action or loader it submitted to returned. The link is
+    * framework magic - no call site exists - so the consumer hook is resolved to the producing data
+    * function and the dataflow engine carries the producer's return value (and the taint inside it)
+    * out to the hook's result. The producer is the one the hook's own type argument names
     * (`useLoaderData<typeof articleLoader>()`, also imported: `import type { loader as rootLoader }
     * from "../root"`), else the route the id names, else the file's single data function. Returns
     * the hooks linked.
@@ -506,10 +506,10 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     if hooks.isEmpty then return
     hooks.foreach { (file, name, cb) =>
         ctx.cpg.call.nameExact(name).filter { c =>
-            val f = c.method.filename
-            f == file || ctx.modules.resolve(f, name).exists(i =>
-                i.module.startsWith(".") && file.startsWith(JsModules.resolveRelative(f, i.module))
-            )
+          val f = c.method.filename
+          f == file || ctx.modules.resolve(f, name).exists(i =>
+              i.module.startsWith(".") && file.startsWith(JsModules.resolveRelative(f, i.module))
+          )
         }.foreach(c => ctx.tagger.resolveCall(c, cb))
     }
   end linkQwikHooks

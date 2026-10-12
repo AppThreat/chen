@@ -52,7 +52,10 @@ class DataflowTest extends DataFlowCodeToCpgSuite:
       val source = cpg.identifier.name("a")
       val sink   = cpg.call.code("foo.*").argument
       val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 6
+      // into `a`, not into the `this` a plain call `foo(a)` is lowered with: that receiver is no
+      // variable the call reads or changes
+      flows.size shouldBe 2
+      flows.map(_.elements.last.code).toSet shouldBe Set("a")
   }
 
   "Flow chains from x to a" in {
@@ -164,7 +167,9 @@ class DataflowTest extends DataFlowCodeToCpgSuite:
       val source = cpg.identifier.name("a")
       val sink   = cpg.call.code("foo.*").argument
       val flows  = sink.reachableByFlows(source)
-      flows.size shouldBe 4
+      // into `b`; the implicit `this` receiver of `foo(b)` receives nothing
+      flows.size shouldBe 2
+      flows.map(_.elements.last.code).toSet shouldBe Set("b")
   }
 
   "Flow from function foo to a" in {

@@ -268,15 +268,15 @@ object MemberTaintBridge:
       hook.astParent match
         case a: Call if a.name == Operators.assignment =>
             a.argumentOption(1).collect { case t: Identifier => t.name }.toList.flatMap { tmp =>
-                val scope = hook.method :: nestedMethods(hook.method)
-                val setter = hook.method.ast.isCall.nameExact(Operators.assignment).l.flatMap { s =>
-                    (s.argumentOption(1), s.argumentOption(2)) match
-                      case (Some(id: Identifier), Some(ia: Call))
-                          if ia.name == Operators.indexAccess && ia.code == s"$tmp[1]" =>
-                          Some(id.name)
-                      case _ => None
-                }.headOption
-                setter.toList.flatMap(name => scope.flatMap(_.ast.isCall.nameExact(name).l))
+              val scope = hook.method :: nestedMethods(hook.method)
+              val setter = hook.method.ast.isCall.nameExact(Operators.assignment).l.flatMap { s =>
+                  (s.argumentOption(1), s.argumentOption(2)) match
+                    case (Some(id: Identifier), Some(ia: Call))
+                        if ia.name == Operators.indexAccess && ia.code == s"$tmp[1]" =>
+                        Some(id.name)
+                    case _ => None
+              }.headOption
+              setter.toList.flatMap(name => scope.flatMap(_.ast.isCall.nameExact(name).l))
             }
         case _ => Nil
 
@@ -298,8 +298,8 @@ object MemberTaintBridge:
                     (w.argumentOption(1), w.argumentOption(2)) match
                       case (Some(fa: Call), Some(v))
                           if !rune && fieldName(fa).contains("value") && fieldBase(fa).exists {
-                            case b: Identifier => b.name == name
-                            case _             => false
+                              case b: Identifier => b.name == name
+                              case _             => false
                           } =>
                           Some(v)
                       case (Some(id: Identifier), Some(v))
@@ -431,6 +431,13 @@ object MemberTaintBridge:
                   crossed += v.id()
                   push(v)
                 }
+            // `obs.pipe(switchMap((sku) => this.api.forSku(sku)))`: what an operator emits is what
+            // its callback returns
+            case c: Call if JsValues.ValueOperators.contains(callName(c)) =>
+                c.astChildren.foreach(push(_))
+                c.argument.l.flatMap(callbacksIn(_)).foreach(cb =>
+                    DataLinkBridge.returnedValues(cb).foreach(push(_))
+                )
             case c: Call =>
                 c.astChildren.foreach(push(_))
                 // a call of a project function - one the frontend resolved, or a bridge did

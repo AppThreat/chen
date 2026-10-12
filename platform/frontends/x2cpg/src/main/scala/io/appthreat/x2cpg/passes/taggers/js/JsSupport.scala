@@ -691,8 +691,8 @@ object JsShapes:
       }.distinctBy(_._2.id())
 
   /** The value a project module exports under the name an identifier was imported as: `export const
-    * tooltipHtml = { mounted() {...} }` for `import { tooltipHtml } from './directives/tooltipHtml'`
-    * (a relative or `@/` specifier).
+    * tooltipHtml = { mounted() {...} }` for `import { tooltipHtml } from
+    * './directives/tooltipHtml'` (a relative or `@/` specifier).
     */
   def importedValue(ctx: JsContext, id: Identifier): Option[Expression] =
     val file = id.method.filename
@@ -708,12 +708,15 @@ object JsShapes:
             .method.nameExact(":program").l.iterator
             .flatMap(_.ast.isCall.nameExact(Operators.assignment))
             .find(_.argumentOption(1).exists(t =>
-                t.code == s"exports.$exported" || t.code.matches(s"""exports\\[["']$exported["']\\]""")
+                t.code == s"exports.$exported" || t.code.matches(
+                  s"""exports\\[["']$exported["']\\]"""
+                )
             ))
             .flatMap(_.argumentOption(2))
             .map(JsValues.origin(_))
       }
     }
+  end importedValue
 
   def hasDefaultExport(ctx: JsContext, file: String): Boolean =
       defaultExportValue(ctx, file).nonEmpty
@@ -987,4 +990,26 @@ object JsValues:
         .flatMap(consumersOf(_, depth - 1))
     (chained ++ combined).distinctBy(_.id())
   end consumersOf
+
+  /** In `producer.pipe(map(f), switchMap(g))`, the callback after a `map` receives what `f`
+    * returns: each such parameter, with the values the map's callback returns.
+    */
+  def mappedInto(producer: Expression): List[(MethodParameterIn, List[Expression])] =
+    val producerId = producer.id()
+    producer.method.call.nameExact("pipe").l
+        .filter(c => JsShapes.receiverOf(c).exists(r => origin(r).id() == producerId))
+        .flatMap { pipe =>
+          val operators = pipe.argument.filter(_.argumentIndex >= 1).isCall
+              .filter(op => ValueOperators.contains(op.name)).l.sortBy(_.argumentIndex)
+          operators.zip(operators.drop(1)).flatMap { (before, after) =>
+              if before.name != "map" then Nil
+              else
+                val returned = before.argument.l.flatMap(JsShapes.callbacksIn(_))
+                    .flatMap(cb =>
+                        cb.ast.isReturn.astChildren.collect { case e: Expression => e }.l
+                    )
+                after.argument.l.flatMap(JsShapes.callbacksIn(_)).flatMap(JsShapes.firstParam)
+                    .map(_ -> returned)
+          }
+        }
 end JsValues

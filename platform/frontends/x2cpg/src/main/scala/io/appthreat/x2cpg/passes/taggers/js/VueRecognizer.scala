@@ -114,6 +114,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
         .flatMap(id => setups.find(s => s.filename == id.method.filename).map(s => id.name -> s))
         .groupMap(_._1)(_._2)
         .collect { case (name, setup :: Nil) => name -> setup }
+  end piniaStores
 
   /** A store's method calls (`store.setTerm(v)`, the receiver one of the store hooks' results) are
     * resolved to the functions the setup returns under that name, carrying the argument in.
@@ -134,10 +135,9 @@ object VueRecognizer extends JsFrameworkRecognizer:
                   case _       => false
             )
     ).foreach(c => methodsOf.get(c.name).foreach(m => ctx.tagger.resolveCall(c, m)))
-  end linkPiniaActions
 
-  /** Every caller's `useSearchStore()` receives the setup's returned object, and reads one member of
-    * it at a time - `store.term`, `storeToRefs(store)`'s `term`, `term.value`. Each such read is
+  /** Every caller's `useSearchStore()` receives the setup's returned object, and reads one member
+    * of it at a time - `store.term`, `storeToRefs(store)`'s `term`, `term.value`. Each such read is
     * tagged with the source behind what the setup returns under that member, so a store holding one
     * tainted member and one constant one taints only the first. Runs with the bridges.
     */
@@ -314,7 +314,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
       ctx.elements.renderedFiles ++ routePropsFunctions(ctx).map(_._2)
 
   private def tagProps(ctx: JsContext): Unit =
-    val fed = fedComponents(ctx)
+    val fed                        = fedComponents(ctx)
     def unfed(n: CfgNode): Boolean = !fed.contains(n.method.filename)
     ctx.tagger.tag(
       ctx.cpg.call.nameExact("defineProps", "withDefaults", "defineModel").filter(unfed),
@@ -376,13 +376,13 @@ object VueRecognizer extends JsFrameworkRecognizer:
     */
   private def directives(ctx: JsContext): Map[String, List[Method]] =
     def hooks(arg: Expression): List[Method] =
-        // `app.directive('tooltip-html', tooltipHtml)`: the hooks object a local or an import holds
-        val value = arg match
-          case id: Identifier => importedValue(ctx, id).getOrElse(JsValues.origin(id))
-          case other          => other
-        callbacksIn(value, DirectiveHooks) match
-          case Nil => callbackMethod(arg).toList
-          case hs  => hs
+      // `app.directive('tooltip-html', tooltipHtml)`: the hooks object a local or an import holds
+      val value = arg match
+        case id: Identifier => importedValue(ctx, id).getOrElse(JsValues.origin(id))
+        case other          => other
+      callbacksIn(value, DirectiveHooks) match
+        case Nil => callbackMethod(arg).toList
+        case hs  => hs
     val registered = ctx.cpg.call.nameExact("directive").l.flatMap { c =>
         (
           c.argument.filter(_.argumentIndex == 1).headOption.flatMap(literalValue),

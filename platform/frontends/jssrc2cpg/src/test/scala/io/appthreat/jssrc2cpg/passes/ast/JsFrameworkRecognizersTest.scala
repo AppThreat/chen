@@ -268,8 +268,8 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.call.nameExact("safeHtml").callee(using NoResolve).name.l should contain("transform")
           flows(cpg, "xss") should be > 0
           cpg.tag.name("xss").call.code.l.filter(_.contains("note")) shouldBe empty
-          // a link is a redirect sink, an SVG image is not
-          cpg.tag.name("redirect").call.lineNumber.l.map(_.intValue) shouldBe List(4)
+          // a link the user clicks to another site is no redirect, nor an SVG image's href
+          cpg.tag.name("redirect").call.l shouldBe empty
           // ngModel writes the field with what the user typed
           cpg.tag.name("framework-input").call.code.l should contain("this.term")
       }
@@ -746,13 +746,27 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           |<script>
           |let { data } = $props();
           |</script>
+          |<p>{data.heading}</p>
+          |<div>{@html data.motd}</div>
           |""".stripMargin,
             "src/routes/posts/+page.svelte"
           ))
-          val props = cpg.call.nameExact("$props").l.head
-          props.methodFullName shouldBe "src/routes/posts/+page.server.ts::program:load"
-          // the handler's parameter is the source; its member reads are not tagged again
-          cpg.tag.name("framework-input").parameter.method.name.l should contain("load")
+          // the page's props are what `load` returned, member by member: `data.motd` holds the
+          // cookie, `data.heading` the route parameter - each read says where it came from
+          cpg.call.nameExact("$props").tag.name("framework-input").l shouldBe empty
+          val reads = cpg.tag.name("framework-input").call
+              .filter(_.method.filename.endsWith("+page.svelte")).l
+          reads.map(_.code) should contain("data.motd")
+          // from the request's cookies (line 2), returned as `motd` (line 5)
+          (reads.find(_.code == "data.motd").get.tag.name.l should contain).allOf(
+            "via:src/routes/posts/+page.server.ts#2",
+            "via:src/routes/posts/+page.server.ts#5"
+          )
+          // the request's members are the sources in the handler, not the event as a whole
+          (cpg.tag.name("framework-input").call.code.l should contain).allOf(
+            "param1_0.params",
+            "param1_0.cookies"
+          )
       }
 
       "make a transformPageChunk callback's return value an HTML sink" in {

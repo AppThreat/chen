@@ -5,11 +5,11 @@ import io.appthreat.jssrc2cpg.parser.BabelAst.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.nodes.{
-  NewBlock,
-  NewCall,
-  NewIdentifier,
-  NewMethodRef,
-  NewTypeRef
+    NewBlock,
+    NewCall,
+    NewIdentifier,
+    NewMethodRef,
+    NewTypeRef
 }
 import ujson.Obj
 
@@ -75,10 +75,10 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
 
   /** `<RichText html={bio} title="About" {...rest} />` lowered to `RichText(<props>)`, where
     * `<props>` is a [[JsxPropsOperator]] call over every value the code computes - `bio`, `rest` -
-    * since the component receives them all in its one props object. Each value is named by its
-    * prop (`bio` is the argument named `html`); a spread is unnamed. Constant attributes carry
-    * nothing and are left out. The value expressions are lowered a second time for the call; the
-    * originals stay under the attribute template nodes, where the template sinks are tagged.
+    * since the component receives them all in its one props object. Each value is named by its prop
+    * (`bio` is the argument named `html`); a spread is unnamed. Constant attributes carry nothing
+    * and are left out. The value expressions are lowered a second time for the call; the originals
+    * stay under the attribute template nodes, where the template sinks are tagged.
     */
   private def componentCallAst(jsxElem: BabelNodeInfo, name: String, elementAst: Ast): Ast =
     val attributes = safeObj(jsxElem.json, "openingElement")
