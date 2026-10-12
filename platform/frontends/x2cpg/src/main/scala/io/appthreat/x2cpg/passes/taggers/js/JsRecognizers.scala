@@ -107,10 +107,12 @@ object JsRecognizers:
         VueRecognizer.bridgeRouterProps(ctx)
       if AngularRecognizer.applies(ctx) then AngularRecognizer.bridgeInputs(ctx)
       DataLinkBridge.bridgeHookReturns(ctx)
+      DataLinkBridge.bridgeBoundArguments(ctx)
       ComponentCallBridge.bridgeProps(ctx)
       VueRecognizer.bridgeDirectives(ctx)
       SvelteRecognizer.bridgeActions(ctx)
       AlpineRecognizer.bridge(ctx)
+      if EmberRecognizer.applies(ctx) then EmberRecognizer.bridge(ctx)
       if VueRecognizer.applies(ctx) then VueRecognizer.bridgeOptionsApi(ctx)
     }
     // The npm package behind each sink, from the project's manifests - no SBOM needed.

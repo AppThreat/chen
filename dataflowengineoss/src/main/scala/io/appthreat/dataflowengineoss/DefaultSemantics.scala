@@ -80,7 +80,14 @@ object DefaultSemantics:
     * default.
     */
   private def javaScriptFlows: List[FlowSemantic] =
-      List(F(Operators.formatString, (1 to 40).toList.map(i => (i, -1))))
+      List(
+        F(Operators.formatString, (1 to 40).toList.map(i => (i, -1))),
+        // `fetch(url, init)`: the response is what the URL serves - the caller chose where it comes
+        // from - but not what the request body sent; the API decides its answer. The receiver too:
+        // type recovery names a `fetch(...).then(cb)` chain's outer call `fetch`, and a promise
+        // chain's result comes from its receiver
+        F("fetch", List((0, -1), (1, -1)))
+      )
 
   private def F = (x: String, y: List[(Int, Int)]) => FlowSemantic.from(x, y)
 

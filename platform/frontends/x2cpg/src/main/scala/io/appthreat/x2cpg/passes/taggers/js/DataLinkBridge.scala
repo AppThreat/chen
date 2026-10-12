@@ -218,6 +218,24 @@ object DataLinkBridge:
     )
   end bridgeHookReturns
 
+  /** `fn.bind(null, returnTo)`: the bound function's leading parameters take the bound values - a
+    * Next.js page binds the arguments of a server action it hands to a form. Where a source reaches
+    * a bound value, the parameter is tagged with it. Runs with the bridges.
+    */
+  def bridgeBoundArguments(ctx: JsContext): Unit =
+      ctx.cpg.call.nameExact("bind").l.foreach { bind =>
+          receiverOf(bind).flatMap(callbackMethod).filterNot(_.isExternal).foreach { fn =>
+            val ps = params(fn)
+            bind.argument.filter(_.argumentIndex >= 2).l.foreach { value =>
+                ps.lift(value.argumentIndex - 2).foreach { p =>
+                    MemberTaintBridge.sourceOf(ctx, value).foreach(found =>
+                        ctx.tagger.tagVia(Iterator(p), found.tag, found.places(value)*)
+                    )
+                }
+            }
+          }
+      }
+
   /** Tags each leaf read in `methods` whose access path `link` maps: with the source behind the
     * produced value, or with the source kind itself. A variable `stop` accepts is a root itself - a
     * prop declared with a default (`export let content = ''`) is whatever the parent passes.

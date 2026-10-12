@@ -227,8 +227,10 @@ object ReactiveBridge:
   private def tagTaintedDerivationCalls(ctx: JsContext): Unit =
       ctx.cpg.call.filter(isDerivationCall).foreach { d =>
           derivationCallback(d).foreach { cb =>
-              returnTaint(ctx, cb).foreach(found =>
-                  ctx.tagger.tagVia(Iterator(d), found.tag, (found.at :: found.hops)*)
+              // with where the value was returned: `useActionState(updateProfile, ...)` holds what
+              // the action returned
+              returnedTaint(ctx, cb).foreach((found, returned) =>
+                  ctx.tagger.tagVia(Iterator(d), found.tag, found.places(returned)*)
               )
           }
       }
@@ -258,8 +260,14 @@ object ReactiveBridge:
             (MemberTaintBridge.sourceOf(ctx, value), derived)
 
   private def returnTaint(ctx: JsContext, m: Method): Option[MemberTaintBridge.Found] =
+      returnedTaint(ctx, m).map(_._1)
+
+  private def returnedTaint(
+    ctx: JsContext,
+    m: Method
+  ): Option[(MemberTaintBridge.Found, Expression)] =
       m.ast.isReturn.astChildren.collect { case e: Expression => e }.l.iterator
-          .flatMap(MemberTaintBridge.sourceOf(ctx, _)).nextOption()
+          .flatMap(e => MemberTaintBridge.sourceOf(ctx, e).map(_ -> e)).nextOption()
 
   private def readTag(ctx: JsContext, id: Identifier): Option[MemberTaintBridge.Found] =
       Seq(JsTags.INPUT, JsTags.INGRESS).find(t => ctx.tagger.has(id.id(), t))

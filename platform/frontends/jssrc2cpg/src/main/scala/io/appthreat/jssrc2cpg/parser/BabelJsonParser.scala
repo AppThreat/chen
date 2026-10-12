@@ -30,7 +30,10 @@ object BabelJsonParser:
     val json        = ujson.read(jsonContent)
     val filename    = json("relativeName").str
     val fullPath    = Paths.get(rootPath.toString, filename)
-    ParseResult(filename, fullPath.toString, json, sourceAsAstgenReadsIt(fullPath), typeMap)
+    // a file astgen rewrote before parsing (an Ember template) comes with the text its offsets index
+    val content =
+        json.obj.get("source").flatMap(_.strOpt).getOrElse(sourceAsAstgenReadsIt(fullPath))
+    ParseResult(filename, fullPath.toString, json, content, typeMap)
 
   /** astgen's offsets index the file as Node's `readFileSync(file, "utf-8")` returns it: a UTF-8
     * byte-order mark stays, as its first character, and malformed bytes become U+FFFD.

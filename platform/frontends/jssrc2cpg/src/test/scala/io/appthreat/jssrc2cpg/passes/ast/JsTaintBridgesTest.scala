@@ -366,6 +366,117 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "Ember templates" should {
+      def emberApp =
+          code(
+            """
+          |import Route from '@ember/routing/route';
+          |export default class PostRoute extends Route {
+          |  async model(params) {
+          |    const slug = params.post_id;
+          |    return { slug, title: 'Hello' };
+          |  }
+          |}
+          |""".stripMargin,
+            "app/routes/post.js"
+          ).moreCode(
+            """
+          |import PostHeader from 'docs-app/components/post-header';
+          |<template>
+          |  <PostHeader @slug={{@model.slug}} @title={{@model.title}} />
+          |</template>
+          |""".stripMargin,
+            "app/templates/post.gjs"
+          ).moreCode(
+            """
+          |import Component from '@glimmer/component';
+          |import { htmlSafe } from '@ember/template';
+          |export default class PostHeader extends Component {
+          |  get crumb() { return `<b>${this.args.slug}</b>`; }
+          |  get heading() { return htmlSafe(this.crumb); }
+          |  get title() { return htmlSafe(this.args.title); }
+          |  <template><h1>{{this.heading}}</h1></template>
+          |}
+          |""".stripMargin,
+            "app/components/post-header.gjs"
+          ).moreCode(
+            """
+          |import Controller from '@ember/controller';
+          |export default class SearchController extends Controller {
+          |  queryParams = ['q'];
+          |  q = '';
+          |}
+          |""".stripMargin,
+            "app/controllers/search.js"
+          ).moreCode(
+            """<p>{{this.q}}</p>
+          |<p>{{{this.q}}}</p>
+          |""".stripMargin,
+            "app/templates/search.hbs"
+          ).moreCode(
+            """
+          |import { modifier } from 'ember-modifier';
+          |export default modifier((element, [markup]) => {
+          |  element.innerHTML = markup;
+          |});
+          |""".stripMargin,
+            "app/modifiers/inner-html.js"
+          ).moreCode(
+            """
+          |import Component from '@glimmer/component';
+          |import { service } from '@ember/service';
+          |import innerHtml from 'docs-app/modifiers/inner-html';
+          |export default class Snippet extends Component {
+          |  @service router;
+          |  get snippet() { return this.router.currentRoute.queryParams.s; }
+          |  <template><div {{innerHtml this.snippet}}></div></template>
+          |}
+          |""".stripMargin,
+            "app/components/snippet.gjs"
+          ).moreCode(
+            """{ "name": "docs-app", "exports": { "./*": "./app/*" }, "dependencies": { "ember-source": "~6.12.0" } }""",
+            "package.json"
+          )
+
+      "carry a route's model through its template and a component's arguments to a getter" in {
+          val cpg = tagged(emberApp)
+          // `@model.slug` is the route's `params.post_id`; `@model.title` a constant
+          val args = cpg.tag.name("framework-input").call
+              .filter(_.file.name.headOption.contains("app/components/post-header.gjs")).code.l
+          args should contain("this.args.slug")
+          args should not contain "this.args.title"
+          // a getter read is what the getter returns, and says where that came from
+          val crumb = cpg.call.code("this\\.crumb").filter(_.inCall.name.contains("htmlSafe")).l
+          crumb.tag.name.l should contain("framework-input")
+          crumb.tag.name.filter(_.startsWith("via:app/routes/post.js")).l should not be empty
+          val sink = cpg.call.nameExact("htmlSafe").code("htmlSafe\\(this\\.crumb\\)")
+          show(sink.reachableByFlows(crumb.iterator)) should not be empty
+      }
+
+      "make a controller's query parameter the route template's this, and {{{x}}} the sink" in {
+          val cpg = tagged(emberApp)
+          val raw = cpg.tag.name("xss").call.filter(
+            _.file.name.headOption.contains("app/templates/search.hbs")
+          ).l
+          raw.map(_.code) shouldBe List("{this.q}")
+          raw.flatMap(_.lineNumber).map(_.intValue) shouldBe List(2)
+          // the read says it is the controller's `queryParams` entry
+          val q = cpg.call.code("this\\.q").filter(
+            _.file.name.headOption.contains("app/templates/search.hbs")
+          ).l
+          q.tag.name.l should contain("framework-input")
+          q.tag.name.filter(_.startsWith("via:app/controllers/search.js")).l should not be empty
+      }
+
+      "hand a modifier the values a template invokes it with" in {
+          val cpg = tagged(emberApp)
+          cpg.method.filename("app/modifiers/inner-html.js").parameter.tag.name("framework-input")
+              .l should not be empty
+          val sink = cpg.call.code("element\\.innerHTML = markup")
+          show(sink.reachableByFlows(cpg.tag.name("framework-input").parameter)) should not be empty
+      }
+  }
+
   "Provenance" should {
       "name where a bridged source came from: Astro locals written by middleware" in {
           val cpg = tagged(code(

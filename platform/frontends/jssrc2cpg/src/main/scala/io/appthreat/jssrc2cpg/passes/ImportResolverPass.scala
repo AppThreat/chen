@@ -36,6 +36,17 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
         Some(s"$SvelteKitLibRoot${JFile.separator}$relative")
       else None
 
+  /** Other path aliases - tsconfig `paths`, the package's own name, `@/` and `~/` - that name a
+    * project file.
+    */
+  private lazy val pathAliases =
+      io.appthreat.x2cpg.passes.taggers.js.JsPathAliases(cpg)
+
+  private def resolveAlias(fileName: String, entity: String): Option[String] =
+      resolveSvelteKitAlias(entity).orElse(
+        pathAliases.resolve(fileName, entity).map(_.replace("/", JFile.separator))
+      )
+
   override protected def optionalResolveImport(
     fileName: String,
     importCall: Call,
@@ -53,8 +64,10 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     // We want to know if the import is local since if an external name is used to match internal methods we may have
     // false paths.
     // ESM imports arrive as "specifier:importedName", requires as the bare specifier
-    val svelteKitAliasPath = resolveSvelteKitAlias(rawEntity.split(pathSep).head)
-    val isLocalImport      = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
+    val svelteKitAliasPath =
+        if importedEntity.startsWith(".") then None
+        else resolveAlias(fileName, rawEntity.split(pathSep).head)
+    val isLocalImport = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
     // TODO: At times there is an operation inside of a require, e.g. path.resolve(__dirname + "/../config/env/all.js")
     //  this tries to recover the string but does not perform string constant propagation
     val entity = if matcher.find() then matcher.group(1) else rawEntity

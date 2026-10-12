@@ -184,6 +184,11 @@ final case class JsImport(
   */
 final class JsModules(cpg: Cpg):
 
+  /** An aliased specifier that names a project file (`@/lib/db`, `~/components/Card`) is recorded
+    * as the relative specifier it stands for, so it is the project's module, not a package.
+    */
+  private lazy val aliases = JsPathAliases(cpg)
+
   val imports: Seq[JsImport] =
       cpg.imports.l.flatMap { imp =>
         val entity = imp.importedEntity.getOrElse("")
@@ -191,7 +196,13 @@ final class JsModules(cpg: Cpg):
         val file   = Iterator(imp).call.file.name.headOption.getOrElse("")
         if entity.isEmpty then None
         else
-          val (module, name) = JsModules.splitEntity(entity)
+          val (written, name) = JsModules.splitEntity(entity)
+          val module =
+              if written.startsWith(".") then written
+              else
+                aliases.resolve(file, written)
+                    .map(aliases.relativeSpecifier(file, _))
+                    .getOrElse(written)
           val kind =
               if name.isEmpty then
                 if local.isEmpty || local == module then ImportKind.SideEffect
@@ -559,6 +570,12 @@ object JsShapes:
       url match
         case l: Literal                   => true
         case c: Call if isConstantExpr(c) => true
+        // `new URL('/account', request.url)`: a constant path on the base's - the app's own - origin
+        case e if e.code.startsWith("new URL(") =>
+            e.ast.isCall.nameExact("<operator>.new").headOption
+                .orElse(Option(e).collect { case c: Call => c })
+                .flatMap(_.argument.filter(_.argumentIndex == 1).headOption)
+                .flatMap(literalValue).exists(fixesOrigin)
         case _ =>
             literalValue(leftmostOperand(url)).exists(fixesOrigin)
 

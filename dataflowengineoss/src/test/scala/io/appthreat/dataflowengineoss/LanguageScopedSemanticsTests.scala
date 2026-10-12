@@ -160,12 +160,16 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
           }
       }
 
-      "give JavaScript graphs the template-literal mapping and nothing of the other languages" in {
+      "give JavaScript graphs the template-literal and fetch mappings and nothing of the other languages" in {
           Seq(Languages.JSSRC, Languages.JAVASCRIPT).foreach { language =>
             val flows = DefaultSemantics.flowsForLanguage(language)
             withClue(s"$language must not receive PHP, Java or C flows: ") {
-                flows.map(_.methodFullName) shouldBe List(Operators.formatString)
+                flows.map(_.methodFullName) shouldBe List(Operators.formatString, "fetch")
             }
+            // a response comes from the URL (and a promise chain's receiver), not the request body
+            flows.find(_.methodFullName == "fetch").toList.flatMap(_.mappings).collect {
+                case FlowMapping(ParameterNode(src, _), ParameterNode(dst, _)) => src -> dst
+            } shouldBe List(0 -> -1, 1 -> -1)
             // every part reaches the result, and no part reaches another
             flows.head.mappings.collect { case FlowMapping(_, ParameterNode(dst, _)) => dst }
                 .distinct shouldBe List(-1)

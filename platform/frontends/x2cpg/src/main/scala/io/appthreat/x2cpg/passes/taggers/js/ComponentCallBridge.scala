@@ -33,7 +33,7 @@ object ComponentCallBridge:
   private val ScriptExtensions = Seq(".tsx", ".jsx", ".ts", ".js", ".mjs", ".mts")
 
   /** Single-file component extensions. */
-  private val ComponentFileExtensions = Seq(".vue", ".svelte", ".astro")
+  private val ComponentFileExtensions = Seq(".vue", ".svelte", ".astro", ".gjs", ".gts", ".hbs")
 
   /** Elements resolved to the function component they render, and elements naming a single-file
     * component, by file.
@@ -76,7 +76,10 @@ object ComponentCallBridge:
     */
   private def componentFile(ctx: JsContext, from: String, module: String): Option[String] =
     val candidates =
-        if module.startsWith(".") then List(JsModules.resolveRelative(from, module))
+        // an Ember component is imported without its `.gjs` extension
+        if module.startsWith(".") then
+          val base = JsModules.resolveRelative(from, module)
+          base :: ComponentFileExtensions.toList.map(base + _)
         else
           val (alias, rest) = module.span(_ != '/')
           val roots = alias match
@@ -102,12 +105,28 @@ object ComponentCallBridge:
   def run(ctx: JsContext): Unit =
       ctx.elements.functions.foreach((call, m) => ctx.tagger.resolveCall(call, m))
 
-  /** Single-file components by their file's base name, where it is unambiguous. */
+  /** Single-file components by their file's base name, where it is unambiguous - an Ember component
+    * under `components/` also by the name a template invokes it with:
+    * `components/search-summary.gjs` is `<SearchSummary />`, `components/ui/card.gjs` `<Ui::Card
+    * />` (lowered to `Ui.Card`).
+    */
   private def singleFileComponents(ctx: JsContext): Map[String, String] =
-      ctx.cpg.file.name.l
-          .filter(f => ComponentFileExtensions.exists(f.endsWith))
-          .groupBy(f => f.substring(f.lastIndexOf('/') + 1).takeWhile(_ != '.'))
-          .collect { case (name, f :: Nil) => name -> f }
+    def emberName(f: String): Option[String] =
+        Option.when(f.contains("/components/") && EmberExtensions.exists(f.endsWith)) {
+            val path = f.substring(f.lastIndexOf("/components/") + "/components/".length)
+            path.takeWhile(_ != '.').split('/').map(_.split('-').map(_.capitalize).mkString)
+                .mkString(".")
+        }
+    ctx.cpg.file.name.l
+        .filter(f => ComponentFileExtensions.exists(f.endsWith))
+        .flatMap(f =>
+            (f.substring(f.lastIndexOf('/') + 1).takeWhile(_ != '.') -> f) :: emberName(f)
+                .map(_ -> f).toList
+        )
+        .groupMap(_._1)(_._2)
+        .collect { case (name, f :: Nil) => name -> f }
+
+  private val EmberExtensions = Seq(".gjs", ".gts", ".hbs")
 
   /** The calls that hand a single-file component its props: Svelte's `$props()`, Vue's
     * `defineProps()` and `withDefaults()`.
@@ -129,6 +148,7 @@ object ComponentCallBridge:
               case None    => passed
         val methods = ctx.cpg.file.nameExact(file).method.l
         // props a read names bare: a Vue template's declared props, a Svelte 4 `export let`
+        val ember = EmberExtensions.exists(file.endsWith)
         val bareProps =
             if file.endsWith(".vue") then VueRecognizer.declaredPropNames(ctx, file)
             else if file.endsWith(".svelte") then SvelteRecognizer.exportedProps(methods)
@@ -152,8 +172,14 @@ object ComponentCallBridge:
                     Some(DataLinkBridge.Link.Values(values(path.lift(1)), path.drop(2)))
                 case id: Identifier if bareProps.contains(id.name) =>
                     Some(DataLinkBridge.Link.Values(values(Some(id.name)), path))
+                // an Ember component's arguments: `this.args.html` is what `@html={{...}}` passes
+                case id: Identifier
+                    if ember && id.name == "this" && path.headOption.contains("args") =>
+                    Some(DataLinkBridge.Link.Values(values(path.lift(1)), path.drop(2)))
                 case _ => None,
-          id => bareProps.contains(id.name) && id.method.parameter.nameExact(id.name).isEmpty
+          id =>
+              (ember && id.name == "this") ||
+                  bareProps.contains(id.name) && id.method.parameter.nameExact(id.name).isEmpty
         )
       }
 

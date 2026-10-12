@@ -61,7 +61,15 @@ object ValidationBridge:
     val roots  = schemaRoots(ctx, file)
     val idents = validator.ast.isIdentifier.l.map(_.name).filterNot(_.startsWith("_tmp_")).toSet
     idents.nonEmpty && idents.forall(roots.contains) &&
-    validator.ast.isCall.map(callName).l.exists(NonTextValidators.contains)
+    (validator.ast.isCall.map(callName).l.exists(NonTextValidators.contains) ||
+        // `z.string().regex(/^[\w-]+\.png$/)`: text the pattern admits whole
+        validator.ast.isCall.filter(c => callName(c) == "regex").exists(
+          _.argument.filter(_.argumentIndex == 1).isLiteral.code.exists(isAnchoredPattern)
+        ))
+
+  /** A regular expression literal anchored at both ends. */
+  private def isAnchoredPattern(code: String): Boolean =
+      code.startsWith("/^") && code.replaceAll("/[a-z]*$", "").endsWith("$")
 
   /** Keys of the schema's object literal that a non-text validator types. */
   def nonTextKeys(ctx: JsContext, file: String, schema: Expression): Set[String] =
