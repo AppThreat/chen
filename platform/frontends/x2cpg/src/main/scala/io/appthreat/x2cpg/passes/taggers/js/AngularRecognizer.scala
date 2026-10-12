@@ -88,6 +88,44 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     tagHostMetadata(ctx)
     tagSinks(ctx)
     tagNavigation(ctx, di)
+    tagTemplateBindings(ctx)
+
+  /** A component's external template (`x.component.html`, by Angular's own file convention) carries
+    * bindings whose expressions are the component's own members: `[(ngModel)]="term"` writes the
+    * field `term` with whatever the user typed into the control, and `[innerHTML]="caption() |
+    * safeHtml"` reads the signal input `caption`. The template is a separate file astgen lowers;
+    * the members this bridges are the linked component's.
+    */
+  private def tagTemplateBindings(ctx: JsContext): Unit =
+    val linked = ctx.cpg.file.name(".*\\.component\\.html").l.flatMap { f =>
+      val base = f.name.substring(f.name.lastIndexOf('/') + 1).stripSuffix(".html")
+      ctx.cpg.file.name(s".*$base.ts").method.internal.nameExact("<init>").l
+          .flatMap(m => enclosingTypeDecl(m)).map(td => f.name -> td)
+    }
+    if linked.isEmpty then return
+    val inputMembers = ctx.tagger.taggedIds(INPUT).l
+        .flatMap(id =>
+            ctx.cpg.graph.node(id) match
+              case m: Member => Some(m)
+              case _         => None
+        )
+    linked.foreach { (html, td) =>
+      val inputs = inputMembers.filter(m => m.typeDecl.id() == td.id()).map(_.name).toSet
+      // `[(ngModel)]="field"`: the control writes the field with user input
+      val fields = ctx.cpg.templateDom.nameExact("JSXAttribute")
+          .where(_.file.nameExact(html))
+          .code(".*ngModel.*").l.map(_.code).flatMap(code =>
+              "=[\"']([A-Za-z_$][\\w$]*)[\"']".r.findFirstMatchIn(code).map(_.group(1))
+          ).toSet
+      fields.foreach(f => ctx.tagger.tag(thisReads(td, f), INPUT))
+      if inputs.nonEmpty then
+        val reads = ctx.cpg.method.filenameExact(html).l
+            .flatMap(_.ast.isIdentifier.nameExact(inputs.toSeq*))
+            .filterNot(isAssignmentTarget) ++
+            ctx.cpg.method.filenameExact(html).l.flatMap(_.call.nameExact(inputs.toSeq*))
+        ctx.tagger.tag(reads, INPUT)
+    }
+  end tagTemplateBindings
 
   // -----------------------------------------------------------------------------------------
   // Dependency injection
@@ -435,10 +473,11 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     // A request whose URL is not fixed by the code.
     val requests = httpCalls.flatMap { c =>
       val urlIndex = if c.name == "request" then 2 else 1
-      c.argument.filter(_.argumentIndex == urlIndex).headOption.toList.flatMap(requestSinksFor(
-        c,
-        _
-      ))
+      c.argument.filter(_.argumentIndex == urlIndex).headOption.toList.flatMap { url =>
+          // a local the URL was built into (`const endpoint = this.host + '/submitKey'`) keeps
+          // its origin's shape; judging the bare identifier would sink every such request
+          requestSinksFor(c, JsValues.origin(url))
+      }
     }
     ctx.tagger.tag(requests.iterator, RequestSink*)
   end tagHttp

@@ -357,6 +357,9 @@ object DomRecognizer extends JsFrameworkRecognizer:
           .stripPrefix("bind:")
           .stripPrefix(":")
           .stripPrefix(".")
+          // an Angular property binding's attribute code keeps its closing bracket
+          // (`innerHTML]="x"`); the name is what precedes it
+          .stripSuffix("]")
           .toLowerCase
 
   /** React 19 replaces a `javascript:` URL in `href`, `src`, `action` and `formAction` with an
