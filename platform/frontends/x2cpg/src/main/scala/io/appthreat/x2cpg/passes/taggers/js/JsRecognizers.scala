@@ -21,7 +21,7 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
     val tagged = tagger.taggedIds(JsTags.INPUT, JsTags.INGRESS).flatMap(id =>
         cpg.graph.node(id) match
           case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => Some(n.method.id())
-          case _ => None
+          case _                                                         => None
     )
     val earlier = cpg.tag.name(s"${JsTags.INPUT}|${JsTags.INGRESS}")._taggedByIn.collect {
         case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => n.method.id()

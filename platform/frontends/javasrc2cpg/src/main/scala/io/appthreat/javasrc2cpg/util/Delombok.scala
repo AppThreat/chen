@@ -37,31 +37,31 @@ object Delombok:
     */
   /** The JVM's classpath for forking a fresh `java`. sbt 2 runs forked tests in a worker whose
     * `java.class.path` only holds the sbt worker jars - the real classpath (lombok included) lives
-    * on the classloader - while sbt 1 and plain `java -cp` runs keep it in the property. Prefer
-    * the loader's URLs and fall back to the property.
+    * on the classloader - while sbt 1 and plain `java -cp` runs keep it in the property. Prefer the
+    * loader's URLs and fall back to the property.
     */
   private def currentClasspath: String =
-      val loaderCp = getClass.getClassLoader match
-          case urlLoader: java.net.URLClassLoader =>
-              urlLoader.getURLs.map(_.toExternalForm).mkString(java.io.File.pathSeparator)
-          case _ => ""
-      if loaderCp.nonEmpty then loaderCp
-      else System.getProperty("java.class.path")
+    val loaderCp = getClass.getClassLoader match
+      case urlLoader: java.net.URLClassLoader =>
+          urlLoader.getURLs.map(_.toExternalForm).mkString(java.io.File.pathSeparator)
+      case _ => ""
+    if loaderCp.nonEmpty then loaderCp
+    else System.getProperty("java.class.path")
 
   private def delombokToTempDirCommand(tempDir: File, analysisJavaHome: Option[String]) =
     val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
     val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match
-        case Success(file) =>
-            if currentClasspath.nonEmpty then
-              // Write classpath to a file to work around Windows length limits.
-              file.write(currentClasspath)
-              s"@${file.canonicalPath}"
-            else currentClasspath
-        case Failure(t) =>
-            logger.debug(
-              s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
-            )
-            currentClasspath
+      case Success(file) =>
+          if currentClasspath.nonEmpty then
+            // Write classpath to a file to work around Windows length limits.
+            file.write(currentClasspath)
+            s"@${file.canonicalPath}"
+          else currentClasspath
+      case Failure(t) =>
+          logger.debug(
+            s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
+          )
+          currentClasspath
     if classPathArg.nonEmpty then
       s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
     else ""
