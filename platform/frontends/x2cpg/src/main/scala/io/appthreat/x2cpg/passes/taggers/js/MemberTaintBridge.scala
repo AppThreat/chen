@@ -67,6 +67,12 @@ object MemberTaintBridge:
                   .filterNot(isAssignmentTarget)
                   .filterNot(isStoreReceiver)
               ctx.tagger.tagVia(readChains(reads), found.tag, found.places(value)*)
+              // and from outside, off an instance: `alerts.latest` after `new LiveAlerts()`
+              ctx.tagger.tagVia(
+                readChains(instanceReads(ctx, td, member)),
+                found.tag,
+                found.places(value)*
+              )
               templateOf.get(td.id()).foreach(html =>
                   ctx.tagger.tagVia(
                     AngularRecognizer.templateReads(ctx, html, member),
@@ -221,25 +227,84 @@ object MemberTaintBridge:
     val (tag, derived, _, _, _) = search(ctx, value)
     (tag, derived)
 
+  /** `<x>.<member>` reads where `x` holds an instance of the class: made by `new <Class>(...)` in
+    * the same file or in one importing the class.
+    */
+  private def instanceReads(ctx: JsContext, td: TypeDecl, member: String): Iterator[Call] =
+      ctx.fieldAccesses.iterator
+          .filter(fa => fieldName(fa).contains(member) && !isAssignmentTarget(fa))
+          .filter(fa =>
+              fieldBase(fa).exists {
+                  case id: Identifier if id.name != "this" =>
+                      JsValues.origin(id) match
+                        case made: Expression =>
+                            constructedClass(made).exists { name =>
+                              val file = fa.method.filename
+                              name == td.name && (td.filename == file ||
+                                  ctx.modules.resolve(file, name).exists(i =>
+                                      td.filename.contains(
+                                        i.module.dropWhile(c => c == '.' || c == '/' || c == '$')
+                                            .replaceAll("\\.(js|ts)$", "")
+                                      )
+                                  ))
+                            }
+                  case _ => false
+              }
+          )
+
+  /** The class a `new C(...)` expression constructs - lowered to a block around the `new` call. */
+  private def constructedClass(e: Expression): Option[String] =
+      "^new\\s+([A-Za-z_$][\\w$]*)\\s*\\(".r.findFirstMatchIn(e.code.trim).map(_.group(1))
+
+  /** State hooks that hand back `[value, setter]`: React's and Preact's `useState`, Solid's
+    * `createSignal`.
+    */
+  private[js] val StateHooks = Set("useState", "createSignal")
+
+  /** The calls of the setter a state hook handed back (`_tmp = useState(x); setHtml = _tmp[1]`), in
+    * the function that made it and the closures nested in it.
+    */
+  private[js] def setterCalls(hook: Call): List[Call] =
+      hook.astParent match
+        case a: Call if a.name == Operators.assignment =>
+            a.argumentOption(1).collect { case t: Identifier => t.name }.toList.flatMap { tmp =>
+                val scope = hook.method :: nestedMethods(hook.method)
+                val setter = hook.method.ast.isCall.nameExact(Operators.assignment).l.flatMap { s =>
+                    (s.argumentOption(1), s.argumentOption(2)) match
+                      case (Some(id: Identifier), Some(ia: Call))
+                          if ia.name == Operators.indexAccess && ia.code == s"$tmp[1]" =>
+                          Some(id.name)
+                      case _ => None
+                }.headOption
+                setter.toList.flatMap(name => scope.flatMap(_.ast.isCall.nameExact(name).l))
+            }
+        case _ => Nil
+
   /** Vue's ref constructors. */
   private val RefConstructors = Set("ref", "shallowRef")
 
-  /** What is written to the `value` of the ref a constructor call made (`x = ref(...)`), in the
-    * function that made it and the closures nested in it.
+  /** What is written to the ref a constructor call made (`x = ref(...)`), in the function that made
+    * it and the closures nested in it: to its `value`, or - for a Svelte `$state` - to the variable
+    * itself (`x = v`).
     */
   private def refWrites(ctor: Call): List[Expression] =
       ctor.astParent match
         case a: Call if a.name == Operators.assignment =>
+            val rune = ctor.name == "$state"
             a.argumentOption(1).collect { case id: Identifier => id.name }.toList.flatMap { name =>
                 (ctor.method :: nestedMethods(ctor.method)).flatMap(
                   _.ast.isCall.nameExact(Operators.assignment).l
-                ).flatMap { w =>
+                ).filterNot(_.id() == a.id()).flatMap { w =>
                     (w.argumentOption(1), w.argumentOption(2)) match
                       case (Some(fa: Call), Some(v))
-                          if fieldName(fa).contains("value") && fieldBase(fa).exists {
+                          if !rune && fieldName(fa).contains("value") && fieldBase(fa).exists {
                             case b: Identifier => b.name == name
                             case _             => false
                           } =>
+                          Some(v)
+                      case (Some(id: Identifier), Some(v))
+                          if rune && id.name == name && w.method.id() != ctor.method.id() &&
+                              w.method.parameter.nameExact(name).isEmpty =>
                           Some(v)
                       case _ => None
                 }
@@ -338,6 +403,16 @@ object MemberTaintBridge:
                 }
             case c: Call if c.name.startsWith("<operator>.assignment") =>
                 c.argumentOption(2).foreach(push(_))
+            // `const [html, setHtml] = useState("")`: the state is what the setter is called with
+            case c: Call if StateHooks.contains(c.name) && setterCalls(c).nonEmpty =>
+                c.astChildren.foreach(push(_))
+                setterCalls(c).flatMap(_.argument.filter(_.argumentIndex == 1).l).foreach { v =>
+                  crossed += v.id()
+                  callbackMethod(v) match
+                    // `setHtml((prev) => prev + chunk)`: what the updater returns
+                    case Some(updater) => DataLinkBridge.returnedValues(updater).foreach(push(_))
+                    case None          => push(v)
+                }
             // a derivation holds what its callback returns
             case c: Call if ReactiveBridge.isDerivationCall(c) =>
                 ReactiveBridge.derivationCallback(c).foreach { cb =>
@@ -350,9 +425,12 @@ object MemberTaintBridge:
                 }
             // `const draft = ref('')`, later `draft.value = event.data.html`: a ref holds what is
             // written to its `value` anywhere in the function that made it
-            case c: Call if RefConstructors.contains(c.name) =>
+            case c: Call if RefConstructors.contains(c.name) || c.name == "$state" =>
                 c.astChildren.foreach(push(_))
-                refWrites(c).foreach(push(_))
+                refWrites(c).foreach { v =>
+                  crossed += v.id()
+                  push(v)
+                }
             case c: Call =>
                 c.astChildren.foreach(push(_))
                 // a call of a project function - one the frontend resolved, or a bridge did

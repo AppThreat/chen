@@ -234,6 +234,11 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
                                   .filter(hasValidGenType)
                                   .l
                                   .filter(_ != null)
+                                  // a plain JavaScript call's `this` receiver is no variable of
+                                  // the caller's that the call could change
+                                  .filterNot(
+                                    io.appthreat.dataflowengineoss.queryengine.ImplicitReceiver.matches
+                                  )
                         mutable.BitSet(
                           (retVal ++ args)
                               .collect {
@@ -494,10 +499,12 @@ class ReachingDefInit(gen: Map[StoredNode, mutable.BitSet])
   override def initOut: Map[StoredNode, mutable.BitSet] = gen
 
 object ReachingDefGen:
-  /** The template operators jssrc2cpg emits (`<operator>.interpolation`, `<operator>.jsxProps`):
-    * they only read their arguments. Counting those as redefined made a template's read of one
-    * field (`{{ data.q }}`) a definition that reached every later read off the same object. In an
-    * object, not a class field: generation runs while the transfer function is constructed.
+  /** The template operators jssrc2cpg emits (`<operator>.interpolation`, `<operator>.jsxProps`) and
+    * string templates (`` `${a}/${b}` ``, f-strings): they only read their arguments. Counting
+    * those as redefined made a template's read of one field (`{{ data.q }}`) a definition that
+    * reached every later read off the same object, and a temporary file name that shares a shell
+    * command with a request value (`` `convert ${image} ${out}` ``) tainted by it. In an object,
+    * not a class field: generation runs while the transfer function is constructed.
     */
   val ReadOnlyTemplateOperators: Set[String] =
-      Set("<operator>.interpolation", "<operator>.jsxProps")
+      Set("<operator>.interpolation", "<operator>.jsxProps", "<operator>.formatString")

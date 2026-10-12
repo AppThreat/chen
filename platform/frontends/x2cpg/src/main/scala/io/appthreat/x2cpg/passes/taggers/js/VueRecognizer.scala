@@ -378,11 +378,8 @@ object VueRecognizer extends JsFrameworkRecognizer:
     def hooks(arg: Expression): List[Method] =
         // `app.directive('tooltip-html', tooltipHtml)`: the hooks object a local or an import holds
         val value = arg match
-          case id: Identifier =>
-              JsValues.origin(id) match
-                case same: Identifier => importedValue(ctx, same).getOrElse(same)
-                case other            => other
-          case other => other
+          case id: Identifier => importedValue(ctx, id).getOrElse(JsValues.origin(id))
+          case other          => other
         callbacksIn(value, DirectiveHooks) match
           case Nil => callbackMethod(arg).toList
           case hs  => hs

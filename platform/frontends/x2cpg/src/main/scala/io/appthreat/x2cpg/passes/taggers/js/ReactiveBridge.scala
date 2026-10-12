@@ -117,6 +117,7 @@ object ReactiveBridge:
             }
       }
       if bridgeCapturedParameters(ctx) then grew = true
+      if bridgeStateSetters(ctx) then grew = true
       // watch(source, (value) => ...)
       ctx.cpg.call.nameExact(Watchers.toSeq*).foreach { w =>
         val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
@@ -161,6 +162,44 @@ object ReactiveBridge:
     }
     grew
   end bridgeCapturedParameters
+
+  /** `const [html, setHtml] = useState("")`, set from a message handler: the engine has no edge
+    * from the setter's argument to the state, so where a source reaches what the setter is called
+    * with, the state's reads - in the component and the closures in it - are tagged with it.
+    * Returns whether anything new was tagged.
+    */
+  private def bridgeStateSetters(ctx: JsContext): Boolean =
+    var grew = false
+    ctx.cpg.call.nameExact(MemberTaintBridge.StateHooks.toSeq*).l.foreach { hook =>
+      if MemberTaintBridge.setterCalls(hook).nonEmpty then
+        stateVariable(hook).foreach { name =>
+          MemberTaintBridge.sourceOf(ctx, hook).foreach { found =>
+            val reads = (hook.method :: nestedMethods(hook.method))
+                .filterNot(m => m.id() != hook.method.id() && declares(m, name))
+                .flatMap(m => readsIn(m, name).l)
+            if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
+            ctx.tagger.tagVia(reads, found.tag, found.places(hook)*)
+          }
+        }
+    }
+    grew
+
+  /** The variable a state hook's value is destructured into: `html` of `_tmp = useState(x); html =
+    * _tmp[0]`.
+    */
+  private def stateVariable(hook: Call): Option[String] =
+      hook.astParent match
+        case a: Call if a.name == Operators.assignment =>
+            a.argumentOption(1).collect { case t: Identifier => t.name }.flatMap { tmp =>
+                hook.method.ast.isCall.nameExact(Operators.assignment).l.flatMap { s =>
+                    (s.argumentOption(1), s.argumentOption(2)) match
+                      case (Some(id: Identifier), Some(ia: Call))
+                          if ia.name == Operators.indexAccess && ia.code == s"$tmp[0]" =>
+                          Some(id.name)
+                      case _ => None
+                }.headOption
+            }
+        case _ => None
 
   /** The calls of a function: resolved ones, and calls by name from its own file or from a file that
     * imports it relatively or through an alias.

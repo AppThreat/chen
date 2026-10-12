@@ -145,6 +145,20 @@ object DomRecognizer extends JsFrameworkRecognizer:
               .foreach(p => ctx.tagger.tag(Iterator(p), t))
       }
     }
+    // Svelte: `<svelte:window onmessage={handler} />` (5), `on:message={handler}` (4)
+    ctx.cpg.templateDom.nameExact("JSXAttribute")
+        .filter(attr =>
+            attr.code.matches("(?s)(on:message|onmessage)\\s*=.*") &&
+                attr.astParent.isInstanceOf[TemplateDom] &&
+                attr.astParent.asInstanceOf[TemplateDom].code.startsWith("<svelte:window")
+        )
+        .l
+        .flatMap(_.ast.collect { case e: Expression => e }.l)
+        .flatMap(callbacksIn(_))
+        .distinctBy(_.id())
+        .filterNot(checksOrigin)
+        .flatMap(firstParam)
+        .foreach(p => ctx.tagger.tag(Iterator(p), INPUT))
   end tagMessageHandlers
 
   /** A message handler that compares `event.origin` by equality before using the message accepts
@@ -392,7 +406,10 @@ object DomRecognizer extends JsFrameworkRecognizer:
   private val DocumentLoaders      = Set("iframe", "frame", "script", "embed", "object")
 
   private def attributeName(code: String): String =
-      code.takeWhile(c => c != '=' && !c.isWhitespace)
+      // Svelte's shorthand `{href}` is `href={href}`
+      (if code.matches("""^\{\s*[A-Za-z_$][\w$]*\s*\}$""") then code.drop(1).dropRight(1).trim
+       else code)
+          .takeWhile(c => c != '=' && !c.isWhitespace)
           .stripPrefix("v-bind:")
           .stripPrefix("x-bind:")
           .stripPrefix("bind:")
@@ -431,14 +448,22 @@ object DomRecognizer extends JsFrameworkRecognizer:
   private def isAngularBinding(name: String): Boolean = name.startsWith("[")
 
   private def tagTemplateSinks(ctx: JsContext): Unit =
+    // the elements of the project's own components: the component decides what a prop does
+    val rendered = (ctx.elements.functions.map(_._1) ++ ctx.elements.files.map(_._1))
+        .flatMap(_.astChildren.collectAll[TemplateDom].l).map(_.id()).toSet
     val attributes = ctx.cpg.templateDom.nameExact("JSXAttribute").filter { attr =>
       val name      = attributeName(attr.code)
       val element   = elementOf(attr).getOrElse("")
       val component = isComponent(element)
+      // an attribute sits in the element's opening tag
+      val owner = attr.astParent match
+        case opening: TemplateDom if opening.name == "JSXOpeningElement" => opening.astParent
+        case parent                                                       => parent
+      !rendered.contains(owner.id()) && (
       !isAngularBinding(name) && MarkupAttributes.contains(name) ||
       (UrlBindingAttributes.contains(name) && (!component || name == "href") &&
           !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
-      (name == "src" && !component && DocumentLoaders.contains(element.toLowerCase))
+      (name == "src" && !component && DocumentLoaders.contains(element.toLowerCase)))
     }.l
     ctx.tagger.tag(boundValues(attributes), HtmlSink*)
 

@@ -149,10 +149,12 @@ object DataLinkBridge:
   def leafReads(methods: List[Method]): List[Expression] =
     def isPassThrough(e: Expression): Boolean =
         e.astParent match
+          // a base a further read continues - but not the object a method is called on
+          // (`bootstrap.value` in `bootstrap.value.slice(n)`), whose value the call consumes
           case p: Call
               if (p.name == Operators.fieldAccess || p.name == Operators.indexAccess) &&
                   p.argumentOption(1).exists(_.id() == e.id()) =>
-              true
+              p._receiverIn.isEmpty
           case a: Call if a.name == Operators.assignment =>
               a.argumentOption(2).exists(_.id() == e.id()) &&
               a.argumentOption(1).exists(_.isInstanceOf[Identifier])
