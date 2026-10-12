@@ -62,17 +62,7 @@ ThisBuild / scalacOptions ++= Seq(
   "23"
 )
 
-enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
-
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
-createDistribution := Def.uncached {
-    val distributionFile = file("target/chen.zip")
-    val zip              = (Projects.platform / (Universal / packageBin)).value
-    // sbt 2 packages to virtual-file refs; materialize via the file converter
-    IO.copyFile(fileConverter.value.toPath(zip).toFile, distributionFile)
-    println(s"created distribution - resulting files: $distributionFile")
-    distributionFile
-}
 
 ThisBuild / resolvers ++= Seq(
   Resolver.mavenLocal,
@@ -92,12 +82,18 @@ ThisBuild / assemblyMergeStrategy := {
 ThisBuild / versionScheme := Some("early-semver")
 
 ThisBuild / Test / fork       := true
-// several frontends keep JVM-global state (soot's Scene, javaparser internals,
-// shared AST caches), which concurrent suites inside one forked JVM corrupt
-ThisBuild / Test / parallelExecution := false
+// sbt 2 runs the suites of a forked test JVM in parallel by default; several
+// frontends keep JVM-global state (soot's Scene, javaparser internals, shared
+// AST caches) that concurrent suites corrupt
+ThisBuild / Test / testForkedParallel := false
+// executeTests reads it through a dynamic task, which lintUnused cannot see
+Global / excludeLintKeys += testForkedParallel
+// sbt 2 packs test classes+resources into jars (exportJars := true), which
+// turns getResource URLs into jar: URLs; keep exploded dirs so tests can read
+// resources as plain files
+ThisBuild / Test / exportJars := false
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-publish / skip   := true // don't publish the root project
 githubOwner      := "appthreat"
 githubRepository := "chen"
 
@@ -105,5 +101,19 @@ githubRepository := "chen"
 lazy val root = project
     .in(file("."))
     .aggregate(aggregatedProjects*)
+    .enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
+    .settings(
+      // sbt 2 applies bare settings to every subproject, so root-only settings
+      // must live on the root project explicitly
+      publish / skip := true, // don't publish the root project
+      createDistribution := Def.uncached {
+          val distributionFile = file("target/chen.zip")
+          val zip              = (Projects.platform / (Universal / packageBin)).value
+          // sbt 2 packages to virtual-file refs; materialize via the file converter
+          IO.copyFile(fileConverter.value.toPath(zip).toFile, distributionFile)
+          println(s"created distribution - resulting files: $distributionFile")
+          distributionFile
+      }
+    )
 
 ThisBuild / Test / packageBin / publishArtifact := true

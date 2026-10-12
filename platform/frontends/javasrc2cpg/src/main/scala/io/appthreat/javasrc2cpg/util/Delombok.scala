@@ -31,37 +31,41 @@ object Delombok:
           }
           .getOrElse("java")
 
-  /** The test/forked JVM's classpath. sbt 2 runs forked tests with a custom classloader, so
-    * `java.class.path` is empty there; fall back to the loader's URLs (real files), which a fresh
-    * `java` process can use as its `-cp`.
+  /** The classpath for the forked delombok `java`: this JVM's `java.class.path`, plus the jar
+    * holding lombok when the property does not already name it. sbt 2 runs forked tests in a worker
+    * whose `java.class.path` only holds the sbt worker jars (the test classpath lives on a
+    * classloader); packaged and plain `java -cp` runs already carry lombok, directly or through a
+    * launcher jar's manifest, where the extra entry is harmless.
     */
-  /** The JVM's classpath for forking a fresh `java`. sbt 2 runs forked tests in a worker whose
-    * `java.class.path` only holds the sbt worker jars - the real classpath (lombok included) lives
-    * on the classloader - while sbt 1 and plain `java -cp` runs keep it in the property. Prefer the
-    * loader's URLs and fall back to the property.
-    */
-  private def currentClasspath: String =
-    val loaderCp = getClass.getClassLoader match
-      case urlLoader: java.net.URLClassLoader =>
-          urlLoader.getURLs.map(_.toExternalForm).mkString(java.io.File.pathSeparator)
-      case _ => ""
-    if loaderCp.nonEmpty then loaderCp
-    else System.getProperty("java.class.path")
+  private lazy val forkClasspath: String =
+    val separator = java.io.File.pathSeparator
+    val property  = Option(System.getProperty("java.class.path")).getOrElse("")
+    val entries   = property.split(separator).filter(_.nonEmpty).toSeq
+    val lombokJar = Try {
+        val location = Class
+            .forName("lombok.launch.Main", false, getClass.getClassLoader)
+            .getProtectionDomain
+            .getCodeSource
+            .getLocation
+        Paths.get(location.toURI).toAbsolutePath.toString
+    }.toOption
+    val listed = entries.map(e => Try(Paths.get(e).toAbsolutePath.toString).getOrElse(e)).toSet
+    (entries ++ lombokJar.filterNot(listed.contains)).mkString(separator)
 
   private def delombokToTempDirCommand(tempDir: File, analysisJavaHome: Option[String]) =
     val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
     val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match
       case Success(file) =>
-          if currentClasspath.nonEmpty then
+          if forkClasspath.nonEmpty then
             // Write classpath to a file to work around Windows length limits.
-            file.write(currentClasspath)
+            file.write(forkClasspath)
             s"@${file.canonicalPath}"
-          else currentClasspath
+          else forkClasspath
       case Failure(t) =>
           logger.debug(
             s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
           )
-          currentClasspath
+          forkClasspath
     if classPathArg.nonEmpty then
       s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
     else ""

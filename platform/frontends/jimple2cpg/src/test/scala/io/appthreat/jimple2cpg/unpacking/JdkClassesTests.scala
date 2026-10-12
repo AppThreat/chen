@@ -3,7 +3,6 @@ package io.appthreat.jimple2cpg.unpacking
 import io.appthreat.jimple2cpg.testfixtures.JimpleCodeToCpgFixture
 import io.appthreat.jimple2cpg.util.JdkClasses
 import io.appthreat.jimple2cpg.{Config, Jimple2Cpg}
-import io.appthreat.x2cpg.testfixtures.TestResources
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 import org.scalatest.BeforeAndAfterAll
@@ -27,7 +26,7 @@ class JdkClassesTests extends AnyWordSpec with Matchers with BeforeAndAfterAll:
 
   override protected def beforeAll(): Unit =
     super.beforeAll()
-    val src = TestResources.extractDirectory("/jdkclasses")(using getClass)
+    val src = Paths.get(getClass.getResource("/jdkclasses").toURI)
     classesDir = Files.createTempDirectory("jdkclasses-classes")
     compile(src, classesDir)
     jarFile = Files.createTempDirectory("jdkclasses-jar").resolve("demo.jar")

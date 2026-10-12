@@ -6,7 +6,6 @@ import io.appthreat.dataflowengineoss.queryengine.summaries.FlowSummaryComputer
 import io.appthreat.jimple2cpg.testfixtures.JimpleCodeToCpgFixture
 import io.appthreat.jimple2cpg.util.JImage
 import io.appthreat.jimple2cpg.{Config, Jimple2Cpg}
-import io.appthreat.x2cpg.testfixtures.TestResources
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
@@ -29,7 +28,7 @@ import scala.util.Using
   */
 class NativeMethodTests extends AnyWordSpec with Matchers with BeforeAndAfterAll:
 
-  private val resources     = TestResources.extractDirectory("/nativemethods")(using getClass)
+  private val resources     = Paths.get(getClass.getResource("/nativemethods").toURI)
   private var dexCpg: Cpg   = uninitialized
   private var classCpg: Cpg = uninitialized
   private var workDir: File = uninitialized

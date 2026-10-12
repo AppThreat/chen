@@ -12,9 +12,8 @@ enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 trapExit                      := false
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-@transient val javaCCTask = taskKey[Seq[File]]("Generate compiler code with JavaCC")
-javaCCTask / fileInputs += baseDirectory.value.toGlob / "pythonGrammar.jj"
-javaCCTask := {
+val javaCCTask = taskKey[Seq[File]]("Generate compiler code with JavaCC")
+javaCCTask := Def.uncached {
     import org.javacc.parser.{Main as JavaCCMain}
     val outputDir   = (Compile / sourceManaged).value / "io" / "appthreat" / "pythonparser"
     val grammarFile = baseDirectory.value / "pythonGrammar.jj"

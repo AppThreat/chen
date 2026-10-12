@@ -52,8 +52,8 @@ Universal / mappings ++= frontendMappings("pysrc2cpg", (Projects.pysrc2cpg / sta
   fileConverter.value
 )
 
-@transient lazy val cpgVersionFile = taskKey[File]("persist cpg version in file (e.g. for schema-extender)")
-cpgVersionFile := {
+lazy val cpgVersionFile = taskKey[File]("persist cpg version in file (e.g. for schema-extender)")
+cpgVersionFile := Def.uncached {
     val ret = target.value / "cpg-version"
     better.files
         .File(ret.getPath)
@@ -62,65 +62,6 @@ cpgVersionFile := {
     ret
 }
 Universal / mappings += fileConverter.value.toVirtualFile(cpgVersionFile.value.toPath) -> "schema-extender/cpg-version"
-
-@transient lazy val generateScaladocs = taskKey[File]("generate scaladocs from combined project sources")
-generateScaladocs := {
-    import better.files.*
-    import java.io.{File as JFile}
-    import sbt.internal.inc.AnalyzingCompiler
-    import sbt.internal.util.Attributed.data
-    import net.lingala.zip4j.ZipFile
-
-    val updateReport = updateClassifiers.value
-    val s            = streams.value
-    val out          = target.value / "api"
-
-    val sOpts =
-        Seq("-language:implicitConversions", "-doc-root-content", "api-doc-root.txt", "-implicits")
-
-    val cp = data((Compile / dependencyClasspath).value).toList
-
-    val inputFilesRelativeDir = target.value / "inputFiles"
-    val inputFiles = File(inputFilesRelativeDir.toString)
-    if (inputFiles.exists) inputFiles.delete()
-    inputFiles.createDirectory()
-
-    /* extract sources-jar dependencies */
-    List("cpg2", "semanticcpg").foreach { projectName =>
-        val jar =
-            SbtHelper.findJar(s"${projectName}_3", updateReport, SbtHelper.JarClassifier.Sources)
-        new ZipFile(jar).extractAll(inputFiles.pathAsString)
-    }
-
-    val srcs: Seq[JFile] =
-        inputFiles.listRecursively
-            .filter { file =>
-                file.extension.contains(".java") || file.extension.contains(".scala")
-            }
-            .map(_.toJava)
-            .toSeq
-
-    // adapted from sbt 2's Defaults.docTaskSettings: Scaladoc only accepts
-    // plain (real) files, so wrap paths in PlainVirtualFile
-    val converter = fileConverter.value
-    val xapis     = apiMappings.value
-    val options   = sOpts ++ Opts.doc.externalAPI(xapis.map { (k, v) =>
-        converter.toPath(k).toFile() -> v
-    })
-    compilers.value.scalac match
-        case ac: AnalyzingCompiler =>
-            ac.doc(
-              srcs.map(_.toPath()).map(new sbt.internal.inc.PlainVirtualFile(_)),
-              cp.map(converter.toPath).map(new sbt.internal.inc.PlainVirtualFile(_)),
-              converter,
-              out.toPath(),
-              options,
-              maxErrors.value,
-              s.log,
-            )
-
-    out
-}
 
 Universal / packageBin / mappings ++= {
     val converter = fileConverter.value
