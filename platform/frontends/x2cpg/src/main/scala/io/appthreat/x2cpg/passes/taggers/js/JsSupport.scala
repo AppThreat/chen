@@ -80,12 +80,20 @@ final class JsTagger(
     */
   def resolveCall(call: Call, method: Method): Unit =
       if memo.add((call.id(), s"<call>${method.id()}")) then
+        resolutions.update(method.id(), call :: resolutions.getOrElse(method.id(), Nil))
         dstGraph.addEdge(call, method, io.shiftleft.codepropertygraph.generated.EdgeTypes.CALL)
         dstGraph.setNodeProperty(
           call,
           io.shiftleft.codepropertygraph.generated.PropertyNames.METHOD_FULL_NAME,
           method.fullName
         )
+
+  /** Call sites resolved to a method this run. The CALL edge lands in the graph only when the pass
+    * ends, so a same-run reader (a bridge deciding what a parameter carries) consults this.
+    */
+  val resolutions: mutable.HashMap[Long, List[Call]] = mutable.HashMap.empty
+
+  def callSitesOf(method: Method): List[Call] = resolutions.getOrElse(method.id(), Nil)
 
   /** Ids of the nodes this run tagged with any of `names`. */
   def taggedIds(names: String*): Iterator[Long] =

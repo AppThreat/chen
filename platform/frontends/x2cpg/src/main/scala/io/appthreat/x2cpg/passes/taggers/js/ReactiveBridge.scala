@@ -12,17 +12,16 @@ import JsShapes.*
   * flow no call edge carries.
   *
   * `computed(() => route.params.id)` (Vue, Angular), `useMemo` (React), `createMemo` (Solid),
-  * `useComputed$` (Qwik), `linkedSignal` (Angular): the wrapper's result is a source when its
-  * callback's return value is, and so are its reads in the function that made it and in the
-  * closures that capture it. `watch(source, (value) => ...)` hands the watched value to its
-  * callback.
+  * `useComputed$` (Qwik), `linkedSignal` (Angular), `useState(key, () => ...)` (Nuxt): the
+  * wrapper's result is a source when its callback's return value is, and so is the wrapper CALL
+  * ITSELF - a composable that returns a derivation (`return computed(...)`) hands the taint to
+  * every caller through its return value. `watch(source, (value) => ...)` hands the watched value
+  * to its callback.
   *
   * Captured variables: the dataflow engine links an outer variable to its reads inside closures
-  * where the frontend records the capture, but a module-level binding - all of a Vue `<script
-  * setup>` block, a plain script's top level - is no closure binding, and its reads inside
-  * functions start untainted. A local whose value comes from a source makes its captured reads
-  * sources of the same kind. Where the engine does link the capture, the flow from the read is a
-  * suffix of the full flow and is deduplicated away by reachables.
+  * only within the enclosing method's dependence graph - a walk that starts at a sink inside the
+  * closure never crosses that link. A local whose value comes from a source therefore makes its
+  * captured reads sources of the same kind.
   *
   * Repeats until nothing new is found, since a derived value may feed another.
   */
@@ -38,15 +37,20 @@ object ReactiveBridge:
     "toRef",
     // React 19: the state is what the action returned
     "useActionState",
-    "useFormState"
+    "useFormState",
+    // Nuxt: the state's initial value is what the init callback returns
+    "useState"
   )
 
   def isDerivationCall(c: Call): Boolean = Derivations.contains(callName(c))
 
-  /** The callback a derivation evaluates: its first argument. */
+  /** The callback a derivation evaluates: its first function-valued argument (`computed(fn)`, and
+    * Nuxt's `useState(key, fn)` where the callback is the second argument).
+    */
   def derivationCallback(c: Call): Option[Method] =
-      c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
-          .flatMap(callbackMethod)
+      c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
+          .flatMap(a => callbackMethod(a))
+          .headOption
 
   private val Watchers = Set("watch")
 
@@ -74,6 +78,7 @@ object ReactiveBridge:
 
   def run(ctx: JsContext): Unit =
     tagSanitizingDerivations(ctx)
+    tagTaintedDerivationCalls(ctx)
     // A local can only be tainted where its own method holds a source (the search for one stays
     // inside the method) or a derivation, whose callback may.
     val withSources =
@@ -100,6 +105,10 @@ object ReactiveBridge:
             tainted.foreach { tagName =>
               done += ((method.id(), name))
               grew = true
+              // The engine links an outer variable to its reads inside closures only inside
+              // the ENCLOSING method's dependence graph; a walk that starts at a sink inside
+              // the closure never crosses that edge, so the captured read is a source of its
+              // own.
               ctx.tagger.tag(capturedReads(ctx, method, name), tagName)
               // A derived value is a new value in its own method too: `const c = computed(...)`
               // and every later `c.value` there start from the wrapper call.
@@ -123,6 +132,17 @@ object ReactiveBridge:
       }
     end while
   end run
+
+  /** A derivation call whose callback returns a source is itself a source: the wrapper holds that
+    * value. Tagging the call - not only reads of a local it was assigned to - carries the taint out
+    * of the defining function, to whatever consumes the composable's return value elsewhere.
+    */
+  private def tagTaintedDerivationCalls(ctx: JsContext): Unit =
+      ctx.cpg.call.filter(isDerivationCall).foreach { d =>
+          derivationCallback(d).foreach { cb =>
+              returnTaint(ctx, cb).foreach(tag => ctx.tagger.tag(Iterator(d), tag))
+          }
+      }
 
   private def isDerivation(value: Expression): Boolean =
       JsShapes.unwrap(value) match

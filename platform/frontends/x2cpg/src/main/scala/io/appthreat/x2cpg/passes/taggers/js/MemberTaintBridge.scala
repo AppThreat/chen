@@ -38,8 +38,9 @@ object MemberTaintBridge:
   private val MaxVisits = 400
 
   def run(ctx: JsContext): Unit =
-    val writes = memberWrites(ctx)
-    if writes.isEmpty then return
+    val classWrites = memberWrites(ctx)
+    val localWrites = localRefWrites(ctx)
+    if classWrites.isEmpty && localWrites.isEmpty then return
     val done  = mutable.HashSet.empty[(String, String)]
     var round = 0
     var grew  = true
@@ -47,7 +48,7 @@ object MemberTaintBridge:
       grew = false
       round += 1
       val withSources = ctx.methodsWithSources
-      writes.foreach { case (td, member, value) =>
+      classWrites.foreach { case (td, member, value) =>
           if !done.contains((td.fullName, member)) && withSources.contains(value.method.id()) then
             sourceTagOf(ctx, value).foreach { tagName =>
               done += ((td.fullName, member))
@@ -61,7 +62,66 @@ object MemberTaintBridge:
               ctx.tagger.tag(readChains(reads), tagName)
             }
       }
+      localWrites.foreach { case (declMethod, local, member, value) =>
+          val key = (declMethod.fullName + "|" + local, member)
+          if !done.contains(key) then
+            sourceTagOf(ctx, value).foreach { tagName =>
+              done += key
+              grew = true
+              val reads = JsIndexes
+                  .methodsUnder(ctx.cpg.graph, declMethod.fullName + ":")
+                  .iterator
+                  .flatMap(_.ast.isCall.nameExact(Operators.fieldAccess))
+                  .filter(c =>
+                      fieldName(c).contains(member) && fieldBase(c).exists {
+                          case id: Identifier => id.name == local
+                          case _              => false
+                      } && !isAssignmentTarget(c)
+                  )
+              ctx.tagger.tag(readChains(reads), tagName)
+            }
+      }
+    end while
   end run
+
+  /** Writes through a CAPTURED LOCAL that holds a reactive container - `term.value = v` on a ref,
+    * `q.set(v)` / `q.next(v)` on a signal or subject - in a method that closes over the local. Like
+    * a class field, the container's value crosses methods only through this bridge. The owner is
+    * the innermost method that binds the local (assigns it, takes it as a parameter, or the module
+    * top level); the reads tagged are `<local>.<member>` in it and the methods nested under it.
+    */
+  private def localRefWrites(ctx: JsContext): List[(Method, String, String, Expression)] =
+    def declaringMethod(name: String, m: Method): Method =
+      def binds(mid: Method): Boolean =
+          mid.parameter.nameExact(name).nonEmpty || JsIndexes.assignedValues(mid, name).nonEmpty
+      val segments = m.fullName.split(':')
+      // innermost binding first, so a shadowing declaration wins; the write's method included
+      (segments.length to 1 by -1).iterator
+          .map(n => JsIndexes.methodByFullName(m.graph, segments.take(n).mkString(":")))
+          .collectFirst { case Some(mid) if binds(mid) => mid }
+          .getOrElse(m)
+    val assignments = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+        (a.argumentOption(1), a.argumentOption(2)) match
+          // x.value = v, x.<member> = v on a local of an enclosing scope
+          case (Some(fa: Call), Some(v)) if fa.name == Operators.fieldAccess =>
+              (fieldBase(fa), fieldName(fa)) match
+                case (Some(id: Identifier), Some(field))
+                    if id.name != "this" && !id.name.startsWith("_tmp_") =>
+                    Some((declaringMethod(id.name, a.method), id.name, field, v))
+                case _ => None
+          case _ => None
+    }
+    val stores = ctx.cpg.call.filter(c => StoringMethods.contains(c.name)).l.flatMap { c =>
+        receiverOf(c) match
+          case Some(id: Identifier)
+              if id.name != "this" && !id.name.startsWith("_tmp_") =>
+              c.argument.filter(_.argumentIndex == 1).headOption.map(v =>
+                  (declaringMethod(id.name, c.method), id.name, "value", v)
+              )
+          case _ => None
+    }
+    assignments ++ stores
+  end localRefWrites
 
   /** (class, field, value written) for every field write in a class. */
   private def memberWrites(ctx: JsContext): List[(TypeDecl, String, Expression)] =
@@ -140,6 +200,12 @@ object MemberTaintBridge:
       val node = queue.dequeue()
       if seen.add(node.id()) && !isImport(node) then
         found = tagOf(node)
+        if found.isDefined then
+          // a tag on a derivation call is the derivation's own doing (ReactiveBridge tags the
+          // wrapper): the value behind this one is still a derivation's result
+          node match
+            case c: Call if ReactiveBridge.isDerivationCall(c) => derived = true
+            case _                                             =>
         if found.isEmpty then
           node match
             case id: Identifier =>
@@ -150,13 +216,28 @@ object MemberTaintBridge:
                             a.argumentOption(1).exists(_.code == id.name) =>
                         a.argumentOption(2).foreach(queue.enqueue(_))
                     // `x` assigned as `x = v` is the definition node `x` itself in some lowerings
-                    case d: Identifier if d.name == id.name && isAssignmentTarget(d) =>
+                    case d: Identifier if d.name == id.name =>
                         d.astParent match
-                          case a: Call => a.argumentOption(2).foreach(queue.enqueue(_))
-                          case _       =>
+                          case a: Call if a.name.startsWith("<operator>.assignment") =>
+                              a.argumentOption(2).foreach(queue.enqueue(_))
+                          // a same-named identifier whose reaching definitions are the def chain
+                          case _ =>
+                              d._reachingDefIn.collect { case n: AstNode => n }.foreach(
+                                queue.enqueue(_)
+                              )
                     case _ =>
                 }
-            case _: MethodParameterIn => // a source only if tagged
+            case p: MethodParameterIn =>
+                // a parameter of a resolved callee is as tainted as the argument a caller passes:
+                // `store.setTerm(route.query.term)` makes setTerm's `value` carry what the caller
+                // had. The CALL edges this run added are not in the graph yet - the tagger's own
+                // record of them is.
+                (p.method._callIn.l.collect {
+                    case c: io.shiftleft.codepropertygraph.generated.nodes.Call => c
+                } ++ ctx.tagger.callSitesOf(p.method)).foreach { call =>
+                    call.argument.collectFirst { case a if a.argumentIndex == p.index => a }
+                        .foreach(arg => queue.enqueue(arg))
+                }
             case c: Call if c.name.startsWith("<operator>.assignment") =>
                 c.argumentOption(2).foreach(queue.enqueue(_))
             // what comes out of a sanitiser or a predicate is not the source any more
