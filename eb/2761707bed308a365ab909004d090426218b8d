@@ -1,0 +1,32 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/PackageAttribution.scala
+  s_d1bd8c782538f7::t_a51bae0ece64ad 1-60,62-121
+  s_d1bd8c782538f7::t_d2894e67cc94d2 61
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_d1bd8c782538f7::t_1f15ea1c9d4839 265-284,291-300
+  s_d1bd8c782538f7::t_72286f2b33a760 285-290
+  s_d1bd8c782538f7::t_783e9ffe121053 214-217,535-544
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_d1bd8c782538f7::t_1f15ea1c9d4839 69-75
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_d1bd8c782538f7::t_1f15ea1c9d4839 88-92
+docs/lessons/lesson-4-jssrc2cpg.md
+  s_d1bd8c782538f7::t_9463450b11205a 269,294-300,328-337
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_d1bd8c782538f7::t_e11bde6b93bb3d 261-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eb2761707bed308a365ab909004d090426218b8d",
+  "prompts": {},
+  "sessions": {
+    "s_d1bd8c782538f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6debb108-9d35-4adc-be40-7d01dd8e9337",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
