@@ -43,8 +43,10 @@ object JsTags:
     */
   val PREDICATE: String = "predicate"
 
-  /** True for a call this run or an earlier pass tagged as neutralising. */
-  def neutralises(tagger: JsTagger, c: Call): Boolean =
+  /** True for a node this run or an earlier pass tagged as neutralising: a sanitising or predicate
+    * call, or a read a guard has validated.
+    */
+  def neutralises(tagger: JsTagger, c: StoredNode): Boolean =
       tagger.has(c.id(), SANITIZER) || tagger.has(c.id(), PREDICATE) ||
           c.tag.name.exists(n => n == SANITIZER || n == PREDICATE)
 
@@ -731,6 +733,20 @@ object JsShapes:
       e match
         case b: Block => b.code.trim.startsWith("{")
         case _        => false
+
+  /** An object literal's own properties - `{ a: v, b }` lowers to a block of writes `_tmp.a = v`,
+    * `_tmp.b = b` ending in the temporary - or None where a spread or a computed key puts members
+    * there that the code does not name.
+    */
+  def objectProperties(literal: Block): Option[Map[String, Expression]] =
+    val writes = literal.astChildren.collect { case c: Call => c }.l.map { c =>
+        (c.name, c.argumentOption(1), c.argumentOption(2)) match
+          case (Operators.assignment, Some(fa: Call), Some(v))
+              if fieldBase(fa).exists(_.code.startsWith("_tmp_")) =>
+              fieldName(fa).map(_ -> v)
+          case _ => None
+    }
+    Option.when(writes.forall(_.nonEmpty))(writes.flatten.toMap)
 
   /** The value written by an assignment. */
   def assignedValue(assignment: Call): Option[Expression] = assignment.argumentOption(2)

@@ -138,7 +138,7 @@ object MemberTaintBridge:
   end localRefWrites
 
   /** (class, field, value written) for every field write in a class. */
-  private def memberWrites(ctx: JsContext): List[(TypeDecl, String, Expression)] =
+  private[js] def memberWrites(ctx: JsContext): List[(TypeDecl, String, Expression)] =
     val assignments = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
         (a.argumentOption(1), a.argumentOption(2)) match
           // this.x = v
@@ -264,7 +264,7 @@ object MemberTaintBridge:
           node match
             case c: Call if ReactiveBridge.isDerivationCall(c) => derived = true
             case _                                             =>
-        if here.isEmpty then
+        if here.isEmpty && !JsTags.neutralises(ctx.tagger, node) then
           node match
             // a definition reached through another read's definitions: what it was assigned
             case id: Identifier if isAssignmentTarget(id) =>
@@ -306,8 +306,6 @@ object MemberTaintBridge:
                 }
             case c: Call if c.name.startsWith("<operator>.assignment") =>
                 c.argumentOption(2).foreach(push(_))
-            // what comes out of a sanitiser or a predicate is not the source any more
-            case c: Call if JsTags.neutralises(ctx.tagger, c) =>
             // a derivation holds what its callback returns
             case c: Call if ReactiveBridge.isDerivationCall(c) =>
                 ReactiveBridge.derivationCallback(c).foreach { cb =>

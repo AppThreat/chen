@@ -441,6 +441,18 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     rendered.iterator.newTagNode("framework-output").store()(using dstGraph)
     rendered.iterator.newTagNode("xss").store()(using dstGraph)
 
+  /** A database call whose statement is constant, so that what else it is given is bound as
+    * parameters: `db.query("SELECT ... WHERE id = $1", [id])`, and a statement prepared from a
+    * constant run with arguments - `db.prepare("... LIKE ?").all(term)`.
+    */
+  private def bindsParameters(c: Call): Boolean =
+    def constantFirstArgument(call: Call): Boolean =
+        call.argument.filter(_.argumentIndex == 1).headOption.exists(_.isInstanceOf[Literal])
+    constantFirstArgument(c) || js.JsShapes.receiverOf(c).exists {
+        case p: Call => js.JsShapes.callName(p) == "prepare" && constantFirstArgument(p)
+        case _       => false
+    }
+
   /** `` db.sql`... ${x}` `` - lowered to `db.sql(<operator>.formatString(...))` - binds the values.
     */
   private def isTaggedTemplate(c: Call): Boolean =
@@ -461,7 +473,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
               matches(JsSdkVerb, c) && !isNotSdkClient(c)
             else
               !c.name.startsWith("<operator>") &&
-              (matches(JsResponseCall, c) || matches(JsDatabaseCall, c) && !isTaggedTemplate(c))
+              (matches(JsResponseCall, c) ||
+                  matches(JsDatabaseCall, c) && !isTaggedTemplate(c) && !bindsParameters(c))
         }
         .newTagNode("framework-output")
         .store()(using dstGraph)

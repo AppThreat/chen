@@ -4,7 +4,13 @@ import io.appthreat.jssrc2cpg.parser.BabelNodeInfo
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
-import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewMethodRef, NewTypeRef}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+  NewBlock,
+  NewCall,
+  NewIdentifier,
+  NewMethodRef,
+  NewTypeRef
+}
 import ujson.Obj
 
 object AstForTemplateDomCreator:
@@ -69,7 +75,8 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
 
   /** `<RichText html={bio} title="About" {...rest} />` lowered to `RichText(<props>)`, where
     * `<props>` is a [[JsxPropsOperator]] call over every value the code computes - `bio`, `rest` -
-    * since the component receives them all in its one props object. Constant attributes carry
+    * since the component receives them all in its one props object. Each value is named by its
+    * prop (`bio` is the argument named `html`); a spread is unnamed. Constant attributes carry
     * nothing and are left out. The value expressions are lowered a second time for the call; the
     * originals stay under the attribute template nodes, where the template sinks are tagged.
     */
@@ -78,20 +85,22 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
         .flatMap(_.get("attributes"))
         .collect { case attrs: ujson.Arr => attrs.value.toList }
         .getOrElse(Nil)
+    // each value with the prop it is passed as; a spread passes props the code does not name
     val values = attributes.flatMap { attr =>
         safeStr(attr, "type") match
           // `{...rest}` passes every prop of `rest`
-          case Some("JSXSpreadAttribute") => attr.obj.get("argument").toList
+          case Some("JSXSpreadAttribute") => attr.obj.get("argument").toList.map(None -> _)
           // `html={bio}`; a boolean attribute (`replace`) has no value, `title="About"` a constant
           case Some("JSXAttribute") =>
+              val name = safeObj(attr, "name").flatMap(safeStr(_, "name"))
               attr.obj.get("value").toList.flatMap {
                   case container: ujson.Obj
                       if safeStr(container, "type").contains("JSXExpressionContainer") =>
-                      container.obj.get("expression").toList
+                      container.obj.get("expression").toList.map(name -> _)
                   case _ => Nil
               }
           case _ => Nil
-    }.filterNot(v =>
+    }.filterNot((_, v) =>
         safeStr(v, "type").exists(t =>
             Set(
               "StringLiteral",
@@ -103,11 +112,24 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
                 .contains(t)
         )
     )
-    val valueAsts = values.map(v => astForNodeWithFunctionReference(v))
+    // the prop's name is the argument's name, for the bridges that follow one prop
+    val valueAsts = values.map { (name, v) =>
+      val ast = astForNodeWithFunctionReference(v)
+      name.foreach(n =>
+          ast.root.foreach {
+              case e: NewIdentifier => e.argumentName = Some(n)
+              case e: NewCall       => e.argumentName = Some(n)
+              case e: NewBlock      => e.argumentName = Some(n)
+              case e: NewMethodRef  => e.argumentName = Some(n)
+              case _                =>
+          }
+      )
+      ast
+    }
     val propsCall = NewCall()
         .name(JsxPropsOperator)
         .methodFullName(JsxPropsOperator)
-        .code(values.map(v => createBabelNodeInfo(v).code).mkString("{", ", ", "}"))
+        .code(values.map((_, v) => createBabelNodeInfo(v).code).mkString("{", ", ", "}"))
         .dispatchType(DispatchTypes.STATIC_DISPATCH)
         .argumentIndex(1)
         .order(1)

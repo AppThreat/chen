@@ -601,8 +601,12 @@ object DomRecognizer extends JsFrameworkRecognizer:
   // Sanitisers
   // -----------------------------------------------------------------------------------------
 
-  /** HTML sanitiser libraries, keyed by package, with the call that sanitises. */
+  /** HTML sanitiser libraries, keyed by package, with the call that sanitises - and
+    * `@braintree/sanitize-url`, which turns a `javascript:`, `data:` or `vbscript:` URL into
+    * `about:blank`: no script runs from a link or a frame it fills.
+    */
   private val HtmlSanitizers: Seq[(String, Set[String])] = Seq(
+    "@braintree/sanitize-url" -> Set("sanitizeUrl"),
     "dompurify"            -> Set("sanitize"),
     "isomorphic-dompurify" -> Set("sanitize"),
     "sanitize-html"        -> Set("sanitizeHtml", "sanitize-html"),

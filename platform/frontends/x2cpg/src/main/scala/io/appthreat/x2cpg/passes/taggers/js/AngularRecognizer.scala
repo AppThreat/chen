@@ -91,6 +91,140 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     tagTemplateBindings(ctx)
 
   private val TemplateUrl = """templateUrl\s*:\s*['"`]([^'"`]+)['"`]""".r
+  private val Selector    = """selector\s*:\s*['"`]([^'"`]+)['"`]""".r
+  private val Binding     = """\[\(?([\w$]+)\)?\]\s*=\s*"([^"]*)"""".r
+  private val InputAlias  = """(?:alias\s*:\s*|@Input\(\s*)['"`]([\w$-]+)['"`]""".r
+  private val LeadingName = """^\s*(?:this\.)?([A-Za-z_$][\w$]*)""".r
+
+  /** Components and directives by what their selector matches: an element name (`app-rich-text`),
+    * or an attribute (`[appHighlight]`).
+    */
+  private def selectors(ctx: JsContext): List[(TypeDecl, Either[String, String])] =
+      ctx.cpg.annotation.nameExact("Component", "Directive").l.flatMap { annotation =>
+          annotation.astParent match
+            case td: TypeDecl =>
+                Selector.findFirstMatchIn(annotation.code).toList
+                    .flatMap(_.group(1).split(',').map(_.trim))
+                    .flatMap {
+                        case e if e.matches("[a-z][\\w-]*")    => Some(td -> Left(e))
+                        case a if a.matches("\\[[\\w$-]+\\]") => Some(td -> Right(a.drop(1).dropRight(1)))
+                        case _                                    => None
+                    }
+            case _ => None
+      }
+
+  /** The template text of each component: the inline `template`, or the elements of its
+    * `templateUrl` file.
+    */
+  private def templateTexts(ctx: JsContext): List[(TypeDecl, String)] =
+    val external = componentTemplates(ctx).map((td, html) =>
+        td -> ctx.cpg.templateDom.nameExact("JSXElement").where(_.file.nameExact(html)).code.l
+            .mkString("\n")
+    )
+    val inline = ctx.cpg.annotation.nameExact("Component").l.flatMap { annotation =>
+        annotation.astParent match
+          case td: TypeDecl if annotation.code.contains("template:") => Some(td -> annotation.code)
+          case _                                                      => None
+    }
+    external ++ inline
+
+  /** The member each binding name of a class's inputs stands for: the member's own name, or the
+    * alias it is declared with (`@Input('promoHtml')`, `@Input({ alias: 'promoHtml' })`,
+    * `input('', { alias: 'promoHtml' })`).
+    */
+  private def inputNames(ctx: JsContext, td: TypeDecl): Map[String, String] =
+    val initialisers = MemberTaintBridge.memberWrites(ctx).filter(_._1.id() == td.id())
+        .groupMap(_._2)(_._3.code)
+    val annotated = ctx.cpg.annotation.nameExact("Input").l.flatMap { a =>
+        a.astParent match
+          case m: Member if m.typeDecl.id() == td.id() => Some(m.name -> a.code)
+          case m: Method if enclosingTypeDecl(m).exists(_.id() == td.id()) =>
+              Some(m.name -> a.code)
+          case _ => None
+    }
+    (annotated ++ initialisers.toList.flatMap((name, codes) => codes.map(name -> _)))
+        .flatMap((name, code) => InputAlias.findFirstMatchIn(code).map(_.group(1) -> name))
+        .toMap
+
+  /** The inputs a parent's template binds on another component or directive: (the child, the
+    * input member, the parent, the bound expression's text).
+    */
+  private def templateBindings(ctx: JsContext): List[(TypeDecl, String, TypeDecl, String)] =
+    val bySelector = selectors(ctx)
+    if bySelector.isEmpty then return Nil
+    val aliases = mutable.HashMap.empty[Long, Map[String, String]]
+    def member(child: TypeDecl, bound: String) =
+        aliases.getOrElseUpdate(child.id(), inputNames(ctx, child)).getOrElse(bound, bound)
+    templateTexts(ctx).flatMap { (parent, text) =>
+        bySelector.flatMap {
+            case (child, Left(element)) =>
+                ("(?s)<" + java.util.regex.Pattern.quote(element) + "(\\s[^>]*)?>").r
+                    .findAllMatchIn(text).toList.flatMap(m =>
+                        Binding.findAllMatchIn(Option(m.group(1)).getOrElse("")).map(b =>
+                            (child, member(child, b.group(1)), parent, b.group(2))
+                        )
+                    )
+            case (child, Right(attribute)) =>
+                ("\\[" + java.util.regex.Pattern.quote(attribute) + "\\]\\s*=\\s*\"([^\"]*)\"").r
+                    .findAllMatchIn(text).toList
+                    .map(b => (child, member(child, attribute), parent, b.group(1)))
+        }
+    }
+
+  /** True when a bound expression is a member of the parent - whose value the bridge can follow -
+    * or a constant.
+    */
+  private def isFollowable(parent: TypeDecl, expr: String): Boolean =
+      expr.trim.matches("""'[^']*'|-?\d+(\.\d+)?|true|false|null""") ||
+          LeadingName.findFirstMatchIn(expr).map(_.group(1)).exists(name =>
+              parent.member.nameExact(name).nonEmpty || classMethods(parent).exists(_.name == name)
+          )
+
+  /** Components and directives some template renders, and of their inputs those a parent binds to
+    * something the bridge cannot follow (a template variable, `@if (product(); as p)`): those stay
+    * sources.
+    */
+  private def fedInputs(ctx: JsContext): (Set[Long], Set[(Long, String)]) =
+    val bySelector = selectors(ctx)
+    val texts      = templateTexts(ctx).map(_._2)
+    val fed = bySelector.collect {
+        case (td, Left(element)) if texts.exists(_.contains(s"<$element")) => td.id()
+        case (td, Right(attr)) if texts.exists(_.contains(s"[$attr]"))     => td.id()
+    }.toSet
+    val unfollowable = templateBindings(ctx).collect {
+        case (child, input, parent, expr) if !isFollowable(parent, expr) => child.id() -> input
+    }.toSet
+    (fed, unfollowable)
+
+  /** A child's input is what its parents bind to it: `<app-rich-text [html]="sellerNote" />` hands
+    * the parent's `sellerNote` to the child's `html`. Where a source reaches the parent member's
+    * value, the child's reads of the input (`this.html`, its setter's parameter, its template's
+    * `html()`) are tagged with that source, with where the value came from. Runs with the bridges.
+    */
+  def bridgeInputs(ctx: JsContext): Unit =
+    val bindings = templateBindings(ctx)
+    if bindings.isEmpty then return
+    val members = MemberTaintBridge.memberWrites(ctx).groupMap(w => (w._1.id(), w._2))(_._3)
+    lazy val templates = componentTemplates(ctx).groupMap(_._1.id())(_._2)
+    bindings.filter(b => isFollowable(b._3, b._4))
+        .groupMap(b => (b._1, b._2))(b => (b._3, b._4)).foreach { case ((child, input), from) =>
+        from.iterator.flatMap { (parent, expr) =>
+            LeadingName.findFirstMatchIn(expr).map(_.group(1)).toList
+                .flatMap(name => members.getOrElse((parent.id(), name), Nil))
+                .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v))
+        }.nextOption().foreach { (found, value) =>
+            val setters = classMethods(child).filter(_.name == input).flatMap(params)
+            val reads   = thisReads(child, input).toList
+            val inTemplate =
+                templates.getOrElse(child.id(), Nil).flatMap(templateReads(ctx, _, input))
+            ctx.tagger.tagVia(
+              readChains(reads) ++ setters ++ inTemplate,
+              found.tag,
+              found.places(value)*
+            )
+        }
+    }
+  end bridgeInputs
   private val PipeName    = """name\s*:\s*['"`]([\w$-]+)['"`]""".r
 
   /** Components and their external templates: `@Component({ templateUrl: './x.component.html' })`,
@@ -342,10 +476,20 @@ object AngularRecognizer extends JsFrameworkRecognizer:
           .nameExact(Operators.fieldAccess)
           .codeExact(s"this.$member")
 
-  /** `@Input()` members and setters. */
+  /** `@Input()` members and setters - of a component no template renders (a routed one, bound from
+    * the URL); the others' are what their parents bind ([[bridgeInputs]]). An input transformed to
+    * a number or a boolean holds no text.
+    */
   private def tagDecoratorInputs(ctx: JsContext): Unit =
-      ctx.cpg.annotation.nameExact("Input").foreach { annotation =>
+    val (fed, unfollowable) = fedInputs(ctx)
+    def bound(td: TypeDecl, name: String) =
+        fed.contains(td.id()) && !unfollowable.contains(td.id() -> name)
+    ctx.cpg.annotation.nameExact("Input")
+        .filterNot(a => a.code.contains("numberAttribute") || a.code.contains("booleanAttribute"))
+        .foreach { annotation =>
           annotation.astParent match
+            case member: Member if bound(member.typeDecl, member.name) =>
+            case setter: Method if enclosingTypeDecl(setter).exists(bound(_, setter.name)) =>
             case member: Member =>
                 ctx.tagger.tag(Iterator(member), INPUT)
                 ctx.tagger.tag(thisReads(member.typeDecl, member.name), INPUT)
@@ -373,7 +517,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     * constructor body; an `input` reached through `import * as ng` or a re-export.
     */
   private def tagSignalInputs(ctx: JsContext): Unit =
-      Seq("input", "model").foreach { exported =>
+    val (fed, unfollowable) = fedInputs(ctx)
+    Seq("input", "model").foreach { exported =>
           ctx.modules.imports
               .filter(i =>
                   i.kind == ImportKind.Named && i.imported == exported &&
@@ -397,8 +542,11 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                       enclosing <- initialiser.inCall.headOption
                       if enclosing.name == Operators.assignment
                       if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
+                      if !initialiser.code.matches("(?s).*\\b(numberAttribute|booleanAttribute)\\b.*")
                       typeDecl <- initialiser.method.typeDecl
                       member   <- typeDecl.member.codeExact(enclosing.code).headOption
+                      if !fed.contains(typeDecl.id()) ||
+                          unfollowable.contains(typeDecl.id() -> member.name)
                     do
                       ctx.tagger.tag(Iterator(member), INPUT)
                       ctx.tagger.tag(thisReads(typeDecl, member.name), INPUT)

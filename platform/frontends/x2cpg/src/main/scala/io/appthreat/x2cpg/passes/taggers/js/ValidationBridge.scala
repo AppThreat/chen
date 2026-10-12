@@ -74,6 +74,44 @@ object ValidationBridge:
           }
       }.toSet
 
+  /** The keys of a `z.object({...})` schema. */
+  private def schemaKeys(ctx: JsContext, file: String, schema: Expression): Set[String] =
+      schemaObject(ctx, file, schema).toList.flatMap(_.ast.isCall.nameExact(Operators.assignment).l)
+          .flatMap(a => a.argumentOption(1).collect { case fa: Call => fa }.flatMap(fieldName))
+          .toSet
+
+  private val ParseMethods = Set("parse", "safeParse", "parseAsync", "safeParseAsync")
+
+  /** `Schema.parse(input)` / `Schema.safeParse(input)` of an object schema: a member the schema
+    * types as non-text is a number, a boolean or a named constant once parsed. Where every member
+    * is, the parse call is a sanitiser; otherwise the reads of those members off its result
+    * (`parsed.data.qty`, `body.qty`) are tagged `predicate`.
+    */
+  def tagSchemaParses(ctx: JsContext): Unit =
+      ctx.cpg.call.filter(c => ParseMethods.contains(callName(c))).l.foreach { parse =>
+        val file = parse.method.filename
+        receiverOf(parse).foreach { schema =>
+          val keys    = schemaKeys(ctx, file, schema)
+          val numeric = nonTextKeys(ctx, file, schema)
+          if keys.nonEmpty && numeric == keys then ctx.tagger.tag(Iterator(parse), SANITIZER)
+          else if numeric.nonEmpty then
+            val scope = parse.method :: nestedMethods(parse.method)
+            val reads = scope.flatMap(_.ast.isCall.nameExact(Operators.fieldAccess).l)
+                .filterNot(isAssignmentTarget)
+                .filter(fa =>
+                    DataLinkBridge.accessPath(fa).exists {
+                        case (root, path) =>
+                            root.id() == parse.id() && (path match
+                              case "data" :: k :: Nil => numeric.contains(k)
+                              case k :: Nil           => numeric.contains(k) && !callName(parse).startsWith("safe")
+                              case _                  => false
+                            )
+                    }
+                )
+            ctx.tagger.tag(reads.iterator, PREDICATE)
+        }
+      }
+
   /** TanStack Router: `createFileRoute(...)({ validateSearch: schema, ... })` types what
     * `Route.useSearch()` returns. A member the schema types as non-text is tagged `predicate`
     * wherever it is read off a `useSearch()` result in the same file.

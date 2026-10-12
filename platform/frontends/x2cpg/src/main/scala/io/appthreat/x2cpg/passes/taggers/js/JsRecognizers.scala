@@ -34,6 +34,9 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   /** Calls and field reads are queried by most recognizers; materialised once per run. */
   lazy val fieldAccesses: List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
       cpg.call.nameExact(io.shiftleft.codepropertygraph.generated.Operators.fieldAccess).l
+
+  /** The template elements that render a project component, resolved once. */
+  lazy val elements: ComponentCallBridge.Elements = ComponentCallBridge.resolve(this)
 end JsContext
 
 /** A recognizer for one JavaScript framework family's sources, sinks and sanitisers.
@@ -80,18 +83,30 @@ object JsRecognizers:
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)
     }
+    // Schema validation, and checks that a value passed before it is used: what they let through
+    // carries nothing, which the source searches of the bridges below must already know.
+    ValidationBridge.tagSchemaParses(ctx)
+    GuardBridge.run(ctx)
     // Template component elements, lowered to calls, resolved to the components they name.
-    val singleFileElements = ComponentCallBridge.run(ctx)
+    ComponentCallBridge.run(ctx)
     // Functions kept in a Map and called after a lookup, resolved to what was put in it.
     RegistryBridge.run(ctx)
-    // Over what the recognizers found: sources kept in a field and read by another method, and
-    // values derived reactively from a source. Each can feed the other, so twice.
-    (1 to 2).foreach { _ =>
+    // Over what the recognizers found: sources kept in a field and read by another method, values
+    // derived reactively from a source, and data a framework hands from a producer to a consumer.
+    // Each can feed the others - a store member to a page, the page to a child's prop - so the
+    // round is repeated.
+    (1 to 3).foreach { _ =>
       MemberTaintBridge.run(ctx)
       ReactiveBridge.run(ctx)
-      singleFileElements.foreach((element, file) =>
-          ComponentCallBridge.bridgeProps(ctx, element, file)
-      )
+      if ReactRecognizer.applies(ctx) then ReactRecognizer.bridgeRouteProps(ctx)
+      if SvelteRecognizer.applies(ctx) then
+        SvelteRecognizer.bridgeLocals(ctx)
+        SvelteRecognizer.bridgeRouteProps(ctx)
+      if VueRecognizer.applies(ctx) then
+        VueRecognizer.bridgePiniaStores(ctx)
+        VueRecognizer.bridgeRouterProps(ctx)
+      if AngularRecognizer.applies(ctx) then AngularRecognizer.bridgeInputs(ctx)
+      ComponentCallBridge.bridgeProps(ctx)
       VueRecognizer.bridgeDirectives(ctx)
       SvelteRecognizer.bridgeActions(ctx)
       AlpineRecognizer.bridge(ctx)

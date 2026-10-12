@@ -121,8 +121,9 @@ object NitroRecognizer extends JsFrameworkRecognizer:
   end run
 
   /** `runTask('db:reindex', { payload })` runs the task whose FILE names it
-    * (`server/tasks/db/reindex.ts` -> `db:reindex`); resolving the call to its `run` method carries
-    * the payload the caller built into the task's `payload` parameter.
+    * (`server/tasks/db/reindex.ts` -> `db:reindex`). The call is resolved to the task's `run`, and
+    * as the options object is not the event `run` receives, the event is tagged with where the
+    * payload came from too, when a source reaches it.
     */
   private def linkTasks(ctx: JsContext, taskRuns: List[Method]): Unit =
     if taskRuns.isEmpty then return
@@ -131,9 +132,14 @@ object NitroRecognizer extends JsFrameworkRecognizer:
         call.argument.filter(_.argumentIndex == 1).flatMap(literalValue).headOption.foreach {
             taskName =>
               val wanted = s"tasks/${taskName.replace(':', '/')}."
-              runByTaskName.find((file, _) => file.contains(wanted)).foreach((_, run) =>
-                  ctx.tagger.resolveCall(call, run)
-              )
+              runByTaskName.find((file, _) => file.contains(wanted)).foreach { (_, run) =>
+                ctx.tagger.resolveCall(call, run)
+                call.argument.filter(_.argumentIndex == 2).headOption
+                    .flatMap(v => MemberTaintBridge.sourceOf(ctx, v).map(_ -> v))
+                    .foreach((found, v) =>
+                        ctx.tagger.tagVia(firstParam(run).iterator, found.tag, found.places(v)*)
+                    )
+              }
         }
     }
 

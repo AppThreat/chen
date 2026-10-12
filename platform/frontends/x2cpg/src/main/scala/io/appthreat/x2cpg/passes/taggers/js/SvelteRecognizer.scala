@@ -69,34 +69,113 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     tagComponentProps(ctx)
     tagPage(ctx)
     tagNavigation(ctx)
-    linkLoadToData(ctx)
     tagTransformedChunks(ctx)
 
-  /** A route component's `data` prop is what the sibling `load` (`+page.server.ts`, or the
-    * universal `+page.ts`) returned. The hook `$props()` is resolved to that load function, so the
-    * engine carries the loader's return value - and the taint inside it - into `data.<field>`
-    * reads.
+  private val RouteComponent = ".*\\+(page|layout|error)\\.svelte"
+
+  /** The `load` functions whose data a route component receives: its own route's (`+page.server`
+    * and `+page`, or `+layout.server` and `+layout` for a layout), then every enclosing layout's.
     */
-  private def linkLoadToData(ctx: JsContext): Unit =
-    val loads = ctx.cpg.file.name(DataFile).method.internal.nameExact("load").l
-    if loads.isEmpty then return
-    ctx.cpg.file.name(Component).foreach { file =>
-      val name = file.name
-      val dir  = name.substring(0, name.lastIndexOf('/') + 1)
-      val stem = if name.contains("+page.") then "+page."
-      else if name.contains("+layout.")
-      then "+layout."
-      else ""
-      val loader =
-          loads.find(m => m.filename.startsWith(dir) && m.filename.contains(s"$stem.server."))
-              .orElse(loads.find(m => m.filename.startsWith(dir) && m.filename.contains(stem)))
-      loader.foreach { loader =>
-          ctx.cpg.file.nameExact(name).method.internal
-              .flatMap(_.call.nameExact("$props"))
-              .foreach(props => ctx.tagger.resolveCall(props, loader))
+  private def loadsFor(ctx: JsContext, component: String): List[Method] =
+    val loads = allLoads(ctx)
+    val dir   = component.substring(0, component.lastIndexOf('/') + 1)
+    val own =
+        if component.contains("+layout.") then loads.filter(l => l.filename.startsWith(dir + "+layout."))
+        else loads.filter(l => l.filename.startsWith(dir + "+page."))
+    val layouts = loads.filter { l =>
+        val ldir = l.filename.substring(0, l.filename.lastIndexOf('/') + 1)
+        l.filename.substring(ldir.length).startsWith("+layout.") && dir.startsWith(ldir) &&
+        !own.exists(_.id() == l.id())
+    }.sortBy(l => -l.filename.length)
+    own ++ layouts
+
+  /** Every `load` of the data modules: `export function load()` and `export const load = (...) =>
+    * ...`, whose function is anonymous.
+    */
+  private def allLoads(ctx: JsContext): List[Method] =
+      (ctx.cpg.file.name(DataFile).method.internal.nameExact("load").l ++
+          exportedFunctions(ctx, Set("load")).map(_._2).filter(_.filename.matches(DataFile)))
+          .distinctBy(_.id())
+
+  /** The form actions of a page: the functions of `export const actions = { ... }` in its
+    * `+page.server` module.
+    */
+  private def actionsFor(ctx: JsContext, component: String): List[Method] =
+    val dir   = component.substring(0, component.lastIndexOf('/') + 1)
+    val loads = allLoads(ctx).map(_.id()).toSet
+    ctx.cpg.file.name(DataFile).filter(_.name.startsWith(dir + "+page.server.")).method.internal
+        .filterNot(m => m.name == ":program" || m.name == "load" || loads.contains(m.id())).l
+
+  /** A route component receives `{ data, form, params }`: `data` is what its `load` functions
+    * returned, `form` what the form action that ran returned, `params` the URL's. Each read below
+    * them is tagged with the source behind that member of the returned data. Runs with the bridges.
+    */
+  def bridgeRouteProps(ctx: JsContext): Unit =
+      ctx.cpg.file.name(RouteComponent).name.l.foreach { component =>
+        lazy val loads   = loadsFor(ctx, component)
+        lazy val actions = actionsFor(ctx, component)
+        def link(path: List[String]): Option[DataLinkBridge.Link] =
+            path match
+              case "data" :: rest   => Some(DataLinkBridge.produced(loads, rest))
+              case "form" :: rest   => Some(DataLinkBridge.produced(actions, rest))
+              case "params" :: rest => Some(DataLinkBridge.Link.Source(INPUT))
+              case _                => None
+        val methods  = ctx.cpg.file.nameExact(component).method.l
+        val exported = exportedProps(methods).intersect(Set("data", "form"))
+        DataLinkBridge.bridgeReads(
+          ctx,
+          methods,
+          (root, path) =>
+              root match
+                case c: Call if c.name == "$props" => link(path)
+                // Svelte 4: `export let data`
+                case id: Identifier if exported.contains(id.name) => link(id.name :: path)
+                case _                                             => None,
+          id => exported.contains(id.name)
+        )
       }
+
+  /** `event.locals.user = ...` in a server hook is what every `load`, action and endpoint of the
+    * request reads as `locals.user`: each such read is tagged with the source behind what the hooks
+    * write under that name. Runs with the bridges.
+    */
+  def bridgeLocals(ctx: JsContext): Unit =
+    val hooks = ctx.cpg.file.name(HooksFile).method.internal.l
+    if hooks.isEmpty then return
+    val written = hooks.flatMap(_.ast.isCall.nameExact(Operators.assignment).l).flatMap { a =>
+        (a.argumentOption(1), a.argumentOption(2)) match
+          case (Some(target: Call), Some(v)) =>
+              DataLinkBridge.accessPath(target).map(_._2).collect {
+                  case path if path.contains("locals") =>
+                      path.dropWhile(_ != "locals").drop(1) -> v
+              }.filter(_._1.nonEmpty)
+          case _ => None
     }
-  end linkLoadToData
+    if written.isEmpty then return
+    val handlers = ctx.cpg.file.name(s"$DataFile|$EndpointFile").method.internal.l
+    DataLinkBridge.bridgeReads(
+      ctx,
+      handlers,
+      (root, path) =>
+          (root, path.dropWhile(_ != "locals")) match
+            case (_: MethodParameterIn, "locals" :: key :: rest) =>
+                written.collect { case (k :: more, v) if k == key => (more, v) } match
+                  case Nil => None
+                  case vs =>
+                      // `locals.user.name` from `locals.user = { name }` - or from a write of
+                      // `locals.user.name` itself
+                      Some(DataLinkBridge.Link.Values(
+                        vs.flatMap((more, v) =>
+                            if more.isEmpty then DataLinkBridge.valueAt(v, rest)
+                            else if rest.startsWith(more) then
+                              DataLinkBridge.valueAt(v, rest.drop(more.size))
+                            else Nil
+                        ),
+                        Nil
+                      ))
+            case _ => None
+    )
+  end bridgeLocals
 
   /** `resolve(event, { transformPageChunk: ({ html }) => html.replace(marker, data) })`: the chunk
     * the callback returns is written into the page the server sends, so its return value is an HTML
@@ -124,8 +203,31 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(returned.iterator, HtmlSink*)
   end tagTransformedChunks
 
+  /** Members of a request event that are not the request: what the server's own hooks put there,
+    * the platform, the parent layout's data, and helpers.
+    */
+  private val NonRequestMembers = Set(
+    "locals",
+    "platform",
+    "parent",
+    "depends",
+    "untrack",
+    "setHeaders",
+    "fetch",
+    "isDataRequest",
+    "isSubRequest",
+    "resolve",
+    "route",
+    "data"
+  )
+
   /** Handlers by file convention: routes, whose parameters are the request. An endpoint's return
     * value is the response; a `data` function's goes to the page and is no sink.
+    *
+    * The request is what an event's members hold - `url`, `params`, `request`, `cookies` - and not
+    * its `locals` (bridged from the hooks that write them, [[bridgeLocals]]), `parent()` or `fetch`.
+    * Where the handler reads the event member by member, those reads are the sources; where it
+    * hands the event on whole, the event is. `handleFetch` sees the app's own outgoing requests.
     */
   private def tagEntrypoints(
     ctx: JsContext,
@@ -139,22 +241,53 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
         .l
     ctx.tagger.tag(handlers.iterator, ROUTE)
     if data then ctx.tagger.tag(handlers.iterator, DATA)
-    ctx.tagger.tag(handlers.iterator.flatMap(params), INPUT)
+    handlers.filterNot(_.name == "handleFetch").foreach { h =>
+        params(h).foreach { p =>
+          val scope = h :: nestedMethods(h)
+          // member reads of the event, destructured (`{ url }` lowers to `url = param.url`) or not
+          val memberReads = scope.flatMap(_.ast.isCall.nameExact(Operators.fieldAccess).l)
+              .filter(fa =>
+                  fieldBase(fa).flatMap(b => DataLinkBridge.accessPath(b)).exists {
+                      case (root, Nil | ("event" :: Nil)) => root.id() == p.id()
+                      case _                              => false
+                  }
+              )
+          // the event used other than by reading a member of it, or through a temporary that is
+          val readWhole = scope.flatMap(_.ast.isIdentifier.nameExact(p.name).l).exists { id =>
+              id.astParent match
+                case c: Call if c.name == Operators.fieldAccess =>
+                    !c.argumentOption(1).exists(_.id() == id.id())
+                case c: Call if c.name == Operators.assignment =>
+                    !c.argumentOption(1).exists(_.code.startsWith("_tmp_"))
+                case _ => true
+          }
+          if readWhole then ctx.tagger.tag(Iterator(p), INPUT)
+          else
+            ctx.tagger.tag(
+              readChains(memberReads.filterNot(fa =>
+                  fieldName(fa).exists(n => NonRequestMembers.contains(n) || n == "event")
+              )),
+              INPUT
+            )
+        }
+    }
+  end tagEntrypoints
 
+  /** A component's props are a source where nothing in the code feeds them: not for a component an
+    * element renders (its parents' values are bridged to it, ComponentCallBridge) nor for a route
+    * component (its data is bridged from `load`, [[bridgeRouteProps]]).
+    */
   private def tagComponentProps(ctx: JsContext): Unit =
+    val fed = ctx.elements.renderedFiles
     val componentMethods = ctx.cpg.file.name(Component).method.internal.l
+        .filterNot(m => fed.contains(m.filename) || m.filename.matches(RouteComponent))
     if componentMethods.isEmpty then return
     // Svelte 5: props arrive from `$props()`; taint flows from it into each destructured prop
     ctx.tagger.tag(componentMethods.iterator.flatMap(_.call.nameExact("$props")), INPUT)
     // Svelte 4: `export let data` lowers to `exports.data = data`; the parent assigns the binding,
     // so there is no producing call, and the prop's reads are tagged instead. Keyed on the exported
     // name: the right-hand identifier carries no REF edge to the local.
-    val exported = componentMethods.iterator.flatMap(_.call.nameExact(Operators.assignment))
-        .flatMap(_.argumentOption(1))
-        .map(_.code)
-        .filter(_.startsWith("exports."))
-        .map(_.stripPrefix("exports."))
-        .toSet
+    val exported = exportedProps(componentMethods)
     if exported.nonEmpty then
       ctx.tagger.tag(
         componentMethods.iterator.flatMap(_.local)
@@ -163,6 +296,15 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
         INPUT
       )
   end tagComponentProps
+
+  /** The props a Svelte 4 component declares with `export let`, lowered to `exports.x = x`. */
+  def exportedProps(componentMethods: List[Method]): Set[String] =
+      componentMethods.iterator.flatMap(_.call.nameExact(Operators.assignment))
+          .flatMap(_.argumentOption(1))
+          .map(_.code)
+          .filter(_.startsWith("exports."))
+          .map(_.stripPrefix("exports."))
+          .toSet
 
   /** `page.url.searchParams` (`page` from `$app/state`) and `$page.url...` (the `$app/stores`
     * store, auto-subscribed with `$` in a component).

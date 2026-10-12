@@ -267,7 +267,12 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     // Database handles: the result of `useDatabase()` (db0, Nitro), `new Database(...)`
     // (better-sqlite3, sqlite3), `open(...)` (sqlite), `createClient(...)` (libsql).
     def isDatabaseHandle(r: Expression): Boolean =
-        JsValues.origin(r) match
+        (JsValues.origin(r) match
+          // `new Database(f)` is lowered to a block around the `new` call
+          case b: Block if b.code.trim.startsWith("new ") =>
+              b.ast.isCall.nameExact("<operator>.new").headOption.getOrElse(b)
+          case other => other
+        ) match
           case fa: Call if fa.name == Operators.fieldAccess => fa.code.matches(HandleNames)
           case c: Call =>
               c.name == "useDatabase" || c.name == "createDatabase" || c.name == "createClient" ||

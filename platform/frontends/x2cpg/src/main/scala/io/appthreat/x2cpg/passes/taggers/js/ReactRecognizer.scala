@@ -147,18 +147,63 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(firstParam(handler).iterator, INPUT)
 
   /** A capitalised function that renders a template is a component by the framework's own naming
-    * rule; its first parameter is its props. Deliberately wide - presentational leaves included -
-    * because props are the only input boundary a function component has.
+    * rule; its first parameter is its props. A component no element of the project renders - a
+    * page, a component handed to a router or a library - gets its props from outside the code, so
+    * they are a source. One that elements render gets them from its parents, through the resolved
+    * element calls; and a route module's component gets them from its data functions, member by
+    * member ([[bridgeRouteProps]]).
     */
   private def tagComponentProps(ctx: JsContext): Unit =
+    val routeComponents = routeModules(ctx).map(_._2.id()).toSet
     val components = ctx.cpg.method.internal
         .filter(m => m.name.nonEmpty && m.name.charAt(0).isUpper)
         .filter(_.ast.isTemplateDom.nonEmpty)
+        .filterNot(m =>
+            ctx.elements.renderedFunctions.contains(m.id()) || routeComponents.contains(m.id())
+        )
     ctx.tagger.tag(components.flatMap(firstParam), INPUT)
 
+  /** Route modules (framework mode): the default-exported component of a file that exports data
+    * functions, with those functions by name.
+    */
+  private def routeModules(ctx: JsContext): List[(String, Method, List[Method])] =
+    val (exported, _) = dataFunctionsByShape(ctx)
+    exported.groupBy(_.filename).toList.flatMap { (file, fns) =>
+        defaultExportValue(ctx, file).flatMap(callbackMethod).map(c => (file, c, fns))
+    }
+
+  /** A route module's component receives `{ loaderData, actionData, params }`: `loaderData` is what
+    * the module's `loader`/`clientLoader` returned, `actionData` what its `action`/`clientAction`
+    * did. Each read below them is tagged with the source behind that member of the returned data;
+    * `params` are the URL's. Runs with the bridges.
+    */
+  def bridgeRouteProps(ctx: JsContext): Unit =
+      routeModules(ctx).foreach { (_, component, fns) =>
+        val props = firstParam(component)
+        def named(names: String*) = fns.filter(f => names.contains(f.name))
+        DataLinkBridge.bridgeReads(
+          ctx,
+          List(component),
+          (root, path) =>
+              (root, path) match
+                case (p: MethodParameterIn, key :: rest) if props.exists(_.id() == p.id()) =>
+                    key match
+                      case "loaderData" =>
+                          Some(DataLinkBridge.produced(named("loader", "clientLoader"), rest))
+                      case "actionData" =>
+                          Some(DataLinkBridge.produced(named("action", "clientAction"), rest))
+                      case "params" => Some(DataLinkBridge.Link.Source(INPUT))
+                      case _        => None
+                case _ => None
+        )
+      }
+
   private def tagHooks(ctx: JsContext): Unit =
-    // `useParams()`, and TanStack's `Route.useParams()` / `useParams({ from })`
+    // `useParams()`, and TanStack's `Route.useParams()` / `useParams({ from })`; a data hook whose
+    // producer is known carries that producer's data instead (see linkDataHooks)
+    val linked = linkDataHooks(ctx)
     val hooks = ctx.cpg.call.filter(c => RouteHooks.contains(callName(c)))
+        .filterNot(c => linked.contains(c.id()))
     ctx.tagger.tag(hooks, INPUT)
     // `useRouter().query` / `.asPath` (Next.js pages router); `.push` is a sink
     val routerReads = ctx.fieldAccesses.filter { fa =>
@@ -180,41 +225,77 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
     }
     ctx.tagger.tag(readChains(locationStateReads), INPUT)
-    linkDataHooks(ctx)
   end tagHooks
 
   /** `useLoaderData()` returns what the route module's `loader` returned, `useActionData()` what
-    * its `action` returned. The link is framework magic - no call site exists - so the consumer
-    * hook is resolved to the producing data function and the dataflow engine carries the loader's
-    * return value (and the taint inside it) out to the hook's result. The producer is the one the
-    * hook's own type argument names (`useLoaderData<typeof articleLoader>()`), else the file's
-    * single data function.
+    * its `action` returned, `useRouteLoaderData(id)` what the loader of the route `id` returned, and
+    * `useFetcher()` holds what the action or loader it submitted to returned. The link is framework
+    * magic - no call site exists - so the consumer hook is resolved to the producing data function
+    * and the dataflow engine carries the producer's return value (and the taint inside it) out to
+    * the hook's result. The producer is the one the hook's own type argument names
+    * (`useLoaderData<typeof articleLoader>()`, also imported: `import type { loader as rootLoader }
+    * from "../root"`), else the route the id names, else the file's single data function. Returns
+    * the hooks linked.
     */
-  private def linkDataHooks(ctx: JsContext): Unit =
+  private def linkDataHooks(ctx: JsContext): Set[Long] =
     val producers = dataFunctionMethods(ctx)
-    if producers.isEmpty then return
+    if producers.isEmpty then return Set.empty
+    val DataHooks = Set("useLoaderData", "useActionData", "useRouteLoaderData", "useFetcher")
     ctx.cpg.call
-        .filter(c => callName(c) == "useLoaderData" || callName(c) == "useActionData")
-        .foreach { hook =>
+        .filter(c => DataHooks.contains(callName(c)))
+        .l
+        .flatMap { hook =>
           val file = hook.method.filename
           val byTypeArg = "typeof\\s+([A-Za-z_$][\\w$]*)".r.findFirstMatchIn(hook.code)
-              .flatMap(m =>
-                  ctx.cpg.method.internal.nameExact(m.group(1)).filenameExact(file).headOption
-              )
+              .flatMap(m => producerNamed(ctx, file, m.group(1), producers))
+          val byRouteId =
+              if callName(hook) != "useRouteLoaderData" then None
+              else
+                hook.argument.filter(_.argumentIndex == 1).headOption.flatMap(literalValue)
+                    .flatMap(id =>
+                        producers.filter(p =>
+                            Seq("loader", "clientLoader").contains(p.name) &&
+                                p.filename.replaceAll("\\.[^./]+$", "").endsWith("/" + id)
+                        ) match
+                          case single :: Nil => Some(single)
+                          case _             => None
+                    )
           val wanted =
-              if callName(hook) == "useLoaderData" then Seq("loader", "clientLoader")
-              else Seq("action", "clientAction")
-          val producer = byTypeArg.orElse {
-              val inFile = producers.filter(p => p.filename == file)
+              if callName(hook) == "useActionData" then Seq("action", "clientAction")
+              else Seq("loader", "clientLoader")
+          val inFile = producers.filter(p => p.filename == file)
+          val producer = byTypeArg.orElse(byRouteId).orElse(
+            if callName(hook) == "useFetcher" || callName(hook) == "useRouteLoaderData" then None
+            else
               inFile.filter(p => wanted.contains(p.name)) match
                 case single :: Nil => Some(single)
                 case _ => inFile match
                       case single :: Nil => Some(single)
                       case _             => None
+          )
+          producer.map { p =>
+            ctx.tagger.resolveCall(hook, p)
+            hook.id()
           }
-          producer.foreach(p => ctx.tagger.resolveCall(hook, p))
         }
+        .toSet
   end linkDataHooks
+
+  /** The data function a name stands for in `file`: one of its own, or the one an import binds. */
+  private def producerNamed(
+    ctx: JsContext,
+    file: String,
+    name: String,
+    producers: List[Method]
+  ): Option[Method] =
+      producers.find(p => p.filename == file && p.name == name).orElse(
+        ctx.modules.resolve(file, name).filter(_.module.startsWith(".")).flatMap { imp =>
+          val base = JsModules.resolveRelative(file, imp.module)
+          producers.find(p =>
+              p.name == imp.imported && (p.filename == base || p.filename.startsWith(base + "."))
+          )
+        }
+      )
 
   /** The methods that produce route data: exported `loader`/`action`/... functions of route
     * modules, and the callbacks a route object's `loader:`/`action:` keys name anywhere.
@@ -401,6 +482,37 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
     )
     ctx.tagger.tag(redirects.iterator, NavigationSink*)
+    linkQwikHooks(ctx)
+
+  /** `export const useMotd = routeLoader$(...)`, used as `const motd = useMotd()`: the hook's value
+    * is what the loader (or action) returns, so the hook's calls - in the file or in one importing
+    * it - are resolved to the callback.
+    */
+  private def linkQwikHooks(ctx: JsContext): Unit =
+    val hooks = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+        (a.argumentOption(1), a.argumentOption(2)) match
+          case (Some(target), Some(c: Call))
+              if Set("routeLoader$", "routeAction$", "globalAction$").contains(c.name) =>
+              val name = target match
+                case id: Identifier => Some(id.name)
+                case fa: Call       => fieldName(fa)
+                case _              => None
+              for
+                n  <- name
+                cb <- c.argument.filter(_.argumentIndex == 1).headOption.flatMap(callbackMethod)
+              yield (a.method.filename, n, cb)
+          case _ => None
+    }
+    if hooks.isEmpty then return
+    hooks.foreach { (file, name, cb) =>
+        ctx.cpg.call.nameExact(name).filter { c =>
+            val f = c.method.filename
+            f == file || ctx.modules.resolve(f, name).exists(i =>
+                i.module.startsWith(".") && file.startsWith(JsModules.resolveRelative(f, i.module))
+            )
+        }.foreach(c => ctx.tagger.resolveCall(c, cb))
+    }
+  end linkQwikHooks
 
   /** `<Route path="/profile" element={<Profile />} />`: the path is a route, the component it
     * renders a handler. Matched exactly on the tag name - a prefix would also take `<Routes>`.

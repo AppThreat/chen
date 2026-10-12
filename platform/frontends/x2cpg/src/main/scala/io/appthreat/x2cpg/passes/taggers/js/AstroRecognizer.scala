@@ -36,9 +36,12 @@ object AstroRecognizer extends JsFrameworkRecognizer:
   private val Verbs        = Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ALL")
 
   def run(ctx: JsContext): Unit =
-    // `Astro.url.searchParams.get('q')`, `Astro.params.slug`, `Astro.cookies.get('motd')`
+    // `Astro.url.searchParams.get('q')`, `Astro.params.slug`, `Astro.cookies.get('motd')`; the
+    // props of a component that elements render are what they pass (ComponentCallBridge)
+    val fed = ctx.elements.renderedFiles
     val globalReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter(fa =>
         fieldName(fa).exists(AstroGlobalReads.contains) &&
+            !(fieldName(fa).contains("props") && fed.contains(fa.method.filename)) &&
             fieldBase(fa).exists {
                 case id: Identifier => id.name == "Astro"
                 case _              => false

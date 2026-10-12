@@ -56,8 +56,9 @@ object VueRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(ctx.cpg.call.nameExact(DataComposables.toSeq*), INGRESS)
     tagSinks(ctx)
     linkProvideInject(ctx)
-    linkPiniaStores(ctx)
+    linkPiniaActions(ctx)
     linkComposableReturns(ctx)
+    tagRouterPropsFunctions(ctx)
 
   /** `provide(key, value)` / `inject(key)`: the injected value IS the provided one, keyed by the
     * same InjectionKey or literal. The engine link is a resolved call from `inject(key)` to the
@@ -91,20 +92,17 @@ object VueRecognizer extends JsFrameworkRecognizer:
   end linkProvideInject
 
   /** A Pinia store: `useSearchStore = defineStore('search', () => { ...; return { term, setTerm }
-    * })`. Every caller's `useSearchStore()` receives the setup's return value, so the call is
-    * resolved to the setup callback - carrying the store's derived state out - and its method calls
-    * (`store.setTerm(v)`) to the functions the setup returns, carrying the argument in. Names
-    * shared by more than one store are left alone.
+    * })`, by the hook a store's file exports. Names shared by more than one store are left alone.
     */
-  private def linkPiniaStores(ctx: JsContext): Unit =
-    if !(ctx.modules.uses("pinia") || ctx.project.dependsOn("pinia")) then return
+  private def piniaStores(ctx: JsContext): Map[String, Method] =
+    if !(ctx.modules.uses("pinia") || ctx.project.dependsOn("pinia")) then return Map.empty
     val setups = ctx.cpg.call.nameExact("defineStore").l.flatMap { call =>
         call.argument.filter(_.argumentIndex >= 2).sortBy(_.argumentIndex).headOption
             .map(a => JsShapes.callbacksIn(a)).getOrElse(Nil)
     }
-    if setups.isEmpty then return
+    if setups.isEmpty then return Map.empty
     // `const useSearchStore = defineStore(...)` - the hook a store's file exports
-    val hookOf = ctx.cpg.call.nameExact(Operators.assignment)
+    ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(2).exists {
                 case c: Call => c.name == "defineStore"
@@ -114,28 +112,20 @@ object VueRecognizer extends JsFrameworkRecognizer:
         .flatMap(_.argumentOption(1)).collect { case id: Identifier => id }
         .l
         .flatMap(id => setups.find(s => s.filename == id.method.filename).map(s => id.name -> s))
-    val setupByHook = hookOf.groupMap(_._1)(_._2).collect {
-        case (name, setup :: Nil) => name -> setup
-    }
-    // the functions the setup's returned object holds, by the key they are returned under
-    val methodsOf = setups.flatMap { setup =>
-        setup.ast.isReturn.astChildren.l.flatMap {
-            case b: io.shiftleft.codepropertygraph.generated.nodes.Block =>
-                b.astChildren.isCall.nameExact(Operators.assignment).l.flatMap { a =>
-                    (a.argumentOption(1), a.argumentOption(2)) match
-                      case (Some(fa: Call), Some(fn: Expression)) =>
-                          fieldName(fa).toList.flatMap(k =>
-                              JsShapes.callbacksIn(fn).map(m => k -> m)
-                          )
-                      case _ => Nil
-                }
-            case _ => Nil
-        }
+        .groupMap(_._1)(_._2)
+        .collect { case (name, setup :: Nil) => name -> setup }
+
+  /** A store's method calls (`store.setTerm(v)`, the receiver one of the store hooks' results) are
+    * resolved to the functions the setup returns under that name, carrying the argument in.
+    */
+  private def linkPiniaActions(ctx: JsContext): Unit =
+    val setupByHook = piniaStores(ctx)
+    if setupByHook.isEmpty then return
+    val methodsOf = setupByHook.values.toList.flatMap { setup =>
+        DataLinkBridge.returnedValues(setup).collect { case b: Block => b }
+            .flatMap(objectProperties(_).getOrElse(Map.empty))
+            .flatMap((k, fn) => JsShapes.callbacksIn(fn).map(k -> _))
     }.groupMap(_._1)(_._2).collect { case (name, m :: Nil) => name -> m }
-    // the store hooks' calls: useSearchStore() -> the setup
-    ctx.cpg.call.filter(c => setupByHook.contains(c.name))
-        .foreach(c => setupByHook.get(c.name).foreach(m => ctx.tagger.resolveCall(c, m)))
-    // store.setTerm(v) where the receiver is one of the store hooks' results -> the returned fn
     ctx.cpg.call.filter(c =>
         methodsOf.contains(c.name) &&
             receiverOf(c).exists(r =>
@@ -144,7 +134,36 @@ object VueRecognizer extends JsFrameworkRecognizer:
                   case _       => false
             )
     ).foreach(c => methodsOf.get(c.name).foreach(m => ctx.tagger.resolveCall(c, m)))
-  end linkPiniaStores
+  end linkPiniaActions
+
+  /** Every caller's `useSearchStore()` receives the setup's returned object, and reads one member of
+    * it at a time - `store.term`, `storeToRefs(store)`'s `term`, `term.value`. Each such read is
+    * tagged with the source behind what the setup returns under that member, so a store holding one
+    * tainted member and one constant one taints only the first. Runs with the bridges.
+    */
+  def bridgePiniaStores(ctx: JsContext): Unit =
+    val setupByHook = piniaStores(ctx)
+    if setupByHook.isEmpty then return
+    val consumers = ctx.cpg.call.filter(c => setupByHook.contains(c.name)).method.dedup.l
+        .map(m => if m.name == ":program" then m else topLevel(m))
+        .distinctBy(_.id())
+    DataLinkBridge.bridgeReads(
+      ctx,
+      consumers,
+      (root, path) =>
+          root match
+            case c: Call if path.nonEmpty =>
+                setupByHook.get(c.name).map(setup => DataLinkBridge.produced(List(setup), path))
+            case _ => None
+    )
+
+  /** The outermost function a method is nested in, below the file's `:program`. */
+  private def topLevel(m: Method): Method =
+    val segments = m.fullName.split(':')
+    val program  = segments.indexWhere(_ == "program")
+    if program < 0 || segments.length <= program + 2 then m
+    else
+      JsIndexes.methodByFullName(m.graph, segments.take(program + 2).mkString(":")).getOrElse(m)
 
   /** A composable that returns a derived value (`return computed(() => route.query[name])`):
     * resolving its callers' calls to the function carries the derivation - tagged as a source by
@@ -201,12 +220,17 @@ object VueRecognizer extends JsFrameworkRecognizer:
         n.nonEmpty && n.forall(c => c.isLetterOrDigit || c == '_' || c == '$')
     )
 
+  /** The props a single-file component declares with `defineProps`. */
+  def declaredPropNames(ctx: JsContext, file: String): Set[String] =
+      ctx.cpg.file.nameExact(file).method.flatMap(_.call.nameExact("defineProps")).l
+          .flatMap(declaredProps).toSet
+
   /** Reads of a single-file component's declared props by bare name, as its template uses them
     * (`v-html="html"`) - not of a script binding that shadows one.
     */
   def templatePropReads(ctx: JsContext, file: String): List[Identifier] =
     val methods = ctx.cpg.file.nameExact(file).method.l
-    val names   = methods.flatMap(_.call.nameExact("defineProps")).flatMap(declaredProps).toSet
+    val names   = declaredPropNames(ctx, file)
     if names.isEmpty then Nil
     else
       methods.flatMap(m =>
@@ -217,20 +241,102 @@ object VueRecognizer extends JsFrameworkRecognizer:
               .l
       )
 
+  /** Route records with a `props` function - `{ component: () => import('./Profile.vue'), props:
+    * (route) => ({ bio: route.query.bio }) }` - as (the props function, the component's file).
+    */
+  private def routePropsFunctions(ctx: JsContext): List[(Method, String)] =
+      ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(fa: Call), Some(v)) if fieldName(fa).contains("props") =>
+                val record = fieldBase(fa).map(_.code).getOrElse("")
+                val component = a.astParent.astChildren.isCall.nameExact(Operators.assignment).l
+                    .find(_.argumentOption(1).exists {
+                        case c: Call =>
+                            fieldName(c).contains("component") &&
+                            fieldBase(c).exists(_.code == record)
+                        case _ => false
+                    })
+                    .flatMap(_.argumentOption(2))
+                for
+                  fn   <- callbackMethod(v)
+                  comp <- component
+                  file <- routeComponentFile(ctx, a.method.filename, comp)
+                yield fn -> file
+            case _ => None
+      }
+
+  private val DynamicImport = """import\(\s*['"]([^'"]+)['"]\s*\)""".r
+
+  /** The file of a route's component: an imported binding, or a lazy `() => import('...')`. */
+  private def routeComponentFile(ctx: JsContext, from: String, comp: Expression): Option[String] =
+    val module = comp match
+      case id: Identifier => ctx.modules.resolve(from, id.name).map(_.module)
+      case other =>
+          callbackMethod(other).flatMap(m => DynamicImport.findFirstMatchIn(m.code))
+              .orElse(DynamicImport.findFirstMatchIn(other.code)).map(_.group(1))
+    module.flatMap { m =>
+      val tail = m.dropWhile(c => c == '.' || c == '/' || c == '@' || c == '~')
+      val base = if m.startsWith(".") then JsModules.resolveRelative(from, m) else tail
+      ctx.cpg.file.name.l.filter(f => f == base || f.endsWith("/" + tail)) match
+        case only :: Nil => Some(only)
+        case _           => None
+    }
+
+  /** A route `props` function receives the route. */
+  private def tagRouterPropsFunctions(ctx: JsContext): Unit =
+      ctx.tagger.tag(routePropsFunctions(ctx).flatMap((fn, _) => firstParam(fn)).iterator, INPUT)
+
+  /** A route component's props are what its route's `props` function returns: each prop read is
+    * tagged with the source behind the member of that name. Runs with the bridges.
+    */
+  def bridgeRouterProps(ctx: JsContext): Unit =
+      routePropsFunctions(ctx).groupMap(_._2)(_._1).foreach { (file, fns) =>
+        val names = declaredPropNames(ctx, file)
+        DataLinkBridge.bridgeReads(
+          ctx,
+          ctx.cpg.file.nameExact(file).method.l,
+          (root, path) =>
+              root match
+                case c: Call if PropsEntries.contains(c.name) && path.nonEmpty =>
+                    Some(DataLinkBridge.produced(fns, path))
+                case id: Identifier if names.contains(id.name) =>
+                    Some(DataLinkBridge.produced(fns, id.name :: path))
+                case _ => None
+        )
+      }
+
+  private val PropsEntries = Set("defineProps", "withDefaults")
+
+  /** Components whose props come from somewhere the code shows: an element rendering them, or a
+    * route `props` function. Their props are no sources of their own.
+    */
+  private def fedComponents(ctx: JsContext): Set[String] =
+      ctx.elements.renderedFiles ++ routePropsFunctions(ctx).map(_._2)
+
   private def tagProps(ctx: JsContext): Unit =
-    ctx.tagger.tag(ctx.cpg.call.nameExact("defineProps", "withDefaults", "defineModel"), INPUT)
-    ctx.cpg.file.name(".*\\.vue").name.l.foreach(f =>
+    val fed = fedComponents(ctx)
+    def unfed(n: CfgNode): Boolean = !fed.contains(n.method.filename)
+    ctx.tagger.tag(
+      ctx.cpg.call.nameExact("defineProps", "withDefaults", "defineModel").filter(unfed),
+      INPUT
+    )
+    ctx.cpg.file.name(".*\\.vue").name.l.filterNot(fed.contains).foreach(f =>
         ctx.tagger.tag(templatePropReads(ctx, f), INPUT)
     )
     // setup(props, ctx)
-    ctx.tagger.tag(ctx.cpg.method.internal.nameExact("setup").flatMap(firstParam), INPUT)
+    ctx.tagger.tag(
+      ctx.cpg.method.internal.nameExact("setup").filterNot(m => fed.contains(m.filename))
+          .flatMap(firstParam),
+      INPUT
+    )
     // Options API: `props: ['title']` or `props: { title: String }`, read as `this.title`
     val declarations = ctx.cpg.call.nameExact(Operators.assignment).filter { a =>
         a.argumentOption(1).exists {
             case fa: Call => fieldName(fa).contains("props")
             case _        => false
         } && (a.method.filename.endsWith(".vue") ||
-            ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains("vue")))
+            ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains("vue"))) &&
+        !fed.contains(a.method.filename) && callbackMethod(a.argumentOption(2).get).isEmpty
     }.l
     declarations.groupBy(_.method.filename).foreach { (file, decls) =>
       val names = decls.flatMap(_.argumentOption(2)).flatMap { value =>

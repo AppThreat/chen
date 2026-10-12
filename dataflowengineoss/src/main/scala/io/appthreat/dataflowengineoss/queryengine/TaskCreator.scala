@@ -2,12 +2,13 @@ package io.appthreat.dataflowengineoss.queryengine
 
 import io.appthreat.dataflowengineoss.queryengine.Engine.argToOutputParams
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{
     Call,
     CfgNode,
     Expression,
     FieldIdentifier,
+    Identifier,
     Method,
     MethodParameterIn,
     MethodParameterOut,
@@ -116,15 +117,27 @@ class TaskCreator(context: EngineContext):
           .getMethodCallsites(param.method)
           .collectAll[Call]
           .flatMap(ArgumentBinding.argumentsBinding(_, param))
+          .filterNot(ImplicitReceiver.matches)
           .l
 
   /** Expand to receiver objects of calls that reference the method of the parameter, e.g., if
-    * `param` is a parameter of `m`, return `foo` in `foo.bar(m)`.
+    * `param` is a parameter of `m`, return `foo` in `foo.bar(m)`. A JavaScript callback's own
+    * `this` receives nothing this way: an arrow function's is its definer's, a function's whatever
+    * the caller binds. A plain call (`watch(source, (v) => ...)`, `exec(cmd, (err, out) => ...)`)
+    * has no receiver to hand on - its callback gets what the call was given.
     */
   private def paramToMethodRefCallReceivers(param: MethodParameterIn): List[Expression] =
-      MethodRefIndex.referencing(param.graph(), param.method.fullName).iterator.inCall.argument(
-        0
-      ).l
+      if param.name == "this" && ImplicitReceiver.isJs(param.graph()) then Nil
+      else
+        MethodRefIndex.referencing(param.graph(), param.method.fullName).iterator.inCall.l
+            .flatMap { call =>
+              call.argument.filter(_.argumentIndex == 0).l match
+                case List(receiver) if ImplicitReceiver.matches(receiver) =>
+                    call.argument.filter(a =>
+                        a.argumentIndex > 0 && !a.isInstanceOf[MethodRef]
+                    ).l
+                case receivers => receivers
+            }
 
   /** Create new tasks from all results that end in an output argument, including return arguments.
     * In this case, we want to traverse to corresponding method output parameters and method return
@@ -297,6 +310,36 @@ end TaskCreator
   * would need the index dropped, which no caller does - the query engine runs on a graph whose
   * passes have finished.
   */
+/** The receiver JavaScript gives a plain call. jssrc2cpg lowers `f(x)` with `this` as argument 0,
+  * but that `this` is neither the callee's nor a callback's: binding the two lets taint on the
+  * caller's `this` - one tainted field of an instance, a hook's dependency array - reach every
+  * plain call any callee makes, `new Function(...)()` included. Java's unqualified call `m()` is
+  * a call on `this`, so only JavaScript graphs are concerned.
+  */
+object ImplicitReceiver:
+  private val jsGraphs =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[overflowdb.Graph, java.lang.Boolean]())
+
+  def isJs(graph: overflowdb.Graph): Boolean =
+      jsGraphs.computeIfAbsent(
+        graph,
+        g =>
+            Cpg(g).metaData.language.headOption.exists(l =>
+                l == Languages.JSSRC || l == Languages.JAVASCRIPT
+            )
+      )
+
+  def matches(e: Expression): Boolean =
+      e match
+        case id: Identifier if id.name == "this" && id.argumentIndex == 0 && isJs(id.graph()) =>
+            id.astParent match
+              case c: Call =>
+                  !c.name.startsWith("<operator>") && !c.code.startsWith("this.") &&
+                  !c.code.startsWith("this[") && !c.code.startsWith("super.")
+              case _ => false
+        case _ => false
+end ImplicitReceiver
+
 object MethodRefIndex:
 
   // Node ids, not nodes: a node references its graph, and a value that references its own key
