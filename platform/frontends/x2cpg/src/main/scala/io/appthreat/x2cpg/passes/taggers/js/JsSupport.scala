@@ -888,17 +888,17 @@ object JsIndexes:
 
   /** Methods whose full name starts with `prefix`. */
   def methodsUnder(graph: overflowdb.Graph, prefix: String): List[Method] =
-      val index = methodIndexes.computeIfAbsent(
-        graph,
-        _ =>
-            val tree = new java.util.TreeMap[String, List[Method]]()
-            Cpg(using graph).method.foreach { m =>
-                tree.merge(m.fullName, List(m), (a, b) => a ++ b)
-            }
-            tree
-      )
-      import scala.jdk.CollectionConverters.*
-      index.subMap(prefix, true, prefix + Char.MaxValue, true).values().asScala.flatten.toList
+    val index = methodIndexes.computeIfAbsent(
+      graph,
+      _ =>
+        val tree = new java.util.TreeMap[String, List[Method]]()
+        Cpg(using graph).method.foreach { m =>
+            tree.merge(m.fullName, List(m), (a, b) => a ++ b)
+        }
+        tree
+    )
+    import scala.jdk.CollectionConverters.*
+    index.subMap(prefix, true, prefix + Char.MaxValue, true).values().asScala.flatten.toList
 
   /** The method with exactly this full name. */
   def methodByFullName(graph: overflowdb.Graph, fullName: String): Option[Method] =
@@ -906,28 +906,28 @@ object JsIndexes:
 
   /** What a method assigns to a plain variable, by name (`x = v` -> v). */
   def assignedValues(m: Method, name: String): List[Expression] =
-      val byMethod = assignmentIndexes.computeIfAbsent(
-        m.graph,
-        _ => new java.util.concurrent.ConcurrentHashMap[Method, Map[String, List[Expression]]]()
-      )
-      byMethod
-          .computeIfAbsent(
-            m,
-            method =>
-                // the method's own assignments: a nested function's are its own (a callback that
-                // destructures `([quantities, products])`) binds new names, not the outer ones)
-                Iterator(method).assignment.filter(_.method.id() == method.id()).l.flatMap { a =>
-                    (a.argumentOption(1), a.argumentOption(2)) match
-                      case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
-                      case _                              => None
-                }.groupMap(_._1)(_._2)
-          )
-          .getOrElse(name, Nil)
+    val byMethod = assignmentIndexes.computeIfAbsent(
+      m.graph,
+      _ => new java.util.concurrent.ConcurrentHashMap[Method, Map[String, List[Expression]]]()
+    )
+    byMethod
+        .computeIfAbsent(
+          m,
+          method =>
+              // the method's own assignments: a nested function's are its own (a callback that
+              // destructures `([quantities, products])`) binds new names, not the outer ones)
+              Iterator(method).assignment.filter(_.method.id() == method.id()).l.flatMap { a =>
+                  (a.argumentOption(1), a.argumentOption(2)) match
+                    case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
+                    case _                              => None
+              }.groupMap(_._1)(_._2)
+        )
+        .getOrElse(name, Nil)
 
   /** Forget everything built for a graph (between runs over a mutated graph). */
   def clear(): Unit =
-      methodIndexes.clear()
-      assignmentIndexes.clear()
+    methodIndexes.clear()
+    assignmentIndexes.clear()
 end JsIndexes
 
 /** Where values come from and where asynchronous values go. */
