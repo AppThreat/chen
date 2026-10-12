@@ -26,17 +26,79 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     def matches(s: String): Boolean =
         requiredLiterals.forall(group => group.exists(s.contains)) && re.matches(s)
 
-  // Language-specific patterns
-  private val JS_REQUEST_PATTERNS = Array(
-    "(?s)(?i).*(req|ctx|context)\\.(originalUrl|path|protocol|route|secure|signedCookies|stale|subdomains|xhr|app|pipe|file|files|baseUrl|fresh|hostname|ip|url|ips|method|body|param|params|query|cookies|request).*"
+  // Node.js handler conventions (Express, Koa, Fastify-style `req`/`res`/`ctx`). Each pattern is
+  // matched from the START of a node's code, so it describes the node itself: the read `req.query`
+  // or the call `res.send(x)`. Unanchored (`.*req\.query.*`), they also matched every statement
+  // assigning such a read and every enclosing call whose callback merely mentioned one - the
+  // `app.get('/x', (req, res) => ...)` registration became both a source and a sink - and the
+  // receiver names were not delimited, so `expires.setFullYear` was a response call and anything
+  // spelled with `db` in it (`feedbackService`) a database sink.
+  private val JsRequestRead = java.util.regex.Pattern.compile(
+    "(?s)(req|ctx|context)\\.(originalUrl|path|protocol|route|secure|signedCookies|stale|subdomains|xhr|app|pipe|file|files|baseUrl|fresh|hostname|ip|url|ips|method|body|param|params|query|cookies|request)(?![\\w$]).*"
   )
 
-  private val JS_RESPONSE_PATTERNS = Array(
-    "(?s)(?i).*(res|ctx|context)\\.(append|attachment|body|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|vary).*",
-    "(?s)(?i).*res\\.(set|writeHead|setHeader).*",
-    "(?s)(?i).*(db|dao|mongo|mongoclient).*",
-    "(?s)(?i).*(\\s|\\.)(list|create|upload|delete|execute|command|invoke|submit|send)"
+  /** A response method called with something to send, also after `res.status(code)`. A
+    * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing
+    * one. `res.json(x)` is no output either: the body is served as `application/json`, which a
+    * browser does not render - as for `Response.json(x)`; `jsonp` runs the callback name it is
+    * given and stays.
+    */
+  private val JsResponseCall = java.util.regex.Pattern.compile(
+    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
   )
+
+  /** Response methods that set a header: one given only literals (`res.setHeader("X-Content-Type-
+    * Options", "nosniff")`) writes what the code says.
+    */
+  private val JsHeaderMethods = Set("append", "set", "setHeader", "vary", "writeHead")
+
+  /** Koa's response body is a property write: `ctx.body = data`. */
+  private val JsResponseWrite =
+      java.util.regex.Pattern.compile("(?s)(ctx|context)\\.body\\s*=.*")
+
+  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`. A tagged
+    * template (`` db.sql`...${x}` ``) binds its values as parameters and is not one.
+    */
+  private val JsDatabaseCall = java.util.regex.Pattern.compile(
+    "(?s)(?i)(this\\.)?(db|dao|mongo|mongoclient)\\.[\\w$]+(\\.[\\w$]+|\\([^)]*\\))*\\s*\\(.*"
+  )
+
+  /** A client/SDK action, as the callee of a call: `s3.upload`, `sqs.send`, `lambda.invoke`. The
+    * receiver must be an instance (`client`, `this.queue`): `Object.create` and other capitalised
+    * receivers are static helpers, `this.send` is the class's own method, and a lowering temporary
+    * (`_tmp_3.create`) stands for some other expression.
+    */
+  private val JsSdkVerb = java.util.regex.Pattern.compile(
+    "(?s)(?!this\\.[\\w$]+$)(?!_tmp_)(this\\.)?[a-z_$][\\w$]*(\\.[\\w$]+)*\\.(list|create|upload|delete|execute|command|invoke|submit|send)"
+  )
+
+  /** Receivers whose `send`/`delete`/`list` are no SDK action. The browser's own channels send what
+    * the page chose to send - a request body, a socket frame - to where the page connected them
+    * (`xhr.send(body)`); collections and a request's own containers delete an entry
+    * (`map.delete(k)`, `cookies.delete('session')`, `url.searchParams.delete('q')`).
+    */
+  private val NonClientConstructors = Set(
+    "XMLHttpRequest",
+    "WebSocket",
+    "BroadcastChannel",
+    "Worker",
+    "SharedWorker",
+    "RTCDataChannel",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "URLSearchParams",
+    "Headers",
+    "FormData"
+  )
+  private val RequestContainers = Set("cookies", "headers", "searchParams", "formData", "params")
+
+  private def isNotSdkClient(callee: Call): Boolean =
+      js.JsShapes.fieldBase(callee).exists { base =>
+          js.JsShapes.memberPath(base).flatMap(_.lastOption).exists(RequestContainers.contains) ||
+          js.DomRecognizer.constructedBy(base, NonClientConstructors)
+      }
 
   // NB: there is no filename-keyed PY_REQUEST_PATTERNS heuristic
   // (".*(views|engine|api|base|http).py:<module>.*"). The framework recognizers in
@@ -342,7 +404,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   // JSXFragment's code is the whole template, so an unanchored `.*@html.*`
   // would tag the entire component as a sink.
   private val RAW_HTML_TEMPLATE_SINKS =
-      "(?s)(\\{@html\\b.*|v-html\\b.*|dangerouslySetInnerHTML\\b.*)"
+      "(?s)(\\{@html\\b.*|x-html\\b.*|v-html\\b.*|dangerouslySetInnerHTML\\b.*)"
 
   // Svelte's `{@html}` is named after the construct (`SvelteHtmlTag`) when astgen supplies the
   // `svelteKind` key, which is a stronger signal than the code pattern; the code pattern still
@@ -380,22 +442,52 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
     // The interpolation wrapper, or the expression's own call when it already was one
     // (`{@html render()}`). Restricted to the sink site's own subtree so a nested element's
-    // interpolation is not tagged along with it.
-    sinkSites.iterator.ast
-        .collectAll[Call]
-        .dedup
-        .newTagNode("framework-output")
-        .store()(using dstGraph)
-  end tagRawHtmlTemplateSinks
+    // interpolation is not tagged along with it. `xss` names the sink's category, so that a flow
+    // through an HTML sanitiser (`sanitizer-xss`, e.g. DOMPurify) is recognised as neutralised.
+    val rendered = sinkSites.iterator.ast.collectAll[Call].dedup.l
+    rendered.iterator.newTagNode("framework-output").store()(using dstGraph)
+    rendered.iterator.newTagNode("xss").store()(using dstGraph)
+
+  /** A database call whose statement is constant, so that what else it is given is bound as
+    * parameters: `db.query("SELECT ... WHERE id = $1", [id])`, and a statement prepared from a
+    * constant run with arguments - `db.prepare("... LIKE ?").all(term)`.
+    */
+  private def bindsParameters(c: Call): Boolean =
+    def constantFirstArgument(call: Call): Boolean =
+        call.argument.filter(_.argumentIndex == 1).headOption.exists(_.isInstanceOf[Literal])
+    constantFirstArgument(c) || js.JsShapes.receiverOf(c).exists {
+        case p: Call => js.JsShapes.callName(p) == "prepare" && constantFirstArgument(p)
+        case _       => false
+    }
+
+  /** `` db.sql`... ${x}` `` - lowered to `db.sql(<operator>.formatString(...))` - binds the values.
+    */
+  private def isTaggedTemplate(c: Call): Boolean =
+      c.code.matches("(?s)^[\\w$.]+\\(<operator>\\.formatString\\(.*")
 
   private def tagJavaScriptPatterns(dstGraph: DiffGraphBuilder): Unit =
+    def matches(p: java.util.regex.Pattern, c: Call) = p.matcher(c.code).matches()
+    def isAssignment(c: Call)                        = c.name.startsWith("<operator>.assignment")
     // Request/Response patterns
-    JS_REQUEST_PATTERNS.foreach(p =>
-        atom.call.code(p).newTagNode("framework-input").store()(using dstGraph)
-    )
-    JS_RESPONSE_PATTERNS.foreach(p =>
-        atom.call.code(p).newTagNode("framework-output").store()(using dstGraph)
-    )
+    atom.call
+        .filter(c => !isAssignment(c) && matches(JsRequestRead, c))
+        .newTagNode("framework-input")
+        .store()(using dstGraph)
+    atom.call
+        .filter { c =>
+            if isAssignment(c) then matches(JsResponseWrite, c)
+            else if c.name == Operators.fieldAccess then
+              matches(JsSdkVerb, c) && !isNotSdkClient(c)
+            else
+              !c.name.startsWith("<operator>") &&
+              (matches(JsResponseCall, c) &&
+                  !(JsHeaderMethods.contains(c.name) && c.argument.argumentIndexGt(0).l.forall(
+                    _.isInstanceOf[Literal]
+                  )) ||
+                  matches(JsDatabaseCall, c) && !isTaggedTemplate(c) && !bindsParameters(c))
+        }
+        .newTagNode("framework-output")
+        .store()(using dstGraph)
 
     tagRawHtmlTemplateSinks(dstGraph)
 

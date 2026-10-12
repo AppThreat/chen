@@ -66,8 +66,8 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll:
           cpg.file.name.l should contain allElementsOf List(
             "a.js",
             "b.js",
-            s"sub${java.io.File.separator}c.js",
-            s"sub${java.io.File.separator}d.js"
+            "sub/c.js",
+            "sub/d.js"
           )
       }
 

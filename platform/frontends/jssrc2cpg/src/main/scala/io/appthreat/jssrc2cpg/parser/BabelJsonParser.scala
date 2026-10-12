@@ -28,9 +28,16 @@ object BabelJsonParser:
 
     val jsonContent = IOUtils.readEntireFile(file)
     val json        = ujson.read(jsonContent)
-    val filename    = json("relativeName").str
-    val fullPath    = Paths.get(rootPath.toString, filename)
-    ParseResult(filename, fullPath.toString, json, sourceAsAstgenReadsIt(fullPath), typeMap)
+    val relative    = json("relativeName").str
+    val fullPath    = Paths.get(rootPath.toString, relative)
+    // the project-relative name is the same on every OS: framework conventions (`app/routes/`,
+    // `pages/api/`) and provenance (`via:<file>#<line>`) are written with `/`
+    val filename = relative.replace('\\', '/')
+    // a file astgen rewrote before parsing (an Ember template) comes with the text its offsets index
+    val content =
+        json.obj.get("source").flatMap(_.strOpt).getOrElse(sourceAsAstgenReadsIt(fullPath))
+    ParseResult(filename, fullPath.toString, json, content, typeMap)
+  end readFile
 
   /** astgen's offsets index the file as Node's `readFileSync(file, "utf-8")` returns it: a UTF-8
     * byte-order mark stays, as its first character, and malformed bytes become U+FFFD.

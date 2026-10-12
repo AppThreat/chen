@@ -83,7 +83,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       createBuiltinStaticCall(callExpr, callee, calleeCode)
     else
       val (receiverAst, baseNode, callName) = callee.node match
-        case MemberExpression =>
+        // `a?.b()` and `a.b?.()` are member calls on `a` too: as plain calls they took the whole
+        // callee text for their name and `this` for their receiver, so `a` never reached them.
+        case MemberExpression | OptionalMemberExpression =>
             val base   = createBabelNodeInfo(callee.json("object"))
             val member = createBabelNodeInfo(callee.json("property"))
             // The call name is taken from the property's source slice. A
@@ -626,6 +628,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   end astForObjectExpression
 
   protected def astForTSSatisfiesExpression(satisfiesExpr: BabelNodeInfo): Ast =
-      // Ignores the type, i.e. `x satisfies T` is understood as `x`.
-      astForNode(satisfiesExpr.json("expression"))
+      // Ignores the type, i.e. `x satisfies T` is understood as `x` - and a function `x` is a
+      // reference to it, as anywhere else a function is a value: `export const load = (async () =>
+      // {...}) satisfies PageServerLoad` assigns the function.
+      astForNodeWithFunctionReference(satisfiesExpr.json("expression"))
 end AstForExpressionsCreator

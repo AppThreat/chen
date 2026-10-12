@@ -2,7 +2,6 @@ package io.appthreat.jssrc2cpg.passes
 
 import io.appthreat.jssrc2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
-import java.io.File
 import scala.annotation.nowarn
 
 @nowarn // otherwise scalac warns about interpolated expressions
@@ -38,27 +37,25 @@ class InheritanceFullNamePassTests extends DataFlowCodeToCpgSuite:
         |
         |export default Musician;
         |""".stripMargin,
-        Seq("domain", "music.js").mkString(File.separator)
+        Seq("domain", "music.js").mkString("/")
       )
 
       "resolve the type being inherited fully" in {
           val List(tgtType) = cpg.typeDecl.nameExact("MusicWithLyrics").l
           tgtType.fullName shouldBe "inheritance.js::program:MusicWithLyrics"
           cpg.typeDecl("Musician").fullName.headOption shouldBe Some(
-            Seq("domain", "music.js::program:Musician").mkString(File.separator)
+            Seq("domain", "music.js::program:Musician").mkString("/")
           )
 
           tgtType.inheritsFromTypeFullName.headOption shouldBe Some(
-            Seq("domain", "music.js::program:Musician").mkString(File.separator)
+            Seq("domain", "music.js::program:Musician").mkString("/")
           )
       }
 
       "identifiers instantiated from these types should have their fully resolved types" in {
           val List(musician)           = cpg.identifier.nameExact("myMusician").l
           val List(musicianWithLyrics) = cpg.identifier.nameExact("myMusicWithLyrics").l
-          musician.typeFullName shouldBe Seq("domain", "music.js::program:Musician").mkString(
-            File.separator
-          )
+          musician.typeFullName shouldBe Seq("domain", "music.js::program:Musician").mkString("/")
           musicianWithLyrics.typeFullName shouldBe "inheritance.js::program:MusicWithLyrics"
       }
   }

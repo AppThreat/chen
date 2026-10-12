@@ -24,6 +24,10 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
   private def inputParams(cpg: Cpg): List[String] =
       cpg.tag.name("framework-input").parameter.name.sorted.l
 
+  /** The request members a handler reads (`{ params }` lowers to `params = param1_0.params`). */
+  private def inputReads(cpg: Cpg): List[String] =
+      cpg.tag.name("framework-input").call.code.l.map(c => c.substring(c.lastIndexOf('.') + 1))
+
   "SvelteKit server entrypoints" should {
 
       "tag load in +page.server.js as a route and its request parameter as input" in {
@@ -38,8 +42,47 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
           ))
 
           routes(cpg) shouldBe List("load")
-          // the destructured request object, and NOT the helper's parameter
-          inputParams(cpg).size shouldBe 1
+          // the request's members, and NOT the helper's parameter
+          (inputReads(cpg) should contain).allOf("params", "url")
+          inputParams(cpg) shouldBe empty
+      }
+
+      "not treat what the server put on the event as request data" in {
+          val cpg = tagged(code(
+            """
+          |export async function load({ url, locals, parent, fetch }) {
+          |  const layout = await parent();
+          |  return { q: url.searchParams.get('q'), user: locals.user, layout };
+          |}
+          |""".stripMargin,
+            "+page.server.js"
+          ))
+          inputReads(cpg) should contain("url")
+          inputReads(cpg) should not contain "locals"
+          inputReads(cpg) should not contain "parent"
+          inputReads(cpg) should not contain "fetch"
+      }
+
+      "bridge what a server hook puts in locals to the loads that read it" in {
+          val cpg = tagged(code(
+            """
+          |export async function handle({ event, resolve }) {
+          |  event.locals.brand = event.cookies.get('brand') ?? 'blue';
+          |  return resolve(event);
+          |}
+          |""".stripMargin,
+            "src/hooks.server.ts"
+          ).moreCode(
+            """
+          |export function load({ locals }) {
+          |  return { brand: locals.brand };
+          |}
+          |""".stripMargin,
+            "src/routes/+layout.server.ts"
+          ))
+          val read = cpg.tag.name("framework-input").call.codeExact("locals.brand").l
+          read should not be empty
+          read.head.tag.name.l should contain("via:src/hooks.server.ts#3")
       }
 
       "tag an actions handler, which compiles to an anonymous method" in {
@@ -56,7 +99,7 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
           ))
 
           routes(cpg) should contain("anonymous")
-          inputParams(cpg) should not be empty
+          inputReads(cpg) should contain("request")
       }
 
       "tag every handler of a multi-action file, which numbers the anonymous methods" in {
@@ -75,7 +118,7 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
           // catch only the first, leaving the other two handlers untagged.
           routes(cpg).size shouldBe 3
           routes(cpg).foreach(_ should startWith("anonymous"))
-          inputParams(cpg).size shouldBe 3
+          inputReads(cpg).sorted shouldBe List("cookies", "request", "request")
       }
 
       "tag every HTTP verb exported from +server.ts" in {
@@ -129,7 +172,7 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
 
   "the component props boundary" should {
 
-      "tag $props() in a .svelte file as framework-input" in {
+      "tag $props() as framework-input in a component nothing in the code renders" in {
           val cpg = tagged(code(
             """
           |<script>
@@ -137,10 +180,24 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
           |</script>
           |<p>{data.title}</p>
           |""".stripMargin,
-            "+page.svelte"
+            "Card.svelte"
           ))
 
           cpg.tag.name("framework-input").call.code.l shouldBe List("$props()")
+      }
+
+      "not tag a route component's $props(): its data is what load returned" in {
+          val cpg = tagged(code(
+            """
+          |<script>
+          |	const { data } = $props();
+          |</script>
+          |<p>{data.title}</p>
+          |""".stripMargin,
+            "src/routes/+page.svelte"
+          ))
+
+          cpg.tag.name("framework-input").call.l shouldBe empty
       }
   }
 
@@ -195,7 +252,7 @@ class SvelteKitRouteTagsTest extends DataFlowCodeToCpgSuite:
           |</script>
           |<div>{@html data.article.body}</div>
           |""".stripMargin,
-            "+page.svelte"
+            "ArticleBody.svelte"
           )
           new ChennaiTagsPass(cpg).createAndApply()
           new EasyTagsPass(cpg).createAndApply()

@@ -70,7 +70,24 @@ object DefaultSemantics:
         case Languages.C | Languages.NEWC => cFlows
         case lang if JvmLanguages.contains(lang) =>
             javaRequestReaderFlows
-        case _ => List.empty
+        case Languages.JSSRC | Languages.JAVASCRIPT => javaScriptFlows
+        case _                                      => List.empty
+
+  /** JavaScript: a template literal (`<operator>.formatString(quasi, value, quasi, ...)`) is built
+    * from its parts, and no part reaches another. Without a mapping the engine took the call for an
+    * unknown one and let every argument taint every other - a text interpolation next to an
+    * `unsafeHTML(...)` "flowed" into it. Parts beyond the 40th are rare enough to leave to the
+    * default.
+    */
+  private def javaScriptFlows: List[FlowSemantic] =
+      List(
+        F(Operators.formatString, (1 to 40).toList.map(i => (i, -1))),
+        // `fetch(url, init)`: the response is what the URL serves - the caller chose where it comes
+        // from - but not what the request body sent; the API decides its answer. The receiver too:
+        // type recovery names a `fetch(...).then(cb)` chain's outer call `fetch`, and a promise
+        // chain's result comes from its receiver
+        F("fetch", List((0, -1), (1, -1)))
+      )
 
   private def F = (x: String, y: List[(Int, Int)]) => FlowSemantic.from(x, y)
 

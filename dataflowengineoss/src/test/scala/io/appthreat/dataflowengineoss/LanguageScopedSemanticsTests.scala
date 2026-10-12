@@ -2,7 +2,7 @@ package io.appthreat.dataflowengineoss
 
 import io.appthreat.dataflowengineoss.semantics.{JavaFrameworkSemantics, PhpFrameworkSemantics}
 import io.appthreat.dataflowengineoss.semanticsloader.{FlowMapping, ParameterNode, Semantics}
-import io.shiftleft.codepropertygraph.generated.Languages
+import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -153,15 +153,26 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
       }
 
       "return nothing for graphs of other languages" in {
-          Seq(
-            Languages.JSSRC,
-            Languages.JAVASCRIPT,
-            Languages.PYTHONSRC,
-            Languages.RUBYSRC
-          ).foreach { language =>
+          Seq(Languages.PYTHONSRC, Languages.RUBYSRC).foreach { language =>
               withClue(s"$language must not receive PHP, Java or C flows: ") {
                   DefaultSemantics.flowsForLanguage(language) shouldBe List.empty
               }
+          }
+      }
+
+      "give JavaScript graphs the template-literal and fetch mappings and nothing of the other languages" in {
+          Seq(Languages.JSSRC, Languages.JAVASCRIPT).foreach { language =>
+            val flows = DefaultSemantics.flowsForLanguage(language)
+            withClue(s"$language must not receive PHP, Java or C flows: ") {
+                flows.map(_.methodFullName) shouldBe List(Operators.formatString, "fetch")
+            }
+            // a response comes from the URL (and a promise chain's receiver), not the request body
+            flows.find(_.methodFullName == "fetch").toList.flatMap(_.mappings).collect {
+                case FlowMapping(ParameterNode(src, _), ParameterNode(dst, _)) => src -> dst
+            } shouldBe List(0 -> -1, 1 -> -1)
+            // every part reaches the result, and no part reaches another
+            flows.head.mappings.collect { case FlowMapping(_, ParameterNode(dst, _)) => dst }
+                .distinct shouldBe List(-1)
           }
       }
   }

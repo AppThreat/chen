@@ -222,83 +222,135 @@ instead:
 | `+server.*`                                                  | `GET POST PUT PATCH DELETE OPTIONS HEAD fallback`                             |
 | `hooks.server.*`, `hooks.*`, `hooks.client.*`                | `handle handleError handleFetch handleValidationError init reroute transport` |
 
-Their parameters — the request object, `{ params, url, request, cookies }` — are tagged
-`framework-input`, which is what makes server-side flows surface. `actions` handlers compile to
-anonymous methods (`anonymous`, `anonymous1`, …), so those are tagged alongside the named
-entrypoints; named helper functions in the same file are left alone.
+The request is what the event's members hold — `{ params, url, request, cookies }` — and those
+member reads are tagged `framework-input` (`{ url }` lowers to `url = param1_0.url`, so the read
+`param1_0.url` is the source). `locals`, `parent()`, `fetch`, `platform` and the other helpers are
+not the request: what a server hook writes to `event.locals.user` reaches the `locals.user` reads of
+loads and endpoints through a bridge, with where it came from. A handler that hands the event on
+whole has its parameter tagged instead. `actions` handlers compile to anonymous methods
+(`anonymous`, `anonymous1`, …), so those are tagged alongside the named entrypoints; named helper
+functions in the same file are left alone; `handleFetch` sees the app's own requests.
 
 The request path crosses a file boundary with no edge in the graph: the server's `load` return
-becomes the component's `data` prop by SvelteKit convention, not by a call or an import. The
-component side is covered instead by tagging `$props()` in a `.svelte` file `framework-input` — the
-component's input boundary. Paired with the `framework-output` tag on a value rendered through
-`{@html}`, that closes a reportable path inside the component:
+becomes the component's `data` prop by SvelteKit convention, not by a call or an import. A route
+component (`+page.svelte`, `+layout.svelte`) reads it member by member — `data.article.title`,
+`form.preview` — and each read is tagged with the source behind that member of what `load` (or the
+form action, or an enclosing layout's `load`) returned, so a sanitised member stays clean beside a
+tainted one. A component no element in the code renders keeps `$props()` as its input boundary;
+one an element renders gets each prop from what its parents pass.
 
 ```text
-+page.svelte L2  $props()                        [framework-input]
-+page.svelte L6  raw
-+page.svelte L7  return '<div>' + raw + '</div>'
-+page.svelte L4  decorate(data.body)
++page.server.ts  L3  url.searchParams.get('notice')   [framework-input]
++page.svelte     L17 data.notice                      [framework-input, via:+page.server.ts#3]
+Notice.svelte    L13 {@html content}                  [framework-output]
 ```
 
-Note that a flow whose source and sink land on the _same line_ — `const { data } = $props()` read
-straight into `{@html data.body}` — is suppressed by `ReachableSlicing` as zero-information, since
-`toSlice` renders at most one node per `file#line`. The value has to pass through something on
-another line to be reported. Svelte 4's `export let` props are not tagged; `$props()` is the
-Svelte 5 form.
+Note that a flow whose source and sink land on the _same line_ — a read straight into
+`{@html data.body}` — is suppressed by `ReachableSlicing` as zero-information, since `toSlice`
+renders at most one node per `file#line`. Svelte 4's `export let` props are read by name (the parent
+assigns the binding, so there is no producing call); `$props()` is the Svelte 5 form. The URL is
+also read from `page` (`$app/state`) or the legacy `$page` store, which are tagged too.
 
-## Angular, React and Vue routes and props
+## Frontend framework recognizers
 
-The three component frameworks are recognised by `ChennaiTagsPass` from shapes the frontend already
-emits, not by pattern-matching source text.
+The JavaScript side of `ChennaiTagsPass` hands most of its work to the recognizers in
+`x2cpg/passes/taggers/js` - one per framework family, registered in `JsRecognizers.all`, the same
+shape as the Python recognizers. Each works from structure: the import that binds a name, the
+member chain a value is read from, the parameter a framework fills, the type a dependency was
+injected as. None of them needs an SBOM; where a framework auto-imports its API (Nuxt, Nitro,
+SvelteKit's `$app`), the project's `package.json` dependencies and file conventions are the
+evidence instead.
 
-**Route tables** — Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
+| Recognizer | Sources | Sinks |
+| --- | --- | --- |
+| `DomRecognizer` (always) | `location.*`, `document.URL`/`referrer`/`cookie`, `window.name`, `message`/`hashchange` events (not when the handler compares `event.origin` by equality); as `service-ingress`, Web Storage and `fetch`/XHR/axios/ky/ofetch responses | `innerHTML`/`outerHTML`/`srcdoc` writes, `insertAdjacentHTML`, `document.write`, URL attributes, `eval`/`Function`/string timers, `location` writes, `window.open`, `postMessage(_, '*')`, `document.cookie`, requests |
+| `AngularRecognizer` | `ActivatedRoute`/`Snapshot` reads and observable callbacks, resolvers/guards, `Router.url`, `Location.path()`, `@Input()`, `input()`/`model()`, `@HostListener('window:message')` and `host: { '(window:message)': ... }`, form `valueChanges`, HttpClient responses through service methods | `bypassSecurityTrust*`, `Renderer2.setProperty/setAttribute`, HttpClient and `httpResource` request URLs, `Router.navigateByUrl` |
+| `ReactRecognizer` | component props, router hooks, loaders/actions, Next.js route handlers, pages, `cookies()`/`headers()`, `'use server'` functions, React 19 form actions, Qwik `routeLoader$`/`routeAction$`/`server$` | `redirect()`, `NextResponse.redirect/rewrite`, `navigate()`/`router.push()`/`<Navigate to>` with an unanchored target |
+| `VueRecognizer` | `useRoute()`, `this.$route`, props (also the Options API), guards, directive bindings, Nuxt request composables, `useFetch`/`useAsyncData` | `navigateTo(_, { external })`, `useHead` scripts, `h()` with `innerHTML`, router navigation |
+| `NitroRecognizer` | `defineEventHandler` events, h3 readers, task payloads | `sendRedirect`, `send`, markup returned by a handler, `proxyRequest`, server `$fetch`, `useStorage` keys |
+| `SvelteRecognizer` | `load`/endpoint/hook parameters, `$props()`, `export let`, `page`/`$page`, `use:` action values | `redirect()`, `goto()` |
+| `NodeRecognizer` | server HTTP client responses | `child_process` (also through `promisify`), `fs`, `vm`, computed `require`, SQL strings (pg, mysql2, sqlite3, `@appthreat/sqlite3`, better-sqlite3, `node:sqlite`, knex, prisma, db0, ...) |
+| `LitRecognizer`, `JQueryRecognizer`, `EmberRecognizer`, `AstroRecognizer` | `@property()`, ajax responses, `model(params)`, the `Astro` global, endpoint/middleware/action context | `unsafeHTML`, `.innerHTML=${}`, `$(html)`, `.html()`, `$.globalEval`, `htmlSafe`, `redirect()` |
+
+**Vocabulary.** Sources are `framework-input` (attacker data) or `service-ingress` (remote data).
+Sinks are `framework-output`, `code-execution`, `http-client` (`ssrf` on the server), `sql`,
+`shell-exec` and `file-io`, and HTML/navigation sinks also carry a category - `xss` or `redirect` -
+so that a sanitiser declaring it (`sanitizer-xss` on `DOMPurify.sanitize`, `sanitizer-redirect`
+on `encodeURIComponent`) neutralises exactly the flows it protects. A call whose result is a
+boolean or a number about its arguments (`allow.has(x)`, `url.startsWith('/')`) is a
+`predicate`: a flow through its result carries nothing.
+
+**What is not a sink.** A value that the code anchors cannot be redirected: a request to
+`/search?q=${q}` or a navigation to `'/search?q=' + q` keeps its origin, and a template `href`
+starting with `/` can never become `javascript:`. A variable in the *path* of a fixed URL
+(`/api/items/${id}`) is client-side path traversal and is a sink; a variable base
+(`${this.apiUrl}/items`) makes only the base one, and a URL that is configuration - a service's
+own field (`this.http.put(this.host, body)`), a SCREAMING_CASE constant, `environment.*` - none.
+The sink of a request is always that part of its URL, never the request call: what reaches its
+body, options or receiver is no forgery. Angular's `[innerHTML]` and React 19's `href`
+sanitise on their own and are not sinks; `@Output()` emitters are not sinks either - an emitted
+value goes to the parent component.
+
+**API chaining.** Data the application received or stored itself - a response, a WebSocket
+message, Web Storage, all `service-ingress` - that reaches nothing but the URL of another request
+is how an API is walked (an id from one response in the path of the next), and atom's reachables
+drops such flows for JavaScript. The same data reaching markup or code is still reported.
+
+**Service calls.** The frontend cannot type `this.products` in `this.products.feed(url)`; where the
+member was injected as one of the project's own classes, the Angular recognizer resolves the call
+to that class's method, so a value handed to a service reaches the request the service makes.
+
+**Bridges.** Three things carry a value where no call does, and run after the recognizers:
+`MemberTaintBridge` makes `this.x` a source in every method of a class when some method assigns
+it from a source (`ngOnInit` storing a route parameter that a click handler uses);
+`ReactiveBridge` does the same for reactive derivations (`computed`, `useMemo`, `createMemo`,
+`useActionState`) and for the reads of a module-level variable inside functions, and makes a
+derivation that returns a sanitiser's result a sanitiser itself.
+
+**Package attribution.** Each sink the recognizers tag is also tagged with the `pkg:npm/...` purl
+of the package its callee is bound to - an import, a member of a module binding, a handle made from
+one (`pool = new pg.Pool()`), or for Angular the type a member was injected as - so reachable flows
+carry purls with no SBOM. Versions come from `package-lock.json` or else the `package.json` range;
+Node.js built-ins and modules no manifest declares (path aliases) get none. Sources are not
+attributed: a purl tag is a sink tag for reachables. A request sink - the part of a URL - carries
+the purl of the request it is passed to (`q` in `axios.get(q)`).
+
+**Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
+much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is
+connected to its inner read, and a captured variable is connected to every read inside the
+closure, not only the first - a component's handlers and effects read what it took from the URL
+at the top.
+
+```text
+go.tsx L12  searchParams.get("next")        [framework-input via useSearchParams()]
+go.tsx L19  window.location.href = next     [framework-output, redirect]   (inside useEffect)
+```
+
+**Route tables** - Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
 `RouterModule.forRoot`/`provideRouter`) and React Router (`createBrowserRouter`) all lower to the
 same object-property assignments, `_tmp_1.path = "/about/:id"` and `_tmp_1.component = About`. A
 temp carrying a `.path` assignment plus a route-record sibling key is a route record: the path
 literal is tagged `framework-route` and the rendered component becomes a handler whose parameters
-are tagged `framework-input`. An object that merely has a `path` property is not a route record.
+are tagged `framework-input`. A router package must be imported; a **strong** sibling key
+(`component`, `element`, `redirect`, `pathMatch`, `loadChildren`, `loadComponent`, `lazy`) admits
+any path, a **weak** one (`children`, `loader`, `action`) also needs a route-shaped path, and a
+relative filesystem value (`./src`) is never a route.
 
-Three independent guards keep ordinary objects out, because a bad route is not just a noisy tag —
-it surfaces in slice output as an application route. A router package must be imported at all.
-Sibling keys are then split by how route-specific they are: a **strong** key names something to
-render or somewhere to go (`component`, `element`, `redirect`, `pathMatch`, and the lazy forms
-`loadChildren`, `loadComponent`, `lazy`) and admits any path, since child routes are written with
-bare relative segments; a **weak** key (`children`, `loader`, `action` — which also describe file
-trees, bundler configs and menus) additionally requires a route-shaped path. And a relative
-filesystem value (`./src`) is never a route. The conservative edge: an Angular parent route written
-as `{ path: 'admin', children: [...] }` — bare path, no component — is missed, while
-`{ path: '/admin', children: [...] }` is found; its children carry components and are found either
-way.
+**Signal inputs** (`input()`, `input.required()`, `model()`, `model.required()` from
+`@angular/core`) are found through the import, so a renamed import still counts and a local
+function that happens to be called `input` does not. Not covered: an initialiser wrapped in
+`as T`, `!` or a conditional, `this.x = input()` in the constructor body, and an `input` reached
+through `import * as ng` or a re-export.
 
-**React** — `<Route path="/profile" element={<Profile />} />` tags the path attribute's literal and
-resolves the rendered component (from the identifier, or from the JSX tag name when the value is an
-element — the `JSXIdentifier` carries no reference edge). `useParams`, `useSearchParams` and
-`useLocation` are tagged `framework-input` — the URL reaches a component through those hooks. And a
-capitalized method that renders a template is a React component by the framework's own naming
-rule, so its first (props) parameter is web-facing input:
+**Lowering details that matter for flows.** A directive prologue (`'use server'`, `'use client'`)
+is emitted as the string-literal statement it is in the source - Babel keeps it apart from the
+body. An optional member call (`form.get('next')?.toString()`) is a call on its object like any
+member call; it used to be lowered as a call of the whole callee text with `this` for a receiver,
+which cut the value off. Template literals map every part to the result and no part to another.
 
-```text
-app.jsx L2  useParams()          [framework-input]
-app.jsx L4  __html: bio          [framework-output]   ← dangerouslySetInnerHTML
-```
-
-**Vue** — `defineProps`/`withDefaults`/`defineModel` calls and `useRoute()` are
-`framework-input`, as is the props parameter of an options-API `setup(props)` method. Since
-atom-parsetools 4.3.0 a directive value like `v-html="content"` keeps a reference to the script
-binding, so a props-to-raw-HTML path inside one component is reportable end to end.
-
-**Angular** — `@Input()` members and their `this.x` reads are `framework-input` (matched
-exactly, so an `@Input() id` does not taint `this.idx`), `@Output()` members are
-`framework-output`, `ActivatedRoute` reads are input — whether the field is named `route` or
-`activatedRoute` (`route.params`, `this.activatedRoute.snapshot.queryParams`,
-`paramMap.get(...)`), and a `bypassSecurityTrust*` call — the sanitizer escape hatch that feeds
-`[innerHTML]`-style bindings — is output.
-
-**Next.js and Nuxt** file conventions are keyed off the file name, like SvelteKit: an app-router
-`route.ts` tags its HTTP-verb exports, a `pages/api` handler tags every export, `middleware.ts`
-and the `getServerSideProps`/`getStaticProps`/`generateMetadata` loaders are entrypoints; Nuxt
-tags `defineEventHandler`/`eventHandler` lambdas and the exports of `server/api`/`server/routes`
-files, with the h3 request readers (`readBody`, `getRouterParam`, `getQuery`, …) as input.
+**Astro.** astgen lowers an `.astro` component to its frontmatter's statements followed by its
+template as JSX (see atom-parsetools' `docs/ASTGEN.md`), so `Astro.url`/`Astro.params`/
+`Astro.cookies` reads are sources and `set:html={x}` is a markup sink like any other JSX attribute.
 
 ## Notes for Security Analysts
 
@@ -312,3 +364,113 @@ files, with the h3 request readers (`readBody`, `getRouterParam`, `getQuery`, �
 - `.vue` and `.svelte` files are also emitted as `CONFIG_FILE` nodes by `ConfigPass`, so
   `cpg.configFile.name(".*\\.svelte")` gives you the raw component text when the graph shape is
   not what you need.
+
+### Producer-consumer links as resolved calls
+
+A framework's producer-to-consumer link that no call site expresses - `useLoaderData()` returns
+what the route's `loader` returned, a route component's `$props()` what the sibling `load`
+returned, `inject(key)` what `provide(key, ...)` gave, `runTask('db:reindex')` the task file's
+`run`, a store hook the `defineStore` setup - is closed by resolving the consumer call to the
+producing METHOD (`JsTagger.resolveCall`). The dataflow engine then carries the callee's return
+value, object taint included, out to the call result; tagging the consumer read alone would
+start the flow too late. `JsTagger` records its resolutions because the CALL edges land in the
+graph only when the pass ends - a same-run reader (`sourceTagThrough` on a resolved callee's
+parameter) consults the record.
+
+Two lowerings carry values that no call site names. A template's COMPONENT element
+(`<RichText html={bio} title="About" {...rest} />`) also lowers to a call of the component whose
+one argument is the props object, `<operator>.jsxProps(bio, rest)` - every value the code
+computes, constants left out. `ComponentCallBridge` resolves the call to the function component
+(the module's default export for a default import, the export of that name for a named one, else
+the one project function of that name), so a parent's values reach the component's props
+parameter. Each value of the props object is named after its prop (`argumentName`), a spread
+unnamed. Single-file components (`.vue`, `.svelte`, `.astro`) are files, not functions, and are not
+resolved: their prop reads take what the elements pass under that prop's name.
+
+**Props are sources only where nothing in the code feeds them.** A component no element renders —
+a page, a component handed to a router or a library — gets its props from outside, so its props
+are a source. One that elements render gets them from its parents; one a framework feeds from data
+functions gets them from those (React Router `loaderData`/`actionData`, SvelteKit `data`/`form`, a
+Vue router `props` function), member by member. Angular inputs follow the same rule through the
+parent templates' bindings (`<app-x [html]="member">`, `[(model)]`, input aliases); an input bound
+to something the bridge cannot follow (`@if (product(); as p)` … `[sku]="p.id"`) stays a source.
+
+An `.html` file with framework bindings lowers like a Svelte component (atom-parsetools'
+`htmlAst.js`). Alpine: inline `x-data` objects become variables, `x-init` statements, `x-html`
+an `innerHTML` JSX attribute. Angular: a property binding keeps its brackets (`[innerHTML]={x}`)
+because Angular sanitises every property binding - none is a sink: markup is sanitised, a
+`javascript:` URL blocked, and a link the user clicks to another site is no redirect. Only a
+`bypassSecurityTrust*` call, itself the sink, gets markup through. A pipe is a call
+(`caption() | safeHtml` is `safeHtml(caption())`) resolved to the `@Pipe` class's `transform`,
+so a bypassing pipe is reached through its own code. The template belongs to the component whose
+`@Component({ templateUrl })` names it: its reads of the component's inputs, and of fields a
+bridge made sources, are sources; `[(ngModel)]="field"` makes the field's reads sources, since
+the control writes it with what the user typed.
+
+**More links no call site expresses.** Where the framework hands a value from one place to
+another by convention, a bridge joins them - and only where a source reaches the value, so an
+unrelated consumer is not made a source:
+
+- single-file components (`.vue`, `.svelte`, `.astro`) take what an element passes: the props
+  entry (`defineProps()`, `$props()`, `Astro.props`) and a Vue template's bare reads of declared
+  props;
+- a Vue directive's `binding` takes the value `v-name="..."` binds, a Svelte action's parameter
+  what `use:name={...}` binds;
+- an Alpine component's template reads (`x-html="highlighted"`, lowered to
+  `search_data.highlighted`) take that property's source, or a getter's return value - property by
+  property, so a sanitising getter stays clean;
+- a Vue Options API component's template takes what a `computed` property returns and what
+  `data()` holds;
+- a Next.js page takes what `getServerSideProps`/`getStaticProps` return under `props` (found by
+  export name - `export const getServerSideProps = (async (ctx) => ...) satisfies ...` is anonymous);
+- calls of a SolidStart `query`/`action` wrapper are resolved to the wrapped function, and a call of
+  a function taken out of a `Map` to the functions put into it (a hand-rolled router's
+  `routes.set(name, handler)` ... `routes.get(name)(outlet, current)`);
+- an object a store or hook returns is read one member at a time (`DataLinkBridge`): a Pinia
+  store's `session.returnUrl`, `const { latest } = useLiveTicker()`, React Router's
+  `loaderData.incident.body_html` - each read follows its member path into what the producer
+  returns, so one tainted member does not taint its neighbours;
+- state set later: a React `useState` setter or Solid signal setter called from a listener, a Vue
+  ref written as `x.value = v`, a Svelte `$state` variable assigned in a closure, a class field read
+  off an instance (`alerts.latest` after `new LiveAlerts()`), a closure reading its enclosing
+  function's parameter.
+
+**Guards.** A use that runs only once a check of the variable has passed is validated
+(`GuardBridge`, tagged `sanitizer`): membership in a constant collection
+(`ALLOWED.includes(x)`, `SET.has(x)`, `x in MAP`), an anchored regular expression
+(`/^[\w-]+$/.test(x)`), equality with a constant or of a URL's origin or host with the page's own,
+or a project predicate function whose returns are such checks of its parameter. The guarded region
+is the `if` branch, what follows an `if` whose other branch leaves (`return`, `throw`, SvelteKit's
+`error()`/`redirect()`), the right operand of `&&`, or a ternary branch - and a ternary yielding only
+the checked value or a constant (`ALLOWED.includes(x) ? x : "/"`) is itself the sanitiser. A prefix
+check (`x.startsWith("/")`) is no guard: `//evil.example` passes it.
+
+**Provenance.** A bridge tags the reads it makes sources with where their value came from as
+well: `via:<file>#<line>` for the value it carried across (`context.locals.banner = <value>` in
+middleware) and for the source found behind it. A reported flow that starts at
+`Astro.locals.banner` in a layout says, in its first node's tags, that the value is the one
+middleware took from the query string. The places include the call-site arguments the value
+crossed (`store.setTerm(route.query.term)`) and every source an object built from several carries.
+
+**Engine details these rely on.** A template's `<operator>.interpolation`, a component
+element's `<operator>.jsxProps` and a template literal (`<operator>.formatString`) only read their
+arguments, so they generate no definition of them - otherwise a template's read of one field
+(`{{ data.q }}`) reached every later read off the same object, and a temporary file name sharing a
+command string with a request value was tainted by it. A plain call `f(x)` is lowered with `this` as
+its receiver; that implicit receiver is no variable of the caller's: the call does not define it,
+it is not bound to the callee's or a callback's `this`, and a callback passed to a plain call gets
+the call's other arguments (`watch(source, (v) => ...)`). jssrc2cpg lowers `x satisfies T` as `x`,
+a function `x` as a reference to it, like `x as T`.
+
+**Responses.** A route endpoint's return value is its response, but most are data: a JSON
+response (`Response.json`, `NextResponse.json`, SvelteKit's `json`) is a neutraliser, and a
+data function's return (`load`, a loader, a form action - tagged `framework-data`) goes to the
+page that renders it, so atom does not treat it as a sink. What reflects content is a server
+handler's `new Response(body, init)` whose body the code does not fix, served without a constant
+data content type (`application/json`, `text/plain`) - an open proxy streaming an upstream's
+body with the upstream's content type, a parameter served as `text/html`.
+
+Validation is a neutraliser where it types the value: a `validateSearch` schema's non-text
+fields (zod/valibot/yup `number`, `enum`, `boolean`, `literal`) make reads of those members of
+`useSearch()` results `predicate` - a number or enum constant carries nothing to inject - while
+`z.string()` neutralises nothing.

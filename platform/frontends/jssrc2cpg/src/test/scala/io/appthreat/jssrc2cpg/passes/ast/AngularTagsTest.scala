@@ -1,13 +1,14 @@
 package io.appthreat.jssrc2cpg.passes.ast
 
+import io.appthreat.jssrc2cpg.Config
 import io.appthreat.jssrc2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.appthreat.dataflowengineoss.language.*
 import io.appthreat.x2cpg.passes.taggers.{ChennaiTagsPass, EasyTagsPass}
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 
-/** Angular boundary semantics: decorator-declared inputs/outputs, the `Routes` config array, and
-  * `ActivatedRoute` parameter reads.
+/** Angular boundary semantics: decorator-declared inputs/outputs, signal inputs, the `Routes`
+  * config array, and `ActivatedRoute` parameter reads.
   */
 class AngularTagsTest extends DataFlowCodeToCpgSuite:
 
@@ -55,20 +56,24 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").call.code.l shouldBe List("this.id")
       }
 
-      "tag @Output members as framework-output" in {
+      "not tag @Output members as sinks" in {
+          // An emitted value goes to the parent component, not out of the application. Tagged as
+          // framework-output, every @Input read that reached an emit became a "flow".
           val cpg = tagged(code(
             """
-          |import { Component, Output, EventEmitter } from '@angular/core';
+          |import { Component, Input, Output, EventEmitter } from '@angular/core';
           |@Component({ selector: 'app-save' })
           |export class SaveComponent {
+          |  @Input() draft = '';
           |  @Output() saved = new EventEmitter<string>();
-          |  save() { this.saved.emit('ok'); }
+          |  save() { this.saved.emit(this.draft); }
           |}
           |""".stripMargin,
             "save.component.ts"
           ))
 
-          cpg.tag.name("framework-output").member.name.l shouldBe List("saved")
+          cpg.tag.name("framework-output").member.name.l shouldBe empty
+          cpg.tag.name("framework-output").call.code.l shouldBe empty
       }
 
       "tag DomSanitizer bypass calls as framework-output" in {
@@ -85,6 +90,231 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
 
           cpg.tag.name("framework-output").call
               .name(".*bypassSecurityTrust.*").l should not be empty
+      }
+  }
+
+  "Angular signal inputs" should {
+
+      "tag input() and input.required() members and their reads as framework-input" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input, signal } from '@angular/core';
+          |@Component({ selector: 'app-bio' })
+          |export class BioComponent {
+          |  bio = input<string>('');
+          |  name = input.required<string>();
+          |  count = signal(0);
+          |  greet() { return this.bio() + this.name() + this.count(); }
+          |}
+          |""".stripMargin,
+            "bio.component.ts"
+          ))
+
+          // count is component state, not an input, although it is read the same way
+          cpg.tag.name("framework-input").member.name.l.sorted shouldBe List("bio", "name")
+          cpg.tag.name("framework-input").call.code.l.sorted shouldBe List("this.bio", "this.name")
+      }
+
+      "close a flow from a signal input read to a sanitizer bypass" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |import { DomSanitizer } from '@angular/platform-browser';
+          |@Component({ selector: 'app-bio' })
+          |export class BioComponent {
+          |  bio = input<string>('');
+          |  constructor(private sanitizer: DomSanitizer) {}
+          |  html() {
+          |    const raw = this.bio();
+          |    return this.sanitizer.bypassSecurityTrustHtml(raw);
+          |  }
+          |}
+          |""".stripMargin,
+            "bio.component.ts"
+          ))
+
+          val sources = cpg.tag.name("framework-input").call.codeExact("this.bio").l
+          val sinks   = cpg.tag.name("framework-output").call.l
+          sources should not be empty
+          sinks should not be empty
+          sinks.iterator.reachableByFlows(sources.iterator).size should be > 0
+      }
+
+      "not tag a member initialised by an input function that is not Angular's" in {
+          val cpg = tagged(code(
+            """
+          |import { Component } from '@angular/core';
+          |import { input } from './prompt';
+          |@Component({ selector: 'app-local' })
+          |export class LocalComponent {
+          |  bio = input('');
+          |  read() { return this.bio(); }
+          |}
+          |""".stripMargin,
+            "local.component.ts"
+          ).moreCode(
+            """
+          |export function input(initial: string): () => string {
+          |  return () => initial;
+          |}
+          |""".stripMargin,
+            "prompt.ts"
+          ).moreCode(
+            """
+          |import { Component, input } from '@angular/core';
+          |import { forms } from './forms';
+          |@Component({ selector: 'app-name' })
+          |export class NameComponent {
+          |  name = input('');
+          |  box = forms.input('');
+          |  rule = forms.required();
+          |}
+          |""".stripMargin,
+            "name.component.ts"
+          ))
+
+          cpg.call.codeExact("this.bio()").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe List("name")
+          cpg.tag.name("framework-input").call.code.l shouldBe empty
+      }
+
+      "tag an input.required() member when the types of @angular/core resolve" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |@Component({ selector: 'app-name' })
+          |export class NameComponent {
+          |  name = input.required<string>();
+          |  greet() { return this.name(); }
+          |}
+          |""".stripMargin,
+            "name.component.ts"
+          ).moreCode(
+            """
+          |export interface InputSignal<T> {
+          |  (): T;
+          |}
+          |export declare const input: {
+          |  <T>(initialValue?: T): InputSignal<T>;
+          |  required<T>(): InputSignal<T>;
+          |};
+          |export declare function Component(metadata: unknown): ClassDecorator;
+          |""".stripMargin,
+            "node_modules/@angular/core/index.d.ts"
+          ).withConfig(Config(tsTypes = true)))
+
+          cpg.identifier.typeFullName.filter(_.contains("InputSignal")).l should not be empty
+          cpg.tag.name("framework-input").member.name.l shouldBe List("name")
+          cpg.tag.name("framework-input").call.code.l shouldBe List("this.name")
+      }
+
+      "tag an input() member in a class that has a method called input" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |@Component({ selector: 'app-field' })
+          |export class FieldComponent {
+          |  label = input('');
+          |  input(value: string) { return this.label() + value; }
+          |}
+          |""".stripMargin,
+            "field.component.ts"
+          ))
+
+          cpg.tag.name("framework-input").member.name.l shouldBe List("label")
+          cpg.tag.name("framework-input").call.code.l shouldBe List("this.label")
+      }
+
+      "tag signal inputs declared through a renamed import" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input as field } from '@angular/core';
+          |@Component({ selector: 'app-bio' })
+          |export class BioComponent {
+          |  bio = field<string>('');
+          |  name = field.required<string>();
+          |  greet() { return this.bio() + this.name(); }
+          |}
+          |""".stripMargin,
+            "bio.component.ts"
+          ))
+
+          cpg.tag.name("framework-input").member.name.l.sorted shouldBe List("bio", "name")
+          cpg.tag.name("framework-input").call.code.l.sorted shouldBe List("this.bio", "this.name")
+      }
+
+      "not tag a member that shares its name with a local variable initialised by input()" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |@Component({ selector: 'app-local' })
+          |export class LocalComponent {
+          |  bio = input('');
+          |  label = 'x';
+          |  other = 'y';
+          |  run(input: (value: string) => string) {
+          |    const label = input('z');
+          |    return label + this.label + this.bio();
+          |  }
+          |  build() {
+          |    const other = input('');
+          |    return other() + this.other;
+          |  }
+          |}
+          |""".stripMargin,
+            "local.component.ts"
+          ))
+
+          cpg.call.codeExact("this.label").size shouldBe 1
+          cpg.call.codeExact("this.other").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe List("bio")
+          cpg.tag.name("framework-input").call.code.l shouldBe List("this.bio")
+      }
+
+      "not tag a member assigned from input() in the constructor body" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input } from '@angular/core';
+          |import type { InputSignal } from '@angular/core';
+          |@Component({ selector: 'app-late' })
+          |export class LateComponent {
+          |  bio = input('');
+          |  late: InputSignal<string>;
+          |  later: InputSignal<string>;
+          |  constructor() {
+          |    this.late = input('')
+          |    this.later = input('');
+          |  }
+          |  read() { return this.late() + this.later() + this.bio(); }
+          |}
+          |""".stripMargin,
+            "late.component.ts"
+          ))
+
+          cpg.call.codeExact("this.late()").size shouldBe 1
+          cpg.call.codeExact("this.later()").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe List("bio")
+          cpg.tag.name("framework-input").call.code.l shouldBe List("this.bio")
+      }
+
+      "not tag a member that shares its name with the condition of a conditional initialiser" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input, signal } from '@angular/core';
+          |declare const wide: boolean;
+          |@Component({ selector: 'app-size' })
+          |export class SizeComponent {
+          |  wide = signal(false);
+          |  size = wide ? input(1) : input(2);
+          |  isWide() { return this.wide(); }
+          |}
+          |""".stripMargin,
+            "size.component.ts"
+          ))
+
+          cpg.call.codeExact("this.wide()").size shouldBe 1
+          cpg.tag.name("framework-input").member.name.l shouldBe empty
+          cpg.tag.name("framework-input").call.code.l shouldBe empty
       }
   }
 

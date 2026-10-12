@@ -8,7 +8,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Method,
 import io.shiftleft.semanticcpg.language.*
 
 import java.io.{File as JFile}
-import java.util.regex.{Matcher, Pattern}
+import java.util.regex.Pattern
 import scala.util.{Failure, Success, Try}
 
 class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
@@ -25,16 +25,25 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     * with no file in the project, so they are deliberately left unresolved.
     */
   private val SvelteKitLibAlias = "$lib"
-  private val SvelteKitLibRoot  = s"src${JFile.separator}lib"
+  // file names are project-relative with `/` on every OS
+  private val SvelteKitLibRoot = "src/lib"
 
   private def resolveSvelteKitAlias(entity: String): Option[String] =
       if entity == SvelteKitLibAlias then Some(SvelteKitLibRoot)
       else if entity.startsWith(s"$SvelteKitLibAlias/") then
-        val relative = entity
-            .stripPrefix(s"$SvelteKitLibAlias/")
-            .replace("/", JFile.separator)
-        Some(s"$SvelteKitLibRoot${JFile.separator}$relative")
+        Some(s"$SvelteKitLibRoot/${entity.stripPrefix(s"$SvelteKitLibAlias/")}")
       else None
+
+  /** Other path aliases - tsconfig `paths`, the package's own name, `@/` and `~/` - that name a
+    * project file.
+    */
+  private lazy val pathAliases =
+      io.appthreat.x2cpg.passes.taggers.js.JsPathAliases(cpg)
+
+  private def resolveAlias(fileName: String, entity: String): Option[String] =
+      resolveSvelteKitAlias(entity).orElse(
+        pathAliases.resolve(fileName, entity)
+      )
 
   override protected def optionalResolveImport(
     fileName: String,
@@ -43,26 +52,28 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     importedAs: String,
     diffGraph: DiffGraphBuilder
   ): Unit =
-    val pathSep     = ":"
-    val rawEntity   = importedEntity.stripPrefix("./")
-    val alias       = importedAs
-    val matcher     = pathPattern.matcher(rawEntity)
-    val sep         = Matcher.quoteReplacement(JFile.separator)
-    val root        = s"$codeRoot${JFile.separator}"
-    val currentFile = s"$root$fileName"
+    val pathSep    = ":"
+    val rawEntity  = importedEntity.stripPrefix("./")
+    val alias      = importedAs
+    val matcher    = pathPattern.matcher(rawEntity)
+    val root       = s"$codeRoot${JFile.separator}"
+    val currentDir = s"$root${fileName.substring(0, math.max(fileName.lastIndexOf('/'), 0))}"
     // We want to know if the import is local since if an external name is used to match internal methods we may have
     // false paths.
     // ESM imports arrive as "specifier:importedName", requires as the bare specifier
-    val svelteKitAliasPath = resolveSvelteKitAlias(rawEntity.split(pathSep).head)
-    val isLocalImport      = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
+    val svelteKitAliasPath =
+        if importedEntity.startsWith(".") then None
+        else resolveAlias(fileName, rawEntity.split(pathSep).head)
+    val isLocalImport = importedEntity.matches("^[.]+/?.*") || svelteKitAliasPath.isDefined
     // TODO: At times there is an operation inside of a require, e.g. path.resolve(__dirname + "/../config/env/all.js")
     //  this tries to recover the string but does not perform string constant propagation
     val entity = if matcher.find() then matcher.group(1) else rawEntity
     val resolvedPath = svelteKitAliasPath.getOrElse(
       better.files
-          .File(currentFile.stripSuffix(currentFile.split(sep).last), entity.split(pathSep).head)
+          .File(currentDir, entity.split(pathSep).head)
           .pathAsString
           .stripPrefix(root)
+          .replace('\\', '/')
     )
 
     val isImportingModule = !entity.contains(pathSep)
