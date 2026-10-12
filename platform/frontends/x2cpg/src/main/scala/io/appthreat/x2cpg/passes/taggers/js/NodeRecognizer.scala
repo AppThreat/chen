@@ -14,8 +14,8 @@ import JsTags.*
   * Sinks: commands (`child_process`), files (`fs`, `fs/promises`, `fs-extra`), code (`vm`, a
   * computed `require`), SQL strings (`pg`, `mysql2`, `better-sqlite3`, `sqlite3`, `knex.raw`,
   * `sequelize.query`, prisma's `$queryRawUnsafe`, db0's `exec`/`prepare`, `postgres`'s `unsafe`)
-  * and outgoing requests (`http.request`, `got`, `undici`, `node-fetch`). A tagged template
-  * (`` sql`... ${x}` ``, `` db.sql`...` ``) binds its values as parameters and is no SQL sink.
+  * and outgoing requests (`http.request`, `got`, `undici`, `node-fetch`). A tagged template (``
+  * sql`... ${x}` ``, `` db.sql`...` ``) binds its values as parameters and is no SQL sink.
   * `path.basename` keeps a file name inside its directory.
   *
   * Bindings are resolved through each file's imports and `require`s, including renames and
@@ -156,11 +156,12 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     val calls = ctx.cpg.call.filter(c =>
         functions.contains(callName(c)) || promisifiedLocals.contains((c.method.filename, c.name))
     ).filter { c =>
-        val file = c.method.filename
-        files.contains(file) && moduleFunction(ctx, c, file, modules, functions)
+      val file = c.method.filename
+      files.contains(file) && moduleFunction(ctx, c, file, modules, functions)
     }
     // Only a computed argument can carry anything in; a constant command or path is no finding.
     ctx.tagger.tag(calls.filter(hasComputedArgument), tags*)
+  end tagModuleCalls
 
   private[js] def moduleFunction(
     ctx: JsContext,
@@ -185,9 +186,12 @@ object NodeRecognizer extends JsFrameworkRecognizer:
         case _ =>
             // `require('child_process').exec(cmd)`
             c.receiver.headOption.exists(r =>
-                modules.exists(m => r.code.contains(s"require(\"$m\")") || r.code.contains(s"require('$m')"))
+                modules.exists(m =>
+                    r.code.contains(s"require(\"$m\")") || r.code.contains(s"require('$m')")
+                )
             )
     )
+  end moduleFunction
 
   /** `const run = promisify(exec)`; `run(cmd)` is `exec(cmd)`. */
   private def promisified(
@@ -198,25 +202,27 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     functions: Set[String]
   ): Boolean =
       c.receiver.headOption.exists {
-        case id: Identifier =>
-            JsValues.origin(id) match
-              case p: Call if p.name == "promisify" =>
-                  p.argument.filter(_.argumentIndex == 1).headOption.exists {
-                    case fn: Identifier =>
-                        functions.contains(fn.name) && modules.exists(m =>
-                            functions.exists(f => ctx.modules.localNamesOf(file, m, f).contains(fn.name))
-                        )
-                    case fa: Call => fieldName(fa).exists(functions.contains)
-                    case _        => false
-                  }
-              case _ => false
-        case _ => false
+          case id: Identifier =>
+              JsValues.origin(id) match
+                case p: Call if p.name == "promisify" =>
+                    p.argument.filter(_.argumentIndex == 1).headOption.exists {
+                        case fn: Identifier =>
+                            functions.contains(fn.name) && modules.exists(m =>
+                                functions.exists(f =>
+                                    ctx.modules.localNamesOf(file, m, f).contains(fn.name)
+                                )
+                            )
+                        case fa: Call => fieldName(fa).exists(functions.contains)
+                        case _        => false
+                    }
+                case _ => false
+          case _ => false
       }
 
   private def hasComputedArgument(c: Call): Boolean =
       c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption.exists {
-        case _: Literal => false
-        case _          => true
+          case _: Literal => false
+          case _          => true
       }
 
   /** `new vm.Script(code)` */
@@ -233,8 +239,8 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   private def tagDynamicRequire(ctx: JsContext): Unit =
     val requires = ctx.cpg.call.nameExact("require").filter(c =>
         c.argument.filter(_.argumentIndex == 1).headOption.exists {
-          case _: Literal => false
-          case _          => true
+            case _: Literal => false
+            case _          => true
         }
     )
     ctx.tagger.tag(requires, CodeSink*)
@@ -273,37 +279,39 @@ object NodeRecognizer extends JsFrameworkRecognizer:
               (c.name == "open" && c.code.contains("driver"))
           case other => other.code.matches(HandleNames)
     val sqlCalls = ctx.cpg.call.filter { c =>
-        val name = callName(c)
-        (SqlMethods.contains(name) || SqlHandleMethods.contains(name)) &&
-        receiverOf(c).exists(r =>
-            r.code != "this" &&
-                (SqlMethods.contains(name) || isDatabaseHandle(r)) &&
-                // `knex.raw`, `prisma.$queryRawUnsafe`, `pool.query`, `db.exec` - never a DOM or
-                // RegExp receiver
-                !r.code.matches("(?s)^(document|window|this\\.document|/.*/[a-z]*)$")
-        ) && !JsShapes.isTaggedTemplateCall(c) && sqlArgument(c).exists(isSqlString)
+      val name = callName(c)
+      (SqlMethods.contains(name) || SqlHandleMethods.contains(name)) &&
+      receiverOf(c).exists(r =>
+          r.code != "this" &&
+              (SqlMethods.contains(name) || isDatabaseHandle(r)) &&
+              // `knex.raw`, `prisma.$queryRawUnsafe`, `pool.query`, `db.exec` - never a DOM or
+              // RegExp receiver
+              !r.code.matches("(?s)^(document|window|this\\.document|/.*/[a-z]*)$")
+      ) && !JsShapes.isTaggedTemplateCall(c) && sqlArgument(c).exists(isSqlString)
     }
     // drizzle `sql.raw(x)` / postgres `sql.unsafe(x)` are covered by name above.
     ctx.tagger.tag(sqlCalls, "sql")
+  end tagSql
 
-  /** Outgoing requests from server code: `got(url)`, `http.get(url)`, `request(url)` from undici. */
+  /** Outgoing requests from server code: `got(url)`, `http.get(url)`, `request(url)` from undici.
+    */
   private def tagServerRequests(ctx: JsContext): Unit =
     val directClients = ctx.cpg.call.filter { c =>
-        val file = c.method.filename
-        c.receiver.headOption.flatMap(memberPath) match
-          case Some(List(local)) =>
-              ServerRequestPackages.exists(p =>
-                  ctx.modules.moduleBindingsOf(file, p).contains(local) ||
-                      ctx.modules.localNamesOf(file, p, "request").contains(local) ||
-                      ctx.modules.localNamesOf(file, p, "fetch").contains(local)
-              )
-          case Some(List(binding, method)) =>
-              (Set("get", "post", "put", "patch", "delete", "head", "request", "stream").contains(
-                method
-              )) && (ServerRequestPackages ++ Seq("http", "https")).exists(p =>
-                  ctx.modules.moduleBindingsOf(file, p).contains(binding)
-              )
-          case _ => false
+      val file = c.method.filename
+      c.receiver.headOption.flatMap(memberPath) match
+        case Some(List(local)) =>
+            ServerRequestPackages.exists(p =>
+                ctx.modules.moduleBindingsOf(file, p).contains(local) ||
+                    ctx.modules.localNamesOf(file, p, "request").contains(local) ||
+                    ctx.modules.localNamesOf(file, p, "fetch").contains(local)
+            )
+        case Some(List(binding, method)) =>
+            (Set("get", "post", "put", "patch", "delete", "head", "request", "stream").contains(
+              method
+            )) && (ServerRequestPackages ++ Seq("http", "https")).exists(p =>
+                ctx.modules.moduleBindingsOf(file, p).contains(binding)
+            )
+        case _ => false
     }.l
     ctx.tagger.tag(directClients.iterator, INGRESS)
     directClients.foreach(p => ctx.tagger.tag(JsValues.consumersOf(p).iterator, INGRESS))
@@ -311,16 +319,17 @@ object NodeRecognizer extends JsFrameworkRecognizer:
         c.argument.filter(_.argumentIndex == 1).headOption.toList.flatMap(requestSinksFor(c, _))
     )
     ctx.tagger.tag(requests.iterator, (RequestSink :+ SSRF)*)
+  end tagServerRequests
 
   /** `path.basename(p)` keeps a name inside the directory it is joined to. */
   private def tagPathSanitizers(ctx: JsContext): Unit =
     val basenames = ctx.cpg.call.nameExact("basename").filter { c =>
-        val file = c.method.filename
-        c.receiver.headOption.flatMap(memberPath).exists {
+      val file = c.method.filename
+      c.receiver.headOption.flatMap(memberPath).exists {
           case List(local) => ctx.modules.localNamesOf(file, "path", "basename").contains(local)
           case List(binding, _) => ctx.modules.moduleBindingsOf(file, "path").contains(binding)
           case _                => false
-        }
+      }
     }
     ctx.tagger.tag(basenames, SANITIZER, sanitizerFor("file-io"))
 end NodeRecognizer

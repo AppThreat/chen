@@ -36,7 +36,7 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
             "dom.js"
           ))
           val inputs = tagsOf(cpg, "framework-input")
-          inputs should contain allOf (
+          (inputs should contain).allOf(
             "location.hash",
             "window.location.search",
             "document.referrer",
@@ -76,7 +76,9 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
           val sinks   = cpg.tag.name("framework-output").call.l
           val sources = cpg.tag.name("framework-input").call.l
           sinks.iterator.reachableByFlows(sources.iterator).size should be > 0
-          cpg.tag.name("xss").call.code.l shouldBe List("document.getElementById('out').innerHTML = '<b>' + h + '</b>'")
+          cpg.tag.name("xss").call.code.l shouldBe List(
+            "document.getElementById('out').innerHTML = '<b>' + h + '</b>'"
+          )
       }
   }
 
@@ -108,11 +110,18 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
             "el.outerHTML = v",
             "el.setAttribute('href', v)"
           )
-          tagsOf(cpg, "redirect") shouldBe List("location.assign(v)", "location.href = v", "window.open(v)")
-          tagsOf(cpg, "code-execution") should contain allOf ("eval(v)", "setTimeout('run(' + v + ')', 1)")
+          tagsOf(cpg, "redirect") shouldBe List(
+            "location.assign(v)",
+            "location.href = v",
+            "window.open(v)"
+          )
+          (tagsOf(cpg, "code-execution") should contain).allOf(
+            "eval(v)",
+            "setTimeout('run(' + v + ')', 1)"
+          )
           // a callback is not evaluated
           tagsOf(cpg, "code-execution") should not contain "setTimeout(cb, 1)"
-          tagsOf(cpg, "framework-output") should contain allOf (
+          (tagsOf(cpg, "framework-output") should contain).allOf(
             "parent.postMessage(v, '*')",
             "document.cookie = 'c=' + v"
           )
@@ -239,7 +248,9 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
           outputs should not contain "res.json()"
           outputs.filter(_.contains("db.sql")) shouldBe empty
           // the registration call is neither a source nor a sink
-          (outputs ++ cpg.tag.name("framework-input").call.code.l).filter(_.startsWith("app.get")) shouldBe empty
+          (outputs ++ cpg.tag.name("framework-input").call.code.l).filter(
+            _.startsWith("app.get")
+          ) shouldBe empty
           cpg.tag.name("framework-input").call.code.l should contain("req.query.name")
       }
   }

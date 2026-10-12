@@ -19,8 +19,8 @@ import JsTags.*
   * `getRouterParam`, `getCookie`, `getHeader`, `getRequestURL`, ...). A Nitro task's `run({ payload
   * })` receives whatever `runTask` was given, and the dev task endpoint takes it from the request.
   *
-  * Sinks: `sendRedirect`, `send`/`sendStream` and a handler returning a string built with markup (h3
-  * sends a string as `text/html`), `proxyRequest`/`sendProxy`, server-side `$fetch` (request
+  * Sinks: `sendRedirect`, `send`/`sendStream` and a handler returning a string built with markup
+  * (h3 sends a string as `text/html`), `proxyRequest`/`sendProxy`, server-side `$fetch` (request
   * forgery), and `useStorage()` keys (`:`-separated paths across every mount).
   */
 object NitroRecognizer extends JsFrameworkRecognizer:
@@ -87,8 +87,8 @@ object NitroRecognizer extends JsFrameworkRecognizer:
         call.argument.filter(_.argumentIndex >= 1).l.flatMap(a => callbacksIn(a, Set("handler")))
     }.distinctBy(_.id())
     handlers.foreach { h =>
-        ctx.tagger.tag(Iterator(h), ROUTE)
-        ctx.tagger.tag(firstParam(h).iterator, INPUT)
+      ctx.tagger.tag(Iterator(h), ROUTE)
+      ctx.tagger.tag(firstParam(h).iterator, INPUT)
     }
     // Handlers exported directly from a server/api or server/routes file. Only handler-shaped
     // exports: one taking an event, or the anonymous default export - so that a plain Node server
@@ -136,7 +136,15 @@ object NitroRecognizer extends JsFrameworkRecognizer:
 
     // useStorage().getItem(key): keys are `:`-separated paths across every mount
     val storage = ctx.cpg.call
-        .nameExact("getItem", "getItemRaw", "setItem", "setItemRaw", "removeItem", "hasItem", "getMeta")
+        .nameExact(
+          "getItem",
+          "getItemRaw",
+          "setItem",
+          "setItemRaw",
+          "removeItem",
+          "hasItem",
+          "getMeta"
+        )
         .filter(c =>
             receiverOf(c).exists(r =>
                 JsValues.origin(r) match

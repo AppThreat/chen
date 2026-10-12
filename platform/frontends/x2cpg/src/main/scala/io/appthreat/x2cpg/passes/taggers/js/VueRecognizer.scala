@@ -7,8 +7,8 @@ import io.shiftleft.semanticcpg.language.*
 import JsShapes.*
 import JsTags.*
 
-/** Vue 3, Vue Router 4 and the application side of Nuxt (https://vuejs.org, https://router.vuejs.org,
-  * https://nuxt.com).
+/** Vue 3, Vue Router 4 and the application side of Nuxt (https://vuejs.org,
+  * https://router.vuejs.org, https://nuxt.com).
   *
   * Sources:
   *   - the route: `useRoute()` and the Options API's `this.$route` (also `$route` in templates);
@@ -22,8 +22,8 @@ import JsTags.*
   *     data fetching (`useFetch`, `useAsyncData`: remote data).
   *
   * Sinks: `v-html` and URL bindings are template sinks (EasyTagsPass, DomRecognizer); here, render
-  * functions (`h('div', { innerHTML })`), `useHead({ script: [{ innerHTML }] })`,
-  * `navigateTo(url, { external: true })`, and router navigation to a target the code does not fix.
+  * functions (`h('div', { innerHTML })`), `useHead({ script: [{ innerHTML }] })`, `navigateTo(url,
+  * { external: true })`, and router navigation to a target the code does not fix.
   *
   * Nuxt auto-imports all of these, so they are matched by name in a project that is a Vue/Nuxt one
   * by its imports or its manifest.
@@ -38,7 +38,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
 
   private val GuardRegistrations = Set("beforeEach", "beforeResolve", "afterEach")
   private val InComponentGuards  = Set("onBeforeRouteUpdate", "onBeforeRouteLeave")
-  private val Middleware = Set("defineNuxtRouteMiddleware", "addRouteMiddleware")
+  private val Middleware         = Set("defineNuxtRouteMiddleware", "addRouteMiddleware")
 
   private val RequestComposables =
       Set("useCookie", "useRequestHeaders", "useRequestHeader", "useRequestURL", "useRequestEvent")
@@ -63,8 +63,8 @@ object VueRecognizer extends JsFrameworkRecognizer:
     val routeReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
         fieldName(fa).contains("$route") ||
         fieldBase(fa).exists {
-          case id: Identifier => id.name == "$route"
-          case _              => false
+            case id: Identifier => id.name == "$route"
+            case _              => false
         }
     }
     ctx.tagger.tag(readChains(routeReads), INPUT)
@@ -76,31 +76,32 @@ object VueRecognizer extends JsFrameworkRecognizer:
     // Options API: `props: ['title']` or `props: { title: String }`, read as `this.title`
     val declarations = ctx.cpg.call.nameExact(Operators.assignment).filter { a =>
         a.argumentOption(1).exists {
-          case fa: Call => fieldName(fa).contains("props")
-          case _        => false
+            case fa: Call => fieldName(fa).contains("props")
+            case _        => false
         } && (a.method.filename.endsWith(".vue") ||
-          ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains("vue")))
+            ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains("vue")))
     }.l
     declarations.groupBy(_.method.filename).foreach { (file, decls) =>
-        val names = decls.flatMap(_.argumentOption(2)).flatMap { value =>
-            // array: pushes of literal names; object: property writes `_tmp.title = ...`
-            val literals = value.ast.isLiteral.flatMap(literalValue).l
-            val keys = value.ast.isCall.nameExact(Operators.assignment).flatMap(_.argumentOption(1))
-                .collect { case fa: Call => fa }.flatMap(fieldName).l
-            if keys.nonEmpty then keys else literals
-        }.filter(n => n.nonEmpty && n.forall(c => c.isLetterOrDigit || c == '_' || c == '$')).toSet
-        if names.nonEmpty then
-          val reads = ctx.fieldAccesses.filter(fa =>
-              fa.method.filename == file && !isAssignmentTarget(fa) &&
-                  fieldBase(fa).exists(_.code == "this") && fieldName(fa).exists(names.contains)
-          )
-          ctx.tagger.tag(readChains(reads), INPUT)
+      val names = decls.flatMap(_.argumentOption(2)).flatMap { value =>
+        // array: pushes of literal names; object: property writes `_tmp.title = ...`
+        val literals = value.ast.isLiteral.flatMap(literalValue).l
+        val keys = value.ast.isCall.nameExact(Operators.assignment).flatMap(_.argumentOption(1))
+            .collect { case fa: Call => fa }.flatMap(fieldName).l
+        if keys.nonEmpty then keys else literals
+      }.filter(n => n.nonEmpty && n.forall(c => c.isLetterOrDigit || c == '_' || c == '$')).toSet
+      if names.nonEmpty then
+        val reads = ctx.fieldAccesses.filter(fa =>
+            fa.method.filename == file && !isAssignmentTarget(fa) &&
+                fieldBase(fa).exists(_.code == "this") && fieldName(fa).exists(names.contains)
+        )
+        ctx.tagger.tag(readChains(reads), INPUT)
     }
   end tagProps
 
   private def tagGuards(ctx: JsContext): Unit =
-    val registered = ctx.cpg.call.nameExact((GuardRegistrations ++ InComponentGuards ++ Middleware).toSeq*)
-        .l.flatMap(c => c.argument.filter(_.argumentIndex >= 1).l.flatMap(callbacksIn(_)))
+    val registered =
+        ctx.cpg.call.nameExact((GuardRegistrations ++ InComponentGuards ++ Middleware).toSeq*)
+            .l.flatMap(c => c.argument.filter(_.argumentIndex >= 1).l.flatMap(callbacksIn(_)))
     // `beforeEnter: (to) => ...` on a route record
     val perRoute = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(_.argumentOption(1).exists {
@@ -112,8 +113,8 @@ object VueRecognizer extends JsFrameworkRecognizer:
     val options = ctx.cpg.method.internal.nameExact("beforeRouteEnter", "beforeRouteUpdate").l
     ctx.tagger.tag((registered ++ perRoute ++ options).flatMap(firstParam).iterator, INPUT)
 
-  /** `app.directive('raw', { mounted(el, binding) {...} })`, `const vRaw = { mounted(el, binding) }`
-    * in `<script setup>`: `binding.value` is the template expression the directive is bound to.
+  /** `app.directive('raw', { mounted(el, binding) {...} })`, `const vRaw = { mounted(el, binding)
+    * }` in `<script setup>`: `binding.value` is the template expression the directive is bound to.
     */
   private def tagDirectives(ctx: JsContext): Unit =
     val registered = ctx.cpg.call.nameExact("directive").l
@@ -122,8 +123,8 @@ object VueRecognizer extends JsFrameworkRecognizer:
     val local = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(1).exists {
-              case id: Identifier => id.name.matches("v[A-Z]\\w*")
-              case _              => false
+                case id: Identifier => id.name.matches("v[A-Z]\\w*")
+                case _              => false
             } && a.method.filename.endsWith(".vue")
         )
         .flatMap(_.argumentOption(2)).l.flatMap(callbacksIn(_, DirectiveHooks))
@@ -134,16 +135,18 @@ object VueRecognizer extends JsFrameworkRecognizer:
     */
   private def computedKeys(arg: Expression): Set[String] =
       arg.ast.isCall.nameExact(Operators.assignment).l.flatMap { a =>
-        (a.argumentOption(1), a.argumentOption(2)) match
-          case (Some(fa: Call), Some(v)) if !v.isInstanceOf[Literal] => fieldName(fa)
-          case _                                                     => None
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(fa: Call), Some(v)) if !v.isInstanceOf[Literal] => fieldName(fa)
+            case _                                                     => None
       }.toSet
 
   private def tagSinks(ctx: JsContext): Unit =
     // navigateTo(url, { external: true }) - and `open: { target }`, which opens a window
     val external = ctx.cpg.call.nameExact("navigateTo").filter { c =>
         c.argument.filter(_.argumentIndex == 2).exists(o =>
-            o.code.matches("(?s).*\\bexternal\\s*:\\s*true.*") || o.code.matches("(?s).*\\bopen\\s*:.*")
+            o.code.matches("(?s).*\\bexternal\\s*:\\s*true.*") || o.code.matches(
+              "(?s).*\\bopen\\s*:.*"
+            )
         ) && c.argument.filter(_.argumentIndex == 1).exists(!_.isInstanceOf[Literal])
     }
     ctx.tagger.tag(external, NavigationSink*)
@@ -172,7 +175,8 @@ object VueRecognizer extends JsFrameworkRecognizer:
         receiverOf(c).exists(r =>
             r.code == "this.$router" || r.code == "$router" || (JsValues.origin(r) match
               case u: Call => u.name == "useRouter"
-              case _       => false)
+              case _       => false
+            )
         ) && c.argument.filter(_.argumentIndex == 1).headOption.exists(t =>
             !isObjectLiteral(t) && !hasFixedOrigin(t)
         )

@@ -19,19 +19,19 @@ final case class JsTypeRef(name: String, pkg: Option[String]):
 /** Angular (v2 through v20): https://angular.dev
   *
   * Angular code reaches framework objects through dependency injection - a constructor parameter
-  * (`constructor(private route: ActivatedRoute)`) or a field initialised by `inject(...)` - and then
-  * uses them as `this.route`, so the recognizer first types each class's injected members and then
-  * works from those types rather than from what a member happens to be called.
+  * (`constructor(private route: ActivatedRoute)`) or a field initialised by `inject(...)` - and
+  * then uses them as `this.route`, so the recognizer first types each class's injected members and
+  * then works from those types rather than from what a member happens to be called.
   *
   * Sources:
   *   - `ActivatedRoute` / `ActivatedRouteSnapshot`: `params`, `queryParams`, `paramMap`,
   *     `queryParamMap`, `fragment`, `data`, `url` - read from a snapshot, or delivered to the
-  *     callbacks of the observables (`this.route.paramMap.subscribe(p => ...)`,
-  *     `.pipe(map(p => ...))`); also through `parent`/`root`/`firstChild`, and in resolvers and
-  *     guards (`(route: ActivatedRouteSnapshot) => ...`, `const r: ResolveFn<T> = (route) => ...`);
+  *     callbacks of the observables (`this.route.paramMap.subscribe(p => ...)`, `.pipe(map(p =>
+  *     ...))`); also through `parent`/`root`/`firstChild`, and in resolvers and guards (`(route:
+  *     ActivatedRouteSnapshot) => ...`, `const r: ResolveFn<T> = (route) => ...`);
   *   - `Router.url`, `Location.path()`, `PlatformLocation` URL parts;
-  *   - component inputs: `@Input()` members (and setters), signal `input()` / `input.required()` and
-  *     `model()` / `model.required()` members, and their `this.x` reads. With
+  *   - component inputs: `@Input()` members (and setters), signal `input()` / `input.required()`
+  *     and `model()` / `model.required()` members, and their `this.x` reads. With
   *     `withComponentInputBinding()` the router binds path and query parameters straight to these,
   *     so a routed component's inputs are URL data;
   *   - `@HostListener('window:message', ['$event'])` handlers;
@@ -122,36 +122,39 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     /** `inject(X)` (or a renamed import of it) -> the type X names. */
     def injected(call: Call): Option[JsTypeRef] =
       val file = call.method.filename
-      if call.name == "inject" || ctx.modules.localNamesOf(file, CorePkg, "inject").contains(call.name)
+      if call.name == "inject" || ctx.modules.localNamesOf(file, CorePkg, "inject").contains(
+          call.name
+        )
       then
         call.argument.filter(_.argumentIndex == 1).headOption.collect {
-          case id: Identifier => resolve(file, id.name)
-          case fa: Call if fa.name == Operators.fieldAccess =>
-              // `inject(tokens.HttpClient)` - rare; the field name is the best guess
-              resolve(file, fieldName(fa).getOrElse(fa.code))
+            case id: Identifier                               => resolve(file, id.name)
+            case fa: Call if fa.name == Operators.fieldAccess =>
+                // `inject(tokens.HttpClient)` - rare; the field name is the best guess
+                resolve(file, fieldName(fa).getOrElse(fa.code))
         }
       else None
 
     def memberTypes(td: TypeDecl): Map[String, JsTypeRef] =
         memberCache.getOrElseUpdate(
           td.fullName, {
-            val file    = td.file.name.headOption.getOrElse("")
-            val methods = classMethods(td)
-            val ctor    = methods.filter(_.name == "<init>")
-            val fromParams = ctor.flatMap(params).flatMap(p =>
-                declared(file, p.typeFullName, p.code).map(p.name -> _)
-            )
-            val fromInject = ctor.flatMap(m => Iterator(m).assignment.l).flatMap { a =>
-                (a.argumentOption(1), a.argumentOption(2).map(JsShapes.unwrap)) match
-                  case (Some(id: Identifier), Some(init: Call)) => injected(init).map(id.name -> _)
-                  case (Some(fa: Call), Some(init: Call)) if fa.code.startsWith("this.") =>
-                      fieldName(fa).flatMap(f => injected(init).map(f -> _))
-                  case _ => None
-            }
-            val fromMembers = td.member.l.flatMap(m =>
-                declared(file, m.typeFullName, m.code).map(m.name -> _)
-            )
-            (fromMembers ++ fromParams ++ fromInject).toMap
+              val file    = td.file.name.headOption.getOrElse("")
+              val methods = classMethods(td)
+              val ctor    = methods.filter(_.name == "<init>")
+              val fromParams = ctor.flatMap(params).flatMap(p =>
+                  declared(file, p.typeFullName, p.code).map(p.name -> _)
+              )
+              val fromInject = ctor.flatMap(m => Iterator(m).assignment.l).flatMap { a =>
+                  (a.argumentOption(1), a.argumentOption(2).map(JsShapes.unwrap)) match
+                    case (Some(id: Identifier), Some(init: Call)) =>
+                        injected(init).map(id.name -> _)
+                    case (Some(fa: Call), Some(init: Call)) if fa.code.startsWith("this.") =>
+                        fieldName(fa).flatMap(f => injected(init).map(f -> _))
+                    case _ => None
+              }
+              val fromMembers = td.member.l.flatMap(m =>
+                  declared(file, m.typeFullName, m.code).map(m.name -> _)
+              )
+              (fromMembers ++ fromParams ++ fromInject).toMap
           }
         )
 
@@ -169,14 +172,15 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                   .flatMap(p => declared(file, p.typeFullName, p.code))
                   .orElse(JsValues.origin(id) match
                     case init: Call => injected(init)
-                    case _          => None)
+                    case _          => None
+                  )
           case _ => None
   end Di
 
   /** `this.products.fetchPartnerFeed(url)`, where `products` was injected as the project's own
-    * `ProductService`: the frontend leaves the call unresolved (it cannot know the member's type), so
-    * a value handed to a service never reached the request the service makes. The call is resolved
-    * to the service's method of that name.
+    * `ProductService`: the frontend leaves the call unresolved (it cannot know the member's type),
+    * so a value handed to a service never reached the request the service makes. The call is
+    * resolved to the service's method of that name.
     */
   private def resolveServiceCalls(ctx: JsContext, di: Di): Unit =
     val classes = ctx.cpg.typeDecl.internal.l.groupBy(_.name)
@@ -185,7 +189,10 @@ object AngularRecognizer extends JsFrameworkRecognizer:
           receiverOf(call).flatMap(di.typeOf).filter(_.pkg.isEmpty).foreach { t =>
               classes.getOrElse(t.name, Nil) match
                 case td :: Nil =>
-                    td.method.nameExact(call.name).headOption.foreach(ctx.tagger.resolveCall(call, _))
+                    td.method.nameExact(call.name).headOption.foreach(ctx.tagger.resolveCall(
+                      call,
+                      _
+                    ))
                 case _ =>
           }
     }
@@ -215,13 +222,15 @@ object AngularRecognizer extends JsFrameworkRecognizer:
             (routeFiles.contains(expr.method.filename) && (JsShapes.unwrap(expr) match
               case fa: Call =>
                   fieldBase(fa).exists(_.code == "this") &&
-                      fieldName(fa).exists(n => RouteMemberNames.contains(n.stripPrefix("_")))
+                  fieldName(fa).exists(n => RouteMemberNames.contains(n.stripPrefix("_")))
               case id: Identifier => RouteMemberNames.contains(id.name)
-              case _              => false))
+              case _              => false
+            ))
     // Strip `snapshot`/`parent`/`root`/`firstChild` hops to find the route the read starts from.
     def routeOf(expr: Expression): Option[Expression] =
         JsShapes.unwrap(expr) match
-          case fa: Call if fa.name == Operators.fieldAccess && fieldName(fa).exists(RouteHops.contains) =>
+          case fa: Call
+              if fa.name == Operators.fieldAccess && fieldName(fa).exists(RouteHops.contains) =>
               fieldBase(fa).flatMap(routeOf).orElse(Option.when(isRoute(fa))(fa))
           case other => Option.when(isRoute(other))(other)
 
@@ -298,29 +307,29 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                       i.packageName.contains(CorePkg)
               )
               .foreach { imp =>
-                  val alias = imp.local
-                  val initialisers = ctx.cpg.file.nameExact(imp.file).method.ast.isCall.filter {
-                      call =>
-                        val isPlain = call.name == alias &&
-                            call.receiver.isIdentifier.nameExact(alias).nonEmpty
-                        val isRequired = call.name == "required" &&
-                            call.argumentOption(0).exists {
+                val alias = imp.local
+                val initialisers = ctx.cpg.file.nameExact(imp.file).method.ast.isCall.filter {
+                    call =>
+                      val isPlain = call.name == alias &&
+                          call.receiver.isIdentifier.nameExact(alias).nonEmpty
+                      val isRequired = call.name == "required" &&
+                          call.argumentOption(0).exists {
                               case id: Identifier => id.name == alias
                               case _              => false
-                            }
-                        isPlain || isRequired
-                  }
-                  initialisers.foreach { initialiser =>
-                      for
-                        enclosing <- initialiser.inCall.headOption
-                        if enclosing.name == Operators.assignment
-                        if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
-                        typeDecl <- initialiser.method.typeDecl
-                        member   <- typeDecl.member.codeExact(enclosing.code).headOption
-                      do
-                        ctx.tagger.tag(Iterator(member), INPUT)
-                        ctx.tagger.tag(thisReads(typeDecl, member.name), INPUT)
-                  }
+                          }
+                      isPlain || isRequired
+                }
+                initialisers.foreach { initialiser =>
+                    for
+                      enclosing <- initialiser.inCall.headOption
+                      if enclosing.name == Operators.assignment
+                      if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
+                      typeDecl <- initialiser.method.typeDecl
+                      member   <- typeDecl.member.codeExact(enclosing.code).headOption
+                    do
+                      ctx.tagger.tag(Iterator(member), INPUT)
+                      ctx.tagger.tag(thisReads(typeDecl, member.name), INPUT)
+                }
               }
       }
 
@@ -356,8 +365,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     val inlineHandlers = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(1).exists {
-              case fa: Call => fieldName(fa).exists(routeKeys.contains)
-              case _        => false
+                case fa: Call => fieldName(fa).exists(routeKeys.contains)
+                case _        => false
             } && ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains(RoutePkg))
         )
         .flatMap(_.argumentOption(2))
@@ -380,7 +389,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
               producers.contains(c) ||
               ((c.name == "pipe" || c.name == "then") &&
                   receiverOf(c).exists(isProducer(_, depth - 1)))
-          case _ => false)
+          case _ => false
+        )
 
     // Service methods returning a producer, to a fixpoint (a method may return another's result).
     val serviceMethods = ctx.cpg.method.internal
@@ -388,8 +398,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
         .filter(_.ast.isReturn.nonEmpty)
         .l
     val producerMethods = mutable.LinkedHashSet.empty[Method]
-    var changed = true
-    var rounds  = 0
+    var changed         = true
+    var rounds          = 0
     while changed && rounds < 4 do
       changed = false
       rounds += 1
@@ -401,17 +411,16 @@ object AngularRecognizer extends JsFrameworkRecognizer:
       }
       // Calls of the producer methods are producers themselves.
       producerMethods.foreach { m =>
-          val owner = enclosingTypeDecl(m)
-          ctx.cpg.call.nameExact(m.name).foreach { c =>
-              val calledOnOwner = receiverOf(c).exists { r =>
-                di.typeOf(r).exists(t => owner.exists(_.name == t.name) && t.pkg.isEmpty) ||
-                (r.code == "this" && owner.exists(o => enclosingTypeDecl(c.method).contains(o)))
-              }
-              if calledOnOwner && producers.add(c) then changed = true
+        val owner = enclosingTypeDecl(m)
+        ctx.cpg.call.nameExact(m.name).foreach { c =>
+          val calledOnOwner = receiverOf(c).exists { r =>
+              di.typeOf(r).exists(t => owner.exists(_.name == t.name) && t.pkg.isEmpty) ||
+              (r.code == "this" && owner.exists(o => enclosingTypeDecl(c.method).contains(o)))
           }
+          if calledOnOwner && producers.add(c) then changed = true
+        }
       }
     end while
-
     // The values reach the callbacks of the observable. The producing calls themselves are not
     // tagged: an Observable is not its values, and a tagged call is a source for everything its
     // arguments reach - including, through `this`, the body of the service method it calls.
@@ -425,8 +434,11 @@ object AngularRecognizer extends JsFrameworkRecognizer:
 
     // A request whose URL is not fixed by the code.
     val requests = httpCalls.flatMap { c =>
-        val urlIndex = if c.name == "request" then 2 else 1
-        c.argument.filter(_.argumentIndex == urlIndex).headOption.toList.flatMap(requestSinksFor(c, _))
+      val urlIndex = if c.name == "request" then 2 else 1
+      c.argument.filter(_.argumentIndex == urlIndex).headOption.toList.flatMap(requestSinksFor(
+        c,
+        _
+      ))
     }
     ctx.tagger.tag(requests.iterator, RequestSink*)
   end tagHttp
@@ -448,7 +460,8 @@ object AngularRecognizer extends JsFrameworkRecognizer:
           ctx.tagger.tag(JsValues.consumersOf(changes).iterator, INPUT)
       }
 
-  /** `@Component({ host: { '(window:message)': 'onMessage($event)' } })` binds a handler by name. */
+  /** `@Component({ host: { '(window:message)': 'onMessage($event)' } })` binds a handler by name.
+    */
   private val HostBinding =
       """['"`]\(window:(message|hashchange|popstate)\)['"`]\s*:\s*['"`]\s*([\w$]+)\s*\(""".r
 
@@ -493,10 +506,10 @@ object AngularRecognizer extends JsFrameworkRecognizer:
 
     // Renderer2: setProperty(el, 'innerHTML', v), setAttribute(el, 'href', v)
     val rendererWrites = ctx.cpg.call.nameExact("setProperty", "setAttribute").filter { c =>
-        val args = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
-        args.size >= 3 && args.lift(1).flatMap(literalValue).exists(n =>
-            RendererProperties.contains(n) || n.toLowerCase.startsWith("on")
-        )
+      val args = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
+      args.size >= 3 && args.lift(1).flatMap(literalValue).exists(n =>
+          RendererProperties.contains(n) || n.toLowerCase.startsWith("on")
+      )
     }
     ctx.tagger.tag(rendererWrites, HtmlSink*)
 
@@ -505,5 +518,4 @@ object AngularRecognizer extends JsFrameworkRecognizer:
       _.argument.filter(_.argumentIndex == 1).exists(_.code.contains("SecurityContext."))
     )
     ctx.tagger.tag(sanitize, SANITIZER, sanitizerFor(XSS), sanitizerFor(REDIRECT))
-  end tagSinks
 end AngularRecognizer

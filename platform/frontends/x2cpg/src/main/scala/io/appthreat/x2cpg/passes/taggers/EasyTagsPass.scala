@@ -38,7 +38,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   )
 
   /** A response method called with something to send, also after `res.status(code)`. A
-    * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing one.
+    * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing
+    * one.
     */
   private val JsResponseCall = java.util.regex.Pattern.compile(
     "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
@@ -411,9 +412,9 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     val rendered = sinkSites.iterator.ast.collectAll[Call].dedup.l
     rendered.iterator.newTagNode("framework-output").store()(using dstGraph)
     rendered.iterator.newTagNode("xss").store()(using dstGraph)
-  end tagRawHtmlTemplateSinks
 
-  /** `` db.sql`... ${x}` `` - lowered to `db.sql(<operator>.formatString(...))` - binds the values. */
+  /** `` db.sql`... ${x}` `` - lowered to `db.sql(<operator>.formatString(...))` - binds the values.
+    */
   private def isTaggedTemplate(c: Call): Boolean =
       c.code.matches("(?s)^[\\w$.]+\\(<operator>\\.formatString\\(.*")
 
@@ -429,7 +430,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
         .filter { c =>
             if isAssignment(c) then matches(JsResponseWrite, c)
             else if c.name == Operators.fieldAccess then matches(JsSdkVerb, c)
-            else !c.name.startsWith("<operator>") &&
+            else
+              !c.name.startsWith("<operator>") &&
               (matches(JsResponseCall, c) || matches(JsDatabaseCall, c) && !isTaggedTemplate(c))
         }
         .newTagNode("framework-output")

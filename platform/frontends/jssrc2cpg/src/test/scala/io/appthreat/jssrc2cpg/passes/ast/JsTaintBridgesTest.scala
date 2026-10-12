@@ -6,9 +6,9 @@ import io.appthreat.x2cpg.passes.taggers.{ChennaiTagsPass, EasyTagsPass}
 import io.shiftleft.codepropertygraph.generated.{Cpg, Operators}
 import io.shiftleft.semanticcpg.language.*
 
-/** What carries a JavaScript value where no call does: class fields read by another method, reactive
-  * derivations, closures over a component's top-level variables, and member chains - the last two
-  * in the def-use edges themselves.
+/** What carries a JavaScript value where no call does: class fields read by another method,
+  * reactive derivations, closures over a component's top-level variables, and member chains - the
+  * last two in the def-use edges themselves.
   */
 class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
 
@@ -50,8 +50,12 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
             "optional.js"
           )
           // a member call through `?.` is a call on its object, named after the member
-          cpg.call.nameExact("toString").receiver.code.l shouldBe List("(_tmp_0 = form.get('next')).toString")
-          show(cpg.call.nameExact("assign").reachableByFlows(cpg.parameter.nameExact("request"))) should not be empty
+          cpg.call.nameExact("toString").receiver.code.l shouldBe List(
+            "(_tmp_0 = form.get('next')).toString"
+          )
+          show(
+            cpg.call.nameExact("assign").reachableByFlows(cpg.parameter.nameExact("request"))
+          ) should not be empty
       }
 
       "carry a captured variable to every read in the closure, not only the first" in {
@@ -69,7 +73,8 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
           |""".stripMargin,
             "go.js"
           )
-          val sink = cpg.call.nameExact(Operators.assignment).code("window\\.location\\.href = next")
+          val sink =
+              cpg.call.nameExact(Operators.assignment).code("window\\.location\\.href = next")
           show(sink.reachableByFlows(cpg.call.nameExact("get"))) should not be empty
       }
   }
@@ -113,7 +118,9 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
             "view.js"
           ))
           cpg.tag.name("framework-input").identifier.name.l should contain("id")
-          cpg.tag.name("sanitizer-xss").call.code.l.filter(_.startsWith("computed")) should not be empty
+          cpg.tag.name("sanitizer-xss").call.code.l.filter(
+            _.startsWith("computed")
+          ) should not be empty
       }
 
       "stop at a sanitiser when looking for a source" in {

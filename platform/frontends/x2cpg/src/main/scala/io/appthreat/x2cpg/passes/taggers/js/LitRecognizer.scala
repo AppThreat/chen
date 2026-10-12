@@ -44,36 +44,43 @@ object LitRecognizer extends JsFrameworkRecognizer:
         .flatMap(_.argument.isCall.nameExact(Operators.formatString))
         .l
     templates.foreach { template =>
-        val (dangerous, safe) = boundValues(template).partition(_._2)
-        if dangerous.nonEmpty then
-          // The template call is where its values meet; tagged only when nothing else is bound
-          // in it, or a text interpolation next to the binding would be reported too.
-          if safe.isEmpty then ctx.tagger.tag(Iterator(template), HtmlSink*)
-          else
-            ctx.tagger.tag(dangerous.iterator.map(_._1).collect { case c: Call => c }, HtmlSink*)
-            ctx.tagger.tag(dangerous.iterator.map(_._1).collect { case i: Identifier => i }, HtmlSink*)
+      val (dangerous, safe) = boundValues(template).partition(_._2)
+      if dangerous.nonEmpty then
+        // The template call is where its values meet; tagged only when nothing else is bound
+        // in it, or a text interpolation next to the binding would be reported too.
+        if safe.isEmpty then ctx.tagger.tag(Iterator(template), HtmlSink*)
+        else
+          ctx.tagger.tag(dangerous.iterator.map(_._1).collect { case c: Call => c }, HtmlSink*)
+          ctx.tagger.tag(
+            dangerous.iterator.map(_._1).collect { case i: Identifier => i },
+            HtmlSink*
+          )
     }
+  end run
 
   /** The values bound in a template, each with whether its position is dangerous. */
   private def boundValues(template: Call): List[(Expression, Boolean)] =
     val parts = template.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
     parts.zipWithIndex.collect {
-      case (value, i) if !value.isInstanceOf[Literal] =>
-          val before = if i > 0 then parts(i - 1) else value
-          val dangerous = before match
-            case quasi: Literal => literalText(quasi).matches(DangerousBinding)
-            case _              => false
-          // an unsafe directive is a sink of its own
-          val directive = value match
-            case c: Call => UnsafeDirectives.contains(c.name)
-            case _       => false
-          (value, dangerous && !directive)
-    }.filterNot((v, _) => v match
-      case c: Call => UnsafeDirectives.contains(c.name)
-      case _       => false)
+        case (value, i) if !value.isInstanceOf[Literal] =>
+            val before = if i > 0 then parts(i - 1) else value
+            val dangerous = before match
+              case quasi: Literal => literalText(quasi).matches(DangerousBinding)
+              case _              => false
+            // an unsafe directive is a sink of its own
+            val directive = value match
+              case c: Call => UnsafeDirectives.contains(c.name)
+              case _       => false
+            (value, dangerous && !directive)
+    }.filterNot((v, _) =>
+        v match
+          case c: Call => UnsafeDirectives.contains(c.name)
+          case _       => false
+    )
 
   private def literalText(l: Literal): String =
-      if l.code.length >= 2 && "\"'`".contains(l.code.head) then l.code.substring(1, l.code.length - 1)
+      if l.code.length >= 2 && "\"'`".contains(l.code.head) then
+        l.code.substring(1, l.code.length - 1)
       else l.code
 
   /** `@property() x` members, and the keys of `static properties = { x: {...} }` - which need not
@@ -86,26 +93,26 @@ object LitRecognizer extends JsFrameworkRecognizer:
     val fromStatic = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(1).exists {
-              case id: Identifier => id.name == "properties"
-              case fa: Call       => fieldName(fa).contains("properties")
-              case _              => false
+                case id: Identifier => id.name == "properties"
+                case fa: Call       => fieldName(fa).contains("properties")
+                case _              => false
             }
         )
         .l.flatMap { a =>
-            val keys = a.argumentOption(2).toList.flatMap(
-              _.ast.isCall.nameExact(Operators.assignment).flatMap(_.argumentOption(1))
-                  .collect { case fa: Call => fa }.flatMap(fieldName).l
-            )
-            a.method.typeDecl.orElse(enclosingTypeDecl(a.method)).toList.flatMap(td =>
-                keys.map(k => (td, k))
-            )
+          val keys = a.argumentOption(2).toList.flatMap(
+            _.ast.isCall.nameExact(Operators.assignment).flatMap(_.argumentOption(1))
+                .collect { case fa: Call => fa }.flatMap(fieldName).l
+          )
+          a.method.typeDecl.orElse(enclosingTypeDecl(a.method)).toList.flatMap(td =>
+              keys.map(k => (td, k))
+          )
         }
     (fromDecorators ++ fromStatic).distinct.foreach { (td, name) =>
-        val reads = classMethods(td).iterator.flatMap(_.ast.isCall)
-            .nameExact(Operators.fieldAccess)
-            .codeExact(s"this.$name")
-            .filterNot(isAssignmentTarget)
-        ctx.tagger.tag(readChains(reads), INPUT)
+      val reads = classMethods(td).iterator.flatMap(_.ast.isCall)
+          .nameExact(Operators.fieldAccess)
+          .codeExact(s"this.$name")
+          .filterNot(isAssignmentTarget)
+      ctx.tagger.tag(readChains(reads), INPUT)
     }
   end tagProperties
 end LitRecognizer

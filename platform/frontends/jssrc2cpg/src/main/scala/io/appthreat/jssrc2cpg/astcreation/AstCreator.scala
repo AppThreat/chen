@@ -288,7 +288,11 @@ class AstCreator(
     val directives = Try(json("directives").arr.toList).getOrElse(Nil)
     directives.flatMap { directive =>
         safeStr(directive("value"), "value").map { v =>
-            Ast(literalNode(createBabelNodeInfo(directive("value")), s"\"$v\"", Option(Defines.String)))
+            Ast(literalNode(
+              createBabelNodeInfo(directive("value")),
+              s"\"$v\"",
+              Option(Defines.String)
+            ))
         }
     }
 

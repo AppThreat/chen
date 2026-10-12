@@ -8,8 +8,8 @@ import scala.collection.mutable
 
 import JsShapes.*
 
-/** Carries a source through reactive derivations, which hold the value their callback returns -
-  * a flow no call edge carries.
+/** Carries a source through reactive derivations, which hold the value their callback returns - a
+  * flow no call edge carries.
   *
   * `computed(() => route.params.id)` (Vue, Angular), `useMemo` (React), `createMemo` (Solid),
   * `useComputed$` (Qwik), `linkedSignal` (Angular): the wrapper's result is a source when its
@@ -18,8 +18,8 @@ import JsShapes.*
   * callback.
   *
   * Captured variables: the dataflow engine links an outer variable to its reads inside closures
-  * where the frontend records the capture, but a module-level binding - all of a Vue
-  * `<script setup>` block, a plain script's top level - is no closure binding, and its reads inside
+  * where the frontend records the capture, but a module-level binding - all of a Vue `<script
+  * setup>` block, a plain script's top level - is no closure binding, and its reads inside
   * functions start untainted. A local whose value comes from a source makes its captured reads
   * sources of the same kind. Where the engine does link the capture, the flow from the read is a
   * suffix of the full flow and is deduplicated away by reachables.
@@ -59,14 +59,16 @@ object ReactiveBridge:
   private def tagSanitizingDerivations(ctx: JsContext): Unit =
       ctx.cpg.call.filter(isDerivationCall).foreach { d =>
           derivationCallback(d).foreach { cb =>
-              val returned = cb.ast.isReturn.astChildren.collect { case c: Call => c }
-                  .filter(_.method.id() == cb.id()).l
-              if returned.nonEmpty && returned.forall(r => JsTags.neutralises(ctx.tagger, r)) then
-                // categories this run gave the sanitiser are in the memo, not yet on the node
-                val categories = Seq(JsTags.XSS, JsTags.REDIRECT, JsTags.HTTP_CLIENT, "file-io")
-                    .map(JsTags.sanitizerFor)
-                    .filter(t => returned.forall(r => ctx.tagger.has(r.id(), t) || r.tag.name.exists(_ == t)))
-                ctx.tagger.tag(Iterator(d), (Seq(JsTags.SANITIZER) ++ categories)*)
+            val returned = cb.ast.isReturn.astChildren.collect { case c: Call => c }
+                .filter(_.method.id() == cb.id()).l
+            if returned.nonEmpty && returned.forall(r => JsTags.neutralises(ctx.tagger, r)) then
+              // categories this run gave the sanitiser are in the memo, not yet on the node
+              val categories = Seq(JsTags.XSS, JsTags.REDIRECT, JsTags.HTTP_CLIENT, "file-io")
+                  .map(JsTags.sanitizerFor)
+                  .filter(t =>
+                      returned.forall(r => ctx.tagger.has(r.id(), t) || r.tag.name.exists(_ == t))
+                  )
+              ctx.tagger.tag(Iterator(d), (Seq(JsTags.SANITIZER) ++ categories)*)
           }
       }
 
@@ -80,7 +82,8 @@ object ReactiveBridge:
         withSources.contains(a.method.id())
     ).l.flatMap { a =>
         (a.argumentOption(1), a.argumentOption(2)) match
-          case (Some(id: Identifier), Some(v)) if !id.name.startsWith("_tmp_") && id.name != "this" =>
+          case (Some(id: Identifier), Some(v))
+              if !id.name.startsWith("_tmp_") && id.name != "this" =>
               Some((a.method, id.name, v))
           case _ => None
     }
@@ -95,28 +98,28 @@ object ReactiveBridge:
           if !done.contains((method.id(), name)) then
             val (tainted, viaDerivation) = taintOf(ctx, value)
             tainted.foreach { tagName =>
-                done += ((method.id(), name))
-                grew = true
-                ctx.tagger.tag(capturedReads(ctx, method, name), tagName)
-                // A derived value is a new value in its own method too: `const c = computed(...)`
-                // and every later `c.value` there start from the wrapper call.
-                if viaDerivation then ctx.tagger.tag(readsIn(method, name), tagName)
+              done += ((method.id(), name))
+              grew = true
+              ctx.tagger.tag(capturedReads(ctx, method, name), tagName)
+              // A derived value is a new value in its own method too: `const c = computed(...)`
+              // and every later `c.value` there start from the wrapper call.
+              if viaDerivation then ctx.tagger.tag(readsIn(method, name), tagName)
             }
       }
       // watch(source, (value) => ...)
       ctx.cpg.call.nameExact(Watchers.toSeq*).foreach { w =>
-          val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
-          if args.size >= 2 then
-            val tainted = args.head match
-              case id: Identifier => readTag(ctx, id)
-              case other =>
-                  callbackMethod(other).flatMap(returnTaint(ctx, _)).orElse(taintOf(ctx, other)._1)
-            tainted.foreach { tagName =>
-                val params = callbacksIn(args(1)).flatMap(firstParam)
-                if params.exists(p => !ctx.tagger.has(p.id(), tagName)) then
-                  grew = true
-                  ctx.tagger.tag(params.iterator, tagName)
-            }
+        val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
+        if args.size >= 2 then
+          val tainted = args.head match
+            case id: Identifier => readTag(ctx, id)
+            case other =>
+                callbackMethod(other).flatMap(returnTaint(ctx, _)).orElse(taintOf(ctx, other)._1)
+          tainted.foreach { tagName =>
+            val params = callbacksIn(args(1)).flatMap(firstParam)
+            if params.exists(p => !ctx.tagger.has(p.id(), tagName)) then
+              grew = true
+              ctx.tagger.tag(params.iterator, tagName)
+          }
       }
     end while
   end run
@@ -126,8 +129,8 @@ object ReactiveBridge:
         case c: Call => Derivations.contains(callName(c))
         case _       => false
 
-  /** The source tag of a value: what reaches it in its method, or - for a reactive derivation - what
-    * its callback returns.
+  /** The source tag of a value: what reaches it in its method, or - for a reactive derivation -
+    * what its callback returns.
     */
   private def taintOf(ctx: JsContext, value: Expression): (Option[String], Boolean) =
       JsShapes.unwrap(value) match
@@ -150,13 +153,15 @@ object ReactiveBridge:
 
   /** Reads of `name` in the functions nested in `method` that capture it. */
   private def capturedReads(ctx: JsContext, method: Method, name: String): Iterator[Identifier] =
-    nestedMethods(method).iterator
-        .filterNot(n => declares(n, name))
-        .flatMap(n => readsIn(n, name))
+      nestedMethods(method).iterator
+          .filterNot(n => declares(n, name))
+          .flatMap(n => readsIn(n, name))
 
   /** Reads of `name` whose method is `m` itself (not a nested one). */
   private def readsIn(m: Method, name: String): Iterator[Identifier] =
-      m.ast.isIdentifier.nameExact(name).filter(_.method.id() == m.id()).filterNot(isAssignmentTarget)
+      m.ast.isIdentifier.nameExact(name).filter(_.method.id() == m.id()).filterNot(
+        isAssignmentTarget
+      )
 
   /** A function that has its own `name` - a parameter, or a variable it assigns - shadows the outer
     * one.
@@ -165,8 +170,8 @@ object ReactiveBridge:
       m.parameter.nameExact(name).nonEmpty ||
           m.ast.isCall.nameExact(Operators.assignment).exists(a =>
               a.method.id() == m.id() && a.argumentOption(1).exists {
-                case id: Identifier => id.name == name
-                case _              => false
+                  case id: Identifier => id.name == name
+                  case _              => false
               }
           )
 end ReactiveBridge

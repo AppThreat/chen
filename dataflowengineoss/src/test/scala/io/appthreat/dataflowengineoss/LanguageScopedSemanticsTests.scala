@@ -162,13 +162,13 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
 
       "give JavaScript graphs the template-literal mapping and nothing of the other languages" in {
           Seq(Languages.JSSRC, Languages.JAVASCRIPT).foreach { language =>
-              val flows = DefaultSemantics.flowsForLanguage(language)
-              withClue(s"$language must not receive PHP, Java or C flows: ") {
-                  flows.map(_.methodFullName) shouldBe List(Operators.formatString)
-              }
-              // every part reaches the result, and no part reaches another
-              flows.head.mappings.collect { case FlowMapping(_, ParameterNode(dst, _)) => dst }
-                  .distinct shouldBe List(-1)
+            val flows = DefaultSemantics.flowsForLanguage(language)
+            withClue(s"$language must not receive PHP, Java or C flows: ") {
+                flows.map(_.methodFullName) shouldBe List(Operators.formatString)
+            }
+            // every part reaches the result, and no part reaches another
+            flows.head.mappings.collect { case FlowMapping(_, ParameterNode(dst, _)) => dst }
+                .distinct shouldBe List(-1)
           }
       }
   }

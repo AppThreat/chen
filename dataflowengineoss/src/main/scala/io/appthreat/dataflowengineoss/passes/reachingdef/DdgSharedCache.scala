@@ -64,12 +64,12 @@ final class DdgSharedCache(sharedAcrossMethods: Boolean = true):
     */
   def isJavaScript(method: Method): Boolean =
       javaScriptGraph.getOrElse {
-        val js = Cpg(using method.graph).metaData.language.headOption.exists(l =>
-            l == io.shiftleft.codepropertygraph.generated.Languages.JSSRC ||
-                l == io.shiftleft.codepropertygraph.generated.Languages.JAVASCRIPT
-        )
-        javaScriptGraph = Some(js)
-        js
+          val js = Cpg(using method.graph).metaData.language.headOption.exists(l =>
+              l == io.shiftleft.codepropertygraph.generated.Languages.JSSRC ||
+                  l == io.shiftleft.codepropertygraph.generated.Languages.JAVASCRIPT
+          )
+          javaScriptGraph = Some(js)
+          js
       }
 
   @volatile private var globalScopeHolders: Set[Long] = null

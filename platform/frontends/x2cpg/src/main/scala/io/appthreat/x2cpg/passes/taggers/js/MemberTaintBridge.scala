@@ -11,9 +11,9 @@ import JsTags.*
 
 /** Carries a source across the methods of a class through the class's fields.
   *
-  * Component code keeps what it read in a field and uses it later: `ngOnInit` stores
-  * `this.orderId = params.get('id')` and a click handler builds `window.open(...this.orderId...)`;
-  * a Vue `created()` hook keeps `this.q = this.$route.query.q` for a method to render. The dataflow
+  * Component code keeps what it read in a field and uses it later: `ngOnInit` stores `this.orderId
+  * \= params.get('id')` and a click handler builds `window.open(...this.orderId...)`; a Vue
+  * `created()` hook keeps `this.q = this.$route.query.q` for a method to render. The dataflow
   * engine follows a value through a field only within one method, so the read in the handler starts
   * a new, untainted value and the flow is lost.
   *
@@ -50,18 +50,17 @@ object MemberTaintBridge:
       writes.foreach { case (td, member, value) =>
           if !done.contains((td.fullName, member)) && withSources.contains(value.method.id()) then
             sourceTagOf(ctx, value).foreach { tagName =>
-                done += ((td.fullName, member))
-                grew = true
-                val reads = classMethods(td).iterator
-                    .flatMap(_.ast.isCall)
-                    .nameExact(Operators.fieldAccess)
-                    .codeExact(s"this.$member")
-                    .filterNot(isAssignmentTarget)
-                    .filterNot(isStoreReceiver)
-                ctx.tagger.tag(readChains(reads), tagName)
+              done += ((td.fullName, member))
+              grew = true
+              val reads = classMethods(td).iterator
+                  .flatMap(_.ast.isCall)
+                  .nameExact(Operators.fieldAccess)
+                  .codeExact(s"this.$member")
+                  .filterNot(isAssignmentTarget)
+                  .filterNot(isStoreReceiver)
+              ctx.tagger.tag(readChains(reads), tagName)
             }
       }
-    end while
   end run
 
   /** (class, field, value written) for every field write in a class. */
@@ -77,7 +76,9 @@ object MemberTaintBridge:
           // `x = v` in a constructor: a field initialiser, lowered with the member's code
           case (Some(id: Identifier), Some(v)) if a.method.name == "<init>" =>
               a.method.typeDecl.flatMap(td =>
-                  td.member.nameExact(id.name).codeExact(a.code).headOption.map(_ => (td, id.name, v))
+                  td.member.nameExact(id.name).codeExact(a.code).headOption.map(_ =>
+                      (td, id.name, v)
+                  )
               )
           case _ => None
     }
@@ -91,6 +92,7 @@ object MemberTaintBridge:
           case _ => None
     }
     assignments ++ stores
+  end memberWrites
 
   /** `this.q` in `this.q.set(v)`: written through, not read. */
   private def isStoreReceiver(fa: Call): Boolean =
@@ -142,16 +144,17 @@ object MemberTaintBridge:
           node match
             case id: Identifier =>
                 id._reachingDefIn.foreach {
-                  case p: MethodParameterIn => queue.enqueue(p)
-                  case a: Call if a.name.startsWith("<operator>.assignment") &&
-                        a.argumentOption(1).exists(_.code == id.name) =>
-                      a.argumentOption(2).foreach(queue.enqueue(_))
-                  // `x` assigned as `x = v` is the definition node `x` itself in some lowerings
-                  case d: Identifier if d.name == id.name && isAssignmentTarget(d) =>
-                      d.astParent match
-                        case a: Call => a.argumentOption(2).foreach(queue.enqueue(_))
-                        case _       =>
-                  case _ =>
+                    case p: MethodParameterIn => queue.enqueue(p)
+                    case a: Call
+                        if a.name.startsWith("<operator>.assignment") &&
+                            a.argumentOption(1).exists(_.code == id.name) =>
+                        a.argumentOption(2).foreach(queue.enqueue(_))
+                    // `x` assigned as `x = v` is the definition node `x` itself in some lowerings
+                    case d: Identifier if d.name == id.name && isAssignmentTarget(d) =>
+                        d.astParent match
+                          case a: Call => a.argumentOption(2).foreach(queue.enqueue(_))
+                          case _       =>
+                    case _ =>
                 }
             case _: MethodParameterIn => // a source only if tagged
             case c: Call if c.name.startsWith("<operator>.assignment") =>
@@ -161,15 +164,17 @@ object MemberTaintBridge:
             // a derivation holds what its callback returns
             case c: Call if ReactiveBridge.isDerivationCall(c) =>
                 ReactiveBridge.derivationCallback(c).foreach { cb =>
-                    derived = true
-                    cb.ast.isReturn.astChildren.foreach {
+                  derived = true
+                  cb.ast.isReturn.astChildren.foreach {
                       case e: Expression if e.method.id() == cb.id() => queue.enqueue(e)
-                      case _                                          =>
-                    }
+                      case _                                         =>
+                  }
                 }
-            case c: Call     => c.astChildren.foreach(queue.enqueue(_))
-            case b: Block    => b.astChildren.foreach(queue.enqueue(_))
-            case _           =>
+            case c: Call  => c.astChildren.foreach(queue.enqueue(_))
+            case b: Block => b.astChildren.foreach(queue.enqueue(_))
+            case _        =>
+        end if
+      end if
     end while
     (found, derived && found.nonEmpty)
   end sourceTagThrough

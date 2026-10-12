@@ -70,7 +70,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
   // Precompiled once: `tagJsRoutes` tests this against every call node in the graph, twice each
   // (methodFullName + code). `String.matches` recompiles the pattern on every call, which dominated
   // the juice-shop tagging phase (jstack: ChennaiTagsPass -> String.matches -> Pattern.compile).
-  private val JsRoutesCallPattern   = Pattern.compile(JS_ROUTES_CALL_REGEX)
+  private val JsRoutesCallPattern = Pattern.compile(JS_ROUTES_CALL_REGEX)
 
   private val CHENNAI_CONFIG_FILE = "chennai.json"
 
@@ -281,7 +281,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             imported.exists(p => pkgs.exists(JsModules.packageMatches(p, _)))
         !importsAny(NODE_SERVER_PACKAGES) && (
           importsAny(FRONTEND_PACKAGES ++ REQUEST_CLIENT_PACKAGES) ||
-            file.method.ast.isCall.nameExact("fetch", "$fetch").nonEmpty
+              file.method.ast.isCall.nameExact("fetch", "$fetch").nonEmpty
         )
       val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
           .filterNot(f => frontend && isClientFile(f))
@@ -295,6 +295,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         FRAMEWORK_INPUT,
         dstGraph
       )
+    end if
     tagRouteTableRecords(dstGraph)
     // Framework sources, sinks and sanitisers (browser platform, Angular, ...), sharing this pass's
     // tag memo so a node reached here and above is tagged once.
@@ -439,13 +440,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         end if
     }
   end tagRouteTableRecords
-
-
-
-
-
-
-
 
   // =============================================================================================
   // Java (javasrc2cpg and the JVM byte-code frontends). The shapes and collision gates are

@@ -21,7 +21,9 @@ object EmberRecognizer extends JsFrameworkRecognizer:
   val name: String = "ember"
 
   def applies(ctx: JsContext): Boolean =
-      ctx.modules.uses("@ember", "ember-source", "@glimmer") || ctx.project.dependsOn("ember-source")
+      ctx.modules.uses("@ember", "ember-source", "@glimmer") || ctx.project.dependsOn(
+        "ember-source"
+      )
 
   private val RouteHooks = Set("model", "beforeModel", "afterModel", "redirect")
 
@@ -47,15 +49,15 @@ object EmberRecognizer extends JsFrameworkRecognizer:
             case _              => false
         })
         .l.foreach { a =>
-            val names = a.argumentOption(2).toList.flatMap(_.ast.isLiteral.flatMap(literalValue).l)
-            a.method.typeDecl.orElse(enclosingTypeDecl(a.method)).foreach { td =>
-                names.foreach { n =>
-                    val reads = classMethods(td).iterator.flatMap(_.ast.isCall)
-                        .nameExact(Operators.fieldAccess).codeExact(s"this.$n")
-                        .filterNot(isAssignmentTarget)
-                    ctx.tagger.tag(readChains(reads), INPUT)
-                }
-            }
+          val names = a.argumentOption(2).toList.flatMap(_.ast.isLiteral.flatMap(literalValue).l)
+          a.method.typeDecl.orElse(enclosingTypeDecl(a.method)).foreach { td =>
+              names.foreach { n =>
+                val reads = classMethods(td).iterator.flatMap(_.ast.isCall)
+                    .nameExact(Operators.fieldAccess).codeExact(s"this.$n")
+                    .filterNot(isAssignmentTarget)
+                ctx.tagger.tag(readChains(reads), INPUT)
+              }
+          }
         }
 
     val trusted = ctx.cpg.call.nameExact("htmlSafe", "trustHTML").filter(c =>

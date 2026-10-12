@@ -15,8 +15,8 @@ import JsTags.*
   * from 'next/navigation'`), a member of a module binding (`axios.get`, `DOMPurify.sanitize`), a
   * handle made from one (`pool = new pg.Pool()` -> `pool.query`), or - for Angular - the type a
   * member was injected as (`this.sanitizer` from `@angular/platform-browser`). The version is the
-  * one `package-lock.json` resolved, or else the one the `package.json` range names; without
-  * either the purl carries no version. Node.js built-ins are no package.
+  * one `package-lock.json` resolved, or else the one the `package.json` range names; without either
+  * the purl carries no version. Node.js built-ins are no package.
   *
   * Only sinks are attributed: a purl tag is itself a sink tag for reachables (`pkg.*`), so on a
   * source it would make the source a sink too.
@@ -57,10 +57,10 @@ object PackageAttribution:
     val sinks = ctx.tagger.taggedIds(SinkTags*).toSet.iterator
         .flatMap(id => Option(ctx.cpg.graph.node(id)))
         .flatMap {
-          case e: Expression if requestSinkIds.contains(e.id()) && requestOf(e).nonEmpty =>
-              requestOf(e).map(_ -> e)
-          case c: Call if !c.name.startsWith("<operator>") => Some(c -> c)
-          case _                                           => None
+            case e: Expression if requestSinkIds.contains(e.id()) && requestOf(e).nonEmpty =>
+                requestOf(e).map(_ -> e)
+            case c: Call if !c.name.startsWith("<operator>") => Some(c -> c)
+            case _                                           => None
         }
     // With manifests in the project, a module they do not declare is no package of it - a
     // tsconfig path alias (`@components/x`), a workspace-relative import.
@@ -68,9 +68,10 @@ object PackageAttribution:
     sinks.foreach { (call, sink) =>
         packageOf(ctx, call, typeOf).filterNot(isBuiltin)
             .filter(pkg => declared.isEmpty || declared.contains(pkg)).foreach { pkg =>
-            ctx.tagger.tag(Iterator(sink), purl(pkg, versions.get(pkg)))
-        }
+                ctx.tagger.tag(Iterator(sink), purl(pkg, versions.get(pkg)))
+            }
     }
+  end run
 
   private val UrlOperators = Set(
     Operators.addition,
@@ -83,9 +84,9 @@ object PackageAttribution:
   /** The call a URL part is an argument of, through the operators that build the URL. */
   private def requestOf(e: Expression): Option[Call] =
       e.astParent match
-        case c: Call if UrlOperators.contains(c.name) => requestOf(c)
+        case c: Call if UrlOperators.contains(c.name)                            => requestOf(c)
         case c: Call if !c.name.startsWith("<operator>") && e.argumentIndex >= 1 => Some(c)
-        case _                                        => None
+        case _                                                                   => None
 
   private def isBuiltin(pkg: String): Boolean =
       NodeBuiltins.contains(pkg) || NodeBuiltins.contains(pkg.stripPrefix("node:"))
@@ -110,11 +111,12 @@ object PackageAttribution:
       // `axios.get(url)`, `DOMPurify.sanitize(x)`, `this.sanitizer.bypassSecurityTrustHtml(x)`
       case Some(path) if path.size >= 2 =>
           binding(path.head).filterNot(_ => path.head == "this").orElse {
-            receiverOf(call).flatMap(r =>
-                typeOf(r).flatMap(_.pkg).orElse(handlePackage(ctx, file, r))
-            )
+              receiverOf(call).flatMap(r =>
+                  typeOf(r).flatMap(_.pkg).orElse(handlePackage(ctx, file, r))
+              )
           }
       case _ => receiverOf(call).flatMap(r => handlePackage(ctx, file, r))
+  end packageOf
 
   /** The package a handle was made from: `new pg.Pool()`, `axios.create()`, `$('#x')`. */
   private def handlePackage(ctx: JsContext, file: String, receiver: Expression): Option[String] =
@@ -129,11 +131,11 @@ object PackageAttribution:
                 c.receiver.headOption.flatMap(memberPath).flatMap(_.headOption)
                     .flatMap(local => ctx.modules.resolve(file, local).flatMap(_.packageName))
                     .orElse {
-                      // `new pg.Pool()` is a block around the constructor call
-                      val ctor = c.code.stripPrefix("new ").takeWhile(ch =>
-                          ch.isLetterOrDigit || ch == '_' || ch == '$'
-                      )
-                      ctx.modules.resolve(file, ctor).flatMap(_.packageName)
+                        // `new pg.Pool()` is a block around the constructor call
+                        val ctor = c.code.stripPrefix("new ").takeWhile(ch =>
+                            ch.isLetterOrDigit || ch == '_' || ch == '$'
+                        )
+                        ctx.modules.resolve(file, ctor).flatMap(_.packageName)
                     }
             case b: Block =>
                 val ctor = b.code.stripPrefix("new ").takeWhile(ch =>
@@ -142,4 +144,5 @@ object PackageAttribution:
                 ctx.modules.resolve(file, ctor).flatMap(_.packageName)
             case _ => None
     rootBinding(receiver, 4)
+  end handlePackage
 end PackageAttribution

@@ -35,7 +35,9 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
   def applies(ctx: JsContext): Boolean =
       ctx.modules.uses("svelte", "@sveltejs/kit", "$app") ||
           ctx.project.dependsOn("svelte", "@sveltejs/kit") ||
-          ctx.project.hasFile(s"$Component|$DataFile|$EndpointFile|.*hooks\\.(server|client)\\.(js|ts|mjs|mts)")
+          ctx.project.hasFile(
+            s"$Component|$DataFile|$EndpointFile|.*hooks\\.(server|client)\\.(js|ts|mjs|mts)"
+          )
 
   private val DataFile     = ".*\\+(page|layout)(\\.server)?\\.(js|ts|mjs|mts)"
   private val EndpointFile = ".*\\+server\\.(js|ts|mjs|mts)"
@@ -46,7 +48,15 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
   private val HttpEntrypoints =
       Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "fallback")
   private val HookEntrypoints =
-      Set("handle", "handleError", "handleFetch", "handleValidationError", "init", "reroute", "transport")
+      Set(
+        "handle",
+        "handleError",
+        "handleFetch",
+        "handleValidationError",
+        "init",
+        "reroute",
+        "transport"
+      )
 
   /** URL and route data on SvelteKit's page object. */
   private val PageFields = Set("url", "params", "data", "form", "state")
@@ -89,6 +99,7 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
             .flatMap(_.referencingIdentifiers),
         INPUT
       )
+  end tagComponentProps
 
   /** `page.url.searchParams` (`page` from `$app/state`) and `$page.url...` (the `$app/stores`
     * store, auto-subscribed with `$` in a component).
@@ -96,14 +107,14 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
   private def tagPage(ctx: JsContext): Unit =
     val pageReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
         fieldName(fa).exists(PageFields.contains) && fieldBase(fa).exists {
-          case id: Identifier =>
-              id.name == "$page" ||
-              (id.name == "page" || ctx.modules.localNamesOf(id.method.filename, "$app", "page")
-                  .contains(id.name)) &&
-              ctx.modules.importsOf(id.method.filename).exists(i =>
-                  i.module == "$app/state" || i.module == "$app/stores"
-              )
-          case _ => false
+            case id: Identifier =>
+                id.name == "$page" ||
+                (id.name == "page" || ctx.modules.localNamesOf(id.method.filename, "$app", "page")
+                    .contains(id.name)) &&
+                ctx.modules.importsOf(id.method.filename).exists(i =>
+                    i.module == "$app/state" || i.module == "$app/stores"
+                )
+            case _ => false
         }
     }
     ctx.tagger.tag(readChains(pageReads), INPUT)

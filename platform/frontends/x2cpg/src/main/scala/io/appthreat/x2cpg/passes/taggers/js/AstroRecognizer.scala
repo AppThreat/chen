@@ -10,11 +10,11 @@ import JsTags.*
   * statements plus the template as JSX) read the request through the `Astro` global - `Astro.url`,
   * `Astro.params`, `Astro.request`, `Astro.cookies`, `Astro.locals` - and their parent's
   * `Astro.props`; `set:html={x}` is a markup sink (DomRecognizer's template attributes). The server
-  * code is API endpoints (`.ts` files under `src/pages` exporting
-  * `GET`/`POST`/... or `ALL`), middleware (`onRequest`, `defineMiddleware`) and actions
-  * (`defineAction({ handler })`). Each receives the request context (`{ params, url, request,
-  * cookies, locals }`) or, for an action, the client's input. `context.redirect(url)` and
-  * `Astro.redirect(url)` are redirects; `context.rewrite(url)` fetches another URL.
+  * code is API endpoints (`.ts` files under `src/pages` exporting `GET`/`POST`/... or `ALL`),
+  * middleware (`onRequest`, `defineMiddleware`) and actions (`defineAction({ handler })`). Each
+  * receives the request context (`{ params, url, request, cookies, locals }`) or, for an action,
+  * the client's input. `context.redirect(url)` and `Astro.redirect(url)` are redirects;
+  * `context.rewrite(url)` fetches another URL.
   */
 object AstroRecognizer extends JsFrameworkRecognizer:
 
@@ -28,7 +28,16 @@ object AstroRecognizer extends JsFrameworkRecognizer:
     * passed (`Astro.props`).
     */
   private val AstroGlobalReads =
-      Set("url", "params", "request", "cookies", "locals", "props", "clientAddress", "originPathname")
+      Set(
+        "url",
+        "params",
+        "request",
+        "cookies",
+        "locals",
+        "props",
+        "clientAddress",
+        "originPathname"
+      )
 
   private val EndpointFile = "(?:.*[/\\\\])?src[/\\\\]pages[/\\\\].*\\.(js|ts|mjs|mts)$"
   private val Middleware   = "(?:.*[/\\\\])?src[/\\\\]middleware(\\.|[/\\\\]).*(js|ts|mjs|mts)$"
@@ -39,8 +48,8 @@ object AstroRecognizer extends JsFrameworkRecognizer:
     val globalReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter(fa =>
         fieldName(fa).exists(AstroGlobalReads.contains) &&
             fieldBase(fa).exists {
-              case id: Identifier => id.name == "Astro"
-              case _              => false
+                case id: Identifier => id.name == "Astro"
+                case _              => false
             }
     )
     ctx.tagger.tag(readChains(globalReads), INPUT)
@@ -54,8 +63,8 @@ object AstroRecognizer extends JsFrameworkRecognizer:
         .flatMap(_.argument.filter(_.argumentIndex == 1).l)
         .flatMap(callbacksIn(_, Set("handler")))
     (endpoints ++ middleware ++ actions).foreach { h =>
-        ctx.tagger.tag(Iterator(h), ROUTE)
-        ctx.tagger.tag(params(h).iterator, INPUT)
+      ctx.tagger.tag(Iterator(h), ROUTE)
+      ctx.tagger.tag(params(h).iterator, INPUT)
     }
 
     val serverFiles = (endpoints ++ middleware).map(_.filename).toSet ++

@@ -34,14 +34,15 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   /** Calls and field reads are queried by most recognizers; materialised once per run. */
   lazy val fieldAccesses: List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
       cpg.call.nameExact(io.shiftleft.codepropertygraph.generated.Operators.fieldAccess).l
+end JsContext
 
 /** A recognizer for one JavaScript framework family's sources, sinks and sanitisers.
   *
   * The JavaScript counterpart of `PythonFrameworkRecognizer`. Recognizers work from structure - the
   * import that binds a name, the member chain a value is read from, the parameter a framework fills
-  * - rather than from a regex over a call's code. A code regex also matches every call that merely
-  * CONTAINS the text (a `subscribe(...)` whose callback body mentions `route.params` is not itself
-  * a route read), which is where most false sources and sinks came from.
+  *   - rather than from a regex over a call's code. A code regex also matches every call that
+  *     merely CONTAINS the text (a `subscribe(...)` whose callback body mentions `route.params` is
+  *     not itself a route read), which is where most false sources and sinks came from.
   *
   * `applies` must be cheap: it is keyed on the import index, never on a sweep of call nodes.
   */
@@ -82,8 +83,8 @@ object JsRecognizers:
     // Over what the recognizers found: sources kept in a field and read by another method, and
     // values derived reactively from a source. Each can feed the other, so twice.
     (1 to 2).foreach { _ =>
-        MemberTaintBridge.run(ctx)
-        ReactiveBridge.run(ctx)
+      MemberTaintBridge.run(ctx)
+      ReactiveBridge.run(ctx)
     }
     // The npm package behind each sink, from the project's manifests - no SBOM needed.
     val typeOf =
@@ -92,7 +93,9 @@ object JsRecognizers:
     PackageAttribution.run(ctx, typeOf)
 
   def isJavaScript(cpg: Cpg): Boolean =
-      cpg.metaData.language.headOption.exists(l => l == Languages.JSSRC || l == Languages.JAVASCRIPT)
+      cpg.metaData.language.headOption.exists(l =>
+          l == Languages.JSSRC || l == Languages.JAVASCRIPT
+      )
 end JsRecognizers
 
 /** Applies the registered [[JsFrameworkRecognizer]]s on their own, for callers that do not run

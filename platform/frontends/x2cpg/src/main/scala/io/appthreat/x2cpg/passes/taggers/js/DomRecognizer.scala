@@ -29,7 +29,8 @@ object DomRecognizer extends JsFrameworkRecognizer:
   def applies(ctx: JsContext): Boolean = true
 
   /** Names under which code reaches the global object. */
-  private val WindowNames = Set("window", "self", "globalThis", "top", "parent", "frames", "$window")
+  private val WindowNames =
+      Set("window", "self", "globalThis", "top", "parent", "frames", "$window")
 
   private val LocationReads = Set("href", "hash", "search", "pathname")
   private val DocumentReads = Set("URL", "documentURI", "baseURI", "referrer", "cookie")
@@ -54,7 +55,9 @@ object DomRecognizer extends JsFrameworkRecognizer:
     * Seq(eval).
     */
   private def calleePath(call: Call): Option[List[String]] =
-      call.receiver.headOption.flatMap(memberPath).orElse(Option.when(call.name.nonEmpty)(List(call.name)))
+      call.receiver.headOption.flatMap(memberPath).orElse(
+        Option.when(call.name.nonEmpty)(List(call.name))
+      )
           .filter(_.lastOption.contains(call.name))
 
   /** A call of a global function (`eval(x)`, `window.eval(x)`), not a method of some object. */
@@ -79,12 +82,12 @@ object DomRecognizer extends JsFrameworkRecognizer:
   private def tagSources(ctx: JsContext): Unit =
     val reads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
         fieldName(fa).exists { field =>
-          (LocationReads.contains(field) || DocumentReads.contains(field) || field == "name") &&
-          fieldBase(fa).flatMap(memberPath).exists { base =>
-              (LocationReads.contains(field) && isLocation(base)) ||
-              (DocumentReads.contains(field) && isDocument(base)) ||
-              (field == "name" && isWindow(base))
-          }
+            (LocationReads.contains(field) || DocumentReads.contains(field) || field == "name") &&
+            fieldBase(fa).flatMap(memberPath).exists { base =>
+                (LocationReads.contains(field) && isLocation(base)) ||
+                (DocumentReads.contains(field) && isDocument(base)) ||
+                (field == "name" && isWindow(base))
+            }
         }
     }
     ctx.tagger.tag(readChains(reads), INPUT)
@@ -98,6 +101,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
         )
     }
     ctx.tagger.tag(storageReads, INGRESS)
+  end tagSources
 
   /** Cross-document messages and URL changes: `addEventListener('message', cb)`, `onmessage = cb`
     * and `hashchange`. A message to the window can come from any origin, so its event is input; a
@@ -111,31 +115,34 @@ object DomRecognizer extends JsFrameworkRecognizer:
           case Some(r) =>
               val path = memberPath(r)
               if path.exists(p => isWindow(p) || p == List("this")) then Some(INPUT)
-              else if constructedBy(r, Set("WebSocket", "EventSource", "io", "ReconnectingWebSocket"))
+              else if constructedBy(
+                  r,
+                  Set("WebSocket", "EventSource", "io", "ReconnectingWebSocket")
+                )
               then Some(INGRESS)
               else None
 
     ctx.cpg.call.nameExact("addEventListener").foreach { call =>
-        val event = call.argument.filter(_.argumentIndex == 1).flatMap(literalValue).headOption
-        val tagName = event match
-          case Some("message") => classify(receiverOf(call))
-          case Some("hashchange") if receiverOf(call).forall(r => memberPath(r).exists(isWindow)) =>
-              Some(INPUT)
-          case _ => None
-        tagName.foreach { t =>
-            call.argument.filter(_.argumentIndex == 2).l
-                .flatMap(callbacksIn(_))
-                .filterNot(checksOrigin)
-                .flatMap(firstParam)
-                .foreach(p => ctx.tagger.tag(Iterator(p), t))
-        }
+      val event = call.argument.filter(_.argumentIndex == 1).flatMap(literalValue).headOption
+      val tagName = event match
+        case Some("message") => classify(receiverOf(call))
+        case Some("hashchange") if receiverOf(call).forall(r => memberPath(r).exists(isWindow)) =>
+            Some(INPUT)
+        case _ => None
+      tagName.foreach { t =>
+          call.argument.filter(_.argumentIndex == 2).l
+              .flatMap(callbacksIn(_))
+              .filterNot(checksOrigin)
+              .flatMap(firstParam)
+              .foreach(p => ctx.tagger.tag(Iterator(p), t))
+      }
     }
     propertyWrites(ctx.cpg, Set("onmessage")).foreach { write =>
-        val target = write.argumentOption(1).collect { case c: Call => c }.flatMap(fieldBase)
-        classify(target.filterNot(t => memberPath(t).exists(isWindow))).foreach { t =>
-            assignedValue(write).toList.flatMap(callbacksIn(_)).flatMap(firstParam)
-                .foreach(p => ctx.tagger.tag(Iterator(p), t))
-        }
+      val target = write.argumentOption(1).collect { case c: Call => c }.flatMap(fieldBase)
+      classify(target.filterNot(t => memberPath(t).exists(isWindow))).foreach { t =>
+          assignedValue(write).toList.flatMap(callbacksIn(_)).flatMap(firstParam)
+              .foreach(p => ctx.tagger.tag(Iterator(p), t))
+      }
     }
   end tagMessageHandlers
 
@@ -145,18 +152,18 @@ object DomRecognizer extends JsFrameworkRecognizer:
     */
   private def checksOrigin(handler: Method): Boolean =
       firstParam(handler).exists { event =>
-        handler.ast.isCall.nameExact(
-          Operators.equals,
-          Operators.notEquals,
-          "<operator>.identity",
-          "<operator>.notIdentity"
-        ).exists(_.argument.isCall.exists(a =>
-            fieldName(a).contains("origin") && a.code == s"${event.name}.origin"
-        )) ||
-        // `ALLOWED.has(e.origin)`, `[...].includes(e.origin)` with the origin as the argument
-        handler.ast.isCall.nameExact("has", "includes").exists(
-          _.argument.filter(_.argumentIndex == 1).exists(_.code == s"${event.name}.origin")
-        )
+          handler.ast.isCall.nameExact(
+            Operators.equals,
+            Operators.notEquals,
+            "<operator>.identity",
+            "<operator>.notIdentity"
+          ).exists(_.argument.isCall.exists(a =>
+              fieldName(a).contains("origin") && a.code == s"${event.name}.origin"
+          )) ||
+          // `ALLOWED.has(e.origin)`, `[...].includes(e.origin)` with the origin as the argument
+          handler.ast.isCall.nameExact("has", "includes").exists(
+            _.argument.filter(_.argumentIndex == 1).exists(_.code == s"${event.name}.origin")
+          )
       }
 
   /** True when `expr` holds an object made by `new C(...)` (or `C(...)`) for one of `ctors`: the
@@ -204,10 +211,10 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // (it is also an axios error's response), so it needs an XHR receiver.
     val xhrReads = ctx.fieldAccesses.filter { fa =>
         fieldName(fa).exists {
-          case "responseText" | "responseXML" => true
-          case "response" =>
-              fieldBase(fa).exists(b => constructedBy(b, Set("XMLHttpRequest")))
-          case _ => false
+            case "responseText" | "responseXML" => true
+            case "response" =>
+                fieldBase(fa).exists(b => constructedBy(b, Set("XMLHttpRequest")))
+            case _ => false
         }
     }
     ctx.tagger.tag(readChains(xhrReads), INGRESS)
@@ -221,29 +228,29 @@ object DomRecognizer extends JsFrameworkRecognizer:
         .filter(isGlobalCall(_, Set("fetch", "$fetch")))
     val clientCalls = ctx.cpg.call.filter { c =>
         HttpClientMethods.contains(c.name) && receiverOf(c).exists { r =>
-          memberPath(r).exists {
-            case List(binding) =>
-                c.file.name.headOption.exists(f =>
-                    HttpClientPackages.exists(pkg =>
-                        ctx.modules.moduleBindingsOf(f, pkg).contains(binding)
-                    )
-                ) || isClientInstance(ctx, r)
-            case List("this", _) => isClientInstance(ctx, r)
-            case _               => false
-          }
+            memberPath(r).exists {
+                case List(binding) =>
+                    c.file.name.headOption.exists(f =>
+                        HttpClientPackages.exists(pkg =>
+                            ctx.modules.moduleBindingsOf(f, pkg).contains(binding)
+                        )
+                    ) || isClientInstance(ctx, r)
+                case List("this", _) => isClientInstance(ctx, r)
+                case _               => false
+            }
         }
     }
     // `axios(config)`, `ky(url)`, `ofetch(url)`, `$fetch(url)`: the binding called directly.
     val directCalls = ctx.cpg.call.filter { c =>
         c.receiver.headOption.flatMap(memberPath).exists {
-          case List(binding) =>
-              binding == c.name && c.file.name.headOption.exists(f =>
-                  HttpClientPackages.exists(pkg =>
-                      ctx.modules.moduleBindingsOf(f, pkg).contains(binding) ||
-                          ctx.modules.localNamesOf(f, pkg, binding).contains(binding)
-                  )
-              )
-          case _ => false
+            case List(binding) =>
+                binding == c.name && c.file.name.headOption.exists(f =>
+                    HttpClientPackages.exists(pkg =>
+                        ctx.modules.moduleBindingsOf(f, pkg).contains(binding) ||
+                            ctx.modules.localNamesOf(f, pkg, binding).contains(binding)
+                    )
+                )
+            case _ => false
         }
     }
     (globalFetch ++ clientCalls ++ directCalls).dedup.cast[Call]
@@ -259,11 +266,11 @@ object DomRecognizer extends JsFrameworkRecognizer:
     JsValues.origin(receiver) match
       case c: Call if c.name == "create" || c.name == "extend" =>
           receiverOf(c).flatMap(memberPath).exists {
-            case List(binding) =>
-                HttpClientPackages.exists(pkg =>
-                    ctx.modules.moduleBindingsOf(file, pkg).contains(binding)
-                )
-            case _ => false
+              case List(binding) =>
+                  HttpClientPackages.exists(pkg =>
+                      ctx.modules.moduleBindingsOf(file, pkg).contains(binding)
+                  )
+              case _ => false
           }
       case _ => false
 
@@ -292,7 +299,10 @@ object DomRecognizer extends JsFrameworkRecognizer:
         .filterNot(w =>
             w.argumentOption(1).collect { case c: Call => c }.flatMap(fieldBase)
                 .flatMap(memberPath).exists(p =>
-                    isLocation(p) || p.headOption.contains("exports") || p.take(2) == List("module", "exports")
+                    isLocation(p) || p.headOption.contains("exports") || p.take(2) == List(
+                      "module",
+                      "exports"
+                    )
                 )
         )
     ctx.tagger.tag(urlWrites, HtmlSink*)
@@ -307,7 +317,8 @@ object DomRecognizer extends JsFrameworkRecognizer:
                   memberPath(r).exists(isDocument) ||
                       (r match
                         case fa: Call => fieldName(fa).contains("document")
-                        case _        => false)
+                        case _        => false
+                      )
               )
           case _ => false
     }
@@ -317,11 +328,11 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // literal naming a URL attribute or an event handler. (Angular's Renderer2.setAttribute takes
     // the element first and is recognised by AngularRecognizer.)
     val attributeCalls = ctx.cpg.call.nameExact("setAttribute", "setAttributeNS").filter { c =>
-        val args = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
-        val nameArg = if c.name == "setAttributeNS" then args.lift(1) else args.headOption
-        nameArg.flatMap(literalValue).exists(n =>
-            UrlAttributes.contains(n.toLowerCase) || n.toLowerCase.startsWith("on")
-        ) && nonConstant(args.lastOption)
+      val args    = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
+      val nameArg = if c.name == "setAttributeNS" then args.lift(1) else args.headOption
+      nameArg.flatMap(literalValue).exists(n =>
+          UrlAttributes.contains(n.toLowerCase) || n.toLowerCase.startsWith("on")
+      ) && nonConstant(args.lastOption)
     }
     ctx.tagger.tag(attributeCalls, HtmlSink*)
   end tagHtmlSinks
@@ -335,7 +346,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
     * As there, the interpolation inside the attribute is tagged: it is the call the bound value
     * flows into.
     */
-  private val MarkupAttributes = Set("innerhtml", "outerhtml", "srcdoc", "set:html")
+  private val MarkupAttributes     = Set("innerhtml", "outerhtml", "srcdoc", "set:html")
   private val UrlBindingAttributes = Set("href", "xlink:href", "action", "formaction")
   private val DocumentLoaders      = Set("iframe", "frame", "script", "embed", "object")
 
@@ -358,27 +369,31 @@ object DomRecognizer extends JsFrameworkRecognizer:
 
   private def tagTemplateSinks(ctx: JsContext): Unit =
     val attributes = ctx.cpg.templateDom.nameExact("JSXAttribute").filter { attr =>
-        val name = attributeName(attr.code)
-        MarkupAttributes.contains(name) ||
-        (UrlBindingAttributes.contains(name) && !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
-        (name == "src" && attr.astParent.isInstanceOf[TemplateDom] && {
+      val name = attributeName(attr.code)
+      MarkupAttributes.contains(name) ||
+      (UrlBindingAttributes.contains(name) && !reactBlocksScriptUrls(
+        ctx,
+        attr.file.name.headOption.getOrElse("")
+      )) ||
+      (name == "src" && attr.astParent.isInstanceOf[TemplateDom] && {
           val element = attr.astParent.asInstanceOf[TemplateDom].code.drop(1)
               .takeWhile(c => c.isLetterOrDigit || c == '-').toLowerCase
           DocumentLoaders.contains(element)
-        })
+      })
     }.l
     // The attribute's value - its outermost expression, not every read nested inside it - and only
     // when the code does not anchor it: `href="/profile/@{name}"` can never become `javascript:`.
     val bound = attributes.iterator.flatMap { attr =>
         attr.ast.collectAll[Call].filterNot(c => c.astParent.isInstanceOf[Call]).l
     }.filter { value =>
-        // a template interpolation is wrapped: `<operator>.interpolation(expr)`
-        val expr =
-            if value.name == "<operator>.interpolation" then value.argumentOption(1).getOrElse(value)
-            else value
-        !hasFixedOrigin(expr)
+      // a template interpolation is wrapped: `<operator>.interpolation(expr)`
+      val expr =
+          if value.name == "<operator>.interpolation" then value.argumentOption(1).getOrElse(value)
+          else value
+      !hasFixedOrigin(expr)
     }.dedup.l
     ctx.tagger.tag(bound.iterator, HtmlSink*)
+  end tagTemplateSinks
 
   private def tagNavigationSinks(ctx: JsContext): Unit =
     // `location = x`, `window.location = x`, `location.href = x`
@@ -386,17 +401,18 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // nowhere, and neither does a write to a local or parameter called `location`.
     // A target whose origin the code fixes (`'/search?q=' + q`) stays on the site and cannot become
     // `javascript:`.
-    def unanchored(v: Option[Expression]) = v.exists(t => !t.isInstanceOf[Literal] && !hasFixedOrigin(t))
+    def unanchored(v: Option[Expression]) =
+        v.exists(t => !t.isInstanceOf[Literal] && !hasFixedOrigin(t))
     val locationWrites = ctx.cpg.call.nameExact(Operators.assignment).filter { a =>
         unanchored(assignedValue(a)) && !isDeclaration(a) &&
         // a lowering temporary is written, not navigated: `(_tmp = location.href).substr(...)`
         !a.argumentOption(1).exists(_.code.startsWith("_tmp_")) &&
         a.argumentOption(1).flatMap(memberPath).exists {
-          // `location = url`, but not a class field called `location` (`private location =
-          // inject(Location)` is lowered to an assignment to an identifier too)
-          case List("location") =>
-              a.code.startsWith("location") && !declaresLocal(a.method, "location")
-          case p => isLocation(p) || (p.lastOption.contains("href") && isLocation(p.init))
+            // `location = url`, but not a class field called `location` (`private location =
+            // inject(Location)` is lowered to an assignment to an identifier too)
+            case List("location") =>
+                a.code.startsWith("location") && !declaresLocal(a.method, "location")
+            case p => isLocation(p) || (p.lastOption.contains("href") && isLocation(p.init))
         }
     }
     ctx.tagger.tag(locationWrites, NavigationSink*)
@@ -425,7 +441,9 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // `document.cookie = ...` - cookie manipulation
     val cookieWrites = propertyWrites(ctx.cpg, Set("cookie")).filter(w =>
         nonConstant(assignedValue(w)) &&
-            w.argumentOption(1).collect { case fa: Call => fa }.flatMap(fieldBase).flatMap(memberPath)
+            w.argumentOption(1).collect { case fa: Call => fa }.flatMap(fieldBase).flatMap(
+              memberPath
+            )
                 .exists(isDocument)
     )
     ctx.tagger.tag(cookieWrites, OUTPUT)
@@ -488,15 +506,21 @@ object DomRecognizer extends JsFrameworkRecognizer:
 
     val xhrOpens = ctx.cpg.call.nameExact("open")
         .filter(c => receiverOf(c).exists(r => constructedBy(r, Set("XMLHttpRequest"))))
-        .flatMap(c => c.argument.filter(_.argumentIndex == 2).headOption.toList.flatMap(requestSinksFor(c, _)))
+        .flatMap(c =>
+            c.argument.filter(_.argumentIndex == 2).headOption.toList.flatMap(requestSinksFor(c, _))
+        )
     ctx.tagger.tag(xhrOpens, RequestSink*)
 
     val channels = ctx.cpg.call.nameExact("<operator>.new", Operators.alloc)
         .filter(c => c.code.startsWith("new WebSocket(") || c.code.startsWith("new EventSource("))
-        .flatMap(c => c.argument.filter(_.argumentIndex == 1).headOption.toList.flatMap(requestSinksFor(c, _)))
+        .flatMap(c =>
+            c.argument.filter(_.argumentIndex == 1).headOption.toList.flatMap(requestSinksFor(c, _))
+        )
     ctx.tagger.tag(channels, RequestSink*)
     val beacons = ctx.cpg.call.nameExact("sendBeacon")
-        .flatMap(c => c.argument.filter(_.argumentIndex == 1).headOption.toList.flatMap(requestSinksFor(c, _)))
+        .flatMap(c =>
+            c.argument.filter(_.argumentIndex == 1).headOption.toList.flatMap(requestSinksFor(c, _))
+        )
     ctx.tagger.tag(beacons, RequestSink*)
   end tagRequestSinks
 
@@ -506,22 +530,22 @@ object DomRecognizer extends JsFrameworkRecognizer:
 
   /** HTML sanitiser libraries, keyed by package, with the call that sanitises. */
   private val HtmlSanitizers: Seq[(String, Set[String])] = Seq(
-    "dompurify"           -> Set("sanitize"),
+    "dompurify"            -> Set("sanitize"),
     "isomorphic-dompurify" -> Set("sanitize"),
-    "sanitize-html"       -> Set("sanitizeHtml", "sanitize-html"),
-    "xss"                 -> Set("filterXSS", "xss"),
-    "escape-html"         -> Set("escapeHtml", "escape"),
-    "he"                  -> Set("encode", "escape"),
-    "validator"           -> Set("escape"),
-    "lodash"              -> Set("escape"),
-    "lodash-es"           -> Set("escape"),
-    "lodash.escape"       -> Set("escape")
+    "sanitize-html"        -> Set("sanitizeHtml", "sanitize-html"),
+    "xss"                  -> Set("filterXSS", "xss"),
+    "escape-html"          -> Set("escapeHtml", "escape"),
+    "he"                   -> Set("encode", "escape"),
+    "validator"            -> Set("escape"),
+    "lodash"               -> Set("escape"),
+    "lodash-es"            -> Set("escape"),
+    "lodash.escape"        -> Set("escape")
   )
 
   /** `x.origin === location.origin` (or `!==`, or against a constant): a URL object whose origin
-    * the code compares before use is checked for where it points. The `new URL(...)` that made it is
-    * tagged a sanitiser for navigation, requests and markup URLs. A string compared this way gets
-    * nothing - the dataflow engine has no notion of the branch that follows.
+    * the code compares before use is checked for where it points. The `new URL(...)` that made it
+    * is tagged a sanitiser for navigation, requests and markup URLs. A string compared this way
+    * gets nothing - the dataflow engine has no notion of the branch that follows.
     */
   private def tagOriginChecks(ctx: JsContext): Unit =
     val comparisons = ctx.cpg.call.nameExact(
@@ -530,15 +554,18 @@ object DomRecognizer extends JsFrameworkRecognizer:
       "<operator>.identity",
       "<operator>.notIdentity"
     ).filter(_.argument.isCall.exists(a => fieldName(a).contains("origin"))).l
-    val checkedUrls = comparisons.flatMap(_.argument.isCall.l).filter(a => fieldName(a).contains("origin"))
+    val checkedUrls = comparisons.flatMap(_.argument.isCall.l).filter(a =>
+        fieldName(a).contains("origin")
+    )
         .flatMap(fieldBase).filterNot(b => memberPath(b).exists(p => isLocation(p) || isWindow(p)))
         .map(JsValues.origin(_))
         .flatMap {
-          // `new URL(raw, base)` is lowered to a block around the `<operator>.new` call
-          case b: Block if b.code.startsWith("new URL(") =>
-              b.ast.isCall.nameExact("<operator>.new").headOption
-          case c: Call if c.code.startsWith("new URL(") || c.code.startsWith("URL.parse(") => Some(c)
-          case _                                                                       => None
+            // `new URL(raw, base)` is lowered to a block around the `<operator>.new` call
+            case b: Block if b.code.startsWith("new URL(") =>
+                b.ast.isCall.nameExact("<operator>.new").headOption
+            case c: Call if c.code.startsWith("new URL(") || c.code.startsWith("URL.parse(") =>
+                Some(c)
+            case _ => None
         }
     ctx.tagger.tag(
       checkedUrls.iterator,
@@ -547,6 +574,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
       sanitizerFor(HTTP_CLIENT),
       sanitizerFor(XSS)
     )
+  end tagOriginChecks
 
   private val Predicates = Set(
     "hasOwn",
@@ -573,19 +601,19 @@ object DomRecognizer extends JsFrameworkRecognizer:
     tagOriginChecks(ctx)
     val htmlSanitizerCalls = ctx.cpg.call.filter { c =>
         HtmlSanitizers.exists { (pkg, names) =>
-          c.file.name.headOption.exists { f =>
-            val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
-            calleePath(c).exists {
-              // `DOMPurify.sanitize(x)`, `he.encode(x)`
-              case List(binding, method) =>
-                  names.contains(method) && moduleBindings.contains(binding)
-              // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
-              case List(binding) =>
-                  moduleBindings.contains(binding) ||
-                  names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
-              case _ => false
+            c.file.name.headOption.exists { f =>
+              val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
+              calleePath(c).exists {
+                  // `DOMPurify.sanitize(x)`, `he.encode(x)`
+                  case List(binding, method) =>
+                      names.contains(method) && moduleBindings.contains(binding)
+                  // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
+                  case List(binding) =>
+                      moduleBindings.contains(binding) ||
+                      names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
+                  case _ => false
+              }
             }
-          }
         } ||
         // DOMPurify loaded from a script tag is a global
         (c.name == "sanitize" && calleePath(c).exists(_.headOption.exists(h =>

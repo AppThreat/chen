@@ -45,7 +45,7 @@ class DdgGenerator(
     val in           = solution.in
     val gen = solution.problem.transferFunction.asInstanceOf[ReachingDefTransferFunction].gen
 
-    val allNodes         = in.keys.toList
+    val allNodes = in.keys.toList
     // JavaScript-only refinements of the def-use edges: nested member reads and closure captures.
     val nestedContainers = sharedCache.isJavaScript(method)
     val usageAnalyzer    = new UsageAnalyzer(problem, in, nestedContainers)
@@ -113,8 +113,8 @@ class DdgGenerator(
       // `route.query.next`.
       if nestedContainers && usageAnalyzer.isContainerAccess(call) then
         call.argument.headOption.foreach {
-          case inner: Call => addEdge(inner, call, nodeToEdgeLabel(inner))
-          case _           =>
+            case inner: Call => addEdge(inner, call, nodeToEdgeLabel(inner))
+            case _           =>
         }
 
       // This handles `foo(new Bar())`, which is lowered to
@@ -219,7 +219,9 @@ class DdgGenerator(
         method._identifierViaContainsOut.foreach { identifier =>
             firstUsages(identifier).foreach { usage =>
                 if usage.method != method &&
-                  identifier.lineNumber.zip(usage.lineNumber).exists((i, u) => i.intValue <= u.intValue)
+                  identifier.lineNumber.zip(usage.lineNumber).exists((i, u) =>
+                      i.intValue <= u.intValue
+                  )
                 then addEdge(identifier, usage, nodeToEdgeLabel(identifier))
             }
         }

@@ -7,8 +7,8 @@ import io.shiftleft.semanticcpg.language.*
 import JsShapes.*
 import JsTags.*
 
-/** React and the frameworks that share its component model: React Router / Remix, Next.js,
-  * TanStack Router, Preact, SolidJS / SolidStart and Qwik City.
+/** React and the frameworks that share its component model: React Router / Remix, Next.js, TanStack
+  * Router, Preact, SolidJS / SolidStart and Qwik City.
   *
   * Sources:
   *   - component props: a capitalised function that renders JSX receives its props as its first
@@ -59,7 +59,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
   private val NextRouteFile = "(?:.*[/\\\\])?app([/\\\\].+)?[/\\\\]route\\.(js|jsx|ts|tsx|mjs|mts)$"
   private val NextMiddlewareFile =
       "(?:.*[/\\\\])?(src[/\\\\])?(middleware|proxy)\\.(js|ts|mjs|mts)$"
-  private val NextApiFile   = "(?:.*[/\\\\])?pages[/\\\\]api[/\\\\].*\\.(js|jsx|ts|tsx|mjs|mts)$"
+  private val NextApiFile = "(?:.*[/\\\\])?pages[/\\\\]api[/\\\\].*\\.(js|jsx|ts|tsx|mjs|mts)$"
 
   /** Next.js file conventions (a `route.ts` under `app`, files under `pages/api`) are evidence on
     * their own.
@@ -157,17 +157,20 @@ object ReactRecognizer extends JsFrameworkRecognizer:
       "@solidjs/router"
     )
     val exported = ctx.cpg.method.internal.nameExact(DataFunctions.toSeq*)
-        .filter(m => routerFiles.contains(m.filename) || m.filename.matches("(?:.*[/\\\\])?routes?[/\\\\].*"))
+        .filter(m =>
+            routerFiles.contains(m.filename) || m.filename.matches("(?:.*[/\\\\])?routes?[/\\\\].*")
+        )
     val keyed = ctx.cpg.call.nameExact(Operators.assignment)
         .filter(a =>
             a.argumentOption(1).exists {
-              case fa: Call => fieldName(fa).exists(DataFunctions.contains)
-              case _        => false
+                case fa: Call => fieldName(fa).exists(DataFunctions.contains)
+                case _        => false
             } && routerFiles.contains(a.method.filename)
         )
         .flatMap(_.argumentOption(2)).l
         .flatMap(callbacksIn(_))
     (exported ++ keyed).foreach(tagHandler(ctx, _))
+  end tagDataFunctions
 
   private def tagNext(ctx: JsContext): Unit =
     val usesNext = ctx.modules.uses("next") || ctx.project.dependsOn("next")
@@ -175,16 +178,16 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     val routeHandlers = ctx.cpg.file.name(NextRouteFile).method.internal
         .filter(m => HttpVerbs.contains(m.name) || m.name.startsWith("anonymous"))
     routeHandlers.foreach { h =>
-        ctx.tagger.tag(Iterator(h), ROUTE)
-        ctx.tagger.tag(params(h).iterator, INPUT)
+      ctx.tagger.tag(Iterator(h), ROUTE)
+      ctx.tagger.tag(params(h).iterator, INPUT)
     }
     // pages/api: every export is a handler of `(req, res)` - the response is no input
     val apiHandlers = ctx.cpg.file.name(NextApiFile).method.internal
         .filterNot(m => m.name.contains("<") || m.name == ":program")
         .filter(m => params(m).nonEmpty)
     apiHandlers.foreach { h =>
-        ctx.tagger.tag(Iterator(h), ROUTE)
-        ctx.tagger.tag(firstParam(h).iterator, INPUT)
+      ctx.tagger.tag(Iterator(h), ROUTE)
+      ctx.tagger.tag(firstParam(h).iterator, INPUT)
     }
     // page-data loaders, middleware (`proxy` from Next 16) - named for Next.js, but not tied to an
     // import: the loaders are found by name in any React project, as they always were
@@ -196,9 +199,13 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     if !usesNext then return
     // app-router pages and layouts: `params` and `searchParams` props
     val pages = ctx.cpg.file
-        .name("(?:.*[/\\\\])?app([/\\\\].+)?[/\\\\](page|layout|default|template)\\.(js|jsx|ts|tsx)$")
+        .name(
+          "(?:.*[/\\\\])?app([/\\\\].+)?[/\\\\](page|layout|default|template)\\.(js|jsx|ts|tsx)$"
+        )
         .method.internal
-        .filter(m => m.name.nonEmpty && (m.name.charAt(0).isUpper || m.name.startsWith("anonymous")))
+        .filter(m =>
+            m.name.nonEmpty && (m.name.charAt(0).isUpper || m.name.startsWith("anonymous"))
+        )
     ctx.tagger.tag(pages.flatMap(firstParam), INPUT)
     // cookies(), headers() and draftMode() read the incoming request
     val requestReaders = ctx.cpg.call.nameExact("cookies", "headers").filter(c =>
@@ -215,8 +222,8 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     // The directive is the first statement; the block lists the function's locals before it.
     def opensWithDirective(m: Method): Boolean =
         m.block.astChildren.filterNot(_.isInstanceOf[Local]).headOption.exists {
-          case l: Literal => l.code.matches("""^['"]use server['"]$""")
-          case _          => false
+            case l: Literal => l.code.matches("""^['"]use server['"]$""")
+            case _          => false
         }
     val moduleLevel = ctx.cpg.method.nameExact(":program").filter(opensWithDirective).l
     val serverFns = (moduleLevel.flatMap(p =>
@@ -228,8 +235,8 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     ) ++ ctx.cpg.method.internal.filter(opensWithDirective).filterNot(_.name == ":program").l)
         .distinctBy(_.id())
     serverFns.foreach { f =>
-        ctx.tagger.tag(Iterator(f), ROUTE)
-        ctx.tagger.tag(params(f).iterator, INPUT)
+      ctx.tagger.tag(Iterator(f), ROUTE)
+      ctx.tagger.tag(params(f).iterator, INPUT)
     }
     // SolidStart: action(async (formData) => ...), query(async (id) => ..., 'key')
     val solidFns = ctx.cpg.call.nameExact("action", "query", "createServerFn")
@@ -240,6 +247,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
         .l.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
     ctx.tagger.tag(solidFns.flatMap(params).iterator, INPUT)
+  end tagServerFunctions
 
   /** React 19 form actions: `useActionState(fn, initial)` and `<form action={fn}>` call `fn` with
     * the submitted form (`fn(previousState, formData)` for the hook, `fn(formData)` for the form).
@@ -298,7 +306,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
 
   private def tagNavigation(ctx: JsContext): Unit =
     def target(c: Call): Option[Expression] = c.argument.filter(_.argumentIndex == 1).headOption
-    def unanchored(e: Expression): Boolean = !isObjectLiteral(e) && !hasFixedOrigin(e)
+    def unanchored(e: Expression): Boolean  = !isObjectLiteral(e) && !hasFixedOrigin(e)
 
     // redirect(url) from react-router / next/navigation / @remix-run, permanentRedirect(url)
     val redirectPkgs =
@@ -324,26 +332,28 @@ object ReactRecognizer extends JsFrameworkRecognizer:
 
     // navigate(target) where navigate = useNavigate(); router.push(target) with useRouter()
     val navigations = ctx.cpg.call.filter { c =>
-        val viaHook = c.receiver.headOption.flatMap(memberPath).exists {
+      val viaHook = c.receiver.headOption.flatMap(memberPath).exists {
           case List(local) =>
               JsValues.origin(c.receiver.head) match
                 case h: Call => h.name == "useNavigate"
                 case _       => false
           case _ => false
-        }
-        val viaRouter = (c.name == "push" || c.name == "replace") && receiverOf(c).exists(r =>
-            JsValues.origin(r) match
-              case h: Call => h.name == "useRouter"
-              case _       => false
-        )
-        (viaHook || viaRouter) && target(c).exists(unanchored)
+      }
+      val viaRouter = (c.name == "push" || c.name == "replace") && receiverOf(c).exists(r =>
+          JsValues.origin(r) match
+            case h: Call => h.name == "useRouter"
+            case _       => false
+      )
+      (viaHook || viaRouter) && target(c).exists(unanchored)
     }
     ctx.tagger.tag(navigations, NavigationSink*)
 
     // <Navigate to={target} />
     val navigateTo = ctx.cpg.templateDom.nameExact("JSXOpeningElement")
         .filter(dom => jsxComponentName(dom.code).contains("Navigate"))
-        .flatMap(_.ast.collectAll[TemplateDom].nameExact("JSXAttribute").filter(_.code.startsWith("to=")))
+        .flatMap(
+          _.ast.collectAll[TemplateDom].nameExact("JSXAttribute").filter(_.code.startsWith("to="))
+        )
         .flatMap(_.ast.collectAll[Call])
     ctx.tagger.tag(navigateTo, NavigationSink*)
   end tagNavigation

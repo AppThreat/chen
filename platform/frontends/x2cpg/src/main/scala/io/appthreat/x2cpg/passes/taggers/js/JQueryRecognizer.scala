@@ -13,8 +13,8 @@ import JsTags.*
   * manipulation methods that take markup (`html`, `append`, `prepend`, `after`, `before`,
   * `replaceWith`, `wrap`, `wrapAll`, `wrapInner`, `add`), `$.parseHTML`, `attr`/`prop` with a URL
   * attribute, an event handler or `innerHTML`; `$.globalEval` and `$.getScript` run code;
-  * `$.ajax`/`$.get`/`$.getJSON`/`$.post`/`.load` request a URL - `dataType: 'script'` or JSONP
-  * runs the response.
+  * `$.ajax`/`$.get`/`$.getJSON`/`$.post`/`.load` request a URL - `dataType: 'script'` or JSONP runs
+  * the response.
   *
   * Sources: the responses of those requests (`.done(cb)`, `.then(cb)`, `success: cb`), and
   * `message`/`hashchange` events bound with `$(window).on(...)`.
@@ -70,18 +70,19 @@ object JQueryRecognizer extends JsFrameworkRecognizer:
       depth > 0 && (JsValues.origin(e) match
         case c: Call if isFactory(c)                    => true
         case c: Call if c.name == Operators.fieldAccess => false
-        case c: Call                                    => receiverOf(c).exists(isCollection(_, depth - 1))
-        case id: Identifier                             => id.name.startsWith("$") && id.name.length > 1
-        case _                                          => false)
+        case c: Call        => receiverOf(c).exists(isCollection(_, depth - 1))
+        case id: Identifier => id.name.startsWith("$") && id.name.length > 1
+        case _              => false
+      )
 
   def run(ctx: JsContext): Unit =
     // $(html): only a computed argument, and not an element or the window/document
     val factories = ctx.cpg.call.filter(isFactory).filter(c =>
         argument(c, 1).exists {
-          case _: Literal => false
-          case id: Identifier => !Set("this", "window", "document", "self").contains(id.name)
-          case _: MethodRef   => false // $(function () { ... }) - document ready
-          case _              => true
+            case _: Literal     => false
+            case id: Identifier => !Set("this", "window", "document", "self").contains(id.name)
+            case _: MethodRef   => false // $(function () { ... }) - document ready
+            case _              => true
         }
     )
     ctx.tagger.tag(factories, HtmlSink*)
@@ -102,7 +103,9 @@ object JQueryRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(attributes, HtmlSink*)
 
-    val code = ctx.cpg.call.filter(c => isStatic(c, Set("globalEval", "getScript")) && computed(argument(c, 1)))
+    val code = ctx.cpg.call.filter(c =>
+        isStatic(c, Set("globalEval", "getScript")) && computed(argument(c, 1))
+    )
     ctx.tagger.tag(code, CodeSink*)
 
     // Requests; their responses are remote data
@@ -110,7 +113,7 @@ object JQueryRecognizer extends JsFrameworkRecognizer:
         isStatic(c, RequestMethods) || (c.name == "load" && receiverOf(c).exists(isCollection(_)))
     ).l
     requests.foreach { c =>
-        argument(c, 1).foreach {
+      argument(c, 1).foreach {
           case cfg: Block =>
               // $.ajax({ url, dataType: 'script' | 'jsonp', success })
               if cfg.code.matches("(?s).*dataType\\s*:\\s*['\"](script|jsonp)['\"].*") then
@@ -122,27 +125,29 @@ object JQueryRecognizer extends JsFrameworkRecognizer:
                         case _        => false
                     })
                     .flatMap(_.argumentOption(2)).headOption
-                url.filterNot(hasFixedOrigin).foreach(_ => ctx.tagger.tag(Iterator(c), RequestSink*))
+                url.filterNot(hasFixedOrigin).foreach(_ =>
+                    ctx.tagger.tag(Iterator(c), RequestSink*)
+                )
               ctx.tagger.tag(callbacksIn(cfg, Set("success")).flatMap(firstParam).iterator, INGRESS)
           case url =>
               // $.getJSON(url + '?callback=?') runs the response as script
               if c.name == "getJSON" && url.code.contains("callback=?") then
                 ctx.tagger.tag(Iterator(c), CodeSink*)
               else if !hasFixedOrigin(url) then ctx.tagger.tag(Iterator(c), RequestSink*)
-        }
-        // $.get(url, function (data) {...}) and the jqXHR promise
-        ctx.tagger.tag(
-          c.argument.filter(_.argumentIndex >= 2).l.flatMap(callbacksIn(_)).flatMap(firstParam).iterator,
-          INGRESS
-        )
-        val chained = c.method.call.nameExact("done", "then", "always").filter(d =>
-            receiverOf(d).exists(r => JsValues.origin(r).id() == c.id())
-        ).l
-        ctx.tagger.tag(
-          chained.flatMap(_.argument.filter(_.argumentIndex == 1).l).flatMap(callbacksIn(_))
-              .flatMap(firstParam).iterator,
-          INGRESS
-        )
+      }
+      // $.get(url, function (data) {...}) and the jqXHR promise
+      ctx.tagger.tag(
+        c.argument.filter(_.argumentIndex >= 2).l.flatMap(callbacksIn(_)).flatMap(firstParam).iterator,
+        INGRESS
+      )
+      val chained = c.method.call.nameExact("done", "then", "always").filter(d =>
+          receiverOf(d).exists(r => JsValues.origin(r).id() == c.id())
+      ).l
+      ctx.tagger.tag(
+        chained.flatMap(_.argument.filter(_.argumentIndex == 1).l).flatMap(callbacksIn(_))
+            .flatMap(firstParam).iterator,
+        INGRESS
+      )
     }
 
     // $(window).on('message', handler): a message from any origin

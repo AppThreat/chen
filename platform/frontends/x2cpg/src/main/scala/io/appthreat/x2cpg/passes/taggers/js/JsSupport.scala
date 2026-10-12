@@ -28,7 +28,7 @@ object JsTags:
   val XSS: String      = "xss"
   val REDIRECT: String = "redirect"
   // Neutralisers
-  val SANITIZER: String = "sanitizer"
+  val SANITIZER: String                      = "sanitizer"
   def sanitizerFor(category: String): String = s"sanitizer-$category"
 
   /** A call that returns a boolean or a number about its arguments (`allow.has(x)`,
@@ -254,8 +254,8 @@ object JsModules:
 end JsModules
 
 /** What the project's manifests declare: the dependencies of every `package.json` outside
-  * `node_modules`. Frameworks that auto-import their APIs (Nuxt, Nitro, SvelteKit's `$app`) leave no
-  * import to gate on, so the manifest is the evidence that the framework is there.
+  * `node_modules`. Frameworks that auto-import their APIs (Nuxt, Nitro, SvelteKit's `$app`) leave
+  * no import to gate on, so the manifest is the evidence that the framework is there.
   */
 final class JsProject(cpg: Cpg):
   private val DependencyKeys =
@@ -294,23 +294,24 @@ final class JsProject(cpg: Cpg):
         )
         .flatMap(f => io.circe.parser.parse(f.content).toOption)
         .flatMap { json =>
-            val v2 = json.hcursor.downField("packages").as[Map[String, io.circe.Json]].toOption
-                .toList.flatMap(_.toList.flatMap { (path, entry) =>
-                    // the root package is keyed "", a nested copy "node_modules/a/node_modules/b"
-                    val marker = path.lastIndexOf("node_modules/")
-                    if marker < 0 || path.indexOf("node_modules/") != marker then None
-                    else
-                      entry.hcursor.downField("version").as[String].toOption
-                          .map(path.substring(marker + "node_modules/".length) -> _)
-                })
-            val v1 = json.hcursor.downField("dependencies").as[Map[String, io.circe.Json]].toOption
-                .toList.flatMap(_.toList.flatMap((name, entry) =>
-                    entry.hcursor.downField("version").as[String].toOption.map(name -> _)
-                ))
-            v2 ++ v1
+          val v2 = json.hcursor.downField("packages").as[Map[String, io.circe.Json]].toOption
+              .toList.flatMap(_.toList.flatMap { (path, entry) =>
+                // the root package is keyed "", a nested copy "node_modules/a/node_modules/b"
+                val marker = path.lastIndexOf("node_modules/")
+                if marker < 0 || path.indexOf("node_modules/") != marker then None
+                else
+                  entry.hcursor.downField("version").as[String].toOption
+                      .map(path.substring(marker + "node_modules/".length) -> _)
+              })
+          val v1 = json.hcursor.downField("dependencies").as[Map[String, io.circe.Json]].toOption
+              .toList.flatMap(_.toList.flatMap((name, entry) =>
+                  entry.hcursor.downField("version").as[String].toOption.map(name -> _)
+              ))
+          v2 ++ v1
         }
         .toMap
     fromRanges ++ fromLocks
+  end resolvedVersions
 
   /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
   def majorVersionOf(name: String): Option[Int] =
@@ -327,8 +328,8 @@ end JsProject
 /** Structural helpers over the shapes jssrc2cpg lowers JavaScript to. */
 object JsShapes:
 
-  /** The method name of a call. An optional call (`a?.b.c(x)`) is lowered to a call whose NAME is the
-    * whole callee text, so the name is its last segment.
+  /** The method name of a call. An optional call (`a?.b.c(x)`) is lowered to a call whose NAME is
+    * the whole callee text, so the name is its last segment.
     */
   def callName(call: Call): String =
       if call.name.startsWith("<") || !call.name.contains('.') then call.name
@@ -339,8 +340,8 @@ object JsShapes:
       if call.name != Operators.fieldAccess then None
       else
         call.argumentOption(2).map {
-          case f: FieldIdentifier => f.canonicalName
-          case other              => other.code
+            case f: FieldIdentifier => f.canonicalName
+            case other              => other.code
         }
 
   /** The receiver (`a` in `a.b`) of a field access. */
@@ -379,9 +380,10 @@ object JsShapes:
       read :: (read.astParent match
         case p: Call
             if (p.name == Operators.fieldAccess || p.name == Operators.indexAccess) &&
-              p.argumentOption(1).exists(_.id() == read.id()) && p._receiverIn.isEmpty =>
+                p.argumentOption(1).exists(_.id() == read.id()) && p._receiverIn.isEmpty =>
             readChain(p)
-        case _ => Nil)
+        case _ => Nil
+      )
 
   /** [[readChain]] of every read. */
   def readChains(reads: IterableOnce[Call]): Iterator[Call] = reads.iterator.flatMap(readChain)
@@ -465,8 +467,9 @@ object JsShapes:
   def isConstantExpr(e: Expression): Boolean =
       e match
         case _: Literal => true
-        case c: Call if c.name.startsWith("<operator>.") && c.name != Operators.fieldAccess &&
-              c.name != Operators.indexAccess =>
+        case c: Call
+            if c.name.startsWith("<operator>.") && c.name != Operators.fieldAccess &&
+                c.name != Operators.indexAccess =>
             c.argument.nonEmpty && c.argument.forall(isConstantExpr)
         case _ => false
 
@@ -477,7 +480,7 @@ object JsShapes:
       e match
         case c: Call
             if c.name == Operators.addition || c.name == Operators.formatString ||
-              c.name == "<operator>.formattedValue" =>
+                c.name == "<operator>.formattedValue" =>
             c.argumentOption(1).map(leftmostOperand).getOrElse(e)
         case _ => e
 
@@ -488,13 +491,13 @@ object JsShapes:
     */
   def hasFixedOrigin(url: Expression): Boolean =
       url match
-        case l: Literal                  => true
+        case l: Literal                   => true
         case c: Call if isConstantExpr(c) => true
         case _ =>
             literalValue(leftmostOperand(url)).exists { prefix =>
-              (prefix.startsWith("/") && !prefix.startsWith("//")) ||
-              prefix.matches("(?i)^https?://[^/?#]+[/?#].*") ||
-              prefix.startsWith("./") || prefix.startsWith("../")
+                (prefix.startsWith("/") && !prefix.startsWith("//")) ||
+                prefix.matches("(?i)^https?://[^/?#]+[/?#].*") ||
+                prefix.startsWith("./") || prefix.startsWith("../")
             }
 
   /** The parts of a string built by concatenation or a template literal, left to right. */
@@ -516,8 +519,8 @@ object JsShapes:
           prefix.startsWith("./") || prefix.startsWith("../")
 
   /** The nodes to tag as request sinks for a request to `url`: the parts of the URL that decide
-    * where the request goes, never the request call itself - what reaches its body, its options
-    * or its receiver is no forgery.
+    * where the request goes, never the request call itself - what reaches its body, its options or
+    * its receiver is no forgery.
     *
     *   - A constant URL, or a value placed only in the query or fragment of a URL whose origin the
     *     code fixes (`/search?q=${q}`), is no sink.
@@ -538,11 +541,11 @@ object JsShapes:
     def variablesInPath(parts: List[Expression], from: Int): List[CfgNode] =
       var text = ""
       parts.drop(from).flatMap {
-        case part if isConstant(part) =>
-            text += literalValue(part).getOrElse(part.code)
-            Nil
-        case part: CfgNode if !text.contains('?') && !text.contains('#') => List(part)
-        case _                                                           => Nil
+          case part if isConstant(part) =>
+              text += literalValue(part).getOrElse(part.code)
+              Nil
+          case part: CfgNode if !text.contains('?') && !text.contains('#') => List(part)
+          case _                                                           => Nil
       }
     url match
       case _: Literal => Nil
@@ -564,6 +567,7 @@ object JsShapes:
       case e if isConfiguredUrl(e) => Nil
       case e: CfgNode              => List(e)
       case _                       => List(call)
+    end match
   end requestSinksFor
 
   private val ConfigRoots = Set("environment", "env", "config", "process", "import.meta")
@@ -574,15 +578,15 @@ object JsShapes:
             id.name.length > 1 && id.name.forall(ch => ch.isUpper || ch.isDigit || ch == '_')
         case c: Call if c.name == Operators.fieldAccess =>
             memberPath(c).exists {
-              case List("this", _) => true
-              case root :: _       => ConfigRoots.contains(root)
-              case _               => false
+                case List("this", _) => true
+                case root :: _       => ConfigRoots.contains(root)
+                case _               => false
             } || c.code.startsWith("import.meta.env.")
         case _ => false
 
   /** A tagged template call (`` sql`... ${x}` ``), lowered to a call of the tag with the template
-    * as `<operator>.formatString(...)`: the tag function receives the values separately - a SQL
-    * tag binds them as parameters.
+    * as `<operator>.formatString(...)`: the tag function receives the values separately - a SQL tag
+    * binds them as parameters.
     */
   def isTaggedTemplateCall(c: Call): Boolean =
       c.name != Operators.formatString &&
@@ -603,14 +607,14 @@ object JsShapes:
     */
   private val ServerFile = (
     "(?:.*[/\\\\])?(" +
-      "server[/\\\\](api|routes|middleware|plugins|tasks|utils)[/\\\\].*" +
-      "|app[/\\\\](.*[/\\\\])?route\\.[cm]?[jt]sx?" +
-      "|pages[/\\\\]api[/\\\\].*" +
-      "|(src[/\\\\])?middleware\\.[cm]?[jt]s" +
-      "|.*\\+(page|layout)\\.server\\.[cm]?[jt]s|.*\\+server\\.[cm]?[jt]s|hooks\\.server\\.[cm]?[jt]s" +
-      "|lib[/\\\\]server[/\\\\].*" +
-      "|.*\\.server\\.[cm]?[jt]sx?" +
-      ")"
+        "server[/\\\\](api|routes|middleware|plugins|tasks|utils)[/\\\\].*" +
+        "|app[/\\\\](.*[/\\\\])?route\\.[cm]?[jt]sx?" +
+        "|pages[/\\\\]api[/\\\\].*" +
+        "|(src[/\\\\])?middleware\\.[cm]?[jt]s" +
+        "|.*\\+(page|layout)\\.server\\.[cm]?[jt]s|.*\\+server\\.[cm]?[jt]s|hooks\\.server\\.[cm]?[jt]s" +
+        "|lib[/\\\\]server[/\\\\].*" +
+        "|.*\\.server\\.[cm]?[jt]sx?" +
+        ")"
   ).r
 
   def isServerFile(filename: String): Boolean = ServerFile.matches(filename)
@@ -625,8 +629,8 @@ object JsShapes:
           .filter(_.argumentOption(1).exists {
               case c: Call =>
                   fieldName(c).exists(fields.contains) && !fieldBase(c).exists {
-                    case id: Identifier => id.name.startsWith("_tmp_")
-                    case _              => false
+                      case id: Identifier => id.name.startsWith("_tmp_")
+                      case _              => false
                   }
               case _ => false
           })
@@ -718,11 +722,11 @@ object JsIndexes:
       assignmentIndexes.computeIfAbsent(
         m,
         method =>
-          Iterator(method).assignment.l.flatMap { a =>
-              (a.argumentOption(1), a.argumentOption(2)) match
-                case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
-                case _                              => None
-          }.groupMap(_._1)(_._2)
+            Iterator(method).assignment.l.flatMap { a =>
+                (a.argumentOption(1), a.argumentOption(2)) match
+                  case (Some(t: Identifier), Some(v)) => Some(t.name -> v)
+                  case _                              => None
+            }.groupMap(_._1)(_._2)
       ).getOrElse(name, Nil)
 
   /** Forget everything built for a graph (between runs over a mutated graph). */
@@ -735,8 +739,9 @@ end JsIndexes
 object JsValues:
 
   /** The expression a value was produced by: through the frontend's temporaries, and through a
-    * local that the method assigns exactly once (`const obs = this.http.get(...)`). A local assigned
-    * more than once is left alone - which assignment reaches a use is the dataflow engine's job.
+    * local that the method assigns exactly once (`const obs = this.http.get(...)`). A local
+    * assigned more than once is left alone - which assignment reaches a use is the dataflow
+    * engine's job.
     */
   def origin(expr: Expression, depth: Int = 4): Expression =
     val e = JsShapes.unwrap(expr)
@@ -746,7 +751,7 @@ object JsValues:
         case id: Identifier if id.name != "this" =>
             JsIndexes.assignedValues(id.method, id.name) match
               case single :: Nil => origin(single, depth - 1)
-              case Nil =>
+              case Nil           =>
                   // a variable of an enclosing function, captured: `const navigate =
                   // useNavigate()` at the top of a component, called in a handler
                   enclosingAssignment(id.method, id.name).map(origin(_, depth - 1)).getOrElse(e)
@@ -771,8 +776,8 @@ object JsValues:
         )
         .collectFirst { case Some(vs) => vs }
         .flatMap {
-          case single :: Nil => Some(single)
-          case _             => None
+            case single :: Nil => Some(single)
+            case _             => None
         }
 
   /** rxjs operators whose callback receives each emitted value. */
@@ -806,10 +811,10 @@ object JsValues:
     */
   def consumersOf(producer: Expression, depth: Int = 6): List[MethodParameterIn] =
     if depth <= 0 then return Nil
-    val method     = producer.method
-    val producerId = producer.id()
+    val method                               = producer.method
+    val producerId                           = producer.id()
     def fromProducer(e: Expression): Boolean = origin(e).id() == producerId
-    val calls = method.call.l
+    val calls                                = method.call.l
     val chained = calls
         .filter(c =>
             (c.name == "then" || c.name == "subscribe" || c.name == "pipe") &&

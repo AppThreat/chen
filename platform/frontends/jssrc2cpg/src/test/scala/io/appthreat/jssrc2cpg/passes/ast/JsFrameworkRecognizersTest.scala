@@ -46,7 +46,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "x.component.ts"
           ))
           val inputs = cpg.tag.name("framework-input").call.code.l
-          inputs should contain allOf (
+          (inputs should contain).allOf(
             "this.ar.snapshot.queryParams",
             "this.ar.snapshot.queryParams.q",
             "this.loc.path()",
@@ -187,7 +187,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           ))
           // a host the component is configured with decides the target, a value in the query not
           cpg.tag.name("http-client").call.code.l shouldBe List("this.cdn()")
-          cpg.tag.name("framework-input").parameter.name.l should contain allOf ("v", "e")
+          (cpg.tag.name("framework-input").parameter.name.l should contain).allOf("v", "e")
           cpg.tag.name("redirect").call.code.l shouldBe List("this.router.navigateByUrl(v)")
       }
   }
@@ -267,7 +267,12 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "legacy.js"
           ))
           val inputs = cpg.tag.name("framework-input").call.code.l
-          inputs should contain allOf ("this.$route", "this.$route.query", "this.$route.query.msg", "this.title")
+          (inputs should contain).allOf(
+            "this.$route",
+            "this.$route.query",
+            "this.$route.query.msg",
+            "this.title"
+          )
           cpg.tag.name("framework-input").parameter.name.l should contain("to")
           flows(cpg, "redirect") should be > 0
       }
@@ -317,7 +322,9 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("shell-exec").call.code.l shouldBe List("run(`ping ${req.host}`)")
           cpg.tag.name("file-io").call.name.l shouldBe List("readFile")
           cpg.tag.name("sanitizer-file-io").call.name.l shouldBe List("basename")
-          cpg.tag.name("sql").call.code.l shouldBe List("pool.query(`select * from t where a = '${req.a}'`)")
+          cpg.tag.name("sql").call.code.l shouldBe List(
+            "pool.query(`select * from t where a = '${req.a}'`)"
+          )
       }
   }
 
@@ -346,7 +353,8 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           |""".stripMargin,
             "server/controllers/items-controller.ts"
           ))
-          val inputs = cpg.tag.name("framework-input").parameter.map(p => s"${p.method.name}.${p.name}").l
+          val inputs =
+              cpg.tag.name("framework-input").parameter.map(p => s"${p.method.name}.${p.name}").l
           inputs should contain("list.req")
           inputs should not contain "get.url"
       }
@@ -381,10 +389,14 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/axios": { "version": "1.7.9" } } }""",
             "package-lock.json"
           ))
-          cpg.tag.name("pkg:npm/.*").call.map(c => s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}").l shouldBe
+          cpg.tag.name("pkg:npm/.*").call.map(c =>
+              s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}"
+          ).l shouldBe
               List("bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0")
           // a request is attributed on its URL, the sink
-          cpg.tag.name("pkg:npm/.*").identifier.map(i => s"${i.inCall.code.head} ${i.tag.name("pkg:npm/.*").name.head}").l shouldBe
+          cpg.tag.name("pkg:npm/.*").identifier.map(i =>
+              s"${i.inCall.code.head} ${i.tag.name("pkg:npm/.*").name.head}"
+          ).l shouldBe
               List("axios.get(q) pkg:npm/axios@1.7.9")
           // a Node.js built-in is no package, and sources get no purl (it would make them sinks)
           cpg.tag.name("pkg:npm/.*").call.name.l should not contain "exec"
@@ -439,7 +451,11 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           |""".stripMargin,
             "app.js"
           ))
-          cpg.tag.name("xss").call.code.l.sorted shouldBe List("$('#c').html(comments)", "$('#title').html(hash)", "$(hash)")
+          cpg.tag.name("xss").call.code.l.sorted shouldBe List(
+            "$('#c').html(comments)",
+            "$('#title').html(hash)",
+            "$(hash)"
+          )
           cpg.tag.name("code-execution").call.code.l shouldBe List("$.globalEval(hash)")
           cpg.tag.name("service-ingress").parameter.name.l shouldBe List("comments")
       }
