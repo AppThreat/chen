@@ -1,6 +1,6 @@
 name := "edg2atom"
 
-dependsOn(
+BareBuildSyntax.dependsOn(
   Projects.c2cpg             % "compile->compile;test->test",
   Projects.dataflowengineoss % "compile->compile;test->test",
   Projects.x2cpg             % "compile->compile;test->test"

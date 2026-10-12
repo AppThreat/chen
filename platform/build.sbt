@@ -1,6 +1,6 @@
 name := "platform"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg)
+BareBuildSyntax.dependsOn(Projects.dataflowengineoss, Projects.x2cpg)
 
 libraryDependencies ++= Seq(
   "io.appthreat"     %% "cpg2"        % Versions.cpg,
@@ -10,7 +10,9 @@ libraryDependencies ++= Seq(
   "org.scalatest"    %% "scalatest"   % Versions.scalatest % Test
 )
 
-Test / compile := (Test / compile).dependsOn((Projects.c2cpg / stage), (Projects.jssrc2cpg / stage)).value
+Test / compile := Def.uncached {
+    (Test / compile).dependsOn((Projects.c2cpg / stage), (Projects.jssrc2cpg / stage)).value
+}
 Test / fork := false
 
 enablePlugins(JavaAppPackaging, UniversalPlugin)
@@ -22,25 +24,35 @@ topLevelDirectory := Some(packageName.value)
 
 Compile / packageDoc / mappings := Seq()
 
-def frontendMappings(frontendName: String, stagedProject: File): Seq[(File, String)] = {
+def frontendMappings(
+    frontendName: String,
+    stagedProject: File
+)(using FileConverter): Seq[(HashedVirtualFileRef, String)] = {
     NativePackagerHelper.contentOf(stagedProject).map { case (file, name) =>
-        file -> s"frontends/$frontendName/$name"
+        summon[FileConverter].toVirtualFile(file.toPath) -> s"frontends/$frontendName/$name"
     }
 }
 
-lazy val x2cpg       = project.in(file("frontends/x2cpg"))
-lazy val javasrc2cpg = project.in(file("frontends/javasrc2cpg"))
-lazy val pysrc2cpg   = project.in(file("frontends/pysrc2cpg"))
-lazy val jimple2cpg  = project.in(file("frontends/jimple2cpg"))
-lazy val jssrc2cpg   = project.in(file("frontends/jssrc2cpg"))
+// These frontends are defined once in project/Projects.scala; referencing them
+// via Projects.* here keeps this directory's build.sbt free of duplicate
+// project definitions, which sbt 2 cannot reconcile with the root ones.
+Universal / mappings ++= frontendMappings("javasrc2cpg", (Projects.javasrc2cpg / stage).value)(using
+  fileConverter.value
+)
+Universal / mappings ++= frontendMappings("c2cpg", (Projects.c2cpg / stage).value)(using
+  fileConverter.value
+)
+Universal / mappings ++= frontendMappings("jssrc2cpg", (Projects.jssrc2cpg / stage).value)(using
+  fileConverter.value
+)
+Universal / mappings ++= frontendMappings("jimple2cpg", (Projects.jimple2cpg / stage).value)(using
+  fileConverter.value
+)
+Universal / mappings ++= frontendMappings("pysrc2cpg", (Projects.pysrc2cpg / stage).value)(using
+  fileConverter.value
+)
 
-Universal / mappings ++= frontendMappings("javasrc2cpg", (javasrc2cpg / stage).value)
-Universal / mappings ++= frontendMappings("c2cpg", (Projects.c2cpg / stage).value)
-Universal / mappings ++= frontendMappings("jssrc2cpg", (jssrc2cpg / stage).value)
-Universal / mappings ++= frontendMappings("jimple2cpg", (jimple2cpg / stage).value)
-Universal / mappings ++= frontendMappings("pysrc2cpg", (pysrc2cpg / stage).value)
-
-lazy val cpgVersionFile = taskKey[File]("persist cpg version in file (e.g. for schema-extender)")
+@transient lazy val cpgVersionFile = taskKey[File]("persist cpg version in file (e.g. for schema-extender)")
 cpgVersionFile := {
     val ret = target.value / "cpg-version"
     better.files
@@ -49,32 +61,27 @@ cpgVersionFile := {
         .writeText(Versions.cpg)
     ret
 }
-Universal / mappings += cpgVersionFile.value -> "schema-extender/cpg-version"
+Universal / mappings += fileConverter.value.toVirtualFile(cpgVersionFile.value.toPath) -> "schema-extender/cpg-version"
 
-lazy val generateScaladocs = taskKey[File]("generate scaladocs from combined project sources")
+@transient lazy val generateScaladocs = taskKey[File]("generate scaladocs from combined project sources")
 generateScaladocs := {
     import better.files.*
-    import java.io.{File as JFile, PrintWriter}
+    import java.io.{File as JFile}
     import sbt.internal.inc.AnalyzingCompiler
     import sbt.internal.util.Attributed.data
     import net.lingala.zip4j.ZipFile
-    import sbt.internal.CommandStrings.ExportStream
 
     val updateReport = updateClassifiers.value
-    val label        = "Chen API documentation"
     val s            = streams.value
     val out          = target.value / "api"
-    val fiOpts       = (Compile / doc / fileInputOptions).value
 
     val sOpts =
         Seq("-language:implicitConversions", "-doc-root-content", "api-doc-root.txt", "-implicits")
 
-    val xapis   = apiMappings.value
-    val options = sOpts ++ Opts.doc.externalAPI(xapis)
-    val cp      = data((Compile / dependencyClasspath).value).toList
+    val cp = data((Compile / dependencyClasspath).value).toList
 
-    val inputFilesRelativeDir = target.value + "/inputFiles"
-    val inputFiles            = File(inputFilesRelativeDir)
+    val inputFilesRelativeDir = target.value / "inputFiles"
+    val inputFiles = File(inputFilesRelativeDir.toString)
     if (inputFiles.exists) inputFiles.delete()
     inputFiles.createDirectory()
 
@@ -85,7 +92,6 @@ generateScaladocs := {
         new ZipFile(jar).extractAll(inputFiles.pathAsString)
     }
 
-    // slightly adapted from sbt's Default.scala `docTaskSettings`
     val srcs: Seq[JFile] =
         inputFiles.listRecursively
             .filter { file =>
@@ -94,32 +100,34 @@ generateScaladocs := {
             .map(_.toJava)
             .toSeq
 
-    def exportedPW(w: PrintWriter, command: String): Seq[String] => Unit =
-        args => w.println((command +: args).mkString(" "))
-
-    def exportedTS(s: TaskStreams, command: String): Seq[String] => Unit = args => {
-        val w = s.text(ExportStream)
-        try exportedPW(w, command)
-        finally w.close()
-    }
-
-    val runDoc = Doc.scaladoc(
-      label,
-      s.cacheStoreFactory.sub("scala"),
-      compilers.value.scalac match {
-          case ac: AnalyzingCompiler => ac.onArgs(exportedTS(s, "scaladoc"))
-      },
-      fiOpts
-    )
-
-    runDoc(srcs, cp, out, options, maxErrors.value, s.log)
+    // adapted from sbt 2's Defaults.docTaskSettings: Scaladoc only accepts
+    // plain (real) files, so wrap paths in PlainVirtualFile
+    val converter = fileConverter.value
+    val xapis     = apiMappings.value
+    val options   = sOpts ++ Opts.doc.externalAPI(xapis.map { (k, v) =>
+        converter.toPath(k).toFile() -> v
+    })
+    compilers.value.scalac match
+        case ac: AnalyzingCompiler =>
+            ac.doc(
+              srcs.map(_.toPath()).map(new sbt.internal.inc.PlainVirtualFile(_)),
+              cp.map(converter.toPath).map(new sbt.internal.inc.PlainVirtualFile(_)),
+              converter,
+              out.toPath(),
+              options,
+              maxErrors.value,
+              s.log,
+            )
 
     out
 }
 
-Universal / packageBin / mappings ++= sbt.Path.directory(
-  new File("platform/src/main/resources/scripts")
-)
+Universal / packageBin / mappings ++= {
+    val converter = fileConverter.value
+    sbt.Path.directory(new File("platform/src/main/resources/scripts")).map { case (f, n) =>
+        converter.toVirtualFile(f.toPath) -> n
+    }
+}
 
 maintainer       := "cloud@appthreat.com"
 githubOwner      := "appthreat"

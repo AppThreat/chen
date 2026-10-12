@@ -1,6 +1,6 @@
 name := "pysrc2cpg"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
+BareBuildSyntax.dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"                       % Versions.cpg,
@@ -12,17 +12,20 @@ enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 trapExit                      := false
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-val javaCCTask = taskKey[Seq[File]]("Generate compiler code with JavaCC")
+@transient val javaCCTask = taskKey[Seq[File]]("Generate compiler code with JavaCC")
 javaCCTask / fileInputs += baseDirectory.value.toGlob / "pythonGrammar.jj"
 javaCCTask := {
     import org.javacc.parser.{Main as JavaCCMain}
-    val outputDir       = (Compile / sourceManaged).value / "io" / "appthreat" / "pythonparser"
-    val inputFileOption = javaCCTask.inputFiles.head
-    if (
-      !outputDir.exists() ||
-      javaCCTask.inputFileChanges.created.nonEmpty ||
-      javaCCTask.inputFileChanges.modified.nonEmpty
-    ) JavaCCMain.mainProgram(Array(s"-OUTPUT_DIRECTORY=$outputDir", inputFileOption.toString))
+    val outputDir   = (Compile / sourceManaged).value / "io" / "appthreat" / "pythonparser"
+    val grammarFile = baseDirectory.value / "pythonGrammar.jj"
+    val generated =
+        if outputDir.exists() then
+            os.walk(os.Path(outputDir)).filter(path => os.isFile(path) && path.ext == "java").map(_.toIO)
+        else Nil
+    // regenerate when the outputs are missing or older than the grammar
+    val stale = generated.isEmpty || generated.map(_.lastModified()).min < grammarFile.lastModified()
+    if stale then
+        JavaCCMain.mainProgram(Array(s"-OUTPUT_DIRECTORY=$outputDir", grammarFile.toString))
     os.walk(os.Path(outputDir)).filter(path => os.isFile(path) && path.ext == "java").map(_.toIO)
 }
 

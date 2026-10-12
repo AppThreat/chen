@@ -17,17 +17,14 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
     * cached: the bridges consult it again after tagging more.
     */
   def methodsWithSources: Set[Long] =
+    // CfgNode covers MethodParameterIn too, so one case suffices
     val tagged = tagger.taggedIds(JsTags.INPUT, JsTags.INGRESS).flatMap(id =>
         cpg.graph.node(id) match
           case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => Some(n.method.id())
-          case p: io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn =>
-              Some(p.method.id())
           case _ => None
     )
     val earlier = cpg.tag.name(s"${JsTags.INPUT}|${JsTags.INGRESS}")._taggedByIn.collect {
         case n: io.shiftleft.codepropertygraph.generated.nodes.CfgNode => n.method.id()
-        case p: io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn =>
-            p.method.id()
     }
     (tagged ++ earlier).toSet
 

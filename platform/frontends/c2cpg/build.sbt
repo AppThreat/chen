@@ -1,6 +1,6 @@
 name := "c2cpg"
 
-dependsOn(
+BareBuildSyntax.dependsOn(
   Projects.semanticcpg,
   Projects.dataflowengineoss % Test,
   Projects.x2cpg             % "compile->compile;test->test"

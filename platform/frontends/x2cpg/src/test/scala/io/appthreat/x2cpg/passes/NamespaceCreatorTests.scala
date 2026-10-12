@@ -12,9 +12,9 @@ import overflowdb.*
 class NamespaceCreatorTests extends AnyWordSpec with Matchers:
   "NamespaceCreateor test " in EmptyGraphFixture { graph =>
     val cpg    = new Cpg(graph)
-    val block1 = graph + (NodeTypes.NAMESPACE_BLOCK, Properties.NAME -> "namespace1")
-    val block2 = graph + (NodeTypes.NAMESPACE_BLOCK, Properties.NAME -> "namespace1")
-    val block3 = graph + (NodeTypes.NAMESPACE_BLOCK, Properties.NAME -> "namespace2")
+    val block1 = graph.+(NodeTypes.NAMESPACE_BLOCK, Properties.NAME.of("namespace1"))
+    val block2 = graph.+(NodeTypes.NAMESPACE_BLOCK, Properties.NAME.of("namespace1"))
+    val block3 = graph.+(NodeTypes.NAMESPACE_BLOCK, Properties.NAME.of("namespace2"))
 
     val namespaceCreator = new NamespaceCreator(new Cpg(graph))
     namespaceCreator.createAndApply()

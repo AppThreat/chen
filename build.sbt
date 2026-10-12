@@ -1,11 +1,13 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "4.0.0"
-ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / scalaVersion := "3.10.0"
 
 val cpgVersion = "3.0.10"
 
-lazy val platform          = Projects.platform
+// NB: named `platformProject`, not `platform`, to avoid ambiguity with sbt's
+// own Keys.platform; the project id itself stays "platform" (see Projects.scala)
+lazy val platformProject = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss
 lazy val semanticcpg       = Projects.semanticcpg
 lazy val c2cpg             = Projects.c2cpg
@@ -19,7 +21,7 @@ lazy val ruby2atom         = Projects.ruby2atom
 lazy val edg2atom          = Projects.edg2atom
 
 lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
-  platform,
+  Projects.platform,
   dataflowengineoss,
   semanticcpg,
   c2cpg,
@@ -63,10 +65,11 @@ ThisBuild / scalacOptions ++= Seq(
 enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
 
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
-createDistribution := {
+createDistribution := Def.uncached {
     val distributionFile = file("target/chen.zip")
-    val zip              = (platform / Universal / packageBin).value
-    IO.copyFile(zip, distributionFile)
+    val zip              = (Projects.platform / (Universal / packageBin)).value
+    // sbt 2 packages to virtual-file refs; materialize via the file converter
+    IO.copyFile(fileConverter.value.toPath(zip).toFile, distributionFile)
     println(s"created distribution - resulting files: $distributionFile")
     distributionFile
 }
