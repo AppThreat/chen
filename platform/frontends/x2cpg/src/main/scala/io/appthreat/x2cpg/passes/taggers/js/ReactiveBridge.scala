@@ -73,10 +73,11 @@ object ReactiveBridge:
   def run(ctx: JsContext): Unit =
     tagSanitizingDerivations(ctx)
     // A local can only be tainted where its own method holds a source (the search for one stays
-    // inside the method), or it is a derivation whose callback does.
-    val withSources = ctx.methodsWithSources
+    // inside the method) or a derivation, whose callback may.
+    val withSources =
+        ctx.methodsWithSources ++ ctx.cpg.call.filter(isDerivationCall).map(_.method.id()).toSet
     val assignments = ctx.cpg.call.nameExact(Operators.assignment).filter(a =>
-        withSources.contains(a.method.id()) || isDerivation(a.argumentOption(2).getOrElse(a))
+        withSources.contains(a.method.id())
     ).l.flatMap { a =>
         (a.argumentOption(1), a.argumentOption(2)) match
           case (Some(id: Identifier), Some(v)) if !id.name.startsWith("_tmp_") && id.name != "this" =>

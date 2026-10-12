@@ -24,6 +24,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.NewTypeRef
 import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import ujson.Value
+import scala.util.Try
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
@@ -276,7 +277,20 @@ class AstCreator(
       astsForProgram(createBabelNodeInfo(file.json("program")))
 
   private def astsForProgram(program: BabelNodeInfo): List[Ast] =
-      createBlockStatementAsts(program.json("body"))
+      astsForDirectives(program.json) ++ createBlockStatementAsts(program.json("body"))
+
+  /** A directive prologue (`'use strict'`, `'use client'`, `'use server'`) as the string-literal
+    * statements it is in the source. Babel keeps directives apart from the statements, in
+    * `directives`, so they were dropped - and `'use server'` makes every export of a module, or the
+    * function it opens, an endpoint any client can call.
+    */
+  protected def astsForDirectives(json: Value): List[Ast] =
+    val directives = Try(json("directives").arr.toList).getOrElse(Nil)
+    directives.flatMap { directive =>
+        safeStr(directive("value"), "value").map { v =>
+            Ast(literalNode(createBabelNodeInfo(directive("value")), s"\"$v\"", Option(Defines.String)))
+        }
+    }
 
   protected def line(node: BabelNodeInfo): Option[Integer]      = node.lineNumber
   protected def column(node: BabelNodeInfo): Option[Integer]    = node.columnNumber

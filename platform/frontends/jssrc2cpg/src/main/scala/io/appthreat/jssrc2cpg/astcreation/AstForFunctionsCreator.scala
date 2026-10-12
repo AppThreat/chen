@@ -537,7 +537,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
           bodyNodeInfo.node match
             case BlockStatement =>
                 // when body contains more than one statement, use bodyJson("body")) to avoid double Block node
-                createBlockStatementAsts(bodyJson("body"))
+                astsForDirectives(bodyJson) ++ createBlockStatementAsts(bodyJson("body"))
             case _ =>
                 // when body is just one expression like const foo = () => 42, generate a Return node
                 val retCode = bodyNodeInfo.code.stripSuffix(";")
@@ -545,7 +545,7 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                   returnNode(bodyNodeInfo, retCode),
                   List(astForNodeWithFunctionReference(bodyJson))
                 ) :: Nil
-      case _ => createBlockStatementAsts(bodyJson("body"))
+      case _ => astsForDirectives(bodyJson) ++ createBlockStatementAsts(bodyJson("body"))
     val methodBlockChildren =
         methodBlockContent ++ additionalBlockStatements.toList ++ bodyStmtAsts
     setArgumentIndices(methodBlockChildren)

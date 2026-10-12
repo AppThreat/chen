@@ -408,6 +408,15 @@ object JsShapes:
             Some(l.code.substring(1, l.code.length - 1))
         case _ => None
 
+  /** An expression of constants only (`-1`, `'a' + 'b'`): `navigate(-1)` goes back in history. */
+  def isConstantExpr(e: Expression): Boolean =
+      e match
+        case _: Literal => true
+        case c: Call if c.name.startsWith("<operator>.") && c.name != Operators.fieldAccess &&
+              c.name != Operators.indexAccess =>
+            c.argument.nonEmpty && c.argument.forall(isConstantExpr)
+        case _ => false
+
   /** The left-most operand of a string concatenation or template literal, for deciding whether a
     * URL's origin is fixed by the code.
     */
@@ -426,7 +435,8 @@ object JsShapes:
     */
   def hasFixedOrigin(url: Expression): Boolean =
       url match
-        case l: Literal => true
+        case l: Literal                  => true
+        case c: Call if isConstantExpr(c) => true
         case _ =>
             literalValue(leftmostOperand(url)).exists { prefix =>
               (prefix.startsWith("/") && !prefix.startsWith("//")) ||

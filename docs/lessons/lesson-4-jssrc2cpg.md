@@ -243,71 +243,80 @@ component's input boundary. Paired with the `framework-output` tag on a value re
 Note that a flow whose source and sink land on the _same line_ — `const { data } = $props()` read
 straight into `{@html data.body}` — is suppressed by `ReachableSlicing` as zero-information, since
 `toSlice` renders at most one node per `file#line`. The value has to pass through something on
-another line to be reported. Svelte 4's `export let` props are not tagged; `$props()` is the
-Svelte 5 form.
+another line to be reported. Svelte 4's `export let` props are tagged at their reads (the parent
+assigns the binding, so there is no producing call); `$props()` is the Svelte 5 form. The URL is
+also read from `page` (`$app/state`) or the legacy `$page` store, which are tagged too.
 
-## Angular, React and Vue routes and props
+## Frontend framework recognizers
 
-The three component frameworks are recognised by `ChennaiTagsPass` from shapes the frontend already
-emits, not by pattern-matching source text.
+The JavaScript side of `ChennaiTagsPass` hands most of its work to the recognizers in
+`x2cpg/passes/taggers/js` - one per framework family, registered in `JsRecognizers.all`, the same
+shape as the Python recognizers. Each works from structure: the import that binds a name, the
+member chain a value is read from, the parameter a framework fills, the type a dependency was
+injected as. None of them needs an SBOM; where a framework auto-imports its API (Nuxt, Nitro,
+SvelteKit's `$app`), the project's `package.json` dependencies and file conventions are the
+evidence instead.
 
-**Route tables** — Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
+| Recognizer | Sources | Sinks |
+| --- | --- | --- |
+| `DomRecognizer` (always) | `location.*`, `document.URL`/`referrer`/`cookie`, `window.name`, Web Storage, `message`/`hashchange` events (not when the handler compares `event.origin` by equality), `fetch`/XHR/axios/ky/ofetch responses | `innerHTML`/`outerHTML`/`srcdoc` writes, `insertAdjacentHTML`, `document.write`, URL attributes, `eval`/`Function`/string timers, `location` writes, `window.open`, `postMessage(_, '*')`, `document.cookie`, requests |
+| `AngularRecognizer` | `ActivatedRoute`/`Snapshot` reads and observable callbacks, resolvers/guards, `Router.url`, `Location.path()`, `@Input()`, `input()`/`model()`, `@HostListener('window:message')`, HttpClient responses through service methods | `bypassSecurityTrust*`, `Renderer2.setProperty/setAttribute`, HttpClient requests |
+| `ReactRecognizer` | component props, router hooks, loaders/actions, Next.js route handlers, pages, `cookies()`/`headers()`, `'use server'` functions, React 19 form actions, Qwik `routeLoader$`/`routeAction$`/`server$` | `redirect()`, `NextResponse.redirect/rewrite`, `navigate()`/`router.push()`/`<Navigate to>` with an unanchored target |
+| `VueRecognizer` | `useRoute()`, `this.$route`, props (also the Options API), guards, directive bindings, Nuxt request composables, `useFetch`/`useAsyncData` | `navigateTo(_, { external })`, `useHead` scripts, `h()` with `innerHTML`, router navigation |
+| `NitroRecognizer` | `defineEventHandler` events, h3 readers, task payloads | `sendRedirect`, `send`, markup returned by a handler, `proxyRequest`, server `$fetch`, `useStorage` keys |
+| `SvelteRecognizer` | `load`/endpoint/hook parameters, `$props()`, `export let`, `page`/`$page`, `use:` action values | `redirect()`, `goto()` |
+| `NodeRecognizer` | server HTTP client responses | `child_process` (also through `promisify`), `fs`, `vm`, computed `require`, SQL strings (pg, mysql2, sqlite3, `@appthreat/sqlite3`, better-sqlite3, `node:sqlite`, knex, prisma, db0, ...) |
+| `LitRecognizer`, `JQueryRecognizer`, `EmberRecognizer`, `AstroRecognizer` | `@property()`, ajax responses, `model(params)`, endpoint/middleware/action context | `unsafeHTML`, `.innerHTML=${}`, `$(html)`, `.html()`, `$.globalEval`, `htmlSafe`, `redirect()` |
+
+**Vocabulary.** Sources are `framework-input` (attacker data) or `service-ingress` (remote data).
+Sinks are `framework-output`, `code-execution`, `http-client` (`ssrf` on the server), `sql`,
+`shell-exec` and `file-io`, and HTML/navigation sinks also carry a category - `xss` or `redirect` -
+so that a sanitiser declaring it (`sanitizer-xss` on `DOMPurify.sanitize`, `sanitizer-redirect`
+on `encodeURIComponent`) neutralises exactly the flows it protects. A call whose result is a
+boolean or a number about its arguments (`allow.has(x)`, `url.startsWith('/')`) is a
+`predicate`: a flow through its result carries nothing.
+
+**What is not a sink.** A value that the code anchors cannot be redirected: a request to
+`/search?q=${q}` or a navigation to `'/search?q=' + q` keeps its origin, and a template `href`
+starting with `/` can never become `javascript:`. A variable in the *path* of a fixed URL
+(`/api/items/${id}`) is client-side path traversal and is a sink; a variable base
+(`${this.apiUrl}/items`) makes only the base one. Angular's `[innerHTML]` and React 19's `href`
+sanitise on their own and are not sinks; `@Output()` emitters are not sinks either - an emitted
+value goes to the parent component.
+
+**Bridges.** Three things carry a value where no call does, and run after the recognizers:
+`MemberTaintBridge` makes `this.x` a source in every method of a class when some method assigns
+it from a source (`ngOnInit` storing a route parameter that a click handler uses);
+`ReactiveBridge` does the same for reactive derivations (`computed`, `useMemo`, `createMemo`,
+`useActionState`) and for the reads of a module-level variable inside functions, and makes a
+derivation that returns a sanitiser's result a sanitiser itself.
+
+**Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
+much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is
+connected to its inner read, and a captured variable is connected to every read inside the
+closure, not only the first - a component's handlers and effects read what it took from the URL
+at the top.
+
+```text
+go.tsx L12  searchParams.get("next")        [framework-input via useSearchParams()]
+go.tsx L19  window.location.href = next     [framework-output, redirect]   (inside useEffect)
+```
+
+**Route tables** - Vue (`createRouter({ routes })`), Angular (`Routes` arrays,
 `RouterModule.forRoot`/`provideRouter`) and React Router (`createBrowserRouter`) all lower to the
 same object-property assignments, `_tmp_1.path = "/about/:id"` and `_tmp_1.component = About`. A
 temp carrying a `.path` assignment plus a route-record sibling key is a route record: the path
 literal is tagged `framework-route` and the rendered component becomes a handler whose parameters
-are tagged `framework-input`. An object that merely has a `path` property is not a route record.
+are tagged `framework-input`. A router package must be imported; a **strong** sibling key
+(`component`, `element`, `redirect`, `pathMatch`, `loadChildren`, `loadComponent`, `lazy`) admits
+any path, a **weak** one (`children`, `loader`, `action`) also needs a route-shaped path, and a
+relative filesystem value (`./src`) is never a route.
 
-Three independent guards keep ordinary objects out, because a bad route is not just a noisy tag —
-it surfaces in slice output as an application route. A router package must be imported at all.
-Sibling keys are then split by how route-specific they are: a **strong** key names something to
-render or somewhere to go (`component`, `element`, `redirect`, `pathMatch`, and the lazy forms
-`loadChildren`, `loadComponent`, `lazy`) and admits any path, since child routes are written with
-bare relative segments; a **weak** key (`children`, `loader`, `action` — which also describe file
-trees, bundler configs and menus) additionally requires a route-shaped path. And a relative
-filesystem value (`./src`) is never a route. The conservative edge: an Angular parent route written
-as `{ path: 'admin', children: [...] }` — bare path, no component — is missed, while
-`{ path: '/admin', children: [...] }` is found; its children carry components and are found either
-way.
-
-**React** — `<Route path="/profile" element={<Profile />} />` tags the path attribute's literal and
-resolves the rendered component (from the identifier, or from the JSX tag name when the value is an
-element — the `JSXIdentifier` carries no reference edge). `useParams`, `useSearchParams` and
-`useLocation` are tagged `framework-input` — the URL reaches a component through those hooks. And a
-capitalized method that renders a template is a React component by the framework's own naming
-rule, so its first (props) parameter is web-facing input:
-
-```text
-app.jsx L2  useParams()          [framework-input]
-app.jsx L4  __html: bio          [framework-output]   ← dangerouslySetInnerHTML
-```
-
-**Vue** — `defineProps`/`withDefaults`/`defineModel` calls and `useRoute()` are
-`framework-input`, as is the props parameter of an options-API `setup(props)` method. Since
-atom-parsetools 4.3.0 a directive value like `v-html="content"` keeps a reference to the script
-binding, so a props-to-raw-HTML path inside one component is reportable end to end.
-
-**Angular** — `@Input()` members and their `this.x` reads are `framework-input` (matched
-exactly, so an `@Input() id` does not taint `this.idx`), `@Output()` members are
-`framework-output`, `ActivatedRoute` reads are input — whether the field is named `route` or
-`activatedRoute` (`route.params`, `this.activatedRoute.snapshot.queryParams`,
-`paramMap.get(...)`), and a `bypassSecurityTrust*` call — the sanitizer escape hatch that feeds
-`[innerHTML]`-style bindings — is output.
-
-Signal inputs are inputs too. A member initialised with `input()` or `input.required()` from
-`@angular/core` is `framework-input`, and so is every access `this.x` in the class. That is the
-node an `@Input()` read gets, and it covers a read `this.x()` as well as a signal handed on
-without being called. The initialiser is found through the import of `input`, so a renamed import
-still counts and a local function that happens to be called `input` does not. `model()` and
-`output()` are not tagged. Neither is an input initialised with `input() as T`, `input()!` or a
-conditional, or one assigned with `this.x = input()` in the constructor body. An `input` reached
-through `import * as ng` or re-exported by another module is not found.
-
-**Next.js and Nuxt** file conventions are keyed off the file name, like SvelteKit: an app-router
-`route.ts` tags its HTTP-verb exports, a `pages/api` handler tags every export, `middleware.ts`
-and the `getServerSideProps`/`getStaticProps`/`generateMetadata` loaders are entrypoints; Nuxt
-tags `defineEventHandler`/`eventHandler` lambdas and the exports of `server/api`/`server/routes`
-files, with the h3 request readers (`readBody`, `getRouterParam`, `getQuery`, …) as input.
+**Signal inputs** (`input()`, `input.required()`, `model()`, `model.required()` from
+`@angular/core`) are found through the import, so a renamed import still counts and a local
+function that happens to be called `input` does not. Not covered: an initialiser wrapped in
+`as T`, `!` or a conditional, `this.x = input()` in the constructor body, and an `input` reached
+through `import * as ng` or a re-export.
 
 ## Notes for Security Analysts
 

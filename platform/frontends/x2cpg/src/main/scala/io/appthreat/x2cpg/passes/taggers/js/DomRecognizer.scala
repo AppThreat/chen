@@ -284,12 +284,15 @@ object DomRecognizer extends JsFrameworkRecognizer:
         propertyWrites(ctx.cpg, HtmlProperties).filter(w => nonConstant(assignedValue(w)))
     ctx.tagger.tag(markupWrites, HtmlSink*)
 
-    // URL properties of an element; `location.href` is navigation and handled there.
+    // URL properties of an element; `location.href` is navigation and handled there, and
+    // `exports.action = action` is a module export.
     val urlWrites = propertyWrites(ctx.cpg, UrlProperties)
         .filter(w => nonConstant(assignedValue(w)))
         .filterNot(w =>
             w.argumentOption(1).collect { case c: Call => c }.flatMap(fieldBase)
-                .flatMap(memberPath).exists(isLocation)
+                .flatMap(memberPath).exists(p =>
+                    isLocation(p) || p.headOption.contains("exports") || p.take(2) == List("module", "exports")
+                )
         )
     ctx.tagger.tag(urlWrites, HtmlSink*)
 
