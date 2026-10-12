@@ -108,13 +108,16 @@ class DdgGenerator(
 
       // JavaScript: a read of a read (`route.query.next`, `e.data[k]`, `path.split('#')[1]`) takes
       // its value from the inner expression. Field and index accesses generate no definition of
-      // their own, so that taint passes through them unharmed, and that also left an inner call
-      // with no edge into the access on its result: a value tagged at `route.query` never reached
-      // `route.query.next`.
+      // their own, so that taint passes through them unharmed, and that also left the inner
+      // expression with no edge into the access on its result: a value tagged at `route.query`
+      // never reached `route.query.next`, and a walk that starts AT the access (`data.motd`, the
+      // `{@html data.motd}` sink) found no incoming edge at all when the base was a plain
+      // identifier.
       if nestedContainers && usageAnalyzer.isContainerAccess(call) then
         call.argument.headOption.foreach {
-            case inner: Call => addEdge(inner, call, nodeToEdgeLabel(inner))
-            case _           =>
+            case inner: Call       => addEdge(inner, call, nodeToEdgeLabel(inner))
+            case inner: Identifier => addEdge(inner, call, nodeToEdgeLabel(inner))
+            case _                 =>
         }
 
       // This handles `foo(new Bar())`, which is lowered to
