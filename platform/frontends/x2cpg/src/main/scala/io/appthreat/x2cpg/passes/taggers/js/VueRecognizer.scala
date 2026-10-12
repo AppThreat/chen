@@ -376,7 +376,14 @@ object VueRecognizer extends JsFrameworkRecognizer:
     */
   private def directives(ctx: JsContext): Map[String, List[Method]] =
     def hooks(arg: Expression): List[Method] =
-        callbacksIn(arg, DirectiveHooks) match
+        // `app.directive('tooltip-html', tooltipHtml)`: the hooks object a local or an import holds
+        val value = arg match
+          case id: Identifier =>
+              JsValues.origin(id) match
+                case same: Identifier => importedValue(ctx, same).getOrElse(same)
+                case other            => other
+          case other => other
+        callbacksIn(value, DirectiveHooks) match
           case Nil => callbackMethod(arg).toList
           case hs  => hs
     val registered = ctx.cpg.call.nameExact("directive").l.flatMap { c =>

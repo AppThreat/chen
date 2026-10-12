@@ -221,6 +221,31 @@ object MemberTaintBridge:
     val (tag, derived, _, _, _) = search(ctx, value)
     (tag, derived)
 
+  /** Vue's ref constructors. */
+  private val RefConstructors = Set("ref", "shallowRef")
+
+  /** What is written to the `value` of the ref a constructor call made (`x = ref(...)`), in the
+    * function that made it and the closures nested in it.
+    */
+  private def refWrites(ctor: Call): List[Expression] =
+      ctor.astParent match
+        case a: Call if a.name == Operators.assignment =>
+            a.argumentOption(1).collect { case id: Identifier => id.name }.toList.flatMap { name =>
+                (ctor.method :: nestedMethods(ctor.method)).flatMap(
+                  _.ast.isCall.nameExact(Operators.assignment).l
+                ).flatMap { w =>
+                    (w.argumentOption(1), w.argumentOption(2)) match
+                      case (Some(fa: Call), Some(v))
+                          if fieldName(fa).contains("value") && fieldBase(fa).exists {
+                            case b: Identifier => b.name == name
+                            case _             => false
+                          } =>
+                          Some(v)
+                      case _ => None
+                }
+            }
+        case _ => Nil
+
   private def search(
     ctx: JsContext,
     value: Expression
@@ -231,6 +256,8 @@ object MemberTaintBridge:
     // places the value crossed into a callee, for provenance
     val prev    = mutable.HashMap.empty[Long, AstNode]
     val crossed = mutable.HashSet.empty[Long]
+    // callees the search went into from a call's result, by the call
+    val entered = mutable.HashMap.empty[Long, Call]
     def tagOf(n: StoredNode): Option[String] =
         SourceTags.find(t => ctx.tagger.has(n.id(), t)).orElse(
           n.tag.name.find(SourceTags.contains)
@@ -295,9 +322,14 @@ object MemberTaintBridge:
                 // `store.setTerm(route.query.term)` makes setTerm's `value` carry what the caller
                 // had. The CALL edges this run added are not in the graph yet - the tagger's own
                 // record of them is.
-                (p.method._callIn.l.collect {
-                    case c: io.shiftleft.codepropertygraph.generated.nodes.Call => c
-                } ++ ctx.tagger.callSitesOf(p.method)).foreach { call =>
+                // Entered from one call's result, the parameter holds that call's argument only.
+                val callers = entered.get(p.method.id()) match
+                  case Some(from) => List(from)
+                  case None =>
+                      p.method._callIn.l.collect {
+                          case c: io.shiftleft.codepropertygraph.generated.nodes.Call => c
+                      } ++ ctx.tagger.callSitesOf(p.method)
+                callers.foreach { call =>
                     call.argument.collectFirst { case a if a.argumentIndex == p.index => a }
                         .foreach { arg =>
                           crossed += arg.id()
@@ -316,7 +348,23 @@ object MemberTaintBridge:
                       case _                                         =>
                   }
                 }
-            case c: Call  => c.astChildren.foreach(push(_))
+            // `const draft = ref('')`, later `draft.value = event.data.html`: a ref holds what is
+            // written to its `value` anywhere in the function that made it
+            case c: Call if RefConstructors.contains(c.name) =>
+                c.astChildren.foreach(push(_))
+                refWrites(c).foreach(push(_))
+            case c: Call =>
+                c.astChildren.foreach(push(_))
+                // a call of a project function - one the frontend resolved, or a bridge did
+                // (`this.reviewsApi.forSku(sku)` to the service method) - is what it returns
+                if !c.name.startsWith("<operator>") then
+                  (c._callOut.collect { case m: Method if !m.isExternal => m }.l ++
+                      ctx.tagger.targetsOf(c)).distinctBy(_.id())
+                      .filterNot(m => entered.contains(m.id()))
+                      .foreach { m =>
+                        entered.update(m.id(), c)
+                        DataLinkBridge.returnedValues(m).foreach(push(_))
+                      }
             case b: Block => b.astChildren.foreach(push(_))
             case _        =>
         end if

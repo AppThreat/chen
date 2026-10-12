@@ -88,6 +88,7 @@ final class JsTagger(
   def resolveCall(call: Call, method: Method): Unit =
       if memo.add((call.id(), s"<call>${method.id()}")) then
         resolutions.update(method.id(), call :: resolutions.getOrElse(method.id(), Nil))
+        targets.update(call.id(), method :: targets.getOrElse(call.id(), Nil))
         dstGraph.addEdge(call, method, io.shiftleft.codepropertygraph.generated.EdgeTypes.CALL)
         dstGraph.setNodeProperty(
           call,
@@ -101,11 +102,14 @@ final class JsTagger(
   /** Tags `nodes` as a source of kind `name` that a bridge carried there from `from` - the value
     * the bridge read (`context.locals.banner = <value>`, `this.id = <value>`) and the node the
     * source was found at behind it. A node that was itself bridged contributes where its own value
-    * came from. Each node also gets a `via:<file>#<line>` tag per place, so a reported flow that
-    * starts at a bridged read says where its value came from.
+    * came from as well as where it is, so the places name the whole way the value went. Each node
+    * also gets a `via:<file>#<line>` tag per place, so a reported flow that starts at a bridged
+    * read says where its value came from.
     */
   def tagVia[T <: StoredNode](nodes: IterableOnce[T], name: String, from: StoredNode*): Unit =
-    val where = from.flatMap(n => origins.getOrElse(n.id(), JsTagger.locationOf(n).toSet)).toSet
+    val where = from.flatMap(n =>
+        origins.getOrElse(n.id(), Set.empty) ++ JsTagger.locationOf(n).toSet
+    ).toSet
     nodes.iterator.foreach { n =>
       tag(Iterator(n), name)
       origins.update(n.id(), origins.getOrElse(n.id(), Set.empty) ++ where)
@@ -118,6 +122,11 @@ final class JsTagger(
   val resolutions: mutable.HashMap[Long, List[Call]] = mutable.HashMap.empty
 
   def callSitesOf(method: Method): List[Call] = resolutions.getOrElse(method.id(), Nil)
+
+  private val targets = mutable.HashMap.empty[Long, List[Method]]
+
+  /** The methods this run resolved a call to. */
+  def targetsOf(call: Call): List[Method] = targets.getOrElse(call.id(), Nil)
 
   /** Ids of the nodes this run tagged with any of `names`. */
   def taggedIds(names: String*): Iterator[Long] =
@@ -680,6 +689,31 @@ object JsShapes:
                 }
             case _ => None
       }.distinctBy(_._2.id())
+
+  /** The value a project module exports under the name an identifier was imported as: `export const
+    * tooltipHtml = { mounted() {...} }` for `import { tooltipHtml } from './directives/tooltipHtml'`
+    * (a relative or `@/` specifier).
+    */
+  def importedValue(ctx: JsContext, id: Identifier): Option[Expression] =
+    val file = id.method.filename
+    ctx.modules.resolve(file, id.name).flatMap { imp =>
+      val base =
+          if imp.module.startsWith(".") then Some(JsModules.resolveRelative(file, imp.module))
+          else if imp.module.startsWith("@/") || imp.module.startsWith("~/") then
+            Some("src/" + imp.module.drop(2))
+          else None
+      base.flatMap { b =>
+        val exported = if imp.kind == ImportKind.Default then "default" else imp.imported
+        ctx.cpg.file.filter(f => f.name == b || f.name.startsWith(b + "."))
+            .method.nameExact(":program").l.iterator
+            .flatMap(_.ast.isCall.nameExact(Operators.assignment))
+            .find(_.argumentOption(1).exists(t =>
+                t.code == s"exports.$exported" || t.code.matches(s"""exports\\[["']$exported["']\\]""")
+            ))
+            .flatMap(_.argumentOption(2))
+            .map(JsValues.origin(_))
+      }
+    }
 
   def hasDefaultExport(ctx: JsContext, file: String): Boolean =
       defaultExportValue(ctx, file).nonEmpty

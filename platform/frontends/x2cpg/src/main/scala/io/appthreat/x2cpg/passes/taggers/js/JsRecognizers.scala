@@ -106,6 +106,7 @@ object JsRecognizers:
         VueRecognizer.bridgePiniaStores(ctx)
         VueRecognizer.bridgeRouterProps(ctx)
       if AngularRecognizer.applies(ctx) then AngularRecognizer.bridgeInputs(ctx)
+      DataLinkBridge.bridgeHookReturns(ctx)
       ComponentCallBridge.bridgeProps(ctx)
       VueRecognizer.bridgeDirectives(ctx)
       SvelteRecognizer.bridgeActions(ctx)

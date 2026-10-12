@@ -425,22 +425,12 @@ object DomRecognizer extends JsFrameworkRecognizer:
 
   /** An Angular property binding (`[innerHTML]="x"`, astgen keeps the brackets) goes through the
     * framework's DomSanitizer: markup is sanitised, a `javascript:` URL blocked, a resource URL
-    * refused - only a value from `bypassSecurityTrust*`, itself the sink, gets through. What a
-    * binding can still do is point a link at another site.
+    * refused - only a value from `bypassSecurityTrust*`, itself the sink, gets through. A link the
+    * user clicks to another site is no redirect either: no binding is a sink.
     */
   private def isAngularBinding(name: String): Boolean = name.startsWith("[")
 
-  private val AngularLinkBindings = Set("[href]", "[attr.href]")
-  // an SVG `<image href>` or a `<link href>` loads a resource; only these navigate
-  private val LinkElements = Set("a", "area")
-
   private def tagTemplateSinks(ctx: JsContext): Unit =
-    val links = ctx.cpg.templateDom.nameExact("JSXAttribute")
-        .filter(attr =>
-            AngularLinkBindings.contains(attributeName(attr.code)) &&
-                elementOf(attr).exists(e => LinkElements.contains(e.toLowerCase))
-        ).l
-    ctx.tagger.tag(boundValues(links), NavigationSink*)
     val attributes = ctx.cpg.templateDom.nameExact("JSXAttribute").filter { attr =>
       val name      = attributeName(attr.code)
       val element   = elementOf(attr).getOrElse("")

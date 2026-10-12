@@ -170,6 +170,45 @@ object DataLinkBridge:
       (ids ++ members).filterNot(e => isAssignmentTarget(e) || isPassThrough(e))
     }
 
+  /** Hooks and composables of the project - `use[A-Z]...` functions - that return an object: a
+    * caller destructures it and reads one member at a time (`const { latest } = useLiveTicker()`,
+    * `latest.headline`). Each read is tagged with the source behind what the function returns
+    * under that member. Runs with the bridges.
+    */
+  def bridgeHookReturns(ctx: JsContext): Unit =
+    val hooks = ctx.cpg.method.internal
+        .filter(m => m.name.matches("use[A-Z]\\w*"))
+        .l
+        .filter(m =>
+            returnedValues(m).exists {
+                case b: Block => isObjectLiteral(b)
+                case _        => false
+            }
+        )
+    if hooks.isEmpty then return
+    val byName = hooks.groupBy(_.name)
+    val calls  = ctx.cpg.call.filter(c => byName.contains(c.name)).l
+    val consumers = calls.map(_.method).distinctBy(_.id())
+    bridgeReads(
+      ctx,
+      consumers,
+      (root, path) =>
+          root match
+            case c: Call if path.nonEmpty && byName.contains(c.name) =>
+                val file = c.method.filename
+                val fns = byName(c.name).filter(fn =>
+                    fn.filename == file || ctx.modules.resolve(file, c.name).exists { i =>
+                      val module = i.module
+                      if module.startsWith(".") then
+                        fn.filename.startsWith(JsModules.resolveRelative(file, module))
+                      else fn.filename.contains(module.dropWhile(_ != '/'))
+                    }
+                )
+                Option.when(fns.nonEmpty)(produced(fns, path))
+            case _ => None
+    )
+  end bridgeHookReturns
+
   /** Tags each leaf read in `methods` whose access path `link` maps: with the source behind the
     * produced value, or with the source kind itself. A variable `stop` accepts is a root itself - a
     * prop declared with a default (`export let content = ''`) is whatever the parent passes.

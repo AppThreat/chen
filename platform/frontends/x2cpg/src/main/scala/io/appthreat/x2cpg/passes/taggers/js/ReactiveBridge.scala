@@ -116,6 +116,7 @@ object ReactiveBridge:
                 ctx.tagger.tagVia(readsIn(method, name), found.tag, found.places(value)*)
             }
       }
+      if bridgeCapturedParameters(ctx) then grew = true
       // watch(source, (value) => ...)
       ctx.cpg.call.nameExact(Watchers.toSeq*).foreach { w =>
         val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
@@ -133,6 +134,52 @@ object ReactiveBridge:
       }
     end while
   end run
+
+  /** A closure reading a parameter of the function it is nested in - `watchEffect(() =>
+    * toValue(orderId))` inside `useOrder(orderId)` - reads what the function's callers pass. The
+    * engine does not cross from a parameter into the closures that capture it, so where a source
+    * reaches an argument some caller passes, the captured reads are tagged with it. Returns whether
+    * anything new was tagged.
+    */
+  private def bridgeCapturedParameters(ctx: JsContext): Boolean =
+    var grew = false
+    ctx.cpg.method.internal.filterNot(_.name == ":program").l.foreach { m =>
+      lazy val nested = nestedMethods(m)
+      params(m).foreach { p =>
+        if nested.nonEmpty then
+          val reads = capturedReads(ctx, m, p.name).toList
+          if reads.nonEmpty && !reads.forall(r => ctx.tagger.has(r.id(), JsTags.INPUT)) then
+            callersOf(ctx, m).iterator
+                .flatMap(_.argument.filter(_.argumentIndex == p.index).l)
+                .flatMap(arg => MemberTaintBridge.sourceOf(ctx, arg).map(_ -> arg))
+                .nextOption()
+                .foreach { (found, arg) =>
+                  if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
+                  ctx.tagger.tagVia(reads, found.tag, found.places(arg)*)
+                }
+      }
+    }
+    grew
+  end bridgeCapturedParameters
+
+  /** The calls of a function: resolved ones, and calls by name from its own file or from a file that
+    * imports it relatively or through an alias.
+    */
+  private def callersOf(ctx: JsContext, fn: Method): List[Call] =
+    val resolved = fn._callIn.collect { case c: Call => c }.l ++ ctx.tagger.callSitesOf(fn)
+    if resolved.nonEmpty then resolved
+    else
+      ctx.cpg.call.nameExact(fn.name).l.filter { c =>
+        val file = c.method.filename
+        file == fn.filename || ctx.modules.resolve(file, fn.name).exists { i =>
+          val module = i.module
+          if module.startsWith(".") then
+            fn.filename.startsWith(JsModules.resolveRelative(file, module))
+          else
+            (module.startsWith("@/") || module.startsWith("~/") || module.startsWith("$lib/")) &&
+            fn.filename.contains(module.dropWhile(_ != '/'))
+        }
+      }
 
   /** A derivation call whose callback returns a source is itself a source: the wrapper holds that
     * value. Tagging the call - not only reads of a local it was assigned to - carries the taint out

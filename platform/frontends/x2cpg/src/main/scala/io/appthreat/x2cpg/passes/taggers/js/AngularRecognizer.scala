@@ -381,7 +381,9 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                     case init: Call => injected(init)
                     case _          => None
                   )
-          case _ => None
+          // `inject(ActivatedRoute).snapshot.queryParamMap`, read straight off the injection
+          case c: Call => injected(c)
+          case _       => None
   end Di
 
   /** `this.products.fetchPartnerFeed(url)`, where `products` was injected as the project's own
