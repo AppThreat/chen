@@ -43,7 +43,10 @@ object EmberRecognizer extends JsFrameworkRecognizer:
 
     val routerReads = ctx.fieldAccesses.filter(fa =>
         fieldName(fa).exists(f => f == "queryParams" || f == "params") &&
-            fieldBase(fa).flatMap(memberPath).exists(_.contains("currentRoute"))
+            fieldBase(fa).flatMap(memberPath).exists(_.contains("currentRoute")) ||
+            // the router service's `currentURL`, query string and all
+            fieldName(fa).contains("currentURL") &&
+            fieldBase(fa).flatMap(memberPath).exists(_.lastOption.contains("router"))
     )
     ctx.tagger.tag(readChains(routerReads), INPUT)
 
@@ -85,10 +88,91 @@ object EmberRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(trusted, HtmlSink*)
     modifiers.clear()
     resolveModifiers(ctx)
+    resolveHelpers(ctx)
+    resolveServiceCalls(ctx)
   end run
 
   /** Modifier calls in templates and the functions they resolved to. */
   private val modifiers = scala.collection.mutable.ListBuffer.empty[(Call, Method)]
+
+  private def dasherize(name: String): String =
+      name.replaceAll("([a-z0-9])([A-Z])", "$1-$2").replace('_', '-').toLowerCase
+
+  /** Files under `app/<kind>/` by the name Ember resolves them with: `services/embed-bridge.ts` is
+    * the `embed-bridge` service.
+    */
+  private def byResolverName(ctx: JsContext, kind: String): Map[String, String] =
+      ctx.cpg.file.name.l.filter(f => f.contains(s"$kind/") && !f.contains("node_modules"))
+          .flatMap { f =>
+            val rest = f.substring(f.lastIndexOf(s"$kind/") + kind.length + 1)
+            Option.when(rest.contains('.'))(rest.take(rest.lastIndexOf('.')) -> f)
+          }.toMap
+
+  /** The class a service file defines: of its top-level declarations (interfaces too), the one with
+    * methods.
+    */
+  private def serviceClass(ctx: JsContext, file: String): Option[TypeDecl] =
+      ctx.cpg.typeDecl.filter(td =>
+          td.fullName.takeWhile(_ != ':') == file && td.fullName.count(_ == ':') == 3
+      ).l.map(td => td -> classMethods(td).count(m => !m.name.startsWith("<")))
+          .filter(_._2 > 0).sortBy(-_._2).headOption.map(_._1)
+
+  /** The service an injected member names - `@service declare catalog`, `@service('embed-bridge')
+    * declare bridge` - found by the member's name, or else as the one service declaring `member`.
+    */
+  private def serviceFor(
+    ctx: JsContext,
+    services: Map[String, String],
+    field: String,
+    member: String
+  ): Option[TypeDecl] =
+      services.get(dasherize(field)).orElse(services.get(field)).flatMap(serviceClass(ctx, _))
+          .orElse {
+              services.values.toList.flatMap(serviceClass(ctx, _)).filter(td =>
+                  classMethods(td).exists(m =>
+                      m.name == member || m.ast.isCall.nameExact(Operators.fieldAccess)
+                          .codeExact(s"this.$member").exists(isAssignmentTarget)
+                  )
+              ) match
+                case only :: Nil => Some(only)
+                case _           => None
+          }
+
+  /** `this.catalog.loadArticle(id)`: a call into an injected service is its method. */
+  private def resolveServiceCalls(ctx: JsContext): Unit =
+    val services = byResolverName(ctx, "services")
+    if services.isEmpty then return
+    ctx.cpg.call.filter(c => !c.name.startsWith("<")).l.foreach { call =>
+        receiverOf(call).flatMap(memberPath).foreach {
+            case List("this", field) =>
+                serviceFor(ctx, services, field, call.name).foreach { td =>
+                    classMethods(td).find(_.fullName == s"${td.fullName}:${call.name}")
+                        .foreach(ctx.tagger.resolveCall(call, _))
+                }
+            case _ =>
+        }
+    }
+
+  /** `{{markdown-lite @model.note}}`, lowered to `markdown_lite(...)`: the default export of
+    * `helpers/markdown-lite`.
+    */
+  private def resolveHelpers(ctx: JsContext): Unit =
+    val helpers = byResolverName(ctx, "helpers")
+    if helpers.isEmpty then return
+    ctx.cpg.call.filter(c => c.method.fullName.contains("__glimmer_template")).l.foreach { call =>
+        helpers.get(call.name.replace('_', '-'))
+            .filter(_ => ctx.modules.resolve(call.method.filename, call.name).isEmpty)
+            .flatMap(defaultExport(ctx, _)).foreach(ctx.tagger.resolveCall(call, _))
+    }
+
+  private def defaultExport(ctx: JsContext, file: String): Option[Method] =
+      defaultExportValue(ctx, file).flatMap(v => callbackMethod(v)).orElse(
+        ctx.cpg.file.nameExact(file).method.internal.filter(m =>
+            !m.name.startsWith(":") && m.fullName.count(_ == ':') == 3
+        ).l match
+          case only :: Nil => Some(only)
+          case _           => None
+      )
 
   private val TemplateExtensions = Seq(".hbs", ".gjs", ".gts")
 
@@ -115,6 +199,8 @@ object EmberRecognizer extends JsFrameworkRecognizer:
     bridgeRouteModels(ctx)
     bridgeGetters(ctx)
     bridgeModifierArguments(ctx)
+    bridgeEachItems(ctx)
+    bridgeServiceFields(ctx)
 
   /** A route template's `@model` (`this.args.model`), and the controller's `this.model`, are what
     * the route's `model()` hook returns, member by member.
@@ -141,6 +227,43 @@ object EmberRecognizer extends JsFrameworkRecognizer:
               )
           }
 
+  /** `{{#each xs as |x|}}`, lowered to `xs.map((x) => ...)`: the block param is an element of `xs`.
+    */
+  private def bridgeEachItems(ctx: JsContext): Unit =
+      ctx.cpg.call.nameExact("map").filter(_.method.fullName.contains("__glimmer_template")).l
+          .foreach { each =>
+              for
+                items <- receiverOf(each)
+                fn <- each.argument.filter(_.argumentIndex == 1).headOption.flatMap(callbackMethod)
+                item  <- fn.parameter.find(_.index == 1)
+                found <- MemberTaintBridge.sourceOf(ctx, items)
+              do ctx.tagger.tagVia(Iterator(item), found.tag, found.places(items)*)
+          }
+
+  /** `this.bridge.lastSnippet` in a component: what the injected service assigns to its field. */
+  private def bridgeServiceFields(ctx: JsContext): Unit =
+    val services = byResolverName(ctx, "services")
+    if services.isEmpty then return
+    ctx.fieldAccesses.filter(fa => fa._receiverIn.isEmpty && !isAssignmentTarget(fa)).foreach {
+        read =>
+            fieldBase(read).flatMap(memberPath).zip(fieldName(read)).foreach {
+                case (List("this", field), member) =>
+                    serviceFor(ctx, services, field, member).filterNot(td =>
+                        read.method.fullName.startsWith(td.fullName + ":")
+                    ).foreach { td =>
+                      val assigned = classMethods(td).flatMap(
+                        _.ast.isCall.nameExact(Operators.assignment).l
+                      ).filter(_.argumentOption(1).exists(_.code == s"this.$member"))
+                          .flatMap(_.argumentOption(2))
+                      DataLinkBridge.sourceAt(ctx, assigned, Nil).foreach((found, value) =>
+                          ctx.tagger.tagVia(Iterator(read), found.tag, found.places(value)*)
+                      )
+                    }
+                case _ =>
+            }
+    }
+  end bridgeServiceFields
+
   /** A getter read (`this.term`, in another getter or the class's template) is what the getter
     * returns.
     */
@@ -157,8 +280,10 @@ object EmberRecognizer extends JsFrameworkRecognizer:
           m.fullName == s"${td.fullName}:${m.name}" &&
               m.parameter.size == 1 && m.name != "__glimmer_template"
       ).groupBy(_.name)
+      // a controller's route template reads its getters too
+      val templates = templateMethods(ctx, counterpart(fileOf(td), "controllers"))
       if getters.nonEmpty then
-        methods.flatMap(_.ast.isCall.nameExact(Operators.fieldAccess).l)
+        (methods ++ templates).flatMap(_.ast.isCall.nameExact(Operators.fieldAccess).l)
             .filter(fa => fieldBase(fa).exists(_.code == "this"))
             .filterNot(fa => isAssignmentTarget(fa) || fa._receiverIn.nonEmpty)
             .foreach { read =>

@@ -87,6 +87,7 @@ object JsRecognizers:
     // carries nothing, which the source searches of the bridges below must already know.
     ValidationBridge.tagSchemaParses(ctx)
     GuardBridge.run(ctx)
+    if ReactRecognizer.applies(ctx) then ReactRecognizer.tagValidatedServerFunctions(ctx)
     // Template component elements, lowered to calls, resolved to the components they name.
     ComponentCallBridge.run(ctx)
     // Functions kept in a Map and called after a lookup, resolved to what was put in it.
@@ -99,6 +100,7 @@ object JsRecognizers:
       MemberTaintBridge.run(ctx)
       ReactiveBridge.run(ctx)
       if ReactRecognizer.applies(ctx) then ReactRecognizer.bridgeRouteProps(ctx)
+      if ReactRecognizer.applies(ctx) then ReactRecognizer.bridgeLoaderDeps(ctx)
       if SvelteRecognizer.applies(ctx) then
         SvelteRecognizer.bridgeLocals(ctx)
         SvelteRecognizer.bridgeRouteProps(ctx)

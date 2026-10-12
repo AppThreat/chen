@@ -108,6 +108,9 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     tagDataFunctions(ctx)
     tagNext(ctx)
     tagServerFunctions(ctx)
+    tagTanStackStart(ctx)
+    tagSolidStartApiRoutes(ctx)
+    tagPageRedirects(ctx)
     tagFormActions(ctx)
     tagQwik(ctx)
     tagRouteElements(ctx)
@@ -141,6 +144,164 @@ object ReactRecognizer extends JsFrameworkRecognizer:
                     }
             }
           }
+
+  /** TanStack Start (https://tanstack.com/start).
+    *
+    *   - A server function, `createServerFn(...).validator(...).handler(async ({ data }) => ...)`,
+    *     is an RPC endpoint: its handler's argument is what a client sends. A call of the function
+    *     - `fetchPost({ data: id })`, or through `useServerFn(fetchPost)` - is the handler.
+    *   - A server route's handlers, `createFileRoute(path)({ server: { handlers: { GET } } })` (and
+    *     `createServerFileRoute(path).methods({ GET })`), answer a request.
+    */
+  private def tagTanStackStart(ctx: JsContext): Unit =
+    if !ctx.modules.uses("@tanstack/react-start", "@tanstack/solid-start", "@tanstack/start")
+    then return
+    // the handler of each server function, by the name the function is bound to
+    val serverFns = ctx.cpg.call.nameExact("handler").l.flatMap { h =>
+      val chain = receiverOf(h).map(_.code).getOrElse("")
+      Option.when(chain.matches("(?s)\\s*createServerFn\\b.*")) {
+          h.argument.filter(_.argumentIndex == 1).headOption.flatMap(callbackMethod).map { fn =>
+            // `export const fetchPost = createServerFn(...)...handler(fn)`
+            val bound = h.inAssignment.argument(1).headOption.collect {
+                case id: Identifier => id.name
+                case fa: Call       => fieldName(fa).getOrElse("")
+            }
+            (bound.getOrElse(""), fn)
+          }
+      }.flatten
+    }
+    serverFns.foreach((_, fn) => tagHandler(ctx, fn))
+    val byName = serverFns.filter(_._1.nonEmpty).groupMap(_._1)(_._2)
+    if byName.nonEmpty then
+      ctx.cpg.call.filter(c => !c.name.startsWith("<")).l.foreach { call =>
+        val file = call.method.filename
+        // `login(...)` after `const login = useServerFn(loginFn)`
+        val wrapped = call.receiver.headOption.orElse(Option.empty).collect {
+            case id: Identifier => JsValues.origin(id)
+        }.collect { case c: Call if c.name == "useServerFn" => c }
+            .flatMap(_.argument.filter(_.argumentIndex == 1).headOption)
+            .collect { case id: Identifier => id.name }
+        val name  = wrapped.getOrElse(call.name)
+        val local = ctx.modules.resolve(file, name).map(_.imported).filter(_.nonEmpty)
+        byName.get(local.getOrElse(name)).foreach {
+            case only :: Nil
+                if local.nonEmpty || wrapped.nonEmpty || only.filename == file =>
+                ctx.tagger.resolveCall(call, only)
+            case _ =>
+        }
+      }
+    // server routes: `handlers: { GET: async ({ request, params }) => ... }`
+    val routeHandlers = ctx.cpg.call.nameExact(Operators.assignment).filter { a =>
+        a.argumentOption(1).exists {
+            case fa: Call => fieldName(fa).exists(HttpVerbs.contains)
+            case _        => false
+        } && a.method.ast.isCall.nameExact(Operators.assignment).exists(_.argumentOption(1).exists {
+            case fa: Call => fieldName(fa).exists(f => f == "handlers")
+            case _        => false
+        })
+    }.l.flatMap(_.argumentOption(2)).flatMap(callbackMethod) ++
+        ctx.cpg.call.nameExact("methods").filter(c =>
+            receiverOf(c).exists(_.code.matches("(?s)\\s*createServerFileRoute\\b.*"))
+        ).l.flatMap(_.argument.filter(_.argumentIndex == 1).l).flatMap(callbacksIn(_))
+    routeHandlers.distinctBy(_.id()).foreach(tagHandler(ctx, _))
+  end tagTanStackStart
+
+  /** A server function's handler receives what its validator returns: a validator function whose
+    * every return is a value a guard validated (`if (!SLUG.test(slug)) throw ...; return slug`)
+    * hands the handler nothing to inject, and the handler's `data` reads are sanitised. Runs after
+    * GuardBridge.
+    */
+  def tagValidatedServerFunctions(ctx: JsContext): Unit =
+      ctx.cpg.call.nameExact("handler").l.foreach { h =>
+        val validator = h.receiver.headOption.collect { case fa: Call => fa }.flatMap(fieldBase)
+            .map(unwrap).collect {
+                case v: Call if v.name == "validator" || v.name == "inputValidator" => v
+            }
+        for
+          v <- validator
+          if receiverOf(v).exists(_.code.matches("(?s)\\s*createServerFn\\b.*"))
+          check   <- v.argument.filter(_.argumentIndex == 1).headOption.flatMap(callbackMethod)
+          handler <- h.argument.filter(_.argumentIndex == 1).headOption.flatMap(callbackMethod)
+          input   <- firstParam(handler)
+          returns = DataLinkBridge.returnedValues(check)
+          if returns.nonEmpty && returns.forall(r => neutralises(ctx.tagger, r))
+        do
+          val reads = handler.ast.isCall.nameExact(Operators.fieldAccess)
+              .filter(fa =>
+                  fieldBase(fa).exists(_.code == input.name) && fieldName(fa).contains("data")
+              )
+          ctx.tagger.tag(reads, SANITIZER)
+      }
+
+  /** TanStack Router: `loaderDeps: ({ search }) => ({ q })` reads the URL's search params, and the
+    * route's `loader: ({ deps }) => ...` gets what it returns as `deps`. Runs with the bridges.
+    */
+  def bridgeLoaderDeps(ctx: JsContext): Unit =
+      ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
+          a.argumentOption(1).collect { case fa: Call => fa }.flatMap(fa =>
+              fieldName(fa).filter(k => k == "loaderDeps" || k == "loader")
+                  .zip(fieldBase(fa).map(_.code))
+          ).zip(a.argumentOption(2).flatMap(callbackMethod)).map { case ((key, obj), fn) =>
+              (a.method.id(), obj, key, fn)
+          }
+      }.groupBy(t => (t._1, t._2)).values.foreach { keyed =>
+          for
+            deps   <- keyed.find(_._3 == "loaderDeps").map(_._4)
+            loader <- keyed.find(_._3 == "loader").map(_._4)
+            input  <- firstParam(loader)
+          do
+            ctx.tagger.tag(firstParam(deps).iterator, INPUT)
+            val reads = loader.ast.isCall.nameExact(Operators.fieldAccess)
+                .filter(fa =>
+                    fieldBase(fa).exists(_.code == input.name) && fieldName(fa).contains("deps")
+                )
+                .l
+            DataLinkBridge.sourceAt(ctx, DataLinkBridge.returnedValues(deps), Nil).foreach(
+              (found, value) => ctx.tagger.tagVia(reads.iterator, found.tag, found.places(value)*)
+            )
+      }
+
+  /** SolidStart API routes: a file under `src/routes` exporting `GET`/`POST`/... answers requests
+    * with them, `({ request, params }: APIEvent)`.
+    */
+  private def tagSolidStartApiRoutes(ctx: JsContext): Unit =
+    if !ctx.modules.uses("@solidjs/start") && !ctx.project.dependsOn("@solidjs/start") then return
+    (ctx.cpg.method.internal.nameExact(HttpVerbs.toSeq*).l ++
+        exportedFunctions(ctx, HttpVerbs).map(_._2))
+        .filter(m => m.filename.matches("(?:.*[/\\\\])?src[/\\\\]routes[/\\\\].*"))
+        .distinctBy(_.id()).foreach(tagHandler(ctx, _))
+
+  /** Next.js pages router: `getServerSideProps` returning `{ redirect: { destination } }` sends the
+    * browser there.
+    */
+  private def tagPageRedirects(ctx: JsContext): Unit =
+      (ctx.cpg.method.internal.nameExact("getServerSideProps", "getStaticProps").l ++
+          exportedFunctions(ctx, Set("getServerSideProps", "getStaticProps")).map(_._2))
+          .distinctBy(_.id()).foreach { gssp =>
+            val destinations = (gssp :: nestedMethods(gssp)).flatMap(
+              _.ast.isCall.nameExact(Operators.assignment).l
+            ).filter(_.argumentOption(1).exists {
+                case fa: Call => fieldName(fa).contains("destination")
+                case _        => false
+            }).filter(inReturnedRedirect).flatMap(_.argumentOption(2)).filter {
+                case _: Literal => false
+                case v          => !hasFixedOrigin(v)
+            }
+            ctx.tagger.tag(destinations.iterator, OUTPUT, REDIRECT)
+          }
+
+  /** A write into the object a function returns under `redirect` - `return { redirect: {
+    * destination } }` - not a `destination` key of some other object (`log({ destination })`).
+    */
+  private def inReturnedRedirect(write: Call): Boolean =
+    val ancestors = Iterator.iterate[AstNode](write)(_.astParent)
+        .takeWhile(n => !n.isInstanceOf[Method]).drop(1).toList
+    ancestors.exists(_.isInstanceOf[Return]) &&
+    ancestors.exists(_.ast.isCall.nameExact(Operators.assignment).exists(_.argumentOption(1)
+        .exists {
+            case fa: Call => fieldName(fa).contains("redirect")
+            case _        => false
+        }))
 
   private def tagHandler(ctx: JsContext, handler: Method): Unit =
     ctx.tagger.tag(Iterator(handler), ROUTE)
@@ -547,15 +708,28 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     def unanchored(e: Expression): Boolean  = !isObjectLiteral(e) && !hasFixedOrigin(e)
 
     // redirect(url) from react-router / next/navigation / @remix-run, permanentRedirect(url)
-    val redirectPkgs =
-        Seq("react-router", "react-router-dom", "@remix-run", "@react-router", "next", "@tanstack")
+    val redirectPkgs = Seq(
+      "react-router",
+      "react-router-dom",
+      "@remix-run",
+      "@react-router",
+      "next",
+      "@tanstack",
+      "@solidjs/router"
+    )
+    // TanStack's `redirect({ href })` leaves the app; `redirect({ to, params })` stays in its routes
+    def leaves(e: Expression): Boolean =
+        e match
+          case b: Block if isObjectLiteral(b) =>
+              objectProperties(b).flatMap(_.get("href")).exists(unanchored)
+          case other => unanchored(other)
     val redirects = ctx.cpg.call
         .nameExact("redirect", "redirectDocument", "permanentRedirect", "replace")
         .filter(c =>
             c.receiver.headOption.flatMap(memberPath).exists(_.size == 1) &&
                 redirectPkgs.exists(p =>
                     ctx.modules.localNamesOf(c.method.filename, p, c.name).contains(c.name)
-                ) && target(c).exists(unanchored)
+                ) && target(c).exists(leaves)
         )
     ctx.tagger.tag(redirects, NavigationSink*)
 

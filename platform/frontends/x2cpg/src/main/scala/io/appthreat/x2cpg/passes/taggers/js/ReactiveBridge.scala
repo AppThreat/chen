@@ -174,15 +174,21 @@ object ReactiveBridge:
         if MemberTaintBridge.setterCalls(hook).nonEmpty then
           stateVariable(hook).foreach { name =>
               MemberTaintBridge.sourceOf(ctx, hook).foreach { found =>
-                val reads = (hook.method :: nestedMethods(hook.method))
+                val scope = (hook.method :: nestedMethods(hook.method))
                     .filterNot(m => m.id() != hook.method.id() && declares(m, name))
-                    .flatMap(m => readsIn(m, name).l)
+                // a Solid signal is read by calling its getter: `html()`
+                val getterCalls =
+                    if hook.name == "createSignal" then
+                      scope.flatMap(_.ast.isCall.nameExact(name).filter(_.method.id() != -1L).l)
+                    else Nil
+                val reads = scope.flatMap(m => readsIn(m, name).l) ++ getterCalls
                 if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
                 ctx.tagger.tagVia(reads, found.tag, found.places(hook)*)
               }
           }
     }
     grew
+  end bridgeStateSetters
 
   /** The variable a state hook's value is destructured into: `html` of `_tmp = useState(x); html =
     * _tmp[0]`.

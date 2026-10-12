@@ -503,6 +503,24 @@ object JsShapes:
                 case only :: Nil => Some(only)
                 case _           => None
             )
+        // `this.handleMessage`: a method of the class, or a class property holding an arrow
+        // function (`handleMessage = (event) => {...}`, assigned in the constructor)
+        case fa: Call
+            if fa.name == Operators.fieldAccess && fieldBase(fa).exists(_.code == "this") =>
+            fieldName(fa).flatMap { name =>
+                enclosingTypeDecl(fa.method).flatMap { td =>
+                    classMethods(td).find(_.fullName == s"${td.fullName}:$name").orElse(
+                      classMethods(td).iterator.flatMap(
+                        _.ast.isCall.nameExact(Operators.assignment)
+                      )
+                          .filter(_.argumentOption(1).exists(t =>
+                              t.code == s"this.$name" || t.code == name
+                          ))
+                          .flatMap(_.argumentOption(2)).collectFirst { case ref: MethodRef => ref }
+                          .flatMap(callbackMethod)
+                    )
+                }
+            }
         case _ => None
 
   /** Callbacks in an argument: the function itself, or each function-valued property of an object
@@ -758,6 +776,8 @@ object JsShapes:
         "|(src[/\\\\])?middleware\\.[cm]?[jt]s" +
         "|.*\\+(page|layout)\\.server\\.[cm]?[jt]s|.*\\+server\\.[cm]?[jt]s|hooks\\.server\\.[cm]?[jt]s" +
         "|lib[/\\\\]server[/\\\\].*" +
+        // SolidStart API routes and TanStack Start server routes; their server modules
+        "|src[/\\\\]routes[/\\\\]api[/\\\\].*|src[/\\\\]server[/\\\\].*" +
         "|.*\\.server\\.[cm]?[jt]sx?" +
         ")"
   ).r

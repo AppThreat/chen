@@ -354,8 +354,9 @@ object DomRecognizer extends JsFrameworkRecognizer:
   end tagHtmlSinks
 
   /** Content types a browser does not render as a page. */
+  // an SVG image is markup: opened from the site's origin, its scripts run
   private val DataContentType =
-      "(?i)^(application/json|text/plain|text/csv|application/octet-stream|image/[\\w.+-]+)(\\s*;.*)?$".r
+      "(?i)^(application/json|text/plain|text/csv|application/octet-stream|image/(?!svg)[\\w.+-]+)(\\s*;.*)?$".r
 
   /** A server handler's `new Response(body, init)` serves `body` from the site's origin: markup the
     * code did not fix - an attacker-chosen upstream's body, a reflected parameter - is rendered as
@@ -749,6 +750,19 @@ object DomRecognizer extends JsFrameworkRecognizer:
       }
     }
     ctx.tagger.tag(jsonResponses, SANITIZER)
+
+    // A lookup in a Map of constants (`PORTALS.get(partner)`, `new Map([['a', 'https://...']])`)
+    // returns one of the code's own values, whatever the key: the key picks, it does not write.
+    val constantLookups = ctx.cpg.call.nameExact("get").filter { c =>
+        receiverOf(c).collect { case id: Identifier => JsValues.origin(id) }.exists {
+            case made: Expression =>
+                made.code.trim.matches("(?s)new\\s+Map\\b.*") &&
+                made.ast.isIdentifier.name.forall(n => n == "Map" || n.startsWith("_tmp_")) &&
+                made.ast.isLiteral.nonEmpty
+            case _ => false
+        }
+    }
+    ctx.tagger.tag(constantLookups, SANITIZER)
 
     // Predicates and position lookups: their result is a boolean or a number.
     val predicates = ctx.cpg.call.filter(c => Predicates.contains(callName(c)))

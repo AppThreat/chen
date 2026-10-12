@@ -839,4 +839,129 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("xss").call.name.l shouldBe List("htmlSafe")
       }
   }
+
+  "TanStack Start and SolidStart" should {
+      "take a server function's data as input, resolve its calls, and trust a guarding validator" in {
+          val cpg = tagged(code(
+            """
+          |import { createServerFn } from '@tanstack/react-start'
+          |import { readFile } from 'node:fs/promises'
+          |const SLUG = /^[a-z-]+$/
+          |export const fetchPost = createServerFn({ method: 'GET' })
+          |  .validator((id: string) => id)
+          |  .handler(async ({ data: postId }) => fetch(`/api/posts/${postId}`))
+          |export const getGuide = createServerFn({ method: 'GET' })
+          |  .validator((slug: string) => {
+          |    if (!SLUG.test(slug)) throw new Error('unknown')
+          |    return slug
+          |  })
+          |  .handler(async ({ data }) => readFile(`guides/${data}.md`, 'utf8'))
+          |""".stripMargin,
+            "src/server/posts.ts"
+          ).moreCode(
+            """
+          |import { createFileRoute } from '@tanstack/react-router'
+          |import { fetchPost } from '~/server/posts'
+          |export const Route = createFileRoute('/posts/$postId')({
+          |  loader: ({ params }) => fetchPost({ data: params.postId }),
+          |})
+          |""".stripMargin,
+            "src/routes/posts.$postId.tsx"
+          ).moreCode(
+            """{ "dependencies": { "@tanstack/react-start": "1.168.0" } }""",
+            "package.json"
+          ))
+          cpg.call.nameExact("fetchPost").callee(using NoResolve).isMethod.filename.l should contain(
+            "src/server/posts.ts"
+          )
+          // `{ data: postId }` binds `postId`
+          cpg.identifier.nameExact("postId").tag.name.l should contain("http-client")
+          flows(cpg, "http-client") should be > 0
+          cpg.tag.name("sanitizer").call.code.l should contain("param1_1.data")
+      }
+
+      "serve an SVG built from the query as markup, and redirect to a href" in {
+          val cpg = tagged(code(
+            """
+          |import { createFileRoute, redirect } from '@tanstack/react-router'
+          |export const Route = createFileRoute('/api/badge')({
+          |  server: {
+          |    handlers: {
+          |      GET: ({ request }) => {
+          |        const label = new URL(request.url).searchParams.get('label')
+          |        if (!label) throw redirect({ href: new URL(request.url).searchParams.get('next') })
+          |        return new Response(`<svg><text>${label}</text></svg>`, { headers: { 'content-type': 'image/svg+xml' } })
+          |      },
+          |    },
+          |  },
+          |})
+          |""".stripMargin,
+            "src/routes/api/badge.ts"
+          ).moreCode(
+            """{ "dependencies": { "@tanstack/react-start": "1.168.0" } }""",
+            "package.json"
+          ))
+          flows(cpg, "xss") should be > 0
+          cpg.tag.name("redirect").call.name.l should contain("redirect")
+      }
+
+      "read a Solid signal through its getter, and answer API routes" in {
+          val cpg = tagged(code(
+            """
+          |import { createSignal, onMount } from 'solid-js'
+          |export default function Embed() {
+          |  const [html, setHtml] = createSignal('')
+          |  onMount(() => {
+          |    window.addEventListener('message', (event) => setHtml(String(event.data.html)))
+          |  })
+          |  return <div innerHTML={html()} />
+          |}
+          |""".stripMargin,
+            "src/components/Embed.tsx"
+          ).moreCode(
+            """
+          |import type { APIEvent } from '@solidjs/start/server'
+          |export function GET({ params }: APIEvent) {
+          |  return new Response(`<h1>${params.title}</h1>`, { headers: { 'Content-Type': 'text/html' } })
+          |}
+          |""".stripMargin,
+            "src/routes/api/og/[title].ts"
+          ).moreCode(
+            """{ "dependencies": { "@solidjs/start": "1.3.5", "solid-js": "1.9.0" } }""",
+            "package.json"
+          ))
+          cpg.tag.name("framework-input").call.code.l should contain("html()")
+          cpg.method.nameExact("GET").parameter.tag.name.l should contain("framework-input")
+          flows(cpg, "xss") should be > 1
+      }
+  }
+
+  "Pages router responses" should {
+      "redirect to a returned destination, and send JSON and fixed headers as no output" in {
+          val cpg = tagged(code(
+            """
+          |export const getServerSideProps = async (context) => {
+          |  const destination = context.query.url
+          |  console.info('out', { destination })
+          |  return { redirect: { destination, permanent: false } }
+          |}
+          |export default function Out() { return null }
+          |""".stripMargin,
+            "pages/out.tsx"
+          ).moreCode(
+            """
+          |export default function handler(req, res) {
+          |  res.setHeader('X-Content-Type-Options', 'nosniff')
+          |  res.status(200).json({ q: req.query.q })
+          |}
+          |""".stripMargin,
+            "pages/api/echo.ts"
+          ).moreCode("""{ "dependencies": { "next": "15.5.0" } }""", "package.json"))
+          cpg.tag.name("redirect").identifier.lineNumber.l.map(_.intValue) shouldBe List(5)
+          cpg.tag.name("framework-output").call.filter(
+            _.file.name.headOption.contains("pages/api/echo.ts")
+          )
+              .l shouldBe empty
+      }
+  }
 end JsFrameworkRecognizersTest

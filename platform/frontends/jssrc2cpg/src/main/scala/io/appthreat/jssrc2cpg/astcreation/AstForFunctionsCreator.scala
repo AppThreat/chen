@@ -211,57 +211,64 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
                 Ast.storeInDiffGraph(typeDecl, diffGraph)
                 scope.addVariable(paramName, param, MethodScope)
 
-                additionalBlockStatements.addAll(nodeInfo.json("properties").arr.toList.map {
+                // `local = base.key`, with `local` declared in the function
+                def bindMember(at: BabelNodeInfo, local: String, base: String, key: String): Ast =
+                  val tpe            = typeFor(at)
+                  val localParamNode = identifierNode(at, local)
+                  localParamNode.typeFullName = tpe
+                  val localNode = newLocalNode(local, tpe).order(0)
+                  diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
+                  scope.addVariable(local, localNode, MethodScope)
+                  val baseNode = identifierNode(at, base)
+                  scope.addVariableReference(base, baseNode)
+                  val keyNode = createFieldIdentifierNode(key, at.lineNumber, at.columnNumber)
+                  val accessAst =
+                      createFieldAccessCallAst(baseNode, keyNode, at.lineNumber, at.columnNumber)
+                  val assignmentCallAst = createAssignmentCallAst(
+                    Ast(localParamNode),
+                    accessAst,
+                    s"$local = ${codeOf(accessAst.nodes.head)}",
+                    at.lineNumber,
+                    at.columnNumber
+                  )
+                  // Handle identifiers referring to locals created by destructured parameters
+                  assignmentCallAst.nodes
+                      .collect { case i: NewIdentifier if localNode.name == i.name => i }
+                      .map(i => assignmentCallAst.withRefEdge(i, localNode))
+                      .reduce(_.merge(_))
+                end bindMember
+
+                // `{ data: postId }` binds `postId` to the `data` member; a default (`{ data: postId
+                // = '' }`) binds the left side; a nested pattern (`{ search: { q } }`) binds
+                // `search` and then each of its own members (`q = search.q`)
+                def boundName(value: ujson.Value): Option[String] =
+                  val bound =
+                      if value("type").str == "AssignmentPattern" then value("left") else value
+                  Option.when(bound("type").str == "Identifier")(bound("name").str)
+
+                additionalBlockStatements.addAll(nodeInfo.json("properties").arr.toList.flatMap {
                     element =>
                       val elementNodeInfo = createBabelNodeInfo(element)
                       elementNodeInfo.node match
                         case ObjectProperty =>
-                            val elemName       = code(elementNodeInfo.json("key"))
-                            val tpe            = typeFor(elementNodeInfo)
-                            val localParamNode = identifierNode(elementNodeInfo, elemName)
-                            localParamNode.typeFullName = tpe
-
-                            val localNode = newLocalNode(elemName, tpe).order(0)
-                            diffGraph.addEdge(
-                              localAstParentStack.head,
-                              localNode,
-                              EdgeTypes.AST
-                            )
-                            scope.addVariable(elemName, localNode, MethodScope)
-
-                            val paramNode = identifierNode(elementNodeInfo, paramName)
-                            scope.addVariableReference(paramName, paramNode)
-
-                            val keyNode =
-                                createFieldIdentifierNode(
-                                  elemName,
-                                  elementNodeInfo.lineNumber,
-                                  elementNodeInfo.columnNumber
-                                )
-                            val accessAst =
-                                createFieldAccessCallAst(
-                                  paramNode,
-                                  keyNode,
-                                  elementNodeInfo.lineNumber,
-                                  elementNodeInfo.columnNumber
-                                )
-                            val assignmentCallAst = createAssignmentCallAst(
-                              Ast(localParamNode),
-                              accessAst,
-                              s"$elemName = ${codeOf(accessAst.nodes.head)}",
-                              elementNodeInfo.lineNumber,
-                              elementNodeInfo.columnNumber
-                            )
-                            // Handle identifiers referring to locals created by destructured parameters
-                            assignmentCallAst.nodes
-                                .collect {
-                                    case i: NewIdentifier if localNode.name == i.name => i
+                            val keyName  = code(elementNodeInfo.json("key"))
+                            val value    = Try(elementNodeInfo.json("value")).toOption
+                            val elemName = value.flatMap(boundName).getOrElse(keyName)
+                            val outer    = bindMember(elementNodeInfo, elemName, paramName, keyName)
+                            val nested = value.filter(_("type").str == "ObjectPattern").toList
+                                .flatMap(_("properties").arr.toList)
+                                .map(createBabelNodeInfo)
+                                .filter(_.node == ObjectProperty)
+                                .map { inner =>
+                                  val innerKey = code(inner.json("key"))
+                                  val innerName = Try(inner.json("value")).toOption
+                                      .flatMap(boundName).getOrElse(innerKey)
+                                  bindMember(inner, innerName, elemName, innerKey)
                                 }
-                                .map { i => assignmentCallAst.withRefEdge(i, localNode) }
-                                .reduce(_.merge(_))
+                            outer :: nested
                         case RestElement =>
-                            handleRestInParameters(elementNodeInfo, nodeInfo, paramName)
-                        case _ => astForNodeWithFunctionReference(elementNodeInfo.json)
+                            List(handleRestInParameters(elementNodeInfo, nodeInfo, paramName))
+                        case _ => List(astForNodeWithFunctionReference(elementNodeInfo.json))
                       end match
                 })
                 param

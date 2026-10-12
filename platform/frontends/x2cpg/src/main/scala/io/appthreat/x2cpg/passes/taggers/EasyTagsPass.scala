@@ -39,11 +39,18 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   /** A response method called with something to send, also after `res.status(code)`. A
     * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing
-    * one.
+    * one. `res.json(x)` is no output either: the body is served as `application/json`, which a
+    * browser does not render - as for `Response.json(x)`; `jsonp` runs the callback name it is
+    * given and stays.
     */
   private val JsResponseCall = java.util.regex.Pattern.compile(
-    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
+    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
   )
+
+  /** Response methods that set a header: one given only literals (`res.setHeader("X-Content-Type-
+    * Options", "nosniff")`) writes what the code says.
+    */
+  private val JsHeaderMethods = Set("append", "set", "setHeader", "vary", "writeHead")
 
   /** Koa's response body is a property write: `ctx.body = data`. */
   private val JsResponseWrite =
@@ -473,7 +480,10 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
               matches(JsSdkVerb, c) && !isNotSdkClient(c)
             else
               !c.name.startsWith("<operator>") &&
-              (matches(JsResponseCall, c) ||
+              (matches(JsResponseCall, c) &&
+                  !(JsHeaderMethods.contains(c.name) && c.argument.argumentIndexGt(0).l.forall(
+                    _.isInstanceOf[Literal]
+                  )) ||
                   matches(JsDatabaseCall, c) && !isTaggedTemplate(c) && !bindsParameters(c))
         }
         .newTagNode("framework-output")
