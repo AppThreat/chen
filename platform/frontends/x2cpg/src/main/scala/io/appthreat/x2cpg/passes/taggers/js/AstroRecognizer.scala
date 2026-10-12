@@ -6,7 +6,11 @@ import io.shiftleft.semanticcpg.language.*
 import JsShapes.*
 import JsTags.*
 
-/** Astro's server code (https://docs.astro.build): API endpoints (`.ts` files under `src/pages` exporting
+/** Astro (https://docs.astro.build). Components (`.astro`, which astgen lowers to the frontmatter's
+  * statements plus the template as JSX) read the request through the `Astro` global - `Astro.url`,
+  * `Astro.params`, `Astro.request`, `Astro.cookies`, `Astro.locals` - and their parent's
+  * `Astro.props`; `set:html={x}` is a markup sink (DomRecognizer's template attributes). The server
+  * code is API endpoints (`.ts` files under `src/pages` exporting
   * `GET`/`POST`/... or `ALL`), middleware (`onRequest`, `defineMiddleware`) and actions
   * (`defineAction({ handler })`). Each receives the request context (`{ params, url, request,
   * cookies, locals }`) or, for an action, the client's input. `context.redirect(url)` and
@@ -17,13 +21,29 @@ object AstroRecognizer extends JsFrameworkRecognizer:
   val name: String = "astro"
 
   def applies(ctx: JsContext): Boolean =
-      ctx.modules.uses("astro", "@astrojs") || ctx.project.dependsOn("astro")
+      ctx.modules.uses("astro", "@astrojs") || ctx.project.dependsOn("astro") ||
+          ctx.project.hasFile(".*\\.astro$")
+
+  /** What a component reads of the request through the `Astro` global, and the props its parent
+    * passed (`Astro.props`).
+    */
+  private val AstroGlobalReads =
+      Set("url", "params", "request", "cookies", "locals", "props", "clientAddress", "originPathname")
 
   private val EndpointFile = "(?:.*[/\\\\])?src[/\\\\]pages[/\\\\].*\\.(js|ts|mjs|mts)$"
   private val Middleware   = "(?:.*[/\\\\])?src[/\\\\]middleware(\\.|[/\\\\]).*(js|ts|mjs|mts)$"
   private val Verbs        = Set("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "ALL")
 
   def run(ctx: JsContext): Unit =
+    // `Astro.url.searchParams.get('q')`, `Astro.params.slug`, `Astro.cookies.get('motd')`
+    val globalReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter(fa =>
+        fieldName(fa).exists(AstroGlobalReads.contains) &&
+            fieldBase(fa).exists {
+              case id: Identifier => id.name == "Astro"
+              case _              => false
+            }
+    )
+    ctx.tagger.tag(readChains(globalReads), INPUT)
     val endpoints = ctx.cpg.file.name(EndpointFile).method.internal
         .filter(m => Verbs.contains(m.name) || m.name.startsWith("anonymous"))
         .l

@@ -83,7 +83,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       createBuiltinStaticCall(callExpr, callee, calleeCode)
     else
       val (receiverAst, baseNode, callName) = callee.node match
-        case MemberExpression =>
+        // `a?.b()` and `a.b?.()` are member calls on `a` too: as plain calls they took the whole
+        // callee text for their name and `this` for their receiver, so `a` never reached them.
+        case MemberExpression | OptionalMemberExpression =>
             val base   = createBabelNodeInfo(callee.json("object"))
             val member = createBabelNodeInfo(callee.json("property"))
             // The call name is taken from the property's source slice. A

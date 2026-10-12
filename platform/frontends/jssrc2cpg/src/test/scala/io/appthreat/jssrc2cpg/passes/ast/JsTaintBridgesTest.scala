@@ -38,6 +38,22 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
               .reachableByFlows(cpg.parameter.nameExact("route"))) should not be empty
       }
 
+      "carry a value into an optional call on it" in {
+          val cpg = code(
+            """
+          |async function post(request) {
+          |  const form = await request.formData();
+          |  const next = form.get('next')?.toString() ?? '/';
+          |  location.assign(next);
+          |}
+          |""".stripMargin,
+            "optional.js"
+          )
+          // a member call through `?.` is a call on its object, named after the member
+          cpg.call.nameExact("toString").receiver.code.l shouldBe List("(_tmp_0 = form.get('next')).toString")
+          show(cpg.call.nameExact("assign").reachableByFlows(cpg.parameter.nameExact("request"))) should not be empty
+      }
+
       "carry a captured variable to every read in the closure, not only the first" in {
           val cpg = code(
             """
