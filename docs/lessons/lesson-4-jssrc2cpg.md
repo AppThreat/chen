@@ -360,3 +360,32 @@ template as JSX (see atom-parsetools' `docs/ASTGEN.md`), so `Astro.url`/`Astro.p
 - `.vue` and `.svelte` files are also emitted as `CONFIG_FILE` nodes by `ConfigPass`, so
   `cpg.configFile.name(".*\\.svelte")` gives you the raw component text when the graph shape is
   not what you need.
+
+### Producer-consumer links as resolved calls
+
+A framework's producer-to-consumer link that no call site expresses - `useLoaderData()` returns
+what the route's `loader` returned, a route component's `$props()` what the sibling `load`
+returned, `inject(key)` what `provide(key, ...)` gave, `runTask('db:reindex')` the task file's
+`run`, a store hook the `defineStore` setup - is closed by resolving the consumer call to the
+producing METHOD (`JsTagger.resolveCall`). The dataflow engine then carries the callee's return
+value, object taint included, out to the call result; tagging the consumer read alone would
+start the flow too late. `JsTagger` records its resolutions because the CALL edges land in the
+graph only when the pass ends - a same-run reader (`sourceTagThrough` on a resolved callee's
+parameter) consults the record.
+
+Two lowerings carry values that no call site names. A template's COMPONENT element
+(`<RichText html={bio} />`) lowers to a call of the component with the element's first computed
+attribute value as its argument - `ComponentCallBridge` resolves it to the component (import
+binding, or the one project method of that name), so a parent's value reaches the component's
+props parameter. An `.html` page (Alpine directives, Angular bindings) lowers like a Svelte
+component: inline `x-data` objects become variables, `x-init` becomes statements, `x-html` and
+`[prop]` bindings become JSX attributes (`x-html` -> `innerHTML`; a piped `[innerHTML]` is the
+bypass marker, an unpiped one is sanitised and keeps a string value), and DOM-sink property
+bindings additionally lower to the property write the framework performs. Angular's
+`x.component.html` links to its component by the file convention: `[(ngModel)]="field"` makes
+the field's `this.` reads sources, and bindings naming inputs read the component's inputs.
+
+Validation is a neutraliser where it types the value: a `validateSearch` schema's non-text
+fields (zod/valibot/yup `number`, `enum`, `boolean`, `literal`) make reads of those members of
+`useSearch()` results `predicate` - a number or enum constant carries nothing to inject - while
+`z.string()` neutralises nothing.
