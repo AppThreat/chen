@@ -90,42 +90,77 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     tagNavigation(ctx, di)
     tagTemplateBindings(ctx)
 
-  /** A component's external template (`x.component.html`, by Angular's own file convention) carries
-    * bindings whose expressions are the component's own members: `[(ngModel)]="term"` writes the
-    * field `term` with whatever the user typed into the control, and `[innerHTML]="caption() |
-    * safeHtml"` reads the signal input `caption`. The template is a separate file astgen lowers;
-    * the members this bridges are the linked component's.
+  private val TemplateUrl = """templateUrl\s*:\s*['"`]([^'"`]+)['"`]""".r
+  private val PipeName    = """name\s*:\s*['"`]([\w$-]+)['"`]""".r
+
+  /** Components and their external templates: `@Component({ templateUrl: './x.component.html' })`,
+    * the URL resolved from the component's own file. astgen lowers the template to the bindings'
+    * expressions, which read the component's members by bare name.
+    */
+  def componentTemplates(ctx: JsContext): List[(TypeDecl, String)] =
+      ctx.cpg.annotation.nameExact("Component").l.flatMap { annotation =>
+          annotation.astParent match
+            case td: TypeDecl =>
+                TemplateUrl.findFirstMatchIn(annotation.code).map(_.group(1)).flatMap { url =>
+                  val html = JsModules.resolveRelative(td.filename, url)
+                  ctx.cpg.file.nameExact(html).headOption.map(_ => td -> html)
+                }
+            case _ => None
+      }
+
+  /** Reads of a component member in its template: `term`, and `caption()` for a signal. */
+  def templateReads(ctx: JsContext, template: String, member: String): List[CfgNode] =
+    val methods = ctx.cpg.method.filenameExact(template).l
+    methods.flatMap(_.ast.isIdentifier.nameExact(member)).filterNot(isAssignmentTarget) ++
+        methods.flatMap(_.call.nameExact(member))
+
+  /** A template's bindings read the component's members, so a member that is a source is one there
+    * too: an `input()` read as `caption()`, a field the user types into through `[(ngModel)]` -
+    * which writes the field with the control's value - read anywhere in the component. A pipe
+    * (`caption() | safeHtml`, lowered to `safeHtml(caption())`) is resolved to its class's
+    * `transform`, so a pipe that bypasses the sanitiser is reached through its own code.
     */
   private def tagTemplateBindings(ctx: JsContext): Unit =
-    val linked = ctx.cpg.file.name(".*\\.component\\.html").l.flatMap { f =>
-      val base = f.name.substring(f.name.lastIndexOf('/') + 1).stripSuffix(".html")
-      ctx.cpg.file.name(s".*$base.ts").method.internal.nameExact("<init>").l
-          .flatMap(m => enclosingTypeDecl(m)).map(td => f.name -> td)
-    }
-    if linked.isEmpty then return
+    val templates = componentTemplates(ctx)
+    if templates.isEmpty then return
     val inputMembers = ctx.tagger.taggedIds(INPUT).l
         .flatMap(id =>
             ctx.cpg.graph.node(id) match
               case m: Member => Some(m)
               case _         => None
         )
-    linked.foreach { (html, td) =>
-      val inputs = inputMembers.filter(m => m.typeDecl.id() == td.id()).map(_.name).toSet
-      // `[(ngModel)]="field"`: the control writes the field with user input
+    templates.foreach { (td, html) =>
       val fields = ctx.cpg.templateDom.nameExact("JSXAttribute")
           .where(_.file.nameExact(html))
-          .code(".*ngModel.*").l.map(_.code).flatMap(code =>
-              "=[\"']([A-Za-z_$][\\w$]*)[\"']".r.findFirstMatchIn(code).map(_.group(1))
-          ).toSet
-      fields.foreach(f => ctx.tagger.tag(thisReads(td, f), INPUT))
-      if inputs.nonEmpty then
-        val reads = ctx.cpg.method.filenameExact(html).l
-            .flatMap(_.ast.isIdentifier.nameExact(inputs.toSeq*))
-            .filterNot(isAssignmentTarget) ++
-            ctx.cpg.method.filenameExact(html).l.flatMap(_.call.nameExact(inputs.toSeq*))
-        ctx.tagger.tag(reads, INPUT)
+          .code("""\[\(ngModel\)\]\s*=.*""").l
+          .flatMap(a =>
+              """=\s*["']([A-Za-z_$][\w$]*)["']""".r.findFirstMatchIn(a.code).map(_.group(1))
+          )
+          .toSet
+      fields.foreach { f =>
+        ctx.tagger.tag(thisReads(td, f), INPUT)
+        ctx.tagger.tag(templateReads(ctx, html, f), INPUT)
+      }
+      inputMembers.filter(_.typeDecl.id() == td.id()).map(_.name).distinct.foreach { input =>
+          ctx.tagger.tag(templateReads(ctx, html, input), INPUT)
+      }
     }
+    resolvePipes(ctx, templates.map(_._2).toSet)
   end tagTemplateBindings
+
+  private def resolvePipes(ctx: JsContext, templates: Set[String]): Unit =
+    val transforms = ctx.cpg.annotation.nameExact("Pipe").l.flatMap { annotation =>
+        annotation.astParent match
+          case td: TypeDecl =>
+              PipeName.findFirstMatchIn(annotation.code).map(_.group(1)).flatMap(name =>
+                  td.method.nameExact("transform").headOption.map(name -> _)
+              )
+          case _ => None
+    }.groupBy(_._1).collect { case (name, (_, transform) :: Nil) => name -> transform }
+    if transforms.isEmpty then return
+    ctx.cpg.call
+        .filter(c => transforms.contains(c.name) && templates.contains(c.method.filename))
+        .foreach(c => ctx.tagger.resolveCall(c, transforms(c.name)))
 
   // -----------------------------------------------------------------------------------------
   // Dependency injection

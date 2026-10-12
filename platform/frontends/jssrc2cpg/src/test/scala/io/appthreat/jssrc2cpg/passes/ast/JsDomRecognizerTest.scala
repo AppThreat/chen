@@ -253,5 +253,81 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
           ) shouldBe empty
           cpg.tag.name("framework-input").call.code.l should contain("req.query.name")
       }
+
+      "not take a browser channel's send or a collection's delete for an SDK action" in {
+          val cpg = tagged(code(
+            """
+          |export async function run(sqs, url, cookies, body) {
+          |  const xhr = new XMLHttpRequest();
+          |  xhr.send(body);
+          |  const seen = new Map();
+          |  seen.delete(url);
+          |  cookies.delete('session');
+          |  await sqs.send(body);
+          |}
+          |""".stripMargin,
+            "client.js"
+          ))
+          cpg.tag.name("framework-output").call.code.l shouldBe List("sqs.send")
+      }
+  }
+
+  "Template and response shapes" should {
+      "tag a component's link href but not its other props, and a form's action" in {
+          val cpg = tagged(code(
+            """
+          |export function Page({ next, ack }) {
+          |  return (
+          |    <>
+          |      <Form action={ack} />
+          |      <Link href={next} />
+          |      <form action={next} />
+          |    </>
+          |  );
+          |}
+          |""".stripMargin,
+            "page.jsx"
+          ))
+          val sinks = cpg.tag.name("framework-output").call.code.l
+          sinks.exists(_.contains("ack")) shouldBe false
+          sinks.count(_.contains("next")) shouldBe 2
+      }
+
+      "leave a component's own URL field alone and keep an element's" in {
+          val cpg = tagged(code(
+            """
+          |class ReturnLink extends HTMLElement {
+          |  connectedCallback() {
+          |    this.href = new URLSearchParams(location.search).get('next');
+          |    this.anchor.href = new URLSearchParams(location.search).get('next');
+          |  }
+          |}
+          |""".stripMargin,
+            "return-link.js"
+          ))
+          cpg.tag.name("framework-output").call.code.l.filter(_.contains("href =")) shouldBe
+              List("this.anchor.href = new URLSearchParams(location.search).get('next')")
+      }
+
+      "make a JSON response a neutraliser" in {
+          val cpg = tagged(code(
+            """
+          |import { json } from '@sveltejs/kit';
+          |import { NextResponse } from 'next/server';
+          |export async function GET({ url }) {
+          |  const q = url.searchParams.get('q');
+          |  if (q) return Response.json({ q });
+          |  if (url.hash) return NextResponse.json({ q });
+          |  return json({ q });
+          |}
+          |""".stripMargin,
+            "src/routes/api/+server.js"
+          ))
+          cpg.tag.name("sanitizer").call.code.l.sorted shouldBe List(
+            "NextResponse.json({ q })",
+            "Response.json({ q })",
+            "json({ q })"
+          )
+      }
   }
 end JsDomRecognizerTest

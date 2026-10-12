@@ -374,16 +374,40 @@ graph only when the pass ends - a same-run reader (`sourceTagThrough` on a resol
 parameter) consults the record.
 
 Two lowerings carry values that no call site names. A template's COMPONENT element
-(`<RichText html={bio} />`) lowers to a call of the component with the element's first computed
-attribute value as its argument - `ComponentCallBridge` resolves it to the component (import
-binding, or the one project method of that name), so a parent's value reaches the component's
-props parameter. An `.html` page (Alpine directives, Angular bindings) lowers like a Svelte
-component: inline `x-data` objects become variables, `x-init` becomes statements, `x-html` and
-`[prop]` bindings become JSX attributes (`x-html` -> `innerHTML`; a piped `[innerHTML]` is the
-bypass marker, an unpiped one is sanitised and keeps a string value), and DOM-sink property
-bindings additionally lower to the property write the framework performs. Angular's
-`x.component.html` links to its component by the file convention: `[(ngModel)]="field"` makes
-the field's `this.` reads sources, and bindings naming inputs read the component's inputs.
+(`<RichText html={bio} title="About" {...rest} />`) also lowers to a call of the component whose
+one argument is the props object, `<operator>.jsxProps(bio, rest)` - every value the code
+computes, constants left out. `ComponentCallBridge` resolves the call to the function component
+(the module's default export for a default import, the export of that name for a named one, else
+the one project function of that name), so a parent's values reach the component's props
+parameter. The engine holds an object as one value: a component reached by any tainted prop is
+tainted in all of them. Single-file components (`.vue`, `.svelte`, `.astro`) are files, not
+functions, and are not resolved.
+
+An `.html` file with framework bindings lowers like a Svelte component (atom-parsetools'
+`htmlAst.js`). Alpine: inline `x-data` objects become variables, `x-init` statements, `x-html`
+an `innerHTML` JSX attribute. Angular: a property binding keeps its brackets (`[innerHTML]={x}`)
+because Angular sanitises every property binding - none is a markup sink; only a link
+(`[href]`, `[attr.href]` on `<a>`/`<area>`) can point at another site, and only a
+`bypassSecurityTrust*` call, itself the sink, gets markup through. A pipe is a call
+(`caption() | safeHtml` is `safeHtml(caption())`) resolved to the `@Pipe` class's `transform`,
+so a bypassing pipe is reached through its own code. The template belongs to the component whose
+`@Component({ templateUrl })` names it: its reads of the component's inputs, and of fields a
+bridge made sources, are sources; `[(ngModel)]="field"` makes the field's reads sources, since
+the control writes it with what the user typed.
+
+**Provenance.** A bridge tags the reads it makes sources with where their value came from as
+well: `via:<file>#<line>` for the value it carried across (`context.locals.banner = <value>` in
+middleware) and for the source found behind it. A reported flow that starts at
+`Astro.locals.banner` in a layout says, in its first node's tags, that the value is the one
+middleware took from the query string.
+
+**Responses.** A route endpoint's return value is its response, but most are data: a JSON
+response (`Response.json`, `NextResponse.json`, SvelteKit's `json`) is a neutraliser, and a
+data function's return (`load`, a loader, a form action - tagged `framework-data`) goes to the
+page that renders it, so atom does not treat it as a sink. What reflects content is a server
+handler's `new Response(body, init)` whose body the code does not fix, served without a constant
+data content type (`application/json`, `text/plain`) - an open proxy streaming an upstream's
+body with the upstream's content type, a parameter served as `text/html`.
 
 Validation is a neutraliser where it types the value: a `validateSearch` schema's non-text
 fields (zod/valibot/yup `number`, `enum`, `boolean`, `literal`) make reads of those members of

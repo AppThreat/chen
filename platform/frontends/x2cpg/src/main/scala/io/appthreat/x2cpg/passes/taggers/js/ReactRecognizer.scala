@@ -192,6 +192,13 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     * modules, and the callbacks a route object's `loader:`/`action:` keys name anywhere.
     */
   private def dataFunctionMethods(ctx: JsContext): List[Method] =
+    val (exported, keyed) = dataFunctionsByShape(ctx)
+    (exported ++ keyed).distinctBy(_.id())
+
+  /** Data functions a route module exports (framework mode), and those a route object's
+    * `loader:`/`action:` names (data routers, TanStack).
+    */
+  private def dataFunctionsByShape(ctx: JsContext): (List[Method], List[Method]) =
     val routerFiles = ctx.modules.filesImporting(
       "react-router",
       "react-router-dom",
@@ -215,14 +222,24 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
         .flatMap(_.argumentOption(2)).l
         .flatMap(callbacksIn(_))
-    (exported ++ keyed).distinctBy(_.id())
-  end dataFunctionMethods
+    (exported, keyed)
+  end dataFunctionsByShape
 
   /** `export async function loader({ params, request })` in a route module, `loader: fn` on a route
     * object or in TanStack's `createFileRoute(...)({ loader })`.
     */
   private def tagDataFunctions(ctx: JsContext): Unit =
-      dataFunctionMethods(ctx).foreach(tagHandler(ctx, _))
+    val (exported, keyed) = dataFunctionsByShape(ctx)
+    // A route module that renders nothing (no default export) is a resource route: its loader
+    // answers the request. Otherwise - and always for a route object's loader - the data goes to
+    // the component.
+    val (resources, data) =
+        exported.partition(f => !hasDefaultExport(ctx, f.filename))
+    resources.foreach(tagHandler(ctx, _))
+    (data ++ keyed).distinctBy(_.id()).foreach { f =>
+      tagHandler(ctx, f)
+      ctx.tagger.tag(Iterator(f), DATA)
+    }
 
   private def tagNext(ctx: JsContext): Unit =
     val usesNext = ctx.modules.uses("next") || ctx.project.dependsOn("next")

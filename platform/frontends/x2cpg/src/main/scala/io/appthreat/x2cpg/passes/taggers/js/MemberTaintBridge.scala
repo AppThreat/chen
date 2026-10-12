@@ -41,6 +41,9 @@ object MemberTaintBridge:
     val classWrites = memberWrites(ctx)
     val localWrites = localRefWrites(ctx)
     if classWrites.isEmpty && localWrites.isEmpty then return
+    // an Angular component's template reads its members by bare name
+    val templateOf =
+        AngularRecognizer.componentTemplates(ctx).map((td, html) => td.id() -> html).toMap
     val done  = mutable.HashSet.empty[(String, String)]
     var round = 0
     var grew  = true
@@ -50,7 +53,7 @@ object MemberTaintBridge:
       val withSources = ctx.methodsWithSources
       classWrites.foreach { case (td, member, value) =>
           if !done.contains((td.fullName, member)) && withSources.contains(value.method.id()) then
-            sourceTagOf(ctx, value).foreach { tagName =>
+            sourceOf(ctx, value).foreach { found =>
               done += ((td.fullName, member))
               grew = true
               val reads = classMethods(td).iterator
@@ -59,13 +62,21 @@ object MemberTaintBridge:
                   .codeExact(s"this.$member")
                   .filterNot(isAssignmentTarget)
                   .filterNot(isStoreReceiver)
-              ctx.tagger.tag(readChains(reads), tagName)
+              ctx.tagger.tagVia(readChains(reads), found.tag, found.at, value)
+              templateOf.get(td.id()).foreach(html =>
+                  ctx.tagger.tagVia(
+                    AngularRecognizer.templateReads(ctx, html, member),
+                    found.tag,
+                    found.at,
+                    value
+                  )
+              )
             }
       }
       localWrites.foreach { case (declMethod, local, member, value) =>
           val key = (declMethod.fullName + "|" + local, member)
           if !done.contains(key) then
-            sourceTagOf(ctx, value).foreach { tagName =>
+            sourceOf(ctx, value).foreach { found =>
               done += key
               grew = true
               val reads = JsIndexes
@@ -78,7 +89,7 @@ object MemberTaintBridge:
                           case _              => false
                       } && !isAssignmentTarget(c)
                   )
-              ctx.tagger.tag(readChains(reads), tagName)
+              ctx.tagger.tagVia(readChains(reads), found.tag, found.at, value)
             }
       }
     end while
@@ -179,12 +190,28 @@ object MemberTaintBridge:
   private[js] def sourceTagOf(ctx: JsContext, value: Expression): Option[String] =
       sourceTagThrough(ctx, value)._1
 
+  /** A source found behind a value: its kind, and the node that carries it. */
+  final case class Found(tag: String, at: StoredNode)
+
+  /** [[sourceTagOf]], with the node the source was found at, for provenance. */
+  private[js] def sourceOf(ctx: JsContext, value: Expression): Option[Found] =
+    val (tag, _, at) = search(ctx, value)
+    tag.zip(at).map(Found.apply)
+
   /** [[sourceTagOf]], and whether the source was found behind a reactive derivation - a wrapper
     * holding what its callback returns (`useActionState(fn)`, `computed(() => ...)`), which no
     * dataflow edge connects to its result.
     */
   private[js] def sourceTagThrough(ctx: JsContext, value: Expression): (Option[String], Boolean) =
-    var derived = false
+    val (tag, derived, _) = search(ctx, value)
+    (tag, derived)
+
+  private def search(
+    ctx: JsContext,
+    value: Expression
+  ): (Option[String], Boolean, Option[StoredNode]) =
+    var derived                = false
+    var at: Option[StoredNode] = None
     def tagOf(n: StoredNode): Option[String] =
         SourceTags.find(t => ctx.tagger.has(n.id(), t)).orElse(
           n.tag.name.find(SourceTags.contains)
@@ -201,6 +228,7 @@ object MemberTaintBridge:
       if seen.add(node.id()) && !isImport(node) then
         found = tagOf(node)
         if found.isDefined then
+          at = Some(node)
           // a tag on a derivation call is the derivation's own doing (ReactiveBridge tags the
           // wrapper): the value behind this one is still a derivation's result
           node match
@@ -257,6 +285,6 @@ object MemberTaintBridge:
         end if
       end if
     end while
-    (found, derived && found.nonEmpty)
-  end sourceTagThrough
+    (found, derived && found.nonEmpty, at)
+  end search
 end MemberTaintBridge

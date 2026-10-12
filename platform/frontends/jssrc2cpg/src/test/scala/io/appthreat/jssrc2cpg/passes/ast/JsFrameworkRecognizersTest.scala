@@ -192,6 +192,98 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "Angular templates" should {
+      "treat bindings as sanitised, reach a bypassing pipe, and tag links and ngModel fields" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, input, inject, Pipe } from '@angular/core';
+          |import { DomSanitizer } from '@angular/platform-browser';
+          |@Pipe({ name: 'safeHtml' })
+          |export class SafeHtmlPipe {
+          |  private sanitizer = inject(DomSanitizer);
+          |  transform(value: string) { return this.sanitizer.bypassSecurityTrustHtml(value); }
+          |}
+          |@Component({ selector: 'app-e', templateUrl: './e.component.html', imports: [SafeHtmlPipe] })
+          |export class EComponent {
+          |  readonly caption = input('');
+          |  readonly note = input('');
+          |  readonly partner = input('');
+          |  term = '';
+          |  preview() { document.getElementById('p')!.innerHTML = this.term; }
+          |}
+          |""".stripMargin,
+            "src/app/e.component.ts"
+          ).moreCode(
+            """<figure>
+          |  <figcaption [innerHTML]="caption() | safeHtml"></figcaption>
+          |  <p [innerHTML]="note()"></p>
+          |  <a [href]="partner()">Partner</a>
+          |  <svg><image [attr.href]="partner()" /></svg>
+          |  <input [(ngModel)]="term" />
+          |</figure>
+          |""".stripMargin,
+            "src/app/e.component.html"
+          ))
+          // the pipe is its class's transform; a plain [innerHTML] binding is no sink
+          cpg.call.nameExact("safeHtml").callee(using NoResolve).name.l should contain("transform")
+          flows(cpg, "xss") should be > 0
+          cpg.tag.name("xss").call.code.l.filter(_.contains("note")) shouldBe empty
+          // a link is a redirect sink, an SVG image is not
+          cpg.tag.name("redirect").call.lineNumber.l.map(_.intValue) shouldBe List(4)
+          // ngModel writes the field with what the user typed
+          cpg.tag.name("framework-input").call.code.l should contain("this.term")
+      }
+  }
+
+  "Vue stores and composables" should {
+      "carry a value through a Pinia setup store and a composable's derivation" in {
+          val cpg = tagged(code(
+            """
+          |import { defineStore } from 'pinia';
+          |import { ref, computed } from 'vue';
+          |export const useSearchStore = defineStore('search', () => {
+          |  const term = ref('');
+          |  const highlighted = computed(() => `<mark>${term.value}</mark>`);
+          |  function setTerm(v) { term.value = v; }
+          |  return { term, highlighted, setTerm };
+          |});
+          |""".stripMargin,
+            "src/stores/search.ts"
+          ).moreCode(
+            """
+          |import { computed } from 'vue';
+          |import { useRoute } from 'vue-router';
+          |export function useQueryParam(name) {
+          |  const route = useRoute();
+          |  return computed(() => route.query[name]);
+          |}
+          |""".stripMargin,
+            "src/composables/query.ts"
+          ).moreCode(
+            """
+          |import { useRoute } from 'vue-router';
+          |import { useSearchStore } from '../stores/search';
+          |import { useQueryParam } from '../composables/query';
+          |const route = useRoute();
+          |const store = useSearchStore();
+          |store.setTerm(route.query.q);
+          |const tab = useQueryParam('tab');
+          |export function render(el) { el.innerHTML = store.highlighted; el.outerHTML = tab.value; }
+          |""".stripMargin,
+            "src/views/search.ts"
+          ))
+          cpg.call.nameExact("useSearchStore").callee(using NoResolve).isMethod.l should not be empty
+          cpg.call.nameExact("setTerm").callee(using NoResolve).isMethod.fullName.l
+              .exists(_.contains("stores/search.ts")) shouldBe true
+          cpg.call.nameExact("useQueryParam").callee(using NoResolve).fullName.l
+              .exists(_.contains("composables/query.ts")) shouldBe true
+          // the store's derived state is a source because setTerm is called with the route query
+          cpg.tag.name("framework-input").call.code.l.exists(
+            _.startsWith("computed(() => `<mark>")
+          ) shouldBe true
+      }
+  }
+
   "React and Next.js" should {
       "tag server functions, form actions and request readers" in {
           val cpg = tagged(code(
@@ -428,6 +520,56 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "Data functions" should {
+      "keep a loader a route whose return value is no response" in {
+          val cpg = tagged(code(
+            """
+          |import { useLoaderData } from 'react-router';
+          |export async function loader({ params }) { return { id: params.id }; }
+          |export default function Item() { const data = useLoaderData(); return <p>{data.id}</p>; }
+          |""".stripMargin,
+            "app/routes/item.tsx"
+          ).moreCode(
+            """
+          |export async function loader({ params }) { return new Response(params.id); }
+          |""".stripMargin,
+            "app/routes/raw.tsx"
+          ))
+          cpg.tag.name("framework-route").method.filename.l.sorted shouldBe
+              List("app/routes/item.tsx", "app/routes/raw.tsx")
+          // a resource route (no component) answers the request with its return value
+          cpg.tag.name("framework-data").method.filename.l shouldBe List("app/routes/item.tsx")
+      }
+
+      "carry h3 event.context fields a middleware set from the request" in {
+          val cpg = tagged(code(
+            """
+          |export default defineEventHandler((event) => {
+          |  event.context.tenant = getRequestHeader(event, 'x-tenant');
+          |  event.context.region = 'eu';
+          |});
+          |""".stripMargin,
+            "server/middleware/tenant.ts"
+          ).moreCode(
+            """
+          |export default defineEventHandler(async (event) => {
+          |  const tenant = event.context.tenant;
+          |  const region = event.context.region;
+          |  return $fetch(`https://${tenant}.internal/config`);
+          |});
+          |""".stripMargin,
+            "server/api/config.get.ts"
+          ).moreCode("""{ "dependencies": { "nuxt": "^4.0.0" } }""", "package.json"))
+          val reads = cpg.call.code("event\\.context\\.(tenant|region)").filter(
+            _.method.filename.contains("api")
+          ).l
+          reads.filter(_.code.endsWith("tenant")).tag.name.l should contain(
+            "via:server/middleware/tenant.ts#3"
+          )
+          reads.filter(_.code.endsWith("region")).tag.name.l should not contain "framework-input"
+      }
+  }
+
   "Node.js on the server" should {
       "tag commands, files and SQL by binding, and leave bound parameters and basename alone" in {
           val cpg = tagged(code(
@@ -549,7 +691,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("redirect").call.code.l shouldBe List("redirect(303, next)")
       }
 
-      "resolve a route component's $props to the sibling load and tag its request members" in {
+      "resolve a route component's $props to the sibling load" in {
           val cpg = tagged(code(
             """
           |export const load = async ({ params, cookies }) => {
@@ -569,11 +711,8 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           ))
           val props = cpg.call.nameExact("$props").l.head
           props.methodFullName shouldBe "src/routes/posts/+page.server.ts::program:load"
-          // the request members are sources where they are read, not only the whole parameter
-          (cpg.tag.name("framework-input").call.code.l should contain).allOf(
-            "params.slug",
-            "cookies.get"
-          )
+          // the handler's parameter is the source; its member reads are not tagged again
+          cpg.tag.name("framework-input").parameter.method.name.l should contain("load")
       }
 
       "make a transformPageChunk callback's return value an HTML sink" in {

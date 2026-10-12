@@ -70,7 +70,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
       case l: Literal => literalValue(l)
       case id: Identifier =>
           ctx.modules.resolve(id.method.filename, id.name).map(i =>
-              s"${VueRecognizer.normalisedModule(i.file, i.module)}:${i.imported}"
+              s"${JsModules.resolveRelative(i.file, i.module)}:${i.imported}"
           )
       case _ => None
     val providers = ctx.cpg.call.nameExact("provide").l.flatMap { call =>
@@ -246,28 +246,20 @@ object VueRecognizer extends JsFrameworkRecognizer:
     * `_tmp.innerHTML = x` writes inside the argument.
     */
   private def computedKeys(arg: Expression): Set[String] =
-      arg.ast.isCall.nameExact(Operators.assignment).l.flatMap { a =>
-          (a.argumentOption(1), a.argumentOption(2)) match
-            case (Some(fa: Call), Some(v)) if !v.isInstanceOf[Literal] => fieldName(fa)
-            case _                                                     => None
-      }.toSet
+      computedWrites(arg).flatMap(a =>
+          a.argumentOption(1).collect { case fa: Call => fa }.flatMap(fieldName)
+      ).toSet
 
-  /** A relative import specifier written from its own file (`./keys`, `../keys`) names the same
-    * module from every importer; this normalises it to a project-relative path so two importers of
-    * one module produce one key.
+  /** The writes of an object literal argument that put a computed value under a key:
+    * `_tmp.innerHTML = snippet` for `{ innerHTML: snippet }`.
     */
-  private def normalisedModule(file: String, module: String): String =
-      if !module.startsWith(".") then module
-      else
-        val dir      = file.substring(0, math.max(file.lastIndexOf('/'), 0))
-        val parts    = (dir.split("/").toSeq ++ module.split("/").toSeq).filter(_.nonEmpty)
-        val resolved = scala.collection.mutable.ArrayBuffer.empty[String]
-        parts.foreach {
-            case "."  => ()
-            case ".." => if resolved.nonEmpty then resolved.trimEnd(1)
-            case p    => resolved += p
-        }
-        resolved.mkString("/", "/", "")
+  private def computedWrites(arg: Expression): List[Call] =
+      arg.ast.isCall.nameExact(Operators.assignment).l.filter { a =>
+          (a.argumentOption(1), a.argumentOption(2)) match
+            case (Some(fa: Call), Some(v)) =>
+                fa.name == Operators.fieldAccess && !v.isInstanceOf[Literal]
+            case _ => false
+      }
 
   private def tagSinks(ctx: JsContext): Unit =
     // navigateTo(url, { external: true }) - and `open: { target }`, which opens a window
@@ -280,13 +272,18 @@ object VueRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(external, NavigationSink*)
 
-    // useHead({ script: [{ innerHTML: x }] }) - useHeadSafe drops these keys
-    val heads = ctx.cpg.call.nameExact("useHead", "useServerHead").filter(c =>
-        c.argument.filter(_.argumentIndex == 1).exists(a =>
-            computedKeys(a).exists(k => k == "innerHTML" || k == "textContent" || k == "src")
+    // useHead({ script: [{ innerHTML: x }] }) - useHeadSafe drops these keys. The sink is the value
+    // written under the key, where the head entry takes it.
+    val headKeys = Set("innerHTML", "textContent", "src")
+    val heads = ctx.cpg.call.nameExact("useHead", "useServerHead").l
+        .flatMap(_.argument.filter(_.argumentIndex == 1).l)
+        .flatMap(computedWrites)
+        .filter(w =>
+            w.argumentOption(1).collect { case fa: Call => fa }.flatMap(fieldName).exists(
+              headKeys.contains
+            )
         )
-    )
-    ctx.tagger.tag(heads, HtmlSink*)
+    ctx.tagger.tag(heads.iterator, HtmlSink*)
 
     // h('div', { innerHTML: x }), h('a', { href: x })
     val renders = ctx.cpg.call.nameExact("h", "createVNode", "createElementVNode").filter(c =>

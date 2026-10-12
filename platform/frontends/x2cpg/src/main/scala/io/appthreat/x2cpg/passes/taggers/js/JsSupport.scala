@@ -19,6 +19,11 @@ object JsTags:
   val INGRESS: String = "service-ingress"
   // Entry points
   val ROUTE: String = "framework-route"
+
+  /** A route's data function (`load`, a loader, a form action): an entrypoint whose return value
+    * goes to the page that renders it, not out as the response - no sink.
+    */
+  val DATA: String = "framework-data"
   // Sinks
   val OUTPUT: String      = "framework-output"
   val CODE_EXEC: String   = "code-execution"
@@ -88,6 +93,23 @@ final class JsTagger(
           method.fullName
         )
 
+  /** Where the value behind a bridged node came from, by node id: `src/middleware.ts#14`. */
+  private val origins = mutable.HashMap.empty[Long, Set[String]]
+
+  /** Tags `nodes` as a source of kind `name` that a bridge carried there from `from` - the value
+    * the bridge read (`context.locals.banner = <value>`, `this.id = <value>`) and the node the
+    * source was found at behind it. A node that was itself bridged contributes where its own value
+    * came from. Each node also gets a `via:<file>#<line>` tag per place, so a reported flow that
+    * starts at a bridged read says where its value came from.
+    */
+  def tagVia[T <: StoredNode](nodes: IterableOnce[T], name: String, from: StoredNode*): Unit =
+    val where = from.flatMap(n => origins.getOrElse(n.id(), JsTagger.locationOf(n).toSet)).toSet
+    nodes.iterator.foreach { n =>
+      tag(Iterator(n), name)
+      origins.update(n.id(), origins.getOrElse(n.id(), Set.empty) ++ where)
+      where.foreach(w => tag(Iterator(n), s"via:$w"))
+    }
+
   /** Call sites resolved to a method this run. The CALL edge lands in the graph only when the pass
     * ends, so a same-run reader (a bridge deciding what a parameter carries) consults this.
     */
@@ -108,6 +130,15 @@ final class JsTagger(
       if memo.add((node.id(), s"$name=$value")) then
         Iterator(node).newTagNodePair(name, value).store()(using dstGraph)
 end JsTagger
+
+object JsTagger:
+  /** `file#line` of a node, for provenance. */
+  def locationOf(n: StoredNode): Option[String] =
+      n match
+        case p: MethodParameterIn => p.lineNumber.map(l => s"${p.method.filename}#$l")
+        case c: CfgNode           => c.lineNumber.map(l => s"${c.method.filename}#$l")
+        case m: Member            => m.lineNumber.map(l => s"${m.typeDecl.filename}#$l")
+        case _                    => None
 
 /** How an ESM specifier bound its local name. */
 enum ImportKind:
@@ -207,6 +238,22 @@ final class JsModules(cpg: Cpg):
 end JsModules
 
 object JsModules:
+
+  /** A relative specifier made a project path: `../keys` from `/app/src/views/A.vue` is
+    * `/app/src/keys`. Two importers of one module get one path. A package specifier is returned as
+    * written.
+    */
+  def resolveRelative(fromFile: String, module: String): String =
+      if !module.startsWith(".") then module
+      else
+        val dir      = fromFile.substring(0, math.max(fromFile.lastIndexOf('/'), 0))
+        val resolved = scala.collection.mutable.ArrayBuffer.empty[String]
+        (dir.split("/").toSeq ++ module.split("/").toSeq).filter(_.nonEmpty).foreach {
+            case "."  =>
+            case ".." => if resolved.nonEmpty then resolved.trimEnd(1)
+            case part => resolved += part
+        }
+        resolved.mkString(if fromFile.startsWith("/") then "/" else "", "/", "")
 
   /** `@angular/core:inject` -> (`@angular/core`, `inject`); `vue` -> (`vue`, ""). A Windows drive
     * letter or a URL scheme is not a separator, so only the LAST colon counts, and only when what
@@ -600,6 +647,18 @@ object JsShapes:
       c.name != Operators.formatString &&
           (c.code.matches("(?s)^[\\w$.]+`.*") ||
               c.code.matches("(?s)^[\\w$.]+\\(<operator>\\.formatString\\(.*"))
+
+  /** What a file exports as default: `export default function Card() {}` and `export default Card`
+    * lower to `exports["default"] = Card`, an arrow function to a reference to it.
+    */
+  def defaultExportValue(ctx: JsContext, file: String): Option[Expression] =
+      ctx.cpg.file.nameExact(file).method.nameExact(":program")
+          .flatMap(_.ast.isCall.nameExact(Operators.assignment))
+          .find(_.argumentOption(1).exists(_.code.matches("""exports\[["']default["']\]""")))
+          .flatMap(_.argumentOption(2))
+
+  def hasDefaultExport(ctx: JsContext, file: String): Boolean =
+      defaultExportValue(ctx, file).nonEmpty
 
   /** True for the target of an assignment (`x.y` in `x.y = v`), which is written, not read. */
   def isAssignmentTarget(e: Expression): Boolean =

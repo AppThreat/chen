@@ -161,8 +161,13 @@ object NitroRecognizer extends JsFrameworkRecognizer:
         inServer(fa)
     }
     writes.foreach { (field, value) =>
-        MemberTaintBridge.sourceTagOf(ctx, value).foreach { tag =>
-            ctx.tagger.tag(readChains(allReads.filter(fieldName(_).contains(field))), tag)
+        MemberTaintBridge.sourceOf(ctx, value).foreach { found =>
+            ctx.tagger.tagVia(
+              readChains(allReads.filter(fieldName(_).contains(field))),
+              found.tag,
+              found.at,
+              value
+            )
         }
     }
   end bridgeEventContext

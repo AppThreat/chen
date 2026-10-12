@@ -69,6 +69,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
     tagMessageHandlers(ctx)
     tagRemoteData(ctx)
     tagHtmlSinks(ctx)
+    tagResponseBodies(ctx)
     tagTemplateSinks(ctx)
     tagNavigationSinks(ctx)
     tagCodeSinks(ctx)
@@ -169,7 +170,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
   /** True when `expr` holds an object made by `new C(...)` (or `C(...)`) for one of `ctors`: the
     * single assignment of a local, or an assignment to the same `this.<field>` in the class.
     */
-  private[js] def constructedBy(expr: Expression, ctors: Set[String]): Boolean =
+  private[taggers] def constructedBy(expr: Expression, ctors: Set[String]): Boolean =
     def madeBy(value: Expression): Boolean =
         value match
           case c: Call =>
@@ -299,10 +300,11 @@ object DomRecognizer extends JsFrameworkRecognizer:
         .filterNot(w =>
             w.argumentOption(1).collect { case c: Call => c }.flatMap(fieldBase)
                 .flatMap(memberPath).exists(p =>
-                    isLocation(p) || p.headOption.contains("exports") || p.take(2) == List(
-                      "module",
-                      "exports"
-                    )
+                    isLocation(p) || p.headOption.contains("exports") ||
+                        p.take(2) == List("module", "exports") ||
+                        // `this.href = v` writes a component's own field (a Lit or Angular
+                        // property), which its template renders - there is the sink
+                        p == List("this")
                 )
         )
     ctx.tagger.tag(urlWrites, HtmlSink*)
@@ -337,6 +339,45 @@ object DomRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(attributeCalls, HtmlSink*)
   end tagHtmlSinks
 
+  /** Content types a browser does not render as a page. */
+  private val DataContentType =
+      "(?i)^(application/json|text/plain|text/csv|application/octet-stream|image/[\\w.+-]+)(\\s*;.*)?$".r
+
+  /** A server handler's `new Response(body, init)` serves `body` from the site's origin: markup the
+    * code did not fix - an attacker-chosen upstream's body, a reflected parameter - is rendered as
+    * the site's own page. Not a sink where `init` sets a constant data content type
+    * (`application/json`, `text/plain`), or where a string is served with the default `text/plain`
+    * \- a template, a concatenation, `JSON.stringify(...)`.
+    */
+  private def tagResponseBodies(ctx: JsContext): Unit =
+    def contentType(init: Option[Expression]): Option[Expression] =
+        init.toList.flatMap(_.ast.isCall.nameExact(Operators.assignment).l).collectFirst {
+            case a if a.argumentOption(1).exists {
+                    case fa: Call =>
+                        fieldName(fa).orElse(fa.argumentOption(2).flatMap(literalValue))
+                            .exists(_.equalsIgnoreCase("content-type"))
+                    case _ => false
+                } => a.argumentOption(2)
+        }.flatten
+    def isText(body: Expression): Boolean = body match
+      case c: Call =>
+          c.name == Operators.formatString || c.name == Operators.addition ||
+          (callName(c) == "stringify" && calleePath(c).contains(List("JSON", "stringify")))
+      case _: Literal => true
+      case _          => false
+    val bodies = ctx.cpg.call.nameExact("<operator>.new")
+        .filter(c => c.code.startsWith("new Response(") && isServerFile(c.method.filename))
+        .filter { c =>
+          val body = c.argumentOption(1).filter(_.argumentIndex == 1)
+          val init = c.argument.filter(_.argumentIndex == 2).headOption
+          body.exists(b => !b.isInstanceOf[Literal]) && (contentType(init) match
+            case Some(t) => !literalValue(t).exists(v => DataContentType.matches(v.trim))
+            case None    => !body.exists(isText)
+          )
+        }
+    ctx.tagger.tag(bodies, HtmlSink*)
+  end tagResponseBodies
+
   /** Attribute bindings in templates (JSX, Vue and Svelte SFCs) that put a value into markup or a
     * URL: `:href="x"`, `href={x}`, `innerHTML={x}` (Solid, Preact), `:srcdoc`, `bind:innerHTML`
     * (Svelte), `set:html` (Astro). A `src` is a sink only on an element that loads a document or
@@ -357,9 +398,6 @@ object DomRecognizer extends JsFrameworkRecognizer:
           .stripPrefix("bind:")
           .stripPrefix(":")
           .stripPrefix(".")
-          // an Angular property binding's attribute code keeps its closing bracket
-          // (`innerHTML]="x"`); the name is what precedes it
-          .stripSuffix("]")
           .toLowerCase
 
   /** React 19 replaces a `javascript:` URL in `href`, `src`, `action` and `formAction` with an
@@ -371,33 +409,64 @@ object DomRecognizer extends JsFrameworkRecognizer:
           ctx.project.majorVersionOf("react").exists(_ >= 19) &&
           !ctx.modules.uses("preact", "solid-js", "@builder.io/qwik", "@qwik.dev")
 
+  /** The element an attribute is written on: `Form` for `<Form action={ack}>`. */
+  private def elementOf(attr: TemplateDom): Option[String] =
+      attr.astParent match
+        case element: TemplateDom =>
+            Some(element.code.drop(1).takeWhile(c => c.isLetterOrDigit || c == '-' || c == '.'))
+        case _ => None
+
+  /** A capitalised element is a component, whose attributes are its props: only a link component's
+    * `href` ends up in an anchor; `<Form action={ack}>` (Qwik, Remix) takes an action object,
+    * `<Image src>` an image.
+    */
+  private def isComponent(element: String): Boolean =
+      element.headOption.exists(_.isUpper)
+
+  /** An Angular property binding (`[innerHTML]="x"`, astgen keeps the brackets) goes through the
+    * framework's DomSanitizer: markup is sanitised, a `javascript:` URL blocked, a resource URL
+    * refused - only a value from `bypassSecurityTrust*`, itself the sink, gets through. What a
+    * binding can still do is point a link at another site.
+    */
+  private def isAngularBinding(name: String): Boolean = name.startsWith("[")
+
+  private val AngularLinkBindings = Set("[href]", "[attr.href]")
+  // an SVG `<image href>` or a `<link href>` loads a resource; only these navigate
+  private val LinkElements = Set("a", "area")
+
   private def tagTemplateSinks(ctx: JsContext): Unit =
+    val links = ctx.cpg.templateDom.nameExact("JSXAttribute")
+        .filter(attr =>
+            AngularLinkBindings.contains(attributeName(attr.code)) &&
+                elementOf(attr).exists(e => LinkElements.contains(e.toLowerCase))
+        ).l
+    ctx.tagger.tag(boundValues(links), NavigationSink*)
     val attributes = ctx.cpg.templateDom.nameExact("JSXAttribute").filter { attr =>
-      val name = attributeName(attr.code)
-      MarkupAttributes.contains(name) ||
-      (UrlBindingAttributes.contains(name) && !reactBlocksScriptUrls(
-        ctx,
-        attr.file.name.headOption.getOrElse("")
-      )) ||
-      (name == "src" && attr.astParent.isInstanceOf[TemplateDom] && {
-          val element = attr.astParent.asInstanceOf[TemplateDom].code.drop(1)
-              .takeWhile(c => c.isLetterOrDigit || c == '-').toLowerCase
-          DocumentLoaders.contains(element)
-      })
+      val name      = attributeName(attr.code)
+      val element   = elementOf(attr).getOrElse("")
+      val component = isComponent(element)
+      !isAngularBinding(name) && MarkupAttributes.contains(name) ||
+      (UrlBindingAttributes.contains(name) && (!component || name == "href") &&
+          !reactBlocksScriptUrls(ctx, attr.file.name.headOption.getOrElse(""))) ||
+      (name == "src" && !component && DocumentLoaders.contains(element.toLowerCase))
     }.l
-    // The attribute's value - its outermost expression, not every read nested inside it - and only
-    // when the code does not anchor it: `href="/profile/@{name}"` can never become `javascript:`.
-    val bound = attributes.iterator.flatMap { attr =>
-        attr.ast.collectAll[Call].filterNot(c => c.astParent.isInstanceOf[Call]).l
-    }.filter { value =>
-      // a template interpolation is wrapped: `<operator>.interpolation(expr)`
-      val expr =
-          if value.name == "<operator>.interpolation" then value.argumentOption(1).getOrElse(value)
-          else value
-      !hasFixedOrigin(expr)
-    }.dedup.l
-    ctx.tagger.tag(bound.iterator, HtmlSink*)
-  end tagTemplateSinks
+    ctx.tagger.tag(boundValues(attributes), HtmlSink*)
+
+  /** The values attributes bind - each one's outermost expression, not every read nested inside it
+    * \- where the code does not anchor them: `href="/profile/@{name}"` can never become
+    * `javascript:` or another site.
+    */
+  private def boundValues(attributes: List[TemplateDom]): Iterator[Call] =
+      attributes.iterator.flatMap { attr =>
+          attr.ast.collectAll[Call].filterNot(c => c.astParent.isInstanceOf[Call]).l
+      }.filter { value =>
+        // a template interpolation is wrapped: `<operator>.interpolation(expr)`
+        val expr =
+            if value.name == "<operator>.interpolation" then
+              value.argumentOption(1).getOrElse(value)
+            else value
+        !hasFixedOrigin(expr)
+      }.dedup
 
   private def tagNavigationSinks(ctx: JsContext): Unit =
     // `location = x`, `window.location = x`, `location.href = x`
@@ -641,6 +710,24 @@ object DomRecognizer extends JsFrameworkRecognizer:
     val objectUrls = ctx.cpg.call.nameExact("createObjectURL")
         .filter(c => receiverOf(c).flatMap(memberPath).contains(List("URL")))
     ctx.tagger.tag(objectUrls, SANITIZER)
+
+    // A JSON response - `Response.json(x)`, Next.js's `NextResponse.json(x)`, SvelteKit's
+    // `json(x)` - is served as `application/json`: a handler returning one returns no markup.
+    val jsonResponses = ctx.cpg.call.nameExact("json").filter { c =>
+      val file = c.method.filename
+      calleePath(c).exists {
+          // the global, unless the code binds the name itself (a captured global is a local too)
+          case List("Response", "json") =>
+              JsIndexes.assignedValues(c.method, "Response").isEmpty &&
+              c.method.parameter.nameExact("Response").isEmpty
+          case List(binding, "json") =>
+              ctx.modules.localNamesOf(file, "next", "NextResponse").contains(binding)
+          case List(binding) =>
+              ctx.modules.localNamesOf(file, "@sveltejs/kit", "json").contains(binding)
+          case _ => false
+      }
+    }
+    ctx.tagger.tag(jsonResponses, SANITIZER)
 
     // Predicates and position lookups: their result is a boolean or a number.
     val predicates = ctx.cpg.call.filter(c => Predicates.contains(callName(c)))

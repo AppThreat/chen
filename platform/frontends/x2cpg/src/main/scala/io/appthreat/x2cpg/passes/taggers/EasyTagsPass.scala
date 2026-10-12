@@ -65,6 +65,34 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     "(?s)(?!this\\.[\\w$]+$)(?!_tmp_)(this\\.)?[a-z_$][\\w$]*(\\.[\\w$]+)*\\.(list|create|upload|delete|execute|command|invoke|submit|send)"
   )
 
+  /** Receivers whose `send`/`delete`/`list` are no SDK action. The browser's own channels send what
+    * the page chose to send - a request body, a socket frame - to where the page connected them
+    * (`xhr.send(body)`); collections and a request's own containers delete an entry
+    * (`map.delete(k)`, `cookies.delete('session')`, `url.searchParams.delete('q')`).
+    */
+  private val NonClientConstructors = Set(
+    "XMLHttpRequest",
+    "WebSocket",
+    "BroadcastChannel",
+    "Worker",
+    "SharedWorker",
+    "RTCDataChannel",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "URLSearchParams",
+    "Headers",
+    "FormData"
+  )
+  private val RequestContainers = Set("cookies", "headers", "searchParams", "formData", "params")
+
+  private def isNotSdkClient(callee: Call): Boolean =
+      js.JsShapes.fieldBase(callee).exists { base =>
+          js.JsShapes.memberPath(base).flatMap(_.lastOption).exists(RequestContainers.contains) ||
+          js.DomRecognizer.constructedBy(base, NonClientConstructors)
+      }
+
   // NB: there is no filename-keyed PY_REQUEST_PATTERNS heuristic
   // (".*(views|engine|api|base|http).py:<module>.*"). The framework recognizers in
   // passes/taggers/python/ tag handler parameters and request accesses structurally
@@ -429,7 +457,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     atom.call
         .filter { c =>
             if isAssignment(c) then matches(JsResponseWrite, c)
-            else if c.name == Operators.fieldAccess then matches(JsSdkVerb, c)
+            else if c.name == Operators.fieldAccess then
+              matches(JsSdkVerb, c) && !isNotSdkClient(c)
             else
               !c.name.startsWith("<operator>") &&
               (matches(JsResponseCall, c) || matches(JsDatabaseCall, c) && !isTaggedTemplate(c))

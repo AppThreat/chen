@@ -102,17 +102,18 @@ object ReactiveBridge:
       assignments.foreach { case (method, name, value) =>
           if !done.contains((method.id(), name)) then
             val (tainted, viaDerivation) = taintOf(ctx, value)
-            tainted.foreach { tagName =>
+            tainted.foreach { found =>
               done += ((method.id(), name))
               grew = true
               // The engine links an outer variable to its reads inside closures only inside
               // the ENCLOSING method's dependence graph; a walk that starts at a sink inside
               // the closure never crosses that edge, so the captured read is a source of its
               // own.
-              ctx.tagger.tag(capturedReads(ctx, method, name), tagName)
+              ctx.tagger.tagVia(capturedReads(ctx, method, name), found.tag, found.at, value)
               // A derived value is a new value in its own method too: `const c = computed(...)`
               // and every later `c.value` there start from the wrapper call.
-              if viaDerivation then ctx.tagger.tag(readsIn(method, name), tagName)
+              if viaDerivation then
+                ctx.tagger.tagVia(readsIn(method, name), found.tag, found.at, value)
             }
       }
       // watch(source, (value) => ...)
@@ -123,11 +124,11 @@ object ReactiveBridge:
             case id: Identifier => readTag(ctx, id)
             case other =>
                 callbackMethod(other).flatMap(returnTaint(ctx, _)).orElse(taintOf(ctx, other)._1)
-          tainted.foreach { tagName =>
+          tainted.foreach { found =>
             val params = callbacksIn(args(1)).flatMap(firstParam)
-            if params.exists(p => !ctx.tagger.has(p.id(), tagName)) then
+            if params.exists(p => !ctx.tagger.has(p.id(), found.tag)) then
               grew = true
-              ctx.tagger.tag(params.iterator, tagName)
+              ctx.tagger.tagVia(params.iterator, found.tag, found.at)
           }
       }
     end while
@@ -140,7 +141,9 @@ object ReactiveBridge:
   private def tagTaintedDerivationCalls(ctx: JsContext): Unit =
       ctx.cpg.call.filter(isDerivationCall).foreach { d =>
           derivationCallback(d).foreach { cb =>
-              returnTaint(ctx, cb).foreach(tag => ctx.tagger.tag(Iterator(d), tag))
+              returnTaint(ctx, cb).foreach(found =>
+                  ctx.tagger.tagVia(Iterator(d), found.tag, found.at)
+              )
           }
       }
 
@@ -152,24 +155,30 @@ object ReactiveBridge:
   /** The source tag of a value: what reaches it in its method, or - for a reactive derivation -
     * what its callback returns.
     */
-  private def taintOf(ctx: JsContext, value: Expression): (Option[String], Boolean) =
+  private def taintOf(
+    ctx: JsContext,
+    value: Expression
+  ): (Option[MemberTaintBridge.Found], Boolean) =
       JsShapes.unwrap(value) match
         case c: Call if Derivations.contains(callName(c)) =>
-            val tag = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
+            val found = c.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
                 .flatMap(a =>
                     callbackMethod(a).flatMap(returnTaint(ctx, _))
-                        .orElse(MemberTaintBridge.sourceTagOf(ctx, a))
+                        .orElse(MemberTaintBridge.sourceOf(ctx, a))
                 )
-            (tag, tag.nonEmpty)
-        case _ => MemberTaintBridge.sourceTagThrough(ctx, value)
+            (found, found.nonEmpty)
+        case _ =>
+            val (_, derived) = MemberTaintBridge.sourceTagThrough(ctx, value)
+            (MemberTaintBridge.sourceOf(ctx, value), derived)
 
-  private def returnTaint(ctx: JsContext, m: Method): Option[String] =
+  private def returnTaint(ctx: JsContext, m: Method): Option[MemberTaintBridge.Found] =
       m.ast.isReturn.astChildren.collect { case e: Expression => e }.l.iterator
-          .flatMap(MemberTaintBridge.sourceTagOf(ctx, _)).nextOption()
+          .flatMap(MemberTaintBridge.sourceOf(ctx, _)).nextOption()
 
-  private def readTag(ctx: JsContext, id: Identifier): Option[String] =
+  private def readTag(ctx: JsContext, id: Identifier): Option[MemberTaintBridge.Found] =
       Seq(JsTags.INPUT, JsTags.INGRESS).find(t => ctx.tagger.has(id.id(), t))
-          .orElse(MemberTaintBridge.sourceTagOf(ctx, id))
+          .map(MemberTaintBridge.Found(_, id))
+          .orElse(MemberTaintBridge.sourceOf(ctx, id))
 
   /** Reads of `name` in the functions nested in `method` that capture it. */
   private def capturedReads(ctx: JsContext, method: Method, name: String): Iterator[Identifier] =

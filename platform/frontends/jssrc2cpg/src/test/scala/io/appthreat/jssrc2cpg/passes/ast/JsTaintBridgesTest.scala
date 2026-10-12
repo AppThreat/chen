@@ -139,4 +139,61 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").identifier.name.l should not contain "n"
       }
   }
+
+  "A component element" should {
+      "carry any of its attributes into the component's props" in {
+          val cpg = code(
+            """
+          |import RichText from './RichText';
+          |export function Page(q) {
+          |  return <RichText title="About" label={'x'} html={q} />;
+          |}
+          |""".stripMargin,
+            "page.jsx"
+          ).moreCode(
+            """
+          |export default function RichText({ html }) {
+          |  document.getElementById('out').innerHTML = html;
+          |  return null;
+          |}
+          |""".stripMargin,
+            "RichText.jsx"
+          )
+          tagged(cpg)
+          val element = cpg.call.nameExact("RichText").l
+          element.argument.code.l shouldBe List("{q}")
+          element.callee(using NoResolve).fullName.l should contain(
+            "RichText.jsx::program:RichText"
+          )
+          val sink = cpg.call.nameExact(Operators.assignment).code(".*innerHTML = html")
+          show(sink.reachableByFlows(cpg.parameter.nameExact("q"))) should not be empty
+      }
+  }
+
+  "Provenance" should {
+      "name where a bridged source came from: Astro locals written by middleware" in {
+          val cpg = tagged(code(
+            """
+          |import { defineMiddleware } from 'astro:middleware';
+          |export const onRequest = defineMiddleware((context, next) => {
+          |  context.locals.banner = context.url.searchParams.get('banner');
+          |  context.locals.theme = 'dark';
+          |  return next();
+          |});
+          |""".stripMargin,
+            "src/middleware.ts"
+          ).moreCode(
+            """
+          |const banner = Astro.locals.banner;
+          |const theme = Astro.locals.theme;
+          |""".stripMargin,
+            "src/layouts/Base.ts"
+          ).moreCode("""{ "dependencies": { "astro": "^5.0.0" } }""", "package.json"))
+          val bridged = cpg.call.code("Astro\\.locals\\.banner").l
+          bridged.tag.name.l should contain("framework-input")
+          bridged.tag.name.l should contain("via:src/middleware.ts#4")
+          // a field middleware set to a constant is no source
+          cpg.call.code("Astro\\.locals\\.theme").tag.name.l should not contain "framework-input"
+      }
+  }
 end JsTaintBridgesTest

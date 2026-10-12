@@ -62,9 +62,10 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
   private val PageFields = Set("url", "params", "data", "form", "state")
 
   def run(ctx: JsContext): Unit =
-    tagEntrypoints(ctx, DataFile, DataEntrypoints)
-    tagEntrypoints(ctx, EndpointFile, HttpEntrypoints)
-    tagEntrypoints(ctx, HooksFile, HookEntrypoints)
+    // `load` and form actions hand their result to the page; endpoints and hooks answer the request
+    tagEntrypoints(ctx, DataFile, DataEntrypoints, data = true)
+    tagEntrypoints(ctx, EndpointFile, HttpEntrypoints, data = false)
+    tagEntrypoints(ctx, HooksFile, HookEntrypoints, data = false)
     tagComponentProps(ctx)
     tagPage(ctx)
     tagActions(ctx)
@@ -124,42 +125,22 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     ctx.tagger.tag(returned.iterator, HtmlSink*)
   end tagTransformedChunks
 
-  private def tagEntrypoints(ctx: JsContext, fileRegex: String, names: Set[String]): Unit =
+  /** Handlers by file convention: routes, whose parameters are the request. An endpoint's return
+    * value is the response; a `data` function's goes to the page and is no sink.
+    */
+  private def tagEntrypoints(
+    ctx: JsContext,
+    fileRegex: String,
+    names: Set[String],
+    data: Boolean
+  ): Unit =
     // Anonymous handlers are numbered when a file has more than one (`anonymous`, `anonymous1`).
     val handlers = ctx.cpg.file.name(fileRegex).method.internal
         .filter(m => names.contains(m.name) || m.name.startsWith("anonymous"))
         .l
     ctx.tagger.tag(handlers.iterator, ROUTE)
+    if data then ctx.tagger.tag(handlers.iterator, DATA)
     ctx.tagger.tag(handlers.iterator.flatMap(params), INPUT)
-    tagHandlerMembers(ctx, handlers)
-
-  /** Reads of the request members a handler received - `params.slug`, `url.searchParams`,
-    * `cookies.get(name)` - are the request's own data, and tagging the read (not only the
-    * parameter) is what makes a flow START where the value entered: the parameter the whole object
-    * came from is a step further back than the corpus' labels.
-    */
-  private def tagHandlerMembers(ctx: JsContext, handlers: List[Method]): Unit =
-    val handlerIds = handlers.map(_.id()).toSet
-    val fromParam: Expression => Boolean = e =>
-        JsValues.origin(e) match
-          case fa: Call if fa.name == Operators.fieldAccess =>
-              fa.argumentOption(1).exists {
-                  case p: MethodParameterIn => handlerIds.contains(p.method.id())
-                  // a parameter used in its method's expression is referenced by name
-                  case id: Identifier =>
-                      fa.method.parameter.nameExact(id.name)
-                          .exists(p => handlerIds.contains(p.method.id()))
-                  case _ => false
-              }
-          case _ => false
-    val reads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
-        fieldName(fa).isDefined && fieldBase(fa).exists {
-            case id: Identifier => fromParam(id)
-            case _              => false
-        } && handlers.exists(h => h.filename == fa.method.filename)
-    }
-    ctx.tagger.tag(readChains(reads), INPUT)
-  end tagHandlerMembers
 
   private def tagComponentProps(ctx: JsContext): Unit =
     val componentMethods = ctx.cpg.file.name(Component).method.internal.l

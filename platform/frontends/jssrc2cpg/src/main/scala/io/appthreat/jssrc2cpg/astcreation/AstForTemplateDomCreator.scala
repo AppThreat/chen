@@ -14,10 +14,15 @@ object AstForTemplateDomCreator:
     */
   val InterpolationOperator: String = "<operator>.interpolation"
 
+  /** The props object a component element passes: `<Card a={x} {...rest} />` calls `Card` with
+    * `<operator>.jsxProps(x, rest)`. Like an object literal it holds every value it is built from.
+    */
+  val JsxPropsOperator: String = "<operator>.jsxProps"
+
 trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
 
-  import AstForTemplateDomCreator.InterpolationOperator
+  import AstForTemplateDomCreator.{InterpolationOperator, JsxPropsOperator}
 
   /** The name to give a template DOM node.
     *
@@ -52,57 +57,64 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
     val allChildrenAsts = openingAst +: childrenAsts :+ closingAst
     setArgumentIndices(allChildrenAsts)
     val elementAst = Ast(domNode).withChildren(allChildrenAsts)
-    // An element whose name is a capitalized identifier names a COMPONENT - a function, in
-    // React-like frameworks and in every template astgen lowers to JSX. The element also lowers
-    // to a CALL of that component with its attribute values as arguments, so a resolved call
-    // edge can carry a parent's value into the component's props - no call site exists for
-    // `<RichText html={bio} />` otherwise. The attribute expressions are lowered a second time
-    // for the call: the originals stay under the attribute template nodes, where the template
-    // sinks are tagged. Host elements (`div`) keep the template DOM alone.
+    // An element named by a capitalised identifier is a COMPONENT - a function, in React-like
+    // frameworks and in every template astgen lowers to JSX - and its attributes are the props it
+    // is called with. The element also lowers to a CALL of that component, so that a resolved call
+    // edge carries a parent's values into the component's props: no call site exists for
+    // `<RichText html={bio} />` otherwise. Host elements (`div`) keep the template DOM alone.
     componentName(jsxElem.json("openingElement"))
-        .map { name =>
-            componentCallAst(jsxElem, name, elementAst)
-        }
+        .map(name => componentCallAst(jsxElem, name, elementAst))
         .getOrElse(elementAst)
   end astForJsxElement
 
-  /** The call of the component an element names, with the element's first computed attribute value
-    * as its argument: `<RichText html={bio} />` lowers to a call whose argument is `bio`'s
-    * expression. React itself passes one props object; the dataflow engine maps a call's argument
-    * to the component's single props parameter by index, so one argument - the first value the code
-    * computes, constants excluded - is what carries a parent's value into the component's props.
-    * The attribute expressions are lowered a second time for the call; the originals stay under the
-    * attribute template nodes, where the template sinks are tagged.
+  /** `<RichText html={bio} title="About" {...rest} />` lowered to `RichText(<props>)`, where
+    * `<props>` is a [[JsxPropsOperator]] call over every value the code computes - `bio`, `rest` -
+    * since the component receives them all in its one props object. Constant attributes carry
+    * nothing and are left out. The value expressions are lowered a second time for the call; the
+    * originals stay under the attribute template nodes, where the template sinks are tagged.
     */
   private def componentCallAst(jsxElem: BabelNodeInfo, name: String, elementAst: Ast): Ast =
-    val attributes = jsxElem.json("openingElement").obj.getOrElse("attributes", ujson.Arr()) match
-      case attrs: ujson.Arr => attrs.value.toList
-      case _                => Nil
+    val attributes = safeObj(jsxElem.json, "openingElement")
+        .flatMap(_.get("attributes"))
+        .collect { case attrs: ujson.Arr => attrs.value.toList }
+        .getOrElse(Nil)
     val values = attributes.flatMap { attr =>
-      val attrObj = attr.obj
-      val valueOpt =
-          for
-            typ <- attrObj.get("type").collect { case ujson.Str("JSXAttribute") => () }
-            // a boolean attribute (`replace`) has a null value
-            v <- attrObj.get("value") if v != ujson.Null
-          yield v
-      valueOpt.map { v =>
-          // `{expr}` lowers to a template node; the argument is the expression inside it
-          v match
-            case container: ujson.Obj => container.obj.get("expression").getOrElse(v)
-            case other                => other
-      }.filter {
-          // a constant attribute (`author="guest"`) carries nothing
-          case ujson.Str(_) => false
-          case expr: ujson.Obj =>
-              expr.obj.get("type").collect { case ujson.Str(t) => t }.forall(t =>
-                  !Set("StringLiteral", "NumericLiteral", "BooleanLiteral", "NullLiteral")
-                      .contains(t)
-              )
-          case _ => true
-      }
-    }
-    val argAsts = values.headOption.map(v => astForNodeWithFunctionReference(v)).toList
+        safeStr(attr, "type") match
+          // `{...rest}` passes every prop of `rest`
+          case Some("JSXSpreadAttribute") => attr.obj.get("argument").toList
+          // `html={bio}`; a boolean attribute (`replace`) has no value, `title="About"` a constant
+          case Some("JSXAttribute") =>
+              attr.obj.get("value").toList.flatMap {
+                  case container: ujson.Obj
+                      if safeStr(container, "type").contains("JSXExpressionContainer") =>
+                      container.obj.get("expression").toList
+                  case _ => Nil
+              }
+          case _ => Nil
+    }.filterNot(v =>
+        safeStr(v, "type").exists(t =>
+            Set(
+              "StringLiteral",
+              "NumericLiteral",
+              "BooleanLiteral",
+              "NullLiteral",
+              "JSXEmptyExpression"
+            )
+                .contains(t)
+        )
+    )
+    val valueAsts = values.map(v => astForNodeWithFunctionReference(v))
+    val propsCall = NewCall()
+        .name(JsxPropsOperator)
+        .methodFullName(JsxPropsOperator)
+        .code(values.map(v => createBabelNodeInfo(v).code).mkString("{", ", ", "}"))
+        .dispatchType(DispatchTypes.STATIC_DISPATCH)
+        .argumentIndex(1)
+        .order(1)
+        .lineNumber(jsxElem.lineNumber)
+        .columnNumber(jsxElem.columnNumber)
+        .typeFullName(io.appthreat.jssrc2cpg.passes.Defines.Any)
+    val propsAst = callAst(propsCall, valueAsts)
     val componentCall = NewCall()
         .code(jsxElem.code)
         .name(name)
@@ -111,13 +123,10 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
         .lineNumber(jsxElem.lineNumber)
         .columnNumber(jsxElem.columnNumber)
         .typeFullName(io.appthreat.jssrc2cpg.passes.Defines.Any)
-    Ast(componentCall)
-        .withChildren(argAsts)
-        .withArgEdges(componentCall, argAsts.flatMap(_.root), 1)
-        .withChild(elementAst)
+    callAst(componentCall, List(propsAst)).withChild(elementAst)
   end componentCallAst
 
-  /** The component a JSX element names, when the name is a capitalized identifier - the naming rule
+  /** The component a JSX element names, when the name is a capitalised identifier - the naming rule
     * React-like frameworks use for component references.
     */
   private def componentName(openingElement: ujson.Value): Option[String] =
@@ -224,13 +233,14 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
     * handles via `case _: Call`, and taint reaches the markup itself rather than stopping at the
     * script-side definition of the value.
     *
-    * Expressions that are already a call carry their own uses, so they are left alone - wrapping
-    * them would add a redundant node to every `{foo()}` in every template.
+    * A call is wrapped too. It carries its own uses, but when the value IS what a framework reads
+    * from outside - a signal input `{partner()}`, `{props.html}` - the read is the source and the
+    * interpolation the sink, and two roles on one node make no flow. A function reference (an event
+    * handler) interpolates nothing and stays bare.
     */
   private def wrapInterpolation(container: BabelNodeInfo, exprAst: Ast): Ast =
       exprAst.root match
         case None                  => exprAst
-        case Some(_: NewCall)      => exprAst
         case Some(_: NewMethodRef) => exprAst
         case Some(_: NewTypeRef)   => exprAst
         case Some(_) =>
