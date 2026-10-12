@@ -75,9 +75,23 @@ final class JsTagger(
           }
       }
 
+  /** Resolves a call the frontend left unresolved to the method it calls, with the CALL edge and
+    * full name the dataflow engine follows into the callee. Only for a call with no callee yet.
+    */
+  def resolveCall(call: Call, method: Method): Unit =
+      if memo.add((call.id(), s"<call>${method.id()}")) then
+        dstGraph.addEdge(call, method, io.shiftleft.codepropertygraph.generated.EdgeTypes.CALL)
+        dstGraph.setNodeProperty(
+          call,
+          io.shiftleft.codepropertygraph.generated.PropertyNames.METHOD_FULL_NAME,
+          method.fullName
+        )
+
   /** Ids of the nodes this run tagged with any of `names`. */
   def taggedIds(names: String*): Iterator[Long] =
       memo.iterator.collect { case (id, n) if names.contains(n) => id }
+
+  private[js] def graphBuilder: DiffGraphBuilder = dstGraph
 
   /** True when this run has tagged the node with `name`. */
   def has(nodeId: Long, name: String): Boolean = memo.contains((nodeId, name))
@@ -501,27 +515,34 @@ object JsShapes:
           prefix.matches("(?i)^[a-z][a-z0-9+.-]*://[^/?#]+[/?#].*") ||
           prefix.startsWith("./") || prefix.startsWith("../")
 
-  /** The nodes to tag as request sinks for a request to `url`.
+  /** The nodes to tag as request sinks for a request to `url`: the parts of the URL that decide
+    * where the request goes, never the request call itself - what reaches its body, its options
+    * or its receiver is no forgery.
     *
     *   - A constant URL, or a value placed only in the query or fragment of a URL whose origin the
     *     code fixes (`/search?q=${q}`), is no sink.
     *   - A variable that decides the origin - the whole URL, a prefix (`${base}/items`), or the
-    *     host after a bare scheme (`wss://${host}/live`) - makes the request a sink. Where the
-    *     variable is only the leading base, that base is the sink, so that data reaching the path
-    *     or query of `${this.apiUrl}/items?q=` is not request forgery.
-    *   - A variable in the PATH of an otherwise fixed URL (`/api/items/${id}`) is client-side path
-    *     traversal: `../` in it reaches another endpoint of the same origin with the page's
-    *     credentials. The request is a sink.
+    *     host after a bare scheme (`wss://${host}/live`) - is a sink. A prefix that is
+    *     configuration - a field (`this.apiUrl`), a member of a config object (`environment.host`)
+    *     or a SCREAMING_CASE constant - is not.
+    *   - A variable in the PATH of a URL (`/api/items/${id}`, `${this.apiUrl}/items/${id}`) is a
+    *     sink for client-side path traversal: `../` in it reaches another endpoint of the same
+    *     origin with the page's credentials.
+    *   - A whole URL that is configuration - a service's own field (`this.http.put(this.host,
+    *     body)`), a SCREAMING_CASE constant, a member of `environment`/`config`/`process.env` - is
+    *     no sink.
     */
   def requestSinksFor(call: Call, url: Expression): List[CfgNode] =
     def isConstant(e: Expression) = e.isInstanceOf[Literal]
-    def variableInPath(parts: List[Expression], from: Int): Boolean =
+    // the variable parts before the query or the fragment starts
+    def variablesInPath(parts: List[Expression], from: Int): List[CfgNode] =
       var text = ""
-      parts.zipWithIndex.drop(from).exists { (part, i) =>
-        if isConstant(part) then
-          text += literalValue(part).getOrElse(part.code)
-          false
-        else !text.contains('?') && !text.contains('#')
+      parts.drop(from).flatMap {
+        case part if isConstant(part) =>
+            text += literalValue(part).getOrElse(part.code)
+            Nil
+        case part: CfgNode if !text.contains('?') && !text.contains('#') => List(part)
+        case _                                                           => Nil
       }
     url match
       case _: Literal => Nil
@@ -530,25 +551,34 @@ object JsShapes:
           val firstVar = parts.indexWhere(p => !isConstant(p))
           if firstVar < 0 then Nil
           else if firstVar == 0 then
-            parts.head match
-              case base: CfgNode =>
-                  // The base decides the origin - unless it is configuration: a field
-                  // (`this.apiUrl`), a member of a config object (`environment.host`) or a
-                  // SCREAMING_CASE constant. A later variable in the path is traversal.
-                  val configured = base match
-                    case c: Call => c.name == Operators.fieldAccess
-                    case id: Identifier =>
-                        id.name.length > 1 && id.name.forall(ch => ch.isUpper || ch.isDigit || ch == '_')
-                    case _ => false
-                  (if configured then Nil else List(base)) ++
-                      (if variableInPath(parts, 1) then List(call) else Nil)
+            val base = parts.head match
+              case c: Call if c.name == Operators.fieldAccess => Nil
+              case id: Identifier if isConfiguredUrl(id)      => Nil
+              case base: CfgNode                              => List(base)
+              case _                                          => Nil
+            base ++ variablesInPath(parts, 1)
           else
             val prefix = parts.take(firstVar).flatMap(literalValue).mkString
-            if !fixesOrigin(prefix) then List(call)
-            else if prefix.contains('?') || prefix.contains('#') then Nil
-            else List(call)
-      case _ => List(call)
+            if fixesOrigin(prefix) && (prefix.contains('?') || prefix.contains('#')) then Nil
+            else variablesInPath(parts, firstVar)
+      case e if isConfiguredUrl(e) => Nil
+      case e: CfgNode              => List(e)
+      case _                       => List(call)
   end requestSinksFor
+
+  private val ConfigRoots = Set("environment", "env", "config", "process", "import.meta")
+
+  private def isConfiguredUrl(url: Expression): Boolean =
+      url match
+        case id: Identifier =>
+            id.name.length > 1 && id.name.forall(ch => ch.isUpper || ch.isDigit || ch == '_')
+        case c: Call if c.name == Operators.fieldAccess =>
+            memberPath(c).exists {
+              case List("this", _) => true
+              case root :: _       => ConfigRoots.contains(root)
+              case _               => false
+            } || c.code.startsWith("import.meta.env.")
+        case _ => false
 
   /** A tagged template call (`` sql`... ${x}` ``), lowered to a call of the tag with the template
     * as `<operator>.formatString(...)`: the tag function receives the values separately - a SQL

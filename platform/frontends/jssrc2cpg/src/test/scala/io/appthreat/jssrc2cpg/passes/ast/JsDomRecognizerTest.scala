@@ -40,10 +40,11 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
             "location.hash",
             "window.location.search",
             "document.referrer",
-            "localStorage.getItem('t')",
             "window.location.href",
             "window.location.href.length"
           )
+          // stored data, like a response
+          tagsOf(cpg, "service-ingress") shouldBe List("localStorage.getItem('t')")
           // a write to location.href is a sink, not a read
           inputs should not contain "el.innerHTML"
       }
@@ -145,14 +146,11 @@ class JsDomRecognizerTest extends DataFlowCodeToCpgSuite:
           |""".stripMargin,
             "requests.js"
           ))
-          // the whole URL, a path segment (client-side path traversal), a host after a bare scheme;
-          // for a variable base only the base is the sink; a value in the query is none
-          cpg.tag.name("http-client").call.code.l.sorted shouldBe List(
-            "fetch(`/api/items/${id}`)",
-            "fetch(`wss://${q}/live`)",
-            "fetch(url)"
-          )
-          cpg.tag.name("http-client").identifier.name.l shouldBe List("base")
+          // the whole URL, a path segment (client-side path traversal), a host after a bare scheme
+          // and a variable base are sinks, not the request - nor a value in the query
+          cpg.tag.name("http-client").call.l shouldBe empty
+          cpg.tag.name("http-client").identifier.map(i => s"${i.name}:${i.lineNumber.get}").l.sorted shouldBe
+              List("base:6", "id:5", "q:7", "url:3")
       }
 
       "tag URL bindings in templates unless the code anchors them" in {

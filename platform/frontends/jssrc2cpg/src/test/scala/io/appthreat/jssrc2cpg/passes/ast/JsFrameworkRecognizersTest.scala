@@ -17,7 +17,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
     cpg
 
   private def flows(cpg: Cpg, sinkTag: String, sourceTag: String = "framework-input"): Int =
-    val sinks = cpg.tag.name(sinkTag).call.l
+    val sinks = cpg.tag.name(sinkTag).call.l ++ cpg.tag.name(sinkTag).identifier.l
     val sources =
         cpg.tag.name(sourceTag).call.l ++ cpg.tag.name(sourceTag).parameter.l ++
             cpg.tag.name(sourceTag).identifier.l
@@ -128,6 +128,68 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("framework-input").member.name.l shouldBe List("notes")
           cpg.tag.name("framework-input").call.code.l shouldBe List("this.notes")
       }
+
+      "resolve a call into the project's own injected service to the service's method" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, inject } from '@angular/core';
+          |import { ActivatedRoute } from '@angular/router';
+          |import { ProductService } from './product.service';
+          |@Component({ selector: 'app-p', template: '' })
+          |export class PComponent {
+          |  private route = inject(ActivatedRoute);
+          |  constructor(private products: ProductService) {}
+          |  ngOnInit() { this.products.feed(this.route.snapshot.queryParams.src); }
+          |}
+          |""".stripMargin,
+            "p.component.ts"
+          ).moreCode(
+            """
+          |import { Injectable, inject } from '@angular/core';
+          |import { HttpClient } from '@angular/common/http';
+          |@Injectable({ providedIn: 'root' })
+          |export class ProductService {
+          |  private http = inject(HttpClient);
+          |  feed(src: string) { return this.http.get(src); }
+          |}
+          |""".stripMargin,
+            "product.service.ts"
+          ))
+          val feed = cpg.call.nameExact("feed").l
+          feed.callee(using NoResolve).fullName.l.exists(_.contains("ProductService")) shouldBe true
+          flows(cpg, "http-client") should be > 0
+      }
+
+      "tag resource URLs, form changes, host metadata handlers and navigateByUrl" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, inject, input } from '@angular/core';
+          |import { httpResource } from '@angular/common/http';
+          |import { FormControl } from '@angular/forms';
+          |import { Router } from '@angular/router';
+          |@Component({
+          |  selector: 'app-r',
+          |  template: '',
+          |  host: { '(window:message)': 'onMessage($event)' }
+          |})
+          |export class RComponent {
+          |  private router = inject(Router);
+          |  cdn = input('');
+          |  id = input('');
+          |  item = httpResource(() => this.cdn() + '/items.json');
+          |  query = httpResource(() => '/api/items?id=' + this.id());
+          |  q = new FormControl('');
+          |  ngOnInit() { this.q.valueChanges.subscribe(v => this.router.navigateByUrl(v)); }
+          |  onMessage(e: MessageEvent) { this.router.navigateByUrl('/home'); }
+          |}
+          |""".stripMargin,
+            "r.component.ts"
+          ))
+          // a host the component is configured with decides the target, a value in the query not
+          cpg.tag.name("http-client").call.code.l shouldBe List("this.cdn()")
+          cpg.tag.name("framework-input").parameter.name.l should contain allOf ("v", "e")
+          cpg.tag.name("redirect").call.code.l shouldBe List("this.router.navigateByUrl(v)")
+      }
   }
 
   "React and Next.js" should {
@@ -224,7 +286,8 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "server/api/proxy.get.ts"
           ))
           cpg.tag.name("framework-input").call.name.l should contain("getQuery")
-          cpg.tag.name("ssrf").call.code.l shouldBe List("$fetch(url)")
+          cpg.tag.name("ssrf").identifier.map(i => s"${i.name} ${i.inCall.code.head}").l shouldBe
+              List("url $fetch(url)")
           cpg.tag.name("file-io").call.name.l shouldBe List("getItem")
           cpg.tag.name("redirect").call.name.l shouldBe List("sendRedirect")
           cpg.ret.where(_.tag.name("xss")).code.l shouldBe List("return `<p>${data}</p>`")
@@ -258,6 +321,37 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
       }
   }
 
+  "The controller file heuristic" should {
+      "leave an API client alone in a frontend repo that carries a mock server" in {
+          val cpg = tagged(code(
+            """
+          |import express from 'express';
+          |express().listen(3000);
+          |""".stripMargin,
+            "mock-server.ts"
+          ).moreCode(
+            """
+          |import { useState } from 'react';
+          |export const x = useState;
+          |""".stripMargin,
+            "app.tsx"
+          ).moreCode(
+            """
+          |export function get(url) { return fetch('/api' + url); }
+          |""".stripMargin,
+            "lib/api-client.ts"
+          ).moreCode(
+            """
+          |export function list(req, res) { res.send(req.query.q); }
+          |""".stripMargin,
+            "server/controllers/items-controller.ts"
+          ))
+          val inputs = cpg.tag.name("framework-input").parameter.map(p => s"${p.method.name}.${p.name}").l
+          inputs should contain("list.req")
+          inputs should not contain "get.url"
+      }
+  }
+
   "Package attribution" should {
       "name the npm package behind a sink from the project's manifests, without an SBOM" in {
           val cpg = tagged(code(
@@ -287,11 +381,11 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/axios": { "version": "1.7.9" } } }""",
             "package-lock.json"
           ))
-          cpg.tag.name("pkg:npm/.*").call.map(c => s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}").l.sorted shouldBe
-              List(
-                "bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0",
-                "get pkg:npm/axios@1.7.9"
-              )
+          cpg.tag.name("pkg:npm/.*").call.map(c => s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}").l shouldBe
+              List("bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0")
+          // a request is attributed on its URL, the sink
+          cpg.tag.name("pkg:npm/.*").identifier.map(i => s"${i.inCall.code.head} ${i.tag.name("pkg:npm/.*").name.head}").l shouldBe
+              List("axios.get(q) pkg:npm/axios@1.7.9")
           // a Node.js built-in is no package, and sources get no purl (it would make them sinks)
           cpg.tag.name("pkg:npm/.*").call.name.l should not contain "exec"
       }

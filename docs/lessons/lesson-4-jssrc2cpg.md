@@ -259,8 +259,8 @@ evidence instead.
 
 | Recognizer | Sources | Sinks |
 | --- | --- | --- |
-| `DomRecognizer` (always) | `location.*`, `document.URL`/`referrer`/`cookie`, `window.name`, Web Storage, `message`/`hashchange` events (not when the handler compares `event.origin` by equality), `fetch`/XHR/axios/ky/ofetch responses | `innerHTML`/`outerHTML`/`srcdoc` writes, `insertAdjacentHTML`, `document.write`, URL attributes, `eval`/`Function`/string timers, `location` writes, `window.open`, `postMessage(_, '*')`, `document.cookie`, requests |
-| `AngularRecognizer` | `ActivatedRoute`/`Snapshot` reads and observable callbacks, resolvers/guards, `Router.url`, `Location.path()`, `@Input()`, `input()`/`model()`, `@HostListener('window:message')`, HttpClient responses through service methods | `bypassSecurityTrust*`, `Renderer2.setProperty/setAttribute`, HttpClient requests |
+| `DomRecognizer` (always) | `location.*`, `document.URL`/`referrer`/`cookie`, `window.name`, `message`/`hashchange` events (not when the handler compares `event.origin` by equality); as `service-ingress`, Web Storage and `fetch`/XHR/axios/ky/ofetch responses | `innerHTML`/`outerHTML`/`srcdoc` writes, `insertAdjacentHTML`, `document.write`, URL attributes, `eval`/`Function`/string timers, `location` writes, `window.open`, `postMessage(_, '*')`, `document.cookie`, requests |
+| `AngularRecognizer` | `ActivatedRoute`/`Snapshot` reads and observable callbacks, resolvers/guards, `Router.url`, `Location.path()`, `@Input()`, `input()`/`model()`, `@HostListener('window:message')` and `host: { '(window:message)': ... }`, form `valueChanges`, HttpClient responses through service methods | `bypassSecurityTrust*`, `Renderer2.setProperty/setAttribute`, HttpClient and `httpResource` request URLs, `Router.navigateByUrl` |
 | `ReactRecognizer` | component props, router hooks, loaders/actions, Next.js route handlers, pages, `cookies()`/`headers()`, `'use server'` functions, React 19 form actions, Qwik `routeLoader$`/`routeAction$`/`server$` | `redirect()`, `NextResponse.redirect/rewrite`, `navigate()`/`router.push()`/`<Navigate to>` with an unanchored target |
 | `VueRecognizer` | `useRoute()`, `this.$route`, props (also the Options API), guards, directive bindings, Nuxt request composables, `useFetch`/`useAsyncData` | `navigateTo(_, { external })`, `useHead` scripts, `h()` with `innerHTML`, router navigation |
 | `NitroRecognizer` | `defineEventHandler` events, h3 readers, task payloads | `sendRedirect`, `send`, markup returned by a handler, `proxyRequest`, server `$fetch`, `useStorage` keys |
@@ -280,9 +280,21 @@ boolean or a number about its arguments (`allow.has(x)`, `url.startsWith('/')`) 
 `/search?q=${q}` or a navigation to `'/search?q=' + q` keeps its origin, and a template `href`
 starting with `/` can never become `javascript:`. A variable in the *path* of a fixed URL
 (`/api/items/${id}`) is client-side path traversal and is a sink; a variable base
-(`${this.apiUrl}/items`) makes only the base one. Angular's `[innerHTML]` and React 19's `href`
+(`${this.apiUrl}/items`) makes only the base one, and a URL that is configuration - a service's
+own field (`this.http.put(this.host, body)`), a SCREAMING_CASE constant, `environment.*` - none.
+The sink of a request is always that part of its URL, never the request call: what reaches its
+body, options or receiver is no forgery. Angular's `[innerHTML]` and React 19's `href`
 sanitise on their own and are not sinks; `@Output()` emitters are not sinks either - an emitted
 value goes to the parent component.
+
+**API chaining.** Data the application received or stored itself - a response, a WebSocket
+message, Web Storage, all `service-ingress` - that reaches nothing but the URL of another request
+is how an API is walked (an id from one response in the path of the next), and atom's reachables
+drops such flows for JavaScript. The same data reaching markup or code is still reported.
+
+**Service calls.** The frontend cannot type `this.products` in `this.products.feed(url)`; where the
+member was injected as one of the project's own classes, the Angular recognizer resolves the call
+to that class's method, so a value handed to a service reaches the request the service makes.
 
 **Bridges.** Three things carry a value where no call does, and run after the recognizers:
 `MemberTaintBridge` makes `this.x` a source in every method of a class when some method assigns
@@ -296,7 +308,8 @@ of the package its callee is bound to - an import, a member of a module binding,
 one (`pool = new pg.Pool()`), or for Angular the type a member was injected as - so reachable flows
 carry purls with no SBOM. Versions come from `package-lock.json` or else the `package.json` range;
 Node.js built-ins and modules no manifest declares (path aliases) get none. Sources are not
-attributed: a purl tag is a sink tag for reachables.
+attributed: a purl tag is a sink tag for reachables. A request sink - the part of a URL - carries
+the purl of the request it is passed to (`q` in `axios.get(q)`).
 
 **Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
 much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is

@@ -178,13 +178,13 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         ctx.tagger.tag(Iterator(h), ROUTE)
         ctx.tagger.tag(params(h).iterator, INPUT)
     }
-    // pages/api: every export is a handler
+    // pages/api: every export is a handler of `(req, res)` - the response is no input
     val apiHandlers = ctx.cpg.file.name(NextApiFile).method.internal
         .filterNot(m => m.name.contains("<") || m.name == ":program")
         .filter(m => params(m).nonEmpty)
     apiHandlers.foreach { h =>
         ctx.tagger.tag(Iterator(h), ROUTE)
-        ctx.tagger.tag(params(h).iterator, INPUT)
+        ctx.tagger.tag(firstParam(h).iterator, INPUT)
     }
     // page-data loaders, middleware (`proxy` from Next 16) - named for Next.js, but not tied to an
     // import: the loaders are found by name in any React project, as they always were

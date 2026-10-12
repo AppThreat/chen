@@ -89,14 +89,15 @@ object DomRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(readChains(reads), INPUT)
 
-    // Web Storage reads: whatever another page (or an earlier XSS) stored.
+    // Web Storage reads: whatever another page (or an earlier XSS) stored. Stored data, like a
+    // response: a source for markup, but no URL the attacker chose.
     val storageReads = ctx.cpg.call.nameExact("getItem").filter { c =>
         receiverOf(c).flatMap(memberPath).exists(p =>
             p.lastOption.exists(StorageNames.contains) &&
                 (p.size == 1 || isWindow(p.init))
         )
     }
-    ctx.tagger.tag(storageReads, INPUT)
+    ctx.tagger.tag(storageReads, INGRESS)
 
   /** Cross-document messages and URL changes: `addEventListener('message', cb)`, `onmessage = cb`
     * and `hashchange`. A message to the window can come from any origin, so its event is input; a

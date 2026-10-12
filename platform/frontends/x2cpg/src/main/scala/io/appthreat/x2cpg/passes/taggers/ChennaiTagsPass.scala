@@ -3,13 +3,14 @@ package io.appthreat.x2cpg.passes.taggers
 import io.circe.*
 import io.circe.parser.*
 import io.appthreat.x2cpg.passes.taggers.JavaFrameworks
-import io.appthreat.x2cpg.passes.taggers.js.{JsRecognizers, JsTagger}
+import io.appthreat.x2cpg.passes.taggers.js.{JsModules, JsRecognizers, JsTagger}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{
     Call,
+    File,
     Identifier,
     Literal,
     Local,
@@ -143,6 +144,9 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     "@loopback"
   )
 
+  private val REQUEST_CLIENT_PACKAGES =
+      Seq("axios", "ky", "ofetch", "redaxios", "wretch", "superagent")
+
   private val FRONTEND_PACKAGES = Seq(
     "react",
     "react-dom",
@@ -264,11 +268,23 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // project the same words name API CLIENTS (`lib/api-client.ts`, `album-api.ts`) and router
     // directories, whose parameters are the app's own values; there the framework recognizers
     // find the real entry points, so the heuristic runs only alongside a Node server framework or
-    // where no frontend framework is in sight.
+    // where no frontend framework is in sight. Alongside one (a mock server in a frontend repo), a
+    // file that makes requests or imports a frontend framework is still a client, not a
+    // controller - unless it imports the server framework itself.
     val nodeServer = usesPackages(NODE_SERVER_PACKAGES*)
     val frontend   = usesPackages(FRONTEND_PACKAGES*)
     if nodeServer || !frontend then
+      lazy val modules = JsModules(atom)
+      def isClientFile(file: File): Boolean =
+        val imported = modules.importsOf(file.name).flatMap(_.packageName)
+        def importsAny(pkgs: Seq[String]) =
+            imported.exists(p => pkgs.exists(JsModules.packageMatches(p, _)))
+        !importsAny(NODE_SERVER_PACKAGES) && (
+          importsAny(FRONTEND_PACKAGES ++ REQUEST_CLIENT_PACKAGES) ||
+            file.method.ast.isCall.nameExact("fetch", "$fetch").nonEmpty
+        )
       val controllerMethods = atom.file.name(".*(route|controller|api).*(js|ts|jsx|tsx)")
+          .filterNot(f => frontend && isClientFile(f))
           .method
           .internal
           .filterNot(_.name.contains("<"))

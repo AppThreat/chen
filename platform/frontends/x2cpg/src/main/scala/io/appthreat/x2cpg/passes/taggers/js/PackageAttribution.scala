@@ -8,7 +8,8 @@ import JsShapes.*
 import JsTags.*
 
 /** Names the npm package behind each sink the recognizers tagged, with a `pkg:npm/...` purl tag -
-  * the attribution `CdxPass` gives from an SBOM, here from the project's own manifests.
+  * the attribution `CdxPass` gives from an SBOM, here from the project's own manifests. A request
+  * sink - the part of a URL that decides the target - carries the package of the request.
   *
   * The package is the one the callee is bound to: a named or default import (`import { redirect }
   * from 'next/navigation'`), a member of a module binding (`axios.get`, `DOMPurify.sanitize`), a
@@ -50,18 +51,41 @@ object PackageAttribution:
 
   def run(ctx: JsContext, typeOf: Expression => Option[JsTypeRef]): Unit =
     val versions = ctx.project.resolvedVersions
-    val sinkCalls = ctx.tagger.taggedIds(SinkTags*).toSet.iterator
+    // A sink call is attributed itself; a request sink is the part of the URL that decides the
+    // target (`q` in `axios.get(q)`), attributed to the request it is passed to.
+    val requestSinkIds = ctx.tagger.taggedIds(HTTP_CLIENT, SSRF).toSet
+    val sinks = ctx.tagger.taggedIds(SinkTags*).toSet.iterator
         .flatMap(id => Option(ctx.cpg.graph.node(id)))
-        .collect { case c: Call if !c.name.startsWith("<operator>") => c }
+        .flatMap {
+          case e: Expression if requestSinkIds.contains(e.id()) && requestOf(e).nonEmpty =>
+              requestOf(e).map(_ -> e)
+          case c: Call if !c.name.startsWith("<operator>") => Some(c -> c)
+          case _                                           => None
+        }
     // With manifests in the project, a module they do not declare is no package of it - a
     // tsconfig path alias (`@components/x`), a workspace-relative import.
     val declared = ctx.project.dependencies.keySet ++ versions.keySet
-    sinkCalls.foreach { call =>
+    sinks.foreach { (call, sink) =>
         packageOf(ctx, call, typeOf).filterNot(isBuiltin)
             .filter(pkg => declared.isEmpty || declared.contains(pkg)).foreach { pkg =>
-            ctx.tagger.tag(Iterator(call), purl(pkg, versions.get(pkg)))
+            ctx.tagger.tag(Iterator(sink), purl(pkg, versions.get(pkg)))
         }
     }
+
+  private val UrlOperators = Set(
+    Operators.addition,
+    Operators.formatString,
+    "<operator>.formattedValue",
+    Operators.conditional,
+    Operators.logicalOr
+  )
+
+  /** The call a URL part is an argument of, through the operators that build the URL. */
+  private def requestOf(e: Expression): Option[Call] =
+      e.astParent match
+        case c: Call if UrlOperators.contains(c.name) => requestOf(c)
+        case c: Call if !c.name.startsWith("<operator>") && e.argumentIndex >= 1 => Some(c)
+        case _                                        => None
 
   private def isBuiltin(pkg: String): Boolean =
       NodeBuiltins.contains(pkg) || NodeBuiltins.contains(pkg.stripPrefix("node:"))

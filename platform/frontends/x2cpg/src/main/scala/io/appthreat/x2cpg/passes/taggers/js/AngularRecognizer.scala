@@ -75,6 +75,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
 
   def run(ctx: JsContext): Unit =
     val di = Di(ctx)
+    resolveServiceCalls(ctx, di)
     tagRouteSources(ctx, di)
     tagLocationSources(ctx, di)
     tagDecoratorInputs(ctx)
@@ -82,7 +83,11 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     tagHostListeners(ctx)
     tagGuardsAndResolvers(ctx)
     tagHttp(ctx, di)
+    tagHttpResources(ctx)
+    tagForms(ctx)
+    tagHostMetadata(ctx)
     tagSinks(ctx)
+    tagNavigation(ctx, di)
 
   // -----------------------------------------------------------------------------------------
   // Dependency injection
@@ -167,6 +172,23 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                     case _          => None)
           case _ => None
   end Di
+
+  /** `this.products.fetchPartnerFeed(url)`, where `products` was injected as the project's own
+    * `ProductService`: the frontend leaves the call unresolved (it cannot know the member's type), so
+    * a value handed to a service never reached the request the service makes. The call is resolved
+    * to the service's method of that name.
+    */
+  private def resolveServiceCalls(ctx: JsContext, di: Di): Unit =
+    val classes = ctx.cpg.typeDecl.internal.l.groupBy(_.name)
+    ctx.cpg.call.filterNot(_.name.startsWith("<operator>")).foreach { call =>
+        if call.callee(using NoResolve).isEmpty then
+          receiverOf(call).flatMap(di.typeOf).filter(_.pkg.isEmpty).foreach { t =>
+              classes.getOrElse(t.name, Nil) match
+                case td :: Nil =>
+                    td.method.nameExact(call.name).headOption.foreach(ctx.tagger.resolveCall(call, _))
+                case _ =>
+          }
+    }
 
   // -----------------------------------------------------------------------------------------
   // Sources
@@ -408,6 +430,49 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     }
     ctx.tagger.tag(requests.iterator, RequestSink*)
   end tagHttp
+
+  /** `httpResource(() => url)`: the URL the callback returns is requested, judged like the URL of
+    * an `HttpClient` request.
+    */
+  private def tagHttpResources(ctx: JsContext): Unit =
+    val urls = ctx.cpg.call.nameExact("httpResource").l.flatMap { c =>
+        c.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_))
+            .flatMap(_.ast.isReturn.astChildren.collect { case e: Expression => e }.l)
+            .flatMap(requestSinksFor(c, _))
+    }
+    ctx.tagger.tag(urls.iterator, RequestSink*)
+
+  /** Reactive forms: what a user types arrives through `valueChanges`. */
+  private def tagForms(ctx: JsContext): Unit =
+      ctx.fieldAccesses.filter(fa => fieldName(fa).contains("valueChanges")).foreach { changes =>
+          ctx.tagger.tag(JsValues.consumersOf(changes).iterator, INPUT)
+      }
+
+  /** `@Component({ host: { '(window:message)': 'onMessage($event)' } })` binds a handler by name. */
+  private val HostBinding =
+      """['"`]\(window:(message|hashchange|popstate)\)['"`]\s*:\s*['"`]\s*([\w$]+)\s*\(""".r
+
+  private def tagHostMetadata(ctx: JsContext): Unit =
+      ctx.cpg.annotation.nameExact("Component", "Directive").foreach { annotation =>
+          HostBinding.findAllMatchIn(annotation.code).map(_.group(2)).foreach { handler =>
+              annotation.astParent match
+                case td: TypeDecl =>
+                    ctx.tagger.tag(td.method.nameExact(handler).flatMap(firstParam), INPUT)
+                case _ =>
+          }
+      }
+
+  /** `router.navigateByUrl(url)` navigates within the app to whatever the caller chose. A command
+    * array (`navigate(['/product', id])`) fixes the route and is no sink.
+    */
+  private def tagNavigation(ctx: JsContext, di: Di): Unit =
+    val byUrl = ctx.cpg.call.nameExact("navigateByUrl").filter(c =>
+        receiverOf(c).flatMap(di.typeOf).exists(_.is("Router", RoutePkg)) &&
+            c.argument.filter(_.argumentIndex == 1).headOption.exists(t =>
+                !isObjectLiteral(t) && !hasFixedOrigin(t)
+            )
+    )
+    ctx.tagger.tag(byUrl, NavigationSink*)
 
   // -----------------------------------------------------------------------------------------
   // Sinks and sanitisers
