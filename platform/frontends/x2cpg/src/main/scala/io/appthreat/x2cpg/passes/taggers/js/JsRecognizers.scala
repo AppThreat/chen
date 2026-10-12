@@ -80,6 +80,8 @@ object JsRecognizers:
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)
     }
+    // Template component elements, lowered to calls, resolved to the components they name.
+    ComponentCallBridge.run(ctx)
     // Over what the recognizers found: sources kept in a field and read by another method, and
     // values derived reactively from a source. Each can feed the other, so twice.
     (1 to 2).foreach { _ =>

@@ -51,7 +51,82 @@ trait AstForTemplateDomCreator(implicit withSchemaValidation: ValidationMode):
             .getOrElse(Ast())
     val allChildrenAsts = openingAst +: childrenAsts :+ closingAst
     setArgumentIndices(allChildrenAsts)
-    Ast(domNode).withChildren(allChildrenAsts)
+    val elementAst = Ast(domNode).withChildren(allChildrenAsts)
+    // An element whose name is a capitalized identifier names a COMPONENT - a function, in
+    // React-like frameworks and in every template astgen lowers to JSX. The element also lowers
+    // to a CALL of that component with its attribute values as arguments, so a resolved call
+    // edge can carry a parent's value into the component's props - no call site exists for
+    // `<RichText html={bio} />` otherwise. The attribute expressions are lowered a second time
+    // for the call: the originals stay under the attribute template nodes, where the template
+    // sinks are tagged. Host elements (`div`) keep the template DOM alone.
+    componentName(jsxElem.json("openingElement"))
+        .map { name =>
+            componentCallAst(jsxElem, name, elementAst)
+        }
+        .getOrElse(elementAst)
+  end astForJsxElement
+
+  /** The call of the component an element names, with the element's first computed attribute value
+    * as its argument: `<RichText html={bio} />` lowers to a call whose argument is `bio`'s
+    * expression. React itself passes one props object; the dataflow engine maps a call's argument
+    * to the component's single props parameter by index, so one argument - the first value the code
+    * computes, constants excluded - is what carries a parent's value into the component's props.
+    * The attribute expressions are lowered a second time for the call; the originals stay under the
+    * attribute template nodes, where the template sinks are tagged.
+    */
+  private def componentCallAst(jsxElem: BabelNodeInfo, name: String, elementAst: Ast): Ast =
+    val attributes = jsxElem.json("openingElement").obj.getOrElse("attributes", ujson.Arr()) match
+      case attrs: ujson.Arr => attrs.value.toList
+      case _                => Nil
+    val values = attributes.flatMap { attr =>
+      val attrObj = attr.obj
+      val valueOpt =
+          for
+            typ <- attrObj.get("type").collect { case ujson.Str("JSXAttribute") => () }
+            // a boolean attribute (`replace`) has a null value
+            v <- attrObj.get("value") if v != ujson.Null
+          yield v
+      valueOpt.map { v =>
+          // `{expr}` lowers to a template node; the argument is the expression inside it
+          v match
+            case container: ujson.Obj => container.obj.get("expression").getOrElse(v)
+            case other                => other
+      }.filter {
+          // a constant attribute (`author="guest"`) carries nothing
+          case ujson.Str(_) => false
+          case expr: ujson.Obj =>
+              expr.obj.get("type").collect { case ujson.Str(t) => t }.forall(t =>
+                  !Set("StringLiteral", "NumericLiteral", "BooleanLiteral", "NullLiteral")
+                      .contains(t)
+              )
+          case _ => true
+      }
+    }
+    val argAsts = values.headOption.map(v => astForNodeWithFunctionReference(v)).toList
+    val componentCall = NewCall()
+        .code(jsxElem.code)
+        .name(name)
+        .methodFullName(io.appthreat.x2cpg.Defines.DynamicCallUnknownFullName)
+        .dispatchType(DispatchTypes.DYNAMIC_DISPATCH)
+        .lineNumber(jsxElem.lineNumber)
+        .columnNumber(jsxElem.columnNumber)
+        .typeFullName(io.appthreat.jssrc2cpg.passes.Defines.Any)
+    Ast(componentCall)
+        .withChildren(argAsts)
+        .withArgEdges(componentCall, argAsts.flatMap(_.root), 1)
+        .withChild(elementAst)
+  end componentCallAst
+
+  /** The component a JSX element names, when the name is a capitalized identifier - the naming rule
+    * React-like frameworks use for component references.
+    */
+  private def componentName(openingElement: ujson.Value): Option[String] =
+      safeObj(openingElement, "name").flatMap { nameNode =>
+          safeStr(nameNode, "name").filter(n =>
+              n.nonEmpty && n.charAt(0).isUpper &&
+                  n.forall(c => c.isLetterOrDigit || c == '_' || c == '$')
+          )
+      }
 
   protected def astForJsxFragment(jsxFragment: BabelNodeInfo): Ast =
     val domNode = createTemplateDomNode(
