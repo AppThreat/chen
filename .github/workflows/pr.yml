@@ -9,6 +9,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 permissions: {}
+# Maven Central is rate-limited/flaky from CI (the sbt launcher itself failed to download
+# org.scala-sbt:sbt with not-found while the artifact existed), so resolve through Google's
+# mirror of Central first, keeping repo1 and the private repos as fallbacks. This drives the
+# sbt launcher as well as the build's dependency resolution.
+env:
+  COURSIER_REPOSITORIES: ivy2-local;https://maven-central.storage-download.googleapis.com/maven2;https://repo1.maven.org/maven2;https://appthreats-mini.tailf64ad.ts.net/maven
 jobs:
   pr-tests:
     runs-on: ${{ matrix.os }}
