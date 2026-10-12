@@ -353,6 +353,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
   private def attributeName(code: String): String =
       code.takeWhile(c => c != '=' && !c.isWhitespace)
           .stripPrefix("v-bind:")
+          .stripPrefix("x-bind:")
           .stripPrefix("bind:")
           .stripPrefix(":")
           .stripPrefix(".")

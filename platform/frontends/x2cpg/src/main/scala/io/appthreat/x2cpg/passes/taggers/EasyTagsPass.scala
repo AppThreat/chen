@@ -369,7 +369,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   // JSXFragment's code is the whole template, so an unanchored `.*@html.*`
   // would tag the entire component as a sink.
   private val RAW_HTML_TEMPLATE_SINKS =
-      "(?s)(\\{@html\\b.*|v-html\\b.*|dangerouslySetInnerHTML\\b.*)"
+      "(?s)(\\{@html\\b.*|x-html\\b.*|v-html\\b.*|dangerouslySetInnerHTML\\b.*)"
 
   // Svelte's `{@html}` is named after the construct (`SvelteHtmlTag`) when astgen supplies the
   // `svelteKind` key, which is a stronger signal than the code pattern; the code pattern still
