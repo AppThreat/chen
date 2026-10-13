@@ -291,6 +291,21 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    f(tweak.c, tweak.c, 0);
     |    return tweak.q[0] ^ tweak.q[1];
     |}
+    |struct Ctx { unsigned long long w[8]; };
+    |typedef void (*ctx_init_fn)(struct Ctx *);
+    |unsigned long long union_callee_writes_through_cast(ctx_init_fn f)
+    |{
+    |    union { unsigned char c[64]; unsigned long long q[8]; } md;
+    |    f((struct Ctx *)md.c);
+    |    return md.q[0];
+    |}
+    |typedef void (*offset_fn)(unsigned char *);
+    |unsigned long long union_callee_writes_at_offset(offset_fn g)
+    |{
+    |    union { unsigned char c[32]; unsigned long long q[4]; } t;
+    |    g(t.c + 16);
+    |    return t.q[0];
+    |}
     |#define CLEAR(u) __builtin_memset((u).c, 0, 16)
     |unsigned long long union_macro_callee_writes(void)
     |{
@@ -416,6 +431,8 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
           "union_anon_member_of_struct",
           "union_holds_struct",
           "union_callee_writes",
+          "union_callee_writes_through_cast",
+          "union_callee_writes_at_offset",
           "union_macro_callee_writes"
         ).foreach { m => withClue(m) { findingsIn(m) should not contain "MS-INIT-001" } }
         findingsIn("union_member_of_struct_other") should contain("MS-INIT-001")

@@ -372,6 +372,37 @@ object InitAndFormatRules:
       isRealCall(c) || c.name == "<operator>.pointerCall" ||
           (c.dispatchType == DispatchTypes.INLINED && c.inAst.collectAll[Call].exists(isRealCall))
 
+  /** The union locals a call argument names, through the casts and address arithmetic written
+    * around them (`f((T *)u.c)`, `f(u.c + 16)`): the callee may write that storage. A whole object
+    * passed by value names nothing - that is a read.
+    */
+  private def handedBasesOf(e: Expression): Set[String] = e match
+    case c: Call =>
+        c.name match
+          case "<operator>.fieldAccess" => fieldPath(c).map(p => Set(p._1)).getOrElse(Set.empty)
+          case "<operator>.cast" =>
+              c.argumentOption(2).orElse(c.argumentOption(1)).map(handedBasesOf)
+                  .getOrElse(Set.empty)
+          case "<operator>.addition" | "<operator>.subtraction" | "<operator>.indexAccess" |
+              "<operator>.indirectIndexAccess" =>
+              c.argument.l.flatMap(handedBasesOf).toSet
+          case _ => Set.empty
+    case _ => Set.empty
+
+  /** The access is handed to a call as (part of) an argument - possibly through a cast or the
+    * address arithmetic written around it: the callee may write that storage, and the hand-over is
+    * not a read of it.
+    */
+  @tailrec
+  private def handedToCall(n: AstNode): Boolean =
+      parentCall(n) match
+        case Some(p)
+            if p.name == "<operator>.cast" || p.name == "<operator>.addition" ||
+                p.name == "<operator>.subtraction" =>
+            handedToCall(p)
+        case Some(p) => handsOut(p)
+        case None    => false
+
   /** The outermost access of a member or element chain `f` is the base of: `s.f` inside `s.f.g.h`,
     * `s.f` inside `s.f[i] = x` (whose left side is a write, not a read).
     */
@@ -502,12 +533,8 @@ object InitAndFormatRules:
         // a member of a union handed to a call: the callee may write that storage (`memcpy(t.c,
         // iv, 16)`), and handing it over is not a read of it
         case c: Call if handsOut(c) =>
-            c.argument.l.collect { case f: Call => f }.foreach { f =>
-                rootFieldPath(unwrapElements(f)).filter(p => unions.contains(p._1)).foreach {
-                    case (b, _) =>
-                        gen(c.id()) = gen.getOrElse(c.id(), Set.empty) + b
-                }
-            }
+            val bases = c.argument.l.flatMap(handedBasesOf).filter(unions.contains).toSet
+            if bases.nonEmpty then gen(c.id()) = gen.getOrElse(c.id(), Set.empty) ++ bases
         case c: Call if c.name == "<operator>.addressOf" =>
             c.argumentOption(1).foreach {
                 case i: Identifier if candidates.contains(i.name) => gen(c.id()) = Set(i.name)
@@ -536,7 +563,7 @@ object InitAndFormatRules:
                 val parent = parentCall(top)
                 val isWrite =
                     parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
-                val handedOut = unions.contains(b) && parent.exists(handsOut)
+                val handedOut = unions.contains(b) && handedToCall(top)
                 if !isWrite && !handedOut && !insideUnevaluated(f) then
                   reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
             }

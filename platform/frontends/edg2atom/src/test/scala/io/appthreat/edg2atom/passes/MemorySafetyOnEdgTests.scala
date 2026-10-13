@@ -310,6 +310,19 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  f(tweak.c, tweak.c, 0);
       |  return tweak.q[0] ^ tweak.q[1];
       |}
+      |struct Ctx { unsigned long long w[8]; };
+      |typedef void (*ctx_init_fn)(struct Ctx *);
+      |unsigned long long union_callee_writes_through_cast(ctx_init_fn f) {
+      |  union { unsigned char c[64]; unsigned long long q[8]; } md;
+      |  f((struct Ctx *)md.c);
+      |  return md.q[0];
+      |}
+      |typedef void (*offset_fn)(unsigned char *);
+      |unsigned long long union_callee_writes_at_offset(offset_fn g) {
+      |  union { unsigned char c[32]; unsigned long long q[4]; } t;
+      |  g(t.c + 16);
+      |  return t.q[0];
+      |}
       |#define CLEAR(u) __builtin_memset((u).c, 0, 16)
       |unsigned long long union_macro_callee_writes() {
       |  union TweakU t;
@@ -352,6 +365,9 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  memcpy(dst, src, obu_size);
       |  return 0;
       |}
+      |typedef enum { kOne, kTwo, kThree } count_t;
+      |static const int count_props[3] = {1, 2, 3};
+      |int props_of_typedef_enum(count_t c) { return count_props[c]; }
       |""".stripMargin,
       "unions.cpp"
     )
@@ -466,6 +482,13 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       "cross signedness as the spelled-out cast does" in {
           requireEdga()
           findingsIn("bad_resign_guard_typedef") should contain("MS-INT-002")
+      }
+  }
+
+  "a table indexed by an enum a typedef names without a tag" should {
+      "not be indexed out of bounds" in {
+          requireEdga()
+          findingsIn("props_of_typedef_enum") should not contain "MS-BOUND-003"
       }
   }
 

@@ -466,6 +466,13 @@ class AstCreator(
 
   // ---- types --------------------------------------------------------------------------------
 
+  /** An enumeration the program does not name with a tag: its enumerators ride on the typedef that
+    * names it.
+    */
+  private def isAnonymousEnum(t: Value): Boolean =
+      t.string("kind").contains("integer") && t.flag("enum") &&
+          t.string("tag").forall(_.isEmpty) && t.field("enumerators").isDefined
+
   private def isDefinedRecordOrTypedef(t: Value): Boolean =
       t.string("kind") match
         case Some("struct" | "class" | "union") => !t.flag("incomplete")
@@ -524,21 +531,30 @@ class AstCreator(
     if isNamedEnum(t) then return Some(enumDeclAst(t, path))
     t.string("kind") match
       case Some("typeref") =>
-          val name  = t.string("typedef").getOrElse("")
-          val alias = registerType(types(t.long("of")))
+          val name         = t.string("typedef").getOrElse("")
+          val alias        = registerType(types(t.long("of")))
+          val targetIsEnum = t.long("of").flatMap(unit.types.get).exists(isAnonymousEnum)
           val decl = typeDeclNode(
             t,
             name,
             registerType(types(t.long("id"))),
             path,
-            s"typedef $name",
+            if targetIsEnum then s"typedef enum $name" else s"typedef $name",
             alias = Some(alias)
           )
           // a typedef of a record without a tag carries the record's members, as the CDT
-          // frontend's typedef declaration does (`typedef struct { fe x; } ge;`)
-          val carried = t.long("of").flatMap(unit.types.get).filter(rec =>
-              isDefinedRecordOrTypedef(rec) && rec.string("tag").forall(_.isEmpty)
-          ).map(rec => recordMemberAsts(rec, path)).getOrElse(Seq.empty)
+          // frontend's typedef declaration does (`typedef struct { fe x; } ge;`), and so does a
+          // typedef of an enum without a tag (`typedef enum { A, B } count_t;`)
+          val carried = t.long("of").flatMap(unit.types.get).map {
+              case rec if isDefinedRecordOrTypedef(rec) && rec.string("tag").forall(_.isEmpty) =>
+                  recordMemberAsts(rec, path)
+              case e if isAnonymousEnum(e) =>
+                  val of = registerType(types(t.long("id")))
+                  e.list("enumerators").map(en =>
+                      Ast(memberNode(en, en.string("name").getOrElse(""), declaratorText(en), of))
+                  )
+              case _ => Seq.empty
+          }.getOrElse(Seq.empty)
           Some(Ast(decl).withChildren(carried))
       case _ =>
           val name     = types(t("id").num.toLong)
