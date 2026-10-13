@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/parser/EdgaRunner.scala
+  s_f0dc77cd7bedb9::t_b593674bc859b2 7,108-111,125-126,139-142,192-199,238-266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0c056cb8349a2b6d8b8d3d4dcc7cd595d9f3c94a",
+  "prompts": {},
+  "sessions": {
+    "s_f0dc77cd7bedb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05a70e3b-3b4f-4d77-a7f8-10fecf1fa02a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
