@@ -59,12 +59,12 @@ jobs:
           lookup-only: true
       - name: sbt createDistribution
         run: |
-          sbt createDistribution
+          sbt --server createDistribution
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: sbt publish
         run: |
-          sbt publish
+          sbt --server publish
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

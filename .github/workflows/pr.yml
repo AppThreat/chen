@@ -91,14 +91,14 @@ jobs:
           key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
       - name: Compile and run tests
         run: |
-          sbt "scalafmtCheck;clean;+testFull"
+          sbt --server "scalafmtCheck; clean; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         if: runner.os != 'Windows'
       - name: Compile and run tests
         run: |
-          sbt "scalafmtCheck;clean;+testFull"
+          sbt --server "scalafmtCheck; clean; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
