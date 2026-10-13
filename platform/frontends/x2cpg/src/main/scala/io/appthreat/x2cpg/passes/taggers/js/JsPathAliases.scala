@@ -46,7 +46,7 @@ final class JsPathAliases(cpg: Cpg):
     val parts = scala.collection.mutable.ArrayBuffer.empty[String]
     path.replace('\\', '/').split("/").foreach {
         case "" | "." =>
-        case ".."     => if parts.nonEmpty then parts.trimEnd(1)
+        case ".."     => if parts.nonEmpty then parts.dropRightInPlace(1)
         case part     => parts += part
     }
     parts.mkString("/")

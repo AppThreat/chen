@@ -31,20 +31,41 @@ object Delombok:
           }
           .getOrElse("java")
 
+  /** The classpath for the forked delombok `java`: this JVM's `java.class.path`, plus the jar
+    * holding lombok when the property does not already name it. sbt 2 runs forked tests in a worker
+    * whose `java.class.path` only holds the sbt worker jars (the test classpath lives on a
+    * classloader); packaged and plain `java -cp` runs already carry lombok, directly or through a
+    * launcher jar's manifest, where the extra entry is harmless.
+    */
+  private lazy val forkClasspath: String =
+    val separator = java.io.File.pathSeparator
+    val property  = Option(System.getProperty("java.class.path")).getOrElse("")
+    val entries   = property.split(separator).filter(_.nonEmpty).toSeq
+    val lombokJar = Try {
+        val location = Class
+            .forName("lombok.launch.Main", false, getClass.getClassLoader)
+            .getProtectionDomain
+            .getCodeSource
+            .getLocation
+        Paths.get(location.toURI).toAbsolutePath.toString
+    }.toOption
+    val listed = entries.map(e => Try(Paths.get(e).toAbsolutePath.toString).getOrElse(e)).toSet
+    (entries ++ lombokJar.filterNot(listed.contains)).mkString(separator)
+
   private def delombokToTempDirCommand(tempDir: File, analysisJavaHome: Option[String]) =
     val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
     val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match
       case Success(file) =>
-          if System.getProperty("java.class.path").nonEmpty then
+          if forkClasspath.nonEmpty then
             // Write classpath to a file to work around Windows length limits.
-            file.write(System.getProperty("java.class.path"))
+            file.write(forkClasspath)
             s"@${file.canonicalPath}"
-          else System.getProperty("java.class.path")
+          else forkClasspath
       case Failure(t) =>
           logger.debug(
             s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
           )
-          System.getProperty("java.class.path")
+          forkClasspath
     if classPathArg.nonEmpty then
       s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
     else ""

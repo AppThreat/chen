@@ -1,6 +1,6 @@
 name := "php2atom"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
+BareBuildSyntax.dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
   "com.lihaoyi"   %% "upickle"    % Versions.upickle,

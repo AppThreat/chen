@@ -12,7 +12,7 @@ permissions: {}
 # sbt launcher as well as the build's dependency resolution (Maven Central is rate-limited
 # from CI).
 env:
-  COURSIER_REPOSITORIES: ivy2-local;https://maven-central.storage-download.googleapis.com/maven2;https://repo1.maven.org/maven2;https://appthreats-mini.tailf64ad.ts.net/maven
+  COURSIER_REPOSITORIES: "ivy2Local|https://maven-central.storage-download.googleapis.com/maven2|https://repo1.maven.org/maven2|https://appthreats-mini.tailf64ad.ts.net/maven"
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -67,13 +67,13 @@ jobs:
             ~/.coursier
           key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
           lookup-only: true
-      - run: sbt scalafmtCheck +test
+      - run: sbt --server "scalafmtCheck; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
         if: runner.os != 'Windows'
       - name: Compile and run tests
-        run: sbt scalafmtCheck +test
+        run: sbt --server "scalafmtCheck; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"

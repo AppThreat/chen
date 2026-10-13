@@ -1,7 +1,8 @@
 /* reads version declarations from /build.sbt so that we can declare them in one place */
 object Versions {
     val cpg: String           = parseVersion("cpgVersion")
-    val antlr                 = "4.13.2"
+    // the runtime must match the code generator in project/meta-build.sbt
+    val antlr: String         = org.antlr.v4.Tool.VERSION
     val cfr                   = "0.152"
     val scalatest             = "3.2.20"
     val cats                  = "3.6.3"
@@ -21,7 +22,7 @@ object Versions {
         val versionRegexp = s""".*val $key[ ]+=[ ]?"(.*?)"""".r
         val versions: List[String] = scala.io.Source
             .fromFile("build.sbt")
-            .getLines
+            .getLines()
             .filter(_.contains(s"val $key"))
             .collect { case versionRegexp(version) => version }
             .toList

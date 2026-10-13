@@ -1,6 +1,6 @@
 name := "jimple2cpg"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
+BareBuildSyntax.dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 resolvers += "Google Maven".at("https://maven.google.com/")
 libraryDependencies ++= Seq(
   "io.appthreat"          %% "cpg2"         % Versions.cpg,

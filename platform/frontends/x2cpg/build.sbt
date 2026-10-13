@@ -1,6 +1,6 @@
 name := "x2cpg"
 
-dependsOn(Projects.semanticcpg)
+BareBuildSyntax.dependsOn(Projects.semanticcpg)
 
 libraryDependencies ++= Seq(
   "com.lihaoyi"         %% "upickle"       % Versions.upickle,

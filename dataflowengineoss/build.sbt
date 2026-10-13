@@ -1,6 +1,6 @@
 name := "dataflowengineoss"
 
-dependsOn(Projects.semanticcpg, Projects.x2cpg)
+BareBuildSyntax.dependsOn(Projects.semanticcpg, Projects.x2cpg)
 
 libraryDependencies ++= Seq(
   "org.antlr"               % "antlr4-runtime"             % Versions.antlr,
@@ -11,11 +11,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang.modules" %% "scala-parallel-collections" % Versions.scalaParallel
 )
 
-enablePlugins(Antlr4Plugin)
-
-Antlr4 / antlr4PackageName := Some("io.appthreat.dataflowengineoss")
-Antlr4 / antlr4Version     := Versions.antlr
-Antlr4 / javaSource        := (Compile / sourceManaged).value
+Compile / sourceGenerators += Antlr4.sourceGenerator("io.appthreat.dataflowengineoss").taskValue
 Compile / doc / sources ~= (_.filter(_ => false))
 githubOwner      := "appthreat"
 githubRepository := "chen"

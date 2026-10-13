@@ -327,7 +327,7 @@ object ImplicitReceiver:
       jsGraphs.computeIfAbsent(
         graph,
         g =>
-            Cpg(g).metaData.language.headOption.exists(l =>
+            Cpg(using g).metaData.language.headOption.exists(l =>
                 l == Languages.JSSRC || l == Languages.JAVASCRIPT
             )
       )

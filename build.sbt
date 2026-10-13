@@ -1,11 +1,13 @@
 name                     := "chen"
 ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "4.0.0"
-ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / scalaVersion := "3.10.0"
 
 val cpgVersion = "3.0.10"
 
-lazy val platform          = Projects.platform
+// NB: named `platformProject`, not `platform`, to avoid ambiguity with sbt's
+// own Keys.platform; the project id itself stays "platform" (see Projects.scala)
+lazy val platformProject = Projects.platform
 lazy val dataflowengineoss = Projects.dataflowengineoss
 lazy val semanticcpg       = Projects.semanticcpg
 lazy val c2cpg             = Projects.c2cpg
@@ -19,7 +21,7 @@ lazy val ruby2atom         = Projects.ruby2atom
 lazy val edg2atom          = Projects.edg2atom
 
 lazy val aggregatedProjects: Seq[ProjectReference] = Seq(
-  platform,
+  Projects.platform,
   dataflowengineoss,
   semanticcpg,
   c2cpg,
@@ -60,16 +62,7 @@ ThisBuild / scalacOptions ++= Seq(
   "23"
 )
 
-enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
-
 lazy val createDistribution = taskKey[File]("Create a complete chen distribution")
-createDistribution := {
-    val distributionFile = file("target/chen.zip")
-    val zip              = (platform / Universal / packageBin).value
-    IO.copyFile(zip, distributionFile)
-    println(s"created distribution - resulting files: $distributionFile")
-    distributionFile
-}
 
 ThisBuild / resolvers ++= Seq(
   Resolver.mavenLocal,
@@ -89,9 +82,18 @@ ThisBuild / assemblyMergeStrategy := {
 ThisBuild / versionScheme := Some("early-semver")
 
 ThisBuild / Test / fork       := true
+// sbt 2 runs the suites of a forked test JVM in parallel by default; several
+// frontends keep JVM-global state (soot's Scene, javaparser internals, shared
+// AST caches) that concurrent suites corrupt
+ThisBuild / Test / testForkedParallel := false
+// executeTests reads it through a dynamic task, which lintUnused cannot see
+Global / excludeLintKeys += testForkedParallel
+// sbt 2 packs test classes+resources into jars (exportJars := true), which
+// turns getResource URLs into jar: URLs; keep exploded dirs so tests can read
+// resources as plain files
+ThisBuild / Test / exportJars := false
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-publish / skip   := true // don't publish the root project
 githubOwner      := "appthreat"
 githubRepository := "chen"
 
@@ -99,5 +101,19 @@ githubRepository := "chen"
 lazy val root = project
     .in(file("."))
     .aggregate(aggregatedProjects*)
+    .enablePlugins(JavaAppPackaging, ClasspathJarPlugin)
+    .settings(
+      // sbt 2 applies bare settings to every subproject, so root-only settings
+      // must live on the root project explicitly
+      publish / skip := true, // don't publish the root project
+      createDistribution := Def.uncached {
+          val distributionFile = file("target/chen.zip")
+          val zip              = (Projects.platform / (Universal / packageBin)).value
+          // sbt 2 packages to virtual-file refs; materialize via the file converter
+          IO.copyFile(fileConverter.value.toPath(zip).toFile, distributionFile)
+          println(s"created distribution - resulting files: $distributionFile")
+          distributionFile
+      }
+    )
 
 ThisBuild / Test / packageBin / publishArtifact := true

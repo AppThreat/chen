@@ -272,7 +272,7 @@ object JsModules:
         val resolved = scala.collection.mutable.ArrayBuffer.empty[String]
         (dir.split("/").toSeq ++ module.split("/").toSeq).filter(_.nonEmpty).foreach {
             case "."  =>
-            case ".." => if resolved.nonEmpty then resolved.trimEnd(1)
+            case ".." => if resolved.nonEmpty then resolved.dropRightInPlace(1)
             case part => resolved += part
         }
         resolved.mkString(if fromFile.startsWith("/") then "/" else "", "/", "")
@@ -661,7 +661,7 @@ object JsShapes:
               case c: Call if c.name == Operators.fieldAccess => Nil
               case id: Identifier if isConfiguredUrl(id)      => Nil
               case base: CfgNode                              => List(base)
-              case _                                          => Nil
+              case null                                       => Nil
             base ++ variablesInPath(parts, 1)
           else
             val prefix = parts.take(firstVar).flatMap(literalValue).mkString
@@ -669,7 +669,7 @@ object JsShapes:
             else variablesInPath(parts, firstVar)
       case e if isConfiguredUrl(e) => Nil
       case e: CfgNode              => List(e)
-      case _                       => List(call)
+      case null                    => List(call)
     end match
   end requestSinksFor
 

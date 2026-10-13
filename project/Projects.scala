@@ -3,7 +3,10 @@ import sbt.*
 object Projects {
     val frontendsRoot = file("platform/frontends")
 
-    lazy val platform          = project.in(file("platform"))
+    // explicit id: the root build.sbt alias for this project cannot be named
+    // `platform` (that would be ambiguous with sbt 2's Keys.platform), so the
+    // id must not depend on the alias name
+    lazy val platform = Project(id = "platform", base = file("platform"))
     lazy val dataflowengineoss = project.in(file("dataflowengineoss"))
     lazy val semanticcpg       = project.in(file("semanticcpg"))
 

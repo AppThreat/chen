@@ -759,7 +759,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
                 made.code.trim.matches("(?s)new\\s+Map\\b.*") &&
                 made.ast.isIdentifier.name.forall(n => n == "Map" || n.startsWith("_tmp_")) &&
                 made.ast.isLiteral.nonEmpty
-            case _ => false
+            case null => false
         }
     }
     ctx.tagger.tag(constantLookups, SANITIZER)

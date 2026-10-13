@@ -1,6 +1,6 @@
 name := "javasrc2cpg"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
+BareBuildSyntax.dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
   "io.appthreat"           %% "cpg2"                          % Versions.cpg,

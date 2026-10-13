@@ -1,6 +1,6 @@
 name := "ruby2atom"
 
-dependsOn(
+BareBuildSyntax.dependsOn(
   Projects.dataflowengineoss % "compile->compile;test->test",
   Projects.x2cpg             % "compile->compile;test->test"
 )
