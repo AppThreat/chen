@@ -190,10 +190,19 @@ object InitAndFormatRules:
       val members = OverlayFacts.membersOfTypeDecl(td)
       members.nonEmpty && !hasMethods(atom, td) && !td.isExternal &&
       !members.exists(m =>
-          m.typeFullName.trim.endsWith("]") || hasDefaultInitializer(m) ||
+          m.typeFullName.trim.endsWith("]") || arrayThroughTypedef(atom, m.typeFullName) ||
+              hasDefaultInitializer(m) ||
               isConstructed(atom, m.typeFullName, Set(name))
       )
     }
+
+  /** An array hidden behind a typedef name (`typedef int32_t fe[10]`): the typedef's target carries
+    * the extent.
+    */
+  private def arrayThroughTypedef(atom: Cpg, t: String): Boolean =
+    val n = t.trim
+    n.nonEmpty && !n.contains("[") && !n.endsWith("*") &&
+    podCandidates(atom, n).exists(_.aliasTypeFullName.exists(_.trim.endsWith("]")))
 
   private def hasDefaultInitializer(m: Member): Boolean =
     val rest = m.code.trim.stripPrefix(m.name).trim
@@ -249,7 +258,8 @@ object InitAndFormatRules:
     */
   private def isUnionLocal(atom: Cpg, l: Local): Boolean =
     val n = l.typeFullName.trim
-    n == "union" || n.startsWith("union ") || l.code.trim.startsWith("union ") || {
+    n == "union" || n.startsWith("union ") || l.code.trim.startsWith("union ") ||
+    l.tag.nameExact(Defines.TypeStorageTag).value.l.contains(Defines.TypeStorageUnion) || {
         val name = n.stripPrefix("struct ").stripPrefix("union ").trim
         name.nonEmpty && !name.contains("[") && podCandidates(atom, name).exists(td =>
             !td.isExternal && !hasMethods(atom, td) && !isConstructed(atom, name, Set(name)) &&

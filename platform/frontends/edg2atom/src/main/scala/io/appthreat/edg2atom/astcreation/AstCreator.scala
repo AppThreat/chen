@@ -474,6 +474,15 @@ class AstCreator(
 
   private def isClosure(t: Value): Boolean = t.flag("closure")
 
+  /** A local of a union type carries the same tag its members do: a record without a tag shares its
+    * name with every other one, so the type's name alone cannot say what its storage is.
+    */
+  private def tagIfUnion(local: NewLocal, typeId: Option[Long]): Unit =
+      typeId.flatMap(id => types.resolved(id)).foreach { t =>
+          if t.string("kind").contains("union") then
+            tagNode(local, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
+      }
+
   /** The records a record of this unit declares as members without a name: they are written as
     * TYPE_DECL children of the declaring record instead of standing on their own.
     */
@@ -517,14 +526,20 @@ class AstCreator(
       case Some("typeref") =>
           val name  = t.string("typedef").getOrElse("")
           val alias = registerType(types(t.long("of")))
-          Some(Ast(typeDeclNode(
+          val decl = typeDeclNode(
             t,
             name,
             registerType(types(t.long("id"))),
             path,
             s"typedef $name",
             alias = Some(alias)
-          )))
+          )
+          // a typedef of a record without a tag carries the record's members, as the CDT
+          // frontend's typedef declaration does (`typedef struct { fe x; } ge;`)
+          val carried = t.long("of").flatMap(unit.types.get).filter(rec =>
+              isDefinedRecordOrTypedef(rec) && rec.string("tag").forall(_.isEmpty)
+          ).map(rec => recordMemberAsts(rec, path)).getOrElse(Seq.empty)
+          Some(Ast(decl).withChildren(carried))
       case _ =>
           val name     = types(t("id").num.toLong)
           val fullName = registerType(name)
@@ -538,32 +553,7 @@ class AstCreator(
                 specifierText(t).getOrElse(name),
                 inherits = inherits
               )
-          // a union's members share one storage: each carries the tag that says so. A member's
-          // code is its declarator as written (`buf[N]`, `n = 0`), as the CDT frontend writes
-          // it; an anonymous record member becomes a TYPE_DECL child instead, the shape the CDT
-          // frontend nests under the type that declares it
-          val isUnion = t.string("kind").contains("union")
-          val members = t.list("fields").flatMap { f =>
-            val memberAst = anonymousRecord(f).getOrElse(
-              Seq(
-                Ast(
-                  memberNode(
-                    f,
-                    f.string("name").getOrElse(""),
-                    declaratorText(f),
-                    registerType(types(f.long("type")))
-                  )
-                )
-              )
-            )
-            if isUnion then
-              memberAst.foreach(a =>
-                  a.root.collectFirst { case m: NewMember =>
-                      tagNode(m, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
-                  }
-              )
-            memberAst
-          }
+          val members = recordMemberAsts(t, path)
           // its member functions: those defined in its braces, and a declaration of each other
           val id = t("id").num.toLong
           val methods = unit.routines.filter { r =>
@@ -575,6 +565,36 @@ class AstCreator(
           Some(Ast(decl).withChildren(inSourceOrder(members ++ methods)))
     end match
   end typeDeclAst
+
+  /** A record's member declarations. A union's members share one storage: each carries the tag that
+    * says so. A member's code is its declarator as written (`buf[N]`, `n = 0`), as the CDT frontend
+    * writes it; an anonymous record member becomes a TYPE_DECL child instead, the shape the CDT
+    * frontend nests under the type that declares it.
+    */
+  private def recordMemberAsts(t: Value, path: String): Seq[Ast] =
+    val isUnion = t.string("kind").contains("union")
+    t.list("fields").flatMap { f =>
+      val memberAst = anonymousRecord(f).getOrElse(
+        Seq(
+          Ast(
+            memberNode(
+              f,
+              f.string("name").getOrElse(""),
+              declaratorText(f),
+              registerType(types(f.long("type")))
+            )
+          )
+        )
+      )
+      if isUnion then
+        memberAst.foreach(a =>
+            a.root.collectFirst { case m: NewMember =>
+                tagNode(m, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
+            }
+        )
+      memberAst
+    }
+  end recordMemberAsts
 
   /** The TYPE_DECL of an anonymous record member, nested under the type that declares it; a member
     * of another kind without a name stays a member.
@@ -748,6 +768,7 @@ class AstCreator(
                 scope.addToScope(name, (local, tpe))
                 if d.string("storage").contains("static") then
                   tagNode(local, X2CpgDefines.StorageClassTag, X2CpgDefines.StorageClassStatic)
+                tagIfUnion(local, d.long("type"))
                 // a default-initialised object has an initialiser of kind `none`: it is not one
                 val initialiser = d.field("init").filterNot(_.kind == "none")
                 if initialiser.isDefined then d.long("id").foreach(initializedAtDeclaration.add)

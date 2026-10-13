@@ -315,6 +315,22 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    int XX9;
     |    return SLOT(9);
     |}
+    |typedef unsigned int fe[10];
+    |typedef struct { fe yplusx; fe yminusx; } ge;
+    |void fe_copy(fe dst, const fe src);
+    |int init_ok_array_member_through_typedef(void)
+    |{
+    |    ge g;
+    |    fe_copy(g.yplusx, g.yminusx);
+    |    return (int)g.yplusx[0];
+    |}
+    |typedef struct { int x; int y; } pair_t;
+    |int init_bad_typedef_record_member(int v)
+    |{
+    |    pair_t p;
+    |    p.x = v;
+    |    return p.y;
+    |}
     |""".stripMargin,
     "unions.c"
   )
@@ -412,6 +428,12 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     "treat a macro invocation on a store's left side as the store it expands to" in {
         findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
         findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
+    }
+    "leave a struct whose member is an array through a typedef alone" in {
+        findingsIn("init_ok_array_member_through_typedef") should not contain "MS-INIT-001"
+    }
+    "report a member of a typedef'd record nothing initialises" in {
+        findingsIn("init_bad_typedef_record_member") should contain("MS-INIT-001")
     }
 end InitAndFormatRulesTests
 

@@ -330,6 +330,28 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  int XX9;
       |  return SLOT(9);
       |}
+      |typedef unsigned int fe[10];
+      |typedef struct { fe yplusx; fe yminusx; } ge;
+      |void fe_copy(fe dst, const fe src);
+      |int init_ok_array_member_through_typedef() {
+      |  ge g;
+      |  fe_copy(g.yplusx, g.yminusx);
+      |  return (int)g.yplusx[0];
+      |}
+      |typedef struct { int x; int y; } pair_t;
+      |int init_bad_typedef_record_member(int v) {
+      |  pair_t p;
+      |  p.x = v;
+      |  return p.y;
+      |}
+      |typedef long offset_like;
+      |int bad_resign_guard_typedef(unsigned int obu_size, int remaining, unsigned char *dst,
+      |                             const unsigned char *src) {
+      |  if ((offset_like)obu_size > remaining)
+      |    return -1;
+      |  memcpy(dst, src, obu_size);
+      |  return 0;
+      |}
       |""".stripMargin,
       "unions.cpp"
     )
@@ -423,6 +445,27 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
           findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
+      }
+  }
+
+  "a struct whose member is an array through a typedef" should {
+      "be left alone, as with a spelled-out array member" in {
+          requireEdga()
+          findingsIn("init_ok_array_member_through_typedef") should not contain "MS-INIT-001"
+      }
+  }
+
+  "a member of a typedef'd record nothing initialises" should {
+      "be reported as with a tagged record" in {
+          requireEdga()
+          findingsIn("init_bad_typedef_record_member") should contain("MS-INIT-001")
+      }
+  }
+
+  "a guard over a re-signing cast to a typedef'd name" should {
+      "cross signedness as the spelled-out cast does" in {
+          requireEdga()
+          findingsIn("bad_resign_guard_typedef") should contain("MS-INT-002")
       }
   }
 

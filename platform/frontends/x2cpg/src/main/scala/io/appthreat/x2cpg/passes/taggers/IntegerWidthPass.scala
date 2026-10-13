@@ -81,10 +81,13 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
                         .getOrElse(c.typeFullName)
               operandOpt.filterNot(fitsAsConstant(_, targetName)).foreach { operand =>
                 val (from, fromW) = declaredWidthOf(operand)
-                integralWidth(targetName).foreach { tw =>
+                widthThroughTypedef(targetName).foreach { tw =>
                     if fromW > tw then
                       record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
-                    else if fromW > 0 && signednessOf(from) != signednessOf(targetName) then
+                    else if fromW > 0 && signednessThroughTypedef(from) != signednessThroughTypedef(
+                        targetName
+                      )
+                    then
                       record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
                 }
               }
@@ -344,7 +347,24 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
   /** (declared type, width) of an expression; width 0 when the type is not a known integral. */
   private def declaredWidthOf(e: Expression): (String, Int) =
     val t = declaredTypeOf(e)
-    (t, integralWidth(t).getOrElse(0))
+    (t, widthThroughTypedef(t).getOrElse(0))
+
+  /** A typedef's target type as the graph records it on its TYPE_DECL (`curl_off_t` is `long
+    * long`), so a width or a signedness a typedef hides still reads through it.
+    */
+  private val typedefTargets = mutable.HashMap.empty[String, Option[String]]
+
+  private def typedefTargetOf(t: String): Option[String] =
+      typedefTargets.getOrElseUpdate(
+        t,
+        atom.typeDecl.fullNameExact(t).flatMap(_.aliasTypeFullName).headOption
+      )
+
+  private def widthThroughTypedef(t: String): Option[Int] =
+      integralWidth(t).orElse(typedefTargetOf(t).flatMap(integralWidth))
+
+  private def signednessThroughTypedef(t: String): Option[Boolean] =
+      signednessOf(t).orElse(typedefTargetOf(t).flatMap(signednessOf))
 
   /** The width the VALUE is computed in: arithmetic promotes every operand narrower than int, so
     * `uint16 + uint16` computes in 32 bits. A bare operand computes at its own declared width -
