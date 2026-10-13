@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
@@ -246,7 +247,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                   val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
                       enclosing.exists(c =>
                           tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
-                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty ||
+                              freesInvocationArgument(node, c)
                       )
                   if isFreeSite then
                     val family = enclosing.flatMap(c =>
@@ -274,6 +276,23 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleStackEscape))
   end ruleAllocationState
+
+  /** A macro invocation whose expansion frees the very argument it was handed: the argument is the
+    * free site, not a use of the freed pointer - a one-macro free (`curlx_free(p)` is `free(p)`)
+    * and a free-and-reset wrapper over it alike. The freed node is the invocation's argument, and
+    * the expansion frees an occurrence of the same variable.
+    */
+  private def freesInvocationArgument(node: StoredNode, invocation: Call): Boolean =
+      invocation.dispatchType == DispatchTypes.INLINED &&
+          (node match
+            case e: Expression => OverlayFacts.variableKey(e)
+            case _             => None
+          ).exists(key =>
+              invocation.ast.isCall.l.exists(f =>
+                  tagValues(f, MemoryApiPass.TagFree).nonEmpty &&
+                      f.argument.l.exists(a => OverlayFacts.variableKey(a).contains(key))
+              )
+          )
 
   /** MS-NULL-001 (CWE-476): a dereference of a value that may be null, three arms over two fact
     * sources. Returns the nodes whose finding is a HYPOTHESIS tier - the renderer lowers those
@@ -327,6 +346,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     // another function's use through it is not a check-after-use, it is an aggregation artefact
     val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
     atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
+      // a use or a guard a constant condition ruled out is on no path: `(0) ? p->v : d` has no
+      // dereference and `if (0) { if (p) ... }` no check
+      val live = OverlayFacts.feasibleCfgNodes(method)
       // a bare `if (x)` is a null guard only for POINTER x: FFmpeg truthiness-checks ints
       // everywhere (`if (ret)`, `if (size)`), and counting those made arm 2 fire on every
       // earlier use of the int
@@ -339,7 +361,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       val guards = mutable.LinkedHashMap.empty[String, (Int, ControlStructure)]
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
           cs.condition.foreach { cond =>
-              OverlayFacts.nullGuardKeysOf(cond, pointerNames).foreach { key =>
+              OverlayFacts.nullGuardKeysOf(cond, pointerNames).filter { _ =>
+                  live.contains(cond.id)
+              }.foreach { key =>
                 val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
                 guards.update(
                   key,
@@ -422,35 +446,36 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           (derefBases ++ callArgs).collect { case i: Identifier => i }
         }
         uses.foreach { use =>
-            castUnwrappingKey(use).foreach { key =>
-              val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
-              guards.get(key) match
-                case Some((guardLine, cs)) if guardLine > line =>
-                    // the guard exists but comes AFTER the use: check-after-use, unless the
-                    // use sits inside the guard's own structure (a loop body under its
-                    // trailer is guarded from the second iteration on and the author wrote
-                    // the check where the loop could see it), or the variable was
-                    // redefined in between (the guard speaks about a different value)
-                    val insideGuard = isNestedWithin(use, cs)
-                    val redefinedInBetween =
-                        redefinitions.get(key.stripPrefix("v:")).exists(lines =>
-                            lines.exists(l => l > line && l < guardLine)
-                        )
-                    if !insideGuard && !redefinedInBetween && !narrowedByTernary(use, key) then
+            if live.contains(use.id) then
+              castUnwrappingKey(use).foreach { key =>
+                val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                guards.get(key) match
+                  case Some((guardLine, cs)) if guardLine > line =>
+                      // the guard exists but comes AFTER the use: check-after-use, unless the
+                      // use sits inside the guard's own structure (a loop body under its
+                      // trailer is guarded from the second iteration on and the author wrote
+                      // the check where the loop could see it), or the variable was
+                      // redefined in between (the guard speaks about a different value)
+                      val insideGuard = isNestedWithin(use, cs)
+                      val redefinedInBetween =
+                          redefinitions.get(key.stripPrefix("v:")).exists(lines =>
+                              lines.exists(l => l > line && l < guardLine)
+                          )
+                      if !insideGuard && !redefinedInBetween && !narrowedByTernary(use, key) then
+                        record(use, RuleNullDeref)
+                  case None
+                      if paramNames.contains(use.name) && isTraversalChainBase(use) =>
+                      // a parameter dereferenced with no guard on it anywhere, through a
+                      // self-referential field chain (`head->next->v`): every hop is a fresh,
+                      // independently-nullable traversal pointer. Any pure field chain would
+                      // also match the FFmpeg context idiom (`s->priv_data->x`), thousands of
+                      // times per library; the member's type equal to the parameter's own
+                      // pointee type is the fact that separates the two.
                       record(use, RuleNullDeref)
-                case None
-                    if paramNames.contains(use.name) && isTraversalChainBase(use) =>
-                    // a parameter dereferenced with no guard on it anywhere, through a
-                    // self-referential field chain (`head->next->v`): every hop is a fresh,
-                    // independently-nullable traversal pointer. Any pure field chain would
-                    // also match the FFmpeg context idiom (`s->priv_data->x`), thousands of
-                    // times per library; the member's type equal to the parameter's own
-                    // pointee type is the fact that separates the two.
-                    record(use, RuleNullDeref)
-                    hypothesis += use
-                case _ => ()
-              end match
-            }
+                      hypothesis += use
+                  case _ => ()
+                end match
+              }
         }
       end if
     }

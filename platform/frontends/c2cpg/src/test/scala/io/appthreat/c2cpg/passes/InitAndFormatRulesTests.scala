@@ -372,6 +372,74 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    p.x = v;
     |    return p.y;
     |}
+    |/* a branch a constant condition does not take is on no path */
+    |int dead_branch_read_in_dead_then(int v)
+    |{
+    |    int x;
+    |    if (0) { return x; }
+    |    x = v;
+    |    return x;
+    |}
+    |int dead_branch_write_in_dead_branch(int v)
+    |{
+    |    int x;
+    |    if (0) { x = v; }
+    |    return x;
+    |}
+    |int dead_branch_read_in_dead_else(int v)
+    |{
+    |    int x;
+    |    if (1) { x = v; } else { return x; }
+    |    return x;
+    |}
+    |int dead_branch_dead_loop_body(int v)
+    |{
+    |    int x;
+    |    while (0) { return x; }
+    |    x = v;
+    |    return x;
+    |}
+    |#define DEAD_ZERO 0
+    |int dead_branch_macro_condition(int v)
+    |{
+    |    int x;
+    |    if (DEAD_ZERO) { return x; }
+    |    x = v;
+    |    return x;
+    |}
+    |int dead_branch_ternary(int v)
+    |{
+    |    int a;
+    |    int r = (0 & 1) ? (a |= 5) : (a = 7);
+    |    return r + a;
+    |}
+    |#define cp_naked(to, n, m) (((n) & 1) ? (to[(n) / 2] |= ((m) & 1) ? 5 : 6) : (to[(n) / 2] = ((m) & 1) ? 7 : 8))
+    |int dead_branch_macro_ternary(const unsigned long *cd)
+    |{
+    |    union { unsigned long bn[4]; unsigned int ui[8]; } buf;
+    |    cp_naked(buf.bn, 0, 1);
+    |    return (int)buf.bn[0];
+    |}
+    |/* the live twins: the same shapes with a condition a caller controls */
+    |int live_branch_read_in_then(int v)
+    |{
+    |    int x;
+    |    if (v) { return x; }
+    |    x = v;
+    |    return x;
+    |}
+    |int live_branch_ternary(int v)
+    |{
+    |    int a;
+    |    int r = (v & 1) ? (a |= 5) : (a = 7);
+    |    return r + a;
+    |}
+    |int live_branch_macro_ternary(int v, const unsigned long *cd)
+    |{
+    |    union { unsigned long bn[4]; unsigned int ui[8]; } buf;
+    |    cp_naked(buf.bn, v, 1);
+    |    return (int)buf.bn[0];
+    |}
     |""".stripMargin,
     "unions.c"
   )
@@ -485,6 +553,24 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     }
     "report a member of a typedef'd record nothing initialises" in {
         findingsIn("init_bad_typedef_record_member") should contain("MS-INIT-001")
+    }
+    "not read a branch a constant condition never takes" in {
+        Seq(
+          "dead_branch_read_in_dead_then",
+          "dead_branch_read_in_dead_else",
+          "dead_branch_dead_loop_body",
+          "dead_branch_macro_condition",
+          "dead_branch_ternary",
+          "dead_branch_macro_ternary"
+        ).foreach { m => withClue(m) { findingsIn(m) should not contain "MS-INIT-001" } }
+    }
+    "still report the same shapes on a branch a caller controls, and a write only a dead branch makes" in {
+        Seq(
+          "dead_branch_write_in_dead_branch",
+          "live_branch_read_in_then",
+          "live_branch_ternary",
+          "live_branch_macro_ternary"
+        ).foreach { m => withClue(m) { findingsIn(m) should contain("MS-INIT-001") } }
     }
 end InitAndFormatRulesTests
 

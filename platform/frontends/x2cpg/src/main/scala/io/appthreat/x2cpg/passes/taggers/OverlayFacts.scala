@@ -589,6 +589,88 @@ private[taggers] object OverlayFacts:
     FieldStores(reaching, dominated, rewritable)
   end fieldStoresReaching
 
+  /** The CFG edges a constant condition rules out: from a node of the condition's own subtree to
+    * the branch that condition's value does not select. A condition the frontends evaluated (a
+    * literal, a `const-value` tag) takes one branch only - `if (0)`, `for (; 0;)`, `cond ? a : b`
+    * with constant `cond` - so the other branch is on no path from the entry.
+    *
+    * Only edges LEAVING THE CONDITION'S OWN SUBTREE are dropped: any other way into the branch (a
+    * goto, a switch's fallthrough) keeps it live, which is what makes the pruning sound. The dead
+    * branch of a loop is its body (a `do` body runs before its condition is tested and is entered
+    * from the top, so nothing is ruled out there).
+    */
+  def constantBranchExits(method: Method): Map[Long, Set[Long]] =
+    val prunes = mutable.HashMap.empty[Long, mutable.LinkedHashSet[Long]]
+    def ruleOut(condition: Expression, deadRoots: List[AstNode]): Unit =
+      if deadRoots.isEmpty then return
+      val condSide = condition.ast.collectAll[CfgNode].l.toList
+      val deadIds  = deadRoots.flatMap(_.ast.id.l).toSet
+      condSide.foreach { n =>
+          n._cfgOut.collectAll[CfgNode].l.filter(s => deadIds.contains(s.id())).foreach { s =>
+              prunes.getOrElseUpdate(n.id(), mutable.LinkedHashSet.empty).add(s.id())
+          }
+      }
+    method.ast.collectAll[ControlStructure].l.foreach { cs =>
+        cs.condition.headOption.foreach { cond =>
+            IndexRange.literal(cond).foreach { value =>
+              val kind = cs.controlStructureType.toUpperCase
+              if kind == "IF" then
+                if value == 0 then
+                  ruleOut(
+                    cond,
+                    cs.astChildren.l.filterNot(ch =>
+                        ch.id == cond.id || isElseStructure(ch)
+                    )
+                  )
+                else
+                  ruleOut(cond, cs.astChildren.l.filter(isElseStructure))
+              else if (kind == "WHILE" || kind == "FOR") && value == 0 then
+                cs.astChildren.collectAll[Block].l.lastOption.foreach(body =>
+                    ruleOut(cond, List(body))
+                )
+            }
+        }
+    }
+    method.ast.collectAll[Call].nameExact("<operator>.conditional").l.foreach { c =>
+        (
+          c.argumentOption(1).collect { case e: Expression => e },
+          c.argumentOption(2),
+          c
+              .argumentOption(3)
+        ) match
+          case (Some(cond), Some(taken), Some(dead)) =>
+              IndexRange.literal(cond).foreach { value =>
+                  ruleOut(cond, List(if value == 0 then taken else dead))
+              }
+          case _ => ()
+    }
+    prunes.view.mapValues(_.toSet).toMap
+  end constantBranchExits
+
+  private def isElseStructure(ch: AstNode): Boolean = ch match
+    case cs: ControlStructure =>
+        cs.controlStructureType.equalsIgnoreCase("ELSE") ||
+        cs.parserTypeName.equalsIgnoreCase("else")
+    case _ => false
+
+  /** The CFG nodes a path from the method entry reaches, once every constant condition has ruled
+    * out the branch it does not take ([[constantBranchExits]]). A node no path reaches (a branch a
+    * constant skipped, or a subtree the frontend could not wire) proves nothing about the paths
+    * that do.
+    */
+  def feasibleCfgNodes(method: Method): Set[Long] =
+    val pruned = constantBranchExits(method)
+    val seen   = mutable.HashSet[Long](method.id())
+    val stack  = mutable.Stack.from(method._cfgOut.collectAll[CfgNode].l)
+    while stack.nonEmpty do
+      val n = stack.pop()
+      if seen.add(n.id()) then
+        val blocked = pruned.get(n.id()).getOrElse(Set.empty)
+        n._cfgOut.collectAll[CfgNode].l.filterNot(s => blocked.contains(s.id())).foreach(
+          stack.push
+        )
+    seen.toSet
+
   /** `&x` handed to an inventoried memory call as its source: read through, never written. */
   def readOnlyAddress(addressOf: Call): Boolean =
       addressOf.tag.name(MemoryApiPass.TagSrc).nonEmpty &&

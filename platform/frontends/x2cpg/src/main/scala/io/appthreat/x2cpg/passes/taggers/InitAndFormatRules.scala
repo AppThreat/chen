@@ -494,7 +494,10 @@ object InitAndFormatRules:
     declLine: Map[String, Int],
     record: (StoredNode, String) => Unit
   ): Unit =
-    val nodes = method.ast.isCfgNode.l
+    // the paths a constant condition leaves closed prove nothing: `if (0) { return x; }` reads
+    // x on no path, and a write only a dead branch makes is no write at all
+    val live  = OverlayFacts.feasibleCfgNodes(method)
+    val nodes = method.ast.isCfgNode.l.filter(n => live.contains(n.id))
     if nodes.isEmpty || nodes.size > 20000 then return
     // the definition each CFG node makes, and the read it performs (checked on entry)
     val gen   = mutable.LongMap.empty[Set[String]]
@@ -581,7 +584,9 @@ object InitAndFormatRules:
       steps += 1
       val n = worklist.dequeue()
       queued -= n.id()
-      val preds = n._cfgIn.collectAll[CfgNode].l
+      // predecessors a constant condition cut off contribute nothing: their writes are on no
+      // path to this node
+      val preds = n._cfgIn.collectAll[CfgNode].l.filter(p => live.contains(p.id()))
       val inSet =
           preds.foldLeft(Set.empty[String])((acc, p) => acc ++ out.getOrElse(p.id(), Set.empty))
       in(n.id()) = inSet
@@ -592,18 +597,13 @@ object InitAndFormatRules:
             if queued.add(s.id()) then worklist.enqueue(s)
         }
     if worklist.nonEmpty then return // did not converge: say nothing
-    // only nodes the method entry reaches: a node cut off from it (a CFG the frontend could not
-    // wire, dead code) has an empty in-set that proves nothing
-    val reachable = mutable.HashSet.empty[Long]
-    val frontier  = mutable.Stack[CfgNode](method)
-    while frontier.nonEmpty do
-      val n = frontier.pop()
-      if reachable.add(n.id()) then n._cfgOut.collectAll[CfgNode].foreach(frontier.push)
+    // every read the analysis judged sits on a path the entry reaches (`live`), or the constant
+    // conditions the method wrote have already ruled its branch out
     reads.foreach { case (node, shown, accepted) =>
         in.get(node.id()).foreach { s =>
           val sameLine =
               node.lineNumber.exists(n => declLine.get(shown.takeWhile(_ != '.')).contains(n.toInt))
-          if reachable.contains(node.id()) && !sameLine && !accepted.exists(s.contains) then
+          if !sameLine && !accepted.exists(s.contains) then
             record(node, MemorySafetyFindingPass.RuleUninitialisedRead)
         }
     }
