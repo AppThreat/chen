@@ -20,6 +20,99 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.cppStandardOption("c++latest") shouldBe "--c++23"
           EdgaRunner.cppStandardOption("") shouldBe "--c++17"
       }
+      "keep the GNU dialect unless the unit asks for the ISO one" in {
+          val gcc = Seq("--gcc", "--gnu_version=140200")
+          EdgaRunner.strictnessOptions(None, gcc) shouldBe Seq("--no_strict_gnu")
+          EdgaRunner.strictnessOptions(Some("gnu99"), gcc) shouldBe Seq("--no_strict_gnu")
+          EdgaRunner.strictnessOptions(Some("c11"), gcc) shouldBe Seq("--strict_gnu")
+          EdgaRunner.strictnessOptions(Some("iso9899:1999"), gcc) shouldBe Seq("--strict_gnu")
+          EdgaRunner.strictnessOptions(Some("gnu++20"), Seq("--g++")) shouldBe Seq(
+            "--no_strict_gnu"
+          )
+          EdgaRunner.strictnessOptions(Some("c++17"), Seq("--clang")) shouldBe Seq("--strict_gnu")
+          EdgaRunner.strictnessOptions(Some("c++17"), Seq("--microsoft")) shouldBe empty
+          EdgaRunner.strictnessOptions(None, Seq.empty) shouldBe empty
+      }
+      "spell C23's va_start with the builtin the front end has" in {
+          EdgaRunner.c23VaStartShim(Seq("--c23")).sliding(2, 2).map(_.head).toSeq shouldBe Seq(
+            "--define_macro",
+            "--define_macro"
+          )
+          EdgaRunner.c23VaStartShim(Seq("--c17")) shouldBe empty
+          EdgaRunner.c23VaStartShim(Seq("--c++23", "--type_traits_helpers")) shouldBe empty
+      }
+      "leave the MSVC keywords to the front end" in {
+          EdgaRunner.isKeywordShim("__asm", "__attribute((asm))") shouldBe true
+          EdgaRunner.isKeywordShim("__m128", "__attribute((m128))") shouldBe true
+          EdgaRunner.isKeywordShim("__asm", "__asm__") shouldBe false
+          EdgaRunner.isKeywordShim("FEATURE", "2") shouldBe false
+      }
+  }
+
+  "a unit of the GNU dialect" should {
+      "see the POSIX declarations the C library hides from ISO C" in {
+          val edga = EdgaRunner.locate()
+          assume(edga.isDefined, "edga is not installed")
+          File.usingTemporaryDirectory("edga-gnu") { dir =>
+            (dir / "p.c").writeText(
+              """#include <math.h>
+                |#include <stdio.h>
+                |#include <string.h>
+                |#ifdef __STRICT_ANSI__
+                |#error ISO dialect
+                |#endif
+                |char *copy(const char *s) { return strdup(s); }
+                |FILE *run(const char *cmd) { return popen(cmd, "r"); }
+                |double tau(void) { return 2 * M_PI; }
+                |""".stripMargin
+            )
+            val config  = Config().withInputPath(dir.pathAsString)
+            val runner  = new EdgaRunner(config, new ProjectSources(config))
+            val dialect = runner.arguments((dir / "p.c").path).toSet
+            assume(dialect("--gcc") || dialect("--clang"), "no GCC or Clang on this host")
+            val unit = runner.exportUnit((dir / "p.c").path, 60)
+            withClue(unit.toSeq.flatMap(_.diagnostics).map(ujson.write(_)).mkString("\n")) {
+                unit.map(_.status) shouldBe Some("ok")
+            }
+            unit.toSeq.flatMap(_.routines).filter(r =>
+                Set("strdup", "popen").contains(r("name").str)
+            ).map(r => r("name").str -> r.obj.get("prototyped").exists(_.bool)).toMap shouldBe Map(
+              "strdup" -> true,
+              "popen"  -> true
+            )
+          }
+      }
+      "take va_start in C23 as a va_start" in {
+          val edga = EdgaRunner.locate()
+          assume(edga.isDefined, "edga is not installed")
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("edga-c23") { dir =>
+            (dir / "v.c").writeText(
+              """#include <stdarg.h>
+                |int sum(int n, ...) {
+                |  va_list ap;
+                |  va_start(ap, n);
+                |  int s = va_arg(ap, int);
+                |  va_end(ap);
+                |  return n + s;
+                |}
+                |""".stripMargin
+            )
+            (dir / "compile_commands.json").writeText(
+              s"""[{ "directory": "${dir.pathAsString}", "file": "v.c",
+                 |   "arguments": ["cc", "-std=c23", "-c", "v.c"] }]""".stripMargin
+            )
+            val config = Config().withInputPath(dir.pathAsString)
+                .withCompileCommands((dir / "compile_commands.json").pathAsString)
+            val unit = new EdgaRunner(config, new ProjectSources(config))
+                .exportUnit((dir / "v.c").path, 60)
+            unit.map(_.status) shouldBe Some("ok")
+            val body = unit.toSeq.flatMap(_.routines).find(_("name").str == "sum")
+                .flatMap(_.obj.get("body")).map(ujson.write(_)).getOrElse("")
+            body should include("\"op\":\"va_start\"")
+            (body should not).include("__builtin_c23_va_start")
+          }
+      }
   }
 
   "the compiler's macros" should {
@@ -125,6 +218,7 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
             val runner = new EdgaRunner(config, new ProjectSources(config))
             val c      = runner.arguments((dir / "a.c").path)
             c should contain("--c99")
+            if c.contains("--gcc") || c.contains("--clang") then c should contain("--no_strict_gnu")
             c.sliding(2).toSeq should contain(Seq("--define_macro", "FEATURE=2"))
             c.sliding(2).toSeq should contain(Seq(
               "-I",
