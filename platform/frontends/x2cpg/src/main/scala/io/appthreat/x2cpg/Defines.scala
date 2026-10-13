@@ -63,6 +63,13 @@ object Defines:
     */
   val ReferenceKindTag = "ref"
 
+  /** C/C++: `union` on each MEMBER of a union, whose members all overlay the same bytes, so a store
+    * to any one of them initialises them all. The EDG frontend also tags a LOCAL of a union type: a
+    * union without a tag has no name to look its members up by.
+    */
+  val TypeStorageTag   = "type-storage"
+  val TypeStorageUnion = "union"
+
   /** Inline assembly (C/C++): an asm statement is a CALL named `asm` whose arguments are its
     * operands, each tagged `asm-operand=<in|out|inout>:<constraint>`. A METHOD declared with an asm
     * label, and the CALLs of it, carry `asm-name=<symbol>`: the name the linker sees (glibc's

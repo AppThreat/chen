@@ -1761,7 +1761,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * dropped - which one a use sees is not something to guess.
     */
   private lazy val enumValues: Map[String, List[(String, BigInt)]] =
-    val parsed = atom.typeDecl.l.filter(_.code.trim.startsWith("enum")).flatMap { td =>
+    val parsed = atom.typeDecl.l.filter { td =>
+      val c = td.code.trim
+      c.startsWith("enum") || c.startsWith("typedef enum")
+    }.flatMap { td =>
       val members = td.astChildren.collectAll[Member].l.sortBy(_.order)
       val known   = mutable.LinkedHashMap.empty[String, BigInt]
       var next    = BigInt(0)
@@ -1788,7 +1791,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   /** Every enum's name, parseable or not: an integer stored in one keeps its value. */
   private lazy val enumTypeNames: Set[String] =
-    val enums = atom.typeDecl.filter(_.code.trim.startsWith("enum")).l
+    val enums = atom.typeDecl.filter { td =>
+      val c = td.code.trim
+      c.startsWith("enum") || c.startsWith("typedef enum")
+    }.l
     (enums.map(_.name) ++ enums.map(_.fullName)).toSet
 
   /** Every caller of a method, or None when not all of them can be seen: an address-taken method (a
@@ -4286,7 +4292,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         // (CVE-2026-75145's `(long)obu_size > remaining`) lets values through the guard that
         // the unconverted operand would not have passed.
         val toSigned = cast.tag.name(IntegerWidthPass.TagResign).value.l.exists { v =>
-            v.split("->to:").lift(1).map(_.split(":").head).exists(OverlayFacts.isSignedIntegral)
+            // a cast to a typedef (`(curl_off_t)n`) resigns to the type underneath
+            v.split("->to:").lift(1).map(_.split(":").head).exists(t =>
+                isSignedIntegral(t) || typedefTarget(atom, t).exists(isSignedIntegral)
+            )
         }
         if toSigned then
           enclosingComparison(cast).foreach { cmp =>

@@ -247,6 +247,144 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |}
       |""".stripMargin,
       "shapes.cpp"
+    ).moreCode(
+      """
+      |extern "C" void *memcpy(void *, const void *, unsigned long);
+      |union Ptrs { long *to_long; unsigned long *to_ulong; };
+      |unsigned long union_store_other_member(long *src) {
+      |  union Ptrs p;
+      |  p.to_long = src;
+      |  return *p.to_ulong;
+      |}
+      |unsigned long union_anon_store_other_member(long *src) {
+      |  union { long *to_long; unsigned long *to_ulong; } p;
+      |  p.to_long = src;
+      |  return *p.to_ulong;
+      |}
+      |unsigned union_bad_read_named() {
+      |  union Reinterp { float f; unsigned u; };
+      |  union Reinterp b;
+      |  return b.u;
+      |}
+      |unsigned union_bad_read_anon() {
+      |  union { float f; unsigned u; } b;
+      |  return b.u;
+      |}
+      |unsigned long long union_bytes_then_words(const unsigned char *iv) {
+      |  union { unsigned long long q[2]; unsigned char c[16]; } tweak;
+      |  memcpy(tweak.c, iv, 16);
+      |  return tweak.q[0] ^ tweak.q[1];
+      |}
+      |unsigned long long union_element_store_then_read(unsigned seed) {
+      |  union { unsigned long long q[2]; unsigned char c[16]; } s;
+      |  s.q[0] = seed;
+      |  return s.q[1] ^ s.c[15];
+      |}
+      |struct WithUnion { int other; union { int a; float b; } u; };
+      |int union_member_of_struct(int seed) {
+      |  struct WithUnion s;
+      |  s.u.a = seed;
+      |  return (int)s.u.b;
+      |}
+      |int union_member_of_struct_other(int seed) {
+      |  struct WithUnion s;
+      |  s.u.a = seed;
+      |  return s.other;
+      |}
+      |struct AnonUnion { int k; union { int a; float b; }; };
+      |int union_anon_member_of_struct(int seed) {
+      |  struct AnonUnion s;
+      |  s.a = seed;
+      |  return (int)s.b;
+      |}
+      |union HoldsStruct { struct { int a; int b; } s; unsigned long long raw; };
+      |int union_holds_struct(int seed) {
+      |  union HoldsStruct u;
+      |  u.raw = 1;
+      |  return u.s.a;
+      |}
+      |typedef void (*block_fn)(unsigned char *, unsigned char *, const void *);
+      |union TweakU { unsigned long long q[2]; unsigned char c[16]; };
+      |unsigned long long union_callee_writes(block_fn f) {
+      |  union TweakU tweak;
+      |  f(tweak.c, tweak.c, 0);
+      |  return tweak.q[0] ^ tweak.q[1];
+      |}
+      |struct Ctx { unsigned long long w[8]; };
+      |typedef void (*ctx_init_fn)(struct Ctx *);
+      |unsigned long long union_callee_writes_through_cast(ctx_init_fn f) {
+      |  union { unsigned char c[64]; unsigned long long q[8]; } md;
+      |  f((struct Ctx *)md.c);
+      |  return md.q[0];
+      |}
+      |typedef void (*offset_fn)(unsigned char *);
+      |unsigned long long union_callee_writes_at_offset(offset_fn g) {
+      |  union { unsigned char c[32]; unsigned long long q[4]; } t;
+      |  g(t.c + 16);
+      |  return t.q[0];
+      |}
+      |#define CLEAR(u) __builtin_memset((u).c, 0, 16)
+      |unsigned long long union_macro_callee_writes() {
+      |  union TweakU t;
+      |  CLEAR(t);
+      |  return t.q[0] ^ t.q[1];
+      |}
+      |unsigned long long union_bad_read_in_expression() {
+      |  union TweakU t;
+      |  return t.q[0] + 1;
+      |}
+      |unsigned consume_bits(unsigned);
+      |unsigned union_bad_read_by_value() {
+      |  union { float f; unsigned u; } b;
+      |  return consume_bits(b.u);
+      |}
+      |unsigned union_bad_compound_first(unsigned v) {
+      |  union { unsigned w[2]; unsigned char c[8]; } u;
+      |  u.w[0] |= v;
+      |  return u.w[0];
+      |}
+      |long lookup_long(long *);
+      |long union_bad_pointer_member_by_value() {
+      |  union Ptrs p;
+      |  return lookup_long(p.to_long);
+      |}
+      |#define SLOT(i) XX##i
+      |int init_ok_macro_lhs_store(int v) {
+      |  int XX0;
+      |  SLOT(0) = v;
+      |  return XX0;
+      |}
+      |int init_bad_macro_value_read() {
+      |  int XX9;
+      |  return SLOT(9);
+      |}
+      |typedef unsigned int fe[10];
+      |typedef struct { fe yplusx; fe yminusx; } ge;
+      |void fe_copy(fe dst, const fe src);
+      |int init_ok_array_member_through_typedef() {
+      |  ge g;
+      |  fe_copy(g.yplusx, g.yminusx);
+      |  return (int)g.yplusx[0];
+      |}
+      |typedef struct { int x; int y; } pair_t;
+      |int init_bad_typedef_record_member(int v) {
+      |  pair_t p;
+      |  p.x = v;
+      |  return p.y;
+      |}
+      |typedef long offset_like;
+      |int bad_resign_guard_typedef(unsigned int obu_size, int remaining, unsigned char *dst,
+      |                             const unsigned char *src) {
+      |  if ((offset_like)obu_size > remaining)
+      |    return -1;
+      |  memcpy(dst, src, obu_size);
+      |  return 0;
+      |}
+      |typedef enum { kOne, kTwo, kThree } count_t;
+      |static const int count_props[3] = {1, 2, 3};
+      |int props_of_typedef_enum(count_t c) { return count_props[c]; }
+      |""".stripMargin,
+      "unions.cpp"
     )
     new MemorySemanticsPass(graph).createAndApply()
     new MemoryApiPass(graph).createAndApply()
@@ -303,6 +441,78 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       "still report a plain member no path writes" in {
           requireEdga()
           findingsIn("plain_read") should contain("MS-INIT-001")
+      }
+  }
+
+  "a union's members" should {
+      "be one storage: a store to any member, or a member passed out, initialises them all" in {
+          requireEdga()
+          Seq(
+            "union_store_other_member",
+            "union_anon_store_other_member",
+            "union_bytes_then_words",
+            "union_element_store_then_read",
+            "union_member_of_struct",
+            "union_anon_member_of_struct",
+            "union_holds_struct",
+            "union_callee_writes",
+            "union_callee_writes_through_cast",
+            "union_callee_writes_at_offset",
+            "union_macro_callee_writes"
+          ).foreach { m =>
+              withClue(m) { findingsIn(m) should not contain "MS-INIT-001" }
+          }
+          findingsIn("union_member_of_struct_other") should contain("MS-INIT-001")
+          findingsIn("union_bad_read_in_expression") should contain("MS-INIT-001")
+      }
+
+      "still report a union member nothing initialises" in {
+          requireEdga()
+          findingsIn("union_bad_read_named") should contain("MS-INIT-001")
+          findingsIn("union_bad_read_anon") should contain("MS-INIT-001")
+      }
+
+      "report a member read by value: passed to a call, or by a compound assignment" in {
+          requireEdga()
+          findingsIn("union_bad_read_by_value") should contain("MS-INIT-001")
+          findingsIn("union_bad_pointer_member_by_value") should contain("MS-INIT-001")
+          findingsIn("union_bad_compound_first") should contain("MS-INIT-001")
+      }
+  }
+
+  "a macro invocation on a store's left side" should {
+      "be the store it expands to, and a macro's value still a read" in {
+          requireEdga()
+          findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
+          findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
+      }
+  }
+
+  "a struct whose member is an array through a typedef" should {
+      "be left alone, as with a spelled-out array member" in {
+          requireEdga()
+          findingsIn("init_ok_array_member_through_typedef") should not contain "MS-INIT-001"
+      }
+  }
+
+  "a member of a typedef'd record nothing initialises" should {
+      "be reported as with a tagged record" in {
+          requireEdga()
+          findingsIn("init_bad_typedef_record_member") should contain("MS-INIT-001")
+      }
+  }
+
+  "a guard over a re-signing cast to a typedef'd name" should {
+      "cross signedness as the spelled-out cast does" in {
+          requireEdga()
+          findingsIn("bad_resign_guard_typedef") should contain("MS-INT-002")
+      }
+  }
+
+  "a table indexed by an enum a typedef names without a tag" should {
+      "not be indexed out of bounds" in {
+          requireEdga()
+          findingsIn("props_of_typedef_enum") should not contain "MS-BOUND-003"
       }
   }
 

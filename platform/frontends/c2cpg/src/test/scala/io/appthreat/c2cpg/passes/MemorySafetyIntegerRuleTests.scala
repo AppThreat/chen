@@ -78,6 +78,17 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
     |    return 0;
     |}
     |
+    |/* the same shape with the cast's target named by a typedef */
+    |typedef long offset_like;
+    |int bad_resign_guard_typedef(uint32_t obu_size, int remaining, unsigned char *dst,
+    |                             const unsigned char *src)
+    |{
+    |    if ((offset_like)obu_size > remaining)
+    |        return -1;
+    |    memcpy(dst, src, obu_size);
+    |    return 0;
+    |}
+    |
     |/* the upstream fix's shape: the cast is on the BOUND, the bounded value never changed width */
     |int good_resign_on_bound(uint32_t obu_size, int frame_size)
     |{
@@ -188,6 +199,10 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
         // unguarded caller param - so assert presence, not exclusivity
         findingsIn("bad_resign_guard").map(_._1) should contain("MS-INT-002")
         findingsIn("bad_resign_guard").count(_._1 == "MS-INT-002") shouldBe 1
+    }
+
+    "fire when the re-signing cast's target is a typedef'd name" in {
+        findingsIn("bad_resign_guard_typedef").map(_._1) should contain("MS-INT-002")
     }
 
     "not fire when the cast is on the guard's bound (the upstream fix's shape)" in {
