@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NullDerefRuleTests.scala
+  s_f0dc77cd7bedb9::t_0479ae09d8d6a1 99-111,189-192
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  s_f0dc77cd7bedb9::t_ab469c2a429365 25-26,241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "472d953eb09084615e56518cf5350b45a8a059ce",
+  "prompts": {},
+  "sessions": {
+    "s_f0dc77cd7bedb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05a70e3b-3b4f-4d77-a7f8-10fecf1fa02a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
