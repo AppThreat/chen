@@ -88,7 +88,9 @@ object Delombok:
                       "Creating AST with original source instead. Some methods and type information will be missing."
                     )
                     projectDir
-            else ""
+            else
+              logger.debug("No java with lombok to fork: creating AST with the original source.")
+              projectDir
 
         case Failure(e) =>
             logger.debug(

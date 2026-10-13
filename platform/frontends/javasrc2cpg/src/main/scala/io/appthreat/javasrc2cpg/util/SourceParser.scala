@@ -133,19 +133,37 @@ object SourceParser:
     delombokMode: Option[String],
     hasLombokDependency: Boolean
   ): (String, String) =
-    lazy val delombokDir = Delombok.run(originalDir, delombokJavaHome)
-    if delombokDir.nonEmpty then
+      analysisAndTypesDirs(
+        originalDir,
+        Delombok.run(originalDir, delombokJavaHome),
+        delombokMode,
+        hasLombokDependency
+      )
+
+  /** [[getAnalysisAndTypesDirs]] given what delombok produced. Where it could not run (no `java` to
+    * fork with lombok on its class path: a native image has none), the original sources are
+    * analysed as they are; an empty root would resolve every file against the working directory and
+    * find none of them.
+    */
+  private[util] def analysisAndTypesDirs(
+    originalDir: String,
+    delombokDir: => String,
+    delombokMode: Option[String],
+    hasLombokDependency: Boolean
+  ): (String, String) =
+    lazy val delomboked = delombokDir
+    if delomboked.nonEmpty then
       Delombok.parseDelombokModeOption(delombokMode) match
         case Default if hasLombokDependency =>
-            (delombokDir, delombokDir)
+            (delomboked, delomboked)
 
         case Default => (originalDir, originalDir)
 
         case NoDelombok => (originalDir, originalDir)
 
-        case TypesOnly => (originalDir, delombokDir)
+        case TypesOnly => (originalDir, delomboked)
 
-        case RunDelombok => (delombokDir, delombokDir)
-    else (delombokDir, delombokDir)
-  end getAnalysisAndTypesDirs
+        case RunDelombok => (delomboked, delomboked)
+    else (originalDir, originalDir)
+  end analysisAndTypesDirs
 end SourceParser
