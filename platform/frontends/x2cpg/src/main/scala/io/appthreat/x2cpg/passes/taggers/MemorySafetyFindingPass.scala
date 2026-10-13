@@ -4292,10 +4292,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         // (CVE-2026-75145's `(long)obu_size > remaining`) lets values through the guard that
         // the unconverted operand would not have passed.
         val toSigned = cast.tag.name(IntegerWidthPass.TagResign).value.l.exists { v =>
+            // a cast to a typedef (`(curl_off_t)n`) resigns to the type underneath
             v.split("->to:").lift(1).map(_.split(":").head).exists(t =>
-                OverlayFacts.isSignedIntegral(t) || typedefTargetOf(t).exists(
-                  OverlayFacts.isSignedIntegral
-                )
+                isSignedIntegral(t) || typedefTarget(atom, t).exists(isSignedIntegral)
             )
         }
         if toSigned then
@@ -4319,17 +4318,6 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       }
 
   /** The comparison the cast sits in, walking up through expression calls only. */
-  /** A typedef's target type as the graph records it on its TYPE_DECL, followed while it is one: a
-    * cast to `curl_off_t` resigns to the `long long` underneath.
-    */
-  private val typedefTargets = mutable.HashMap.empty[String, Option[String]]
-
-  private def typedefTargetOf(t: String): Option[String] =
-      typedefTargets.getOrElseUpdate(
-        t,
-        atom.typeDecl.fullNameExact(t).flatMap(_.aliasTypeFullName).headOption
-      )
-
   private def enclosingComparison(node: AstNode): Option[Call] =
     var cursor: Option[StoredNode] = node._astIn.nextOption()
     var found: Option[Call]        = None

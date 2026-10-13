@@ -5,6 +5,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 /** Structural facts shared by the memory-safety overlay passes (Extent, Guard, ValueOrigin,
@@ -129,6 +130,37 @@ private[taggers] object OverlayFacts:
       }.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
       includeGraphs.put(cpg, graph)
       graph
+
+  /** Each graph's typedefs: a type's full name -> the type it aliases, for the names whose every
+    * declaration aliases the same type.
+    */
+  private val typedefTables =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Cpg, Map[String, String]]())
+
+  private def typedefTable(cpg: Cpg): Map[String, String] =
+    val known = typedefTables.get(cpg)
+    if known != null then known
+    else
+      val table = cpg.typeDecl.l
+          .flatMap(td => td.aliasTypeFullName.map(a => td.fullName -> a.trim))
+          .groupMap(_._1)(_._2)
+          .collect { case (name, targets) if targets.distinct.sizeIs == 1 => name -> targets.head }
+      typedefTables.put(cpg, table)
+      table
+
+  /** The type a typedef name stands for, through typedefs of typedefs (`curl_off_t` is `long
+    * long`). None when `t` is not a typedef, or is declared as different types in different places:
+    * which one a use sees is not something to guess.
+    */
+  def typedefTarget(cpg: Cpg, t: String): Option[String] =
+    val table = typedefTable(cpg)
+    @tailrec
+    def follow(n: String, seen: Set[String]): String =
+        table.get(n) match
+          case Some(next) if !seen.contains(next) => follow(next, seen + next)
+          case _                                  => n
+    val name = t.trim
+    table.get(name).map(target => follow(target, Set(name, target)))
 
   /** Every file `file` includes, directly or through other includes. */
   def includedBy(cpg: Cpg, file: String): Set[String] =

@@ -333,6 +333,21 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  union TweakU t;
       |  return t.q[0] + 1;
       |}
+      |unsigned consume_bits(unsigned);
+      |unsigned union_bad_read_by_value() {
+      |  union { float f; unsigned u; } b;
+      |  return consume_bits(b.u);
+      |}
+      |unsigned union_bad_compound_first(unsigned v) {
+      |  union { unsigned w[2]; unsigned char c[8]; } u;
+      |  u.w[0] |= v;
+      |  return u.w[0];
+      |}
+      |long lookup_long(long *);
+      |long union_bad_pointer_member_by_value() {
+      |  union Ptrs p;
+      |  return lookup_long(p.to_long);
+      |}
       |#define SLOT(i) XX##i
       |int init_ok_macro_lhs_store(int v) {
       |  int XX0;
@@ -441,6 +456,8 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
             "union_anon_member_of_struct",
             "union_holds_struct",
             "union_callee_writes",
+            "union_callee_writes_through_cast",
+            "union_callee_writes_at_offset",
             "union_macro_callee_writes"
           ).foreach { m =>
               withClue(m) { findingsIn(m) should not contain "MS-INIT-001" }
@@ -453,6 +470,13 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("union_bad_read_named") should contain("MS-INIT-001")
           findingsIn("union_bad_read_anon") should contain("MS-INIT-001")
+      }
+
+      "report a member read by value: passed to a call, or by a compound assignment" in {
+          requireEdga()
+          findingsIn("union_bad_read_by_value") should contain("MS-INIT-001")
+          findingsIn("union_bad_pointer_member_by_value") should contain("MS-INIT-001")
+          findingsIn("union_bad_compound_first") should contain("MS-INIT-001")
       }
   }
 

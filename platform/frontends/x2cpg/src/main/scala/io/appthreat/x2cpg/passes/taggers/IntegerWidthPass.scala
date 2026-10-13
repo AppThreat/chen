@@ -84,9 +84,8 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
                 widthThroughTypedef(targetName).foreach { tw =>
                     if fromW > tw then
                       record(c, TagNarrow, s"from:$from:$fromW->to:$targetName:$tw")
-                    else if fromW > 0 && signednessThroughTypedef(from) != signednessThroughTypedef(
-                        targetName
-                      )
+                    else if fromW > 0 &&
+                      signednessThroughTypedef(from) != signednessThroughTypedef(targetName)
                     then
                       record(c, TagResign, s"from:$from:$fromW->to:$targetName:$tw")
                 }
@@ -349,22 +348,12 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
     val t = declaredTypeOf(e)
     (t, widthThroughTypedef(t).getOrElse(0))
 
-  /** A typedef's target type as the graph records it on its TYPE_DECL (`curl_off_t` is `long
-    * long`), so a width or a signedness a typedef hides still reads through it.
-    */
-  private val typedefTargets = mutable.HashMap.empty[String, Option[String]]
-
-  private def typedefTargetOf(t: String): Option[String] =
-      typedefTargets.getOrElseUpdate(
-        t,
-        atom.typeDecl.fullNameExact(t).flatMap(_.aliasTypeFullName).headOption
-      )
-
+  /** The width and the signedness a typedef hides read through to the type it names. */
   private def widthThroughTypedef(t: String): Option[Int] =
-      integralWidth(t).orElse(typedefTargetOf(t).flatMap(integralWidth))
+      integralWidth(t).orElse(OverlayFacts.typedefTarget(atom, t).flatMap(integralWidth))
 
   private def signednessThroughTypedef(t: String): Option[Boolean] =
-      signednessOf(t).orElse(typedefTargetOf(t).flatMap(signednessOf))
+      signednessOf(t).orElse(OverlayFacts.typedefTarget(atom, t).flatMap(signednessOf))
 
   /** The width the VALUE is computed in: arithmetic promotes every operand narrower than int, so
     * `uint16 + uint16` computes in 32 bits. A bare operand computes at its own declared width -

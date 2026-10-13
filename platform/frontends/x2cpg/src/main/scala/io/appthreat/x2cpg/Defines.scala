@@ -63,8 +63,9 @@ object Defines:
     */
   val ReferenceKindTag = "ref"
 
-  /** On a TYPE_DECL (C/C++): the storage its members share - `union` when every member overlays the
-    * same bytes, so a store to any one of them initialises them all.
+  /** C/C++: `union` on each MEMBER of a union, whose members all overlay the same bytes, so a store
+    * to any one of them initialises them all. The EDG frontend also tags a LOCAL of a union type: a
+    * union without a tag has no name to look its members up by.
     */
   val TypeStorageTag   = "type-storage"
   val TypeStorageUnion = "union"

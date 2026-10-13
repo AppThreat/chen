@@ -318,6 +318,24 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    union TweakU t;
     |    return t.q[0] + 1;
     |}
+    |unsigned consume_bits(unsigned);
+    |unsigned union_bad_read_by_value(void)
+    |{
+    |    union { float f; unsigned u; } b;
+    |    return consume_bits(b.u);
+    |}
+    |unsigned union_bad_compound_first(unsigned v)
+    |{
+    |    union { unsigned w[2]; unsigned char c[8]; } u;
+    |    u.w[0] |= v;
+    |    return u.w[0];
+    |}
+    |long lookup_long(long *);
+    |long union_bad_pointer_member_by_value(void)
+    |{
+    |    union Ptrs p;
+    |    return lookup_long(p.to_long);
+    |}
     |#define SLOT(i) XX##i
     |int init_ok_macro_lhs_store(int v)
     |{
@@ -329,6 +347,14 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |{
     |    int XX9;
     |    return SLOT(9);
+    |}
+    |#define AT(i) slots[i]
+    |int init_bad_macro_lhs_index(int v)
+    |{
+    |    int k;
+    |    int slots[4];
+    |    AT(k) = v;
+    |    return slots[0];
     |}
     |typedef unsigned int fe[10];
     |typedef struct { fe yplusx; fe yminusx; } ge;
@@ -442,9 +468,17 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         findingsIn("union_bad_read_named") should contain("MS-INIT-001")
         findingsIn("union_bad_read_anon") should contain("MS-INIT-001")
     }
+    "report a union member read by value: passed to a call, or by a compound assignment" in {
+        findingsIn("union_bad_read_by_value") should contain("MS-INIT-001")
+        findingsIn("union_bad_pointer_member_by_value") should contain("MS-INIT-001")
+        findingsIn("union_bad_compound_first") should contain("MS-INIT-001")
+    }
     "treat a macro invocation on a store's left side as the store it expands to" in {
         findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
         findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
+    }
+    "still report what such a macro's expansion only reads, as an index" in {
+        findingsIn("init_bad_macro_lhs_index") should contain("MS-INIT-001")
     }
     "leave a struct whose member is an array through a typedef alone" in {
         findingsIn("init_ok_array_member_through_typedef") should not contain "MS-INIT-001"
