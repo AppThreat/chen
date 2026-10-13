@@ -96,6 +96,19 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |    memcpy(dst, src, n);
     |    free(dst);
     |}
+    |
+    |#define MAP_FAILED ((void *) -1)
+    |void *mmap(void *addr, size_t len, int prot, int flags, int fd, long off);
+    |int munmap(void *addr, size_t len);
+    |
+    |/* mmap fails with MAP_FAILED, not NULL: this is its checked form */
+    |int good_mmap_checked(int fd, size_t n)
+    |{
+    |    char *p = (char *)mmap(0, n, 1, 2, fd, 0);
+    |    if (p == MAP_FAILED) return -1;
+    |    p[0] = 'a';
+    |    return munmap(p, n);
+    |}
     |""".stripMargin,
     "null_deref.c"
   )
@@ -172,5 +185,9 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
         // MS-BOUND-002 may still ask its own question about the caller-controlled length
         // (the function is externally reachable); the NULL rule must not fire on it
         findingsIn("good_memcpy_checked_len") should not contain "MS-NULL-001"
+    }
+
+    "stay silent on an mmap result checked against MAP_FAILED, mmap's failure value" in {
+        findingsIn("good_mmap_checked").map(_._1) should not contain "MS-NULL-001"
     }
 end NullDerefRuleTests
