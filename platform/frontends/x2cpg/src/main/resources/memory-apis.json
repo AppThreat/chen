@@ -22,7 +22,8 @@
     "Nullable-return entries: `nullableReturn` marks an API whose result may be NULL - ",
     "allocation-family calls that return POINTERS declare it explicitly; the fd-returning family ",
     "(open, socket, accept) does NOT: an int fd's failure is -1, checked with `< 0`, and conflating ",
-    "the two would turn a checked fd into a null-deref finding. The pass emits `nullable-return` on the ",
+    "the two would turn a checked fd into a null-deref finding. Neither does mmap, which fails with ",
+    "MAP_FAILED ((void *) -1), not NULL: its correct check is no null guard. The pass emits `nullable-return` on the ",
     "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use.",
     "The str*-search family reads through its HAYSTACK, which is argument 1 (`src: 1`), not the ",
     "needle/char, so passing a pointer to be searched counts as a read-through; `strlen` is a ",
@@ -237,8 +238,7 @@
     {
       "name": "mmap",
       "len": 2,
-      "alloc": "mmap",
-      "nullableReturn": true
+      "alloc": "mmap"
     },
     {
       "name": "munmap",

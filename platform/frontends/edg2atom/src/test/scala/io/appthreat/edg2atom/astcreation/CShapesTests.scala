@@ -21,6 +21,7 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
         |void *my_alloc(size_t n) __attribute__((malloc, alloc_size(1), warn_unused_result));
         |int my_log(const char *fmt, ...) __attribute__((format(printf, 1, 2), nonnull(1)));
         |void my_fill(char *buf, size_t n) __attribute__((access(write_only, 1, 2)));
+        |_Noreturn void my_die(int code);
         |static void unlock(int *p) { *p = 0; }
         |static jmp_buf env;
         |int scoped(void) {
@@ -29,6 +30,7 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
         |  char *b = my_alloc(16);
         |  my_fill(b, 16);
         |  my_log("%s\n", b);
+        |  if (!b) my_die(1);
         |  longjmp(env, 2);
         |  return guard;
         |}
@@ -60,6 +62,8 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
           attributesOf(longjmp) should contain("noreturn")
           longjmp.tag.nameExact("callee-declared-in").value.l.head should endWith("setjmp.h")
           attributesOf(cpg.call.nameExact("my_alloc").head) should contain("alloc_size(1)")
+          // C11's keyword, as musl declares longjmp and exit
+          attributesOf(cpg.call.nameExact("my_die").head) should contain("noreturn")
       }
 
       "mark the calls that return twice" in {

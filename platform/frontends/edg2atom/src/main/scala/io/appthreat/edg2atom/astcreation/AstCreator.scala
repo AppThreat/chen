@@ -312,6 +312,7 @@ class AstCreator(
     methodStack = methodStack.drop(1)
     scope.popScope()
     attributeTags(r, method)
+    r.string("asmName").foreach(tagNode(method, X2CpgDefines.AsmNameTag, _))
     Some(methodAst(method, params, bodyAst, methodReturn, modifiersOf(r)))
   end routineAst
 
@@ -433,9 +434,14 @@ class AstCreator(
 
   /** The function attributes the overlay reads from a declaration (`malloc`, `alloc_size`, ...). */
   private def attributeTags(r: Value, method: NewMethod): Unit =
-      r.list("attributes").flatMap(attributeText).distinct.foreach(
-        tagNode(method, X2CpgDefines.FunctionAttributeTag, _)
-      )
+      routineAttributes(r).distinct.foreach(tagNode(method, X2CpgDefines.FunctionAttributeTag, _))
+
+  /** A routine's attributes, with `noreturn` also for C11's `_Noreturn` and C++'s `[[noreturn]]`,
+    * which the front end records on the function's type: musl declares `longjmp` and `exit` that
+    * way where glibc writes `__attribute__((__noreturn__))`.
+    */
+  protected def routineAttributes(r: Value): Seq[String] =
+      r.list("attributes").flatMap(attributeText) ++ Option.when(r.flag("noReturn"))("noreturn")
 
   /** A declaration's code: its source text, when the front end gave its position. */
   private def codeOfDeclaration(r: Value): String =
@@ -586,7 +592,33 @@ class AstCreator(
         case "try_block"                 => tryAst(s)
         case "range_based_for"           => rangeForAst(s)
         case "stmt_expr_result"          => s.field("expr").map(expressionAst).getOrElse(Ast())
-        case _                           => Ast(unknownNode(s, code(s)))
+        // an edga before 0.2 writes an asm statement without its operands: UNKNOWN, as before
+        case "asm" if s.field("text").isDefined => asmAst(s)
+        case _                                  => Ast(unknownNode(s, code(s)))
+
+  /** An asm statement as a call of `asm` on its operands, outputs first. The data flow knows no
+    * semantics for it, so it takes every argument as defined from the others: what the statement
+    * reads reaches what it writes, and a value handed to a `syscall` reaches the call. Each operand
+    * is tagged with its direction and constraint.
+    */
+  private def asmAst(s: Value): Ast =
+    val call = callNode(
+      s,
+      code(s),
+      X2CpgDefines.AsmCallName,
+      X2CpgDefines.AsmCallName,
+      DispatchTypes.STATIC_DISPATCH,
+      None,
+      Some(registerType("void"))
+    )
+    val operands = s.list("operands").flatMap { o =>
+        o.field("expr").map(expressionAst).map { operand =>
+          val role = s"${o.string("dir").getOrElse("in")}:${o.string("constraint").getOrElse("")}"
+          operand.root.foreach(tagNode(_, X2CpgDefines.AsmOperandTag, role))
+          operand
+        }
+    }
+    callAst(call, operands)
 
   /** Statements that become several ASTs in a context that takes one. */
   private def wrapped(s: Value, asts: Seq[Ast]): Ast =

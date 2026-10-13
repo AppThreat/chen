@@ -733,12 +733,14 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
     * own file does not declare it.
     */
   protected def tagCallee(call: NewCall, r: Value): Unit =
-    val attributes = r.list("attributes").flatMap(attributeText) ++
+    val attributes = routineAttributes(r) ++
         Option.when(ReturnsTwice.contains(r.string("name").getOrElse("")))("returns_twice")
     attributes.distinct.foreach(tagNode(call, X2CpgDefines.FunctionAttributeTag, _))
     r.position.filter(_.file != 0L).flatMap(p => unit.files.get(p.file)).foreach { f =>
         tagNode(call, CalleeDeclaredInTag, f.path)
     }
+    // the symbol the call links to, when an asm label renames it
+    r.string("asmName").foreach(tagNode(call, X2CpgDefines.AsmNameTag, _))
 
   private val CalleeDeclaredInTag = "callee-declared-in"
 

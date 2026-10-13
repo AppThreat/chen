@@ -89,6 +89,8 @@ jobs:
             ~/.sbt
             ~/.coursier
           key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
+      # Before the tests: the edg2atom tests cancel themselves without edga
+      - uses: ./.github/actions/edga-from-main  # temporary: remove once edga 0.2.0 is released
       - name: Compile and run tests
         run: |
           sbt --server "scalafmtCheck; clean; +testFull"
