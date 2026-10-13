@@ -217,6 +217,106 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "members.cpp"
+  ).moreCode(
+    """
+    |extern void *memcpy(void *, const void *, unsigned long);
+    |union Ptrs { long *to_long; unsigned long *to_ulong; };
+    |unsigned long union_store_other_member(long *src)
+    |{
+    |    union Ptrs p;
+    |    p.to_long = src;
+    |    return *p.to_ulong;
+    |}
+    |unsigned long union_anon_store_other_member(long *src)
+    |{
+    |    union { long *to_long; unsigned long *to_ulong; } p;
+    |    p.to_long = src;
+    |    return *p.to_ulong;
+    |}
+    |unsigned union_bad_read_named(void)
+    |{
+    |    union Reinterp { float f; unsigned u; };
+    |    union Reinterp b;
+    |    return b.u;
+    |}
+    |unsigned union_bad_read_anon(void)
+    |{
+    |    union { float f; unsigned u; } b;
+    |    return b.u;
+    |}
+    |unsigned long long union_bytes_then_words(const unsigned char *iv)
+    |{
+    |    union { unsigned long long q[2]; unsigned char c[16]; } tweak;
+    |    memcpy(tweak.c, iv, 16);
+    |    return tweak.q[0] ^ tweak.q[1];
+    |}
+    |unsigned long long union_element_store_then_read(unsigned seed)
+    |{
+    |    union { unsigned long long q[2]; unsigned char c[16]; } s;
+    |    s.q[0] = seed;
+    |    return s.q[1] ^ s.c[15];
+    |}
+    |struct WithUnion { int other; union { int a; float b; } u; };
+    |int union_member_of_struct(int seed)
+    |{
+    |    struct WithUnion s;
+    |    s.u.a = seed;
+    |    return (int)s.u.b;
+    |}
+    |int union_member_of_struct_other(int seed)
+    |{
+    |    struct WithUnion s;
+    |    s.u.a = seed;
+    |    return s.other;
+    |}
+    |struct AnonUnion { int k; union { int a; float b; }; };
+    |int union_anon_member_of_struct(int seed)
+    |{
+    |    struct AnonUnion s;
+    |    s.a = seed;
+    |    return (int)s.b;
+    |}
+    |union HoldsStruct { struct { int a; int b; } s; unsigned long long raw; };
+    |int union_holds_struct(int seed)
+    |{
+    |    union HoldsStruct u;
+    |    u.raw = 1;
+    |    return u.s.a;
+    |}
+    |typedef void (*block_fn)(unsigned char *, unsigned char *, const void *);
+    |union TweakU { unsigned long long q[2]; unsigned char c[16]; };
+    |unsigned long long union_callee_writes(block_fn f)
+    |{
+    |    union TweakU tweak;
+    |    f(tweak.c, tweak.c, 0);
+    |    return tweak.q[0] ^ tweak.q[1];
+    |}
+    |#define CLEAR(u) __builtin_memset((u).c, 0, 16)
+    |unsigned long long union_macro_callee_writes(void)
+    |{
+    |    union TweakU t;
+    |    CLEAR(t);
+    |    return t.q[0] ^ t.q[1];
+    |}
+    |unsigned long long union_bad_read_in_expression(void)
+    |{
+    |    union TweakU t;
+    |    return t.q[0] + 1;
+    |}
+    |#define SLOT(i) XX##i
+    |int init_ok_macro_lhs_store(int v)
+    |{
+    |    int XX0;
+    |    SLOT(0) = v;
+    |    return XX0;
+    |}
+    |int init_bad_macro_value_read(void)
+    |{
+    |    int XX9;
+    |    return SLOT(9);
+    |}
+    |""".stripMargin,
+    "unions.c"
   )
 
   new MemorySemanticsPass(cpg).createAndApply()
@@ -289,6 +389,29 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     "leave a struct holding an array, or one whose members have initialisers, alone" in {
         findingsIn("init_ok_array_member_filled") should not contain "MS-INIT-001"
         findingsIn("init_ok_default_initialised") should not contain "MS-INIT-001"
+    }
+    "treat a union's members as one storage" in {
+        Seq(
+          "union_store_other_member",
+          "union_anon_store_other_member",
+          "union_bytes_then_words",
+          "union_element_store_then_read",
+          "union_member_of_struct",
+          "union_anon_member_of_struct",
+          "union_holds_struct",
+          "union_callee_writes",
+          "union_macro_callee_writes"
+        ).foreach { m => withClue(m) { findingsIn(m) should not contain "MS-INIT-001" } }
+        findingsIn("union_member_of_struct_other") should contain("MS-INIT-001")
+        findingsIn("union_bad_read_in_expression") should contain("MS-INIT-001")
+    }
+    "report a union member nothing initialises" in {
+        findingsIn("union_bad_read_named") should contain("MS-INIT-001")
+        findingsIn("union_bad_read_anon") should contain("MS-INIT-001")
+    }
+    "treat a macro invocation on a store's left side as the store it expands to" in {
+        findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
+        findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
     }
 end InitAndFormatRulesTests
 

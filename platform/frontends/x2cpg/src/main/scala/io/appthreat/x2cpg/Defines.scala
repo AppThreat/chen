@@ -63,6 +63,12 @@ object Defines:
     */
   val ReferenceKindTag = "ref"
 
+  /** On a TYPE_DECL (C/C++): the storage its members share - `union` when every member overlays the
+    * same bytes, so a store to any one of them initialises them all.
+    */
+  val TypeStorageTag   = "type-storage"
+  val TypeStorageUnion = "union"
+
   /** Inline assembly (C/C++): an asm statement is a CALL named `asm` whose arguments are its
     * operands, each tagged `asm-operand=<in|out|inout>:<constraint>`. A METHOD declared with an asm
     * label, and the CALLs of it, carry `asm-name=<symbol>`: the name the linker sees (glibc's

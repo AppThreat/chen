@@ -4,6 +4,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.{Ast, ValidationMode}
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
@@ -538,6 +539,13 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     scope.pushNewScope(typeDecl)
 
     val memberAsts = typeSpecifier.getDeclarations(true).toList.flatMap(astsForDeclaration)
+    // a union's members share one storage: each carries the tag that says so
+    if typeSpecifier.getKey == IASTCompositeTypeSpecifier.k_union then
+      memberAsts.foreach { m =>
+          m.root.collectFirst { case node: NewMember =>
+              tagNode(node, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
+          }
+      }
 
     methodAstParentStack.pop()
     scope.popScope()

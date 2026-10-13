@@ -136,8 +136,12 @@ class AstCreator(
         .lineNumber(Integer.valueOf(1)).columnNumber(Integer.valueOf(1))
 
     val inFile = (v: Value) => v.position.exists(_.file == file.id)
+    // a record an enclosing record declares without a name is written under the enclosing one,
+    // not here
+    val nestedUnderAnother = anonymousMemberTypeIds
     val typeDecls = unit.types.values.toSeq.sortBy(_("id").num).filter { t =>
-        (isDefinedRecordOrTypedef(t) || isNamedEnum(t)) && inFile(t) && !isClosure(t)
+        (isDefinedRecordOrTypedef(t) || isNamedEnum(t)) && inFile(t) && !isClosure(t) &&
+        !nestedUnderAnother(t("id").num.toLong)
     }.flatMap(typeDeclAst(_, path))
     val globals = unit.globals.filter(inFile).flatMap(globalAst)
     // a member function defined in its class is written in the class's TYPE_DECL
@@ -470,6 +474,20 @@ class AstCreator(
 
   private def isClosure(t: Value): Boolean = t.flag("closure")
 
+  /** The records a record of this unit declares as members without a name: they are written as
+    * TYPE_DECL children of the declaring record instead of standing on their own.
+    */
+  private def anonymousMemberTypeIds: Set[Long] =
+      unit.types.values.flatMap { t =>
+          if isDefinedRecordOrTypedef(t) then
+            t.list("fields")
+                .filter(f => f.string("name").exists(_.isEmpty))
+                .flatMap(f => f.long("type").flatMap(unit.types.get))
+                .filter(c => isDefinedRecordOrTypedef(c) && !isClosure(c))
+                .map(_("id").num.toLong)
+          else Seq.empty
+      }.toSet
+
   /** A class's or an enumeration's specifier as written, `enum Color { Red, Green }`. */
   private def specifierText(t: Value): Option[String] =
       t.field("span").map(_.arr.toSeq.flatMap(EdgaUnit.pos)).filter(_.size == 2)
@@ -520,11 +538,31 @@ class AstCreator(
                 specifierText(t).getOrElse(name),
                 inherits = inherits
               )
-          // a member's code is its declarator as written (`buf[N]`, `n = 0`), as the CDT
-          // frontend writes it
-          val members = t.list("fields").map { f =>
-            val fname = f.string("name").getOrElse("")
-            Ast(memberNode(f, fname, declaratorText(f), registerType(types(f.long("type")))))
+          // a union's members share one storage: each carries the tag that says so. A member's
+          // code is its declarator as written (`buf[N]`, `n = 0`), as the CDT frontend writes
+          // it; an anonymous record member becomes a TYPE_DECL child instead, the shape the CDT
+          // frontend nests under the type that declares it
+          val isUnion = t.string("kind").contains("union")
+          val members = t.list("fields").flatMap { f =>
+            val memberAst = anonymousRecord(f).getOrElse(
+              Seq(
+                Ast(
+                  memberNode(
+                    f,
+                    f.string("name").getOrElse(""),
+                    declaratorText(f),
+                    registerType(types(f.long("type")))
+                  )
+                )
+              )
+            )
+            if isUnion then
+              memberAst.foreach(a =>
+                  a.root.collectFirst { case m: NewMember =>
+                      tagNode(m, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
+                  }
+              )
+            memberAst
           }
           // its member functions: those defined in its braces, and a declaration of each other
           val id = t("id").num.toLong
@@ -537,6 +575,18 @@ class AstCreator(
           Some(Ast(decl).withChildren(inSourceOrder(members ++ methods)))
     end match
   end typeDeclAst
+
+  /** The TYPE_DECL of an anonymous record member, nested under the type that declares it; a member
+    * of another kind without a name stays a member.
+    */
+  private def anonymousRecord(f: Value): Option[Seq[Ast]] =
+      if !f.string("name").exists(_.isEmpty) then None
+      else
+        f.long("type").flatMap(unit.types.get).flatMap { t =>
+            if isDefinedRecordOrTypedef(t) && !isClosure(t) then
+              typeDeclAst(t, currentPath, withMethods = false).map(Seq(_))
+            else None
+        }
 
   /** A class's members and member functions in the order they are written. */
   private def inSourceOrder(asts: Seq[Ast]): Seq[Ast] =

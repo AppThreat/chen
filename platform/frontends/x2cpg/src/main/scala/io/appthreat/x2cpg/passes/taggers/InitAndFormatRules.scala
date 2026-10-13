@@ -3,8 +3,10 @@ package io.appthreat.x2cpg.passes.taggers
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
+import io.appthreat.x2cpg.Defines
 import io.shiftleft.semanticcpg.language.*
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 /** Two weakness classes outside allocation state, read straight off the AST and CFG:
@@ -239,6 +241,47 @@ object InitAndFormatRules:
     !n.contains("[") && (ScalarType.matches(n) || isPointer(n) || isPodStruct(atom, n) ||
         isLocalStructDefinition(atom, n, localCode))
 
+  /** A local of a union: its members all overlay one storage, so a store to any one of them
+    * initialises them all. The type says so when it is spelled as one (the CDT frontend's
+    * elaborated and both frontends' anonymous spelling) or when the TYPE_DECL's members carry the
+    * tag both frontends write. A union a constructor builds (a C++ union with member functions) is
+    * left to the constructor, as a class is.
+    */
+  private def isUnionLocal(atom: Cpg, l: Local): Boolean =
+    val n = l.typeFullName.trim
+    n == "union" || n.startsWith("union ") || l.code.trim.startsWith("union ") || {
+        val name = n.stripPrefix("struct ").stripPrefix("union ").trim
+        name.nonEmpty && !name.contains("[") && podCandidates(atom, name).exists(td =>
+            !td.isExternal && !hasMethods(atom, td) && !isConstructed(atom, name, Set(name)) &&
+                OverlayFacts.membersOfTypeDecl(td).exists(
+                  _.tag.nameExact(Defines.TypeStorageTag).value.l
+                      .contains(Defines.TypeStorageUnion)
+                )
+        )
+    }
+
+  /** The member sets of a struct whose members share storage: an anonymous union declared inside
+    * it, which both frontends write as a TYPE_DECL child of the struct's with tagged members.
+    */
+  private def unionMemberGroups(atom: Cpg, t: String): List[Set[String]] =
+    val name = t.trim.stripPrefix("struct ").trim
+    if name.isEmpty then Nil
+    else
+      podCandidates(atom, name).flatMap { td =>
+          if td.isExternal then Nil
+          else
+            td.astChildren.collectAll[TypeDecl]
+                .filter(c =>
+                    OverlayFacts.membersOfTypeDecl(c).exists(m =>
+                        m.tag.nameExact(Defines.TypeStorageTag).value.l
+                            .contains(Defines.TypeStorageUnion)
+                    )
+                )
+                .map(c => OverlayFacts.membersOfTypeDecl(c).map(_.name).toSet)
+                .filter(_.nonEmpty)
+                .l
+      }.distinct
+
   private def isStatic(l: Local): Boolean =
       l.code.trim.startsWith("static") ||
           l.tag.nameExact(MemorySemanticsPass.TagStorage).value.l.contains(
@@ -262,6 +305,25 @@ object InitAndFormatRules:
   private def isLhsOf(n: AstNode, c: Call): Boolean =
       OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists(_.id == n.id)
 
+  /** The macro invocation an assignment's left side spells (`X(0) = l`, `#define X(i) XX##i`): the
+    * expansion's names are the store's destination, not reads. The expansion sits inside the
+    * INLINED call (`identifier -> block -> INLINED -> assignment`), which may wrap blocks.
+    */
+  private def insideAssignmentLhsMacro(n: AstNode): Boolean =
+      lhsMacroOf(n).exists { m =>
+          parentCall(m).exists(p => isLhsOf(m, p))
+      }
+
+  @tailrec
+  private def lhsMacroOf(n: AstNode): Option[Call] =
+      n._astIn.collectFirst { case c: Call => c } match
+        case Some(m) if m.dispatchType == DispatchTypes.INLINED => Some(m)
+        case Some(_)                                            => None
+        case _ =>
+            n._astIn.collectFirst { case b: Block => b } match
+              case Some(b) => lhsMacroOf(b)
+              case None    => None
+
   /** `s.b` / `s->b` with `s` an identifier: (base, field). */
   private def fieldPath(c: Call): Option[(String, String)] =
       if c.name == "<operator>.fieldAccess" then
@@ -278,10 +340,36 @@ object InitAndFormatRules:
         else None
       )
 
-  /** The outermost access of a member chain `f` is the base of: `s.f` inside `s.f.g.h`. */
+  /** The expression an element access reads its container through: `s.f[i]` is `s.f`, an array
+    * element of a union being one storage with its other members.
+    */
+  private def unwrapElements(c: Call): Call =
+      if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" then
+        c.argumentOption(1).collect { case x: Call => unwrapElements(x) }.getOrElse(c)
+      else c
+
+  /** A call the program writes, not an operator the frontend derived nor a macro's inline
+    * expansion: handing one of its arguments a piece of storage lets the callee write it.
+    */
+  private def isRealCall(c: Call): Boolean =
+      !c.name.startsWith("<operator>") && c.dispatchType != DispatchTypes.INLINED
+
+  /** A call that may write the storage one of its arguments names: one the program writes, a call
+    * through a function pointer, or a macro that forwards to one (`memset` under `_FORTIFY_SOURCE`
+    * becomes `__builtin___memset_chk`).
+    */
+  private def handsOut(c: Call): Boolean =
+      isRealCall(c) || c.name == "<operator>.pointerCall" ||
+          (c.dispatchType == DispatchTypes.INLINED && c.inAst.collectAll[Call].exists(isRealCall))
+
+  /** The outermost access of a member or element chain `f` is the base of: `s.f` inside `s.f.g.h`,
+    * `s.f` inside `s.f[i] = x` (whose left side is a write, not a read).
+    */
   private def outermostAccess(f: Call): Call =
       parentCall(f).filter(p =>
-          p.name == "<operator>.fieldAccess" && p.argumentOption(1).exists(_.id == f.id)
+          (p.name == "<operator>.fieldAccess" || p.name == "<operator>.indexAccess" ||
+              p.name == "<operator>.indirectIndexAccess") &&
+              p.argumentOption(1).exists(_.id == f.id)
       )
           .map(outermostAccess).getOrElse(f)
 
@@ -321,7 +409,12 @@ object InitAndFormatRules:
             locals.groupBy(_.name).collect { case (n, ls) if ls.size > 1 => n }.toSet
         val candidates = locals
             .filter(l =>
-                !isStatic(l) && !isCatchBinding(l) && candidateType(atom, l.typeFullName, l.code)
+                !isStatic(l) && !isCatchBinding(l) && (candidateType(
+                  atom,
+                  l.typeFullName,
+                  l.code
+                ) ||
+                    isUnionLocal(atom, l))
             )
             .filterNot(l => l.inAst.collectAll[Call].exists(_.dispatchType == "INLINED"))
             .map(_.name)
@@ -329,7 +422,19 @@ object InitAndFormatRules:
         // declared on the line it is read on: hand-written C does not do that, a macro that
         // defines a whole function (GET_STR16, RTP_G726_HANDLER) does - its lines are all one
         val declLine = locals.flatMap(l => l.lineNumber.map(n => l.name -> n.toInt)).toMap
-        if candidates.nonEmpty then analyse(method, candidates, declLine, record)
+        if candidates.nonEmpty then
+          val unions = locals
+              .filter(l => candidates.contains(l.name) && isUnionLocal(atom, l))
+              .map(_.name)
+              .toSet
+          val groups = locals
+              .filter(l => candidates.contains(l.name) && !unions.contains(l.name))
+              .flatMap(l => unionMemberGroups(atom, l.typeFullName).map(g => l.name -> g))
+              .groupBy(_._1)
+              .view
+              .mapValues(_.map(_._2))
+              .toMap
+          analyse(method, candidates, unions, groups, declLine, record)
       }
 
   /** The names the method's lambdas use from it: a capture by reference may write the local (`[&] {
@@ -345,6 +450,8 @@ object InitAndFormatRules:
   private def analyse(
     method: Method,
     candidates: Set[String],
+    unions: Set[String],
+    groups: Map[String, List[Set[String]]],
     declLine: Map[String, Int],
     record: (StoredNode, String) => Unit
   ): Unit =
@@ -353,18 +460,43 @@ object InitAndFormatRules:
     // the definition each CFG node makes, and the read it performs (checked on entry)
     val gen   = mutable.LongMap.empty[Set[String]]
     val reads = mutable.ListBuffer.empty[(CfgNode, String, Set[String])] // node, shown, accepted
+    /** The storage a write to `b.fl` initialises: the whole of `b` for a union (its members share
+      * one storage), the union's members for a field of an anonymous union inside the struct, the
+      * field itself otherwise.
+      */
+    def storageOf(b: String, fl: String): Set[String] =
+        if unions.contains(b) then Set(b)
+        else
+          groups.get(b).flatMap(_.find(_.contains(fl))).map(g => g.map(m => s"$b.$m"))
+              .getOrElse(Set(s"$b.$fl"))
     nodes.foreach {
         case c: Call if OverlayFacts.isAssignmentOperator(c.name) =>
             c.argumentOption(1).foreach {
                 case i: Identifier if candidates.contains(i.name) =>
                     gen(c.id()) = Set(i.name)
-                // `s.f.g = x` initialises (part of) s.f: partly initialised is not uninitialised
+                // a macro invocation on the left (`X(0) = l`, `#define X(i) XX##i`): the store
+                // writes every candidate name its expansion spells
+                case m: Call if m.dispatchType == DispatchTypes.INLINED =>
+                    val written = m.ast.isIdentifier.filter(i => candidates.contains(i.name))
+                        .map(_.name).toSet
+                    if written.nonEmpty then gen(c.id()) = written
+                // `s.f.g = x` initialises (part of) s.f: partly initialised is not uninitialised;
+                // so does `s.f[i] = x` on a union, whose elements are one storage with the rest
                 case f: Call =>
-                    rootFieldPath(f).filter(p => candidates.contains(p._1)).foreach {
+                    rootFieldPath(unwrapElements(f)).filter(p => candidates.contains(p._1)).foreach {
                         case (b, fl) =>
-                            gen(c.id()) = Set(s"$b.$fl")
+                            gen(c.id()) = storageOf(b, fl)
                     }
                 case _ => ()
+            }
+        // a member of a union handed to a call: the callee may write that storage (`memcpy(t.c,
+        // iv, 16)`), and handing it over is not a read of it
+        case c: Call if handsOut(c) =>
+            c.argument.l.collect { case f: Call => f }.foreach { f =>
+                rootFieldPath(unwrapElements(f)).filter(p => unions.contains(p._1)).foreach {
+                    case (b, _) =>
+                        gen(c.id()) = gen.getOrElse(c.id(), Set.empty) + b
+                }
             }
         case c: Call if c.name == "<operator>.addressOf" =>
             c.argumentOption(1).foreach {
@@ -385,7 +517,7 @@ object InitAndFormatRules:
                 p.name == "<operator>.cast" && p.code.replace(" ", "").startsWith("(void)")
             )
             if !isWrite && !isFieldBase && !voided && !isSelfAssignmentRhs(i, parent) &&
-              !insideUnevaluated(i)
+              !insideUnevaluated(i) && !insideAssignmentLhsMacro(i)
             then
               reads += ((i, i.name, Set(i.name, s"${i.name}.*")))
         case f: Call if f.name == "<operator>.fieldAccess" =>
@@ -394,7 +526,8 @@ object InitAndFormatRules:
                 val parent = parentCall(top)
                 val isWrite =
                     parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
-                if !isWrite && !insideUnevaluated(f) then
+                val handedOut = unions.contains(b) && parent.exists(handsOut)
+                if !isWrite && !handedOut && !insideUnevaluated(f) then
                   reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
             }
         case _ => ()

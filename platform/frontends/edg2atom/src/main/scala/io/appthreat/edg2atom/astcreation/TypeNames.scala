@@ -74,9 +74,11 @@ final class TypeNames(unit: EdgaUnit):
           s"${sub(t.long("returns"))}(${all.mkString(",")})"
       // a lambda's closure has no name the program can spell
       case "class" | "struct" | "union" if t.flag("closure") => X2CpgDefines.Any
-      case "class" | "struct" | "union" =>
-          t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag")).map(dotted)
-              .getOrElse(X2CpgDefines.Any)
+      case "class" | "struct" | "union"                      =>
+          // a record without a tag is spelled by its kind, as the CDT frontend types it
+          t.string("qualifiedName").filter(n => n.nonEmpty && n != "<unnamed>")
+              .orElse(t.string("tag").filter(_.nonEmpty)).map(dotted)
+              .getOrElse(t.string("kind").getOrElse(X2CpgDefines.Any))
       case "integer" if t.flag("enum") =>
           t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag").filter(_.nonEmpty))
               .map(dotted).getOrElse(cleaned(t.string("name")))
