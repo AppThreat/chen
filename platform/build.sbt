@@ -24,33 +24,22 @@ topLevelDirectory := Some(packageName.value)
 
 Compile / packageDoc / mappings := Seq()
 
+// Each frontend's own Universal mappings, not the contents of its stage directory: a stage
+// directory keeps whatever an earlier stage left there (an older Scala library, say).
 def frontendMappings(
     frontendName: String,
-    stagedProject: File
-)(using FileConverter): Seq[(HashedVirtualFileRef, String)] = {
-    NativePackagerHelper.contentOf(stagedProject).map { case (file, name) =>
-        summon[FileConverter].toVirtualFile(file.toPath) -> s"frontends/$frontendName/$name"
-    }
-}
+    mappings: Seq[(HashedVirtualFileRef, String)]
+): Seq[(HashedVirtualFileRef, String)] =
+    mappings.map { case (file, name) => file -> s"frontends/$frontendName/$name" }
 
 // These frontends are defined once in project/Projects.scala; referencing them
 // via Projects.* here keeps this directory's build.sbt free of duplicate
 // project definitions, which sbt 2 cannot reconcile with the root ones.
-Universal / mappings ++= frontendMappings("javasrc2cpg", (Projects.javasrc2cpg / stage).value)(using
-  fileConverter.value
-)
-Universal / mappings ++= frontendMappings("c2cpg", (Projects.c2cpg / stage).value)(using
-  fileConverter.value
-)
-Universal / mappings ++= frontendMappings("jssrc2cpg", (Projects.jssrc2cpg / stage).value)(using
-  fileConverter.value
-)
-Universal / mappings ++= frontendMappings("jimple2cpg", (Projects.jimple2cpg / stage).value)(using
-  fileConverter.value
-)
-Universal / mappings ++= frontendMappings("pysrc2cpg", (Projects.pysrc2cpg / stage).value)(using
-  fileConverter.value
-)
+Universal / mappings ++= frontendMappings("javasrc2cpg", (Projects.javasrc2cpg / Universal / mappings).value)
+Universal / mappings ++= frontendMappings("c2cpg", (Projects.c2cpg / Universal / mappings).value)
+Universal / mappings ++= frontendMappings("jssrc2cpg", (Projects.jssrc2cpg / Universal / mappings).value)
+Universal / mappings ++= frontendMappings("jimple2cpg", (Projects.jimple2cpg / Universal / mappings).value)
+Universal / mappings ++= frontendMappings("pysrc2cpg", (Projects.pysrc2cpg / Universal / mappings).value)
 
 lazy val cpgVersionFile = taskKey[File]("persist cpg version in file (e.g. for schema-extender)")
 cpgVersionFile := Def.uncached {
