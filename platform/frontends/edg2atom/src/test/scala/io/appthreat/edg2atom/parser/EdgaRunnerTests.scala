@@ -98,9 +98,10 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
                 |}
                 |""".stripMargin
             )
+            // c2x: GCC 13 (ubuntu-24.04's) does not know -std=c23 yet
             (dir / "compile_commands.json").writeText(
               s"""[{ "directory": "${dir.pathAsString}", "file": "v.c",
-                 |   "arguments": ["cc", "-std=c23", "-c", "v.c"] }]""".stripMargin
+                 |   "arguments": ["cc", "-std=c2x", "-c", "v.c"] }]""".stripMargin
             )
             val config = Config().withInputPath(dir.pathAsString)
                 .withCompileCommands((dir / "compile_commands.json").pathAsString)
