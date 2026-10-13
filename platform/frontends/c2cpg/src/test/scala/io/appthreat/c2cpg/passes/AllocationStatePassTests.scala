@@ -50,6 +50,26 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |/* the free a macro spells: the invocation's argument is the free site, whether the macro is
+    |   the free itself or a wrapper that frees and resets */
+    |#define wrap_free(p) free(p)
+    |void bad_conditional_macro_free(int flag)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    if (p == NULL) return;
+    |    if (flag) { wrap_free(p); }
+    |    wrap_free(p);
+    |}
+    |/* the use a macro's argument makes, when the macro frees nothing, is not a free */
+    |#define wrap_use(p) strlen(p)
+    |void bad_uaf_macro_use(int flag)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    if (p == NULL) return;
+    |    if (flag) { wrap_free(p); }
+    |    wrap_use(p);
+    |}
+    |
     |void good_nulled(void)
     |{
     |    char *p = (char *)malloc(16);
@@ -278,6 +298,10 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
         findingsIn("bad_via_wrapper") shouldBe Set("MS-ALLOC-001")
     }
 
+    "fire through a macro that is the free, or a wrapper that frees and resets" in {
+        findingsIn("bad_conditional_macro_free") shouldBe Set("MS-ALLOC-001")
+    }
+
     "stay silent behind the free-and-reset idiom" in {
         findingsIn("good_nulled") shouldBe empty
     }
@@ -286,6 +310,10 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "fire on a write through a freed pointer" in {
         findingsIn("bad_uaf") shouldBe Set("MS-ALLOC-002")
+    }
+
+    "fire through a macro's argument when the macro frees nothing" in {
+        findingsIn("bad_uaf_macro_use") shouldBe Set("MS-ALLOC-002")
     }
 
     "stay silent when the pointer was nulled and re-checked" in {
