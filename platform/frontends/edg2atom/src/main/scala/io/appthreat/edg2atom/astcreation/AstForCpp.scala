@@ -739,6 +739,8 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
     r.position.filter(_.file != 0L).flatMap(p => unit.files.get(p.file)).foreach { f =>
         tagNode(call, CalleeDeclaredInTag, f.path)
     }
+    // the symbol the call links to, when an asm label renames it
+    r.string("asmName").foreach(tagNode(call, X2CpgDefines.AsmNameTag, _))
 
   private val CalleeDeclaredInTag = "callee-declared-in"
 
