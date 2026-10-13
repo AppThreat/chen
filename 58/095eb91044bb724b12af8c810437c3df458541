@@ -1,0 +1,24 @@
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/util/SourceParser.scala
+  s_f0dc77cd7bedb9::t_e65335a2465c90 136-142,147-155,158,164,166-168
+  s_f0dc77cd7bedb9::t_807912a335f9a3 143-146
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/util/Delombok.scala
+  s_f0dc77cd7bedb9::t_e65335a2465c90 91-93
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/util/SourceParserTests.scala
+  s_f0dc77cd7bedb9::t_e65335a2465c90 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "58095eb91044bb724b12af8c810437c3df458541",
+  "prompts": {},
+  "sessions": {
+    "s_f0dc77cd7bedb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05a70e3b-3b4f-4d77-a7f8-10fecf1fa02a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
