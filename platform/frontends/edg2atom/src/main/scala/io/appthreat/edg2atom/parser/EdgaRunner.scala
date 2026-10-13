@@ -4,6 +4,7 @@ import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.parser.{
     CompilerFamily,
     CompilerIdentity,
+    DefaultDefines,
     PredefinedMacros,
     ProjectSources,
     SourceLanguage,
@@ -104,6 +105,10 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
             "--type_traits_helpers"
           )
         else Seq(EdgaRunner.cStandardOption(settings.standard.orNull))
+    val written =
+        if cpp then settings.standard.orElse(Option(config.cppStandard).filter(_.trim.nonEmpty))
+        else settings.standard
+    val strictness = EdgaRunner.strictnessOptions(written, dialect)
     val systemDirs =
         facts.map(_.systemIncludePaths).getOrElse(Seq.empty).map(_.toAbsolutePath.normalize)
     val (projectIncludes, otherIncludes) =
@@ -117,8 +122,8 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
         (otherIncludes ++ systemDirs).distinct.flatMap(p => Seq("--sys_include", p.toString))
     // the compiler's macros, without those the front end defines from its own options
     val predefinedFile = macroFile(macros)
-    val userDefines = settings.definedSymbols.filterNot((k, _) =>
-        macros.contains(k) || EdgaRunner.ParserShims(k)
+    val userDefines = settings.definedSymbols.filterNot((k, v) =>
+        macros.contains(k) || EdgaRunner.ParserShims(k) || EdgaRunner.isKeywordShim(k, v)
     )
         .toSeq.sorted.flatMap((k, v) => Seq("--define_macro", if v.isEmpty then k else s"$k=$v"))
     // libc++'s vectorized algorithms are alias templates of clang's dependent-size vector types,
@@ -131,9 +136,10 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
         settings.macroFiles.flatMap(f => Seq("--preinclude_macros", f.toString))
     // a compiler macro the front end also defines keeps the front end's value, which describes what
     // it implements, without an error for the attempted redefinition
-    Seq("--clear_flag=use_predefined_macro_file", "--diag_suppress=46") ++ dialect ++ standard ++
-        Seq("--preinclude_macros", predefinedFile.toString) ++ includes ++ userDefines ++ libcxx ++
-        EdgaRunner.float128Shim(this.identity, macros, cpp) ++ forced
+    Seq("--clear_flag=use_predefined_macro_file", "--diag_suppress=46") ++ dialect ++
+        strictness ++ standard ++ Seq("--preinclude_macros", predefinedFile.toString) ++
+        includes ++ userDefines ++ libcxx ++ EdgaRunner.float128Shim(this.identity, macros, cpp) ++
+        EdgaRunner.c23VaStartShim(standard) ++ forced
   end arguments
 
   private def macroFile(macros: Map[String, String]): Path =
@@ -183,6 +189,14 @@ object EdgaRunner:
   val ParserShims: Set[String] =
       UnitSettings.FeatureTests.keySet ++ Set("__has_include(x)", "__has_include_next(x)", "export")
 
+  /** The MSVC keywords the C/C++ parser settings spell as attributes where the compiler is not
+    * known (`__asm` as `__attribute((asm))`), which the front end parses itself. Passed on, they
+    * break the headers that use them: the macOS SDK names symbols with `__asm` (`__DARWIN_ALIAS`),
+    * and the x86 intrinsics headers declare `__m128`.
+    */
+  def isKeywordShim(name: String, value: String): Boolean =
+      DefaultDefines.DEFAULT_CALL_CONVENTIONS.get(name).contains(value)
+
   /** The front end's option for a `-std` spelling (`c++17`, `gnu++2a`, `c++latest`), C++17 when
     * none is given or the front end has no mode for it.
     */
@@ -220,6 +234,35 @@ object EdgaRunner:
         case "11" | "1x" | "iso9899:2011"                    => "--c11"
         case "2x" | "23" | "iso9899:2024"                    => "--c23"
         case _                                               => "--c17"
+
+  /** Whether the front end emulates GCC's and Clang's own dialect (`-std=gnu17`, their default) or
+    * the ISO one (`-std=c17`). Given a `--c*` mode it takes the ISO one, which defines
+    * `__STRICT_ANSI__` on Linux: glibc and musl then leave out what POSIX and GNU add (`strdup`,
+    * `popen`, `M_PI`), and calls of those become implicit declarations returning `int`. A unit is
+    * parsed in the ISO dialect only when its `-std` names it.
+    */
+  def strictnessOptions(standard: Option[String], dialect: Seq[String]): Seq[String] =
+      if !dialect.exists(Set("--gcc", "--g++", "--clang")) then Seq.empty
+      else
+        val iso = standard.map(_.trim.toLowerCase).exists(s =>
+            s.startsWith("c") || s.startsWith("iso9899")
+        )
+        Seq(if iso then "--strict_gnu" else "--no_strict_gnu")
+
+  /** GCC 15 and Clang 21 define C23's `va_start` with `__builtin_c23_va_start`, which the front end
+    * does not have: it would read as a call of an undeclared function, not a `va_start`. The shim
+    * keeps the last named parameter when one is given (`va_start(ap, n)`); C23's one-argument form
+    * becomes `__builtin_va_start(ap, 0)`, which the front end warns about but accepts.
+    */
+  def c23VaStartShim(standard: Seq[String]): Seq[String] =
+      if !standard.contains("--c23") then Seq.empty
+      else
+        Seq(
+          "--define_macro",
+          "__builtin_c23_va_start(...)=__edga_va_start(__VA_ARGS__, 0, 0)",
+          "--define_macro",
+          "__edga_va_start(ap, last, ...)=__builtin_va_start(ap, last)"
+        )
 
   def locate(): Option[String] =
       sys.props.get("edga.path").orElse(sys.env.get("EDGA_PATH")).filter(p =>
