@@ -63,6 +63,15 @@ object Defines:
     */
   val ReferenceKindTag = "ref"
 
+  /** Inline assembly (C/C++): an asm statement is a CALL named `asm` whose arguments are its
+    * operands, each tagged `asm-operand=<in|out|inout>:<constraint>`. A METHOD declared with an asm
+    * label, and the CALLs of it, carry `asm-name=<symbol>`: the name the linker sees (glibc's
+    * `__REDIRECT` makes `strtol` `__isoc23_strtol`).
+    */
+  val AsmCallName   = "asm"
+  val AsmOperandTag = "asm-operand"
+  val AsmNameTag    = "asm-name"
+
   /** C/C++ macro invocations. Each invocation of a file has an index: its INLINED call and the
     * nodes its expansion produced carry `macro-invocation=<index>`; an invocation nested in another
     * (an argument that is itself a macro) carries `macro-parent=<index>` of the enclosing one. A
