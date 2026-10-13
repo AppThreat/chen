@@ -1,0 +1,41 @@
+.gitignore
+  s_f0dc77cd7bedb9::t_eb68cd81f1f2c8 71-73
+build.sbt
+  s_f0dc77cd7bedb9::t_5df5465f6e2ea3 95-97
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/GoldenComparisonTests.scala
+  s_b09c568a640d82::t_f977124b49c4a1 6,29
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/util/Delombok.scala
+  s_f0dc77cd7bedb9::t_7d1c2ad725ac40 34-50,54-64
+platform/frontends/jimple2cpg/src/test/scala/io/appthreat/jimple2cpg/unpacking/JarUnpackingTests.scala
+  s_b09c568a640d82::t_65726aa22cc558 9,40,43
+platform/frontends/jimple2cpg/src/test/scala/io/appthreat/jimple2cpg/unpacking/JdkClassesTests.scala
+  s_b09c568a640d82::t_067024dcfd1b4c 6,30
+platform/frontends/jimple2cpg/src/test/scala/io/appthreat/jimple2cpg/unpacking/NativeMethodTests.scala
+  s_b09c568a640d82::t_cad933b1e7fb55 9,32
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/AbstractPassTest.scala
+  s_b09c568a640d82::t_68ac1016cfd15f 8,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2a2581c7f3fa873af7e022877d630f9dc99b5975",
+  "prompts": {},
+  "sessions": {
+    "s_b09c568a640d82": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76c5da75-537e-4aab-a7c4-6efe345d0bde",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_f0dc77cd7bedb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05a70e3b-3b4f-4d77-a7f8-10fecf1fa02a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
