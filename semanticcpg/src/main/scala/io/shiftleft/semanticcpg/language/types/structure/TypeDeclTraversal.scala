@@ -83,13 +83,9 @@ class TypeDeclTraversal(val traversal: Iterator[TypeDecl]) extends AnyVal:
     */
   def unravelAlias: Iterator[TypeDecl] =
       traversal.map { typeDecl =>
-        val alias =
-            for
-              tpe      <- typeDecl.aliasedType.nextOption()
-              typeDecl <- tpe.referencedTypeDecl.nextOption()
-            yield typeDecl
-
-        alias.getOrElse(typeDecl)
+          typeDecl.aliasedType.nextOption()
+              .flatMap(tpe => preferredDeclaration(tpe.referencedTypeDecl.l))
+              .getOrElse(typeDecl)
       }
 
   /** Traverse to canonical type which means unravel aliases until we find a non alias type
@@ -111,3 +107,25 @@ end TypeDeclTraversal
 
 object TypeDeclTraversal:
   private val maxAliasExpansions = 100
+
+  /** The declaration a type stands for when several declare it - in C, a header's forward
+    * declaration (`typedef struct s S;` declares `s` too) and the definition in one source file. A
+    * declaration that is not an alias wins, then one with members (the definition), a parsed one
+    * over a stub, and then a content-stable order. The first edge or index entry would be whichever
+    * file a parallel frontend happened to write first, so a type's members could differ from one
+    * run to the next.
+    */
+  def preferredDeclaration(decls: List[TypeDecl]): Option[TypeDecl] =
+      if decls.sizeIs <= 1 then decls.headOption
+      else
+        decls.minByOption(d =>
+            (
+              d.aliasTypeFullName.isDefined,
+              d._memberViaAstOut.isEmpty,
+              d.isExternal,
+              d.filename,
+              d.lineNumber.map(_.intValue).getOrElse(Int.MaxValue),
+              d.code
+            )
+        )
+end TypeDeclTraversal

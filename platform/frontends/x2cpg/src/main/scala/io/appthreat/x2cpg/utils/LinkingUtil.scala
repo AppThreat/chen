@@ -9,6 +9,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.Method
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NamespaceBlock
 import io.shiftleft.codepropertygraph.generated.nodes.Type
+import io.shiftleft.semanticcpg.language.types.structure.TypeDeclTraversal
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import overflowdb.NodeDb
@@ -26,8 +27,14 @@ trait LinkingUtil:
 
   val logger: Logger = LoggerFactory.getLogger(classOf[LinkingUtil])
 
+  /** The type declaration a full name links to. Several can share one (a C header's forward
+    * declaration and the definition): the choice is [[TypeDeclTraversal.preferredDeclaration]]'s,
+    * not the index's order, which follows the order a parallel frontend wrote the files in.
+    */
   def typeDeclFullNameToNode(cpg: Cpg, x: String): Option[TypeDecl] =
-      nodesWithFullName(cpg, x).collectFirst { case x: TypeDecl => x }
+      TypeDeclTraversal.preferredDeclaration(
+        nodesWithFullName(cpg, x).collect { case d: TypeDecl => d }.toList
+      )
 
   def typeFullNameToNode(cpg: Cpg, x: String): Option[Type] =
       nodesWithFullName(cpg, x).collectFirst { case x: Type => x }
