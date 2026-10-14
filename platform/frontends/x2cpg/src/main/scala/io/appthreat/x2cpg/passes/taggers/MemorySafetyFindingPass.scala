@@ -4498,7 +4498,36 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       tags.contains(GuardPass.TagAbove) || tags.contains(GuardPass.TagByExtent)
 
   private def reaches(value: Expression, param: MethodParameterIn): Boolean =
-      OverlayFacts.reachingDefsIn(value).contains(param) || countsLoopsOver(value, param)
+      definedThrough(value, param) || countsLoopsOver(value, param)
+
+  /** Whether `param` defines `value`, walking back along its definitions for up to eight of them. A
+    * variable handed by value to another call (`note(n)`, or a macro's argument copy and the call
+    * its expansion makes) is listed among the definitions but keeps its value: the walk steps
+    * through it without spending one.
+    */
+  private def definedThrough(value: Expression, param: MethodParameterIn): Boolean =
+    val seen  = mutable.HashSet.empty[Long]
+    val queue = mutable.ArrayDeque[(StoredNode, Int)]((value, 0))
+    var found = false
+    while !found && queue.nonEmpty do
+      val (node, spent) = queue.removeHead()
+      if seen.add(node.id()) then
+        val exclude = node match
+          case e: Expression => OverlayFacts.expansionExclusionOf(e)
+          case _             => Set.empty[Long]
+        node._reachingDefIn.foreach { d =>
+            if d.id() == param.id() then found = true
+            else if !exclude.contains(d.id()) && !seen.contains(d.id()) then
+              if passedByValue(d) then queue.prepend((d, spent))
+              else if spent < 8 then queue.append((d, spent + 1))
+        }
+    found
+
+  private def passedByValue(node: StoredNode): Boolean = node match
+    case i: Identifier =>
+        !GuardPass.isDefinitionSite(i) &&
+        i._astIn.collectFirst { case c: Call => c }.exists(!_.name.startsWith("<operator"))
+    case _ => false
 
   /** The length counts iterations of loops the capacity bounds: `n = 0; for (i = 0; i < m; i++) {
     * ...; n++; }`, with `m` set from the capacity (`if (m > max_depth) m = max_depth;`). Each
