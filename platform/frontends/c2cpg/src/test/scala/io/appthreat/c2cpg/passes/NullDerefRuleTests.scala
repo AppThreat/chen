@@ -57,6 +57,21 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
     |    return strlen(s);
     |}
     |
+    |/* a check or a use only a branch a constant condition rules out reaches is on no path */
+    |size_t good_dead_check_after_use(char *s)
+    |{
+    |    size_t n = strlen(s);
+    |    if (0) { if (s == NULL) return 0; }
+    |    return n;
+    |}
+    |size_t good_dead_use_before_check(char *s)
+    |{
+    |    size_t n = 0;
+    |    if (0) { n = strlen(s); }
+    |    if (s == NULL) return 0;
+    |    return n;
+    |}
+    |
     |/* the CWE-476 chained unvalidated parameter (the hypothesis tier) */
     |void bad_chained(struct node *head)
     |{
@@ -151,6 +166,11 @@ class NullDerefRuleTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the same check precedes the use" in {
         findingsIn("good_check_before_use") shouldBe empty
+    }
+
+    "stay silent when the late check or the early use is on a branch a constant condition rules out" in {
+        findingsIn("good_dead_check_after_use") shouldBe empty
+        findingsIn("good_dead_use_before_check") shouldBe empty
     }
 
     "fire on the unvalidated parameter deref at the low tier (the CWE-476 chained shape)" in {

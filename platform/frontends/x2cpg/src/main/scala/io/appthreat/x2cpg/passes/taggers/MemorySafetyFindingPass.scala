@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
@@ -246,7 +247,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                   val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
                       enclosing.exists(c =>
                           tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
-                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty
+                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty ||
+                              freesInvocationArgument(node, c)
                       )
                   if isFreeSite then
                     val family = enclosing.flatMap(c =>
@@ -274,6 +276,21 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleStackEscape))
   end ruleAllocationState
+
+  /** A macro invocation that frees the argument it is handed (`xfree(p)` spelling `free(p)`, or a
+    * wrapper that frees and resets): the argument is the free site, not a use of the freed pointer.
+    */
+  private def freesInvocationArgument(node: StoredNode, invocation: Call): Boolean =
+      invocation.dispatchType == DispatchTypes.INLINED && (node match
+        case arg: AstNode =>
+            OverlayFacts.variableKey(arg).exists(key =>
+                invocation.ast.isCall.exists(free =>
+                    tagValues(free, MemoryApiPass.TagFree).nonEmpty &&
+                        free.argument.exists(a => OverlayFacts.variableKey(a).contains(key))
+                )
+            )
+        case _ => false
+      )
 
   /** MS-NULL-001 (CWE-476): a dereference of a value that may be null, three arms over two fact
     * sources. Returns the nodes whose finding is a HYPOTHESIS tier - the renderer lowers those
@@ -327,6 +344,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     // another function's use through it is not a check-after-use, it is an aggregation artefact
     val hypothesis = mutable.LinkedHashSet.empty[StoredNode]
     atom.method.filterNot(_.isExternal).filterNot(_.name == "<global>").l.foreach { method =>
+      // a use or a guard only a branch a constant condition rules out reaches is on no path:
+      // `0 ? p->v : d` has no dereference and `if (0) { if (p) ... }` no check
+      val dead = OverlayFacts.constantlyDeadCfgNodes(method)
       // a bare `if (x)` is a null guard only for POINTER x: FFmpeg truthiness-checks ints
       // everywhere (`if (ret)`, `if (size)`), and counting those made arm 2 fire on every
       // earlier use of the int
@@ -338,7 +358,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       // belongs to - nesting inside that structure is protection, not lateness
       val guards = mutable.LinkedHashMap.empty[String, (Int, ControlStructure)]
       method.ast.collectAll[ControlStructure].l.foreach { cs =>
-          cs.condition.foreach { cond =>
+          cs.condition.filterNot(c => dead.contains(c.id)).foreach { cond =>
               OverlayFacts.nullGuardKeysOf(cond, pointerNames).foreach { key =>
                 val line = cond.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
                 guards.update(
@@ -421,7 +441,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 c.argument.l.filter(a => readsThrough.contains(a.argumentIndex))
           (derefBases ++ callArgs).collect { case i: Identifier => i }
         }
-        uses.foreach { use =>
+        uses.filterNot(u => dead.contains(u.id)).foreach { use =>
             castUnwrappingKey(use).foreach { key =>
               val line = use.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
               guards.get(key) match

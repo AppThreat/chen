@@ -1,6 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -588,6 +589,76 @@ private[taggers] object OverlayFacts:
     }
     FieldStores(reaching, dominated, rewritable)
   end fieldStoresReaching
+
+  /** The CFG edges a constant condition rules out, by source node: from the condition's own subtree
+    * into the branch its value does not select. A condition the frontends evaluated (a literal, a
+    * `const-value` tag) takes one branch only - `if (0)`, `while (0)`, `for (; 0;)`, `c ? a : b`
+    * with constant `c`.
+    *
+    * Only the edges leaving the condition are dropped: any other way into the branch (a goto, a
+    * `case` label) keeps it live, which is what makes the pruning sound. A `do` body is entered
+    * from the top before its condition is tested, so nothing is ruled out there.
+    */
+  def constantBranchExits(method: Method): Map[Long, Set[Long]] =
+    val cut = mutable.LinkedHashMap.empty[Long, Set[Long]]
+    def ruleOut(condition: AstNode, dead: List[AstNode]): Unit =
+      val deadIds = dead.flatMap(_.ast.id.l).toSet
+      if deadIds.nonEmpty then
+        condition.ast.collectAll[CfgNode].foreach { n =>
+          val into = n._cfgOut.collectAll[CfgNode].map(_.id()).filter(deadIds.contains).toSet
+          if into.nonEmpty then cut(n.id()) = cut.getOrElse(n.id(), Set.empty) ++ into
+        }
+    method.ast.collectAll[ControlStructure].foreach { cs =>
+        cs.condition.foreach { cond =>
+            IndexRange.literal(cond).foreach { value =>
+              // what a true condition runs is everything but the condition and an `else`
+              val (orElse, whenTrue) = cs.astChildren.filterNot(_.id == cond.id).l.partition {
+                  case e: ControlStructure => e.controlStructureType == ControlStructureTypes.ELSE
+                  case _                   => false
+              }
+              cs.controlStructureType match
+                case ControlStructureTypes.IF =>
+                    ruleOut(cond, if value == 0 then whenTrue else orElse)
+                case ControlStructureTypes.WHILE | ControlStructureTypes.FOR if value == 0 =>
+                    ruleOut(cond, whenTrue)
+                case _ => ()
+            }
+        }
+    }
+    method.ast.isCall.nameExact(Operators.conditional).foreach { c =>
+        (c.argumentOption(1), c.argumentOption(2), c.argumentOption(3)) match
+          case (Some(cond), Some(whenTrue), Some(whenFalse)) =>
+              IndexRange.literal(cond).foreach { value =>
+                  ruleOut(cond, List(if value == 0 then whenTrue else whenFalse))
+              }
+          case _ => ()
+    }
+    cut.toMap
+  end constantBranchExits
+
+  /** The CFG nodes a path from the method's entry reaches once the branches constant conditions
+    * rule out ([[constantBranchExits]]) are cut. A node no path reaches (a dead branch, or a
+    * subtree the frontend could not wire) proves nothing about the paths that do.
+    */
+  def feasibleCfgNodes(method: Method): Set[Long] = cfgReach(method, constantBranchExits(method))
+
+  /** The CFG nodes only a branch a constant condition rules out reaches: reachable from the entry,
+    * but not once those branches are cut. Unlike the complement of [[feasibleCfgNodes]], a node the
+    * frontend left unwired is not in it.
+    */
+  def constantlyDeadCfgNodes(method: Method): Set[Long] =
+    val cut = constantBranchExits(method)
+    if cut.isEmpty then Set.empty else cfgReach(method, Map.empty) -- cfgReach(method, cut)
+
+  private def cfgReach(method: Method, cut: Map[Long, Set[Long]]): Set[Long] =
+    val seen  = mutable.HashSet.empty[Long]
+    val stack = mutable.Stack[CfgNode](method)
+    while stack.nonEmpty do
+      val n = stack.pop()
+      if seen.add(n.id()) then
+        val blocked = cut.getOrElse(n.id(), Set.empty)
+        n._cfgOut.collectAll[CfgNode].filterNot(s => blocked.contains(s.id())).foreach(stack.push)
+    seen.toSet
 
   /** `&x` handed to an inventoried memory call as its source: read through, never written. */
   def readOnlyAddress(addressOf: Call): Boolean =

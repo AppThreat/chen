@@ -50,6 +50,34 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |/* the free a macro spells: the invocation's argument is the free site */
+    |#define wrap_free(p) free(p)
+    |void bad_conditional_macro_free(int flag)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    if (p == NULL) return;
+    |    if (flag) { wrap_free(p); }
+    |    wrap_free(p);
+    |}
+    |/* the use a macro's argument makes, when the macro frees nothing, is not a free */
+    |#define wrap_use(p) strlen(p)
+    |void bad_uaf_macro_use(int flag)
+    |{
+    |    char *p = (char *)malloc(64);
+    |    if (p == NULL) return;
+    |    if (flag) { wrap_free(p); }
+    |    wrap_use(p);
+    |}
+    |
+    |/* a free only a branch a constant condition rules out reaches frees nothing */
+    |void good_dead_branch_free(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    if (p == NULL) return;
+    |    if (0) { free(p); }
+    |    free(p);
+    |}
+    |
     |void good_nulled(void)
     |{
     |    char *p = (char *)malloc(16);
@@ -278,6 +306,14 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
         findingsIn("bad_via_wrapper") shouldBe Set("MS-ALLOC-001")
     }
 
+    "fire through a macro that is the free" in {
+        findingsIn("bad_conditional_macro_free") shouldBe Set("MS-ALLOC-001")
+    }
+
+    "stay silent when the first free is on a branch a constant condition rules out" in {
+        findingsIn("good_dead_branch_free") shouldBe empty
+    }
+
     "stay silent behind the free-and-reset idiom" in {
         findingsIn("good_nulled") shouldBe empty
     }
@@ -286,6 +322,10 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "fire on a write through a freed pointer" in {
         findingsIn("bad_uaf") shouldBe Set("MS-ALLOC-002")
+    }
+
+    "fire through a macro's argument when the macro frees nothing" in {
+        findingsIn("bad_uaf_macro_use") shouldBe Set("MS-ALLOC-002")
     }
 
     "stay silent when the pointer was nulled and re-checked" in {

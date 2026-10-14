@@ -213,6 +213,65 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     |{
     |    return nut->st[idx];
     |}
+    |
+    |/* a function whose every return is a constant, or an enumerator: the closed range of its
+    |   own body bounds what a caller passes its result on */
+    |static int pick_slot(unsigned int x)
+    |{
+    |    if (x)
+    |        return 1;
+    |    return 0;
+    |}
+    |static void take_slot(struct nut *nut, int slot)
+    |{
+    |    use_ptr(nut->st[slot]);
+    |}
+    |void route_narrow(struct nut *nut, unsigned int x)
+    |{
+    |    take_slot(nut, pick_slot(x));
+    |}
+    |enum pns { PNS_INITIAL, PNS_HANDSHAKE, PNS_APP, PNS_NUM };
+    |static enum pns enc_to_pns(unsigned int enc_level)
+    |{
+    |    switch (enc_level) {
+    |    case 0: return PNS_INITIAL;
+    |    case 1: return PNS_HANDSHAKE;
+    |    default: return PNS_APP;
+    |    }
+    |}
+    |static void take_pns(struct nut *nut, int pn_space)
+    |{
+    |    use_ptr(nut->st[pn_space]);
+    |}
+    |void route_pns(struct nut *nut, unsigned int enc_level)
+    |{
+    |    take_pns(nut, enc_to_pns(enc_level));
+    |}
+    |/* the positive twin: a function that returns what it is handed bounds nothing */
+    |static int pick_wide(unsigned int x)
+    |{
+    |    return x;
+    |}
+    |static void take_unbounded(struct nut *nut, int slot)
+    |{
+    |    use_ptr(nut->st[slot]);
+    |}
+    |void route_wide(struct nut *nut, unsigned int x)
+    |{
+    |    take_unbounded(nut, pick_wide(x));
+    |}
+    |
+    |/* a counter the loop initialises with an enumerator and bounds with the enum's count */
+    |static void take_enum_counter(struct nut *nut, int pn_space)
+    |{
+    |    use_ptr(nut->st[pn_space]);
+    |}
+    |void discard_all(struct nut *nut)
+    |{
+    |    int pn_space;
+    |    for (pn_space = PNS_INITIAL; pn_space < PNS_NUM; ++pn_space)
+    |        take_enum_counter(nut, pn_space);
+    |}
     |""".stripMargin,
     "range.c"
   )
@@ -288,6 +347,20 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     }
     "report at an entry point no caller bounds" in {
         boundFindingsIn("api_get") should not be empty
+    }
+
+  "a call of a function whose every return is a constant" should:
+    "bound what its caller passes on" in {
+        boundFindingsIn("take_slot") shouldBe empty
+        boundFindingsIn("take_pns") shouldBe empty
+    }
+    "not bound anything when the callee returns what it is handed" in {
+        boundFindingsIn("take_unbounded") should not be empty
+    }
+
+  "a loop counter the caller's loop condition bounds" should:
+    "bound what it passes on with enumerator init and bound" in {
+        boundFindingsIn("take_enum_counter") shouldBe empty
     }
 end IndexRangeTests
 

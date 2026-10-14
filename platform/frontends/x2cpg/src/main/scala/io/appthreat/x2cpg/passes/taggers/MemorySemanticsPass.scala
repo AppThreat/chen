@@ -62,6 +62,7 @@ class MemorySemanticsPass(atom: Cpg, externalConfig: Option[String] = None) exte
         }
     }
     rows ++= storageFacts(atom, declared ++ result.entries)
+    rows ++= returnRangeRows(atom)
     rows.groupMap { case (_, tag, value) => (tag, value) } { case (node, _, _) => node }
         .foreach { case ((tag, value), nodes) =>
             nodes.iterator.distinct.newTagNodePair(tag, value).store()(using dstGraph)
@@ -177,6 +178,42 @@ object MemorySemanticsPass:
           .groupMapReduce(_._1)(_._2)(_ ++ _)
 
   private def semanticValues(m: Method): List[String] = m.tag.nameExact(TagSemantic).value.l
+
+  /** The prefix of the `mem-semantic` value that names a function's closed return range. */
+  final val ReturnRangePrefix = "ret-range:"
+
+  /** The closed return range a function's own body spells: every value-return a constant - a
+    * literal, an enumerator, a constant macro - and every same-named body agreeing (a body that
+    * returns anything else says the name can return anything). A caller passing such a call's
+    * result on knows the value it hands over. Falling off the end of a value-returning function and
+    * using the result has no value in C at all, so it excludes nothing here.
+    */
+  private def returnRangeRows(cpg: Cpg): List[(StoredNode, String, String)] =
+      cpg.method.isExternal(false).l.groupBy(_.name).values.toList.flatMap { bodies =>
+        val ranges = bodies.map(bodyRange)
+        if ranges.exists(_.isEmpty) then Nil
+        else
+          val lo = ranges.flatten.map(_._1).min
+          val hi = ranges.flatten.map(_._2).max
+          bodies.map(m => (m, TagSemantic, s"$ReturnRangePrefix$lo:$hi"))
+      }
+
+  private def bodyRange(m: Method): Option[(BigInt, BigInt)] =
+    val returns = m.ast.isReturn.l
+    val values = returns.flatMap(_.astChildren.collectFirst { case e: Expression => e }
+        .flatMap(IndexRange.literal))
+    Option.when(returns.nonEmpty && values.size == returns.size)((values.min, values.max))
+
+  /** A METHOD's summarised return range, read back from the tag the pass wrote. */
+  def returnRangeOf(m: Method): Option[(BigInt, BigInt)] =
+      semanticValues(m).collectFirst {
+          case v if v.startsWith(ReturnRangePrefix) =>
+              v.stripPrefix(ReturnRangePrefix).split(":", 2)
+      }.flatMap {
+          case Array(lo, hi) =>
+              scala.util.Try((BigInt(lo), BigInt(hi))).toOption
+          case _ => None
+      }
 
   private def entryFromValues(name: String, vs: Set[String]): Option[MemApiVocab.MemApiEntry] =
     def idx(prefix: String): Option[Int] =

@@ -542,6 +542,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     method.ast.collectAll[ControlStructure].foreach { cs =>
         cs.condition.foreach(c => guards.update(c.id(), cs))
     }
+    // the branch edges a constant condition closes: a use, free or narrowing there is on no
+    // path, and the worklist must not walk it
+    val closedBranches = OverlayFacts.constantBranchExits(method)
     // The stack-address question is asked of the same worklist. A method that never
     // allocates, frees, reallocs or touches an inventoried memory call AND never takes a local's
     // address has no tracked pointer and no facts: skip the worklist entirely
@@ -656,7 +659,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       val successors =
           if isNoReturnCall(node) then Nil
           else
+            val closed = closedBranches.getOrElse(node.id(), Set.empty)
             node._cfgOut.iterator.collect { case succ: CfgNode => succ }.toList
+                .filterNot(succ => closed.contains(succ.id()))
                 .sortBy { succ =>
                     (
                       succ.lineNumber.map(_.toInt).getOrElse(Int.MaxValue),

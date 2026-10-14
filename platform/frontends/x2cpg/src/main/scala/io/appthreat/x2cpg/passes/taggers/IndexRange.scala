@@ -81,8 +81,9 @@ private[taggers] final class IndexRange(
 
   private def compute(e: Expression, depth: Int): Option[Range] =
       literal(e).map(v => Range(v, v)).orElse(e match
-        case c: Call if returnRangeOf(c).isDefined => returnRangeOf(c)
-        case c: Call if c.name == "<operator>.and" =>
+        case c: Call if returnRangeOf(c).isDefined        => returnRangeOf(c)
+        case c: Call if summaryReturnRangeOf(c).isDefined => summaryReturnRangeOf(c)
+        case c: Call if c.name == "<operator>.and"        =>
             // a non-negative mask bounds the result whatever the other operand holds
             c.argument.l.flatMap(literal).filter(_ >= 0).minOption.map(m => Range(0, m))
         case c: Call if c.name == "<operator>.modulo" =>
@@ -311,6 +312,15 @@ private[taggers] object IndexRange:
                   case _                  => None
             case _ => None
       }
+
+  /** The closed range the callee's own body spells, when every return of it is a constant (a
+    * literal, an enumerator, a constant macro): a caller handing such a call's result on as an
+    * index knows what it passes.
+    */
+  private def summaryReturnRangeOf(c: Call): Option[Range] =
+      c._callOut.collectAll[Method].map(MemorySemanticsPass.returnRangeOf).l.distinct match
+        case List(Some((lo, hi))) => Some(Range(lo, hi))
+        case _                    => None
 
   /** An integer literal's value: decimal, hex, octal (a leading 0: `010` is 8), an ASCII character,
     * and a negated literal.
