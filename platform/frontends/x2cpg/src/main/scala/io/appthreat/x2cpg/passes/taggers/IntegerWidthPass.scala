@@ -240,10 +240,15 @@ class IntegerWidthPass(atom: Cpg) extends CpgPass(atom):
       parts.toList.map(_.trim).filter(_.nonEmpty)
 
   /** A constant the destination type holds: storing it changes nothing, whatever type the constant
-    * is computed in (`uint8_t c = 5`, `(uint16_t) sizeof(hdr)`).
+    * is computed in (`uint8_t c = 5`, `(uint16_t) sizeof(hdr)`). The destination's own name or the
+    * type it names decides - a cast to a typedef the fixed-width table does not spell (`(signed
+    * count_t) sizeof(magic)`) cannot change a value that already fits the type underneath.
     */
   private def fitsAsConstant(value: Expression, destination: String): Boolean =
-      IndexRange.literal(value).exists(IndexRange.fitsType(_, destination))
+      IndexRange.literal(value).exists(v =>
+          IndexRange.fitsType(v, destination) ||
+              OverlayFacts.typedefTarget(atom, destination).exists(IndexRange.fitsType(v, _))
+      )
 
   /** A constant the destination cannot hold under either signedness: past the top of its range, or
     * below the bottom of a signed one. `-1` into an unsigned type is the all-bits-set idiom, not a
