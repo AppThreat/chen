@@ -101,7 +101,10 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     val standard =
         if cpp then
           Seq(
-            EdgaRunner.cppStandardOption(settings.standard.getOrElse(config.cppStandard)),
+            EdgaRunner.cppStandardOption(
+              settings.standard.getOrElse(config.cppStandard),
+              microsoft = dialect.contains("--microsoft")
+            ),
             "--type_traits_helpers"
           )
         else Seq(EdgaRunner.cStandardOption(settings.standard.orNull))
@@ -205,21 +208,26 @@ object EdgaRunner:
     * them unparsable.
     */
   def cppStandardOption(standard: String, microsoft: Boolean = false): String =
-      Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse(
-        ""
-      ) match
-        case "++98" | "++03" | "++11" | "++0x" | "++14" | "++1y" if microsoft => "--ms_c++14"
-        case "++98" | "++03"                                                  => "--c++03"
-        case "++11" | "++0x"                                                  => "--c++11"
-        case "++14" | "++1y"                                                  => "--c++14"
-        case "++17" | "++1z" if microsoft                                     => "--ms_c++17"
-        case "++20" | "++2a" if microsoft                                     => "--ms_c++20"
-        case "++23" | "++2b" | "++26" | "++2c" if microsoft                   => "--ms_c++23"
-        case "++latest" if microsoft                                          => "--ms_c++latest"
-        case "" if microsoft                                                  => "--ms_c++14"
-        case "++20" | "++2a"                                                  => "--c++20"
-        case "++23" | "++2b" | "++26" | "++2c" | "++latest"                   => "--c++23"
-        case _                                                                => "--c++17"
+    val std =
+        Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse("")
+    if microsoft then
+      std match
+        // MSVC's baseline, and its default: it has no mode before C++14
+        case "" | "++98" | "++03" | "++11" | "++0x" | "++14" | "++1y" => "--ms_c++14"
+        case "++20" | "++2a"                                          => "--ms_c++20"
+        // the front end's Microsoft C++23 needs a newer compiler than its version table gives
+        // (19.43); its latest mode has no such floor
+        case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--ms_c++latest"
+        case _                                              => "--ms_c++17"
+    else
+      std match
+        case "++98" | "++03"                                => "--c++03"
+        case "++11" | "++0x"                                => "--c++11"
+        case "++14" | "++1y"                                => "--c++14"
+        case "++20" | "++2a"                                => "--c++20"
+        case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
+        case _                                              => "--c++17"
+  end cppStandardOption
 
   /** Whether a directory holds a header a system directory also has (`time.h`): as an include
     * directory it would be found first for `<time.h>`.
@@ -291,19 +299,20 @@ object EdgaRunner:
   /** The binary's name on the host. */
   def binaryName(windows: Boolean): String = if windows then "edga.exe" else "edga"
 
-  /** The directories to search for executables, whatever case the host spells the variable with:
-    * `Path` on Windows, where a map lookup by the name is not case-insensitive (a `System.getenv`
-    * lookup is).
+  /** The directories to search for executables: `PATH`, else the variable spelled in another case
+    * (`Path` on Windows, where a lookup in this map is not case-insensitive as `System.getenv` is).
     */
   def pathEnvironment(env: Map[String, String] = sys.env): String =
-      env.find((name, _) => name.equalsIgnoreCase("PATH")).map(_._2).getOrElse("")
+      env.get("PATH")
+          .orElse(env.collectFirst { case (name, value) if name.equalsIgnoreCase("PATH") => value })
+          .getOrElse("")
 
   /** The first directory on `path` (the PATH environment variable) holding the binary as a file
     * that runs. On Windows every file can run, and `canExecute` says yes for any of them, so only a
     * regular file named like the binary qualifies.
     */
   def locateInPath(path: String, name: String): Option[String] =
-      path.split(File.pathSeparator).toSeq.map(d => new File(d, name))
+      path.split(File.pathSeparator).toSeq.filter(_.nonEmpty).map(d => new File(d, name))
           .find(f => f.isFile && f.canExecute).map(_.getAbsolutePath)
 
   /** The compiler the CDT frontend asks for its macros when no compilation database names one. */

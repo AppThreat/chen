@@ -29,6 +29,10 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.pathEnvironment(Map("PATH" -> "/usr/bin")) shouldBe "/usr/bin"
           EdgaRunner.pathEnvironment(Map("path" -> "/bin")) shouldBe "/bin"
           EdgaRunner.pathEnvironment(Map("HOME" -> "/home")) shouldBe ""
+          // where both spellings are variables of their own (a POSIX environment), PATH is the one
+          EdgaRunner.pathEnvironment(
+            Map("Path" -> "/other", "PATH" -> "/usr/bin")
+          ) shouldBe "/usr/bin"
       }
       "not take a directory, or a file of the other name, for the binary" in {
           File.usingTemporaryDirectory("edga-locate-dir") { dir =>
@@ -65,6 +69,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.cppStandardOption("c++17", microsoft = true) shouldBe "--ms_c++17"
           EdgaRunner.cppStandardOption("c++20", microsoft = true) shouldBe "--ms_c++20"
           EdgaRunner.cppStandardOption("c++latest", microsoft = true) shouldBe "--ms_c++latest"
+          // the front end's Microsoft C++23 asks for a newer compiler than the table's
+          EdgaRunner.cppStandardOption("c++23", microsoft = true) shouldBe "--ms_c++latest"
           EdgaRunner.cppStandardOption("c++14", microsoft = true) shouldBe "--ms_c++14"
           EdgaRunner.cppStandardOption("", microsoft = true) shouldBe "--ms_c++14"
           // MSVC has no mode older than its C++14 baseline
@@ -254,31 +260,37 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
   }
 
   "a compilation database" should {
-      "not define MSVC's keywords as macros for the front end" in {
+      "give an MSVC unit the Microsoft mode of its standard, and no keyword macros" in {
           File.usingTemporaryDirectory("edga-msvc-keywords") { dir =>
-              (dir / "w.c").writeText("int w(void) { return 0; }\n")
-              (dir / "compile_commands.json").writeText(
-                s"""[{ "directory": "${dir.pathAsString}", "file": "w.c",
-                   |   "command": "cl /std:c++17 /c w.c" }]""".stripMargin
-              )
-              val config = Config().withInputPath(dir.pathAsString)
-                  .withCompileCommands((dir / "compile_commands.json").pathAsString)
-              val runner = new EdgaRunner(config, new ProjectSources(config))
-              val args   = runner.arguments((dir / "w.c").path)
-              val macros = args.sliding(2).collectFirst { case Seq("--preinclude_macros", f) =>
-                  File(f).contentAsString
-              }
-              // the compiler's own macros, when the unit's table gave them; in Microsoft mode
-              // the front end parses __declspec and the calling conventions itself - a macro
-              // would take their place and break the headers that use them - and the module
-              // keyword the parser settings macroize, which the MSVC standard library forbids
-              // outright. MinGW's GCC predefines __declspec for its own headers, and the GNU
-              // dialect is written for that.
-              if args.contains("--microsoft") then
-                macros.get should include("#define _MSC_VER")
-                (macros.get should not).include("__declspec")
-                (macros.get should not).include("__stdcall")
-              (macros.get should not).include("#define export")
+            (dir / "w.cpp").writeText("int w() { return 0; }\n")
+            (dir / "compile_commands.json").writeText(
+              s"""[{ "directory": "${dir.pathAsString}", "file": "w.cpp",
+                   |   "command": "cl /std:c++17 /c w.cpp" }]""".stripMargin
+            )
+            val config = Config().withInputPath(dir.pathAsString)
+                .withCompileCommands((dir / "compile_commands.json").pathAsString)
+            val runner = new EdgaRunner(config, new ProjectSources(config))
+            val args   = runner.arguments((dir / "w.cpp").path)
+            // on a Windows host a GNU compiler on the PATH can take the unit over (a known
+            // limit), so the Microsoft dialect is required only elsewhere
+            if !scala.util.Properties.isWin then args should contain("--microsoft")
+            val macros = args.sliding(2).collectFirst { case Seq("--preinclude_macros", f) =>
+                File(f).contentAsString
+            }
+            // the compiler's own macros, when the unit's table gave them; in Microsoft mode
+            // the front end parses __declspec and the calling conventions itself - a macro
+            // would take their place and break the headers that use them - and the module
+            // keyword the parser settings macroize, which the MSVC standard library forbids
+            // outright. MinGW's GCC predefines __declspec for its own headers, and the GNU
+            // dialect is written for that.
+            if args.contains("--microsoft") then
+              // MSVC's /std:c++17 is the front end's Microsoft C++17, not the ISO one
+              args should contain("--ms_c++17")
+              (args should not).contain("--c++17")
+              macros.get should include("#define _MSC_VER")
+              (macros.get should not).include("__declspec")
+              (macros.get should not).include("__stdcall")
+            (macros.get should not).include("#define export")
           }
       }
       "give a unit its own standard, defines and include directories" in {
