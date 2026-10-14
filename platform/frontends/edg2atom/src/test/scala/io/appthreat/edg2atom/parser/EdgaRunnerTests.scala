@@ -8,6 +8,41 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class EdgaRunnerTests extends AnyWordSpec with Matchers:
 
+  "the binary" should {
+      "be found on the PATH as edga.exe on Windows, and as edga elsewhere" in {
+          File.usingTemporaryDirectory("edga-locate") { dir =>
+            (dir / "edga.exe").writeBytes(Iterator(0x4d.toByte, 0x5a.toByte, 0x90.toByte, 0.toByte))
+            (dir / "edga.exe").toJava.setExecutable(true)
+            val path = dir.pathAsString + java.io.File.pathSeparator + "/nowhere"
+            EdgaRunner.binaryName(windows = true) shouldBe "edga.exe"
+            EdgaRunner.binaryName(windows = false) shouldBe "edga"
+            EdgaRunner.locateInPath(path, EdgaRunner.binaryName(windows = true)) shouldBe Some(
+              (dir / "edga.exe").path.toAbsolutePath.toString
+            )
+            // the POSIX name finds nothing when only edga.exe is there: an edga.exe-only
+            // directory is what a Windows PATH holds
+            EdgaRunner.locateInPath(path, EdgaRunner.binaryName(windows = false)) shouldBe empty
+          }
+      }
+      "not take a directory, or a file of the other name, for the binary" in {
+          File.usingTemporaryDirectory("edga-locate-dir") { dir =>
+            (dir / "edga.exe").createDirectory()
+            (dir / "edga").writeText("not a binary")
+            (dir / "edga").toJava.setExecutable(true)
+            EdgaRunner.locateInPath(
+              dir.pathAsString,
+              EdgaRunner.binaryName(windows = true)
+            ) shouldBe empty
+            EdgaRunner.locateInPath(
+              dir.pathAsString,
+              EdgaRunner.binaryName(windows = false)
+            ) shouldBe Some(
+              (dir / "edga").path.toAbsolutePath.toString
+            )
+          }
+      }
+  }
+
   "a standard" should {
       "map to the front end's mode" in {
           EdgaRunner.cStandardOption("gnu99") shouldBe "--c99"
@@ -137,6 +172,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
       val aarch64 = "edga 0.1.0\nEDG commit abc\nconfiguration linux-aarch64 0123"
       val x86     = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64 0123"
       val x86Musl = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64-musl 0123"
+      val winX64  = "edga 0.1.0\nEDG commit abc\nconfiguration windows-x86_64 0123"
+      val winArm  = "edga 0.1.0\nEDG commit abc\nconfiguration windows-arm64 0123"
       val gcc14   = Map("__GNUC__" -> "14")
       "name `long double` `_Float128` where glibc takes it as the compiler's type" in {
           val shim = Seq("--define_macro", "_Float128=long double")
@@ -144,6 +181,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.float128Shim(aarch64, gcc14, cpp = true) shouldBe shim
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = false) shouldBe shim
           EdgaRunner.float128Shim(x86Musl, gcc14, cpp = false) shouldBe shim
+          EdgaRunner.float128Shim(winX64, gcc14, cpp = false) shouldBe shim
+          EdgaRunner.float128Shim(winArm, gcc14, cpp = true) shouldBe shim
       }
       "leave it to glibc's typedef, and to a front end with float128" in {
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = true) shouldBe empty

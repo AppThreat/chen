@@ -268,9 +268,26 @@ object EdgaRunner:
       sys.props.get("edga.path").orElse(sys.env.get("EDGA_PATH")).filter(p =>
           new File(p).canExecute
       )
-          .orElse(sys.env.get("PATH").toSeq.flatMap(_.split(File.pathSeparator)).map(d =>
-              new File(d, "edga")
-          ).find(_.canExecute).map(_.getAbsolutePath))
+          .orElse(
+            EdgaRunner.locateInPath(
+              sys.env.getOrElse("PATH", ""),
+              EdgaRunner.binaryName(EdgaRunner.onWindows)
+            )
+          )
+
+  /** Whether the host is Windows: the binary is `edga.exe` there, `edga` elsewhere. */
+  def onWindows: Boolean = scala.util.Properties.isWin
+
+  /** The binary's name on the host. */
+  def binaryName(windows: Boolean): String = if windows then "edga.exe" else "edga"
+
+  /** The first directory on `path` (the PATH environment variable) holding the binary as a file
+    * that runs. On Windows every file can run, and `canExecute` says yes for any of them, so only a
+    * regular file named like the binary qualifies.
+    */
+  def locateInPath(path: String, name: String): Option[String] =
+      path.split(File.pathSeparator).toSeq.map(d => new File(d, name))
+          .find(f => f.isFile && f.canExecute).map(_.getAbsolutePath)
 
   /** The compiler the CDT frontend asks for its macros when no compilation database names one. */
   def hostIdentity(config: Config, language: SourceLanguage): Option[CompilerIdentity] =
@@ -293,10 +310,12 @@ object EdgaRunner:
     * where the headers take the type as the compiler's: as a macro the typedef would read `typedef
     * long double long double`.
     */
-  /** edga configurations built without float128: aarch64 Linux, and x86_64 Linux on musl (no static
-    * quadmath). Either binary also runs against glibc's headers.
+  /** edga configurations built without float128: aarch64 Linux, x86_64 Linux on musl (no static
+    * quadmath), and Windows (the MSVC host compiler has no quadmath). Either binary also runs
+    * against glibc's headers.
     */
-  private val ConfigurationsWithoutFloat128 = Set("linux-aarch64", "linux-x86_64-musl")
+  private val ConfigurationsWithoutFloat128 =
+      Set("linux-aarch64", "linux-x86_64-musl", "windows-x86_64", "windows-arm64")
 
   def float128Shim(edgaIdentity: String, macros: Map[String, String], cpp: Boolean): Seq[String] =
     val withoutFloat128 = edgaIdentity.linesIterator.exists(l =>
