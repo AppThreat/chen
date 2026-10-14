@@ -83,8 +83,36 @@ class AstCreator(
     val files   = filesToWrite
     val written = files.map(_.id).toSet
     files.foreach(f => Ast.storeInDiffGraph(fileAst(f, written), diffGraph))
+    recordForeignTypedefs(written)
     usedTypes.foreach(t => CGlobal.usedTypes.putIfAbsent(t, true))
     diffGraph
+
+  /** The typedefs this unit uses that a header outside the project declares - the C library's or an
+    * external library's. Their targets would otherwise be unknown to the graph (the CDT frontend's
+    * bindings spell them), and a rule asking a typedef's width or signedness would conclude
+    * nothing. A header under the project root is the project's own even when the build hands its
+    * directory over as a system include directory; its typedefs are left as they are spelled.
+    * Recorded through the used-types channel, so the AST cache replays them; one record per name,
+    * and names two headers typedef to different types are dropped when the channel drains.
+    */
+  private def recordForeignTypedefs(written: Set[Long]): Unit =
+    val foreign = unit.files.values.collect {
+        case f
+            if f.id != 0L && !f.inRoot && !written.contains(f.id) &&
+                !AstCreator.realPath(Paths.get(f.path)).startsWith(root) => f.id
+    }.toSet
+    unit.types.values.toSeq.sortBy(_("id").num).foreach { t =>
+        if t.string("kind").contains("typeref") then
+          for
+            name   <- t.string("typedef").filter(_.nonEmpty)
+            typeId <- t.long("id")
+            of     <- t.long("of")
+            file   <- t.position.map(_.file) if foreign.contains(file)
+          do
+            val record =
+                CGlobal.typedefRecord(registerType(types(typeId)), registerType(types(of)))
+            usedTypes.add(record)
+    }
 
   /** The translation unit's own file, and the project headers that belong to it. */
   private def filesToWrite: Seq[FileEntry] =

@@ -23,6 +23,19 @@ object CGlobal extends Global:
     */
   @volatile var lastMembers: Map[String, List[(String, List[(Int, String, String)])]] = Map.empty
 
+  /** Typedef targets ride the used-types channel as records under this prefix: the type a typedef
+    * in a header no unit writes stands for (`libssh2_uint64_t` is `unsigned long long`).
+    */
+  val TypedefRecordPrefix = "\u0000typedef\u0000"
+
+  def typedefRecord(name: String, target: String): String =
+      s"$TypedefRecordPrefix$name\u0000$target"
+
+  /** The typedef targets the last [[typesSeen]] drained, by typedef name. A name two headers
+    * typedef to different types is left out.
+    */
+  @volatile var lastTypedefs: Map[String, String] = Map.empty
+
   /** Constant values ride the same channel: `\u0000const\u0000<name>\u0000<value>`. */
   val ConstRecordPrefix = "\u0000const\u0000"
 
@@ -50,6 +63,7 @@ object CGlobal extends Global:
   def reset(): Unit =
     usedTypes.clear()
     lastMembers = Map.empty
+    lastTypedefs = Map.empty
     lastConstants = Map.empty
     lastArrayTypedefs = Set.empty
 
@@ -63,7 +77,13 @@ object CGlobal extends Global:
     }.groupMap(_._1)(_._2).collect { case (n, vs) if vs.distinct.size == 1 => n -> vs.head }
     val (arrayTypedefs, others) = rest.partition(_.startsWith(ArrayTypedefPrefix))
     lastArrayTypedefs = arrayTypedefs.map(_.stripPrefix(ArrayTypedefPrefix)).toSet
-    val (records, types) = others.partition(_.startsWith(MemberRecordPrefix))
+    val (typedefs, remaining) = others.partition(_.startsWith(TypedefRecordPrefix))
+    lastTypedefs = typedefs.flatMap { r =>
+        r.stripPrefix(TypedefRecordPrefix).split('\u0000') match
+          case Array(name, target) => Some(name -> target)
+          case _                   => None
+    }.groupMap(_._1)(_._2).collect { case (n, ts) if ts.distinct.size == 1 => n -> ts.head }
+    val (records, types) = remaining.partition(_.startsWith(MemberRecordPrefix))
     lastMembers = records.flatMap { r =>
         r.stripPrefix(MemberRecordPrefix).split('\u0000') match
           case Array(owner, file, order, name, tpe) =>

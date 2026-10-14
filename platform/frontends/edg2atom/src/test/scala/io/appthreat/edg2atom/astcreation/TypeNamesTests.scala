@@ -27,7 +27,9 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
       |    { "id": 14, "kind": "pointer", "name": "char **", "to": 10 },
       |    { "id": 15, "kind": "class", "name": "std::__1::vector<int, std::__1::allocator<int>>", "tag": "vector", "qualifiedName": "std::__1::vector<int, std::__1::allocator<int>>" },
       |    { "id": 16, "kind": "typeref", "name": "std::__1::literals::chrono_literals::hours", "typedef": "std::__1::literals::chrono_literals::hours", "of": 0 },
-      |    { "id": 17, "kind": "typeref", "name": "std::__1::string", "typedef": "string", "of": 15 }
+      |    { "id": 17, "kind": "typeref", "name": "std::__1::string", "typedef": "string", "of": 15 },
+      |    { "id": 18, "kind": "array", "name": "char [2][256]", "of": 19, "count": 2 },
+      |    { "id": 19, "kind": "array", "name": "char [256]", "of": 2, "count": 256 }
       |  ],
       |  "inlineNamespaces": ["std::__1", "std::__1::literals", "std::__1::literals::chrono_literals"]
       |}""".stripMargin
@@ -40,6 +42,10 @@ class TypeNamesTests extends AnyWordSpec with Matchers:
           types(3L) shouldBe "char[16]"
           types(7L) shouldBe "size_t"
           types(9L) shouldBe "int(int*,char*)"
+      }
+
+      "spell a multi-dimensional array's dimensions in declaration order" in {
+          types(18L) shouldBe "char[2][256]"
       }
 
       "join C++ scopes with dots and drop qualifiers and references" in {

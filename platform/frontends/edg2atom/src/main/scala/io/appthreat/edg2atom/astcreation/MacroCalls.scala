@@ -75,14 +75,15 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     invocation.field("start").flatMap(EdgaUnit.pos).foreach { p =>
         call.lineNumber(Integer.valueOf(p.line)).columnNumber(Integer.valueOf(p.column))
     }
+    // the expansion follows the argument copies - each one written, a variadic macro's too - as
+    // the CDT frontend numbers it, a block expansion as well
+    val expansionIndex = args.size + 1
     val block = NewBlock().code("<empty>").typeFullName(registerType("void"))
-        .argumentIndex(params + 1).order(params + 1)
-    // the expansion follows the argument copies
+        .argumentIndex(expansionIndex).order(expansionIndex)
     expansion.root.foreach {
-        case _: NewBlock =>
         case e: ExpressionNew =>
-            e.argumentIndex = params + 1
-            e.order = params + 1
+            e.argumentIndex = expansionIndex
+            e.order = expansionIndex
         case _ =>
     }
     val expansionBlock = expansion.root match
@@ -124,7 +125,15 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
             // a stringised argument (`#x`) is text of the expansion, not a value passed in
             case Some(n) if n.string("ck").contains("string") && !text.trim.startsWith("\"") =>
                 None
-            case Some(n) => Some(expressionAst(n))
+            // the copy reads as the argument is written, as the CDT frontend's copies do: an
+            // operation the expansion built has no source text of its own
+            case Some(n) =>
+                val copy = expressionAst(n)
+                copy.root.foreach {
+                    case e: ExpressionNew if e.code.isEmpty => e.code = text.trim
+                    case _                                  =>
+                }
+                Some(copy)
             case None =>
                 val value = objectMacroValue(root, text).getOrElse(text.trim)
                 Some(Ast(literalNode(root, value, registerType(literalType(value)))))

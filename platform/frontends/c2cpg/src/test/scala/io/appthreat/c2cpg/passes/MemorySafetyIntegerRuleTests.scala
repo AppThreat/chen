@@ -89,6 +89,19 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
     |    return 0;
     |}
     |
+    |/* a cast of a CONSTANT the target type holds, named by a typedef the fixed-width table does
+    |   not spell: converting 4 to a signed type cannot change it */
+    |typedef long long tally_t;
+    |int good_constant_resign_through_typedef(int len, unsigned char *dst)
+    |{
+    |    unsigned char magic[4];
+    |    unsigned int pos;
+    |    if ((tally_t)len < (tally_t)sizeof(magic))
+    |        return -1;
+    |    pos = magic[0] + magic[1];
+    |    return (int)pos;
+    |}
+    |
     |/* the upstream fix's shape: the cast is on the BOUND, the bounded value never changed width */
     |int good_resign_on_bound(uint32_t obu_size, int frame_size)
     |{
@@ -211,5 +224,9 @@ class MemorySafetyIntegerRuleTests extends DataFlowCodeToCpgSuite:
 
     "not fire on a resign cast that feeds a length with no guard around it" in {
         findingsIn("good_cast_in_copy") shouldBe empty
+    }
+
+    "not fire on a cast of a constant that fits the type a typedef names" in {
+        findingsIn("good_constant_resign_through_typedef") shouldBe empty
     }
 end MemorySafetyIntegerRuleTests

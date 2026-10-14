@@ -60,10 +60,17 @@ final class TypeNames(unit: EdgaUnit):
           val to = sub(t.long("to"))
           if t.flag("reference") || t.flag("rvalueReference") then to else s"$to*"
       case "array" =>
-          val of = sub(t.long("of"))
-          t.long("count") match
-            case Some(n) if n > 0 => s"$of[$n]"
-            case _                => s"$of[]"
+          // a multi-dimensional array spells its dimensions in declaration order, the outer
+          // count first (`char[2][256]` for `char buf[2][256]`), as the CDT frontend writes it
+          val dims  = mutable.ArrayBuffer.empty[String]
+          var cur   = t
+          var guard = 0
+          while guard < 32 && cur.string("kind").contains("array") do
+            dims += cur.long("count").filter(_ > 0).map(_.toString).getOrElse("")
+            cur = cur.long("of").flatMap(unit.types.get).getOrElse(null)
+            guard += 1
+          val base = if cur == null then X2CpgDefines.Any else nameOf(cur, depth + 1)
+          s"$base${dims.map(d => s"[$d]").mkString}"
       case "typeref" =>
           t.string("typedef") match
             case Some(name) if name.nonEmpty => scoped(name, t)

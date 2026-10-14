@@ -68,6 +68,26 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |    return size;
         |}
         |
+        |void note_len(int n);
+        |int good_cap_through_calls(unsigned char *buf, int size, struct data_block *db)
+        |{
+        |    int n = size % 16;
+        |    note_len(n); note_len(n); note_len(n); note_len(n);
+        |    note_len(n); note_len(n); note_len(n); note_len(n);
+        |    memcpy(buf, db->payload, n);
+        |    return n;
+        |}
+        |
+        |int bad_other_through_calls(unsigned char *buf, int size, struct data_block *db)
+        |{
+        |    int n = db->payload_len % 16;
+        |    (void)size;
+        |    note_len(n); note_len(n); note_len(n); note_len(n);
+        |    note_len(n); note_len(n); note_len(n); note_len(n);
+        |    memcpy(buf, db->payload, n);
+        |    return n;
+        |}
+        |
         |int good_counts_bounded_loop(int *sizes, int max_depth, const int *found, int total)
         |{
         |    int n = total;
@@ -389,6 +409,11 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
 
       "not fire when the capacity parameter IS the length" in {
           lenFinding("good_uses_cap") shouldBe empty
+      }
+
+      "not fire when the length comes from the capacity through calls that read it" in {
+          lenFinding("good_cap_through_calls") shouldBe empty
+          lenFinding("bad_other_through_calls") shouldBe Set("MS-BOUND-001")
       }
 
       "not fire when the length counts iterations of a loop the capacity bounds" in {

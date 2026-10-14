@@ -69,7 +69,9 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
         new DuplicateDefinitionPass(cpg).createAndApply()
         new FrontendTagPass(cpg, frontendOf).createAndApply()
         TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
-        new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation).createAndApply()
+        new TypeDeclNodePass(cpg, CGlobal.lastMembers, CGlobal.lastTypedefs)(using
+          config.schemaValidation
+        ).createAndApply()
         new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
         new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
         new DeclarationAttributesPass(cpg).createAndApply()

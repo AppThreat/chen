@@ -117,6 +117,83 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
     |    }
     |}
     |
+    |/* the caller guards a struct's field, copies it into a local, and hands the local to the
+    |       helper that indexes with it: the guard bounds the value the helper receives */
+    |struct conn_state { int space; };
+    |static void take_guarded_copy(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void guarded_copy(struct nut *nut, struct conn_state *p)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    space = p->space;
+    |    take_guarded_copy(nut, space);
+    |}
+    |/* the copy without the guard: the helper's index is unbounded */
+    |static void take_unguarded_copy(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void unguarded_copy(struct nut *nut, struct conn_state *p)
+    |{
+    |    unsigned int space = p->space;
+    |    take_unguarded_copy(nut, space);
+    |}
+    |/* the base is re-stored between the guard and the call: the guard's value is gone */
+    |static void take_copy_base_written(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void copy_base_written(struct nut *nut, struct conn_state *p, struct conn_state *other)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    space = p->space;
+    |    p = other;
+    |    take_copy_base_written(nut, space);
+    |}
+    |/* the path is written through another pointer that may hold the same object */
+    |static void take_copy_alias_written(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void copy_alias_written(struct nut *nut, struct conn_state *p, struct conn_state *q)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    q->space = 9;
+    |    space = p->space;
+    |    take_copy_alias_written(nut, space);
+    |}
+    |/* a call between the guard and the copy can write the path: it is handed the path's address,
+    |   or the object is reachable without it */
+    |void read_space(int *out);
+    |void refresh_state(void);
+    |static void take_copy_address_passed(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void copy_address_passed(struct nut *nut, struct conn_state *p)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    read_space(&p->space);
+    |    space = p->space;
+    |    take_copy_address_passed(nut, space);
+    |}
+    |static void take_copy_after_call(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void copy_after_call(struct nut *nut, struct conn_state *p)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    refresh_state();
+    |    space = p->space;
+    |    take_copy_after_call(nut, space);
+    |}
+    |/* the path is incremented between the guard and the copy */
+    |static void take_copy_incremented(struct nut *nut, int space) { use_ptr(nut->st[space]); }
+    |void copy_incremented(struct nut *nut, struct conn_state *p)
+    |{
+    |    unsigned int space;
+    |    if (p->space >= 4)
+    |        return;
+    |    p->space++;
+    |    space = p->space;
+    |    take_copy_incremented(nut, space);
+    |}
+    |
     |/* tiertexseq.c's shape: checked above in the helper; the caller passes a byte element, which
     |   stays non-negative in the helper's int */
     |struct seq { void *frame_buffers[30]; };
@@ -361,6 +438,23 @@ class IndexRangeTests extends DataFlowCodeToCpgSuite:
   "a loop counter the caller's loop condition bounds" should:
     "bound what it passes on with enumerator init and bound" in {
         boundFindingsIn("take_enum_counter") shouldBe empty
+    }
+
+  "a guard on an access path its caller copies" should:
+    "bound the copy the call receives" in {
+        boundFindingsIn("take_guarded_copy") shouldBe empty
+    }
+    "not bound it when the copy has no guard" in {
+        boundFindingsIn("take_unguarded_copy") should not be empty
+    }
+    "not bound it when the path's base is re-stored between the guard and the call" in {
+        boundFindingsIn("take_copy_base_written") should not be empty
+    }
+    "not bound it when the path can be written through another pointer, a call or an increment" in {
+        boundFindingsIn("take_copy_alias_written") should not be empty
+        boundFindingsIn("take_copy_address_passed") should not be empty
+        boundFindingsIn("take_copy_after_call") should not be empty
+        boundFindingsIn("take_copy_incremented") should not be empty
     }
 end IndexRangeTests
 

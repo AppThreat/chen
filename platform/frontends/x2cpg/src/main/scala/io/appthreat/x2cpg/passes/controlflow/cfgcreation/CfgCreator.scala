@@ -356,7 +356,14 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
         .map(cfgFor)
         .reduceOption((x, y) => x ++ y)
         .getOrElse(Cfg.empty) ++ cfgForSingleNode(call)
-    val cfgForExpansion = call.astChildren.lastOption.map(cfgFor).getOrElse(Cfg.empty)
+    // the expansion is the child expression that is not an argument copy, whichever order the
+    // graph's edges happen to list the children in - a block expansion listed before a later copy
+    // would otherwise never be wired, and the statements it expands to would sit on no CFG path
+    val argumentIds = call.argument.l.map(_.id()).toSet
+    val expansion = call.astChildren.l
+        .collect { case e: Expression if !argumentIds.contains(e.id()) => e }
+        .maxByOption(_.argumentIndex)
+    val cfgForExpansion = expansion.map(cfgFor).getOrElse(Cfg.empty)
     val cfg = Cfg
         .from(cfgForMacroCall, cfgForExpansion)
         .copy(
@@ -369,6 +376,7 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
               else cfgForMacroCall.fringe
         )
     cfg
+  end cfgForInlinedCall
 
   /** A for statement is of the form `for(initExpr; condition; loopExpr) body` and all four
     * components may be empty. The sequence (condition - body - loopExpr) form the inner part of the
