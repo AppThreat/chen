@@ -254,6 +254,29 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
   }
 
   "a compilation database" should {
+      "not define MSVC's keywords as macros for the front end" in {
+          File.usingTemporaryDirectory("edga-msvc-keywords") { dir =>
+              (dir / "w.c").writeText("int w(void) { return 0; }\n")
+              (dir / "compile_commands.json").writeText(
+                s"""[{ "directory": "${dir.pathAsString}", "file": "w.c",
+                   |   "command": "cl /std:c++17 /c w.c" }]""".stripMargin
+              )
+              val config = Config().withInputPath(dir.pathAsString)
+                  .withCompileCommands((dir / "compile_commands.json").pathAsString)
+              val runner = new EdgaRunner(config, new ProjectSources(config))
+              val args   = runner.arguments((dir / "w.c").path)
+              args should contain("--microsoft")
+              val macros = args.sliding(2).collectFirst { case Seq("--preinclude_macros", f) =>
+                  File(f).contentAsString
+              }
+              macros.get should include("#define _MSC_VER")
+              // the front end parses __declspec and the calling conventions itself, in
+              // Microsoft mode; a macro would take their place and break the headers that
+              // use them
+              (macros.get should not).include("__declspec")
+              (macros.get should not).include("__stdcall")
+          }
+      }
       "give a unit its own standard, defines and include directories" in {
           assume(!scala.util.Properties.isWin)
           File.usingTemporaryDirectory("edga-runner") { dir =>

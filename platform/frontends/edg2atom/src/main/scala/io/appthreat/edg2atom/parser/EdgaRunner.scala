@@ -143,8 +143,8 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
   end arguments
 
   private def macroFile(macros: Map[String, String]): Path =
-    val text = macros.toSeq.sorted.filterNot((k, _) =>
-        EdgaRunner.FrontEndOwned(k.takeWhile(_ != '('))
+    val text = macros.toSeq.sorted.filterNot((k, v) =>
+        EdgaRunner.FrontEndOwned(k.takeWhile(_ != '(')) || EdgaRunner.isKeywordShim(k, v)
     ).map {
         (k, v) => s"#define $k $v"
     }.mkString("", "\n", "\n")
