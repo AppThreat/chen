@@ -106,6 +106,40 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    if (p != NULL) { p[0] = 'a'; }
     |}
     |
+    |/* ---- a helper that never returns ---- */
+    |
+    |/* a helper whose every path ends in the C library's terminator: a caller's path that
+    |   reaches its call ends there, whatever the helper freed first */
+    |static void die(int rc)
+    |{
+    |    exit(rc);
+    |}
+    |int good_freed_before_die(int n)
+    |{
+    |    char *p = (char *)malloc(32);
+    |    if (p == NULL) return -1;
+    |    if (n < 0) {
+    |        free(p);
+    |        die(1);
+    |    }
+    |    p[0] = 'a';
+    |    free(p);
+    |    return 0;
+    |}
+    |/* the same free on a branch that falls through: the read and the second free are
+    |   reached with the freed state */
+    |int bad_freed_in_branch(int n)
+    |{
+    |    char *p = (char *)malloc(32);
+    |    if (p == NULL) return -1;
+    |    if (n < 0) {
+    |        free(p);
+    |    }
+    |    p[0] = 'a';
+    |    free(p);
+    |    return 0;
+    |}
+    |
     |/* ---- MS-ALLOC-003, leak ---- */
     |
     |int bad_leak_early_return(int n)
@@ -272,6 +306,30 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |}
     |""".stripMargin,
     "alloc_state.c"
+  ).moreCode(
+    """
+    |#include <stdlib.h>
+    |
+    |/* a static helper of the same name as another file's that does return: a call of it is not
+    |   the end of its caller's path */
+    |static void die(int rc)
+    |{
+    |    (void)rc;
+    |}
+    |int bad_freed_before_returning_helper(int n)
+    |{
+    |    char *p = (char *)malloc(32);
+    |    if (p == NULL) return -1;
+    |    if (n < 0) {
+    |        free(p);
+    |        die(1);
+    |    }
+    |    p[0] = 'a';
+    |    free(p);
+    |    return 0;
+    |}
+    |""".stripMargin,
+    "alloc_state_helper.c"
   )
 
   new MemoryApiPass(cpg).createAndApply()
@@ -330,6 +388,18 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the pointer was nulled and re-checked" in {
         findingsIn("good_nulled_uaf") shouldBe empty
+    }
+
+    "stay silent when the freeing branch ends in a helper that never returns" in {
+        findingsIn("good_freed_before_die") shouldBe empty
+    }
+
+    "fire when the freeing branch falls through to the use" in {
+        findingsIn("bad_freed_in_branch") should not be empty
+    }
+
+    "fire when the helper the call reaches returns, though a same-named one elsewhere exits" in {
+        findingsIn("bad_freed_before_returning_helper") should not be empty
     }
 
   "MS-ALLOC-003" should:

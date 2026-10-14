@@ -1386,8 +1386,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   end branchNarrowing
 
   /** A call to a function that does not return: declared `noreturn` (on the call, from its
-    * declaration, or on the METHOD it links to), or one of the C library's terminators when no
-    * header said so.
+    * declaration, or on the METHOD it links to), one of the C library's terminators when no header
+    * said so, or a function whose own body can only end in a terminator (a cleanup helper whose
+    * every path reaches `exit` - its callers' paths end at the call, whatever it frees first), when
+    * every function the call links to is one.
     */
   private def isNoReturnCall(node: CfgNode): Boolean = node match
     case c: Call if !c.name.startsWith("<operator") =>
@@ -1399,8 +1401,32 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           _.tag.nameExact(io.appthreat.x2cpg.Defines.FunctionAttributeTag).value.l.contains(
             "noreturn"
           )
-        )
+        ) || {
+            // every function the call can reach ends in a terminator: two static helpers of one
+            // name in two files are two answers, and the one that returns decides
+            val callees = c._callOut.collectAll[Method].l
+            callees.nonEmpty && callees.forall(neverReturnsByBody)
+        }
     case _ => false
+
+  /** Whether every path through the method's body reaches its return only through a call that does
+    * not return: each of the return's CFG predecessors is itself one. A method still being walked
+    * answers no (a cycle of calls each ending in the other says nothing about either).
+    */
+  private val neverReturnsMemo    = mutable.HashMap.empty[Long, Boolean]
+  private val neverReturnsWalking = mutable.HashSet.empty[Long]
+  private def neverReturnsByBody(m: Method): Boolean =
+      neverReturnsMemo.get(m.id()) match
+        case Some(known) => known
+        case None =>
+            if neverReturnsWalking.add(m.id()) then
+              val answer = m.methodReturn._cfgIn.collectAll[CfgNode].l match
+                case preds if preds.nonEmpty => preds.forall(isNoReturnCall)
+                case _                       => false
+              neverReturnsWalking.remove(m.id())
+              neverReturnsMemo.update(m.id(), answer)
+              answer
+            else false
 
   /** The error channel of a C API: `db = leveldb_open(opts, name, &err)` returns NULL exactly when
     * it sets `err`. Where a guard proves `err` NULL the call succeeded and its result is not NULL;
