@@ -270,7 +270,7 @@ object EdgaRunner:
       )
           .orElse(
             EdgaRunner.locateInPath(
-              sys.env.getOrElse("PATH", ""),
+              EdgaRunner.pathEnvironment(),
               EdgaRunner.binaryName(EdgaRunner.onWindows)
             )
           )
@@ -280,6 +280,13 @@ object EdgaRunner:
 
   /** The binary's name on the host. */
   def binaryName(windows: Boolean): String = if windows then "edga.exe" else "edga"
+
+  /** The directories to search for executables, whatever case the host spells the variable with:
+    * `Path` on Windows, where a map lookup by the name is not case-insensitive (a `System.getenv`
+    * lookup is).
+    */
+  def pathEnvironment(env: Map[String, String] = sys.env): String =
+      env.find((name, _) => name.equalsIgnoreCase("PATH")).map(_._2).getOrElse("")
 
   /** The first directory on `path` (the PATH environment variable) holding the binary as a file
     * that runs. On Windows every file can run, and `canExecute` says yes for any of them, so only a

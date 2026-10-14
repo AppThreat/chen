@@ -24,6 +24,12 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
             EdgaRunner.locateInPath(path, EdgaRunner.binaryName(windows = false)) shouldBe empty
           }
       }
+      "read the PATH variable whatever case the host spells it with" in {
+          EdgaRunner.pathEnvironment(Map("Path" -> "C:\\bin")) shouldBe "C:\\bin"
+          EdgaRunner.pathEnvironment(Map("PATH" -> "/usr/bin")) shouldBe "/usr/bin"
+          EdgaRunner.pathEnvironment(Map("path" -> "/bin")) shouldBe "/bin"
+          EdgaRunner.pathEnvironment(Map("HOME" -> "/home")) shouldBe ""
+      }
       "not take a directory, or a file of the other name, for the binary" in {
           File.usingTemporaryDirectory("edga-locate-dir") { dir =>
             (dir / "edga.exe").createDirectory()
