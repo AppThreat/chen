@@ -101,7 +101,10 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     val standard =
         if cpp then
           Seq(
-            EdgaRunner.cppStandardOption(settings.standard.getOrElse(config.cppStandard)),
+            EdgaRunner.cppStandardOption(
+              settings.standard.getOrElse(config.cppStandard),
+              microsoft = dialect.contains("--microsoft")
+            ),
             "--type_traits_helpers"
           )
         else Seq(EdgaRunner.cStandardOption(settings.standard.orNull))
@@ -143,8 +146,9 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
   end arguments
 
   private def macroFile(macros: Map[String, String]): Path =
-    val text = macros.toSeq.sorted.filterNot((k, _) =>
-        EdgaRunner.FrontEndOwned(k.takeWhile(_ != '('))
+    val text = macros.toSeq.sorted.filterNot((k, v) =>
+        EdgaRunner.FrontEndOwned(k.takeWhile(_ != '(')) || EdgaRunner.ParserShims(k) ||
+            EdgaRunner.isKeywordShim(k, v)
     ).map {
         (k, v) => s"#define $k $v"
     }.mkString("", "\n", "\n")
@@ -198,18 +202,32 @@ object EdgaRunner:
       DefaultDefines.DEFAULT_CALL_CONVENTIONS.get(name).contains(value)
 
   /** The front end's option for a `-std` spelling (`c++17`, `gnu++2a`, `c++latest`), C++17 when
-    * none is given or the front end has no mode for it.
+    * none is given or the front end has no mode for it. The Microsoft dialect has standards of its
+    * own (`--ms_c++17` for MSVC's `/std:c++17`): they turn on what that Visual Studio version
+    * supports, which its standard library headers are written for - the ISO options leave parts of
+    * them unparsable.
     */
-  def cppStandardOption(standard: String): String =
-      Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse(
-        ""
-      ) match
+  def cppStandardOption(standard: String, microsoft: Boolean = false): String =
+    val std =
+        Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse("")
+    if microsoft then
+      std match
+        // MSVC's baseline, and its default: it has no mode before C++14
+        case "" | "++98" | "++03" | "++11" | "++0x" | "++14" | "++1y" => "--ms_c++14"
+        case "++20" | "++2a"                                          => "--ms_c++20"
+        // the front end's Microsoft C++23 needs a newer compiler than its version table gives
+        // (19.43); its latest mode has no such floor
+        case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--ms_c++latest"
+        case _                                              => "--ms_c++17"
+    else
+      std match
         case "++98" | "++03"                                => "--c++03"
         case "++11" | "++0x"                                => "--c++11"
         case "++14" | "++1y"                                => "--c++14"
         case "++20" | "++2a"                                => "--c++20"
         case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
         case _                                              => "--c++17"
+  end cppStandardOption
 
   /** Whether a directory holds a header a system directory also has (`time.h`): as an include
     * directory it would be found first for `<time.h>`.
@@ -268,9 +286,34 @@ object EdgaRunner:
       sys.props.get("edga.path").orElse(sys.env.get("EDGA_PATH")).filter(p =>
           new File(p).canExecute
       )
-          .orElse(sys.env.get("PATH").toSeq.flatMap(_.split(File.pathSeparator)).map(d =>
-              new File(d, "edga")
-          ).find(_.canExecute).map(_.getAbsolutePath))
+          .orElse(
+            EdgaRunner.locateInPath(
+              EdgaRunner.pathEnvironment(),
+              EdgaRunner.binaryName(EdgaRunner.onWindows)
+            )
+          )
+
+  /** Whether the host is Windows: the binary is `edga.exe` there, `edga` elsewhere. */
+  def onWindows: Boolean = scala.util.Properties.isWin
+
+  /** The binary's name on the host. */
+  def binaryName(windows: Boolean): String = if windows then "edga.exe" else "edga"
+
+  /** The directories to search for executables: `PATH`, else the variable spelled in another case
+    * (`Path` on Windows, where a lookup in this map is not case-insensitive as `System.getenv` is).
+    */
+  def pathEnvironment(env: Map[String, String] = sys.env): String =
+      env.get("PATH")
+          .orElse(env.collectFirst { case (name, value) if name.equalsIgnoreCase("PATH") => value })
+          .getOrElse("")
+
+  /** The first directory on `path` (the PATH environment variable) holding the binary as a file
+    * that runs. On Windows every file can run, and `canExecute` says yes for any of them, so only a
+    * regular file named like the binary qualifies.
+    */
+  def locateInPath(path: String, name: String): Option[String] =
+      path.split(File.pathSeparator).toSeq.filter(_.nonEmpty).map(d => new File(d, name))
+          .find(f => f.isFile && f.canExecute).map(_.getAbsolutePath)
 
   /** The compiler the CDT frontend asks for its macros when no compilation database names one. */
   def hostIdentity(config: Config, language: SourceLanguage): Option[CompilerIdentity] =
@@ -293,10 +336,12 @@ object EdgaRunner:
     * where the headers take the type as the compiler's: as a macro the typedef would read `typedef
     * long double long double`.
     */
-  /** edga configurations built without float128: aarch64 Linux, and x86_64 Linux on musl (no static
-    * quadmath). Either binary also runs against glibc's headers.
+  /** edga configurations built without float128: aarch64 Linux, x86_64 Linux on musl (no static
+    * quadmath), and Windows (the MSVC host compiler has no quadmath). Either binary also runs
+    * against glibc's headers.
     */
-  private val ConfigurationsWithoutFloat128 = Set("linux-aarch64", "linux-x86_64-musl")
+  private val ConfigurationsWithoutFloat128 =
+      Set("linux-aarch64", "linux-x86_64-musl", "windows-x86_64", "windows-arm64")
 
   def float128Shim(edgaIdentity: String, macros: Map[String, String], cpp: Boolean): Seq[String] =
     val withoutFloat128 = edgaIdentity.linesIterator.exists(l =>

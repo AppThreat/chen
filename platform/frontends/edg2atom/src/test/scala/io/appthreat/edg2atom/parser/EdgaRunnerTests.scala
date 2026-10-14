@@ -8,6 +8,51 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class EdgaRunnerTests extends AnyWordSpec with Matchers:
 
+  "the binary" should {
+      "be found on the PATH as edga.exe on Windows, and as edga elsewhere" in {
+          File.usingTemporaryDirectory("edga-locate") { dir =>
+            (dir / "edga.exe").writeBytes(Iterator(0x4d.toByte, 0x5a.toByte, 0x90.toByte, 0.toByte))
+            (dir / "edga.exe").toJava.setExecutable(true)
+            val path = dir.pathAsString + java.io.File.pathSeparator + "/nowhere"
+            EdgaRunner.binaryName(windows = true) shouldBe "edga.exe"
+            EdgaRunner.binaryName(windows = false) shouldBe "edga"
+            EdgaRunner.locateInPath(path, EdgaRunner.binaryName(windows = true)) shouldBe Some(
+              (dir / "edga.exe").path.toAbsolutePath.toString
+            )
+            // the POSIX name finds nothing when only edga.exe is there: an edga.exe-only
+            // directory is what a Windows PATH holds
+            EdgaRunner.locateInPath(path, EdgaRunner.binaryName(windows = false)) shouldBe empty
+          }
+      }
+      "read the PATH variable whatever case the host spells it with" in {
+          EdgaRunner.pathEnvironment(Map("Path" -> "C:\\bin")) shouldBe "C:\\bin"
+          EdgaRunner.pathEnvironment(Map("PATH" -> "/usr/bin")) shouldBe "/usr/bin"
+          EdgaRunner.pathEnvironment(Map("path" -> "/bin")) shouldBe "/bin"
+          EdgaRunner.pathEnvironment(Map("HOME" -> "/home")) shouldBe ""
+          // where both spellings are variables of their own (a POSIX environment), PATH is the one
+          EdgaRunner.pathEnvironment(
+            Map("Path" -> "/other", "PATH" -> "/usr/bin")
+          ) shouldBe "/usr/bin"
+      }
+      "not take a directory, or a file of the other name, for the binary" in {
+          File.usingTemporaryDirectory("edga-locate-dir") { dir =>
+            (dir / "edga.exe").createDirectory()
+            (dir / "edga").writeText("not a binary")
+            (dir / "edga").toJava.setExecutable(true)
+            EdgaRunner.locateInPath(
+              dir.pathAsString,
+              EdgaRunner.binaryName(windows = true)
+            ) shouldBe empty
+            EdgaRunner.locateInPath(
+              dir.pathAsString,
+              EdgaRunner.binaryName(windows = false)
+            ) shouldBe Some(
+              (dir / "edga").path.toAbsolutePath.toString
+            )
+          }
+      }
+  }
+
   "a standard" should {
       "map to the front end's mode" in {
           EdgaRunner.cStandardOption("gnu99") shouldBe "--c99"
@@ -19,6 +64,18 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.cppStandardOption("c++14") shouldBe "--c++14"
           EdgaRunner.cppStandardOption("c++latest") shouldBe "--c++23"
           EdgaRunner.cppStandardOption("") shouldBe "--c++17"
+      }
+      "map MSVC's own standards to the front end's Microsoft modes" in {
+          EdgaRunner.cppStandardOption("c++17", microsoft = true) shouldBe "--ms_c++17"
+          EdgaRunner.cppStandardOption("c++20", microsoft = true) shouldBe "--ms_c++20"
+          EdgaRunner.cppStandardOption("c++latest", microsoft = true) shouldBe "--ms_c++latest"
+          // the front end's Microsoft C++23 asks for a newer compiler than the table's
+          EdgaRunner.cppStandardOption("c++23", microsoft = true) shouldBe "--ms_c++latest"
+          EdgaRunner.cppStandardOption("c++14", microsoft = true) shouldBe "--ms_c++14"
+          EdgaRunner.cppStandardOption("", microsoft = true) shouldBe "--ms_c++14"
+          // MSVC has no mode older than its C++14 baseline
+          EdgaRunner.cppStandardOption("c++11", microsoft = true) shouldBe "--ms_c++14"
+          EdgaRunner.cppStandardOption("gnu++17", microsoft = true) shouldBe "--ms_c++17"
       }
       "keep the GNU dialect unless the unit asks for the ISO one" in {
           val gcc = Seq("--gcc", "--gnu_version=140200")
@@ -137,6 +194,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
       val aarch64 = "edga 0.1.0\nEDG commit abc\nconfiguration linux-aarch64 0123"
       val x86     = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64 0123"
       val x86Musl = "edga 0.1.0\nEDG commit abc\nconfiguration linux-x86_64-musl 0123"
+      val winX64  = "edga 0.1.0\nEDG commit abc\nconfiguration windows-x86_64 0123"
+      val winArm  = "edga 0.1.0\nEDG commit abc\nconfiguration windows-arm64 0123"
       val gcc14   = Map("__GNUC__" -> "14")
       "name `long double` `_Float128` where glibc takes it as the compiler's type" in {
           val shim = Seq("--define_macro", "_Float128=long double")
@@ -144,6 +203,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.float128Shim(aarch64, gcc14, cpp = true) shouldBe shim
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = false) shouldBe shim
           EdgaRunner.float128Shim(x86Musl, gcc14, cpp = false) shouldBe shim
+          EdgaRunner.float128Shim(winX64, gcc14, cpp = false) shouldBe shim
+          EdgaRunner.float128Shim(winArm, gcc14, cpp = true) shouldBe shim
       }
       "leave it to glibc's typedef, and to a front end with float128" in {
           EdgaRunner.float128Shim(aarch64, Map("__GNUC__" -> "12"), cpp = true) shouldBe empty
@@ -199,6 +260,39 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
   }
 
   "a compilation database" should {
+      "give an MSVC unit the Microsoft mode of its standard, and no keyword macros" in {
+          File.usingTemporaryDirectory("edga-msvc-keywords") { dir =>
+            (dir / "w.cpp").writeText("int w() { return 0; }\n")
+            (dir / "compile_commands.json").writeText(
+              s"""[{ "directory": "${dir.pathAsString}", "file": "w.cpp",
+                   |   "command": "cl /std:c++17 /c w.cpp" }]""".stripMargin
+            )
+            val config = Config().withInputPath(dir.pathAsString)
+                .withCompileCommands((dir / "compile_commands.json").pathAsString)
+            val runner = new EdgaRunner(config, new ProjectSources(config))
+            val args   = runner.arguments((dir / "w.cpp").path)
+            // on a Windows host a GNU compiler on the PATH can take the unit over (a known
+            // limit), so the Microsoft dialect is required only elsewhere
+            if !scala.util.Properties.isWin then args should contain("--microsoft")
+            val macros = args.sliding(2).collectFirst { case Seq("--preinclude_macros", f) =>
+                File(f).contentAsString
+            }
+            // the compiler's own macros, when the unit's table gave them; in Microsoft mode
+            // the front end parses __declspec and the calling conventions itself - a macro
+            // would take their place and break the headers that use them - and the module
+            // keyword the parser settings macroize, which the MSVC standard library forbids
+            // outright. MinGW's GCC predefines __declspec for its own headers, and the GNU
+            // dialect is written for that.
+            if args.contains("--microsoft") then
+              // MSVC's /std:c++17 is the front end's Microsoft C++17, not the ISO one
+              args should contain("--ms_c++17")
+              (args should not).contain("--c++17")
+              macros.get should include("#define _MSC_VER")
+              (macros.get should not).include("__declspec")
+              (macros.get should not).include("__stdcall")
+            (macros.get should not).include("#define export")
+          }
+      }
       "give a unit its own standard, defines and include directories" in {
           assume(!scala.util.Properties.isWin)
           File.usingTemporaryDirectory("edga-runner") { dir =>

@@ -37,18 +37,26 @@ class EdgAstCreationPassTests extends AnyWordSpec with Matchers:
 
   /** Runs `test` with edga replaced by a program that fails every unit. */
   private def withFailingEdga(dir: File)(test: => Unit): Unit =
-    val fake = dir / "fake-edga"
+    val fake = dir / (if scala.util.Properties.isWin then "fake-edga.bat" else "fake-edga")
     // the same build, by its identity, that exports nothing
-    fake.writeText(
-      s"#!/bin/sh\nif [ \"$$1\" = \"--edga-version\" ]; then exec ${edga.get} --edga-version; fi\nexit 4\n"
-    )
-    fake.toJava.setExecutable(true)
+    if scala.util.Properties.isWin then
+      // the version answer goes to the real binary, so the identity is byte for byte the same
+      fake.writeText(
+        s"@echo off\r\nif \"%1\"==\"--edga-version\" (\"edga-path\" %*) else exit /b 4\r\n"
+            .replace("edga-path", edga.get)
+      )
+    else
+      fake.writeText(
+        s"#!/bin/sh\nif [ \"$$1\" = \"--edga-version\" ]; then exec ${edga.get} --edga-version; fi\nexit 4\n"
+      )
+      fake.toJava.setExecutable(true)
     val saved = sys.props.get("edga.path")
     sys.props("edga.path") = fake.pathAsString
     try test
     finally saved match
           case Some(p) => sys.props("edga.path") = p
           case None    => sys.props.remove("edga.path")
+  end withFailingEdga
 
   private val shared = "shared.h" -> "static inline int twice(int x) { return 2 * x; }\n"
   private val first = "a.c" -> "#include \"shared.h\"\nint first(int x) { return twice(x); }\n"
