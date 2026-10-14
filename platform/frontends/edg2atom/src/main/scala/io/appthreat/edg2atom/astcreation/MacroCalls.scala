@@ -125,7 +125,15 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
             // a stringised argument (`#x`) is text of the expansion, not a value passed in
             case Some(n) if n.string("ck").contains("string") && !text.trim.startsWith("\"") =>
                 None
-            case Some(n) => Some(expressionAst(n))
+            // the copy reads as the argument is written, as the CDT frontend's copies do: an
+            // operation the expansion built has no source text of its own
+            case Some(n) =>
+                val copy = expressionAst(n)
+                copy.root.foreach {
+                    case e: ExpressionNew if e.code.isEmpty => e.code = text.trim
+                    case _                                  =>
+                }
+                Some(copy)
             case None =>
                 val value = objectMacroValue(root, text).getOrElse(text.trim)
                 Some(Ast(literalNode(root, value, registerType(literalType(value)))))

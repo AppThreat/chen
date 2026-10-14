@@ -572,6 +572,10 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("init_ok_variadic_macro_out_param") should not contain "MS-INIT-001"
       }
+      "keep its argument copies as they are written" in {
+          requireEdga()
+          cpg.call.nameExact("FILL_INFO").argument.code.l shouldBe List("&info", "a", "2", "3")
+      }
       "make them when it is a block or a statement expression" in {
           requireEdga()
           findingsIn("init_ok_block_macro_store") should not contain "MS-INIT-001"
