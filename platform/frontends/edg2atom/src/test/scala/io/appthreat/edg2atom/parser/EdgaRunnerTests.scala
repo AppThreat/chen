@@ -61,6 +61,16 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.cppStandardOption("c++latest") shouldBe "--c++23"
           EdgaRunner.cppStandardOption("") shouldBe "--c++17"
       }
+      "map MSVC's own standards to the front end's Microsoft modes" in {
+          EdgaRunner.cppStandardOption("c++17", microsoft = true) shouldBe "--ms_c++17"
+          EdgaRunner.cppStandardOption("c++20", microsoft = true) shouldBe "--ms_c++20"
+          EdgaRunner.cppStandardOption("c++latest", microsoft = true) shouldBe "--ms_c++latest"
+          EdgaRunner.cppStandardOption("c++14", microsoft = true) shouldBe "--ms_c++14"
+          EdgaRunner.cppStandardOption("", microsoft = true) shouldBe "--ms_c++14"
+          // MSVC has no mode older than its C++14 baseline
+          EdgaRunner.cppStandardOption("c++11", microsoft = true) shouldBe "--ms_c++14"
+          EdgaRunner.cppStandardOption("gnu++17", microsoft = true) shouldBe "--ms_c++17"
+      }
       "keep the GNU dialect unless the unit asks for the ISO one" in {
           val gcc = Seq("--gcc", "--gnu_version=140200")
           EdgaRunner.strictnessOptions(None, gcc) shouldBe Seq("--no_strict_gnu")

@@ -198,18 +198,27 @@ object EdgaRunner:
       DefaultDefines.DEFAULT_CALL_CONVENTIONS.get(name).contains(value)
 
   /** The front end's option for a `-std` spelling (`c++17`, `gnu++2a`, `c++latest`), C++17 when
-    * none is given or the front end has no mode for it.
+    * none is given or the front end has no mode for it. The Microsoft dialect has standards of its
+    * own (`--ms_c++17` for MSVC's `/std:c++17`): they turn on what that Visual Studio version
+    * supports, which its standard library headers are written for - the ISO options leave parts of
+    * them unparsable.
     */
-  def cppStandardOption(standard: String): String =
+  def cppStandardOption(standard: String, microsoft: Boolean = false): String =
       Option(standard).map(_.trim.toLowerCase.stripPrefix("gnu").stripPrefix("c")).getOrElse(
         ""
       ) match
-        case "++98" | "++03"                                => "--c++03"
-        case "++11" | "++0x"                                => "--c++11"
-        case "++14" | "++1y"                                => "--c++14"
-        case "++20" | "++2a"                                => "--c++20"
-        case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
-        case _                                              => "--c++17"
+        case "++98" | "++03" | "++11" | "++0x" | "++14" | "++1y" if microsoft => "--ms_c++14"
+        case "++98" | "++03"                                                  => "--c++03"
+        case "++11" | "++0x"                                                  => "--c++11"
+        case "++14" | "++1y"                                                  => "--c++14"
+        case "++17" | "++1z" if microsoft                                     => "--ms_c++17"
+        case "++20" | "++2a" if microsoft                                     => "--ms_c++20"
+        case "++23" | "++2b" | "++26" | "++2c" if microsoft                   => "--ms_c++23"
+        case "++latest" if microsoft                                          => "--ms_c++latest"
+        case "" if microsoft                                                  => "--ms_c++14"
+        case "++20" | "++2a"                                                  => "--c++20"
+        case "++23" | "++2b" | "++26" | "++2c" | "++latest"                   => "--c++23"
+        case _                                                                => "--c++17"
 
   /** Whether a directory holds a header a system directory also has (`time.h`): as an include
     * directory it would be found first for `<time.h>`.
