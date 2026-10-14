@@ -1,7 +1,8 @@
 name: pr
-# pr-tests is the required status check on main, so this workflow must
-# trigger on merge-group builds too; the queue re-runs it on the
-# speculative merge commit.
+# pr-tests (<os>, 25) are the required status checks on main, so this workflow must trigger on
+# merge-group builds too. Pull requests also run jvms 23 and 26 on Ubuntu. The queue runs only the
+# three required checks, and only when the pull request's own run has not already passed them on
+# the very tree the queue built (see `reuse`).
 on:
   pull_request:
   merge_group:
@@ -16,29 +17,85 @@ permissions: {}
 env:
   COURSIER_REPOSITORIES: "ivy2Local|https://maven-central.storage-download.googleapis.com/maven2|https://repo1.maven.org/maven2|https://appthreats-mini.tailf64ad.ts.net/maven"
 jobs:
+  # A merge-queue build of one pull request on an unchanged main is the tree that pull request's
+  # own run already tested: the queue commit's first parent is the queue base and its second the
+  # pull request's head, and every required pr-tests job records the tree it passed on. When all
+  # three records exist for this tree, from a run of this pull request's head, the queue reuses
+  # them. Any other build (main moved, several pull requests in one group, a lookup error) runs
+  # the tests.
+  reuse:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      tested: ${{ steps.lookup.outputs.tested }}
+    steps:
+      - id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          QUEUE_SHA: ${{ github.event.merge_group.head_sha }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          # must match the matrix's os values and the jvm of the required checks
+          REQUIRED: "ubuntu-latest windows-latest macos-26"
+          REQUIRED_JVM: "25"
+        run: |
+          set -euo pipefail
+          commit=$(gh api "repos/$REPO/git/commits/$QUEUE_SHA")
+          tree=$(jq -r .tree.sha <<<"$commit")
+          first=$(jq -r '.parents[0].sha // empty' <<<"$commit")
+          head=$(jq -r '.parents[1].sha // empty' <<<"$commit")
+          tested=false
+          if [ "$first" = "$BASE_SHA" ] && [ -n "$head" ]; then
+            tested=true
+            for os in $REQUIRED; do
+              name="tested-$os-$REQUIRED_JVM-$tree"
+              found=$(gh api "repos/$REPO/actions/artifacts?name=$name&per_page=100" \
+                --jq "[.artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$head\")] | length")
+              [ "$found" -gt 0 ] || { tested=false; break; }
+            done
+          fi
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+          echo "Queue tree \`$tree\`, pull request head \`${head:-none}\`: reuse = $tested" >> "$GITHUB_STEP_SUMMARY"
   pr-tests:
-    runs-on: ${{ matrix.os }}
+    needs: reuse
+    # reuse is skipped outside the queue, and a failed lookup must not block the tests
+    if: ${{ !cancelled() }}
+    # a reused check needs no Windows or macOS machine: its name comes from the matrix values
+    runs-on: ${{ needs.reuse.outputs.tested == 'true' && 'ubuntu-latest' || matrix.os }}
+    env:
+      REUSED: ${{ needs.reuse.outputs.tested == 'true' }}
     strategy:
       fail-fast: false
       matrix:
+        # the required jvm on every OS; pull requests also try the other jvms on Ubuntu, the queue
+        # runs only the required checks
         os: [ubuntu-latest, windows-latest, macos-26]
-        jvm: ['23', '25', '26']
+        jvm: ['25']
+        include: ${{ fromJSON(github.event_name == 'merge_group' && '[]' || '[{"os":"ubuntu-latest","jvm":"23"},{"os":"ubuntu-latest","jvm":"26"}]') }}
     steps:
+      - name: Reuse the pull request's result
+        if: env.REUSED == 'true'
+        env:
+          OS: ${{ matrix.os }}
+          JVM: ${{ matrix.jvm }}
+        run: echo "This tree passed pr-tests ($OS, $JVM) in the pull request's own run."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: env.REUSED != 'true'
         with:
           fetch-depth: 1
           persist-credentials: false
       - name: Set up JDK
+        if: env.REUSED != 'true'
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.jvm }}
           cache: "sbt"
       - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729  # v1.5.8
-      # php2atom's parser shells out to `php`, and install.sh runs `composer`, so PHP is a real
-      # test dependency on every OS. All we need of it is those two binaries on PATH: chen ships
-      # its own php.ini (PhpParser passes `--php-ini` explicitly), so the ini, tools and coverage
-      # machinery setup-php provides is unused.
+        if: env.REUSED != 'true'
       # php2atom shells out to `php` and install.sh runs `composer`, so both binaries must be on
       # PATH on every OS. chen supplies its own php.ini (PhpParser passes `--php-ini`), so no ini,
       # extension or coverage setup is required.
@@ -48,7 +105,7 @@ jobs:
           coverage: "none"
           php-version: "8.5"
           tools: composer:v2
-        if: runner.os != 'macOS'
+        if: env.REUSED != 'true' && runner.os != 'macOS'
       # macOS installs from brew directly rather than through setup-php, which builds macOS PHP
       # from a Homebrew tap and fails the whole job when that tap is broken.
       #
@@ -61,47 +118,51 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
-        if: runner.os == 'macOS'
+        if: env.REUSED != 'true' && runner.os == 'macOS'
       - name: Use Node.js
+        if: env.REUSED != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '25.x'
-      - name: Delete `.rustup` directory
-        run: rm -rf /home/runner/.rustup # to save disk space
-        if: runner.os == 'Linux'
-      - name: Delete `.cargo` directory # to save disk space
-        run: rm -rf /home/runner/.cargo
-        if: runner.os == 'Linux'
+      - name: Delete `.rustup` and `.cargo` directories # to save disk space
+        run: rm -rf /home/runner/.rustup /home/runner/.cargo
+        if: env.REUSED != 'true' && runner.os == 'Linux'
       - name: Install graphviz-dev
         run: sudo apt install -y graphviz-dev
-        if: runner.os == 'Linux'
+        if: env.REUSED != 'true' && runner.os == 'Linux'
       - name: Install sbt (macOS)
         run: |
           brew install sbt
-        if: runner.os == 'macOS'
+        if: env.REUSED != 'true' && runner.os == 'macOS'
       - name: Install and test
+        if: env.REUSED != 'true'
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom-parsetools
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: |
-            ~/.sbt
-            ~/.coursier
-          key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
       # Before the tests: the edg2atom tests cancel themselves without edga
       - uses: ./.github/actions/edga-from-main  # temporary: remove once edga 0.2.0 is released
+        if: env.REUSED != 'true'
       - name: Compile and run tests
+        if: env.REUSED != 'true'
         run: |
           sbt --server "scalafmtCheck; clean; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-        if: runner.os != 'Windows'
-      - name: Compile and run tests
-        run: |
-          sbt --server "scalafmtCheck; clean; +testFull"
+      # what `reuse` looks for: the tree this job passed on (the pull request's merge commit)
+      - name: Record the tested tree
+        id: tree
+        if: github.event_name == 'pull_request'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-        if: runner.os == 'Windows'
+          OS: ${{ matrix.os }}
+          JVM: ${{ matrix.jvm }}
+        run: |
+          git rev-parse 'HEAD^{tree}' > tested-tree.txt
+          echo "name=tested-$OS-$JVM-$(cat tested-tree.txt)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          name: ${{ steps.tree.outputs.name }}
+          path: tested-tree.txt
+          retention-days: 14
