@@ -1,0 +1,16 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/parser/EdgaRunner.scala
+  h_0926447d100ad2 271-290,313-315,317-318
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/EdgaRunnerTests.scala
+  h_0926447d100ad2 11-45,175-176,184-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d6e617d3b4f7dcb1bde4af5a5c7f2a8ead8b265d",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgAstCreationPassTests.scala
+  h_0926447d100ad2 40,42-52
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/EdgaRunnerTests.scala
+  h_0926447d100ad2 271-275
+  h_0926447d100ad2 276-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddbfcd9acf4f50ee7d873d76b14847adcea1838a",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
