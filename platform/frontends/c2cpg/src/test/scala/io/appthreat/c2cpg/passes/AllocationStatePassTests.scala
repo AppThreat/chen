@@ -50,8 +50,7 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
-    |/* the free a macro spells: the invocation's argument is the free site, whether the macro is
-    |   the free itself or a wrapper that frees and resets */
+    |/* the free a macro spells: the invocation's argument is the free site */
     |#define wrap_free(p) free(p)
     |void bad_conditional_macro_free(int flag)
     |{
@@ -68,6 +67,15 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
     |    if (p == NULL) return;
     |    if (flag) { wrap_free(p); }
     |    wrap_use(p);
+    |}
+    |
+    |/* a free only a branch a constant condition rules out reaches frees nothing */
+    |void good_dead_branch_free(void)
+    |{
+    |    char *p = (char *)malloc(16);
+    |    if (p == NULL) return;
+    |    if (0) { free(p); }
+    |    free(p);
     |}
     |
     |void good_nulled(void)
@@ -298,8 +306,12 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
         findingsIn("bad_via_wrapper") shouldBe Set("MS-ALLOC-001")
     }
 
-    "fire through a macro that is the free, or a wrapper that frees and resets" in {
+    "fire through a macro that is the free" in {
         findingsIn("bad_conditional_macro_free") shouldBe Set("MS-ALLOC-001")
+    }
+
+    "stay silent when the first free is on a branch a constant condition rules out" in {
+        findingsIn("good_dead_branch_free") shouldBe empty
     }
 
     "stay silent behind the free-and-reset idiom" in {

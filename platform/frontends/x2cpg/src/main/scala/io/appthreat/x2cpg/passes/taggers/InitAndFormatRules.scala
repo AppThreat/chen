@@ -584,8 +584,7 @@ object InitAndFormatRules:
       steps += 1
       val n = worklist.dequeue()
       queued -= n.id()
-      // predecessors a constant condition cut off contribute nothing: their writes are on no
-      // path to this node
+      // a predecessor only a dead branch reaches contributes nothing: its writes are on no path
       val preds = n._cfgIn.collectAll[CfgNode].l.filter(p => live.contains(p.id()))
       val inSet =
           preds.foldLeft(Set.empty[String])((acc, p) => acc ++ out.getOrElse(p.id(), Set.empty))
@@ -593,12 +592,11 @@ object InitAndFormatRules:
       val o = inSet ++ genOf(n)
       if !out.get(n.id()).contains(o) then
         out(n.id()) = o
-        n._cfgOut.collectAll[CfgNode].foreach { s =>
+        n._cfgOut.collectAll[CfgNode].filter(s => live.contains(s.id())).foreach { s =>
             if queued.add(s.id()) then worklist.enqueue(s)
         }
     if worklist.nonEmpty then return // did not converge: say nothing
-    // every read the analysis judged sits on a path the entry reaches (`live`), or the constant
-    // conditions the method wrote have already ruled its branch out
+    // every read judged here is on a path from the entry: `nodes` holds only `live` ones
     reads.foreach { case (node, shown, accepted) =>
         in.get(node.id()).foreach { s =>
           val sameLine =

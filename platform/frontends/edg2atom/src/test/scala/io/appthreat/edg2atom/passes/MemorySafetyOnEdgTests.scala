@@ -379,6 +379,24 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  x = v;
       |  return x;
       |}
+      |int dead_branch_read_in_dead_else(int v) {
+      |  int x;
+      |  if (1) { x = v; } else { return x; }
+      |  return x;
+      |}
+      |int dead_branch_for_body(int v) {
+      |  int x;
+      |  for (; 0;) { return x; }
+      |  x = v;
+      |  return x;
+      |}
+      |int live_branch_entered_by_goto(int v) {
+      |  int x;
+      |  if (v) goto in;
+      |  if (0) { in: return x; }
+      |  x = v;
+      |  return x;
+      |}
       |int dead_branch_write_in_dead_branch(int v) {
       |  int x;
       |  if (0) { x = v; }
@@ -542,6 +560,8 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           Seq(
             "dead_branch_read_in_dead_then",
+            "dead_branch_read_in_dead_else",
+            "dead_branch_for_body",
             "dead_branch_macro_condition",
             "dead_branch_macro_ternary"
           ).foreach { m => withClue(m) { findingsIn(m) should not contain "MS-INIT-001" } }
@@ -551,6 +571,7 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("dead_branch_write_in_dead_branch") should contain("MS-INIT-001")
           findingsIn("live_branch_ternary") should contain("MS-INIT-001")
+          findingsIn("live_branch_entered_by_goto") should contain("MS-INIT-001")
           findingsIn("live_branch_macro_ternary") should contain("MS-INIT-001")
       }
   }

@@ -420,7 +420,23 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    cp_naked(buf.bn, 0, 1);
     |    return (int)buf.bn[0];
     |}
-    |/* the live twins: the same shapes with a condition a caller controls */
+    |int dead_branch_for_body(int v)
+    |{
+    |    int x;
+    |    for (; 0;) { return x; }
+    |    x = v;
+    |    return x;
+    |}
+    |/* the live twins: the same shapes with a condition a caller controls, and a dead branch a
+    |   goto enters */
+    |int live_branch_entered_by_goto(int v)
+    |{
+    |    int x;
+    |    if (v) goto in;
+    |    if (0) { in: return x; }
+    |    x = v;
+    |    return x;
+    |}
     |int live_branch_read_in_then(int v)
     |{
     |    int x;
@@ -559,6 +575,7 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
           "dead_branch_read_in_dead_then",
           "dead_branch_read_in_dead_else",
           "dead_branch_dead_loop_body",
+          "dead_branch_for_body",
           "dead_branch_macro_condition",
           "dead_branch_ternary",
           "dead_branch_macro_ternary"
@@ -568,6 +585,7 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         Seq(
           "dead_branch_write_in_dead_branch",
           "live_branch_read_in_then",
+          "live_branch_entered_by_goto",
           "live_branch_ternary",
           "live_branch_macro_ternary"
         ).foreach { m => withClue(m) { findingsIn(m) should contain("MS-INIT-001") } }

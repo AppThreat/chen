@@ -318,9 +318,9 @@ private[taggers] object IndexRange:
     * index knows what it passes.
     */
   private def summaryReturnRangeOf(c: Call): Option[Range] =
-      c._callOut.collectAll[Method].headOption.flatMap(MemorySemanticsPass.returnRangeOf).map {
-          case (lo, hi) => Range(lo, hi)
-      }
+      c._callOut.collectAll[Method].map(MemorySemanticsPass.returnRangeOf).l.distinct match
+        case List(Some((lo, hi))) => Some(Range(lo, hi))
+        case _                    => None
 
   /** An integer literal's value: decimal, hex, octal (a leading 0: `010` is 8), an ASCII character,
     * and a negated literal.

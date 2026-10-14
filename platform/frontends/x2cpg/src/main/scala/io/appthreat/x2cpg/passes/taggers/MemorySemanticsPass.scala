@@ -189,31 +189,20 @@ object MemorySemanticsPass:
     * using the result has no value in C at all, so it excludes nothing here.
     */
   private def returnRangeRows(cpg: Cpg): List[(StoredNode, String, String)] =
-      cpg.method.isExternal(false).l
-          .groupBy(_.name)
-          .toList
-          .flatMap { case (name, bodies) =>
-              val ranges = bodies.map(bodyRange)
-              Option.when(ranges.forall(_.isDefined) && ranges.nonEmpty)(
-                ranges.flatten.reduce((a, b) => (a._1.min(b._1), a._2.max(b._2)))
-              ).map { case (lo, hi) =>
-                  bodies.map(m => (m: StoredNode, TagSemantic, s"$ReturnRangePrefix$lo:$hi"))
-              }.getOrElse(Nil)
-          }
+      cpg.method.isExternal(false).l.groupBy(_.name).values.toList.flatMap { bodies =>
+        val ranges = bodies.map(bodyRange)
+        if ranges.exists(_.isEmpty) then Nil
+        else
+          val lo = ranges.flatten.map(_._1).min
+          val hi = ranges.flatten.map(_._2).max
+          bodies.map(m => (m, TagSemantic, s"$ReturnRangePrefix$lo:$hi"))
+      }
 
   private def bodyRange(m: Method): Option[(BigInt, BigInt)] =
     val returns = m.ast.isReturn.l
-    Option.when(returns.nonEmpty)
-        .apply(returns.flatMap(r => r.astChildren.collectFirst { case e: Expression => e }))
-        .filter(values => values.size == returns.size)
-        .flatMap { values =>
-          val consts = values.map(v => IndexRange.literal(v))
-          Option.when(consts.forall(_.isDefined)).apply(
-            consts.flatten.foldLeft((BigInt(Int.MaxValue), BigInt(Int.MinValue)))((acc, v) =>
-                (acc._1.min(v), acc._2.max(v))
-            )
-          )
-        }
+    val values = returns.flatMap(_.astChildren.collectFirst { case e: Expression => e }
+        .flatMap(IndexRange.literal))
+    Option.when(returns.nonEmpty && values.size == returns.size)((values.min, values.max))
 
   /** A METHOD's summarised return range, read back from the tag the pass wrote. */
   def returnRangeOf(m: Method): Option[(BigInt, BigInt)] =
@@ -222,8 +211,7 @@ object MemorySemanticsPass:
               v.stripPrefix(ReturnRangePrefix).split(":", 2)
       }.flatMap {
           case Array(lo, hi) =>
-              for l <- scala.util.Try(BigInt(lo)).toOption; h <- scala.util.Try(BigInt(hi)).toOption
-              yield (l, h)
+              scala.util.Try((BigInt(lo), BigInt(hi))).toOption
           case _ => None
       }
 

@@ -1,6 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -589,86 +590,74 @@ private[taggers] object OverlayFacts:
     FieldStores(reaching, dominated, rewritable)
   end fieldStoresReaching
 
-  /** The CFG edges a constant condition rules out: from a node of the condition's own subtree to
-    * the branch that condition's value does not select. A condition the frontends evaluated (a
-    * literal, a `const-value` tag) takes one branch only - `if (0)`, `for (; 0;)`, `cond ? a : b`
-    * with constant `cond` - so the other branch is on no path from the entry.
+  /** The CFG edges a constant condition rules out, by source node: from the condition's own subtree
+    * into the branch its value does not select. A condition the frontends evaluated (a literal, a
+    * `const-value` tag) takes one branch only - `if (0)`, `while (0)`, `for (; 0;)`, `c ? a : b`
+    * with constant `c`.
     *
-    * Only edges LEAVING THE CONDITION'S OWN SUBTREE are dropped: any other way into the branch (a
-    * goto, a switch's fallthrough) keeps it live, which is what makes the pruning sound. The dead
-    * branch of a loop is its body (a `do` body runs before its condition is tested and is entered
-    * from the top, so nothing is ruled out there).
+    * Only the edges leaving the condition are dropped: any other way into the branch (a goto, a
+    * `case` label) keeps it live, which is what makes the pruning sound. A `do` body is entered
+    * from the top before its condition is tested, so nothing is ruled out there.
     */
   def constantBranchExits(method: Method): Map[Long, Set[Long]] =
-    val prunes = mutable.HashMap.empty[Long, mutable.LinkedHashSet[Long]]
-    def ruleOut(condition: Expression, deadRoots: List[AstNode]): Unit =
-      if deadRoots.isEmpty then return
-      val condSide = condition.ast.collectAll[CfgNode].l.toList
-      val deadIds  = deadRoots.flatMap(_.ast.id.l).toSet
-      condSide.foreach { n =>
-          n._cfgOut.collectAll[CfgNode].l.filter(s => deadIds.contains(s.id())).foreach { s =>
-              prunes.getOrElseUpdate(n.id(), mutable.LinkedHashSet.empty).add(s.id())
-          }
-      }
-    method.ast.collectAll[ControlStructure].l.foreach { cs =>
-        cs.condition.headOption.foreach { cond =>
+    val cut = mutable.LinkedHashMap.empty[Long, Set[Long]]
+    def ruleOut(condition: AstNode, dead: List[AstNode]): Unit =
+      val deadIds = dead.flatMap(_.ast.id.l).toSet
+      if deadIds.nonEmpty then
+        condition.ast.collectAll[CfgNode].foreach { n =>
+          val into = n._cfgOut.collectAll[CfgNode].map(_.id()).filter(deadIds.contains).toSet
+          if into.nonEmpty then cut(n.id()) = cut.getOrElse(n.id(), Set.empty) ++ into
+        }
+    method.ast.collectAll[ControlStructure].foreach { cs =>
+        cs.condition.foreach { cond =>
             IndexRange.literal(cond).foreach { value =>
-              val kind = cs.controlStructureType.toUpperCase
-              if kind == "IF" then
-                if value == 0 then
-                  ruleOut(
-                    cond,
-                    cs.astChildren.l.filterNot(ch =>
-                        ch.id == cond.id || isElseStructure(ch)
-                    )
-                  )
-                else
-                  ruleOut(cond, cs.astChildren.l.filter(isElseStructure))
-              else if (kind == "WHILE" || kind == "FOR") && value == 0 then
-                cs.astChildren.collectAll[Block].l.lastOption.foreach(body =>
-                    ruleOut(cond, List(body))
-                )
+              // what a true condition runs is everything but the condition and an `else`
+              val (orElse, whenTrue) = cs.astChildren.filterNot(_.id == cond.id).l.partition {
+                  case e: ControlStructure => e.controlStructureType == ControlStructureTypes.ELSE
+                  case _                   => false
+              }
+              cs.controlStructureType match
+                case ControlStructureTypes.IF =>
+                    ruleOut(cond, if value == 0 then whenTrue else orElse)
+                case ControlStructureTypes.WHILE | ControlStructureTypes.FOR if value == 0 =>
+                    ruleOut(cond, whenTrue)
+                case _ => ()
             }
         }
     }
-    method.ast.collectAll[Call].nameExact("<operator>.conditional").l.foreach { c =>
-        (
-          c.argumentOption(1).collect { case e: Expression => e },
-          c.argumentOption(2),
-          c
-              .argumentOption(3)
-        ) match
-          case (Some(cond), Some(taken), Some(dead)) =>
+    method.ast.isCall.nameExact(Operators.conditional).foreach { c =>
+        (c.argumentOption(1), c.argumentOption(2), c.argumentOption(3)) match
+          case (Some(cond), Some(whenTrue), Some(whenFalse)) =>
               IndexRange.literal(cond).foreach { value =>
-                  ruleOut(cond, List(if value == 0 then taken else dead))
+                  ruleOut(cond, List(if value == 0 then whenTrue else whenFalse))
               }
           case _ => ()
     }
-    prunes.view.mapValues(_.toSet).toMap
+    cut.toMap
   end constantBranchExits
 
-  private def isElseStructure(ch: AstNode): Boolean = ch match
-    case cs: ControlStructure =>
-        cs.controlStructureType.equalsIgnoreCase("ELSE") ||
-        cs.parserTypeName.equalsIgnoreCase("else")
-    case _ => false
-
-  /** The CFG nodes a path from the method entry reaches, once every constant condition has ruled
-    * out the branch it does not take ([[constantBranchExits]]). A node no path reaches (a branch a
-    * constant skipped, or a subtree the frontend could not wire) proves nothing about the paths
-    * that do.
+  /** The CFG nodes a path from the method's entry reaches once the branches constant conditions
+    * rule out ([[constantBranchExits]]) are cut. A node no path reaches (a dead branch, or a
+    * subtree the frontend could not wire) proves nothing about the paths that do.
     */
-  def feasibleCfgNodes(method: Method): Set[Long] =
-    val pruned = constantBranchExits(method)
-    val seen   = mutable.HashSet[Long](method.id())
-    val stack  = mutable.Stack.from(method._cfgOut.collectAll[CfgNode].l)
+  def feasibleCfgNodes(method: Method): Set[Long] = cfgReach(method, constantBranchExits(method))
+
+  /** The CFG nodes only a branch a constant condition rules out reaches: reachable from the entry,
+    * but not once those branches are cut. Unlike the complement of [[feasibleCfgNodes]], a node the
+    * frontend left unwired is not in it.
+    */
+  def constantlyDeadCfgNodes(method: Method): Set[Long] =
+    val cut = constantBranchExits(method)
+    if cut.isEmpty then Set.empty else cfgReach(method, Map.empty) -- cfgReach(method, cut)
+
+  private def cfgReach(method: Method, cut: Map[Long, Set[Long]]): Set[Long] =
+    val seen  = mutable.HashSet.empty[Long]
+    val stack = mutable.Stack[CfgNode](method)
     while stack.nonEmpty do
       val n = stack.pop()
       if seen.add(n.id()) then
-        val blocked = pruned.get(n.id()).getOrElse(Set.empty)
-        n._cfgOut.collectAll[CfgNode].l.filterNot(s => blocked.contains(s.id())).foreach(
-          stack.push
-        )
+        val blocked = cut.getOrElse(n.id(), Set.empty)
+        n._cfgOut.collectAll[CfgNode].filterNot(s => blocked.contains(s.id())).foreach(stack.push)
     seen.toSet
 
   /** `&x` handed to an inventoried memory call as its source: read through, never written. */
