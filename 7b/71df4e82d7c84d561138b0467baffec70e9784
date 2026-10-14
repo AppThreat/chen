@@ -1,0 +1,30 @@
+.gitignore
+  h_0926447d100ad2 74
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  h_0926447d100ad2 23-24,440-450,741-767,774-778
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/ConstantValues.scala
+  h_0926447d100ad2 149,157-176
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/TypeofAndSuffixLiteralTests.scala
+  h_0926447d100ad2 1-94
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  h_0926447d100ad2 924-927,936-941,1121-1123
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/TypeNames.scala
+  h_0926447d100ad2 69-71
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/ModernStatementShapesTests.scala
+  h_0926447d100ad2 1-75
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  h_0926447d100ad2 349-351,353
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 1276-1278,1281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7b71df4e82d7c84d561138b0467baffec70e9784",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
