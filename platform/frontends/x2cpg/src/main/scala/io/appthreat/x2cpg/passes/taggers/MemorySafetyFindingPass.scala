@@ -2056,22 +2056,25 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * (bounds above, strict, bound, through an unsigned conversion). A condition the call is merely
     * control-dependent on - a sibling `case`'s early exit on an earlier iteration's value - or one
     * that tested an older value (`while (n < 4) { n = read(); f(n); }`) bounds nothing here.
+    *
+    * A guard on an ACCESS PATH bounds the value a call receives through a copy of it (`space =
+    * p->space; f(space)`) as directly as it bounds the path itself, when nothing between the guard
+    * and the call writes the path: the copy hands on exactly the value the guard tested.
     */
   private def siteFacts(
     site: Call,
     value: Expression
   ): List[(Boolean, Boolean, Expression, Boolean)] =
     val key = castUnwrappingKey(value)
-    if key.isEmpty then Nil
+    if key.isEmpty && copiedAccessPathOf(value).isEmpty then Nil
     else
       GuardPass.guardingControllers(GuardPass.statementRootOf(site)).flatMap { cond =>
           GuardPass.conjunctsAt(cond, site).flatMap {
               case (cmp, holds) =>
                   GuardPass.directionalFacts(cmp, holds).collect {
                       case (bounded, isAbove, bound)
-                          if castUnwrappingKey(bounded) == key &&
-                              GuardPass.unchangedSince(bounded, value) &&
-                              castsOnlyToUnsignedOrNothing(bounded) =>
+                          if castsOnlyToUnsignedOrNothing(bounded) &&
+                              boundedStillHolds(bounded, value, cmp, key) =>
                           (
                             isAbove,
                             GuardPass.isStrict(cmp, holds),
@@ -2082,6 +2085,66 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           }
       }
   end siteFacts
+
+  /** Whether the value the call receives is the one the comparison's operand tested: the same
+    * variable, unchanged, or a copy of the operand's access path with no write to the path between
+    * the guard, the copy and the call.
+    */
+  private def boundedStillHolds(
+    bounded: Expression,
+    value: Expression,
+    cmp: Call,
+    key: Option[String]
+  ): Boolean =
+    val directKey = castUnwrappingKey(bounded)
+    (directKey.isDefined && directKey == key && GuardPass.unchangedSince(bounded, value)) ||
+    directKey.exists(copiesBoundToPath(bounded, _, value, cmp))
+
+  /** The access path `value`'s variable is a copy of (`space = p->space; f(space)`), with each
+    * assignment that made the copy. Only when EVERY definition of the variable is a plain
+    * assignment of the same access path: a parameter, an increment, or another variable reaching
+    * the call says the guard tested something else. A whole-variable copy is the frame-up
+    * recursion's question, not a path's.
+    */
+  private def copiedAccessPathOf(value: Expression): Option[(String, List[Call])] =
+      withoutCasts(value)._1 match
+        case i: Identifier =>
+            GuardPass.valueSources(i).filter(_.nonEmpty).flatMap { defs =>
+              val copies = defs.toList.flatMap { d =>
+                  for
+                    assignment <- d._astIn.collectFirst {
+                        case c: Call if c.name == "<operator>.assignment" => c
+                    }
+                    if assignment.argumentOption(1).exists(_.id() == d.id())
+                    rhs     <- assignment.argumentOption(2).collect { case e: Expression => e }
+                    pathKey <- castUnwrappingKey(rhs).filter(OverlayFacts.isAccessPathKey)
+                  yield (assignment, pathKey)
+              }
+              if copies.size != defs.size then None
+              else
+                copies.map(_._2).distinct match
+                  case List(one) => Some((one, copies.map(_._1)))
+                  case _         => None
+            }
+        case _ => None
+
+  /** A guard on an access path bounds a copy of that path handed to a call: the value the guard
+    * tested is the value the copy read and the call receives, when nothing that could write the
+    * path (see [[GuardPass.pathWrittenBetween]]) runs after the guard or a copy and before the
+    * call's argument is read.
+    */
+  private def copiesBoundToPath(
+    bounded: Expression,
+    boundedKey: String,
+    value: Expression,
+    cmp: Call
+  ): Boolean =
+      copiedAccessPathOf(value) match
+        case Some((pathKey, assignments)) if pathKey == boundedKey =>
+            (cmp :: assignments).forall(from =>
+                !GuardPass.pathWrittenBetween(atom, bounded, from, value)
+            )
+        case _ => false
 
   /** A guard on `(unsigned)i` bounds i when the cast is to an unsigned type (FFmpeg's two-sided
     * idiom); a cast to anything else tested a different value.

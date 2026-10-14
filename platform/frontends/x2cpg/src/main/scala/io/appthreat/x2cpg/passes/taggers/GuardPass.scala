@@ -407,6 +407,96 @@ object GuardPass:
 
   private val AddressTakenKind = "address-taken"
 
+  /** Can the access path `path` (`p->space`, a member of an element) hold another value at `to`
+    * than it held at `from`, on some CFG path between them? Any call can change it - the callee may
+    * hold the object through a pointer of its own, or reach it through a global. So can a store or
+    * an increment that names the path or a prefix of it (`p->space`, `p`); one to the path's member
+    * through another access (`q->space`, for a `q` that may point at the same object); one to
+    * another member of the path's own object that is not shown to be a member of a struct (a
+    * union's members share their storage); a store through a pointer or into an element (`*q`,
+    * `q[i]`), unless it writes an element of a local array of scalars; and a store to a variable
+    * whose address is taken. `true` when the path cannot be read, so the caller stands down.
+    */
+  private[taggers] def pathWrittenBetween(
+    cpg: Cpg,
+    path: Expression,
+    from: CfgNode,
+    to: CfgNode
+  ): Boolean =
+    val chain = accessChain(path)
+    if chain.isEmpty then return true
+    val prefixKeys = chain.flatMap(OverlayFacts.variableKey(_)).toSet
+    val members = chain.collect { case c: Call if isMemberAccess(c) => OverlayFacts.memberOf(c) }
+        .flatten.toSet
+    def writesPath(target: Expression): Boolean = withoutCasts(target) match
+      case t if OverlayFacts.variableKey(t).exists(prefixKeys.contains) => true
+      case i: Identifier                                                => isAddressTaken(i)
+      case c: Call if isMemberAccess(c) =>
+          OverlayFacts.memberOf(c).forall(members.contains) ||
+          (c.argumentOption(1).exists(b =>
+              OverlayFacts.variableKey(b).exists(prefixKeys.contains)
+          ) &&
+              !OverlayFacts.memberRefOf(cpg, c).exists(m => !isUnionMember(m)))
+      case c: Call if c.name.endsWith("ndexAccess") => !isLocalScalarArrayElement(c)
+      case _                                        => true
+    val writers = from.method.ast.isCall.l.filter { c =>
+        if !c.name.startsWith("<operator") then true
+        else if OverlayFacts.isAssignmentOperator(c.name) || isIncrementOrDecrement(c.name) then
+          c.argumentOption(1).collect { case e: Expression => e }.exists(writesPath)
+        else false
+    }
+    writers.exists { w =>
+        cfgReachesAvoiding(from._cfgOut.collectAll[CfgNode].l, w.id(), Set.empty) &&
+        cfgReachesAvoiding(w._cfgOut.collectAll[CfgNode].l, to.id(), Set.empty)
+    }
+  end pathWrittenBetween
+
+  /** The access path from its outermost access down to the root identifier (`p->a.b`, `p->a`, `p`),
+    * or empty when it is not rooted at a variable.
+    */
+  private def accessChain(e: Expression): List[Expression] = withoutCasts(e) match
+    case i: Identifier => List(i)
+    case c: Call if isMemberAccess(c) || c.name.endsWith("ndexAccess") =>
+        c.argumentOption(1).collect { case x: Expression => x }.map(accessChain) match
+          case Some(rest) if rest.nonEmpty => c :: rest
+          case _                           => Nil
+    case _ => Nil
+
+  private def isMemberAccess(c: Call): Boolean =
+      c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess"
+
+  private def isIncrementOrDecrement(name: String): Boolean =
+      name.matches("<operator>\\.(pre|post)(In|De)crement")
+
+  private def isUnionMember(m: Member): Boolean =
+      m.tag.nameExact(io.appthreat.x2cpg.Defines.TypeStorageTag).value.l
+          .contains(io.appthreat.x2cpg.Defines.TypeStorageUnion)
+
+  private def isAddressTaken(i: Identifier): Boolean =
+      OverlayFacts.declOf(i).exists(
+        _.tag.nameExact(io.appthreat.x2cpg.Defines.ReferenceKindTag).value.l.contains(
+          AddressTakenKind
+        )
+      )
+
+  /** An element store into a local array of scalars whose address is not taken: storage of its own,
+    * which no access path through another variable reaches.
+    */
+  private def isLocalScalarArrayElement(c: Call): Boolean =
+      c.argumentOption(1).map(withoutCasts) match
+        case Some(i: Identifier) =>
+            OverlayFacts.declOf(i).exists {
+                case l: Local =>
+                    val t = l.typeFullName.trim
+                    t.contains("[") && ScalarElement.matches(t.takeWhile(_ != '[').trim) &&
+                    !isAddressTaken(i)
+                case _ => false
+            }
+        case _ => false
+
+  private val ScalarElement =
+      "((const|volatile|signed|unsigned|char|short|int|long|float|double|_Bool|bool)\\s*)+|u?int(8|16|32|64)_t".r
+
   /** An argument bound to a non-const reference parameter of the function the call links to: the
     * callee can write the variable. The parameter's declaration says (`int &n`, `const int &n`); a
     * call with no linked function to ask keeps the guard.

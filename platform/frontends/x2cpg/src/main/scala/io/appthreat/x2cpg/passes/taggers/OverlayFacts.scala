@@ -39,6 +39,10 @@ private[taggers] object OverlayFacts:
           case _ => None
     case _ => None
 
+  /** Whether a variable key names an access path (`v:p.space`), not a whole variable (`v:space`).
+    */
+  def isAccessPathKey(key: String): Boolean = key.contains('.')
+
   /** The member name a field access reads, from its FIELD_IDENTIFIER argument. */
   def memberOf(fieldAccess: Call): Option[String] =
       fieldAccess.argument.isFieldIdentifier.headOption.map(_.canonicalName)
