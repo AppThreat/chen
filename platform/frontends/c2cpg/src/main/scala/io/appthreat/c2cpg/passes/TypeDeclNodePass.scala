@@ -18,7 +18,8 @@ import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
   */
 class TypeDeclNodePass(
   cpg: Cpg,
-  members: Map[String, List[(String, List[(Int, String, String)])]] = Map.empty
+  members: Map[String, List[(String, List[(Int, String, String)])]] = Map.empty,
+  typedefs: Map[String, String] = Map.empty
 )(implicit withSchemaValidation: ValidationMode)
     extends CpgPass(cpg):
 
@@ -75,6 +76,9 @@ class TypeDeclNodePass(
                 .filename(definedIn)
                 .astParentType(NodeTypes.NAMESPACE_BLOCK)
                 .astParentFullName(fullName)
+            // the type a header's typedef stands for, when the front end saw the header: the
+            // width and signedness rules read a typedef's target off the declaration
+            typedefs.get(typeDeclFullName).foreach(newTypeDecl.aliasTypeFullName(_))
             dstGraph.addNode(newTypeDecl)
             layout.foreach { (order, memberName, tpe) =>
               val member = NewMember()
