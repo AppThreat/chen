@@ -1,0 +1,14 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  h_0926447d100ad2 53-72,301-304,315-318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5942faf70ea192518123d299e9fdff64b866eeea",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

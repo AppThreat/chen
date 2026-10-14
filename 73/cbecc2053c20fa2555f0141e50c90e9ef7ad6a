@@ -1,0 +1,18 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/IndexRangeTests.scala
+  h_0926447d100ad2 216-274,351-364
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  h_0926447d100ad2 84-86,316-324
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  h_0926447d100ad2 65,182-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73cbecc2053c20fa2555f0141e50c90e9ef7ad6a",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
