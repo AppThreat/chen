@@ -275,6 +275,9 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
               // use them
               (macros.get should not).include("__declspec")
               (macros.get should not).include("__stdcall")
+              // and the module keyword the parser settings macroize, which the MSVC standard
+              // library forbids outright
+              (macros.get should not).include("#define export")
           }
       }
       "give a unit its own standard, defines and include directories" in {
