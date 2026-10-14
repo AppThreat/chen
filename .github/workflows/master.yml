@@ -16,16 +16,39 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
+      # A push to main from the merge queue is the commit the queue's pr-tests already passed (or
+      # reused from the pull request's run of the same tree): testing it again proves nothing.
+      # Tags, release branches and manual runs still test.
+      - name: Tested by the merge queue?
+        id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          tested=false
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            n=$(gh api "repos/$REPO/actions/workflows/pr.yml/runs?event=merge_group&head_sha=$GITHUB_SHA&status=success" --jq .total_count || echo 0)
+            [ "$n" -gt 0 ] && tested=true
+          fi
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+          echo "Passed the merge queue: $tested" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up JDK
+        id: java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
         with:
           distribution: 'temurin'
           java-version: '25'
+          # main's dependency cache is the one pull request and merge-queue runs can restore. Only
+          # main writes it, and tag and release-branch runs neither read nor write it.
+          cache: ${{ github.ref == 'refs/heads/main' && 'sbt' || '' }}  # zizmor: ignore[cache-poisoning] main-only; this workflow publishes nothing
       - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729  # v1.5.8
       - name: "Install PHP"
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # 2.37.2
@@ -57,27 +80,20 @@ jobs:
           brew install sbt
         if: runner.os == 'macOS'
       - name: Install and test
+        if: steps.queue.outputs.tested != 'true'
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom-parsetools
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: |
-            ~/.sbt
-            ~/.coursier
-          key: ${{ runner.os }}-sbt-${{ hashfiles('**/build.sbt') }}
-          lookup-only: true
       - run: sbt --server "scalafmtCheck; +testFull"
+        if: steps.queue.outputs.tested != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-        if: runner.os != 'Windows'
-      - name: Compile and run tests
-        run: sbt --server "scalafmtCheck; +testFull"
+      # no tests to fill a missing cache: resolve the dependencies so the cache is saved whole
+      - run: sbt --server update
+        if: steps.queue.outputs.tested == 'true' && steps.java.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-        if: runner.os == 'Windows'
       - name: Generate SBOM with cdxgen
         run: |
           npm install -g @cdxgen/cdxgen
