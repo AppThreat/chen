@@ -233,6 +233,16 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
     |    p.to_long = src;
     |    return *p.to_ulong;
     |}
+    |/* a store a macro's statement-expression block makes through its argument copy: the copy
+    |       names the macro's parameter, the storage is the union member the caller passes */
+    |#define word_copy(to, n, from, m) (((n) & 1) ? (to[(n) / 2] |= (from[(m) / 2] & 0xffffffff00000000UL)) : (to[(n) / 2] = (from[(m) / 2])))
+    |#define word_set2(to, from, a2) { word_copy(to, 0, from, (a2) - 7); }
+    |unsigned long union_macro_block_store(const unsigned long *src)
+    |{
+    |    union { unsigned long bn[4]; unsigned int ui[8]; } buf;
+    |    word_set2(buf.bn, src, 9);
+    |    return buf.bn[0];
+    |}
     |unsigned union_bad_read_named(void)
     |{
     |    union Reinterp { float f; unsigned u; };
@@ -535,6 +545,7 @@ class InitAndFormatRulesTests extends DataFlowCodeToCpgSuite:
         Seq(
           "union_store_other_member",
           "union_anon_store_other_member",
+          "union_macro_block_store",
           "union_bytes_then_words",
           "union_element_store_then_read",
           "union_member_of_struct",

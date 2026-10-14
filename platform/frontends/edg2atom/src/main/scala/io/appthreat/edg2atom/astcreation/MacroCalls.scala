@@ -75,14 +75,15 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     invocation.field("start").flatMap(EdgaUnit.pos).foreach { p =>
         call.lineNumber(Integer.valueOf(p.line)).columnNumber(Integer.valueOf(p.column))
     }
+    // the expansion follows the argument copies - each one written, a variadic macro's too - as
+    // the CDT frontend numbers it, a block expansion as well
+    val expansionIndex = args.size + 1
     val block = NewBlock().code("<empty>").typeFullName(registerType("void"))
-        .argumentIndex(params + 1).order(params + 1)
-    // the expansion follows the argument copies
+        .argumentIndex(expansionIndex).order(expansionIndex)
     expansion.root.foreach {
-        case _: NewBlock =>
         case e: ExpressionNew =>
-            e.argumentIndex = params + 1
-            e.order = params + 1
+            e.argumentIndex = expansionIndex
+            e.order = expansionIndex
         case _ =>
     }
     val expansionBlock = expansion.root match

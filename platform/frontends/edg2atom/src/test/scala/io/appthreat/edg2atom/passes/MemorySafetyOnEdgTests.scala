@@ -358,6 +358,32 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  int XX9;
       |  return SLOT(9);
       |}
+      |#define SET_FLAG(flag, v) { int t_ = (v); flag = t_ > 0; if (t_ > 9) flag = 0; }
+      |int init_ok_block_macro_store(int v) {
+      |  int flag;
+      |  SET_FLAG(flag, v);
+      |  return flag;
+      |}
+      |int fetch_info(int h, int *out);
+      |#define GET_INFO(h, out) __extension__({ fetch_info(h, out); })
+      |int init_ok_statement_expression_out_param(int h) {
+      |  int info;
+      |  GET_INFO(h, &info);
+      |  return info;
+      |}
+      |int fill_info(int *out, int a, int b, int c);
+      |#define FILL_INFO(out, ...) fill_info(out, __VA_ARGS__)
+      |int init_ok_variadic_macro_out_param(int a) {
+      |  int info;
+      |  FILL_INFO(&info, a, 2, 3);
+      |  return info;
+      |}
+      |#define NOTE(v) { int n_ = (v); (void)n_; }
+      |int init_bad_read_after_block_macro(int v) {
+      |  int flag;
+      |  NOTE(v);
+      |  return flag;
+      |}
       |typedef unsigned int fe[10];
       |typedef struct { fe yplusx; fe yminusx; } ge;
       |void fe_copy(fe dst, const fe src);
@@ -538,6 +564,22 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("init_ok_macro_lhs_store") should not contain "MS-INIT-001"
           findingsIn("init_bad_macro_value_read") should contain("MS-INIT-001")
+      }
+  }
+
+  "a macro invocation's expansion" should {
+      "make the stores it runs, a variadic macro's out-parameter call's too" in {
+          requireEdga()
+          findingsIn("init_ok_variadic_macro_out_param") should not contain "MS-INIT-001"
+      }
+      "make them when it is a block or a statement expression" in {
+          requireEdga()
+          findingsIn("init_ok_block_macro_store") should not contain "MS-INIT-001"
+          findingsIn("init_ok_statement_expression_out_param") should not contain "MS-INIT-001"
+      }
+      "still leave a variable it does not write unwritten" in {
+          requireEdga()
+          findingsIn("init_bad_read_after_block_macro") should contain("MS-INIT-001")
       }
   }
 
