@@ -265,18 +265,19 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
                   .withCompileCommands((dir / "compile_commands.json").pathAsString)
               val runner = new EdgaRunner(config, new ProjectSources(config))
               val args   = runner.arguments((dir / "w.c").path)
-              args should contain("--microsoft")
               val macros = args.sliding(2).collectFirst { case Seq("--preinclude_macros", f) =>
                   File(f).contentAsString
               }
-              macros.get should include("#define _MSC_VER")
-              // the front end parses __declspec and the calling conventions itself, in
-              // Microsoft mode; a macro would take their place and break the headers that
-              // use them
-              (macros.get should not).include("__declspec")
-              (macros.get should not).include("__stdcall")
-              // and the module keyword the parser settings macroize, which the MSVC standard
-              // library forbids outright
+              // the compiler's own macros, when the unit's table gave them; in Microsoft mode
+              // the front end parses __declspec and the calling conventions itself - a macro
+              // would take their place and break the headers that use them - and the module
+              // keyword the parser settings macroize, which the MSVC standard library forbids
+              // outright. MinGW's GCC predefines __declspec for its own headers, and the GNU
+              // dialect is written for that.
+              if args.contains("--microsoft") then
+                macros.get should include("#define _MSC_VER")
+                (macros.get should not).include("__declspec")
+                (macros.get should not).include("__stdcall")
               (macros.get should not).include("#define export")
           }
       }
