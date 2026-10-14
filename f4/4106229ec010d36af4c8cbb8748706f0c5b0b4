@@ -1,0 +1,37 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 321-323
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 587,595,599
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InitAndFormatRulesTests.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 423-439,578,588
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 4,593-596,598-600,603-612,614-624,628-630,632,636,639-643,645-647,649-655,659-660
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 53,72-80,309,313-314
+  s_236e880d3ee8e7::t_93e4b37d98e3bd 315-316
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 280-281,284-293,347-349,361-362,444-459,461-473
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 192-199,203-205,214
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NullDerefRuleTests.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 60-74,171-173
+  s_236e880d3ee8e7::t_16fd78620304e9 174-175
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTests.scala
+  s_236e880d3ee8e7::t_42b9286f4c994c 382-399,563-564,574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f44106229ec010d36af4c8cbb8748706f0c5b0b4",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
