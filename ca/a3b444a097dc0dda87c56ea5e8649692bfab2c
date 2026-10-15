@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  h_0926447d100ad2 759-761,764-765,779,790
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/TypeofAndSuffixLiteralTests.scala
+  h_0926447d100ad2 47,52,54,115-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "caa3b444a097dc0dda87c56ea5e8649692bfab2c",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
