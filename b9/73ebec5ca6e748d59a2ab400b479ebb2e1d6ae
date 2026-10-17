@@ -1,0 +1,41 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ArrayMemberInitTests.scala
+  s_236e880d3ee8e7::t_63cafa39d7d32c 58-65,132-135
+  s_5bad3094f7bc65::t_74d3f4832d5aa1 1-57,66-67,85-131,139
+  s_236e880d3ee8e7::t_9d9c21e369fe6e 137-138
+  h_0926447d100ad2 68-84,136
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  h_0926447d100ad2 98,175-188,382-385,388-397,405-406,409-414,416-428,638-643
+  s_236e880d3ee8e7::t_3c769a2ada47d1 386,399-404,407,603-607,623-624
+  s_236e880d3ee8e7::t_11cb681bd3783d 93-97,166-169,198-200,203,381,387,398,408,415,429,441-445,593-598,600-602,628-629
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InstanceFormatTests.scala
+  s_5bad3094f7bc65::t_ca78a1851917db 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b973ebec5ca6e748d59a2ab400b479ebb2e1d6ae",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_5bad3094f7bc65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8058ad5-2c38-4556-995e-6d27935e4326",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
