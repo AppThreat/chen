@@ -1,0 +1,27 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ZeroLengthMemberTests.scala
+  s_236e880d3ee8e7::t_e3ea37ee356933 1-78
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTests.scala
+  s_236e880d3ee8e7::t_4f5a75ac81be9f 467-488,612-619
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_236e880d3ee8e7::t_fcdbe9edac5b25 399-401
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_7d54bd3f260f4b 1219
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_236e880d3ee8e7::t_20d9d1630c8474 212-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8c6c4f971e1ad458bc478ec2578b493108746586",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
