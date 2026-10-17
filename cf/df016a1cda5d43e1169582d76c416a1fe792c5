@@ -1,0 +1,19 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_5bad3094f7bc65::t_5d7c9a3beabeed 3657-3663,3689-3696
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfdf016a1cda5d43e1169582d76c416a1fe792c5",
+  "prompts": {},
+  "sessions": {
+    "s_5bad3094f7bc65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8058ad5-2c38-4556-995e-6d27935e4326",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
