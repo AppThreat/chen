@@ -3654,7 +3654,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           len  <- lenArgs.collectFirst(Function.unlift(literalNumberOfAs))
           cap  <- extentCapacity(dst)
           rule <- extentRule(dst)
-          if len._2 > cap
+          // a callee that clamps the parameter this length is passed as to K bounds the
+          // length at K: a literal past the extent but at or under the clamp writes within
+          // the buffer
+          clampedTo = call.argument.l
+              .flatMap(_.tag.name(MemoryApiPass.TagClamp).value.l)
+              .flatMap(_.toLongOption).headOption
+          if len._2 > cap && !clampedTo.exists(_ <= cap)
         do record(len._1, rule)
     }
 
@@ -3680,7 +3686,14 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       case _         => ""
                     ) && ValueOriginPass.originNamesOf(a).exists(attackers.contains)
                 ).foreach { content =>
-                    if !lengthGuardedCopy(call, content) then record(content, rule)
+                  // a callee that clamps the length parameter bounds the content's reach:
+                  // a clamp at or under the destination's capacity keeps the copy inside it
+                  val clampedInside = call.argument.l
+                      .flatMap(_.tag.name(MemoryApiPass.TagClamp).value.l)
+                      .flatMap(_.toLongOption)
+                      .exists(k => extentCapacity(dst).exists(k <= _))
+                  if !clampedInside && !lengthGuardedCopy(call, content) then
+                    record(content, rule)
                 }
               }
           }
