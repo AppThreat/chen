@@ -1,4 +1,4 @@
-![logo](_media/chen.png)
+![logo](_media/chen-logo.png)
 
 # Code Hierarchy Exploration Net (chen)
 
