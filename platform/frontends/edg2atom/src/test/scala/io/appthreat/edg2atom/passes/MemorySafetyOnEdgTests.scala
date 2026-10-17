@@ -464,6 +464,28 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |int props_of_typedef_enum(count_t c) { return count_props[c]; }
       |""".stripMargin,
       "unions.cpp"
+    ).moreCode(
+      """
+      |extern "C" void *malloc(unsigned long);
+      |extern "C" void free(void *);
+      |extern "C" char *strcpy(char *, const char *);
+      |extern "C" unsigned long strlen(const char *);
+      |struct packet { int kind; char body[0]; };
+      |struct framed { int kind; char body[4]; };
+      |void zero_tail_sized_by_allocation(const char *user) {
+      |  packet *p = static_cast<packet *>(malloc(sizeof(*p) + strlen(user) + 1));
+      |  if (!p) return;
+      |  strcpy(p->body, user);
+      |  free(p);
+      |}
+      |void fixed_tail_overrun(const char *user) {
+      |  framed *f = static_cast<framed *>(malloc(sizeof(*f)));
+      |  if (!f) return;
+      |  strcpy(f->body, user);
+      |  free(f);
+      |}
+      |""".stripMargin,
+      "tails.cpp"
     )
     new MemorySemanticsPass(graph).createAndApply()
     new MemoryApiPass(graph).createAndApply()
@@ -584,6 +606,14 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       "still leave a variable it does not write unwritten" in {
           requireEdga()
           findingsIn("init_bad_read_after_block_macro") should contain("MS-INIT-001")
+      }
+  }
+
+  "a string copy into a zero-length trailing member" should {
+      "not be held to the declared zero extent, as a trailing member with one is" in {
+          requireEdga()
+          findingsIn("zero_tail_sized_by_allocation") should not contain "MS-BOUND-006"
+          findingsIn("fixed_tail_overrun") should contain("MS-BOUND-006")
       }
   }
 

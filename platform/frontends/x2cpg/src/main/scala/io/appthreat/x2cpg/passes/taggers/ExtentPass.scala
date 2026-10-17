@@ -396,6 +396,9 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   private def extentOfField(fieldAccess: Call): Option[(String, List[StoredNode])] =
       OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>
           arrayExtent(member.typeFullName)
+              // GNU's zero-length trailing array is the flexible member written before C99: its
+              // storage is what the allocation adds past the record, not a declared capacity
+              .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
               .map(n => (s"$ValueConst:$n", List(member)))
               .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
               // a pointer member's capacity is wherever its allocation is

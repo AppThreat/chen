@@ -146,13 +146,33 @@ trait ConstantValues(implicit withSchemaValidation: ValidationMode):
         case n: java.lang.Short      => BigInt(n.longValue)
         case n: java.lang.Byte       => BigInt(n.longValue)
         case n: java.math.BigInteger => BigInt(n)
-    }.map { v =>
+    }.orElse(literalValueOfText(e)).map { v =>
         if v >= 0 then v
         else
           unsignedWidthOf(e) match
             case Some(bits) => v.mod(BigInt(1) << bits)
             case None       => v
     }
+
+  /** An integer literal's value from its own text, when the value factory does not know its suffix:
+    * the standard's integer suffixes (`u`, `l`, `ll`, `z` and their case and order variants, the
+    * C++23 size suffix among them), digit separators included. Only a literal is read, so the value
+    * is the one the program wrote.
+    */
+  private def literalValueOfText(e: IASTExpression): Option[BigInt] =
+      e match
+        case l: IASTLiteralExpression if l.getKind == IASTLiteralExpression.lk_integer_constant =>
+            val raw  = String.valueOf(l.getValue)
+            val body = raw.reverse.dropWhile(c => "uUlLzZ".contains(c)).reverse.replace("'", "")
+            val (digits, radix) =
+                if body.startsWith("0x") || body.startsWith("0X") then (body.drop(2), 16)
+                else if body.startsWith("0b") || body.startsWith("0B") then (body.drop(2), 2)
+                else if body.length > 1 && body.startsWith("0") then (body.drop(1), 8)
+                else (body, 10)
+            if digits.nonEmpty && digits.forall(c => Character.digit(c, radix) >= 0) then
+              scala.util.Try(BigInt(digits, radix)).toOption
+            else None
+        case _ => None
 
   /** The width in bits of an unsigned integral expression's type, for the target. */
   private def unsignedWidthOf(e: IASTExpression): Option[Int] =
