@@ -343,6 +343,20 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     declared.orElse(method.local.name(name).headOption).flatMap { local =>
         arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
     }.orElse {
+        // A member read without `this->`: the frontend types the identifier with the OWNER
+        // class, so the member's declared array extent is the buffer's, with the member as
+        // the declaration a guard matches against
+        use match
+          case i: Identifier =>
+              for
+                member <- OverlayFacts.implicitMemberOf(atom, i)
+                n      <- arrayExtent(member.typeFullName)
+                // a trailing zero- or one-element array is a flexible member: the allocation,
+                // not the declaration, sizes it (`next_[1]` in a node allocated with its levels)
+                if n > 1 || !OverlayFacts.isTrailingMember(member)
+              yield (s"$ValueConst:$n", List(member))
+          case _ => None
+    }.orElse {
         // A buffer parameter with an adjacent capacity parameter. The
         // parameter declaration carries the extent so guards can match against it.
         for
