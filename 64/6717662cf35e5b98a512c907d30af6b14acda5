@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AnonymousMemberTests.scala
+  h_0926447d100ad2 81-84
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  h_0926447d100ad2 634-639
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "646717662cf35e5b98a512c907d30af6b14acda5",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
