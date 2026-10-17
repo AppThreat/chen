@@ -1,0 +1,20 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
+  h_6a4cc5cdf68def 238-240
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/HeldTaskCompletion.scala
+  h_6a4cc5cdf68def 108-110,117-122,124-129,156-172,174-191
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/SourcesToStartingPoints.scala
+  h_6a4cc5cdf68def 6,9,134-167,171-196
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskSolver.scala
+  h_6a4cc5cdf68def 130-148,150-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cadf9eadea25590bd21e4e8f429e55f3cc497bbe",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

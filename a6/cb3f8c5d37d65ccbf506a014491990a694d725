@@ -1,0 +1,20 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgGenerator.scala
+  h_6a4cc5cdf68def 196-208
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPass.scala
+  h_6a4cc5cdf68def 258-265,359-360,391,394,397
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPatternIndex.scala
+  h_6a4cc5cdf68def 9-10,69-71,74-75
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/CdxPatternIndexTests.scala
+  h_6a4cc5cdf68def 45-51,53-58,62-67,69-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a6cb3f8c5d37d65ccbf506a014491990a694d725",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

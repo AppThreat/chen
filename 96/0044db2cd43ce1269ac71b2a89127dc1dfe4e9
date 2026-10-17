@@ -1,0 +1,26 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/language/ExtendedCfgNode.scala
+  h_6a4cc5cdf68def 57-66,96
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/HeldTaskCompletion.scala
+  h_6a4cc5cdf68def 122-126,128-141,143-148,179
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/SourcesToStartingPoints.scala
+  h_6a4cc5cdf68def 26-33,39
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskSolver.scala
+  h_6a4cc5cdf68def 134
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/package.scala
+  h_6a4cc5cdf68def 46-56,132-176
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/DedupKeysAndCycleTests.scala
+  h_6a4cc5cdf68def 1-208
+semanticcpg/src/main/scala/io/shiftleft/semanticcpg/language/MethodExplorability.scala
+  h_6a4cc5cdf68def 4-7,25-51,64-66,75-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "960044db2cd43ce1269ac71b2a89127dc1dfe4e9",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

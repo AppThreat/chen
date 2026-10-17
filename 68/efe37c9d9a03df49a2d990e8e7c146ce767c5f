@@ -1,0 +1,14 @@
+build.sbt
+  h_6a4cc5cdf68def 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "68efe37c9d9a03df49a2d990e8e7c146ce767c5f",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

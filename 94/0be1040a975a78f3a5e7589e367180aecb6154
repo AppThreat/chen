@@ -1,0 +1,24 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/package.scala
+  h_6a4cc5cdf68def 8-12,14,26
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgGenerator.scala
+  h_6a4cc5cdf68def 4,17,170,172,202-203,205
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgSharedCache.scala
+  h_6a4cc5cdf68def 1-85
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/FluxReachingDefPass.scala
+  h_6a4cc5cdf68def 26-29,44
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/ReachingDefPass.scala
+  h_6a4cc5cdf68def 24-26,41
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/CdxPatternIndexTests.scala
+  h_6a4cc5cdf68def 72-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "940be1040a975a78f3a5e7589e367180aecb6154",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeRecovery.scala
+  h_6a4cc5cdf68def 527-531
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XTypeRecovery.scala
+  h_6a4cc5cdf68def 45-51,57-61,520-523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e9e7d3a7dd52e528c68b8c140e24a18c86746b24",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

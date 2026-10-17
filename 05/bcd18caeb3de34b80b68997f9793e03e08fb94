@@ -1,0 +1,18 @@
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/PhpParser.scala
+  h_6a4cc5cdf68def 23-27,34-36,42-63,65-69,71-86,88-127,130-131,137,140,143-149,151-153,177-187,348-354,369-379,418-419,421-426
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/ProbeGatedIngestionTests.scala
+  h_6a4cc5cdf68def 245-309
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/ExternalCommand.scala
+  h_6a4cc5cdf68def 7,21-26,28-29,88-92,97-98,113-127,131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "05bcd18caeb3de34b80b68997f9793e03e08fb94",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

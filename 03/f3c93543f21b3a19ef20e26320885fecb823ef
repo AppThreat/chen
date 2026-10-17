@@ -1,0 +1,16 @@
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/AstCreationPass.scala
+  h_6a4cc5cdf68def 147,152-164
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/BatchIngestionWiringTests.scala
+  h_6a4cc5cdf68def 162,170-174,179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "03f3c93543f21b3a19ef20e26320885fecb823ef",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
