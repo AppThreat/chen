@@ -346,10 +346,17 @@ private[taggers] object IndexRange:
       }
 
   def literalValue(code: String): Option[BigInt] =
-    val c = code.trim.toLowerCase.replaceAll("[ul]+$", "")
-    if c.startsWith("0x") then scala.util.Try(BigInt(c.drop(2), 16)).toOption
-    else if c.matches("0[0-7]+") then scala.util.Try(BigInt(c.drop(1), 8)).toOption
-    else if c.matches("'[\\x20-\\x7e]'") && c != "'\\'" then Some(BigInt(code.trim.charAt(1).toInt))
-    else if c.matches("-?[0-9]+") then scala.util.Try(BigInt(c)).toOption
-    else None
+    val raw = code.trim
+    // a character literal is its code point (the quote-stripping below must not reach it)
+    if raw.matches("'[\\x20-\\x7e]'") && raw != "'\\'" then
+      Some(BigInt(raw.charAt(1).toInt))
+    else
+      // the standard's integer suffixes, the C++23 size suffix `z` among them, and digit
+      // separators, all of which leave the value the literal wrote
+      val c = raw.toLowerCase.replaceAll("'", "").replaceAll("[ulz]+$", "")
+      if c.startsWith("0x") then scala.util.Try(BigInt(c.drop(2), 16)).toOption
+      else if c.matches("0b[01]+") then scala.util.Try(BigInt(c.drop(2), 2)).toOption
+      else if c.matches("0[0-7]+") then scala.util.Try(BigInt(c.drop(1), 8)).toOption
+      else if c.matches("-?[0-9]+") then scala.util.Try(BigInt(c)).toOption
+      else None
 end IndexRange

@@ -1270,15 +1270,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     case c: Call if c.name == "<operator>.cast" => castOperand(c).map(stripCasts).getOrElse(e)
     case other                                  => other
 
-  /** The value of an integer literal (`8`, `0x10`, `4u`), through casts. */
+  /** The value of an integer literal (`8`, `0x10`, `4u`, `16uz`), through casts. A character
+    * literal is not one here: its code point is not what the program wrote as a count.
+    */
   private def literalValue(e: Expression): Option[Int] = stripCasts(e) match
-    case l: Literal =>
-        val d = l.code.trim.replaceAll("(?i)[ul]+$", "")
-        scala.util.Try {
-            if d.matches("(?i)0x[0-9a-f]+") then Integer.parseInt(d.drop(2), 16)
-            else if d.matches("0[0-7]+") then Integer.parseInt(d.drop(1), 8)
-            else d.toInt
-        }.toOption
+    case l: Literal if !l.code.trim.startsWith("'") =>
+        IndexRange.literalValue(l.code).filter(_.isValidInt).map(_.toInt)
     case _ => None
 
   private def isSizeof(e: Expression): Boolean = stripCasts(e) match
