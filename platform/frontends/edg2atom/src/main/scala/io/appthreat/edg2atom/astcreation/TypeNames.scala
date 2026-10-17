@@ -66,7 +66,10 @@ final class TypeNames(unit: EdgaUnit):
           var cur   = t
           var guard = 0
           while guard < 32 && cur.string("kind").contains("array") do
-            dims += cur.long("count").filter(_ > 0).map(_.toString).getOrElse("")
+            // a count of 0 is an unknown bound (`char data[]`) unless the front end marks it a
+            // declared zero bound (GNU's `char data[0]`)
+            dims += cur.long("count").filter(n => n > 0 || cur.flag("zeroBound"))
+                .map(_.toString).getOrElse("")
             cur = cur.long("of").flatMap(unit.types.get).getOrElse(null)
             guard += 1
           val base = if cur == null then X2CpgDefines.Any else nameOf(cur, depth + 1)

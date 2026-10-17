@@ -4,8 +4,9 @@ import io.appthreat.edg2atom.testfixtures.EdgCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
 /** What the language's statement forms declare: a C++17 selection statement's initialiser (if, if
-  * constexpr and switch) declares what its condition reads, and a body the front end closed at the
-  * end of the file does not end the translation unit's visit.
+  * constexpr and switch) declares what its condition reads, a GNU zero-length array keeps its
+  * declared extent apart from a flexible member's, and a body the front end closed at the end of
+  * the file does not end the translation unit's visit.
   */
 class ModernStatementShapesTests extends EdgCodeToCpgSuite(".cpp"):
 
@@ -81,6 +82,32 @@ class ModernStatementShapesTests extends EdgCodeToCpgSuite(".cpp"):
           val idxLocals = cpg.method.name("graded.*").local.nameExact("idx").l
           idxLocals should not be empty
           cpg.method.name("graded.*").call.nameExact("atoi").l should not be empty
+      }
+  }
+
+  "a zero-length array member" should {
+      val cpg = code(
+        """struct rec {
+          |  int count;
+          |  char data[0];
+          |};
+          |struct msg {
+          |  int count;
+          |  char data[];
+          |};
+          |""".stripMargin
+      )
+
+      "keep the declared zero extent, as the CDT frontend writes it" in {
+          requireEdga()
+          cpg.typeDecl.nameExact("rec").member.nameExact("data").typeFullName.l should
+              contain("char[0]")
+      }
+
+      "leave a flexible member without one" in {
+          requireEdga()
+          cpg.typeDecl.nameExact("msg").member.nameExact("data").typeFullName.l should
+              contain("char[]")
       }
   }
 
