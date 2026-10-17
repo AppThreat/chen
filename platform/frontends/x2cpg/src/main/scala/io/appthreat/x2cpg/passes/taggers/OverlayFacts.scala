@@ -69,7 +69,16 @@ private[taggers] object OverlayFacts:
           case c: Call =>
               c.name match
                 case "<operator>.fieldAccess" | "<operator>.indirectFieldAccess" =>
-                    memberRefOf(cpg, c).map(_.typeFullName)
+                    // the hop through an ANONYMOUS member names no member (its field identifier
+                    // is empty): the type that owns the lookup is the one the hop stands on
+                    val hopNamesNothing = c.argument.isFieldIdentifier.headOption.exists(fi =>
+                        fi.canonicalName.trim.isEmpty
+                    )
+                    if hopNamesNothing then
+                      c.argumentOption(1).collect { case i: Identifier =>
+                          Option.when(i.typeFullName.nonEmpty)(i.typeFullName)
+                      }.flatten
+                    else memberRefOf(cpg, c).map(_.typeFullName)
                 case _ => None
           case _ => None
         typeName = baseType.stripSuffix("*").trim
@@ -85,7 +94,25 @@ private[taggers] object OverlayFacts:
     typeName: String,
     memberName: String,
     inFile: String
-  ): List[Member] = membersAmong(cpg.typeDecl.nameExact(typeName).l, memberName, inFile)
+  ): List[Member] =
+    val decls  = cpg.typeDecl.nameExact(typeName).l
+    val direct = membersAmong(decls, memberName, inFile)
+    // a member of an ANONYMOUS struct or union member is a member of the enclosing type
+    // (C11 6.7.2.1p13): `f.small` where frame declares `union { char small[8]; };`. The
+    // anonymous member is a nested TYPE_DECL the frontends name `owner.anonymous_composite_type_N`
+    if direct.nonEmpty then direct
+    else
+      membersAmong(anonymousCompositeTypes(decls), memberName, inFile)
+
+  /** The anonymous struct/union members declared inside `decls`: their nested composite TYPE_DECLs,
+    * and those of any anonymous member they in turn declare (the flattening is recursive in the
+    * language).
+    */
+  private def anonymousCompositeTypes(decls: List[TypeDecl]): List[TypeDecl] =
+    val nested = decls.flatMap(_.astChildren.collectAll[TypeDecl].l)
+        .filter(_.name.contains("anonymous_composite_type"))
+    if nested.isEmpty then Nil
+    else nested ++ anonymousCompositeTypes(nested)
 
   /** The member `memberName` of `decls`, preferring the definition in `inFile`, then a
     * content-stable order. Only declarations that declare the member count: a same-named

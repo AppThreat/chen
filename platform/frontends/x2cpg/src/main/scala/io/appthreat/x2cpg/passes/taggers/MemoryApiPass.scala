@@ -79,9 +79,17 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     // What chen concluded on its own (MemorySemanticsPass): wrappers, attribute-declared
     // allocators, nullable returns, inherited roles, capacity binders. Tagged exactly like the
     // inventory's entries so no consumer needs a second vocabulary; a declared entry wins.
+    // A call the graph RESOLVES to a method is tagged by that method's own conclusion (an
+    // overload or an instantiated template the front end selected, judged by its own body); a
+    // call no CALLEE edge resolves falls back to the name, which only same-named methods'
+    // agreement earned.
     val inferred = MemorySemanticsPass.entriesFor(atom, inventory)
-    inferred.values.foreach { entry =>
-        atom.call.nameExact(entry.name).foreach(site => tagCall(entry, site, record))
+    val own      = MemorySemanticsPass.ownEntriesFor(atom)
+    atom.call.filterNot(c => inventory.contains(c.name)).foreach { site =>
+        resolvedCalleeOf(site).flatMap(m => own.get(m.id)).orElse(inferred.get(site.name))
+            .foreach { entry =>
+                tagCall(entry.copy(name = site.name), site, record)
+            }
     }
 
     // The umbrella is emitted once per node across all categories, not once per (tag, value)
@@ -98,6 +106,17 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     }
     umbrella.iterator.newTagNode(UmbrellaTag).store()(using dstGraph)
   end run
+
+  /** The one method a call's CALLEE edges name - the linker's answer, not a name lookup, so an
+    * overload or an instance the front end resolved speaks for its own body.
+    */
+  private def resolvedCalleeOf(call: Call): Option[Method] =
+    import io.shiftleft.semanticcpg.language.NoResolve
+    // exactly one: a call the linker binds to several methods (same-named statics, an
+    // unresolved overload set) has no single body to speak for it
+    call.callee(using NoResolve).collectAll[Method].dedup.l match
+      case List(only) => Some(only)
+      case _          => None
 
   /** Whether `call` is what a macro spelling the same API expands to - `alloca(n)` defined as
     * `__builtin_alloca(n)`, `memcpy` defined as `__builtin___memcpy_chk` under `_FORTIFY_SOURCE`.
@@ -125,6 +144,18 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
 
     val api = entry.apiName
     entry.dst.foreach(i => argAt(i).foreach(n => record(TagDst, api, n)))
+    // the callee clamps one of its parameters to this literal: the effective value at this
+    // call's argument is the smaller of the two (`clamp` is "<param index>:<literal>")
+    entry.clamp.foreach { clamp =>
+        clamp.split(":", 2) match
+          case Array(i, k) =>
+              for
+                idx <- i.toIntOption
+                lit <- Some(k).filter(_.forall(_.isDigit))
+                n   <- argAt(idx)
+              do record(TagClamp, lit, n)
+          case _ => ()
+    }
     entry.src.foreach(i => argAt(i).foreach(n => record(TagSrc, api, n)))
     entry.len.foreach(i => argAt(i).foreach(n => record(TagLen, api, n)))
     // A count-by-size allocator bounds the operation by the PRODUCT, so the element count
@@ -174,8 +205,11 @@ object MemoryApiPass:
     * compiler worked it out: capacity evidence for [[ExtentPass]].
     */
   final val TagObjectSize = "mem-object-size"
-  final val TagAlloc      = "mem-alloc"
-  final val TagFree       = "mem-free"
+
+  /** The literal the callee clamps its length argument to, valued with the literal. */
+  final val TagClamp = "mem-clamp"
+  final val TagAlloc = "mem-alloc"
+  final val TagFree  = "mem-free"
 
   /** The third family: the call releases its input pointer and returns a fresh allocation. It is
     * deliberately NOT emitted as both `mem-alloc` and `mem-free` - every consumer reads those as
