@@ -1,0 +1,21 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  s_236e880d3ee8e7::t_87259909813d6f 683-684,688-690,926-937,947,991
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/ModernStatementShapesTests.scala
+  s_236e880d3ee8e7::t_de58d2e48ee9fa 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0b43ca836acc79a5393706205b93aabb45788915",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
