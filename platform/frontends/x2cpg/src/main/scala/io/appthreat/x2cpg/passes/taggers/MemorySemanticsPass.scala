@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -61,6 +62,15 @@ class MemorySemanticsPass(atom: Cpg, externalConfig: Option[String] = None) exte
           s.evidence.foreach(v => rows += ((m, TagEvidence, v)))
         }
     }
+    // each method's own conclusion, beside the name-level ones: a call the graph resolves to
+    // this method reads THESE, so an overload the front end selected is judged by its own body
+    if result.methodEntries.nonEmpty then
+      atom.method.l.foreach { m =>
+          result.methodEntries.get(m.id).foreach { entry =>
+            Summary(entry).values.foreach(v => rows += ((m, TagOwn, v)))
+            rows += ((m, TagEvidence, EvidenceBody))
+          }
+      }
     rows ++= storageFacts(atom, declared ++ result.entries)
     rows ++= returnRangeRows(atom)
     rows.groupMap { case (_, tag, value) => (tag, value) } { case (node, _, _) => node }
@@ -92,6 +102,12 @@ object MemorySemanticsPass:
   final val TagEvidence = "mem-semantic-evidence"
   final val TagStorage  = "mem-storage"
   final val TagPointsTo = "mem-points-to"
+
+  /** A method's OWN body conclusion, on the method itself: what a call whose CALLEE edge resolves
+    * to it reads, independent of what same-named methods agree on (`mem-semantic` stays the
+    * name-level, agreement-required channel).
+    */
+  final val TagOwn = "mem-semantic-own"
 
   final val EvidenceAttribute = "attribute"
   final val EvidenceBody      = "body"
@@ -129,6 +145,7 @@ object MemorySemanticsPass:
             entry.dst.map(i => s"dst:$i") ++
             entry.src.map(i => s"src:$i") ++
             entry.untrustedRead.map(i => s"untrusted-read:$i") ++
+            entry.clamp.map(kv => s"clamp:$kv") ++
             entry.increments.map((i, f) => s"grow:$i:$f") ++
             Option.when(entry.nullableReturn && !nonnullReturn)("nullable-return") ++
             Option.when(nonnullReturn)("nonnull-return") ++
@@ -137,11 +154,26 @@ object MemorySemanticsPass:
     def isEmpty: Boolean = values.isEmpty
   end Summary
 
-  final case class Result(summaries: Map[String, Summary]):
+  final case class Result(
+    summaries: Map[String, Summary],
+    methodEntries: Map[Long, MemApiVocab.MemApiEntry] = Map.empty
+  ):
     def entries: Map[String, MemApiVocab.MemApiEntry] =
         summaries.map { case (n, s) =>
             n -> s.entry.copy(nullableReturn = s.entry.nullableReturn && !s.nonnullReturn)
         }
+
+  /** Each method's own body conclusion ([[TagOwn]] on the method), by method id: what a RESOLVED
+    * call reads. Empty when the pass did not run (a caller gets the name-level channel alone).
+    */
+  def ownEntriesFor(cpg: Cpg): Map[Long, MemApiVocab.MemApiEntry] =
+      cpg.method
+          .where(_.tag.nameExact(TagOwn))
+          .l
+          .flatMap { m =>
+              entryFromValues(m.name, m.tag.nameExact(TagOwn).value.l.toSet).map(m.id -> _)
+          }
+          .toMap
 
   /** The inventory entries the pass concluded, read back from the METHOD tags when the pass ran, or
     * computed here when it did not (a caller running [[MemoryApiPass]] alone gets the same
@@ -230,6 +262,12 @@ object MemorySemanticsPass:
       free = fam("free:"),
       realloc = fam("realloc:"),
       untrustedRead = idx("untrusted-read:"),
+      clamp = vs.collectFirst {
+          case v if v.startsWith("clamp:") =>
+              v.stripPrefix("clamp:").split(":", 2) match
+                case Array(i, k) if i.toIntOption.isDefined => s"$i:$k"
+                case _                                      => null
+      },
       nullableReturn = vs.contains("nullable-return"),
       increments = vs.collectFirst { case v if v.startsWith("grow:") => v.stripPrefix("grow:") }
           .flatMap(_.split(":", 2) match
@@ -314,6 +352,14 @@ object MemorySemanticsPass:
       }
       round += 1
     end while
+    // 2b. each body's OWN conclusion, whatever its name-sharers concluded: the fact a resolved
+    // call reads. Computed with the settled name-level knowledge, after the fixpoint
+    val own = (for
+      (_, methods) <- defined
+      m            <- methods
+      if !declared.contains(m.name)
+      entry <- fromBody(m, known)
+    yield m.id -> entry).toMap
     // 3. capacity binders (a constructor remembering where its buffer ends)
     inferBinders(cpg).foreach { entry =>
         if !declared.contains(entry.name) then
@@ -350,7 +396,10 @@ object MemorySemanticsPass:
       end if
     }
 
-    Result(out.filterNot { case (name, s) => declared.contains(name) || s.isEmpty }.toMap)
+    Result(
+      out.filterNot { case (name, s) => declared.contains(name) || s.isEmpty }.toMap,
+      own
+    )
   end summarize
 
   /** Names of the functions whose memory role the name-and-signature heuristic supplied (it only
@@ -499,6 +548,7 @@ object MemorySemanticsPass:
           extra.realloc
         ).flatten),
         untrustedRead = base.untrustedRead.orElse(extra.untrustedRead),
+        clamp = base.clamp.orElse(extra.clamp),
         increments = base.increments.orElse(extra.increments),
         nullableReturn = base.nullableReturn || extra.nullableReturn
       )
@@ -603,11 +653,54 @@ object MemorySemanticsPass:
     val inferred = roles.copy(
       nullableReturn = nullable,
       untrustedRead = roles.untrustedRead.orElse(untrustedOutParamIndex(method)),
-      increments = counterIncrementOf(method)
+      increments = counterIncrementOf(method),
+      clamp = clampedParamOf(method, known)
     )
     val entry = fillEmpty(wrapper.getOrElse(MemApiVocab.MemApiEntry(method.name)), inferred)
     Option.when(entry != MemApiVocab.MemApiEntry(method.name))(entry)
   end fromBody
+
+  /** The bound a parameter is clamped to inside the body: `if (n > K) n = L;` with literals and L
+    * <= K leaves n at most K after the statement, whatever the caller passed - encoded as the
+    * parameter's index and K. The store must be the `if`'s own branch under exactly that test, and
+    * the only store to the parameter in the body; anything else is no clamp.
+    */
+  private def clampedParamOf(
+    method: Method,
+    known: String => Option[MemApiVocab.MemApiEntry]
+  ): Option[String] =
+    def literal(e: Expression): Option[BigInt] = e match
+      case l: Literal => IndexRange.literalValue(l.code)
+      case _          => None
+    val stores = method.call.filter(c => OverlayFacts.isAssignmentOperator(c.name)).l
+    def storesTo(name: String) =
+        stores.filter(_.argumentOption(1).exists {
+            case i: Identifier => i.name == name
+            case _             => false
+        })
+    val clamps = method.parameter.l.flatMap { p =>
+        storesTo(p.name) match
+          case List(store) =>
+              for
+                bound <-
+                    store.argumentOption(2).collect { case e: Expression => e }.flatMap(literal)
+                test <- store.inAst.collectAll[ControlStructure].headOption
+                    .filter(_.controlStructureType == ControlStructureTypes.IF)
+                    .flatMap(_.condition.headOption).collect { case c: Call => c }
+                if test.name == "<operator>.greaterThan"
+                if test.argumentOption(1).exists {
+                    case i: Identifier => i.name == p.name
+                    case _             => false
+                }
+                k <- test.argumentOption(2).collect { case e: Expression => e }.flatMap(literal)
+                if bound <= k && k >= 0
+              yield s"${p.index}:$k"
+          case _ => None
+    }
+    clamps match
+      case List(one) => Some(one)
+      case _         => None
+  end clampedParamOf
 
   /** The parameter a method stores through while reading through a different pointer parameter:
     * `int parse_leb(const uint8_t *buf, int n, uint32_t *out) { ... *out = v; }` fills `out` with a

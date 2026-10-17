@@ -555,7 +555,12 @@ class AstCreator(
     }
     Ast(decl).withChildren(members)
 
-  private def typeDeclAst(t: Value, path: String, withMethods: Boolean = true): Option[Ast] =
+  private def typeDeclAst(
+    t: Value,
+    path: String,
+    withMethods: Boolean = true,
+    givenName: String = ""
+  ): Option[Ast] =
     if isNamedEnum(t) then return Some(enumDeclAst(t, path))
     t.string("kind") match
       case Some("typeref") =>
@@ -585,16 +590,22 @@ class AstCreator(
           }.getOrElse(Seq.empty)
           Some(Ast(decl).withChildren(carried))
       case _ =>
-          val name     = types(t("id").num.toLong)
-          val fullName = registerType(name)
+          val written  = types(t("id").num.toLong)
+          val fullName = registerType(written)
+          // an anonymous member's TYPE_DECL carries the owner-qualified name it was given, as
+          // both its name and its full name, the way the CDT frontend writes it
+          val nodeName =
+              Option.when(givenName.nonEmpty)(givenName).getOrElse(unqualifiedTypeName(written))
+          val nodeFull =
+              Option.when(givenName.nonEmpty)(registerType(givenName)).getOrElse(fullName)
           val inherits = t.list("bases").flatMap(_.long("type")).map(b => registerType(types(b)))
           val decl =
               typeDeclNode(
                 t,
-                unqualifiedTypeName(name),
-                fullName,
+                nodeName,
+                nodeFull,
                 path,
-                specifierText(t).getOrElse(name),
+                specifierText(t).getOrElse(written),
                 inherits = inherits
               )
           val members = recordMemberAsts(t, path)
@@ -617,38 +628,59 @@ class AstCreator(
     */
   private def recordMemberAsts(t: Value, path: String): Seq[Ast] =
     val isUnion = t.string("kind").contains("union")
-    t.list("fields").flatMap { f =>
-      val memberAst = anonymousRecord(f).getOrElse(
-        Seq(
-          Ast(
-            memberNode(
-              f,
-              f.string("name").getOrElse(""),
-              declaratorText(f),
-              registerType(types(f.long("type")))
+    val fields  = t.list("fields")
+    // the anonymous record members before each field, in declaration order: an anonymous
+    // member's TYPE_DECL is named after its position among them, so two anonymous members of one
+    // record never share a name
+    var anonymousSeen = 0
+    val anonymousIndexOf = fields.map { f =>
+      val idx = anonymousSeen
+      if isAnonymousRecordField(f) then anonymousSeen += 1
+      idx
+    }
+    fields.zip(anonymousIndexOf).flatMap { case (f, anonymousIndex) =>
+        val memberAst = anonymousRecord(f, t, anonymousIndex).getOrElse(
+          Seq(
+            Ast(
+              memberNode(
+                f,
+                f.string("name").getOrElse(""),
+                declaratorText(f),
+                registerType(types(f.long("type")))
+              )
             )
           )
         )
-      )
-      if isUnion then
-        memberAst.foreach(a =>
-            a.root.collectFirst { case m: NewMember =>
-                tagNode(m, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
-            }
-        )
-      memberAst
+        if isUnion then
+          memberAst.foreach(a =>
+              a.root.collectFirst { case m: NewMember =>
+                  tagNode(m, X2CpgDefines.TypeStorageTag, X2CpgDefines.TypeStorageUnion)
+              }
+          )
+        memberAst
     }
   end recordMemberAsts
 
+  /** A field that declares an unnamed record: an anonymous struct or union member. */
+  private def isAnonymousRecordField(f: Value): Boolean =
+      f.string("name").contains("") && f.long("type").flatMap(unit.types.get).exists(t =>
+          isDefinedRecordOrTypedef(t) && !isClosure(t)
+      )
+
   /** The TYPE_DECL of an anonymous record member, nested under the type that declares it; a member
-    * of another kind without a name stays a member.
+    * of another kind without a name stays a member. Named after its owner and its position among
+    * the owner's anonymous members (`frame.anonymous_composite_type_0`), the name the CDT frontend
+    * gives it: the front end's own name for an unnamed type is the same `<unnamed>` for every one
+    * of them, which nothing downstream can tell apart.
     */
-  private def anonymousRecord(f: Value): Option[Seq[Ast]] =
+  private def anonymousRecord(f: Value, owner: Value, anonymousIndex: Int): Option[Seq[Ast]] =
       if !f.string("name").exists(_.isEmpty) then None
       else
         f.long("type").flatMap(unit.types.get).flatMap { t =>
             if isDefinedRecordOrTypedef(t) && !isClosure(t) then
-              typeDeclAst(t, currentPath, withMethods = false).map(Seq(_))
+              val ownerName = registerType(types(owner.long("id")))
+              val fullName  = s"$ownerName.anonymous_composite_type_$anonymousIndex"
+              typeDeclAst(t, currentPath, withMethods = false, givenName = fullName).map(Seq(_))
             else None
         }
 

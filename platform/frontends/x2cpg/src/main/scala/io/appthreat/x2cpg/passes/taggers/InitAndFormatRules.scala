@@ -90,9 +90,12 @@ object InitAndFormatRules:
     case _ => false
 
   private def isForwarder(m: Method): Boolean =
-      m.parameter.l.exists(p =>
-          p.typeFullName.contains("va_list") || p.code.contains("...") || p.isVariadic
-      ) || Option(m.signature).exists(_.contains("..."))
+      // actual variadicity: a `va_list` parameter or a signature that still carries the
+      // ellipsis. A parameter's own flag is not evidence - a template's pack parameter is
+      // flagged variadic by the front end while the instance's signature holds the expanded
+      // types, and that instance's printf is a call with concrete arguments, not a forward
+      m.parameter.l.exists(_.typeFullName.contains("va_list")) ||
+          Option(m.signature).exists(_.contains("..."))
 
   /** The call a printf-family macro expands to (`snprintf` defined as `__builtin___snprintf_chk`
     * under `_FORTIFY_SOURCE`): the macro's call carries the format, on the arguments as written;
@@ -160,25 +163,29 @@ object InitAndFormatRules:
     * of.
     */
   private def hasMethods(atom: Cpg, td: TypeDecl): Boolean =
-      td.method.nonEmpty || methodOwners(atom).contains(td.fullName)
+      // a bare `<clinit>` is the frontend's own static-initialiser artifact for a record with
+      // file-scope initialisation, not a member function: a C struct carrying one is still a
+      // plain aggregate
+      td.method.nameNot("<clinit>").nonEmpty || methodOwners(atom).contains(td.fullName)
 
   private val methodOwnersOf = new java.util.WeakHashMap[Cpg, Set[String]]()
 
   private def methodOwners(atom: Cpg): Set[String] = methodOwnersOf.synchronized {
       Option(methodOwnersOf.get(atom)).getOrElse {
-          val owners = atom.method.isExternal(false).fullName.l.flatMap { fullName =>
-            val qualified = fullName.takeWhile(_ != ':')
-            var depth     = 0
-            var last      = -1
-            qualified.indices.foreach { i =>
-                qualified(i) match
-                  case '<'               => depth += 1
-                  case '>'               => depth -= 1
-                  case '.' if depth == 0 => last = i
-                  case _                 =>
-            }
-            Option.when(last > 0)(qualified.substring(0, last))
-          }.toSet
+          val owners =
+              atom.method.isExternal(false).nameNot("<clinit>").fullName.l.flatMap { fullName =>
+                val qualified = fullName.takeWhile(_ != ':')
+                var depth     = 0
+                var last      = -1
+                qualified.indices.foreach { i =>
+                    qualified(i) match
+                      case '<'               => depth += 1
+                      case '>'               => depth -= 1
+                      case '.' if depth == 0 => last = i
+                      case _                 =>
+                }
+                Option.when(last > 0)(qualified.substring(0, last))
+              }.toSet
           methodOwnersOf.put(atom, owners)
           owners
       }
@@ -188,10 +195,12 @@ object InitAndFormatRules:
     val name = t.trim.stripPrefix("struct ").trim
     podCandidates(atom, name).exists { td =>
       val members = OverlayFacts.membersOfTypeDecl(td)
+      // an array member is initialised element-wise (`s.buf[i] = x` counts through
+      // unwrapElements) or whole (`memcpy(s.buf, ...)`, which hands it out), so it keeps the
+      // struct a candidate; a default initialiser or a constructed member does not
       members.nonEmpty && !hasMethods(atom, td) && !td.isExternal &&
       !members.exists(m =>
-          isArrayType(atom, m.typeFullName) || hasDefaultInitializer(m) ||
-              isConstructed(atom, m.typeFullName, Set(name))
+          hasDefaultInitializer(m) || isConstructed(atom, m.typeFullName, Set(name))
       )
     }
 
@@ -369,6 +378,55 @@ object InitAndFormatRules:
     * expansion (the calls its expansion makes are calls in their own right): the callee may write
     * the storage an argument points into.
     */
+  /** An argument position a call binds by reference: argument 0 of a member call (the receiver,
+    * held by reference in C++), or a position whose RESOLVED callee declares a non-const reference
+    * parameter. A by-value or const-reference binding reads; this one may write. The reference is
+    * read out of the callee's FULL NAME - a parameter node's own type, and some graphs' signature
+    * property, drop it, while the full name every frontend writes keeps it.
+    */
+  private def boundByReference(c: Call, index: Int): Boolean =
+    import io.shiftleft.semanticcpg.language.NoResolve
+    if index == 0 && c.name != "<operator>.pointerCall" then true
+    else
+      c.callee(using NoResolve).collectFirst { case m: Method => m }.exists { m =>
+          signatureParameter(m.fullName, index).exists(t =>
+            val trimmed = t.trim
+            (trimmed.endsWith("&") || trimmed.endsWith("&&")) &&
+            !trimmed.startsWith("const")
+          )
+      }
+
+  /** An identifier a call receives as storage it may write: bound by reference, or an array -
+    * spelled out or through a typedef (`pniels_t twop`) - that decays to a pointer into itself.
+    */
+  private def handedAsStorage(atom: Cpg, c: Call, i: Identifier): Boolean =
+      boundByReference(c, i.argumentIndex) || isArrayType(atom, i.typeFullName)
+
+  /** The `index`-th parameter's type as the method's signature spells it, splitting the parameter
+    * list at the commas outside angle brackets and parentheses.
+    */
+  private def signatureParameter(signature: String, index: Int): Option[String] =
+    val open  = signature.indexOf('(')
+    val close = signature.lastIndexOf(')')
+    if open < 0 || close <= open then None
+    else
+      val params = signature.substring(open + 1, close)
+      if params.trim.isEmpty then None
+      else
+        val parts   = mutable.ArrayBuffer.empty[String]
+        val current = new StringBuilder
+        var depth   = 0
+        params.foreach { ch =>
+            ch match
+              case '<' | '('         => depth += 1; current += ch
+              case '>' | ')'         => depth -= 1; current += ch
+              case ',' if depth == 0 => parts += current.toString; current.clear()
+              case other             => current += other
+        }
+        parts += current.toString
+        parts.lift(index - 1)
+  end signatureParameter
+
   private def handsOut(c: Call): Boolean =
       c.name == "<operator>.pointerCall" ||
           (!c.name.startsWith("<operator") && c.dispatchType != DispatchTypes.INLINED)
@@ -380,7 +438,11 @@ object InitAndFormatRules:
     */
   private def handedBaseOf(atom: Cpg, e: Expression): Option[String] = e match
     case c: Call if c.name == "<operator>.fieldAccess" =>
-        fieldPath(c).filter(_ => isArrayType(atom, c.typeFullName)).map(_._1)
+        // the member's DECLARED type decides: the access itself is typed as what it decays to
+        // (a pointer) in some graphs, and an array member decays wherever it is handed over
+        val memberIsArray = isArrayType(atom, c.typeFullName) ||
+            OverlayFacts.memberRefOf(atom, c).exists(m => isArrayType(atom, m.typeFullName))
+        fieldPath(c).filter(_ => memberIsArray).map(_._1)
     case c: Call if c.name == "<operator>.cast" =>
         c.argument.l.lastOption.flatMap(handedBaseOf(atom, _))
     case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
@@ -528,11 +590,21 @@ object InitAndFormatRules:
     nodes.foreach {
         case c: Call if OverlayFacts.isAssignmentOperator(c.name) =>
             c.argumentOption(1).flatMap(stored).foreach(s => gen(c.id()) = s)
-        // a union's array member handed to a call: the callee may write that storage
-        // (`memcpy(t.c, iv, 16)`)
+        // an ARRAY member handed to a call: it decays to a pointer into the object, so the
+        // callee may write that storage (`memcpy(t.c, iv, 16)`, `strncpy(f.tail, user, n)` on a
+        // plain struct as much as on a union - a scalar or pointer member passed by value is a
+        // read, and names nothing here). An object handed over BY REFERENCE - the receiver of a
+        // member call, or an argument bound to a non-const reference parameter of the method the
+        // graph resolves - is its callee's to write, exactly as an out-parameter is.
         case c: Call if handsOut(c) =>
-            val bases = c.argument.l.flatMap(handedBaseOf(atom, _)).filter(unions.contains).toSet
-            if bases.nonEmpty then gen(c.id()) = bases
+            val bases = c.argument.l.flatMap(handedBaseOf(atom, _)).toSet
+            val byReference = c.argument.l.collect {
+                case i: Identifier
+                    if candidates.contains(i.name) && handedAsStorage(atom, c, i) =>
+                    i.name
+            }.toSet
+            val written = bases ++ byReference
+            if written.nonEmpty then gen(c.id()) = written
         // the address of a local, a member or an element (`&s.f[i]`): an out-parameter
         case c: Call if c.name == "<operator>.addressOf" =>
             c.argumentOption(1).foreach {
@@ -548,11 +620,13 @@ object InitAndFormatRules:
                 isLhsOf(i, p) && p.name == "<operator>.assignment"
             )
             val isFieldBase = parent.exists(_.name == "<operator>.fieldAccess")
+            // handed over by reference: the callee holds the storage, this is not a read
+            val handedOver = parent.exists(p => handsOut(p) && handedAsStorage(atom, p, i))
             val voided = parent.exists(p =>
                 p.name == "<operator>.cast" && p.code.replace(" ", "").startsWith("(void)")
             )
-            if !isWrite && !isFieldBase && !voided && !isSelfAssignmentRhs(i, parent) &&
-              !insideUnevaluated(i) && !isMacroStoreTarget(i)
+            if !isWrite && !isFieldBase && !handedOver && !voided &&
+              !isSelfAssignmentRhs(i, parent) && !insideUnevaluated(i) && !isMacroStoreTarget(i)
             then
               reads += ((i, i.name, Set(i.name, s"${i.name}.*")))
         case f: Call if f.name == "<operator>.fieldAccess" =>
@@ -561,8 +635,12 @@ object InitAndFormatRules:
                 val parent = parentCall(top)
                 val isWrite =
                     parent.exists(p => isLhsOf(top, p) && p.name == "<operator>.assignment")
-                val handedOut =
-                    unions.contains(b) && isArrayType(atom, top.typeFullName) && handedToCall(top)
+                // an ARRAY member handed to a call is handed as storage wherever it is
+                // declared - a union's or a plain struct's alike; a scalar or pointer member
+                // passed by value is a read
+                val memberIsArray = isArrayType(atom, top.typeFullName) ||
+                    OverlayFacts.memberRefOf(atom, f).exists(m => isArrayType(atom, m.typeFullName))
+                val handedOut = memberIsArray && handedToCall(top)
                 if !isWrite && !handedOut && !insideUnevaluated(f) then
                   reads += ((f, s"$b.$fl", Set(b, s"$b.$fl")))
             }
