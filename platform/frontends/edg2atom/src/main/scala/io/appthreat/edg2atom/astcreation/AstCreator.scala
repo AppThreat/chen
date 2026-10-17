@@ -680,11 +680,14 @@ class AstCreator(
         case "return" if s.flag("implicit") && s.field("expr").isEmpty => Ast()
         case "return"                                                  => returnStatementAst(s)
         case "if"                                                      => ifAst(s)
-        // `if constexpr` with a known condition, in an instance: the branch it takes
+        // `if constexpr` with a known condition, in an instance: the branch it takes, with the
+        // initialiser ahead of it as for any selection statement
         case "constexpr_if" =>
             s.field("value") match
               case Some(ujson.Bool(taken)) =>
-                  s.field(if taken then "then" else "else").map(statementAst).getOrElse(Ast())
+                  withSelectionInit(s)(
+                    s.field(if taken then "then" else "else").map(statementAst).getOrElse(Ast())
+                  )
               case _ => ifAst(s)
         case "while"          => whileStatementAst(s)
         case "end_test_while" => doWhileStatementAst(s)
@@ -920,6 +923,18 @@ class AstCreator(
         case Seq(inner) if inner.kind == "block" && !inner.flag("implicit") => Some(inner)
         case _                                                              => None
 
+  /** A selection statement's initialiser ahead of the statement proper: the front end exports the
+    * C++17/C23 init in `init`, and without it the graph loses the local and its initialising call,
+    * so the declaration goes into a block before the statement.
+    */
+  private def withSelectionInit(s: Value)(statement: Ast): Ast =
+    val initAsts = s.field("init").toSeq.flatMap(statementAsts)
+    initAsts match
+      case Nil => statement
+      case inits =>
+          val block = blockNode(s, "<selection-init>", registerType("void"))
+          blockAst(block, (inits :+ statement).toList)
+
   private def ifAst(s: Value): Ast =
     val cond    = conditionAst(s)
     val ifNode  = controlStructureNode(s, ControlStructureTypes.IF, s"if (${codeOfAst(cond)})")
@@ -929,7 +944,7 @@ class AstCreator(
           val elseNode = controlStructureNode(e, ControlStructureTypes.ELSE, "else")
           Ast(elseNode).withChild(branchAst(Some(e)))
       case None => Ast()
-    controlStructureAst(ifNode, Some(cond), Seq(thenAst, elseAst))
+    withSelectionInit(s)(controlStructureAst(ifNode, Some(cond), Seq(thenAst, elseAst)))
 
   private def whileStatementAst(s: Value): Ast =
     val cond = conditionAst(s)
@@ -973,7 +988,7 @@ class AstCreator(
     val switchNode =
         controlStructureNode(s, ControlStructureTypes.SWITCH, s"switch(${codeOfAst(cond)})")
     val body = withExitScope("switch", s)(branchAst(s.field("body")))
-    controlStructureAst(switchNode, Some(cond), Seq(body))
+    withSelectionInit(s)(controlStructureAst(switchNode, Some(cond), Seq(body)))
 
   private def jumpAst(s: Value): Ast =
     val jump = s.string("jump") match
