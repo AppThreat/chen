@@ -356,7 +356,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             changed = true
       }
       collapse()
-    perMethod.toMap.map { case (m, idxs) => m.name -> idxs }
+    // by name, as the rounds read them: the last of several same-named methods must not speak
+    // for the others, whose conclusions may differ
+    perMethod.toList.groupMap(_._1.name)(_._2).map { case (name, idxs) =>
+        name -> (if idxs.distinct.size == 1 then idxs.head else Set.empty[Int])
+    }
   end derefsParamsOf
 
   /** The effect summary of one method body, from the role table - no tag reads per node.

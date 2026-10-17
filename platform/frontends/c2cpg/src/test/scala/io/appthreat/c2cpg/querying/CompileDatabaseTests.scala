@@ -59,6 +59,40 @@ class CompileDatabaseTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
       }
   }
 
+  "a C23 unit declaring through typeof_unqual" should {
+      val cpg = code(
+        """
+          |void copy_unqual(void) {
+          |    const char a[16] = {0};
+          |    typeof_unqual(a) b;
+          |    (void)b;
+          |}
+          |""".stripMargin,
+        "unqual.c"
+      ).moreCode(
+        """
+          |int typeof_unqual(int v) { return v; }
+          |int older(void) { return typeof_unqual(3); }
+          |""".stripMargin,
+        "older.c"
+      ).moreCode(
+        database(
+          entry("unqual.c", "cc -std=c23 -c unqual.c"),
+          entry("older.c", "cc -std=c17 -c older.c")
+        ),
+        "compile_commands.json"
+      ).withConfig(Config().withCompileCommands("compile_commands.json"))
+
+      "give the declaration the referenced array's type" in {
+          cpg.method.nameExact("copy_unqual").local.nameExact("b").typeFullName.l should
+              contain("char[16]")
+      }
+
+      "leave the name alone before C23" in {
+          cpg.method.nameExact("typeof_unqual").l should have size 1
+      }
+  }
+
   "a header with C++ syntax" should {
       val cpg = code(
         """

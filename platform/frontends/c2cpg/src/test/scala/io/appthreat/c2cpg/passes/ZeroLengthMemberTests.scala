@@ -38,6 +38,36 @@ class ZeroLengthMemberTests extends DataFlowCodeToCpgSuite:
       |    strcpy(p->body, user);
       |    free(p);
       |}
+      |struct message {
+      |    int kind;
+      |    char body[];
+      |};
+      |void zero_tail_record_only(const char *user) {
+      |    struct packet *p = malloc(sizeof(*p));
+      |    if (!p) return;
+      |    strcpy(p->body, user);
+      |    free(p);
+      |}
+      |void zero_tail_record_by_type(const char *user) {
+      |    struct packet *p = malloc(sizeof(struct packet));
+      |    if (!p) return;
+      |    strcpy(p->body, user);
+      |    free(p);
+      |}
+      |void flexible_record_only(const char *user) {
+      |    struct message *m = malloc(sizeof(*m));
+      |    if (!m) return;
+      |    strcpy(m->body, user);
+      |    free(m);
+      |}
+      |void zero_tail_either_size(const char *user, int roomy) {
+      |    struct packet *p;
+      |    if (roomy) p = malloc(sizeof(*p) + strlen(user) + 1);
+      |    else p = malloc(sizeof(*p));
+      |    if (!p) return;
+      |    strcpy(p->body, user);
+      |    free(p);
+      |}
       |void fixed_tail_overrun(const char *user) {
       |    struct framed *f = malloc(sizeof(*f));
       |    if (!f) return;
@@ -67,6 +97,18 @@ class ZeroLengthMemberTests extends DataFlowCodeToCpgSuite:
   "a string copy into a zero-length trailing member" should {
       "not be held to the declared zero extent" in {
           findingsIn("zero_tail_sized_by_allocation") should not contain "MS-BOUND-006"
+      }
+  }
+
+  "a string copy into a flexible trailing member of an allocation of just the record" should {
+      "overrun the member, which has no room" in {
+          findingsIn("zero_tail_record_only") should contain("MS-BOUND-006")
+          findingsIn("zero_tail_record_by_type") should contain("MS-BOUND-006")
+          findingsIn("flexible_record_only") should contain("MS-BOUND-006")
+      }
+
+      "say nothing when another allocation reaching it adds room" in {
+          findingsIn("zero_tail_either_size") should not contain "MS-BOUND-006"
       }
   }
 

@@ -478,6 +478,12 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
       |  strcpy(p->body, user);
       |  free(p);
       |}
+      |void zero_tail_record_only(const char *user) {
+      |  packet *p = static_cast<packet *>(malloc(sizeof(*p)));
+      |  if (!p) return;
+      |  strcpy(p->body, user);
+      |  free(p);
+      |}
       |void fixed_tail_overrun(const char *user) {
       |  framed *f = static_cast<framed *>(malloc(sizeof(*f)));
       |  if (!f) return;
@@ -614,6 +620,10 @@ class MemorySafetyOnEdgTests extends Code2CpgFixture(() => new EdgDataFlowTestCp
           requireEdga()
           findingsIn("zero_tail_sized_by_allocation") should not contain "MS-BOUND-006"
           findingsIn("fixed_tail_overrun") should contain("MS-BOUND-006")
+      }
+      "overrun it when the allocation is just the record" in {
+          requireEdga()
+          findingsIn("zero_tail_record_only") should contain("MS-BOUND-006")
       }
   }
 

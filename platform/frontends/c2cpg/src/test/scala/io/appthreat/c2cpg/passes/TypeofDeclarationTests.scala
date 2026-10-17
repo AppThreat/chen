@@ -4,8 +4,8 @@ import io.appthreat.c2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
 /** A declaration through `typeof`/`__typeof__` declares the referenced expression's own type, so a
-  * buffer declared that way keeps its extent; a pointer, array or function derived from it does
-  * not take that type.
+  * buffer declared that way keeps its extent; a pointer, array or function derived from it does not
+  * take that type.
   */
 class TypeofDeclarationTests extends DataFlowCodeToCpgSuite:
 

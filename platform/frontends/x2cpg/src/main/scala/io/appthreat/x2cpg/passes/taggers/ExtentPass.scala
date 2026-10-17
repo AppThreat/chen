@@ -395,15 +395,53 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
 
   private def extentOfField(fieldAccess: Call): Option[(String, List[StoredNode])] =
       OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>
-          arrayExtent(member.typeFullName)
+          Option.when(roomlessTrailingMember(fieldAccess, member))(
+            (s"$ValueConst:0", List(member))
+          ).orElse(arrayExtent(member.typeFullName)
               // GNU's zero-length trailing array is the flexible member written before C99: its
               // storage is what the allocation adds past the record, not a declared capacity
               .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
               .map(n => (s"$ValueConst:$n", List(member)))
               .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
               // a pointer member's capacity is wherever its allocation is
-              .orElse(memberExtents.get(member).map(v => (v, List(member))))
+              .orElse(memberExtents.get(member).map(v => (v, List(member)))))
       }
+
+  /** A flexible trailing member (`char data[]`, GNU's `char data[0]`) reached through a pointer
+    * whose every allocation reaching the access is exactly the record - `malloc(sizeof(*p))` or
+    * `malloc(sizeof(struct T))`, nothing added: the member has no storage at all. Any other
+    * allocation, a definition that is none, or another base says nothing.
+    */
+  private def roomlessTrailingMember(fieldAccess: Call, member: Member): Boolean =
+    val flexible = OverlayFacts.isTrailingMember(member) &&
+        (arrayExtent(member.typeFullName).contains(0) || member.typeFullName.trim.endsWith("[]"))
+    def sizedAsRecord(alloc: Call, base: String): Boolean =
+        alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty) match
+          case List(sz: Call) if sz.name.startsWith("<operator>.sizeOf") =>
+              sz.argument.l match
+                case List(deref: Call) if deref.name == "<operator>.indirection" =>
+                    deref.argument.l.collect { case i: Identifier => i.name } == List(base)
+                // `sizeof(struct T)`, or of an object of the record's type
+                case List(operand: Expression) =>
+                    Option(member.typeDecl).exists(td =>
+                        operand.property("TYPE_FULL_NAME") == td.fullName
+                    )
+                case _ => false
+          case _ => false
+    flexible && fieldAccess.name == "<operator>.indirectFieldAccess" &&
+    (fieldAccess.argumentOption(1) match
+      case Some(base: Identifier) =>
+          // the stores that define the pointer: an assignment whose target is it
+          val stores = OverlayFacts.reachingDefsIn(base).collect { case d: Identifier =>
+              d._astIn.collectFirst {
+                  case a: Call if a.name == "<operator>.assignment" && d.argumentIndex == 1 => a
+              }
+          }.flatten.distinct
+          val allocations = stores.map(_.argumentOption(2).flatMap(allocCallOf))
+          stores.nonEmpty && allocations.forall(_.exists(sizedAsRecord(_, base.name)))
+      case _ => false
+    )
+  end roomlessTrailingMember
 
   /** A struct member holding the length beside a pointer member, by the C `_len`/`_size` suffix
     * convention (`payload` / `payload_len`).
