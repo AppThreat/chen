@@ -1216,7 +1216,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           // the header's size
           val flexibleMember = OverlayFacts.memberRefOf(atom, fa).exists { m =>
               OverlayFacts.arrayExtent(m.typeFullName).contains(1) &&
-              m._astIn.collectAll[TypeDecl].l.flatMap(_.member.l).forall(_.order <= m.order)
+              OverlayFacts.isTrailingMember(m)
           }
           flexibleMember && fa.argumentOption(1).collect { case e: Expression => e }
               .map(unwrapCast)

@@ -209,6 +209,13 @@ private[taggers] object OverlayFacts:
     val viaAst = td.astChildren.collectAll[Member].l
     if viaAst.nonEmpty then viaAst else td.member.l
 
+  /** Whether nothing is declared after `m` in its record. A trailing array is where the flexible
+    * idioms keep a payload the allocation sizes: `char data[]`, GNU's `char data[0]` and the older
+    * `char data[1]`.
+    */
+  def isTrailingMember(m: Member): Boolean =
+      m._astIn.collectAll[TypeDecl].l.flatMap(membersOfTypeDecl).forall(_.order <= m.order)
+
   /** Declared array size from a type full name (`char[64]`, `int[16]` through a #define). */
   def arrayExtent(typeFullName: String): Option[Int] =
       """\[(\d+)\]$""".r.findFirstMatchIn(typeFullName).map(_.group(1).toInt)
