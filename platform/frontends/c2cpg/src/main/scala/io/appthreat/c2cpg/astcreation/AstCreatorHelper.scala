@@ -436,7 +436,13 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
                 val nodeType = safeGetNodeType(s)
                 cleanType(nodeType, stripKeywords)
       case _: IASTIdExpression | _: IASTName | _: IASTDeclarator =>
-          val nodeType = safeGetNodeType(node)
+          // a declarator whose declaration says `typeof(expr)` declares the referenced
+          // expression's own type, not the keyword the node type spells
+          val typeofOperand = node match
+            case d: IASTDeclarator => typeofExpressionOf(d)
+            case _                 => None
+          val nodeType = typeofOperand.map(e => safeGetType(e.getExpressionType))
+              .getOrElse(safeGetNodeType(node))
           cleanType(nodeType, stripKeywords)
       case s: IASTNamedTypeSpecifier =>
           val spelled = ASTStringUtil.getReturnTypeString(s, null)
@@ -728,12 +734,56 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         case decl: ICPPASTDecltypeSpecifier => astForDecltypeSpecifier(decl)
         case _                              => notHandledYet(node)
 
+  /** The expression a `typeof`/`__typeof__` specifier references. */
+  private def typeofExpressionIn(spec: IASTNode): Option[IASTExpression] = spec match
+    case s: IASTSimpleDeclSpecifier if s.getType == IASTSimpleDeclSpecifier.t_typeof =>
+        Option(s.getDeclTypeExpression)
+    case _ => None
+
+  /** Whether a declarator derives a pointer, reference, array or function from its specifier's
+    * type: that is not the referenced type itself, and spelling it as one would hand an extent to a
+    * pointer.
+    */
+  private def derivesFromSpecifier(d: IASTDeclarator): Boolean =
+      d.getPointerOperators.nonEmpty || d.isInstanceOf[IASTFunctionDeclarator] || (d match
+        case a: IASTArrayDeclarator => a.getArrayModifiers.nonEmpty
+        case _                      => false
+      )
+
+  /** The expression the `typeof` specifier of `declarator`'s declaration references, when the
+    * declarator declares the referenced type itself.
+    */
+  private def typeofExpressionOf(declarator: IASTDeclarator): Option[IASTExpression] =
+      if derivesFromSpecifier(declarator) then None
+      else
+        declarator.getParent match
+          case decl: IASTSimpleDeclaration  => typeofExpressionIn(decl.getDeclSpecifier)
+          case pd: IASTParameterDeclaration => typeofExpressionIn(pd.getDeclSpecifier)
+          case _                            => None
+
+  /** The declarator at `index` of the declaration `spec` belongs to. */
+  private def declaratorOf(spec: IASTNode, index: Int): Option[IASTDeclarator] =
+      spec.getParent match
+        case decl: IASTSimpleDeclaration if index >= 0 && index < decl.getDeclarators.length =>
+            Option(decl.getDeclarators()(index))
+        case pd: IASTParameterDeclaration => Option(pd.getDeclarator)
+        case fd: IASTFunctionDefinition   => Option(fd.getDeclarator)
+        case _                            => None
+
   protected def typeForDeclSpecifier(
     spec: IASTNode,
     stripKeywords: Boolean = true,
     index: Int = 0
   ): String =
+    // `typeof(expr)` / `__typeof__(expr)`: the declared type is the referenced expression's own
+    // type (`typeof(a)` for `char a[16]` declares another `char[16]`); without this the
+    // specifier's keyword itself is spelled as the type. A declarator that derives from it (a
+    // pointer, reference, array or function) keeps the spelling the other cases give it.
+    val typeofOperand = typeofExpressionIn(spec)
+        .filterNot(_ => declaratorOf(spec, index).exists(derivesFromSpecifier))
     val tpe = spec match
+      case _ if typeofOperand.isDefined =>
+          cleanType(safeGetType(typeofOperand.get.getExpressionType), stripKeywords)
       case s: IASTSimpleDeclSpecifier if s.getParent.isInstanceOf[IASTParameterDeclaration] =>
           val parentDecl = s.getParent.asInstanceOf[IASTParameterDeclaration].getDeclarator
           pointersAsString(s, parentDecl, stripKeywords)
