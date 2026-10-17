@@ -1,0 +1,41 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_236e880d3ee8e7::t_3c769a2ada47d1 174
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  s_236e880d3ee8e7::t_3c769a2ada47d1 399-404,603,624
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ArrayMemberInitTests.scala
+  s_236e880d3ee8e7::t_63cafa39d7d32c 58-65,115-118
+  s_236e880d3ee8e7::t_9d9c21e369fe6e 119-120
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_236e880d3ee8e7::t_3c769a2ada47d1 354-356
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  s_236e880d3ee8e7::t_3c769a2ada47d1 110-111,115-119
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ImplicitMemberExtentTests.scala
+  s_236e880d3ee8e7::t_0f5c837a724b65 53-58,94-96
+  s_236e880d3ee8e7::t_bd348cb2e0b5e6 97-99
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  s_236e880d3ee8e7::t_3ade6288fd517e 5,663-664,685-686
+  s_236e880d3ee8e7::t_3c769a2ada47d1 665-666,672-684,687-702
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_236e880d3ee8e7::t_890250cfb71647 13-22
+  s_236e880d3ee8e7::t_93b873409c517d 108
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ResolvedCalleeSummaryTests.scala
+  s_236e880d3ee8e7::t_1a698bb159288f 63,65
+  s_236e880d3ee8e7::t_0f5c837a724b65 64,66-72,117-118
+  s_236e880d3ee8e7::t_44c39d1fa5a958 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "25bd553761aed92856cd879dfb64038597db5050",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
