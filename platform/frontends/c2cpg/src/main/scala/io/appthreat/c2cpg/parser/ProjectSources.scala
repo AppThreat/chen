@@ -58,6 +58,12 @@ object UnitSettings:
     "__is_target_environment(x)"  -> "0"
   )
 
+  /** Whether a `-std` spelling names C23 or a later C standard. */
+  def isC23OrLater(standard: String): Boolean =
+      Set("23", "2x", "2y", "iso9899:2024").contains(
+        standard.toLowerCase.stripPrefix("gnu").stripPrefix("c")
+      )
+
   /** The value `__cplusplus` has for a `-std`/`/std:` spelling, if it names a C++ standard. */
   def cplusplusFor(standard: String): Option[String] =
       standard.toLowerCase.stripPrefix("gnu").stripPrefix("c") match
@@ -316,7 +322,13 @@ object ProjectSources:
         case None                                     =>
       // `export` marks an exported declaration of a module interface unit; see CppModules
       if !symbols.contains("export") then symbols += "export" -> ""
-    else symbols -= "__cplusplus"
+    else
+      symbols -= "__cplusplus"
+      // C23's `typeof_unqual` is no keyword to the parser; GCC's `__typeof__` names the same
+      // type but for its qualifiers, which no declared type here keeps
+      if flags.flatMap(_.standard).exists(UnitSettings.isC23OrLater) then
+        for kw <- Seq("typeof_unqual", "__typeof_unqual__") if !symbols.contains(kw) do
+          symbols += kw -> "__typeof__"
     // the compiler's own search order: a C++ library's wrapper headers (`<cstdlib>`'s
     // `<stdlib.h>`) must be found before the C library's, and `#include_next` relies on it
     val systemIncludes = facts.map(_.systemIncludePaths).filter(_.nonEmpty).getOrElse(
