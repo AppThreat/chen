@@ -1,0 +1,40 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  h_0926447d100ad2 704-713,766
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  h_0926447d100ad2 252-256,262-272,274-279
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ImplicitMemberExtentTests.scala
+  h_0926447d100ad2 18-19
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ResolvedCalleeSummaryTests.scala
+  h_0926447d100ad2 17-18
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/MultidimSubscriptTests.scala
+  h_0926447d100ad2 32-39,41-44,46-50,52
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  h_0926447d100ad2 593,597-600,637-639,642-650,654-660,677-685
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgRound6Tests.scala
+  h_0926447d100ad2 15-16,79
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  h_0926447d100ad2 352-353
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  h_0926447d100ad2 98,175-188,382-385,388-397,399-400,403-408,410-422,636-638
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  h_0926447d100ad2 110-111,114-115,149-151,207-208
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 3689-3696
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  h_0926447d100ad2 67-72,267-268,357-360,662-666,672,675,680-690
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  h_0926447d100ad2 98,107-109
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  h_0926447d100ad2 186-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8d9ec84dfb8c831dc2fada77864e31a3f1b57d70",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
