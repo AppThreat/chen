@@ -4,7 +4,8 @@ import io.appthreat.edg2atom.testfixtures.EdgCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
 /** What the language's statement forms declare: a C++17 selection statement's initialiser (if, if
-  * constexpr and switch) declares what its condition reads.
+  * constexpr and switch) declares what its condition reads, and a body the front end closed at the
+  * end of the file does not end the translation unit's visit.
   */
 class ModernStatementShapesTests extends EdgCodeToCpgSuite(".cpp"):
 
@@ -83,4 +84,19 @@ class ModernStatementShapesTests extends EdgCodeToCpgSuite(".cpp"):
       }
   }
 
+  "a function body the file ends inside" should {
+      // the front end recovers with a body that ends at the end of the file, a position with no
+      // column
+      val cpg = code(
+        """int first(int v) { return v; }
+          |int unterminated(int v) {
+          |  return v;
+          |""".stripMargin
+      )
+
+      "not end the visit of the unit" in {
+          requireEdga()
+          cpg.method.nameExact("first").l should not be empty
+      }
+  }
 end ModernStatementShapesTests

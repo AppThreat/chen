@@ -1124,7 +1124,9 @@ class AstCreator(
 
   /** The text from `start` to `end` (the end's character included). */
   private def textBetween(lines: Array[String], start: Pos, end: Pos): Option[String] =
-      if start.line < 1 || end.line > lines.length || end.line < start.line then None
+      // a position with no column (a synthesised end the front end did not locate) has no text
+      if start.line < 1 || end.line > lines.length || end.line < start.line || end.column < 1 then
+        None
       else if start.line == end.line then
         val l = lines(start.line - 1)
         Option.when(start.column >= 1 && end.column <= l.length + 1 && end.column >= start.column)(
