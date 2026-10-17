@@ -721,9 +721,25 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             astForExpression(arrayIndexExpression.getArrayExpression),
             astForNode(arrayIndexExpression.getArgument)
           )
+    // a comma-separated subscript (the multidimensional `operator[]`) leaves no implicit
+    // name: the operator is looked up on the base's class by its parameter count
+    val multidim = arrayIndexExpression.getArgument match
+      case list: IASTExpressionList if overloaded.isEmpty =>
+          multidimSubscriptOperator(
+            arrayIndexExpression.getArrayExpression,
+            list.getExpressions.length
+          )
+      case _ => None
     overloaded match
       case Some((overload, linked)) =>
           overloadedOperatorAst(arrayIndexExpression, overload, linked, name, List(expr, arg))
+      case None if multidim.isDefined =>
+          val (overload, linked) = multidim.get
+          val operands = arrayIndexExpression.getArgument match
+            case list: IASTExpressionList =>
+                expr :: list.getExpressions.map(astForExpression).toList
+            case _ => List(expr, arg)
+          overloadedOperatorAst(arrayIndexExpression, overload, linked, name, operands)
       case None =>
           val cpgArrayIndexing =
               callNode(
@@ -736,6 +752,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 Some(expressionType(arrayIndexExpression))
               )
           callAst(cpgArrayIndexing, List(expr, arg))
+    end match
   end astForArrayIndexExpression
 
   private def astForCastExpression(castExpression: IASTCastExpression): Ast =

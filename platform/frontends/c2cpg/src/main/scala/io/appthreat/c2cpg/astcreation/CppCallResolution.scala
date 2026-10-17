@@ -249,6 +249,35 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     tagCall(call, X2CpgDefines.OperatorCallTag, builtinOperator)
     ast
 
+  /** The `operator[]` a comma-separated subscript calls (the multidimensional subscript): the front
+    * end parses the syntax and types the operands but leaves no implicit name for the operator, so
+    * the base's class is asked directly. Only an operator of the base's own class whose parameter
+    * count matches the written indices, exactly one of them, links - anything ambiguous or
+    * inherited stays the built-in index access.
+    */
+  protected def multidimSubscriptOperator(
+    base: IASTExpression,
+    indices: Int
+  ): Option[(ICPPFunction, ICPPFunction)] =
+    val baseBinding = base match
+      case id: IASTIdExpression => CdtQuery(id.getName.resolveBinding).toOption
+      case _                    => None
+    val owner = baseBinding.collectFirst { case v: ICPPVariable => v }
+        .flatMap(v => CdtQuery(v.getType).toOption.collectFirst { case t: ICPPClassType => t })
+    owner.flatMap { cls =>
+      val operators: Array[ICPPMethod] =
+          CdtQuery(cls.getDeclaredMethods).toOption.getOrElse(Array.empty[ICPPMethod])
+      operators
+          .filter(m =>
+              m.getName.replace(" ", "") == "operator[]" &&
+                  CdtQuery(m.getParameters).toOption.exists(ps => indices == ps.length)
+          )
+          .toList match
+        case List(one) => graphFunction(one).map(one -> _)
+        case _         => None
+    }
+  end multidimSubscriptOperator
+
   /** The graph's METHOD for the user-defined operator an expression calls, if any. */
   protected def linkedOverload(overload: => ICPPFunction): Option[(ICPPFunction, ICPPFunction)] =
       CdtQuery(Option(overload)).toOption.flatten.flatMap(o => graphFunction(o).map(o -> _))
