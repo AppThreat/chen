@@ -1,0 +1,29 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/MemberDefUsePass.scala
+  s_b9f6f98e1c3bda::t_50321c30159b32 45-46,54-64,75-76,87-93
+  s_b9f6f98e1c3bda::t_83f1fe8455e069 27-29,52,97-102,105-106
+  s_b9f6f98e1c3bda::t_1d0306d03b8a74 1-26,30-44,47-51,53,65-74,77-86,94-96,103-104,107-108
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/callgraph/DynamicCallLinker.scala
+  s_b9f6f98e1c3bda::t_e6a97b230532d8 5-19,36-37,252,256-260,273-288,300-315,337-340
+  s_b9f6f98e1c3bda::t_50321c30159b32 270,289-299
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/CppObjectFlowTests.scala
+  s_b9f6f98e1c3bda::t_50321c30159b32 1-10,12,15-51,55-89
+  s_b9f6f98e1c3bda::t_6c534cf585a158 11,13-14,52-54
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/layers/dataflows/OssDataFlow.scala
+  s_b9f6f98e1c3bda::t_eee86c0824a596 8,66-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "78180c977afc8b777bbcfe944fd4326247ddd801",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

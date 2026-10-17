@@ -1,0 +1,28 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  h_0926447d100ad2 781
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AnonymousMemberExtentTests.scala
+  h_0926447d100ad2 15-16
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/TypeNames.scala
+  h_0926447d100ad2 69-71
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/controlflow/cfgcreation/CfgCreator.scala
+  h_0926447d100ad2 363,381
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 1394-1403,1409,1416-1421
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/GuardPass.scala
+  h_0926447d100ad2 418-459,461-477,482-484,486-487
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 2077,2100-2102,2114-2128
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  h_0926447d100ad2 28-40,42-43,91-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b099d2cf0e6bf795a2249687704c5ca6bfab5eb8",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

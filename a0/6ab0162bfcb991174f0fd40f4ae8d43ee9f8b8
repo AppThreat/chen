@@ -1,0 +1,158 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_4b70c6697bebd0::t_a4ddf948060565 75-77,80-89
+  s_4b70c6697bebd0::t_3266f58d9a65b6 71-72
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  s_4b70c6697bebd0::t_64928bd65f4a55 89
+  s_4b70c6697bebd0::t_d2bfb239d4a683 20-22,38,40-41,46-48,69-74,83-88
+  s_4b70c6697bebd0::t_70c37672e4b359 95-128
+  s_4b70c6697bebd0::t_e8b32ecacc9d1a 7,129
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part13ReviewTests.scala
+  s_4b70c6697bebd0::t_bf1bcb300c4f70 1-365
+  s_4b70c6697bebd0::t_b92473637c8367 366-501
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_4b70c6697bebd0::t_d2bfb239d4a683 29-35,73-78,151-161,178
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ParserConfig.scala
+  s_4b70c6697bebd0::t_f3790efbb99790 29,31-33
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/MacroCensusReviewTests.scala
+  s_4b70c6697bebd0::t_7c8dc1ef24328e 1-301
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_4b70c6697bebd0::t_8788fc63d36b38 741,770,987,1037-1045,1047
+  s_4b70c6697bebd0::t_397f64bf25a80f 562-580,615,676-682,690-696,703,705-706,709-710,712-722,724-740,742-769,771-897,899,901-904,906-940,946-986,988-1033,1046,1050-1052,1054,1064-1100,1104-1107,1110-1123,1148,1226,1274,1286,1296-1299,1304,1312,1326,1328,1330,1334,1344,1362,1392-1394,1409,1420,1426,1433,1437,1439,1458,1489-1490,1498,1508,1545,3185,3194,3478,3514
+  s_4b70c6697bebd0::t_aad66bc4cff9f6 1034-1036
+  s_4b70c6697bebd0::t_82bdfbd742d4bb 1048-1049
+  s_4b70c6697bebd0::t_eb445a38745555 1053
+  s_4b70c6697bebd0::t_6d7559ec8d9dff 1055-1057
+  s_4b70c6697bebd0::t_dc8274b6f68deb 1061-1063
+  s_4b70c6697bebd0::t_02a4fdb5f504da 1124-1126
+  s_4b70c6697bebd0::t_0a0fe444e77c47 1149-1151
+  s_4b70c6697bebd0::t_ee780140f1525c 1223-1225
+  s_4b70c6697bebd0::t_01871d636c766a 1227-1229,1271-1273
+  s_4b70c6697bebd0::t_fdbd56bda510fb 1275-1277,1283-1285
+  s_4b70c6697bebd0::t_417334de6e8006 1287-1289,1293-1295
+  s_4b70c6697bebd0::t_54cfc9b328a15c 1300-1303
+  s_4b70c6697bebd0::t_93525019fb8a19 1305-1307,1309-1311
+  s_4b70c6697bebd0::t_461a2d88d945cb 1313-1315,1323-1325
+  s_4b70c6697bebd0::t_516987b7edada3 1327
+  s_4b70c6697bebd0::t_4af69231703c4d 1329
+  s_4b70c6697bebd0::t_c63c42a0fa4346 1331-1333
+  s_4b70c6697bebd0::t_c0580549f2664f 1335-1337,1341-1343
+  s_4b70c6697bebd0::t_f8fbfa2a0f1ce4 1345-1347,1359-1361
+  s_4b70c6697bebd0::t_63fd3adfe0f92f 1363-1365,1389-1391
+  s_4b70c6697bebd0::t_c23d5b5f50a655 1395-1397,1406-1408
+  s_4b70c6697bebd0::t_3ca41c32d94d18 1410-1412,1417-1419
+  s_4b70c6697bebd0::t_098de4ca86fcb4 1421-1425
+  s_4b70c6697bebd0::t_90125e5638daeb 1427-1432
+  s_4b70c6697bebd0::t_c87618e018ea69 1434-1436
+  s_4b70c6697bebd0::t_414934ebc0e6e8 1438
+  s_4b70c6697bebd0::t_1341ef15241fd8 1440-1442,1455-1457
+  s_4b70c6697bebd0::t_94d6a5eca1a50f 1459-1461,1486-1488
+  s_4b70c6697bebd0::t_e07634f729a28c 1491-1493,1495-1497
+  s_4b70c6697bebd0::t_baf61b533fffe8 1499-1501,1505-1507
+  s_4b70c6697bebd0::t_c1f16bb5640710 1509-1511,1542-1544
+  s_4b70c6697bebd0::t_5cd5ecaf75405a 1546-1548
+  s_4b70c6697bebd0::t_353f996ea9a11e 3186-3188
+  s_4b70c6697bebd0::t_0181fa3448ba28 3479-3481
+  s_4b70c6697bebd0::t_b4fca174de6095 1059-1060,1127-1138,1142-1145,1152-1159,1176-1178,1181,1191-1222,1230-1270,1278-1282,1290-1292,1308,1316-1322,1338-1340,1348-1358,1366-1388,1398-1405,1413-1416,1443-1454,1462-1485,1494,1502-1504,1512-1541,1549-1558,2005,2292,2737,3189-3191,3482-3485,3502-3508,3550,3583,4110,4141-4142
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/MacroCensusTests.scala
+  s_4b70c6697bebd0::t_05fbe5289a8793 147-156
+  s_4b70c6697bebd0::t_4ddc7de3784a4f 81,97,107
+  s_4b70c6697bebd0::t_2062bb34655275 1-25,27-80,82-96,98-100,102-106,108-117,119-146,157
+  s_4b70c6697bebd0::t_aaa664d7c1df2a 158-159
+  s_4b70c6697bebd0::t_7457ecb12da78d 26
+  s_4b70c6697bebd0::t_027c5d77dbab78 101,118
+  s_4b70c6697bebd0::t_c757bd7aedd302 160
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part12Tests.scala
+  s_4b70c6697bebd0::t_8a46a53294f348 300
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part13SelfSizedTests.scala
+  s_4b70c6697bebd0::t_d3c11e2d280516 1-7,10-121
+  s_4b70c6697bebd0::t_ebd6761744875b 8-9
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/MacroCensus.scala
+  s_4b70c6697bebd0::t_111f27246fcb6f 1-18,21-27,29,32-38,40-54,56-64,68-80,82-84,86-100,102-122,125,127-132,135-188,191-196,208-209,211-277,279-324,326-333,336-375,387,393
+  s_4b70c6697bebd0::t_36b9056eeb0ddb 19-20,28,30-31,65-67,126,133-134,278,325,334-335
+  s_4b70c6697bebd0::t_7457ecb12da78d 123-124,189-190
+  s_4b70c6697bebd0::t_3e494c7ae3ce08 376-386,388-392,394-848
+  s_4b70c6697bebd0::t_4ddc7de3784a4f 39,55,81,85,101,197-207,210
+  s_4b70c6697bebd0::t_7b76141790ec32 849-857
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  s_4b70c6697bebd0::t_e46de7ba642a0f 50-157,410-415,735-737,775-797
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_4b70c6697bebd0::t_840f846786c8ef 574
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_4b70c6697bebd0::t_16e25b1cd294e9 145-148,158-168,199-203,240-243
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForPrimitivesCreator.scala
+  s_4b70c6697bebd0::t_7c46519b6d12e7 71,92-94,119-121,128
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForStatementsCreator.scala
+  s_4b70c6697bebd0::t_e3cbbb7f289023 199,205
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/datastructures/CGlobal.scala
+  s_4b70c6697bebd0::t_59097b09ba8f4a 10-34,36-49,51-52
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/ConstantTagPass.scala
+  s_4b70c6697bebd0::t_653e6e2ade3223 1-32
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/TypeDeclNodePass.scala
+  s_4b70c6697bebd0::t_b0d6de50c5122b 6,14-21,60-86,88
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ContainerInvalidationRulesTests.scala
+  s_4b70c6697bebd0::t_3ae15b358aacbc 9-10,138-140,143
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/FieldAliasStateTests.scala
+  s_4b70c6697bebd0::t_726b5c86db0b9b 9-10
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/FieldOriginTests.scala
+  s_4b70c6697bebd0::t_c37e58f1a7a4f3 1-88
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/FieldStoreRuleTests.scala
+  s_4b70c6697bebd0::t_c8c86846205570 1-115
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/GuardPolarityTests.scala
+  s_4b70c6697bebd0::t_e7d99c03183bf2 1-80
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/HeaderConstantTests.scala
+  s_4b70c6697bebd0::t_ed1ee915e6b504 1-64
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/HeaderFunctionAttributeTests.scala
+  s_4b70c6697bebd0::t_bd6bf193838537 68,76-81,122-123
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/HeaderMemberLayoutTests.scala
+  s_4b70c6697bebd0::t_c48fc80ee3e6f1 1-164
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InitAndFormatRulesTests.scala
+  s_4b70c6697bebd0::t_c024fe0698405d 172-174
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyFindingPassTests.scala
+  s_4b70c6697bebd0::t_a81646e5e4f2b1 385-393
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySemanticsPassTests.scala
+  s_4b70c6697bebd0::t_d2b20f958cdea4 289,316-317
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part10BoundsTests.scala
+  s_4b70c6697bebd0::t_a722fc838c66f4 8-9
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part10LeakTests.scala
+  s_4b70c6697bebd0::t_0756f9c600c597 8-10
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part11Tests.scala
+  s_4b70c6697bebd0::t_95e963a1f17877 669-671,740-741,746
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part13AdvanceTests.scala
+  s_4b70c6697bebd0::t_1b69c86108b06d 1-241
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/types/NamespaceTypeTests.scala
+  s_4b70c6697bebd0::t_923959e80a5c44 389-425
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_4b70c6697bebd0::t_c017198247b87b 20-26
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_4b70c6697bebd0::t_6a162ee58a4a08 161-163,177-180,189,222-243,245-248,507-514,581-583,633-644,656-660,663-668,670,682-689,780-790,802-803,867-871,879,881,886-891,901-907,910,1037-1048,1152-1153,1184-1185,1190-1198,1208,1328-1330,1459-1462,1502-1503,1509,1621-1624,1642-1645,1680-1681,1684-1686,1821-1822,1878-1884
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ContainerInvalidationRules.scala
+  s_4b70c6697bebd0::t_f3a71f09fd93b7 11-15,18-19,33-38,44-56,62-75,109-114,118-119,128-130,133-134,140-142,146-148,150,154-163,165-170,187-206,220-222,226-244,247
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/GuardPass.scala
+  s_4b70c6697bebd0::t_76e58bdad73d8d 99,423-430,451-554
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  s_4b70c6697bebd0::t_4b165ea5732737 125-139,197,330-334
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  s_4b70c6697bebd0::t_7ed2a1d64ae8a2 15-20,81-84,133-139,142-147,183-185,203-204,216-234,255-257,285-290,311-312,330-333
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IntegerWidthPass.scala
+  s_4b70c6697bebd0::t_1ac68372c0935e 231-232
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_4b70c6697bebd0::t_c92590aa59edea 49-56,75-76,83-114,126-127,188-190,193-196,378-379,401,422-529
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_4b70c6697bebd0::t_a92bf04d194447 163-165,179-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a06ab0162bfcb991174f0fd40f4ae8d43ee9f8b8",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

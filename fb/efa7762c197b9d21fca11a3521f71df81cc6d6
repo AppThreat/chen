@@ -1,0 +1,30 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/ReferenceKindPass.scala
+  s_b9f6f98e1c3bda::t_4be365dc0c4c6a 179-181,187
+  s_b9f6f98e1c3bda::t_11525940b81b13 16-19,22
+  s_b9f6f98e1c3bda::t_74977292aa6508 76-78,82,85-86,88-90,93-108,113,116
+  s_b9f6f98e1c3bda::t_abbf66d3250183 109-112,114-115,117-119
+  s_b9f6f98e1c3bda::t_be8a74e6e0234f 20-21,91-92
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/GuardPass.scala
+  s_b9f6f98e1c3bda::t_621212a869cb5e 386-388,412-413
+  s_b9f6f98e1c3bda::t_abbf66d3250183 409-411,414-420
+  s_b9f6f98e1c3bda::t_a1bbea21ee5618 421
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReferenceKindTests.scala
+  s_b9f6f98e1c3bda::t_621212a869cb5e 244-247,249-320
+  s_b9f6f98e1c3bda::t_37d945a67bbc88 248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fbefa7762c197b9d21fca11a3521f71df81cc6d6",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

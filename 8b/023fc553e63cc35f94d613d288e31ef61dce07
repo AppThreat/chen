@@ -1,0 +1,33 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  s_236e880d3ee8e7::t_5e67a973c4d8f7 309-332,401-402
+  h_0926447d100ad2 109-142,393-400
+  s_236e880d3ee8e7::t_358272fd184481 403-404
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_236e880d3ee8e7::t_a1cebd7605361d 1391-1392,1404-1409
+  h_0926447d100ad2 1389-1390,1412-1429
+  s_236e880d3ee8e7::t_fc93320a98d0b1 1430
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTests.scala
+  s_236e880d3ee8e7::t_e030995e63d83d 374,378
+  s_236e880d3ee8e7::t_b73a8d05ddde93 375-377,379-380,570-575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8b023fc553e63cc35f94d613d288e31ef61dce07",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

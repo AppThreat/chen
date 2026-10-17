@@ -1,0 +1,18 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  h_0926447d100ad2 731-736,779-781,785-790
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AnonymousMemberExtentTests.scala
+  h_0926447d100ad2 1-63
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  h_0926447d100ad2 28-43,80-82,89-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7d2e596cfebfeb8324a9fa2914023cd1a86cf5e7",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

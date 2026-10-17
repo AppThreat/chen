@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/HeaderFunctionAttributeTests.scala
+  s_b9f6f98e1c3bda::t_ad84ebf63da073 151
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_b9f6f98e1c3bda::t_ad84ebf63da073 75-78,105
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForStatementsCreator.scala
+  s_b9f6f98e1c3bda::t_ad84ebf63da073 144-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "85db4def1bb9d64b4ffede0008a6d987315fce69",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

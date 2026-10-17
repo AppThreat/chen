@@ -1,0 +1,31 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/DataFlowTests.scala
+  s_b9f6f98e1c3bda::t_7583503118e87f 376,570
+  s_b9f6f98e1c3bda::t_4959db334704e9 1806,1836-1867
+  s_b9f6f98e1c3bda::t_6907d26f025cd8 2165-2166,2168,2170
+  s_b9f6f98e1c3bda::t_18bd373c3ce24e 1787-1799,1802-1803,1805,1807-1820,1827-1835
+  s_b9f6f98e1c3bda::t_e4ed90b6e79f51 1800-1801,1804,1821-1826
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgGenerator.scala
+  s_b9f6f98e1c3bda::t_1e0de3d780408d 6
+  s_b9f6f98e1c3bda::t_b9f262a42c9f16 311-313,321,325,328-329
+  s_b9f6f98e1c3bda::t_a9f831b655642d 8,104-108
+  s_b9f6f98e1c3bda::t_9eee6e955e6c0d 326-327,330-335
+  s_b9f6f98e1c3bda::t_e8ce19d1b1ba86 322,336
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/DefaultSemantics.scala
+  s_b9f6f98e1c3bda::t_a9f831b655642d 172-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b442ccb52b402a3b05ff6ec8b85d4caa8ab2fbd6",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

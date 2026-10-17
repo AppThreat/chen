@@ -1,0 +1,39 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IntegerWidthPass.scala
+  s_236e880d3ee8e7::t_dadc542e7d1a02 87-88,351,353,356
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_236e880d3ee8e7::t_d69debeee54107 134-164
+  s_236e880d3ee8e7::t_120f73d68f6681 8
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_dadc542e7d1a02 4295,4297
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/InitAndFormatRules.scala
+  s_236e880d3ee8e7::t_66e4b7e460f3c5 330
+  s_236e880d3ee8e7::t_e93a7a2a382063 368-370,374
+  s_236e880d3ee8e7::t_bd05213350cff2 193,198-199,201,249-251,254-257,261,263-268,282,311-313,315-329,331-341,367,373,376-379,381-391,475,489,511-524,527-529,531-533,538-539,552,561-562
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_236e880d3ee8e7::t_aabbe30c366b01 66-68
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InitAndFormatRulesTests.scala
+  s_236e880d3ee8e7::t_a89996a91feba6 321-326,333-338,351-358
+  s_236e880d3ee8e7::t_d247a506880eba 472-473,475,480-482
+  s_236e880d3ee8e7::t_e93a7a2a382063 327-332,471,474
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTests.scala
+  s_236e880d3ee8e7::t_25707f2a645ca5 480
+  s_236e880d3ee8e7::t_dc561d3a607d90 336-340,346-350
+  s_236e880d3ee8e7::t_940e865297775f 459-460,474,476-478
+  s_236e880d3ee8e7::t_e93a7a2a382063 341-345,475,479
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7ca256f1b38b9fbf42167caf4a307e3fa82abe50",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}

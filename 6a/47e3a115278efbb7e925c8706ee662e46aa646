@@ -1,0 +1,67 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsDomRecognizerTest.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 39,79-81,113-121,124,251-253
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/LanguageScopedSemanticsTests.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 165-171
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/PackageAttribution.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 18-19,60-63,71-72,74,87,89,114-116,119,134-138,147
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactiveBridge.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 11-12,21-22,62-71,85-86,101-106,111-122,132-133,156-158,162-164,173-174
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/EmberRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 24-26,52-60
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 49,190,270-275,325-327,356-357,392-394,397-399,454-458
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 73,284,298
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 10-11,62,160-162,166-167,173,181-182,189-190,202-204,206-208,225-226,238-239,250,309,335,341-347,354-356
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JQueryRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 16-17,73-76,82-85,106-108,116,128-130,137-150
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AstroRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 13-17,31-40,51-52,66-67
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 31,257-258,297-310,314,331-332,343-344,383,385-386,470-472,483,494,498-500,522-523,544-548,570,581-583,588-589,610-617,632-633,725-729,742-744,754,779-780,814-815,817
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NitroRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 22-23,90-91,139-147
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 41-42,416-417,433-434
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsTaintBridgesTest.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 9-11,53-58,76-77,121-123
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 22-24,29-31,33-34,125-127,130-133,140-157,175-176,181-183,192-195,225,227-228,232-233,310-316,319-332,368-369,392-393,401-402,414-418,420-421,437-441,463-464,509-512
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/VueRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 10-11,25-26,41,66-67,79-80,82,85-97,102-104,116-117,126-127,138-140,147-149,178-179
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/SvelteRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 38-40,51-59,102,110-117
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgGenerator.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 48,116-117,222-224
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 291-295
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NodeRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 17-18,159-160,164,189-191,194,205-219,224-225,242-243,282-290,294,296-297,300-314,322,327-328,332
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgSharedCache.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 67-72
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 32-33,58-60,85-90,104,118-121,126-138,141-145,155-166,214-217,231-240,246-253,269-273,302-305,320-321,331-335,349,372-378,382,389-393,396,404-405,411-415,444-446,509-511,516-518,521-523,533,535-542,546-548,557-559,563-568,577,604-615
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/MemberTaintBridge.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 14-16,53-61,79-81,95,147-157,167-168,170-171,173-177
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 37,43-45,86-87,96-98
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/LitRecognizer.scala
+  s_d1bd8c782538f7::t_6a2755ffe9a725 47-57,59,65-79,82-83,96-98,102-108,111-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6a47e3a115278efbb7e925c8706ee662e46aa646",
+  "prompts": {},
+  "sessions": {
+    "s_d1bd8c782538f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6debb108-9d35-4adc-be40-7d01dd8e9337",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

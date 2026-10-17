@@ -1,0 +1,25 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/CppObjectFlowTests.scala
+  s_b9f6f98e1c3bda::t_aa7d56ef99b972 90-121
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForPrimitivesCreator.scala
+  s_b9f6f98e1c3bda::t_8878bae7e95873 21-24,27,29-40,49-51
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/callgraph/FunctionPointerCallLinker.scala
+  s_b9f6f98e1c3bda::t_aa7d56ef99b972 6,97-103,106-110
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_b9f6f98e1c3bda::t_8878bae7e95873 65-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5146ff54fd6a078ba40ee3ba49cc37b65622e9db",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

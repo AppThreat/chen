@@ -1,0 +1,42 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_d1bd8c782538f7::t_91b84856d544cf 230
+  s_d1bd8c782538f7::t_dce84db1683f9a 1-229,231-329
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactiveBridge.scala
+  s_d1bd8c782538f7::t_b93569c37a2f6f 76-78,80
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsTaintBridgesTest.scala
+  s_d1bd8c782538f7::t_dbe86c01ff3fb7 1-119
+docs/lessons/lesson-4-jssrc2cpg.md
+  s_d1bd8c782538f7::t_f295ff36f08072 250-298,300-303,305,310-319
+  s_d1bd8c782538f7::t_a647285f302494 246-248
+  s_d1bd8c782538f7::t_78d2d44edf6d96 249
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsDomRecognizerTest.scala
+  s_d1bd8c782538f7::t_f3ebfc6721af1c 1-248
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_d1bd8c782538f7::t_559a70dcae3403 280-287
+  s_d1bd8c782538f7::t_bc897b3c534f96 27,288-293
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForFunctionsCreator.scala
+  s_d1bd8c782538f7::t_559a70dcae3403 540,548
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/LanguageScopedSemanticsTests.scala
+  s_d1bd8c782538f7::t_fa27a6fd9626ad 5,156,162-171
+  s_d1bd8c782538f7::t_8191ef983a14f7 172-173
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_d1bd8c782538f7::t_13c082a9c2d3b6 287-288,293-295
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_d1bd8c782538f7::t_1e2c45b5136585 411-419,438-439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "40480ffbf2d8955e124c1cb9a6af41e6dc41ec00",
+  "prompts": {},
+  "sessions": {
+    "s_d1bd8c782538f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6debb108-9d35-4adc-be40-7d01dd8e9337",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

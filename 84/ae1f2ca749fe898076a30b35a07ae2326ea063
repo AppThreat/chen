@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/MacroCalls.scala
+  s_236e880d3ee8e7::t_b03bd3ffc6154d 78-80,82,85-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "84ae1f2ca749fe898076a30b35a07ae2326ea063",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

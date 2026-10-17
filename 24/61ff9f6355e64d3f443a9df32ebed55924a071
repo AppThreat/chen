@@ -1,0 +1,19 @@
+build.sbt
+  s_63c1cb61808304::t_a3374a22211a00 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2461ff9f6355e64d3f443a9df32ebed55924a071",
+  "prompts": {},
+  "sessions": {
+    "s_63c1cb61808304": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1ced2510-d837-4ffd-b689-82e442b358ec",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

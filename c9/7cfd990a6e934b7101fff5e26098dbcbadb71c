@@ -1,0 +1,21 @@
+docs/lessons/lesson-1-c2cpg.md
+  s_b9f6f98e1c3bda::t_fecdc65eff2cb3 19-29,60-63,74-79,84,86,88,90-91,110,114,117-118,122,127,131-134,213-226,232-233
+platform/frontends/c2cpg/lib/README.md
+  s_b9f6f98e1c3bda::t_fecdc65eff2cb3 3-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c97cfd990a6e934b7101fff5e26098dbcbadb71c",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

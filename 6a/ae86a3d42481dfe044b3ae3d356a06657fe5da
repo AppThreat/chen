@@ -1,0 +1,28 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  s_873964dd1cc1b3::t_d2068953a819ca 93-108
+  s_873964dd1cc1b3::t_3c219c87cc8bda 9
+  s_873964dd1cc1b3::t_cda2c9101c8e80 228-231
+  s_873964dd1cc1b3::t_968ac7e70c08d7 218-223,225-227,232-245
+  s_873964dd1cc1b3::t_258b1ea072f27c 224
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_873964dd1cc1b3::t_f04ab34eb53c90 202-209,213-227
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_873964dd1cc1b3::t_8f784caa9dede5 155-162
+  s_873964dd1cc1b3::t_8df45da218616c 153-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6aae86a3d42481dfe044b3ae3d356a06657fe5da",
+  "prompts": {},
+  "sessions": {
+    "s_873964dd1cc1b3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "be314a9f-ba72-483c-b01a-a8381a03fcff",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

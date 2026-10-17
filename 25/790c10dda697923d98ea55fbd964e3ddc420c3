@@ -1,0 +1,46 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_968be6984e88f3::t_af826e210e7345 832
+  s_968be6984e88f3::t_6344c07e1184ac 233
+  s_968be6984e88f3::t_a64ed6250e91c3 830-831,833-835
+  s_968be6984e88f3::t_74ada444de7a97 219-221,226-228,808-810,812-815,817-819,840-845,1072-1077,1079-1080
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/LanguageScopedSemanticsTests.scala
+  s_968be6984e88f3::t_a64ed6250e91c3 76-77
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/ModernJavaSyntaxTests.scala
+  s_968be6984e88f3::t_7b4bd762330108 68-83
+  s_968be6984e88f3::t_b3bd62c8287bfa 30-67,84-102
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/scope/Scope.scala
+  s_968be6984e88f3::t_a64ed6250e91c3 166-170,172-175
+  s_968be6984e88f3::t_94729213685acb 161-165,171,176-189
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_968be6984e88f3::t_88c1591061ac26 2107-2112,2114-2129
+  s_968be6984e88f3::t_e37b144759ffcf 664-669
+  s_968be6984e88f3::t_fd3259d994fa97 3034-3037
+  s_968be6984e88f3::t_5e390c8969f1c3 3660-3664
+  s_968be6984e88f3::t_b2e860c985bd77 1330-1337,1339-1342
+  s_968be6984e88f3::t_1348b4c85583ee 254,256-261,652,1039-1044,1048-1055,1346-1356,1359-1365,1922-1927,2209-2213,2274-2275,2988-2993,2998-3001,3015,3025-3031
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/DefaultSemantics.scala
+  s_968be6984e88f3::t_a64ed6250e91c3 278-279
+  s_968be6984e88f3::t_f19b8d11534238 268-270,274-277
+  s_968be6984e88f3::t_fd0899e9d14898 282-294
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/JavaFrameworkTagsTest.scala
+  s_968be6984e88f3::t_f513098c2ce466 576-601
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/JavaFrameworks.scala
+  s_968be6984e88f3::t_a64ed6250e91c3 10-12,29-30,91-92,294-295
+  s_968be6984e88f3::t_9f1f672b122740 7-9,24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "25790c10dda697923d98ea55fbd964e3ddc420c3",
+  "prompts": {},
+  "sessions": {
+    "s_968be6984e88f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bc8e2f4-852a-48dc-9b75-cf5608cbf8dd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

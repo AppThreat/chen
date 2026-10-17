@@ -1,0 +1,29 @@
+semanticcpg/src/main/scala/io/shiftleft/semanticcpg/language/types/propertyaccessors/ModifierAccessors.scala
+  s_968be6984e88f3::t_d820608e8a59bf 31-34
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/MemberTests.scala
+  s_968be6984e88f3::t_8e0eb869a29edd 446-475,494-498
+  s_968be6984e88f3::t_d401e4a1bafd03 476-493
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_968be6984e88f3::t_4206efe8968dcc 1035
+  s_968be6984e88f3::t_8c3adbb8e9ca35 1034
+  s_968be6984e88f3::t_09c9a02bb35bf4 576-582
+  s_968be6984e88f3::t_be9bf7ea890fbc 1017-1018
+  s_968be6984e88f3::t_b57bfb2e8ff3ea 1019-1021
+  s_968be6984e88f3::t_8d18753ca84a39 1395-1406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2708eb65615aad60ac61021fdcfb40ea756cc4ad",
+  "prompts": {},
+  "sessions": {
+    "s_968be6984e88f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0bc8e2f4-852a-48dc-9b75-cf5608cbf8dd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

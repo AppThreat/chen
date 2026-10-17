@@ -1,0 +1,47 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CdtQuery.scala
+  s_b9f6f98e1c3bda::t_b46ff45cfe5ca3 1-17
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/datastructures/Scope.scala
+  s_b9f6f98e1c3bda::t_755a5d4302bc33 21-27
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  s_b9f6f98e1c3bda::t_24de004fa89796 67,74,114,140-141,144,148,152,295,531,803,806,819,832,847,861,882,957-973,998
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/SemanticFailureTests.scala
+  s_b9f6f98e1c3bda::t_1c962bbd18bdfd 1-92
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_b9f6f98e1c3bda::t_272766f44d7055 37-39,65,146,189,299,302-304,306-308,351-354,871,874-875
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/astcreation/OverflowRecoveryTests.scala
+  s_b9f6f98e1c3bda::t_bb219f459cbaf8 1-56
+docs/lessons/lesson-1-c2cpg.md
+  s_b9f6f98e1c3bda::t_1d06f57e5913dc 229-238
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_b9f6f98e1c3bda::t_30a3b92a2029a0 118
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForPrimitivesCreator.scala
+  s_b9f6f98e1c3bda::t_8e473b1c3fff2c 85,121
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForStatementsCreator.scala
+  s_b9f6f98e1c3bda::t_4463190f0e6d82 178-180,220
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForTypesCreator.scala
+  s_b9f6f98e1c3bda::t_042fc7d2327d1a 141,292-296,314,394-396,478,519
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/ConstantValues.scala
+  s_b9f6f98e1c3bda::t_9e26468152071d 83,121,142,159,162
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  s_b9f6f98e1c3bda::t_9f73ba4a333912 63,148,156-159,161-168,254,261,263,272,274,311-312,331-332
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppScopeExits.scala
+  s_b9f6f98e1c3bda::t_85d55d70c1d911 50,52,73,189,255,270,275
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/MacroHandler.scala
+  s_b9f6f98e1c3bda::t_acce425cc83077 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f41224ff4d134bb6b38b1d6e3b85105788d1992c",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

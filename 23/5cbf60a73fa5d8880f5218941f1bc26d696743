@@ -1,0 +1,30 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/IndexRangeTests.scala
+  s_4b70c6697bebd0::t_6c2205c318dd1d 1-82,85-159,181-231,235-256
+  s_4b70c6697bebd0::t_51180945f5ca74 83-84,160-180,232-234
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_4b70c6697bebd0::t_67f83868c488e4 682,685-740
+  s_4b70c6697bebd0::t_2385242f2129bf 834
+  s_4b70c6697bebd0::t_8f5d7610d4c33f 806-808,811-814
+  s_4b70c6697bebd0::t_e44bd7cfd9341a 751-805,809-810,815-833,835,857,883,886,891,905,907
+  s_4b70c6697bebd0::t_8498bc2abbb42a 649-654,741-744,836-856,858-882,884-885,887-890,892-904,906,908-913
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  s_4b70c6697bebd0::t_679f2fb2070d4b 1-50,52-172
+  s_4b70c6697bebd0::t_7923ff04ed9b86 51
+  s_4b70c6697bebd0::t_296c22da9d5c39 173-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "235cbf60a73fa5d8880f5218941f1bc26d696743",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

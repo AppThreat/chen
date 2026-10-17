@@ -1,0 +1,23 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_f2e49f4a6af1f3 4503-4504
+  s_236e880d3ee8e7::t_3edacba9621fba 4501-4502,4505-4530
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyFindingPassTests.scala
+  s_236e880d3ee8e7::t_2cf14bd75ad236 71-90,414-416
+  s_236e880d3ee8e7::t_dc0c0206535182 417-418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26fd84196ade5197939f9491b69e48c2fc788732",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}

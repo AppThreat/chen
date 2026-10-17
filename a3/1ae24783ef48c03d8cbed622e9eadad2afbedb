@@ -1,0 +1,24 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyIntegerRuleTests.scala
+  s_236e880d3ee8e7::t_d23538103d7311 92-104,228-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a31ae24783ef48c03d8cbed622e9eadad2afbedb",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

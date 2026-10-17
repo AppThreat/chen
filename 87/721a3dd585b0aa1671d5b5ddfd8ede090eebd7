@@ -1,0 +1,42 @@
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/testfixtures/CfgTestFixture.scala
+  s_4b70c6697bebd0::t_4701f0934f9e6a 3
+platform/frontends/pysrc2cpg/build.sbt
+  s_4b70c6697bebd0::t_cf207ea91e1673 39-41
+build.sbt
+  s_4b70c6697bebd0::t_cf207ea91e1673 94-95
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/AccessPathUsageTests.scala
+  s_4b70c6697bebd0::t_cf207ea91e1673 3,24
+  s_4b70c6697bebd0::t_8b63ac3587613e 25-26
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyFindingPassTests.scala
+  s_4b70c6697bebd0::t_cf207ea91e1673 337
+platform/frontends/javasrc2cpg/build.sbt
+  s_4b70c6697bebd0::t_cf207ea91e1673 61-63
+semanticcpg/src/main/scala/io/shiftleft/semanticcpg/testing/DummyNode.scala
+  s_4b70c6697bebd0::t_cf207ea91e1673 12-13,16-17,39-50
+  s_4b70c6697bebd0::t_5f694eff5af4e1 51
+project/ScaladocNoWarn.scala
+  s_4b70c6697bebd0::t_ed18611311a04a 3-7,9
+  s_4b70c6697bebd0::t_b58133f295f1c4 1-2,8,10-11
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ExtentPassTests.scala
+  s_4b70c6697bebd0::t_cf207ea91e1673 256
+semanticcpg/src/test/scala/io/shiftleft/semanticcpg/accesspath/AccessPathTests.scala
+  s_4b70c6697bebd0::t_e4359b05c7ed14 3
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/GuardPassTests.scala
+  s_4b70c6697bebd0::t_cf207ea91e1673 203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "87721a3dd585b0aa1671d5b5ddfd8ede090eebd7",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

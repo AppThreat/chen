@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstCreatorHelper.scala
+  h_0926447d100ad2 443-444,747-759,762-766
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/ConstantValues.scala
+  h_0926447d100ad2 157-160,163-175
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/TypeofAndSuffixLiteralTests.scala
+  h_0926447d100ad2 60-69,76-81,85-87,89-91,93
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  h_0926447d100ad2 928-930
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/ModernStatementShapesTests.scala
+  h_0926447d100ad2 12-14,24,26-32,34-39,41-43,48,50-55,57-61,68,70-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9ac015e4f8b2a72dc4cb6bc3a56a6236d3578a53",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

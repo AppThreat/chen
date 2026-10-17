@@ -1,0 +1,30 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/Part12ReviewTests.scala
+  s_4b70c6697bebd0::t_224116a3ee4f3c 1-7,12-114
+  s_4b70c6697bebd0::t_8708e92faf307b 8-11
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_4b70c6697bebd0::t_53ea41e93282a1 551-561
+  s_4b70c6697bebd0::t_3d7c622b144f18 358-371,376-377
+  s_4b70c6697bebd0::t_7827af4c468741 783
+  s_4b70c6697bebd0::t_8708e92faf307b 381-387,465-466,472-473,562-569,604-613,624,627,633-634,647
+  s_4b70c6697bebd0::t_49ff3342b68298 729-735,777-782,784-786,794
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_4b70c6697bebd0::t_7827af4c468741 565
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_4b70c6697bebd0::t_47821595993c08 1151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "48afa39c9f48abcc53f71b929464415aa74bb94b",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

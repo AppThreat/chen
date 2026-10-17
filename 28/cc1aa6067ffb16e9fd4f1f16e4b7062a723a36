@@ -1,0 +1,20 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTests.scala
+  s_236e880d3ee8e7::t_e030995e63d83d 374,378
+  s_236e880d3ee8e7::t_b73a8d05ddde93 375-377,379-380,570-575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "28cc1aa6067ffb16e9fd4f1f16e4b7062a723a36",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

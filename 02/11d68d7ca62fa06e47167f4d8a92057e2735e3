@@ -1,0 +1,16 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/TypeNames.scala
+  h_0926447d100ad2 63-73
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/TypeNamesTests.scala
+  h_0926447d100ad2 30-33,47-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0211d68d7ca62fa06e47167f4d8a92057e2735e3",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

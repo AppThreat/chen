@@ -1,0 +1,75 @@
+.scalafmt.conf
+  s_f0dc77cd7bedb9::t_79eaffd311266f 20,23,26
+build.sbt
+  s_f0dc77cd7bedb9::t_4b24bbe105e9c0 4,8-10,24,68,70-72
+dataflowengineoss/build.sbt
+  s_f0dc77cd7bedb9::t_e82002c0378c93 3,14
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/TaskCreator.scala
+  s_f0dc77cd7bedb9::t_d442e4a2fb877d 330
+platform/build.sbt
+  s_f0dc77cd7bedb9::t_b6ce3f71edc253 3,13-15,27-30,32,36-53,55,64,66,69,81,83-84,103-120,125-130
+platform/frontends/c2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_64cdc69de8e40a 3
+platform/frontends/edg2atom/build.sbt
+  s_f0dc77cd7bedb9::t_0acf3e69ee98b2 3
+platform/frontends/javasrc2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_129108f1d63d77 3
+platform/frontends/jimple2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_3cf7d3f902f135 3
+platform/frontends/jssrc2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_717dbd4a695ba6 8
+platform/frontends/php2atom/build.sbt
+  s_f0dc77cd7bedb9::t_12c9617ce1b9a3 3
+platform/frontends/pysrc2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_2fb73a319cce51 3,15,19-28
+platform/frontends/ruby2atom/build.sbt
+  s_f0dc77cd7bedb9::t_8026c7cf0f594e 3
+platform/frontends/x2cpg/build.sbt
+  s_f0dc77cd7bedb9::t_1b00d109ac09a6 3
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_f0dc77cd7bedb9::t_d82f03d09808af 762
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsPathAliases.scala
+  s_f0dc77cd7bedb9::t_de93b82e9cb19f 49
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_f0dc77cd7bedb9::t_af0c6396babf66 20
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_f0dc77cd7bedb9::t_a3e62b4912e381 275,664,672
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/MethodDecoratorPassTests.scala
+  s_f0dc77cd7bedb9::t_deb0c5dc50ed98 18-23
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/NamespaceCreatorTests.scala
+  s_f0dc77cd7bedb9::t_35cb4472516f85 15-17
+project/Antlr4.scala
+  s_f0dc77cd7bedb9::t_49b430f463430a 1-61
+project/FileUtils.scala
+  s_f0dc77cd7bedb9::t_78d329d8a2c9c2 3
+project/GithubPackages.scala
+  s_f0dc77cd7bedb9::t_323ab92cef756c 1-28
+project/Projects.scala
+  s_f0dc77cd7bedb9::t_ee221365676412 6-9
+project/Versions.scala
+  s_f0dc77cd7bedb9::t_d89b2d979e27df 24
+project/build.properties
+  s_f0dc77cd7bedb9::t_7a5e13bc0239a5 1
+project/meta-build.sbt
+  s_f0dc77cd7bedb9::t_6cbc310db11210 7-10
+project/plugins.sbt
+  s_f0dc77cd7bedb9::t_02eea4e344d683 1-6
+semanticcpg/src/main/scala/io/shiftleft/semanticcpg/language/NodeTypeStarters.scala
+  s_f0dc77cd7bedb9::t_42eb6226cd55e6 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "51c6c36e3c39a8bc4719d808ece087bbc9c913f9",
+  "prompts": {},
+  "sessions": {
+    "s_f0dc77cd7bedb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05a70e3b-3b4f-4d77-a7f8-10fecf1fa02a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

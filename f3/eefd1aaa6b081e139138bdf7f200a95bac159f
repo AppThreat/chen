@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/datastructures/CGlobal.scala
+  h_0926447d100ad2 26-38,66,80-86
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/TypeDeclNodePass.scala
+  h_0926447d100ad2 21-22,79-81
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  h_0926447d100ad2 72-74
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  h_0926447d100ad2 86,90-110
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/ResignThroughHeaderTypedefTests.scala
+  h_0926447d100ad2 1-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3eefd1aaa6b081e139138bdf7f200a95bac159f",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

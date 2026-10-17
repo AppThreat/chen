@@ -1,0 +1,58 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/ReachingDefProblem.scala
+  s_b9f6f98e1c3bda::t_42a1d1a0ae7db6 443-445
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/MethodParameterTests.scala
+  s_b9f6f98e1c3bda::t_c787ab0e4e784f 34-47
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/layers/dataflows/OssDataFlow.scala
+  s_b9f6f98e1c3bda::t_0df4fa6d810b90 62-66
+  s_b9f6f98e1c3bda::t_a8b2c910aa0556 7,61
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/linking/StitchPass.scala
+  s_b9f6f98e1c3bda::t_aa9c11ecfad8b4 85
+  s_b9f6f98e1c3bda::t_18821b800edaed 5
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/DataFlowTests.scala
+  s_b9f6f98e1c3bda::t_dc2843d36d0a5c 1868-1915,1920-1926,1928-1938
+  s_b9f6f98e1c3bda::t_a295af22b9accb 1916-1919
+  s_b9f6f98e1c3bda::t_0df4fa6d810b90 1927
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_b9f6f98e1c3bda::t_69500378f7fd9d 465,468,475
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/callgraph/FunctionPointerCallLinker.scala
+  s_b9f6f98e1c3bda::t_0df4fa6d810b90 21-22,55-60,70-77,79-82,86-92,114-116,134-135
+  s_b9f6f98e1c3bda::t_a42b4152322d06 1-15,17-20,23-54,61-65,83-85,93-113,117-123,131-133,136-138,141-152
+  s_b9f6f98e1c3bda::t_aa9c11ecfad8b4 16,66-69
+  s_b9f6f98e1c3bda::t_e865e025d52848 78,124-130,139-140
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/GlobalVariableDefUsePass.scala
+  s_b9f6f98e1c3bda::t_13643b9210507a 5,64-67,72,75-77
+  s_b9f6f98e1c3bda::t_a8b2c910aa0556 60-61
+  s_b9f6f98e1c3bda::t_3c947690f97e9a 1-4,6-12,15-18,21-24,27,31-37,51,53-59,62-63,68-70,73-74,78-81
+  s_b9f6f98e1c3bda::t_0df4fa6d810b90 13-14,19-20,38-50,52,71
+  s_b9f6f98e1c3bda::t_24ca24e7f3452c 25-26
+  s_b9f6f98e1c3bda::t_afaae26a8dddab 28-30
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_b9f6f98e1c3bda::t_3946a2572d18e5 65-66
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/DdgGenerator.scala
+  s_b9f6f98e1c3bda::t_0365676e9fd3ea 325,330,333-341
+  s_b9f6f98e1c3bda::t_d29ef7e7587e72 273-274,280-281
+  s_b9f6f98e1c3bda::t_0df4fa6d810b90 326-329
+  s_b9f6f98e1c3bda::t_75a9cc69c55036 342
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/layers/CallGraph.scala
+  s_b9f6f98e1c3bda::t_aa9c11ecfad8b4 5-10,19-24
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/dataflow/DataflowTest.scala
+  s_b9f6f98e1c3bda::t_54414cb73d39fd 119,121
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/io/dotgenerator/DotDdgGeneratorTests.scala
+  s_b9f6f98e1c3bda::t_460b5dedec837a 26-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0e850570a496a8ff21b1951f2f9526d7ac98f2f5",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
