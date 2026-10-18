@@ -1,0 +1,33 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_6c3ada1bcf9b70 5132-5169
+  s_236e880d3ee8e7::t_13fec0bed06d7b 89-92,4851-4861
+  s_236e880d3ee8e7::t_04ff517ad37812 4862
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/UndefinedOperationRules.scala
+  s_236e880d3ee8e7::t_b79944cc0c0612 349-357,471-473,476,506-540
+  s_236e880d3ee8e7::t_4a23e2ba2f55db 1-284,287-348,358-401,410,414-460,462-470,474-475,477-479,483-484,500-505,541-565
+  s_236e880d3ee8e7::t_f47448bdca2e16 285-286
+  s_236e880d3ee8e7::t_a358731f059d99 461
+  s_236e880d3ee8e7::t_13fec0bed06d7b 480-482,485-499
+  s_236e880d3ee8e7::t_17b297e9780e03 402-409,411-413
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_236e880d3ee8e7::t_134e6b1fbe86d0 174-179,237-263
+  s_236e880d3ee8e7::t_811f6feb5a7e87 264
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UndefinedOperationRulesTests.scala
+  s_236e880d3ee8e7::t_5d129e008c3465 1-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "54a3be3199d0880ecc4c1c53e745fa681c8869b1",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
