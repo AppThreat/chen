@@ -1,0 +1,35 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_236e880d3ee8e7::t_e15dedc257e00a 186-196
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_236e880d3ee8e7::t_e15dedc257e00a 56-61
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/LifetimeRules.scala
+  s_236e880d3ee8e7::t_56ee056e116159 45-62,69-113
+  s_236e880d3ee8e7::t_cc3e2a925b8ad3 63-68
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/TemporaryLifetimeTests.scala
+  s_236e880d3ee8e7::t_79d081c5570875 1-87
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_236e880d3ee8e7::t_5a8c9508992ed7 12,14,70-74,76,79-131
+  s_236e880d3ee8e7::t_83a9b735868347 64,75,77-78
+  s_236e880d3ee8e7::t_bd1a87a2445abd 132
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_56ee056e116159 95
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectLifetimesTests.scala
+  s_236e880d3ee8e7::t_79d081c5570875 127-142,258-268
+  s_236e880d3ee8e7::t_a27f0d0a54a9a9 269-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "651703e2518a910a32f39fb47f8d9d2b9b95533e",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
