@@ -1,0 +1,29 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_236e880d3ee8e7::t_c1fc0e155df9c5 332-334
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_236e880d3ee8e7::t_cf7b36cbfa1f81 166-175,209-212,225-227
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/controlflow/cfgcreation/CfgCreator.scala
+  s_236e880d3ee8e7::t_091c965f98fac1 125-126,274-288,672,676-699,701-702,706-723,728-729
+  s_236e880d3ee8e7::t_cf7b36cbfa1f81 673-675,700,703-705,724-727
+  s_236e880d3ee8e7::t_50a9e2e252f2f9 730
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NoReturnPathTests.scala
+  s_236e880d3ee8e7::t_e3e646b04cedf8 90-95
+  s_236e880d3ee8e7::t_2c69ddcf7208e9 1-88,96-113
+  s_236e880d3ee8e7::t_edd3b2a68b35d8 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb66c29e6c08abf452cb1dc546c9f3bed9cd1552",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
