@@ -1,0 +1,38 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UseAfterScopeTests.scala
+  s_236e880d3ee8e7::t_91b5bcda6e2da4 72-77,106-110
+  s_236e880d3ee8e7::t_4b138b9eeb848e 111
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/LifetimeRules.scala
+  s_236e880d3ee8e7::t_a302454cf2d510 250-251
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  s_236e880d3ee8e7::t_91b5bcda6e2da4 145-152,248
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_236e880d3ee8e7::t_a302454cf2d510 1975-1980
+  s_236e880d3ee8e7::t_ea7c3f0fb8a7c8 720
+  s_236e880d3ee8e7::t_3a60dcf9e1d5e0 1954-1955,1957,1960-1965,1970-1974,1981
+  s_236e880d3ee8e7::t_d4da59dc46555b 1982
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_236e880d3ee8e7::t_3a60dcf9e1d5e0 161-164,179-182
+  s_236e880d3ee8e7::t_ad95a9f469a29a 183
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UndefinedOperationRulesTests.scala
+  s_236e880d3ee8e7::t_91b5bcda6e2da4 67-81,286,322
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ObjectAccessRules.scala
+  s_236e880d3ee8e7::t_6c9cbaebb48670 44-56
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/UndefinedOperationRules.scala
+  s_236e880d3ee8e7::t_c6d6d0966ce73f 71-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8c76a0cfa191714c0506f0351b7c4142735580de",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
