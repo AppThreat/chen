@@ -144,6 +144,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
     definedMethods.foreach(m => analyseMethod(m, roles, effectsByName, record))
     failurePathFieldDoubleFrees(definedMethods, roles, record)
+    owningClassFacts(record)
 
     OverlayFacts.emitTags(
       dstGraph,
@@ -249,6 +250,126 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         }
     }
   end failurePathFieldDoubleFrees
+
+  /** The class-ownership facts no single method can see, across the constructor, the destructor and
+    * the copy that shares a member's storage:
+    *   - a constructor's ARRAY new into a member that the destructor releases with a SCALAR delete:
+    *     the forms do not match ([expr.new], [expr.delete]) - every object of the class is released
+    *     wrongly, and the report is the destructor's delete.
+    *   - a copy-initialised pair of a class whose destructor frees a member: the copy shared the
+    *     member's storage, so the two scope-exit destructor calls free it twice. The report is the
+    *     copy.
+    */
+  private def owningClassFacts(record: (StoredNode, String, String) => Unit): Unit =
+    def memberOfLhs(lhs: AstNode): Option[Member] = lhs match
+      case c: Call       => OverlayFacts.memberRefOf(atom, c)
+      case i: Identifier => OverlayFacts.implicitMemberOf(atom, i)
+      case _             => None
+    // the member a delete or new's enclosing assignment writes, by the delete/new call. A
+    // field the resolver will not carry (`this->p`) names the member of the constructor's own
+    // class by its field identifier
+    def memberThrough(call: Call, owner: Option[TypeDecl] = None): Option[Member] =
+        call._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
+            .flatMap(_.argumentOption(1)).flatMap { lhs =>
+                memberOfLhs(lhs).orElse(owner.flatMap(td =>
+                    fieldNamed(lhs).flatMap(n => td.member.nameExact(n).headOption)
+                ))
+            }
+
+    def fieldNamed(lhs: AstNode): Option[String] = lhs match
+      case c: Call
+          if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
+          c.argument.l.collectFirst {
+              case f: io.shiftleft.codepropertygraph.generated.nodes.FieldIdentifier =>
+                  f.canonicalName
+          }
+      case _ => None
+    def isArrayForm(c: Call): Boolean =
+        c.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+            .contains(io.appthreat.x2cpg.Defines.AllocFormArray)
+    def isScalarDelete(c: Call): Boolean =
+        c.name == "<operator>.delete" && !isArrayForm(c)
+
+    val classDecls = atom.typeDecl.l.filter(td => td.method.l.exists(_.block.astChildren.nonEmpty))
+    // the classes whose destructor frees one of their own members
+    val freeingClasses: Map[TypeDecl, List[Call]] = classDecls.flatMap { td =>
+      val dtor = td.method.l.find(m => m.name.startsWith("~") && m.block.astChildren.nonEmpty)
+      dtor.toList.flatMap { d =>
+        val deletes = d.ast.isCall.name("<operator>.delete").l
+            .filter(c => c.argumentOption(1).isDefined)
+        Option.when(deletes.exists(c =>
+            c.argumentOption(1).flatMap(memberOfLhs).isDefined ||
+                memberThrough(c).isDefined
+        ))(td -> deletes)
+      }
+    }.toMap
+
+    // 1. the form mismatch: the constructor's array new into a member the destructor's scalar
+    //    delete releases
+    freeingClasses.foreach { case (td, deletes) =>
+        val ctor = td.method.l.find(m => m.name == td.name && m.block.astChildren.nonEmpty)
+        val arrayNewMembers = ctor.toList.flatMap { c =>
+            c.ast.isCall.name("<operator>.new").l.filter(isArrayForm).flatMap(memberThrough(
+              _,
+              Some(td)
+            ))
+        }.toSet
+        if arrayNewMembers.nonEmpty then
+          deletes.foreach { del =>
+              if isScalarDelete(del) then
+                val released =
+                    del.argumentOption(1).flatMap(memberOfLhs).orElse(memberThrough(del, Some(td)))
+                released.filter(arrayNewMembers.contains).foreach { _ =>
+                    del.argumentOption(1).collect { case e: Expression => e }
+                        .foreach(e => record(e, TagClassFormMismatch, "new-array-delete"))
+                }
+          }
+    }
+
+    // 2. the copy that shares a freeing member: both objects' scope-exit destructors free it
+    // a class that declares its own copy constructor or copy assignment decides what a copy
+    // shares (a deep copy shares nothing); only the implicit member-wise copy shares the member
+    def declaresCopy(td: TypeDecl): Boolean =
+        td.method.l.exists { m =>
+            (m.name == td.name || m.name == "operator=") &&
+            m.parameter.l.filterNot(_.name == "this").exists(p =>
+                p.typeFullName.contains(td.name) && p.typeFullName.trim.endsWith("&")
+            )
+        }
+    val classNames = freeingClasses.keys.filterNot(declaresCopy).map(_.name).toSet
+    if classNames.nonEmpty then
+      val byMethod = mutable.HashMap.empty[Method, List[Call]]
+      def dtorCallNames(m: Method): List[Call] =
+          byMethod.getOrElseUpdate(
+            m,
+            m.ast.isCall.l.filter(c =>
+                c.name.startsWith("~") && c.argument.l.exists(_.isInstanceOf[Identifier])
+            )
+          )
+      atom.method.filterNot(_.isExternal).l.foreach { m =>
+          m.ast.isCall.nameExact("<operator>.assignment").l.foreach { copy =>
+            val sides =
+                for
+                  lhs <- copy.argumentOption(1).collect { case i: Identifier => i }
+                  rhs <- copy.argumentOption(2).collect { case i: Identifier => i }
+                  lhsType = String
+                      .valueOf(lhs.property("TYPE_FULL_NAME"))
+                      .trim
+                  rhsType = String
+                      .valueOf(rhs.property("TYPE_FULL_NAME"))
+                      .trim
+                  if classNames.contains(lhsType) && lhsType == rhsType
+                yield (lhs, rhs)
+            sides.foreach { case (lhs, rhs) =>
+                val destroyed = dtorCallNames(m).flatMap(_.argument.l)
+                    .collect { case i: Identifier => i.name }.toSet
+                if destroyed.contains(lhs.name) && destroyed.contains(rhs.name) then
+                  record(copy, TagState, ValueSummaryFreed)
+            }
+          }
+      }
+    end if
+  end owningClassFacts
 
   /** The `derefs-param:<i>` conclusions, per METHOD NAME (collapsed across same-named methods the
     * way every effect summary is): a method reads through parameter i on every path. Two phases,
@@ -410,6 +531,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 case _ => None
               if !viaPointee.exists(nulledThrough.contains) then
                 paramOf(freed).foreach(idx => effects += s"effect:frees-param:$idx")
+              // a free THROUGH the pointee the method then nulls (free(*p); *p = NULL) still
+              // freed the caller's object: the caller is left null, not dangling, but a
+              // SECOND release of it before this call is a double free all the same
+              else
+                paramOf(freed).foreach(idx => effects += s"effect:freep-param:$idx")
             }
         case c if c.name == "<operator>.assignment" =>
             val dstEternal = argAt(c.argument.l, 1).map(unwrapCasts).exists {
@@ -486,6 +612,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     effectsByName: mutable.HashMap[String, Set[String]],
     record: (StoredNode, String, String) => Unit
   ): Unit =
+    // The view question runs before the tracked-pointer skip: a method can dangle a view with
+    // no allocation, no array local and no addressOf anywhere
+    viewOfTemporaryFacts(method, record)
     // (site, exit, name) -> the state at the exit's LATEST visit. A leak is a claim that NO
     // path frees the allocation ("still live, un-freed and un-escaped"), and the worklist
     // delivers an exit's predecessors at different rounds: the false edge of `if (fd >= 0)
@@ -593,11 +722,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
             .exists { case i: Identifier => ctx.locals.contains(i.name); case _ => false }
     )
-    val callsASummarisedCallee = callFacts.values.exists(cf => effectsByName.contains(cf.name))
+    // a compound literal's address in a return is the frame question with no allocation, no
+    // array local and no addressOf anywhere: the literal is an unnamed automatic object
+    val returnsLiteralAddress = method.ast.collectAll[Return].exists(r =>
+        r.astChildren.collectFirst { case e: Expression => e }.exists(holdsBlockLiteralAddress)
+    )
+    val callsASummarisedCallee = callFacts.values.exists(cf =>
+        effectsByName.contains(cf.name) || returnsStackNames.contains(cf.name)
+    )
     if !callFacts.values.exists(cf =>
           cf.allocFamilies.nonEmpty || cf.freeFamilies.nonEmpty ||
               cf.reallocFamilies.nonEmpty || cf.nullable
       ) && !ctx.arrayLocals.nonEmpty && !hasAddressOfLocal && !callsASummarisedCallee &&
+      !returnsLiteralAddress &&
       !(ctx.refReturn && ctx.locals.nonEmpty)
     then return
     val inStates = mutable.HashMap.empty[Long, Map[String, Tracked]]
@@ -698,7 +835,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 // char[] flowing to it is not an escape (std::string owns its
                 // buffer)
                 if !ctx.stringReturn &&
-                  (holdsStackAddress(e, ctx) || viaTracked || refToLocale)
+                  (holdsStackAddress(e, ctx) || viaTracked || refToLocale ||
+                      holdsBlockLiteralAddress(e) || callReturnsStackAddress(e))
                 then record(r, TagStackEscape, "escape:return")
               }
           case c: Call if c.name == "<operator>.assignment" && !initializesTemporary(c) =>
@@ -1041,6 +1179,15 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
     // 3. assignment: fresh allocation, copy-in, NULL reset, or loss of provenance
     if cf.name == "<operator>.assignment" then
+      // a REBOUND null-tracked variable is no longer the null a move or a guard left: whatever
+      // the rhs produces, the old null-ness is gone. The movesHandle rhs keeps the block, and
+      // a tracked rhs hands its own state over below
+      (argAt(cf.args, 1).flatMap(trackedNameOf), argAt(cf.args, 2)) match
+        case (Some(lhs), Some(rhs))
+            if out.get(lhs).exists(_.state == StNull) && !isNullLiteral(rhs) &&
+                !movesHandle(rhs, lhs) =>
+            out = out - lhs
+        case _ => ()
       val fieldLhs = argAt(cf.args, 1).flatMap(trackedNameOf).filter(isFieldName)
       (argAt(cf.args, 1).flatMap(trackedNameOf).filterNot(isFieldName), argAt(cf.args, 2)) match
         case (Some(lhs), Some(rhs)) =>
@@ -1274,6 +1421,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               .flatMap {
                   case e if e.startsWith("effect:frees-param:") =>
                       Set(e.stripPrefix("effect:frees-param:").toInt)
+                  case e if e.startsWith("effect:freep-param:") =>
+                      Set(e.stripPrefix("effect:freep-param:").toInt)
                   case _ => Set.empty
               }
       val summaryDerefsArgs: Set[Int] =
@@ -1327,8 +1476,36 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         }
                     }
                   }
+              case e if e.startsWith("effect:freep-param:") =>
+                  val idx = e.stripPrefix("effect:freep-param:").toInt
+                  argAt(cf.args, idx).foreach { arg =>
+                    val operand = addressOfOperand(arg).getOrElse(arg)
+                    trackedNameOf(operand).foreach { name =>
+                        useState.get(name).foreach { t =>
+                          if t.state == StFreed || t.state == StMaybeFreed then
+                            record(operand, TagState, ValueSummaryFreed)
+                          // the callee nulls the slot through the address it was given:
+                          // the caller's variable holds NULL from here, not a dangling
+                          // pointer
+                          out = out.updated(name, t.copy(state = StNullReset))
+                        }
+                    }
+                  }
               case _ => ()
           }
+      }
+      // ... and a move into a by-value or rvalue-reference parameter of an owning type spends
+      // the source: a unique_ptr's move construction takes the pointer and leaves the source
+      // null, so from here the source variable is tracked AS null - a later read through it is
+      // the null rule's question. The parameter's type is the resolved callee's own fact; the
+      // name `move` is never consulted
+      val callees = c._callOut.collectAll[Method].l
+      cf.args.foreach {
+          case i: Identifier
+              if callees.exists(m => movesOwningParameter(m, i.argumentIndex)) ||
+                  movesOwningSignature(c.methodFullName, i.argumentIndex) =>
+              out = out.updated(i.name, Tracked(StNull, c.id, nullable = true))
+          case _ => ()
       }
     end if
     out
@@ -1629,6 +1806,125 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case other     => cursor = other._astIn.nextOption()
     found
 
+  /** A view (string_view, span) bound DIRECTLY to a call's by-value result: the temporary the call
+    * returned dies at the end of that statement ([class.temporary]), so every later use of the view
+    * reads storage that no longer exists - the frame-escape question applied to a view. The report
+    * is the binding: the line whose temporary dies. A callee whose return type is unknown stays
+    * silent - evidence, not a guess - and a view bound to a reference or a lvalue is the storage's
+    * own lifetime, not this arm's.
+    */
+  private def viewOfTemporaryFacts(
+    method: Method,
+    record: (StoredNode, String, String) => Unit
+  ): Unit =
+    val viewNames = method.local.l
+        .filter(l => isViewType(Option(l.typeFullName).getOrElse("")))
+        .map(_.name)
+        .toSet
+    if viewNames.isEmpty then return
+    val uses = method.ast.isIdentifier.l.filter(i => viewNames.contains(i.name))
+    uses.foreach { use =>
+      val bindings = OverlayFacts.reachingDefsIn(use).collect {
+          case d: Identifier if d.name == use.name => d
+      }
+          .flatMap { d =>
+              d._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
+          }
+          .filter { a =>
+              a.argumentOption(1).exists {
+                  case i: Identifier => viewNames.contains(i.name)
+                  case _             => false
+              } && a.argumentOption(2).exists {
+                  case c: Call => bindingSourceOf(c).exists(returnsOwningValue)
+                  case _       => false
+              }
+          }.toList.distinctBy(_.id)
+      if bindings.nonEmpty && bindings.forall(lineOf(_) <= lineOf(use)) then
+        bindings.foreach(b => record(b, TagStackEscape, "escape:view-of-temporary"))
+    }
+  end viewOfTemporaryFacts
+
+  /** The call a view's binding expression produces: through a cast, and through a conversion
+    * operator (`std.string::operator basic_string_view`) to the value it converts. A conversion of
+    * something that is not itself a producing call (an lvalue) binds no temporary: the storage is
+    * the lvalue's own lifetime.
+    */
+  private def bindingSourceOf(c: Call): Option[Call] =
+      if c.name == "<operator>.cast" then
+        c.argument.l.collectFirst { case x: Expression => x }.collect {
+            case inner: Call => inner
+        }.flatMap(bindingSourceOf)
+      else if c.methodFullName.contains(".operator ") && c.argument.l.sizeIs <= 2 then
+        c.argument.l.collectFirst { case x: Expression => x }.collect {
+            case inner: Call => inner
+        }.flatMap(bindingSourceOf)
+      else Some(c)
+
+  /** A resolved call whose return is a string-like owner BY VALUE - the temporary a view binds to.
+    * A pointer, a reference, a view itself, or an unknown return type is not one.
+    */
+  private def returnsOwningValue(c: Call): Boolean =
+      c._callOut.collectAll[Method].l.exists { m =>
+        val t = Option(m.methodReturn.typeFullName).map(_.trim).getOrElse("")
+        t.nonEmpty && t != "ANY" && !t.endsWith("*") && !t.endsWith("&") &&
+        !isViewType(t) && t.contains("string") && !t.contains("string_view")
+      }
+
+  /** `std::string_view` (any `basic_string_view` instance) and `std::span`, by the type's own name
+    * segment - a `timespan` or `lifespan` is not a view.
+    */
+  private val ViewTypeName = """(^|[.:])(basic_)?(string_view|span)\b""".r
+
+  private def isViewType(t: String): Boolean = ViewTypeName.findFirstIn(t.trim).isDefined
+
+  /** The same question off the resolved signature a call carries: a template's parameters are often
+    * typed ANY while the signature spells them (`std.unique_ptr<...> &&`). The parameter list is
+    * split at the depth-zero commas; the argument's position names its parameter.
+    */
+  private def movesOwningSignature(callee: String, argIndex: Int): Boolean =
+    val open = callee.indexOf('(')
+    if open < 0 then return false
+    val close = callee.lastIndexOf(')')
+    if close <= open then return false
+    var depth = 0
+    val parts = scala.collection.mutable.ListBuffer.empty[String]
+    val cur   = StringBuilder()
+    callee.substring(open + 1, close).foreach { ch =>
+      ch match
+        case '(' | '<' => depth += 1
+        case ')' | '>' => depth -= 1
+        case _         => ()
+      if ch == ',' && depth == 0 then
+        parts += cur.result()
+        cur.clear()
+      else cur += ch
+    }
+    parts += cur.result()
+    // the callee numbers its parameters from 1; a member call's receiver occupies argument 0,
+    // so the argument's own index and the one before it both name a parameter
+    // a single `&` spells a template-derived rvalue reference too (`std.move:...(T &)`,
+    // the instantiated `_Tp&&`): the callee's rvalue-reference RETURN names the move family,
+    // while a plain lview borrower returns something else
+    val returnsRvalue = callee.substring(0, open).trim.endsWith("&&")
+    Seq(argIndex, argIndex - 1).flatMap(i => parts.lift(i - 1)).exists { t =>
+      val x = t.trim
+      val byMove = x.endsWith("&&") || !x.endsWith("&") ||
+          (returnsRvalue && x.endsWith("&"))
+      byMove && x.stripSuffix("&&").trim.contains("unique_ptr<")
+    }
+  end movesOwningSignature
+
+  /** Whether the method's parameter at `index` takes an owning unique pointer BY VALUE or by rvalue
+    * reference - the two forms whose argument is spent by the call. An lvalue reference (`&`)
+    * borrows; the moved-from question is not asked of it.
+    */
+  private def movesOwningParameter(method: Method, index: Int): Boolean =
+      method.parameter.index(index).headOption.exists { p =>
+        val t      = Option(p.typeFullName).map(_.trim).getOrElse("")
+        val byMove = t.endsWith("&&") || !t.endsWith("&")
+        byMove && t.stripSuffix("&&").trim.contains("unique_ptr<")
+      }
+
   /** A tracked field path: its block is owned by the struct, so it never leaks from the frame. */
   private def isFieldName(name: String): Boolean = name.contains("->") || name.contains(".")
 
@@ -1712,6 +2008,27 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => false
     case i: Identifier => ctx.arrayLocals.contains(i.name)
     case _             => false
+
+  /** `&(T){...}` - the address of a block-scope compound literal, an unnamed automatic object of
+    * this frame (C99 6.5.2.5p5). Returned, it leaves the frame exactly the way a named local's
+    * address does. The literal itself assigned to storage is the store arm's question (the
+    * destination's duration decides it), and a file-scope literal never reaches a frame's return -
+    * `<global>` asks no stack question.
+    */
+  private def holdsBlockLiteralAddress(e: Expression): Boolean = e match
+    case c: Call if c.name == "<operator>.addressOf" =>
+        c.argument.l.collectFirst { case x: Expression => x }.exists(isCompoundLiteral)
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argument.l.collectFirst { case x: Expression => x }.exists(holdsBlockLiteralAddress)
+    case _ => false
+
+  private def isCompoundLiteral(e: Expression): Boolean = e match
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argument.l.collect { case x: Expression => x }.exists {
+            case init: Call => init.name == "<operator>.arrayInitializer"
+            case _          => false
+        }
+    case _ => false
 
   /** A designated initializer of an object with no name - a compound literal, a C++ temporary: the
     * frontend writes it as an assignment to the bare designator inside the initializer list. The
@@ -1800,7 +2117,59 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         trackedNameOf(inner).flatMap(state.get).exists(_.state == StStackAddr)
                     )
                 case _ => false
-          }
+          } || callReturnsStackAddress(rhs)
+
+  /** The names every defined method of which returns its own frame's address: the summary a call
+    * site reads (returning such a call's result, or storing it into eternal storage, hands out a
+    * dead frame's address). Name-level like every effect summary: same-named methods that disagree
+    * carry nothing.
+    */
+  private lazy val returnsStackNames: Set[String] =
+    val per = atom.method.filterNot(_.isExternal).filter(_.block.astChildren.nonEmpty).l
+        .map(m => m.name -> returnsFrameAddress(m))
+    per.groupMap(_._1)(_._2).collect {
+        case (name, answers) if answers.forall(_ == true) =>
+            name
+    }.toSet
+
+  /** Every return of the method hands out this frame's storage: the address of a non-static local,
+    * or an array local decaying to its first element.
+    */
+  private def returnsFrameAddress(m: Method): Boolean =
+    val locals = m.local.l.filterNot(isStaticLocal).map(_.name).toSet
+    val arrays = m.local.l
+        .filter(l =>
+            OverlayFacts.arrayExtent(l.typeFullName).isDefined || l.typeFullName.trim.endsWith(
+              "[]"
+            )
+        )
+        .map(_.name)
+        .toSet
+    val returns = m.ast.collectAll[Return].l
+        .flatMap(_.astChildren.collectFirst { case e: Expression => e })
+    def holds(e: Expression): Boolean = e match
+      case c: Call if c.name == "<operator>.addressOf" =>
+          c.argument.l.collectFirst {
+              case i: Identifier => locals.contains(i.name)
+              case _             => false
+          }.getOrElse(false)
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: Expression => x }.exists(holds)
+      case i: Identifier => arrays.contains(i.name)
+      case _             => false
+    returns.nonEmpty && returns.forall(holds)
+  end returnsFrameAddress
+
+  /** An expression that is (through a cast) a call to a method whose every return is its own
+    * frame's address.
+    */
+  private def callReturnsStackAddress(e: Expression): Boolean = e match
+    case c: Call =>
+        (c.name.startsWith("<operator>.cast") &&
+            c.argument.l.collectFirst { case x: Expression => x }
+                .exists(callReturnsStackAddress)) ||
+        returnsStackNames.contains(c.name)
+    case _ => false
 
   private def addressOfOperand(e: AstNode): Option[Expression] = e match
     case c: Call if c.name == "<operator>.addressOf" => c.argumentOption(1)
@@ -1961,6 +2330,11 @@ object AllocationStatePass:
     "verrx"
   )
   final val TagStackEscape = "stack-escape"
+
+  /** A release whose form does not match the acquisition the object's own class performed: the
+    * constructor array-newed the member, the destructor scalar-deletes it.
+    */
+  final val TagClassFormMismatch = "class-form-mismatch"
 
   /** A per-method effect summary, ON the method node - `effect:frees-param:<i>`,
     * `effect:allocates-return`, `effect:escapes-param:<i>` - so an interprocedural effect is a tag
