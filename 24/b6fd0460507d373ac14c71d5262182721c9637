@@ -1,0 +1,18 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ArrayViewExtentTests.scala
+  h_0926447d100ad2 1-123
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/SmartPointerExtentTests.scala
+  h_0926447d100ad2 1-105
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  h_0926447d100ad2 285-292,336-343,384-395,402-518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "24b6fd0460507d373ac14c71d5262182721c9637",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
