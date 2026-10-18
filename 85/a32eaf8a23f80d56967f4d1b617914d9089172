@@ -1,0 +1,26 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectModelTests.scala
+  s_236e880d3ee8e7::t_9ee210bdb0a51a 1-600
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/LifetimeRules.scala
+  s_236e880d3ee8e7::t_8e4e50cf921093 296-298
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_236e880d3ee8e7::t_8e4e50cf921093 1405-1409,2265-2284
+  s_236e880d3ee8e7::t_7bc70e97652aa6 2285
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ObjectAccessRules.scala
+  s_236e880d3ee8e7::t_8e4e50cf921093 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "85a32eaf8a23f80d56967f4d1b617914d9089172",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
