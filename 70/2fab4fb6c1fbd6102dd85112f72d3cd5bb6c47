@@ -1,0 +1,44 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/TypeNames.scala
+  s_236e880d3ee8e7::t_f9ecb461365717 54-63
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  s_236e880d3ee8e7::t_9b7dad9e4d977a 1-226
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_236e880d3ee8e7::t_ca5e9820df133b 383-386
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForTypesCreator.scala
+  s_236e880d3ee8e7::t_9f616bf6ddb7f1 145,149,167
+  s_236e880d3ee8e7::t_57ff2c8320f579 110-114,119-120,134,141-144,146-148,150-166,168-187
+  s_236e880d3ee8e7::t_09bbe2e8825c24 188
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_720e765504fcf7 591-592,598-613,615-620
+  s_236e880d3ee8e7::t_c9a8b3dc467779 93
+  s_236e880d3ee8e7::t_fda13181e8f67b 614
+  s_236e880d3ee8e7::t_1b02b43599c8e9 1709-1710,1746-1766,3695-3784,3866-3870,3897,4094-4121,4981-4986,5309-5326
+  s_236e880d3ee8e7::t_4621f7ca0f9a02 621
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_236e880d3ee8e7::t_ca3085b1f7f46f 268-288,352,378-382,464-467,597-598,608-649,713-717
+  s_236e880d3ee8e7::t_a6577cbb39510f 718
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  s_236e880d3ee8e7::t_f9ecb461365717 488,643-648,650-653,846,881,1196-1201
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_236e880d3ee8e7::t_f9ecb461365717 60-70
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_236e880d3ee8e7::t_57ff2c8320f579 773-778
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ObjectAccessRules.scala
+  s_236e880d3ee8e7::t_bb638291a0f772 1-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "702fab4fb6c1fbd6102dd85112f72d3cd5bb6c47",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
