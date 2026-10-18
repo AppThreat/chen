@@ -1,0 +1,39 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_eb54ef3072880b 84,602-627,630-638,640-641,643-650
+  s_236e880d3ee8e7::t_dabc0613c3010c 628-629,639,642
+  s_236e880d3ee8e7::t_7c9105a0e2ee47 651
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgClosureTests.scala
+  s_236e880d3ee8e7::t_34338997af7777 59-71,129-133
+  s_236e880d3ee8e7::t_c38a3df278593d 134-136
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_236e880d3ee8e7::t_548fc4de929950 617-619
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  s_236e880d3ee8e7::t_dabc0613c3010c 113-125,229-232
+  s_236e880d3ee8e7::t_4ce13f526be7a9 233-235
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/IndexRange.scala
+  s_236e880d3ee8e7::t_34338997af7777 244-245,248,369-374,376-377,386-387,389-393,395-397
+  s_236e880d3ee8e7::t_c05cc14db6694c 246-247,362-368,375,378-385,388,394
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForCpp.scala
+  s_236e880d3ee8e7::t_548fc4de929950 360-380
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ClosureCaptureTests.scala
+  s_236e880d3ee8e7::t_732826ba8b0c1f 47-57,105-108
+  s_236e880d3ee8e7::t_393e73565edbb1 109-111
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/LifetimeRules.scala
+  s_236e880d3ee8e7::t_8ac0a9bc059a12 74-77,88-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a641546cbe7f99030d9ef92ea59ce987f3ed4b56",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
