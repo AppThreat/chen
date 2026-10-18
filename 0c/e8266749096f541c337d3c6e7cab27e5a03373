@@ -1,0 +1,31 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 278-284,1686-1708,3694-3707,3803-3822,3959-4005
+  s_236e880d3ee8e7::t_1612458ce14934 1709-1714,1808-1855,3678-3679,3681-3683,3708-3714,3782,3823-3828,4006-4010
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 147,254-364,728,1479-1481,1488-1493,1497-1499,1809-1864,1866-1913,2012-2017,2120-2158
+  s_236e880d3ee8e7::t_22fe3a97a1e824 365-373,534-538,615-617,725-727,729-732,737,838-839,1182-1190,1424-1425,1482-1487,1500-1509,1865,1914-1927,2018-2032,2159-2172,2334-2338
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectLifetimesTests.scala
+  h_0926447d100ad2 1-51,94-180,213-252
+  s_236e880d3ee8e7::t_d745248274cd61 52-93,181-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0ce8266749096f541c337d3c6e7cab27e5a03373",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
