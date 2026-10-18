@@ -83,7 +83,9 @@ private[taggers] final class IndexRange(
       literal(e).map(v => Range(v, v)).orElse(e match
         case c: Call if returnRangeOf(c).isDefined        => returnRangeOf(c)
         case c: Call if summaryReturnRangeOf(c).isDefined => summaryReturnRangeOf(c)
-        case c: Call if c.name == "<operator>.and"        =>
+        case c: Call if constructedReturnRangeOf(c, depth).isDefined =>
+            constructedReturnRangeOf(c, depth)
+        case c: Call if c.name == "<operator>.and" =>
             // a non-negative mask bounds the result whatever the other operand holds
             c.argument.l.flatMap(literal).filter(_ >= 0).minOption.map(m => Range(0, m))
         case c: Call if c.name == "<operator>.modulo" =>
@@ -222,6 +224,28 @@ private[taggers] final class IndexRange(
           if ranges.forall(_.isDefined) then Some(ranges.flatten.reduce(_.union(_))) else None
       case _ => None
     fromCallers.orElse(ofType(p.typeFullName))
+
+  /** The range every return EXPRESSION of the one method the call links to has by construction: an
+    * unsigned parameter shifted right by a constant lies in [0, 2^(w-k) - 1] whatever the parameter
+    * holds, so a caller handing the call's result on as an index knows what it passes without
+    * seeing the constant-return summary.
+    */
+  private def constructedReturnRangeOf(c: Call, depth: Int): Option[Range] =
+      c._callOut.collectAll[Method].l.distinct match
+        case List(only) =>
+            val returns = only.ast.isReturn.l
+                .flatMap(_.astChildren.collectFirst { case e: Expression => e })
+            // each hop into a callee consumes depth: a self-recursive callee terminates here
+            // instead of overflowing the stack
+            val ranges = returns.map(of(_, depth - 1))
+            // only returns the range follows by construction - a literal or an operator over
+            // the parameters. A returned local carries whatever its definitions accumulated
+            // (`type_select += 8` behind four guards), which this reader does not sum
+            val constructed = returns.forall(r => !r.isInstanceOf[Identifier])
+            if returns.nonEmpty && constructed && ranges.forall(_.isDefined) then
+              Some(ranges.flatten.reduce(_.union(_)))
+            else None
+        case _ => None
 end IndexRange
 
 private[taggers] object IndexRange:

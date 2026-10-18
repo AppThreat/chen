@@ -282,6 +282,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         case c: Call
             if c.name == "<operator>.fieldAccess" || c.name == "<operator>.indirectFieldAccess" =>
             extentOfField(c).orElse(sizeofInCopy.map(v => (v, List.empty[StoredNode])))
+        case c: Call if isGetAccessor(c) =>
+            // a smart pointer's `.get()` hands out its own storage: the receiver's extent is
+            // the result's. The receiver resolves through every extent arm, so this yields
+            // one only where the receiver itself has a capacity (an array view, a smart
+            // pointer's construction) - an arbitrary accessor named get stays unknown
+            c.argument.l.collectFirst { case i: Identifier => i } match
+              case Some(receiver) => extentOf(receiver, method, sizeofInCopy)
+              case None           => sizeofInCopy.map(v => (v, List.empty[StoredNode]))
         case _ =>
             sizeofInCopy.map(v => (v, List.empty[StoredNode]))
 
@@ -325,6 +333,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   private val knownExtentPrefixes: Set[String] =
       Set(ValueConst, ValueSizeof, ValueAlloc, ValueParam, ValueField).map(_ + ":")
 
+  /** A nullary `get` accessor call (`p.get()`), resolved or not: its only expression argument is
+    * the receiver.
+    */
+  private def isGetAccessor(c: Call): Boolean =
+    val callee = c.methodFullName
+    val last   = callee.substring(callee.lastIndexOf('.') + 1).takeWhile(c => c != ':')
+    last == "get" && c.argument.l.collect { case e: Expression => e }.sizeIs <= 1
+
   private def extentOfVariable(
     name: String,
     use: Expression,
@@ -366,10 +382,151 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     }.orElse {
         sizeofInCopy.map(v => (v, List.empty))
     }.orElse {
+        // A pointer that VIEWS an array: `auto p = buf` (the array decays into the pointer) or
+        // `int *pair = (int[]){x, 0}` (a compound literal's element count is its extent). The
+        // pointer holds no storage of its own - every definition must name the same element
+        // count, or there is no single capacity to read
+        arrayViewExtentOf(use).map(v => (v, List.empty[StoredNode]))
+    }.orElse {
+        // The extent a smart pointer's own storage has: `std::unique_ptr<T[]>(new T[n])`,
+        // `std::make_unique<T[]>(n)`, and `std::array<T, N>`'s constant N. The array form is
+        // the instance's template argument as the resolved callee spells it - never the
+        // source's own spelling
+        smartPointerExtentOf(use).map(v => (v, List.empty[StoredNode]))
+    }.orElse {
         // A pointer whose definition is an inventoried allocation.
         allocExtentOf(use).map(v => (v, List.empty))
     }
   end extentOfVariable
+
+  /** The definitions of the used variable itself. The reaching-definition walk is transitive, so it
+    * also returns the definitions of whatever fed them (`server = host` behind `found =
+    * strstr(no_proxy, server)`): only the ones that write the used name are its own.
+    */
+  private def ownDefinitionsOf(use: Expression): List[Identifier] =
+      use match
+        case u: Identifier =>
+            OverlayFacts.reachingDefsIn(use).collect {
+                case d: Identifier if d.name == u.name => d
+            }
+        case _ => Nil
+
+  /** The extent a pointer's definitions view: every definition is an identifier of an array (a
+    * declared array local), or a compound literal written as an initializer list. All the
+    * definitions must agree on the element count.
+    */
+  private def arrayViewExtentOf(use: Expression): Option[String] =
+    val defs = ownDefinitionsOf(use)
+    if defs.isEmpty then return None
+    val rhsValues = defs.flatMap { defNode =>
+        defNode._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
+    }.flatMap(_.argumentOption(2)).toSet
+    if rhsValues.isEmpty then return None
+    val values = rhsValues.flatMap { rhs =>
+        rhs match
+          // a compound literal: the cast's own type names the array (EDG writes the computed
+          // count, `int[2]`; CDT the unsized `int[]`), and the initializer list under an
+          // unsized array type carries the element count. A record literal (`(struct point){x,
+          // y}`) is not an array and gives no extent
+          case c: Call if c.name == "<operator>.cast" =>
+              val castType = String.valueOf(c.property("TYPE_FULL_NAME")).trim
+              arrayExtent(castType).map(n => s"$ValueConst:$n").orElse {
+                  Option.when(castType.endsWith("[]"))(
+                    c.argument.l.collectFirst {
+                        case init: Call if init.name == "<operator>.arrayInitializer" => init
+                    }.map(init => s"$ValueConst:${init.argument.l.size}")
+                  ).flatten
+              }
+          case i: Identifier =>
+              arrayExtentOfIdentifier(i, use.method)
+          case _ => None
+    }
+    Option.when(values.nonEmpty && values.size == 1)(values.head)
+  end arrayViewExtentOf
+
+  /** The declared element count an identifier names: its own array local. */
+  private def arrayExtentOfIdentifier(i: Identifier, method: Method): Option[String] =
+      i.refsTo.collectFirst { case l: Local => l }
+          .orElse(method.local.name(i.name).headOption)
+          .flatMap(l => arrayExtent(l.typeFullName))
+          .map(n => s"$ValueConst:$n")
+
+  /** The instance spellings of the array-form smart pointers, as the resolved callee (or the
+    * local's own instance type) writes them: `unique_ptr<char[]>`, `make_unique<char[]>`. The
+    * template argument belongs to the instance the front end resolved, never to the source's
+    * spelling of it.
+    */
+  private val ArrayFormInstance = "(unique_ptr|make_unique)<[^>]*\\[\\]".r
+
+  /** `std::array<T, N>`: the instance's second template argument is the constant count. */
+  private val StdArrayInstance = "std\\.array<[^,>]+,\\s*(\\d+)>".r
+
+  /** The extent a smart pointer's own storage has:
+    *   - `std::array<T, N>` - the instance's N, a declared count;
+    *   - `std::unique_ptr<T[]>(new T[n])` - the array new's extent argument;
+    *   - `std::make_unique<T[]>(n)` - the factory's count argument.
+    * Every definition must state the same count.
+    */
+  private def smartPointerExtentOf(use: Expression): Option[String] =
+    val declared = use match
+      case i: Identifier =>
+          i.refsTo.collectFirst { case l: Local => l }
+              .orElse(use.method.local.name(i.name).headOption)
+              .flatMap(l => StdArrayInstance.findFirstMatchIn(l.typeFullName))
+              .map(m => s"$ValueConst:${m.group(1)}")
+      case _ => None
+    declared.orElse {
+        val defs = ownDefinitionsOf(use)
+        val rhsCall = defs.flatMap { defNode =>
+            defNode._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
+        }.flatMap(_.argumentOption(2)).collect { case c: Call => c }.toSet
+        val values = rhsCall.flatMap(smartPointerCountOf)
+        Option.when(values.nonEmpty && values.size == 1)(values.head)
+    }
+
+  private def smartPointerCountOf(ctor: Call): Option[String] =
+    val callee = ctor.methodFullName
+    // the definition's rhs is itself the array new (the construction folded into the
+    // assignment): the new's extent argument is the count
+    if ctor.name == "<operator>.new" &&
+      ctor.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+          .contains(io.appthreat.x2cpg.Defines.AllocFormArray)
+    then arrayNewCountOf(ctor)
+    else if ArrayFormInstance.findFirstIn(callee).isEmpty then None
+    else if callee.contains("make_unique") then
+      // the factory's count argument: the value the array was constructed with
+      ctor.argument.l.collect { case e: Expression => e }
+          .filterNot(_.isInstanceOf[Call])
+          .find(e => IndexRange.literal(e).isDefined || e.isInstanceOf[Identifier])
+          .map(e => s"$ValueAlloc:${e.id}")
+    else
+      // the constructor's array new: the new's own extent argument is the count
+      ctor.argument.l.collect { case nc: Call => nc }
+          .find(nc =>
+              nc.name == "<operator>.new" && nc.tag
+                  .name(io.appthreat.x2cpg.Defines.AllocFormTag)
+                  .value
+                  .l
+                  .contains(io.appthreat.x2cpg.Defines.AllocFormArray)
+          )
+          .flatMap(arrayNewCountOf)
+    end if
+  end smartPointerCountOf
+
+  /** The count an array `new T[n]` states: the extent argument the frontend wired in after the type
+    * (argument index 2 onward, before the element constructor's call).
+    */
+  private def arrayNewCountOf(newCall: Call): Option[String] =
+    val lens = newCall.argument.l.collect { case e: Expression => e }
+        .filter(a => a.tag.name(MemoryApiPass.TagLen).nonEmpty)
+    lens.headOption
+        .map(e => s"$ValueAlloc:${e.id}")
+        .orElse {
+            newCall.argument.l.collect { case e: Expression => e }
+                .filter(a => a.argumentIndex > 1 && !a.isInstanceOf[Call])
+                .find(IndexRange.literal(_).isDefined)
+                .map(e => s"$ValueAlloc:${e.id}")
+        }
 
   /** The capacity parameter beside a buffer parameter: adjacency in the signature plus the
     * pointer/integral type pattern. Names are deliberately not consulted.
