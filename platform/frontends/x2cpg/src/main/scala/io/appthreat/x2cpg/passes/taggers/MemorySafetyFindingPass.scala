@@ -275,6 +275,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .l
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleStackEscape))
+    // the class-level form mismatch: the object's own constructor array-newed the member its
+    // destructor scalar-deletes
+    atom.tag
+        .name(AllocationStatePass.TagClassFormMismatch)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .foreach(node => record(node, RuleMismatchedFree))
   end ruleAllocationState
 
   /** A macro invocation that frees the argument it is handed (`xfree(p)` spelling `free(p)`, or a
@@ -1676,6 +1683,35 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             val hasAttackerTag = tags.contains(ValueOriginPass.OriginUntrustedRead) ||
                 tags.contains(ValueOriginPass.OriginCallerParam)
             val knownishExtent = knownExtent || extent.startsWith(ExtentPass.ValueParam + ":")
+            // a DEFINITE out-of-bounds index: the index's own value is known and it reaches at or past a
+            // declared array's element count. `p[20]` into a sixteen-element array is out of
+            // bounds whatever feeds it; no attacker is needed. An enum the array is sized by
+            // keeps its own fit rule (a count sentinel enumerator equal to the capacity is the
+            // declared shape, not a violation), and only a `const:` count is declared - an
+            // allocation's capacity is the capacity-overrun rule's question
+            // a literal the frontend evaluated: a range narrowed to one point is not enough, since
+            // whole-tree summaries can narrow it on paths the access never sees
+            val knownIndexValue = IndexRange.literal(idx)
+            // `&a[N]` names the one-past-the-end address, well-defined and idiomatic as an
+            // end sentinel (C 6.5.2.1, C++ [expr.unary.op]); only reading or writing through
+            // it is out of bounds. The definite arm is the value comparison, so it stands down
+            // when the access is the operand of an address-of
+            val addressedOnly = access._astIn.collectFirst { case c: Call => c }
+                .exists(_.name == "<operator>.addressOf")
+            // the count must be the base's OWN declaration: a one-dimensional array local or
+            // member whose declared bound is the capacity. A pointer's extent comes through its
+            // definitions and an inner row's through the outer type - neither is a declared
+            // count the index can be compared against without the analysis being exact
+            val rowOfOuter = access._astIn.collectFirst { case c: Call => c }
+                .exists(c => isIndexAccess(c) && c.argumentOption(1).exists(_.id == access.id))
+            if !addressedOnly && !rowOfOuter && declaredOneDimCount(base).exists(capacity.contains)
+            then
+              knownIndexValue.foreach { v =>
+                  capacity.filter(n => v >= n).foreach { n =>
+                      if !enumIndexFits(typeOfExpr(idx), n, declaredArrayText(base)) then
+                        record(idx, ruleIdFor(access))
+                  }
+              }
             // the attacker arms need a capacity (or a C++ container) to overrun; the
             // half-bounded arm asks only about the missing lower side, whatever the base
             if halfBounded ||
@@ -1769,6 +1805,54 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * struct member (the frontend keeps a member's declarator; a local's type is already folded to
     * `int[3]`).
     */
+  private def isIndexAccess(c: Call): Boolean =
+      c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess"
+
+  /** The element count a one-dimensional array local or member declares, read off its own type -
+    * or, for a pointer, the count every definition of it views: a declared one-dimensional array
+    * decaying into it (`auto p = buf`) or an array compound literal (`(int[]){x, 0}`).
+    */
+  private def declaredOneDimCount(base: Expression): Option[BigInt] =
+    def ownCount(e: Expression): Option[BigInt] =
+      val declared = e match
+        case i: Identifier =>
+            i.refsTo.collectFirst { case l: Local => l.typeFullName }
+                .orElse(i.method.local.nameExact(i.name).typeFullName.headOption)
+        case c: Call if isFieldAccess(c) =>
+            // only a member whose type no other declaration shares: the per-function anonymous
+            // unions of one file (`union { BN_ULONG bn[N]; ... } buf`) share a name, and the
+            // lookup would read one function's count for another's access
+            OverlayFacts.memberRefOf(atom, c).filter(m =>
+                m._astIn.collectFirst { case td: TypeDecl => td }.exists(td =>
+                    atom.typeDecl.fullNameExact(td.fullName).size == 1
+                )
+            ).map(_.typeFullName)
+        case _ => None
+      declared.filter(_.count(_ == '[') == 1).flatMap(OverlayFacts.arrayExtent).map(BigInt(_))
+    def literalCount(c: Call): Option[BigInt] =
+        Option.when(c.name == "<operator>.cast")(c.argument.l.collectFirst {
+            case init: Call if init.name == "<operator>.arrayInitializer" =>
+                BigInt(init.argument.size)
+        }).flatten
+    ownCount(base).orElse(base match
+      case i: Identifier =>
+          // the walk is transitive: keep the definitions of the base itself
+          val viewed = OverlayFacts.reachingDefsIn(i).collect {
+              case d: Identifier if d.name == i.name => d
+          }.toList.map { d =>
+              d._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
+                  .flatMap(_.argumentOption(2)).flatMap {
+                      case src: Identifier => ownCount(src)
+                      case c: Call         => literalCount(c)
+                      case _               => None
+                  }
+          }
+          Option.when(viewed.nonEmpty && viewed.forall(_.isDefined))(viewed.flatten.distinct)
+              .collect { case List(n) => n }
+      case _ => None
+    )
+  end declaredOneDimCount
+
   private def declaredArrayText(base: Expression): Option[String] = base match
     case c: Call if isFieldAccess(c) => OverlayFacts.memberRefOf(atom, c).map(_.code)
     case _                           => None
@@ -3591,9 +3675,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .groupBy { case (c, _, _) => c }
         .map { case (c, rows) => c -> rows.map { case (_, arg, _) => arg }.distinct }
 
-    // a literal, or a constant the frontend evaluated (`HDR_LEN`, `COUNT`, `sizeof(int)`)
+    // a literal, a constant the frontend evaluated (`HDR_LEN`, `COUNT`, `sizeof(int)`), or a
+    // value every return of the callee states
     def literalNumberOf(e: Expression): Option[Long] =
-        IndexRange.literal(e).filter(_.isValidLong).map(_.toLong)
+        IndexRange.literal(e).filter(_.isValidLong).map(_.toLong).orElse(
+          ranges.of(e).collect { case r if r.lo == r.hi && r.lo.isValidLong => r.lo.toLong }
+        )
 
     def allocCallOf(e: Expression): Option[Call] = e match
       case c: Call
@@ -3603,6 +3690,27 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case c: Call if c.name == "<operator>.cast" =>
           c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
       case _ => None
+
+    /** the allocation that produced the pointer a destination names, through its definitions */
+    def dstAllocOf(dst: Expression): Option[Call] =
+        OverlayFacts
+            .reachingDefsIn(dst)
+            .collect { case d: Identifier => d }
+            .flatMap(d =>
+                d._astIn.collectFirst {
+                    case a: Call if a.name == "<operator>.assignment" => a
+                }.toList
+            )
+            .flatMap(a => a.argumentOption(2).toList)
+            .flatMap(x => allocCallOf(x).toList)
+            .headOption
+
+    /** an expression, or a call over it, reads the variable the key names (`strlen(user)`) */
+    def readsContentKey(e: Expression, key: Option[String]): Boolean =
+        OverlayFacts.variableKey(e).contains(key.getOrElse("")) || e.ast
+            .collectAll[Expression]
+            .l
+            .exists(x => OverlayFacts.variableKey(x) == key)
 
     /** The capacity in BYTES the dst's extent names, when it is knowable - a copy length counts
       * bytes. `const:N` counts ELEMENTS, so it converts only for a byte-sized element type (`int
@@ -3671,7 +3779,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
         if dstArgs.nonEmpty && srcArgs.nonEmpty && lenArgs.isEmpty then
           dstArgs.headOption.foreach { dst =>
-              extentRule(dst).filter(_ == RuleFixedExtentOverrun).foreach { rule =>
+              extentRule(dst).foreach { rule =>
                 // the content: a src argument, or (sprintf's variadic %s) an argument the
                 // inventory gave no role at all
                 val rolePositions = (dstArgs ++ srcArgs).map(_.argumentIndex).toSet
@@ -3692,7 +3800,32 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       .flatMap(_.tag.name(MemoryApiPass.TagClamp).value.l)
                       .flatMap(_.toLongOption)
                       .exists(k => extentCapacity(dst).exists(k <= _))
-                  if !clampedInside && !lengthGuardedCopy(call, content) then
+                  // a length guard excuses the copy only while its bound fits the destination:
+                  // `if (strlen(u) < 20) strcpy(buf16, u)` is guarded by a limit the buffer
+                  // cannot hold. A bound this reader cannot value still excuses - evidence,
+                  // not a guess, and the guard is the author's own claim
+                  val guardExcuses =
+                      lengthGuardedCopy(call, content) &&
+                          lengthGuardBoundOf(call, content).forall(b =>
+                              extentCapacity(dst).exists(b <= _)
+                          )
+                  // the destination's own allocation sized it from the content with room for
+                  // the terminator (`malloc(strlen(u) + 1)`, the strdup shape): the copy fits
+                  // by construction. An exact `strlen(u)` without the +1 keeps the finding -
+                  // the terminator overruns it
+                  val selfSized = dstAllocOf(dst).exists(alloc =>
+                      OverlayFacts.variableKey(content).exists { contentKey =>
+                          alloc.argument.l.collect { case sz: Expression => sz }.exists {
+                              case add: Call if add.name == "<operator>.addition" =>
+                                  val ops     = add.argument.l.collect { case x: Expression => x }
+                                  val literal = ops.drop(1).flatMap(IndexRange.literal).headOption
+                                  ops.headOption.exists(readsContentKey(_, Some(contentKey))) &&
+                                  literal.exists(_ >= 1)
+                              case _ => false
+                          }
+                      }
+                  )
+                  if !clampedInside && !guardExcuses && !selfSized then
                     record(content, rule)
                 }
               }
@@ -3823,7 +3956,58 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * the for-comprehension shape of the arm-1 loop.
     */
   private def literalNumberOfAs(e: Expression): Option[(Expression, Long)] =
-      IndexRange.literal(e).filter(_.isValidLong).map(v => (e, v.toLong))
+      IndexRange.literal(e).filter(_.isValidLong).map(v => (e, v.toLong)).orElse(
+        // a length the callee's own body states: every return a constant, or the range the
+        // returns span by construction - the value is known without an attacker
+        ranges.of(e).collect { case r if r.lo == r.hi && r.lo.isValidLong => (e, r.lo.toLong) }
+      )
+
+  /** The tightest value the guards bounding the content's length impose above it, when they spell
+    * it: a literal, or a variable whose reaching definition is one. A guard whose bound cannot be
+    * valued answers None (and excuses the copy).
+    */
+  private def lengthGuardBoundOf(call: Call, content: Expression): Option[BigInt] =
+    def valueOf(bound: AstNode): Option[BigInt] = bound match
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.collectFirst { case x: AstNode => x }.flatMap(valueOf)
+      case e: Expression =>
+          IndexRange.literal(e).orElse(
+            e match
+              case i: Identifier =>
+                  val defs = OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                  defs.flatMap(d =>
+                      d._astIn.collectFirst {
+                          case a: Call if a.name == "<operator>.assignment" => a
+                      }.toList
+                  ).flatMap(a =>
+                      a.argumentOption(2).toList.flatMap {
+                          case lit: io.shiftleft.codepropertygraph.generated.nodes.Literal =>
+                              IndexRange.literalValue(lit.code).toList
+                          case other => IndexRange.literal(other).toList
+                      }
+                  ).maxOption
+              case _ => None
+          )
+      case _ => None
+    val bounds = OverlayFacts.variableKey(content).toList.flatMap { contentKey =>
+        GuardPass.guardingControllers(call).flatMap { controller =>
+            GuardPass.conjunctsAt(controller, call).flatMap { case (cmp, holds) =>
+                GuardPass.directionalFacts(cmp, holds).collect {
+                    case (bounded, above, bound)
+                        if above && (bounded match
+                          case bc: Call =>
+                              bc.argument.l.exists(a =>
+                                  OverlayFacts.variableKey(a).contains(contentKey)
+                              )
+                          case _ => false
+                        ) =>
+                        bound
+                }
+            }
+        }
+    }
+    bounds.flatMap(valueOf).minOption
+  end lengthGuardBoundOf
 
   /** Is the copy guarded by a comparison bounding some call over the content variable above - `if
     * (strlen(userInput) < sizeof(dest)) strcpy(dest, userInput)`? The guard bounds the source's

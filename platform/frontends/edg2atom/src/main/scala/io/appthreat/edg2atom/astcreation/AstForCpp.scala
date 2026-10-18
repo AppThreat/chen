@@ -547,7 +547,15 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
             if d.cleanup then cleanupCallAst(at, d)
             else
               val callCode = s"${d.name}.${cppName(d.destructor.string("name").getOrElse(""))}()"
-              linkedCallAst(at, d.destructor, "void", None, Nil, Some(callCode))
+              // the destroyed object is the call's argument 0, bound to the variable the scope
+              // holds: the destructor's body reads it through `this`, and a rule reads WHICH
+              // object the lifetime ended for
+              val target = variables.get(d.variable)
+              val varType = target.collect { case l: NewLocal => l.typeFullName }
+                  .getOrElse(X2CpgDefines.Any)
+              val obj    = identifierNode(at, d.name, d.name, varType)
+              val objAst = target.map(t => Ast(obj).withRefEdge(obj, t)).getOrElse(Ast(obj))
+              linkedCallAst(at, d.destructor, "void", Some(objAst), Nil, Some(callCode))
         if atEnd then
           at.field("end").flatMap(EdgaUnit.pos).foreach { p =>
               call.lineNumber(Integer.valueOf(p.line)).columnNumber(Integer.valueOf(p.column))

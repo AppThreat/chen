@@ -91,7 +91,19 @@ trait CppScopeExits(implicit withSchemaValidation: ValidationMode):
   ): List[Ast] =
       destructions.flatMap { d =>
         val callCode = s"${d.declaredAt}.${d.destructor.getName}()"
-        destructorCallAst(at, d.destructor, callCode).map { ast =>
+        // the destroyed object: the identifier the declaration's name gives, bound to the
+        // local in scope, as the call's argument 0
+        val receiver = bindingOf(d.declaredAt).collect { case v: ICPPVariable => v }.flatMap {
+            vb =>
+                CdtQuery(vb.getType).toOption.map(t => safeGetType(t)).map { tpe =>
+                  val nm      = d.declaredAt.toString
+                  val objNode = identifierNode(at, nm, nm, tpe)
+                  scope.lookupVariable(nm)
+                      .map { case (local, _) => Ast(objNode).withRefEdge(objNode, local) }
+                      .getOrElse(Ast(objNode))
+                }
+        }
+        destructorCallAst(at, d.destructor, callCode, receiver).map { ast =>
           if atEnd then
             ast.root.foreach {
                 case call: NewCall => call.lineNumber(lineEnd(at)).columnNumber(columnEnd(at))

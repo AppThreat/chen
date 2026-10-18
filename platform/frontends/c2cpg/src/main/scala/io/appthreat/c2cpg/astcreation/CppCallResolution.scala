@@ -305,13 +305,14 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     }.flatMap(c => graphFunction(c).map(c -> _))
 
   /** A call to the destructor `destructor` (resolved by CDT) when the graph holds its METHOD. The
-    * destroyed object is named in the call's code only: the destructor's body reads it through
-    * `this`, which the graph does not model as an argument.
+    * destroyed object is the call's argument 0: the destructor's body reads it through `this`, and
+    * a rule reads WHICH object the lifetime ended for.
     */
   protected def destructorCallAst(
     node: IASTNode,
     destructor: IBinding,
-    callCode: String
+    callCode: String,
+    receiver: => Option[Ast] = None
   ): Option[Ast] =
       destructor match
         case d: ICPPFunction =>
@@ -321,7 +322,7 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
                   d,
                   linked,
                   registerType(Defines.voidTypeName),
-                  None,
+                  receiver,
                   Nil,
                   Some(callCode)
                 )._2

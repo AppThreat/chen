@@ -3,7 +3,7 @@ package io.appthreat.c2cpg.querying.cppeval
 import io.appthreat.c2cpg.astcreation.CppScopeExits
 import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, CfgNode}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, CfgNode, FieldIdentifier, Identifier}
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
 
@@ -34,8 +34,15 @@ class CppScopeExitTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
     Iterator.iterate(target.cfgPrev.headOption)(_.flatMap(_.cfgPrev.headOption))
         .takeWhile(_.isDefined).flatten
         .dropWhile(inTarget.contains)
-        .takeWhile { case c: Call => c.name == "~Guard"; case _ => false }
-        .map(_.code).toList.reverse
+        // a destructor call's destroyed object is its receiver argument, an identifier the
+        // same walk passes through between two consecutive calls
+        .takeWhile {
+            case c: Call            => c.name == "~Guard"
+            case _: Identifier      => true
+            case _: FieldIdentifier => true
+            case _                  => false
+        }
+        .collect { case c: Call => c.code }.toList.reverse
 
   "a return" should {
       val cpg = code(s"""$guard
@@ -146,7 +153,11 @@ class CppScopeExitTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
 
       "destroy an if's condition variable after the statement" in {
           val List(dtor) = cpg.method.nameExact("conditions").call.codeExact("g.~Guard()").l
-          dtor.cfgPrev.code.l should contain("poll()")
+          // the call's own predecessors begin with its receiver; the statement before it is
+          // one hop further back
+          (dtor.cfgPrev.code.l ++ dtor.cfgPrev.flatMap(_.cfgPrev).code.l) should contain(
+            "poll()"
+          )
       }
 
       "destroy a while's condition variable at the end of each iteration, at continue and on exit" in {
