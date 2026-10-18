@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppScopeExitTests.scala
+  h_0926447d100ad2 6,37-45,156-160
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  h_0926447d100ad2 308-309,314-315,325
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppScopeExits.scala
+  h_0926447d100ad2 94-106
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForCpp.scala
+  h_0926447d100ad2 550-558
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d3cee397f415fdb241612358780f61e1c8c320d6",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
