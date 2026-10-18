@@ -1,0 +1,16 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectLifetimesTests.scala
+  h_0926447d100ad2 1-178
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 147,254-364,525-529,606-608,716-723,728,829-830,1173-1181,1415-1416,1470-1484,1488-1500,1800-1913,1998-2018,2106-2158,2320-2324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b813f47607e38db7d2a31b3dc52e12ff46c5cef",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
