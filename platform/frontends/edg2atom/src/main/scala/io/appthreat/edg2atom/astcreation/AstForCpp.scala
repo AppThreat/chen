@@ -344,10 +344,57 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
               element =>
                   element.field("init").flatMap(_.field("expr")).flatMap(capturedVariable)
           }
-          val captures      = members.zip(captured).collect { case (m, Some(v)) => m -> v }.toMap
+          // what each closure member holds, as the front end lists it (edga 0.2+): the variable
+          // a capture copies or refers to, by member - else by member order
+          val listed = init.toSeq.flatMap(_.list("captures")) ++ at.list("captures")
+          val captures =
+              if listed.exists(_.string("field").isDefined) then
+                listed.flatMap(c => c.string("field").zip(c.long("var"))).toMap
+              else members.zip(captured).collect { case (m, Some(v)) => m -> v }.toMap
           val (_, fullName) = lambdaMethod(r, captures)
-          Ast(methodRefNode(at, code(at), fullName, globalTypeDeclFullName))
+          val ref           = methodRefNode(at, code(at), fullName, globalTypeDeclFullName)
+          listed.flatMap(captureText).distinct.foreach(tagNode(ref, X2CpgDefines.CaptureTag, _))
+          Ast(ref)
       case None => Ast(unknownNode(at, code(at)))
+    end match
+  end lambdaRefAst
+
+  /** A lambda the front end folded to a constant: every capture a constant (`[k = 16]`). The
+    * constant's elements are the closure's members in order, each an init-capture of its value.
+    */
+  protected def foldedLambdaAst(at: Value, aggregate: Value): Ast =
+    val routine = aggregate.long("lambdaRoutine").flatMap(unit.routinesById.get)
+    routine match
+      case Some(r) =>
+          val members = aggregate.long("t").flatMap(unit.types.get).toSeq.flatMap(_.list("fields"))
+              .flatMap(_.string("name"))
+          val values = aggregate.list("elements").map(e =>
+              Option.when(e.string("ck").contains("integer"))(e.string("value")).flatten
+          )
+          val (_, fullName) = lambdaMethod(r, Map.empty)
+          val ref           = methodRefNode(at, code(at), fullName, globalTypeDeclFullName)
+          members.zip(values).foreach {
+              case (m, Some(v)) => tagNode(ref, X2CpgDefines.CaptureTag, s"init:$m=$v")
+              case (m, None)    => tagNode(ref, X2CpgDefines.CaptureTag, s"init:$m")
+          }
+          Ast(ref)
+      case None => Ast(unknownNode(at, code(at)))
+
+  /** One capture as the closure's capture tag spells it. */
+  private def captureText(c: Value): Option[String] =
+      if c.flag("this") then None
+      else
+        c.field("initializer") match
+          case Some(init) =>
+              val value = init.field("expr").filter(_.kind == "constant")
+                  .flatMap(_.string("value"))
+              c.string("field").map(f => s"init:$f" + value.map(v => s"=$v").getOrElse(""))
+          case None =>
+              c.long("var").flatMap(variables.get).flatMap {
+                  case l: NewLocal             => Some(l.name)
+                  case p: NewMethodParameterIn => Some(p.name)
+                  case _                       => None
+              }.map(name => (if c.flag("byReference") then "ref:" else "copy:") + name)
 
   private def capturedVariable(e: Value): Option[Long] =
       e.kind match

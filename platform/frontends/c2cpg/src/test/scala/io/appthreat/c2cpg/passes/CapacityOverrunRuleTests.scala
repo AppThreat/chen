@@ -202,7 +202,9 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     }
 
     "fire on a constant length past a shrunk reallocation" in {
-        findingsIn("bad_const_past_realloc") shouldBe Set("MS-BOUND-007")
+        // `buf = realloc(buf, 8)` also loses the block when realloc fails (MS-ALLOC-003): a true
+        // finding of another rule about the same line
+        findingsIn("bad_const_past_realloc") shouldBe Set("MS-BOUND-007", "MS-ALLOC-003")
     }
 
     "stay silent when the length matches the allocation" in {

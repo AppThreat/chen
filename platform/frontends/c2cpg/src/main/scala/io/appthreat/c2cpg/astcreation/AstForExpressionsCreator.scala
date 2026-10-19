@@ -9,7 +9,9 @@ import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPTypedef
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.TypeOfDependentExpression
+import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.SemanticUtil
 import org.eclipse.cdt.core.dom.ast.gnu.IGNUASTCompoundStatementExpression
+import org.eclipse.cdt.core.dom.ast.IASTExpression.ValueCategory
 import org.eclipse.cdt.core.model.IMethod
 import org.eclipse.cdt.internal.core.dom.parser.c.{
     CASTFieldReference,
@@ -59,10 +61,74 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case _                                           => notHandledYet(expression)
     tagConstantValue(expression, r)
     r.root.foreach(root => expressionRoots.put(expression, root))
+    tagTemporaries(expression)
     val inMacro = asChildOfMacroCall(expression, r)
     if inMacro ne r then tagConstantValue(expression, inMacro)
     inMacro
   end expressionAst
+
+  /** A temporary the end of its full-expression destroys ([class.temporary]p4): a class-type
+    * prvalue with a destructor - a call returning the class by value, a constructor call, an
+    * overloaded operator's result - that the program does not use to initialise an object of its
+    * own type (the prvalue IS that object, C++17 [dcl.init]), return, or bind to a reference (which
+    * extends it to the reference's block). Its node is tagged `lifetime-end=full-expression`, so
+    * what borrows from it (`make().c_str()`) is known not to outlive the statement.
+    */
+  private def tagTemporaries(expression: IASTExpression): Unit =
+      if expression.isInstanceOf[ICPPASTExpression] && materializesTemporary(expression) then
+        Option(expressionRoots.get(expression)).foreach(root =>
+            tagNode(root, X2CpgDefines.LifetimeEndTag, X2CpgDefines.TemporaryLifetime)
+        )
+
+  private def materializesTemporary(e: IASTExpression): Boolean =
+    val producer = e match
+      case _: IASTFunctionCallExpression | _: ICPPASTSimpleTypeConstructorExpression => true
+      case b: IASTBinaryExpression =>
+          b.isInstanceOf[ICPPASTBinaryExpression] &&
+          CdtQuery(b.asInstanceOf[ICPPASTBinaryExpression].getOverload).toOption.exists(_ != null)
+      case _ => false
+    producer && CdtQuery(e.getValueCategory).toOption.contains(ValueCategory.PRVALUE) &&
+    CdtQuery(e.getExpressionType).toOption.flatMap(classWithDestructor).exists { cls =>
+      // the context the prvalue is used in, through parentheses
+      var child: IASTNode  = e
+      var parent: IASTNode = e.getParent
+      while parent match
+          case u: IASTUnaryExpression => u.getOperator == IASTUnaryExpression.op_bracketedPrimary
+          case _                      => false
+      do
+        child = parent
+        parent = parent.getParent
+      parent match
+        case _: IASTReturnStatement => false
+        case init: IASTEqualsInitializer =>
+            initialisedType(init).forall(t => !isReferenceTo(t) && !sameClass(t, cls))
+        case list: IASTInitializerList        => false
+        case _: ICPPASTConstructorInitializer => false
+        case _                                => true
+    }
+  end materializesTemporary
+
+  private def classWithDestructor(t: IType): Option[ICPPClassType] =
+      SemanticUtil.getNestedType(t, SemanticUtil.TDEF | SemanticUtil.CVTYPE) match
+        case c: ICPPClassType
+            if CdtQuery(c.getDeclaredMethods.toList).toOption.exists(_.exists(_.isDestructor)) =>
+            Some(c)
+        case _ => None
+
+  /** The declared type of the variable an `= init` initialises. */
+  private def initialisedType(init: IASTEqualsInitializer): Option[IType] =
+      init.getParent match
+        case d: IASTDeclarator =>
+            CdtQuery(d.getName.resolveBinding()).toOption.collect { case v: IVariable => v.getType }
+        case _ => None
+
+  private def isReferenceTo(t: IType): Boolean =
+      SemanticUtil.getNestedType(t, SemanticUtil.TDEF).isInstanceOf[ICPPReferenceType]
+
+  private def sameClass(t: IType, cls: ICPPClassType): Boolean =
+      SemanticUtil.getNestedType(t, SemanticUtil.TDEF | SemanticUtil.CVTYPE) match
+        case c: ICPPClassType => c.isSameType(cls)
+        case _                => false
 
   protected def astForStaticAssert(a: ICPPASTStaticAssertDeclaration): Ast =
     val name  = "static_assert"
@@ -770,8 +836,15 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val expr    = astForExpression(castExpression.getOperand)
     val argNode = castExpression.getTypeId
     val arg     = unknownNode(argNode, code(argNode))
+    // a conversion to a pointer type: the bytes an access through the result touches
+    scala.util.Try(castExpression.getExpressionType).toOption.collect {
+        case p: IPointerType => p.getType
+    }.flatMap(objectSizeOf).foreach(size =>
+        tagNode(cpgCastExpression, X2CpgDefines.PointeeSizeTag, size.toString)
+    )
 
     callAst(cpgCastExpression, List(Ast(arg), expr))
+  end astForCastExpression
 
   /** The arguments a `new` expression hands to the constructor: `new T(a, b)` and `new T{a, b}`. */
   private def astsForConstructorInitializer(initializer: IASTInitializer): List[Ast] =

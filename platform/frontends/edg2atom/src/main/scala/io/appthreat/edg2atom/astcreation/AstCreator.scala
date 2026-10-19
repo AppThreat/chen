@@ -485,6 +485,7 @@ class AstCreator(
     val name  = v.string("name").getOrElse("")
     val tpe   = registerType(types(v.long("type")))
     val local = localNode(v, name, s"$tpe $name", tpe)
+    tagObjectSize(local, v.long("type"))
     v.long("id").foreach(id => variables(id) = local)
     scope.addToScope(name, (local, tpe))
     if v.string("storage").contains("static") then
@@ -639,18 +640,17 @@ class AstCreator(
       idx
     }
     fields.zip(anonymousIndexOf).flatMap { case (f, anonymousIndex) =>
-        val memberAst = anonymousRecord(f, t, anonymousIndex).getOrElse(
-          Seq(
-            Ast(
-              memberNode(
-                f,
-                f.string("name").getOrElse(""),
-                declaratorText(f),
-                registerType(types(f.long("type")))
-              )
+        val memberAst = anonymousRecord(f, t, anonymousIndex).getOrElse {
+            val member = memberNode(
+              f,
+              f.string("name").getOrElse(""),
+              declaratorText(f),
+              registerType(types(f.long("type")))
             )
-          )
-        )
+            tagObjectSize(member, f.long("type"))
+            if f.flag("flexible") then tagNode(member, X2CpgDefines.FlexibleMemberTag, "true")
+            Seq(Ast(member))
+        }
         if isUnion then
           memberAst.foreach(a =>
               a.root.collectFirst { case m: NewMember =>
@@ -843,6 +843,7 @@ class AstCreator(
                 val name  = d.string("name").getOrElse("")
                 val tpe   = registerType(types(d.long("type")))
                 val local = localNode(d, name, s"$tpe $name", tpe)
+                tagObjectSize(local, d.long("type"))
                 d.long("id").foreach(id => variables(id) = local)
                 scope.addToScope(name, (local, tpe))
                 if d.string("storage").contains("static") then
@@ -877,6 +878,7 @@ class AstCreator(
     val name  = b.string("name").getOrElse("")
     val tpe   = registerType(types(b.long("type")))
     val local = localNode(b, name, s"$tpe $name", tpe)
+    tagObjectSize(local, b.long("type"))
     b.long("id").foreach(id => variables(id) = local)
     scope.addToScope(name, (local, tpe))
     val init = b.field("bound").map(bound => ujson.Obj("k" -> "expression", "expr" -> bound))
@@ -1191,6 +1193,12 @@ class AstCreator(
     t
 
   /** Tags for the frontend's own facts, flushed with the AST. */
+  /** The bytes the object a LOCAL or MEMBER declares occupies, from the front end's type table. */
+  protected def tagObjectSize(node: NewNode, typeId: Option[Long]): Unit =
+      typeId.flatMap(types.byteSize).foreach(size =>
+          tagNode(node, X2CpgDefines.ObjectSizeTag, size.toString)
+      )
+
   protected def tagNode(node: NewNode, name: String, value: String): Unit =
     val tag = NewTag().name(name).value(value)
     diffGraph.addNode(tag)

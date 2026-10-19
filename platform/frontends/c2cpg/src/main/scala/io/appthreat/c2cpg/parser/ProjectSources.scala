@@ -329,6 +329,9 @@ object ProjectSources:
       if flags.flatMap(_.standard).exists(UnitSettings.isC23OrLater) then
         for kw <- Seq("typeof_unqual", "__typeof_unqual__") if !symbols.contains(kw) do
           symbols += kw -> "__typeof__"
+      // C11's `_Noreturn` is no keyword to the parser either; GCC's attribute declares the same
+      // function, and what calls it then reads that the path ends there
+      if !symbols.contains("_Noreturn") then symbols += "_Noreturn" -> "__attribute__((noreturn))"
     // the compiler's own search order: a C++ library's wrapper headers (`<cstdlib>`'s
     // `<stdlib.h>`) must be found before the C library's, and `#include_next` relies on it
     val systemIncludes = facts.map(_.systemIncludePaths).filter(_.nonEmpty).getOrElse(

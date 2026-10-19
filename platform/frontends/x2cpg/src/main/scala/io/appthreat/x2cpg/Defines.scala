@@ -53,9 +53,33 @@ object Defines:
     */
   val CompilerGeneratedTag = "compiler-generated"
   val LifetimeEndTag       = "lifetime-end"
-  val VirtualCallTag       = "virtual-call"
-  val DefaultArgumentTag   = "default-argument"
-  val VlaSizeTag           = "vla-size"
+
+  /** `lifetime-end=full-expression` on the expression that makes a temporary the end of the
+    * full-expression destroys ([class.temporary]p4): a pointer or view it hands out does not
+    * outlive the statement.
+    */
+  val TemporaryLifetime  = "full-expression"
+  val VirtualCallTag     = "virtual-call"
+  val DefaultArgumentTag = "default-argument"
+  val VlaSizeTag         = "vla-size"
+
+  /** C/C++ object layout, from the frontend's own type sizes (EDG's type table, CDT's
+    * `SizeofCalculator`): `object-size` on a LOCAL or MEMBER is the bytes its object occupies (an
+    * array's whole extent, a struct's own size); `pointee-size` on a cast to a pointer type is the
+    * bytes an access through the converted pointer reads or writes; `flexible-member` marks a
+    * struct's last member when it is an array of unknown bound, whose elements are the bytes the
+    * allocated object has past it (C99 6.7.2.1p18).
+    */
+  /** C++: what a lambda's closure holds, on its METHOD_REF, one tag per capture - `ref:<name>` and
+    * `copy:<name>` for an outer variable by reference or by copy, `init:<name>` for an init-capture
+    * (`init:<name>=<value>` when its initialiser is a constant), and `default:ref` / `default:copy`
+    * for a capture default, under which every outer variable the body names is captured that way.
+    */
+  val CaptureTag = "capture"
+
+  val ObjectSizeTag     = "object-size"
+  val PointeeSizeTag    = "pointee-size"
+  val FlexibleMemberTag = "flexible-member"
 
   /** On a LOCAL or METHOD_PARAMETER_IN (C/C++): how the variable is referenced, one tag per kind -
     * `address-taken` (its address leaves, so it can change unnamed), `modified` (written after its

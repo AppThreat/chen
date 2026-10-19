@@ -9,8 +9,11 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, ModifierTypes}
 import org.eclipse.cdt.core.dom.ast.*
 import org.eclipse.cdt.core.dom.ast.cpp.{
+    ICPPASTConstructorInitializer,
     ICPPASTFunctionDeclarator,
     ICPPASTFunctionWithTryBlock,
+    ICPPASTInitCapture,
+    ICPPASTInitializerList,
     ICPPASTLambdaExpression,
     ICPPConstructor,
     ICPPMethod
@@ -111,8 +114,41 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
         createFunctionTypeAndTypeDecl(lambdaExpression, methodNode_, name, fullname, signature)
     storeAst(astForLambda.merge(typeDeclAst))
 
-    Ast(methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName))
+    val ref = methodRefNode(lambdaExpression, code, fullname, methodNode_.astParentFullName)
+    lambdaCaptures(lambdaExpression).foreach(tagNode(ref, X2CpgDefines.CaptureTag, _))
+    Ast(ref)
   end astForMethodRefForLambda
+
+  /** What the closure holds: each explicit capture, and the capture default (see
+    * [[X2CpgDefines.CaptureTag]]).
+    */
+  private def lambdaCaptures(lambda: ICPPASTLambdaExpression): List[String] =
+    val explicit = CdtQuery(lambda.getCaptures.toList).getOrElse(Nil).flatMap {
+        case init: ICPPASTInitCapture =>
+            val declarator = init.getDeclarator
+            val name       = ASTStringUtil.getSimpleName(declarator.getName)
+            val value = Option(declarator.getInitializer).flatMap {
+                case e: IASTEqualsInitializer         => Option(e.getInitializerClause)
+                case c: ICPPASTConstructorInitializer => c.getArguments.headOption
+                case l: ICPPASTInitializerList        => l.getClauses.headOption
+                case _                                => None
+            }.collect {
+                case lit: IASTLiteralExpression
+                    if lit.getKind == IASTLiteralExpression.lk_integer_constant => code(lit)
+            }
+            Some(s"init:$name" + value.map(v => s"=$v").getOrElse(""))
+        case c if c.capturesThisPointer => None
+        case c =>
+            Option(c.getIdentifier).map(n => ASTStringUtil.getSimpleName(n)).map { name =>
+                (if c.isByReference then "ref:" else "copy:") + name
+            }
+    }
+    val default = lambda.getCaptureDefault match
+      case ICPPASTLambdaExpression.CaptureDefault.BY_REFERENCE => List("default:ref")
+      case ICPPASTLambdaExpression.CaptureDefault.BY_COPY      => List("default:copy")
+      case _                                                   => Nil
+    explicit ++ default
+  end lambdaCaptures
 
   private def deducedLambdaReturnType(lambdaExpression: ICPPASTLambdaExpression): String =
       CdtQuery(lambdaExpression.getExpressionType).toOption
@@ -163,6 +199,16 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     }.distinct.toList
   end gccAttributes
 
+  /** `noreturn` for a function CDT knows does not return although no attribute spells it: C11's
+    * `_Noreturn` keyword, and C++'s `[[noreturn]]` on a declaration the attribute reader does not
+    * own.
+    */
+  private def withNoReturn(attributes: List[String], function: IBinding): List[String] =
+    val declared = function match
+      case f: IFunction => scala.util.Try(f.isNoReturn).getOrElse(false)
+      case _            => false
+    if declared && !attributes.contains("noreturn") then attributes :+ "noreturn" else attributes
+
   /** The declarator and declaration specifier of every declaration and the definition of `function`
     * the translation unit has seen - the included headers' ones among them. A function declared
     * twice keeps the attributes of both (`seenFunctionFullnames` builds one METHOD, from the
@@ -196,7 +242,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     binding: IBinding = null
   ): Unit =
     val tagged = methodAttributes.getOrElseUpdate(method.fullName, mutable.HashSet.empty)
-    gccAttributes(owners ++ Option(binding).toSeq.flatMap(declarationOwners)).foreach { attr =>
+    withNoReturn(
+      gccAttributes(owners ++ Option(binding).toSeq.flatMap(declarationOwners)),
+      binding
+    ).foreach { attr =>
         if tagged.add(attr) then tagNode(method, X2CpgDefines.FunctionAttributeTag, attr)
     }
 
@@ -209,7 +258,9 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     */
   protected def tagCallAttributes(call: NewCall, function: IBinding): Unit =
     val owners = declarationOwners(function)
-    gccAttributes(owners).foreach(attr => tagNode(call, X2CpgDefines.FunctionAttributeTag, attr))
+    withNoReturn(gccAttributes(owners), function).foreach(attr =>
+        tagNode(call, X2CpgDefines.FunctionAttributeTag, attr)
+    )
     // the header a function is declared in, when this file does not declare it: what tells an
     // SBOM which package's API the call uses
     if owners.nonEmpty && owners.forall(isIncludedNode) then

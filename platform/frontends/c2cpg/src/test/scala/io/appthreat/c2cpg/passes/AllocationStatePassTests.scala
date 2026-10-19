@@ -488,7 +488,8 @@ class AllocationStatePassTests extends DataFlowCodeToCpgSuite:
   "realloc" should:
 
     "not turn into a double free: the realloc frees the input, the free frees the result" in {
-        findingsIn("bad_realloc_then_free") shouldBe empty
+        // `p = realloc(p, 16)` loses the block when realloc fails - that leak is the one finding
+        findingsIn("bad_realloc_then_free") shouldBe Set("MS-ALLOC-003")
     }
 
   "MS-ALLOC-004" should:

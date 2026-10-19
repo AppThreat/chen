@@ -1,7 +1,7 @@
 package io.appthreat.x2cpg.passes.taggers
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.DispatchTypes
+import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
@@ -103,7 +103,9 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
                           // the value tested must be the value used: `while (n < 4) { n =
                           // read(); a[n]; }` tests an older n
                           variableKey(bounded).flatMap(argKeys.get)
-                              .filter(arg => unchangedSince(bounded, arg)).foreach { arg =>
+                              .filter(arg =>
+                                  unchangedSince(bounded, arg, retestedByLoopExit(controller, call))
+                              ).foreach { arg =>
                                 add(
                                   arg,
                                   if above then TagAbove else TagBelow,
@@ -323,10 +325,42 @@ object GuardPass:
     */
   private[taggers] def guardingControllers(node: CfgNode): List[Call] =
     val controllers = node.controlledBy.collect { case c: Call => c }.l
-    if controllers.isEmpty then Nil
-    else
-      val dominators = node.dominatedBy.map(_.id()).toSet
-      controllers.filter(c => dominators.contains(c.id()))
+    val dominating  = node.dominatedBy.l
+    val dominators  = dominating.map(_.id()).toSet
+    val direct      = controllers.filter(c => dominators.contains(c.id()))
+    // the loops the node comes after: a loop's condition dominates what follows it, and the
+    // loop ends only where the condition fails - after `for (n = len; n > max; n -= max) ...`,
+    // n is at most max. No control dependence says so (the node runs whatever the loop did);
+    // the condition's branch reaching the node decides the polarity, and a `break` that also
+    // reaches it leaves the polarity open
+    val exits = dominating.collect {
+        case c: Call if loopExitedBefore(c, node) && !direct.exists(_.id() == c.id()) => c
+    }
+    direct ++ exits
+
+  /** The loop whose condition `condition` is, when `node` lies after the loop, not inside it. */
+  private[taggers] def loopExitedBefore(condition: Call, node: StoredNode): Boolean =
+      loopOf(condition).exists(loop => !isWithin(node, loop))
+
+  private[taggers] def loopOf(condition: Call): Option[ControlStructure] =
+      condition._astIn.nextOption().collect {
+          case cs: ControlStructure
+              if LoopTypes.contains(cs.controlStructureType) &&
+                  cs.condition.headOption.exists(_.id() == condition.id()) => cs
+      }
+
+  private val LoopTypes =
+      Set(ControlStructureTypes.WHILE, ControlStructureTypes.FOR, ControlStructureTypes.DO)
+
+  private def isWithin(node: StoredNode, ancestor: AstNode): Boolean =
+    var cursor: Option[StoredNode] = Some(node)
+    var inside                     = false
+    while !inside && cursor.isDefined do
+      cursor.get match
+        case n if n.id() == ancestor.id() => inside = true
+        case _: Method                    => cursor = None
+        case other                        => cursor = other._astIn.nextOption()
+    inside
 
   /** Is the value `use` reads the one the comparison operand `guarded` tested, with no definition
     * of the variable between them? The walk back from `use` stops at the operand (every call
@@ -338,14 +372,26 @@ object GuardPass:
     * short-circuit path on which the `&&` is false and the access never runs. Plain variables only
     *   - a field access has no per-variable definitions to walk and is matched by its key alone.
     */
-  private[taggers] def unchangedSince(guarded: Expression, use: Expression): Boolean =
+  private[taggers] def unchangedSince(
+    guarded: Expression,
+    use: Expression,
+    retested: StoredNode => Boolean = _ => false
+  ): Boolean =
       (withoutCasts(guarded), withoutCasts(use)) match
         case (g: Identifier, u: Identifier) if g.name == u.name =>
             valueSources(u, stopAt = Some(g.id())).exists(_.forall {
-                case d: CfgNode => !d.dominatedBy.exists(_.id() == g.id())
+                case d: CfgNode => retested(d) || !d.dominatedBy.exists(_.id() == g.id())
                 case _          => true
             }) && !changedThroughAlias(g, u)
         case _ => true
+
+  /** A definition inside the loop whose exit condition is the guard: the condition tests it again
+    * before the loop ends, so after the loop the guard's verdict is about it.
+    */
+  private[taggers] def retestedByLoopExit(guard: Call, use: StoredNode): StoredNode => Boolean =
+      loopOf(guard).filterNot(loop => isWithin(use, loop)) match
+        case Some(loop) => d => isWithin(d, loop)
+        case None       => _ => false
 
   /** Can a variable whose address was taken ([[io.appthreat.x2cpg.Defines.ReferenceKindTag]]) have
     * changed between the guard and the use without being named? Yes when a call that receives its
@@ -620,6 +666,16 @@ object GuardPass:
               case "<operator>.lessThan" | "<operator>.lessEqualsThan" =>
                   if holds then List((l, true, r), (r, false, l))
                   else List((r, true, l), (l, false, r))
+              // `x == K` holding, or `x != K` failing (`if (x != 0) return;`, an assumption),
+              // pins x to the constant: bounded on both sides by it
+              case "<operator>.equals" | "<operator>.notEquals"
+                  if holds == (cmp.name == "<operator>.equals") =>
+                  (l, r) match
+                    case (x: Expression, k: Expression) if IndexRange.literal(k).isDefined =>
+                        List((x, true, k), (x, false, k))
+                    case (k: Expression, x: Expression) if IndexRange.literal(k).isDefined =>
+                        List((x, true, k), (x, false, k))
+                    case _ => Nil
               case _ => Nil
         case _ => Nil
 

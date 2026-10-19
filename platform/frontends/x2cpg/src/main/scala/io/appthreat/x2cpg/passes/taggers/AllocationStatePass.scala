@@ -612,9 +612,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     effectsByName: mutable.HashMap[String, Set[String]],
     record: (StoredNode, String, String) => Unit
   ): Unit =
-    // The view question runs before the tracked-pointer skip: a method can dangle a view with
-    // no allocation, no array local and no addressOf anywhere
-    viewOfTemporaryFacts(method, record)
     // (site, exit, name) -> the state at the exit's LATEST visit. A leak is a claim that NO
     // path frees the allocation ("still live, un-freed and un-escaped"), and the worklist
     // delivers an exit's predecessors at different rounds: the false edge of `if (fd >= 0)
@@ -720,7 +717,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     )
     val hasAddressOfLocal = callFacts.values.exists(cf =>
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
-            .exists { case i: Identifier => ctx.locals.contains(i.name); case _ => false }
+            .exists { case e: Expression => namesFrameObject(e, ctx); case _ => false }
     )
     // a compound literal's address in a return is the frame question with no allocation, no
     // array local and no addressOf anywhere: the literal is an unnamed automatic object
@@ -761,6 +758,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         callFacts.get(site).exists(cf =>
             cf.isAllocCall ||
                 effectsByName.get(cf.name).exists(_.contains("effect:allocates-return"))
+        )
+
+    // a realloc site's input variable: the block a successful realloc consumed
+    def reallocInputOf(site: Long): Option[String] =
+        callFacts.get(site).filter(_.reallocFamilies.nonEmpty).flatMap(cf =>
+            argAt(cf.args, 1).flatMap(trackedNameOf)
         )
 
     // a tracked site whose handle IS an integer (the fd-returning families): its failure
@@ -814,8 +817,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         // branch edges leave from the CONDITION CALL of a guard, not from the control
         // structure node, so the narrowing rides on the condition's out-edges
         val succState = guards.get(node.id()) match
-          case Some(cs) => branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite)
-          case None     => out
+          case Some(cs) =>
+              branchNarrowing(node, cs, succ, out, isOwningSite, isHandleSite, reallocInputOf)
+          case None => out
         enqueue(succ, succState)
       }
     end while
@@ -839,7 +843,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                       holdsBlockLiteralAddress(e) || callReturnsStackAddress(e))
                 then record(r, TagStackEscape, "escape:return")
               }
-          case c: Call if c.name == "<operator>.assignment" && !initializesTemporary(c) =>
+          // main's automatic objects live until the program ends: only exit handlers run
+          // after its frame, so a global or a member keeping one of its addresses outlives
+          // nothing that could read it (CBMC asserts only at a dereference of a dead object)
+          case c: Call
+              if c.name == "<operator>.assignment" && !initializesTemporary(c) && c.method.name != "main" =>
               (argAt(c.argument.l, 1), argAt(c.argument.l, 2)) match
                 case (Some(dst), Some(rhs)) =>
                     val stackRhs = rhsHoldsStackAddress(rhs, settled, ctx)
@@ -1172,10 +1180,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           // `p = realloc(p, n)` consumes p here (the assignment below stores the fresh block)
           else if assignedTarget(c).exists(_ != name) then ()
           else
+            // `p = realloc(p, n)`: when realloc fails it returns NULL and leaves the block -
+            // whose only handle the assignment has just overwritten with that NULL (C11
+            // 7.22.3.5p4). The block is lost on the failure path
+            if assignedTarget(c).contains(name) && useState.get(name).exists(t =>
+                  t.state == StAllocated && !t.aliases.exists(useState.contains)
+              )
+            then record(c, TagLeak, s"leak:$name")
             out = withGroup(out, name, out.get(name).map(_.aliases).getOrElse(Set.empty), StFreed)
             out = out.updated(name, Tracked(StFreed, 0L))
         }
       }
+    end if
 
     // 3. assignment: fresh allocation, copy-in, NULL reset, or loss of provenance
     if cf.name == "<operator>.assignment" then
@@ -1391,6 +1407,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // would report every later exit as a leak of a resource the object now owns (leveldb's
     // env-wrapper shape)
     if isOperatorCall(cf.name) && cf.name != "<operator>.new" then ()
+    // a compile-time query keeps nothing it is handed (`__builtin_object_size(p, 0)` in a
+    // fortified call's expansion), and inside a macro that stands for an inventoried API
+    // (`memset` defined as `__builtin___memset_chk(...)`) the expansion's call IS the macro's
+    // call, already read as that API's use
+    else if NonRetainingBuiltins.contains(cf.name) || expandsInventoriedMacro(c) then ()
     else if cf.isMemoryCall && cf.name != "<operator>.new" then
       // 5. an inventoried memory call USES its pointer arguments; ownership unchanged. Only
       //    the positions the inventory says the call READS THROUGH (dst/src) are uses for the
@@ -1525,7 +1546,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     succ: CfgNode,
     out: Map[String, Tracked],
     isOwningSite: Long => Boolean,
-    isHandleSite: Long => Boolean
+    isHandleSite: Long => Boolean,
+    reallocInputOf: Long => Option[String]
   ): Map[String, Tracked] =
     // branchOf: Some(true) where the condition holds on this successor, None when unknown
     val facts: List[(String, Option[Boolean])] = branchOf(succ, cs) match
@@ -1554,10 +1576,17 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         else t.state
                     // the non-null side of a guard on a nullable-produced pointer is the
                     // check itself: downstream uses of it are not unchecked
-                    acc.updated(
+                    val narrowed = acc.updated(
                       name,
                       t.copy(state = newState, checked = t.checked || !nullHere)
                     )
+                    // `tmp = realloc(p, n)` succeeded on this side: realloc consumed p (the
+                    // block moved to tmp), so p is released here - a read of it is a use after
+                    // free, and it no longer leaks. On the NULL side p is still the block
+                    reallocInputOf(t.site).filter(in => !nullHere && in != name).flatMap(in =>
+                        narrowed.get(in).map(in -> _)
+                    ).map { case (in, it) => narrowed.updated(in, it.copy(state = StFreed)) }
+                        .getOrElse(narrowed)
                 case None =>
                     // an untracked pointer that is provably null becomes tracked-as-null;
                     // nothing downstream reports on it either way
@@ -1806,77 +1835,6 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         case other     => cursor = other._astIn.nextOption()
     found
 
-  /** A view (string_view, span) bound DIRECTLY to a call's by-value result: the temporary the call
-    * returned dies at the end of that statement ([class.temporary]), so every later use of the view
-    * reads storage that no longer exists - the frame-escape question applied to a view. The report
-    * is the binding: the line whose temporary dies. A callee whose return type is unknown stays
-    * silent - evidence, not a guess - and a view bound to a reference or a lvalue is the storage's
-    * own lifetime, not this arm's.
-    */
-  private def viewOfTemporaryFacts(
-    method: Method,
-    record: (StoredNode, String, String) => Unit
-  ): Unit =
-    val viewNames = method.local.l
-        .filter(l => isViewType(Option(l.typeFullName).getOrElse("")))
-        .map(_.name)
-        .toSet
-    if viewNames.isEmpty then return
-    val uses = method.ast.isIdentifier.l.filter(i => viewNames.contains(i.name))
-    uses.foreach { use =>
-      val bindings = OverlayFacts.reachingDefsIn(use).collect {
-          case d: Identifier if d.name == use.name => d
-      }
-          .flatMap { d =>
-              d._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
-          }
-          .filter { a =>
-              a.argumentOption(1).exists {
-                  case i: Identifier => viewNames.contains(i.name)
-                  case _             => false
-              } && a.argumentOption(2).exists {
-                  case c: Call => bindingSourceOf(c).exists(returnsOwningValue)
-                  case _       => false
-              }
-          }.toList.distinctBy(_.id)
-      if bindings.nonEmpty && bindings.forall(lineOf(_) <= lineOf(use)) then
-        bindings.foreach(b => record(b, TagStackEscape, "escape:view-of-temporary"))
-    }
-  end viewOfTemporaryFacts
-
-  /** The call a view's binding expression produces: through a cast, and through a conversion
-    * operator (`std.string::operator basic_string_view`) to the value it converts. A conversion of
-    * something that is not itself a producing call (an lvalue) binds no temporary: the storage is
-    * the lvalue's own lifetime.
-    */
-  private def bindingSourceOf(c: Call): Option[Call] =
-      if c.name == "<operator>.cast" then
-        c.argument.l.collectFirst { case x: Expression => x }.collect {
-            case inner: Call => inner
-        }.flatMap(bindingSourceOf)
-      else if c.methodFullName.contains(".operator ") && c.argument.l.sizeIs <= 2 then
-        c.argument.l.collectFirst { case x: Expression => x }.collect {
-            case inner: Call => inner
-        }.flatMap(bindingSourceOf)
-      else Some(c)
-
-  /** A resolved call whose return is a string-like owner BY VALUE - the temporary a view binds to.
-    * A pointer, a reference, a view itself, or an unknown return type is not one.
-    */
-  private def returnsOwningValue(c: Call): Boolean =
-      c._callOut.collectAll[Method].l.exists { m =>
-        val t = Option(m.methodReturn.typeFullName).map(_.trim).getOrElse("")
-        t.nonEmpty && t != "ANY" && !t.endsWith("*") && !t.endsWith("&") &&
-        !isViewType(t) && t.contains("string") && !t.contains("string_view")
-      }
-
-  /** `std::string_view` (any `basic_string_view` instance) and `std::span`, by the type's own name
-    * segment - a `timespan` or `lifespan` is not a view.
-    */
-  private val ViewTypeName = """(^|[.:])(basic_)?(string_view|span)\b""".r
-
-  private def isViewType(t: String): Boolean = ViewTypeName.findFirstIn(t.trim).isDefined
-
   /** The same question off the resolved signature a call carries: a template's parameters are often
     * typed ANY while the signature spells them (`std.unique_ptr<...> &&`). The parameter list is
     * split at the depth-zero commas; the argument's position names its parameter.
@@ -1998,16 +1956,41 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def holdsStackAddress(e: Expression, ctx: MethodContext): Boolean = e match
     case c: Call =>
         c.name match
+          // the address of a local, of one of its elements or members (`&buf[1]`, `&s.f`): a
+          // pointer into this frame's object, at whatever offset
           case "<operator>.addressOf" =>
-              c.argumentOption(1).exists {
-                  case i: Identifier => ctx.locals.contains(i.name)
-                  case _             => false
-              }
+              c.argumentOption(1).collect { case x: Expression => x }.exists(namesFrameObject(
+                _,
+                ctx
+              ))
           case "<operator>.cast" =>
               c.argument.l.collect { case x: Expression => x }.exists(holdsStackAddress(_, ctx))
+          // `buf + k`, `buf - k`: the array local, moved within itself by an integer (the
+          // difference of two pointers is an integer, no address)
+          case "<operator>.addition" | "<operator>.subtraction" =>
+              c.argumentOption(1).collect { case x: Expression => x }.exists {
+                  case i: Identifier => ctx.arrayLocals.contains(i.name)
+                  case _             => false
+              } && c.argumentOption(2).collect { case x: Expression => x }.exists { k =>
+                val t = String.valueOf(k.property("TYPE_FULL_NAME")).trim
+                !OverlayFacts.isPointer(t) && !t.endsWith("]")
+              }
           case _ => false
     case i: Identifier => ctx.arrayLocals.contains(i.name)
     case _             => false
+
+  /** The lvalue names this frame's own object: a local, or an element or member of one. */
+  private def namesFrameObject(e: Expression, ctx: MethodContext): Boolean = e match
+    case i: Identifier => ctx.locals.contains(i.name)
+    case c: Call if c.name == "<operator>.indexAccess" || c.name == "<operator>.fieldAccess" =>
+        c.argumentOption(1).collect { case x: Expression => x }.exists(namesFrameObject(_, ctx))
+    // an array local indexed as a pointer (`text[1]` on `char text[] = "..."`)
+    case c: Call if c.name == "<operator>.indirectIndexAccess" =>
+        c.argumentOption(1).exists {
+            case i: Identifier => ctx.arrayLocals.contains(i.name)
+            case _             => false
+        }
+    case _ => false
 
   /** `&(T){...}` - the address of a block-scope compound literal, an unnamed automatic object of
     * this frame (C99 6.5.2.5p5). Returned, it leaves the frame exactly the way a named local's
@@ -2308,6 +2291,27 @@ object AllocationStatePass:
   final val TagState   = "alloc-state"
   final val TagLeak    = "alloc-leak"
   final val TagNullUse = "null-use"
+
+  /** Builtins that read nothing through a pointer argument and keep nothing: queries the compiler
+    * answers (`__builtin_object_size`, `__builtin_constant_p`) and a cache hint.
+    */
+  private val NonRetainingBuiltins = Set(
+    "__builtin_object_size",
+    "__builtin_dynamic_object_size",
+    "__builtin_constant_p",
+    "__builtin_prefetch"
+  )
+
+  /** A call inside the expansion of a macro whose own call the inventory tags with the same API: a
+    * fortified `memset(p, 0, n)` expanding to `__builtin___memset_chk(p, 0, n, ...)`.
+    */
+  private def expandsInventoriedMacro(c: Call): Boolean =
+    val api = MemApiVocab.apiOf(c.name)
+    c.inAst.collectAll[Call].exists(m =>
+        m.dispatchType == io.shiftleft.codepropertygraph.generated.DispatchTypes.INLINED &&
+            MemApiVocab.apiOf(m.name) == api &&
+            m.argument.l.exists(_.tag.name("mem-.*").nonEmpty)
+    )
 
   /** The C library's functions that do not return, for code whose headers are not available. */
   private val NoReturnFunctions = Set(

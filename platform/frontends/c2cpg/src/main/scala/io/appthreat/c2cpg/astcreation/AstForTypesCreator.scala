@@ -11,6 +11,7 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.appthreat.x2cpg.datastructures.Stack.*
 import scala.annotation.tailrec
+import scala.collection.mutable
 
 trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
@@ -107,11 +108,17 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           val tpe = declarator match
             case _: IASTArrayDeclarator => registerType(typeFor(declarator))
             case _ => registerType(typeForDeclSpecifier(declaration.getDeclSpecifier))
-          Ast(memberNode(declarator, name, nodeSignature(declarator), tpe))
+          val member = memberNode(declarator, name, nodeSignature(declarator), tpe)
+          tagLayout(member, declarator)
+          if isFlexibleMember(d, declarator) then
+            tagNode(member, X2CpgDefines.FlexibleMemberTag, "true")
+          Ast(member)
       case _ if declarator.isInstanceOf[IASTArrayDeclarator] =>
-          val tpe     = registerType(typeFor(declarator))
+          val tpe     = registerType(foldedBound(declarator, typeFor(declarator)))
           val codeTpe = typeFor(declarator, stripKeywords = false)
           val node    = localNode(declarator, name, s"$codeTpe $name", tpe)
+          tagLayout(node, declarator)
+          vlaBound(declarator).foreach(tagNode(node, X2CpgDefines.VlaSizeTag, _))
           scope.addToScope(name, (node, tpe))
           localAst(declaration, node)
       case _ =>
@@ -125,11 +132,116 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           val codeTpe =
               typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = false, index)
           val node = localNode(declarator, name, s"$codeTpe $name", tpe)
+          tagLayout(node, declarator)
           scope.addToScope(name, (node, tpe))
           registerArrayTypedef(declarator, tpe)
           localAst(declaration, node)
     end match
   end astForDeclarator
+
+  /** The bytes the declared object occupies, as the target's data model sizes it (the unit's
+    * `__SIZEOF_*__` macros): what a byte-length copy into it is compared with.
+    */
+  private def tagLayout(node: NewNode, declarator: IASTDeclarator): Unit =
+      declaredVariableType(declarator).flatMap(objectSizeOf).foreach(size =>
+          tagNode(node, X2CpgDefines.ObjectSizeTag, size.toString)
+      )
+
+  private def declaredVariableType(declarator: IASTDeclarator): Option[IType] =
+      scala.util.Try(effectiveDeclaratorName(declarator).resolveBinding()).toOption.collect {
+          case v: IVariable => v.getType
+      }.filter(_ != null)
+
+  /** The size of an object of type `t`, when the type is complete and fixed. */
+  protected def objectSizeOf(t: IType): Option[Long] =
+      scala.util.Try(sizeCalculator.sizeAndAlignment(t)).toOption.flatMap(Option(_))
+          .map(_.size).filter(_ > 0)
+
+  protected lazy val sizeCalculator =
+      new org.eclipse.cdt.internal.core.dom.parser.SizeofCalculator(cdtAst)
+
+  /** `char buf[n]` with a runtime n: the bound as written, evaluated where the array is declared.
+    * The bound must read a variable: a size CDT could not value because a name in it did not
+    * resolve (`md[EVP_MAX_MD_SIZE]` with the macro's header out of reach) is a constant the parser
+    * missed, not a run-time length.
+    */
+  private def vlaBound(declarator: IASTDeclarator): Option[String] =
+      declarator match
+        case a: IASTArrayDeclarator =>
+            a.getArrayModifiers.toList.headOption.flatMap(m => Option(m.getConstantExpression))
+                .filter(_ => declaredVariableType(declarator).exists(isVariableLength))
+                .filter(readsVariable)
+                .map(code).filter(_.nonEmpty)
+        case _ => None
+
+  /** `char buf[buffer_size()]` with a `consteval` or `constexpr` size CDT could not value (the type
+    * reads `char[<error>]`): the bound is a call of a parameterless function whose body returns one
+    * literal, which is the count.
+    */
+  private def foldedBound(declarator: IASTDeclarator, tpe: String): String =
+      declarator match
+        case a: IASTArrayDeclarator if tpe.endsWith("[<error>]") =>
+            a.getArrayModifiers.toList.headOption.flatMap(m => Option(m.getConstantExpression)).collect {
+                case call: IASTFunctionCallExpression if call.getArguments.isEmpty => call
+            }.flatMap(call => constantReturnOf(call.getFunctionNameExpression))
+                .map(n => tpe.stripSuffix("[<error>]") + s"[$n]")
+                .getOrElse(tpe)
+        case _ => tpe
+
+  private def constantReturnOf(callee: IASTExpression): Option[Long] =
+      callee match
+        case id: IASTIdExpression =>
+            scala.util.Try(id.getName.resolveBinding()).toOption.collect { case f: IFunction => f }
+                .flatMap(f => cdtAst.getDefinitionsInAST(f).toList.headOption)
+                .flatMap(name => Option(name.getParent).flatMap(p => Option(p.getParent)))
+                .collect { case fd: IASTFunctionDefinition => fd.getBody }
+                .collect {
+                    case body: IASTCompoundStatement if body.getStatements.length == 1 =>
+                        body.getStatements.head
+                }
+                .collect { case r: IASTReturnStatement => r.getReturnValue }
+                .collect {
+                    case l: IASTLiteralExpression
+                        if l.getKind == IASTLiteralExpression.lk_integer_constant =>
+                        l.toString.trim.toLowerCase.replaceAll("[ul]+$", "")
+                }
+                .flatMap(text => scala.util.Try(java.lang.Long.decode(text).longValue).toOption)
+                .filter(_ > 0)
+        case _ => None
+
+  /** Every name the expression reads resolves, and one of them is a variable. */
+  private def readsVariable(e: IASTExpression): Boolean =
+    val names = mutable.ListBuffer.empty[IASTName]
+    e.accept(new ASTVisitor(true):
+      override def visit(name: IASTName): Int =
+        names += name
+        ASTVisitor.PROCESS_CONTINUE
+    )
+    val bindings = names.toList.map(n => scala.util.Try(n.resolveBinding()).toOption.orNull)
+    bindings.nonEmpty && !bindings.exists(b => b == null || b.isInstanceOf[IProblemBinding]) &&
+    bindings.exists(_.isInstanceOf[IVariable])
+
+  private def isVariableLength(t: IType): Boolean = t match
+    case a: IArrayType =>
+        a.hasSize && scala.util.Try(a.getSize.numberValue()).toOption.flatMap(Option(_)).isEmpty
+    case _ => false
+
+  /** The last member of a struct, declared as an array of unknown bound: a flexible array member.
+    */
+  private def isFlexibleMember(
+    declaration: IASTSimpleDeclaration,
+    declarator: IASTDeclarator
+  ): Boolean =
+    val unknownBound = declarator match
+      case a: IASTArrayDeclarator =>
+          a.getArrayModifiers.toList.lastOption.exists(_.getConstantExpression == null)
+      case _ => false
+    unknownBound && (declaration.getParent match
+      case c: IASTCompositeTypeSpecifier =>
+          c.getMembers.toList.lastOption.contains(declaration) &&
+          declaration.getDeclarators.toList.lastOption.contains(declarator)
+      case _ => false
+    )
 
   /** Records `tpe` as an array behind a typedef when the declared variable's type is one. */
   private def registerArrayTypedef(declarator: IASTDeclarator, tpe: String): Unit =

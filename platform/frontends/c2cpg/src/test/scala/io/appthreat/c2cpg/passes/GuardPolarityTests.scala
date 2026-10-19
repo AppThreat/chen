@@ -49,6 +49,51 @@ class GuardPolarityTests extends DataFlowCodeToCpgSuite:
     |    buf[i] = 1;
     |    note();
     |}
+    |
+    |#include <stddef.h>
+    |#include <string.h>
+    |/* a loop's exit: after it, n > 32 has failed, so the last copy is at most 32 bytes */
+    |void after_a_chunking_loop(unsigned char *out, size_t total)
+    |{
+    |    unsigned char block[32];
+    |    unsigned char *cp;
+    |    size_t n;
+    |    memset(block, 1, sizeof(block));
+    |    for (cp = out, n = total; n > 32; n -= 32, cp += 32)
+    |        memcpy(cp, block, 32);
+    |    memcpy(cp, block, n);
+    |}
+    |
+    |/* the chunk is a digest's size, 32 or 64, and the source holds 64 */
+    |void after_a_digest_sized_loop(unsigned char *out, size_t total, int kind)
+    |{
+    |    unsigned char digest[64];
+    |    unsigned char *cp;
+    |    size_t chunk, n;
+    |    if (kind == 5)
+    |        chunk = 32;
+    |    else
+    |        chunk = 64;
+    |    memset(digest, 1, sizeof(digest));
+    |    for (cp = out, n = total; n > chunk; n -= chunk, cp += chunk)
+    |        memcpy(cp, digest, chunk);
+    |    memcpy(cp, digest, n);
+    |}
+    |
+    |/* the twin: a break leaves the loop with the condition still true */
+    |void after_a_loop_with_a_break(unsigned char *out, size_t total)
+    |{
+    |    unsigned char block[32];
+    |    unsigned char *cp;
+    |    size_t n;
+    |    memset(block, 1, sizeof(block));
+    |    for (cp = out, n = total; n > 32; n -= 32, cp += 32) {
+    |        if (cp[0] == 0)
+    |            break;
+    |        memcpy(cp, block, 32);
+    |    }
+    |    memcpy(cp, block, n);
+    |}
     |""".stripMargin,
     "guardpolarity.c"
   )
@@ -76,5 +121,14 @@ class GuardPolarityTests extends DataFlowCodeToCpgSuite:
     }
     "bound the index after an early exit" in {
         boundFindings("then_exits") shouldBe empty
+    }
+    "bound the length after the loop whose condition failed" in {
+        boundFindings("after_a_chunking_loop") shouldBe empty
+    }
+    "bound the length by a chunk every value of which fits the source" in {
+        boundFindings("after_a_digest_sized_loop") shouldBe empty
+    }
+    "leave the length unbounded when a break also leaves the loop" in {
+        boundFindings("after_a_loop_with_a_break") should not be empty
     }
 end GuardPolarityTests

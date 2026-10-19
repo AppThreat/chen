@@ -124,6 +124,22 @@ class MemorySafetyOnEdgObjectLifetimesTests extends Code2CpgFixture(() =>
       |    std::string_view v = make_name(id);
       |    return v;
       |}
+      |void use_text(const char *);
+      |void bad_c_str_of_temporary(int id) {
+      |    const char *p = make_name(id).c_str();
+      |    use_text(p);
+      |}
+      |char bad_view_of_concatenation(const std::string &a) {
+      |    std::string_view v = a + "-suffix";
+      |    return v[0];
+      |}
+      |void good_reference_extends(int id) {
+      |    const std::string &kept = make_name(id);
+      |    use_text(kept.c_str());
+      |}
+      |void good_inside_full_expression(int id) {
+      |    use_text(make_name(id).c_str());
+      |}
       |std::string_view good_view_of_lvalue(const std::string &s) {
       |    std::string_view v = s;
       |    return v;
@@ -143,6 +159,35 @@ class MemorySafetyOnEdgObjectLifetimesTests extends Code2CpgFixture(() =>
       |    if (!p) return;
       |    p[0] = 'x';
       |}
+      |struct tree_node { int depth; };
+      |static tree_node *build_from(std::string spec) {
+      |    tree_node *n = new tree_node;
+      |    n->depth = (int)spec.size();
+      |    return n;
+      |}
+      |int good_new_object_from_temporary_argument(int id) {
+      |    tree_node *n = build_from(make_name(id));
+      |    int d = n->depth;
+      |    delete n;
+      |    return d;
+      |}
+      |struct named_value { const char *name; int value; };
+      |static const named_value known_values[] = { {"a", 1}, {"b", 2}, {nullptr, 0} };
+      |int good_global_table_walk(int wanted) {
+      |    const named_value *nv;
+      |    for (nv = known_values; nv->name; nv++)
+      |        if (nv->value == wanted) return 1;
+      |    return nv->value;
+      |}
+      |struct sink {
+      |    char buf[64];
+      |    char *pos = buf;
+      |    void fill(size_t n, char c) {
+      |        auto put = [&](size_t count) { memset(pos, c, count); pos += count; };
+      |        if (n <= sizeof(buf)) put(n);
+      |    }
+      |};
+      |void good_closure_kept_in_frame(sink &s) { s.fill(3, 'x'); }
       |""".stripMargin,
       "object_lifetimes.cpp"
     )
@@ -236,6 +281,37 @@ class MemorySafetyOnEdgObjectLifetimesTests extends Code2CpgFixture(() =>
       "stay silent for a view of an lvalue" in {
           requireEdga()
           findingsIn("good_view_of_lvalue") shouldBe Set.empty
+      }
+  }
+
+  "a pointer or view borrowed from a temporary" should {
+      "report its read after the temporary's statement" in {
+          requireEdga()
+          findingsIn("bad_c_str_of_temporary") should contain("MS-ALLOC-002")
+          findingsIn("bad_view_of_concatenation") should contain("MS-ALLOC-002")
+      }
+      "stay silent for an extended temporary and a use inside the statement" in {
+          requireEdga()
+          findingsIn("good_reference_extends") should not contain "MS-ALLOC-002"
+          findingsIn("good_inside_full_expression") should not contain "MS-ALLOC-002"
+      }
+      "stay silent for a new object a call builds from a temporary argument" in {
+          requireEdga()
+          findingsIn("good_new_object_from_temporary_argument") should not contain "MS-ALLOC-002"
+      }
+  }
+
+  "a pointer walking a global table" should {
+      "stay silent: the table's storage is the program's" in {
+          requireEdga()
+          findingsIn("good_global_table_walk") should not contain "MS-ALLOC-002"
+      }
+  }
+
+  "a closure a member function keeps in a local" should {
+      "not escape its frame" in {
+          requireEdga()
+          findingsIn("fill") should not contain "MS-ESC-001"
       }
   }
 

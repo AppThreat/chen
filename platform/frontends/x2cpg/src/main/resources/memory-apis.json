@@ -33,8 +33,11 @@
     "loader derives for every entry. The `_chk` wrappers the C library's _FORTIFY_SOURCE turns calls",
     "into (`__memcpy_chk`, and the compiler's `__builtin___memcpy_chk`) take an extra argument, the",
     "destination size the compiler worked out, and some move their other arguments: each has its own",
-    "entry, with `api` naming the API its tags are valued with and `objectSize` that argument."
+    "entry, with `api` naming the API its tags are valued with and `objectSize` that argument.",
+    "`untrustedPrefixes` names the input functions of verification benchmarks by prefix: SV-COMP's `__VERIFIER_nondet_int` and CBMC's `nondet_*` return any value - the program's input - so their results are untrusted like getenv's.",
+    "The readers that fill a caller's buffer (read, recv, fgets, fread, ...) declare it as `dst` beside `untrustedRead`: the bytes they write are bounded by their length argument, which the destination must hold (CBMC's library models assert `w_ok(buf, n)`)."
   ],
+  "untrustedPrefixes": ["__VERIFIER_nondet_", "nondet_", "__CPROVER_nondet"],
   "apis": [
     {
       "name": "strcpy",
@@ -295,11 +298,13 @@
     },
     {
       "name": "read",
+      "dst": 2,
       "len": 3,
       "untrustedRead": 2
     },
     {
       "name": "pread",
+      "dst": 2,
       "len": 3,
       "untrustedRead": 2
     },
@@ -310,11 +315,13 @@
     },
     {
       "name": "recv",
+      "dst": 2,
       "len": 3,
       "untrustedRead": 2
     },
     {
       "name": "recvfrom",
+      "dst": 2,
       "len": 3,
       "untrustedRead": 2
     },
@@ -324,11 +331,14 @@
     },
     {
       "name": "fread",
+      "dst": 1,
+      "count": 3,
       "len": 2,
       "untrustedRead": 1
     },
     {
       "name": "fgets",
+      "dst": 1,
       "len": 2,
       "untrustedRead": 1
     },
@@ -346,6 +356,7 @@
     },
     {
       "name": "readlink",
+      "dst": 2,
       "len": 3,
       "untrustedRead": 2
     },
@@ -505,6 +516,7 @@
     },
     {
       "name": "__read_chk",
+      "dst": 2,
       "api": "read",
       "len": 3,
       "untrustedRead": 2,
@@ -512,6 +524,7 @@
     },
     {
       "name": "__pread_chk",
+      "dst": 2,
       "api": "pread",
       "len": 3,
       "untrustedRead": 2,
@@ -519,6 +532,7 @@
     },
     {
       "name": "__recv_chk",
+      "dst": 2,
       "api": "recv",
       "len": 3,
       "untrustedRead": 2,
@@ -526,6 +540,7 @@
     },
     {
       "name": "__recvfrom_chk",
+      "dst": 2,
       "api": "recvfrom",
       "len": 3,
       "untrustedRead": 2,
@@ -533,6 +548,7 @@
     },
     {
       "name": "__fgets_chk",
+      "dst": 1,
       "api": "fgets",
       "len": 3,
       "untrustedRead": 1,
@@ -546,6 +562,7 @@
     },
     {
       "name": "__readlink_chk",
+      "dst": 2,
       "api": "readlink",
       "len": 3,
       "untrustedRead": 2,
