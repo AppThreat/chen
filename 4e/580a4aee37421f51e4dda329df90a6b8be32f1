@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyFindingPassTests.scala
+  s_eb3fa0a873dcb2::t_02cb9b878084ef 432-434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4e580a4aee37421f51e4dda329df90a6b8be32f1",
+  "prompts": {},
+  "sessions": {
+    "s_eb3fa0a873dcb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14a505c7-bd8c-4d25-b29c-3e3b8733af79",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
