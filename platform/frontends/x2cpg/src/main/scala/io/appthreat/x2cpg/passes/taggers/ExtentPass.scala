@@ -265,9 +265,27 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   ): Option[(String, List[StoredNode])] =
       dst match
         case c: Call if c.name == "<operator>.addressOf" =>
-            // the copy's own sizeof evidence is evidence about the address target too:
-            // memcpy(&dst, src, sizeof(dst)) is a correctly bounded copy
-            c.argumentOption(1).flatMap(extentOf(_, method, sizeofInCopy))
+            // `&buf[k]` for a literal k is `buf + k`: the capacity left from the element on
+            c.argumentOption(1) match
+              case Some(ix: Call)
+                  if (ix.name == "<operator>.indexAccess" ||
+                      ix.name == "<operator>.indirectIndexAccess") &&
+                      ix.argumentOption(2).flatMap(IndexRange.literal).exists(_ > 0) =>
+                  val k = ix.argumentOption(2).flatMap(IndexRange.literal).get
+                  ix.argumentOption(1).flatMap(extentOf(_, method, None)).map { case (v, _) =>
+                      val reduced = v match
+                        case c if c.startsWith(s"$ValueConst:") =>
+                            c.stripPrefix(s"$ValueConst:").toLongOption.filter(_ > k)
+                                .map(n => s"$ValueConst:${n - k}")
+                                .getOrElse(s"$ValueOffset:$v")
+                        case other if knownExtentPrefixes.exists(other.startsWith) =>
+                            s"$ValueOffset:$other"
+                        case other => other
+                      (reduced, List.empty[StoredNode])
+                  }
+              // the copy's own sizeof evidence is evidence about the address target too:
+              // memcpy(&dst, src, sizeof(dst)) is a correctly bounded copy
+              case other => other.flatMap(extentOf(_, method, sizeofInCopy))
         case c: Call
             if c.name == "<operator>.indexAccess" || c.name == "<operator>.indirectIndexAccess" =>
             // &buf[off] still writes into buf's capacity
@@ -331,7 +349,7 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   end additiveExtentOf
 
   private val knownExtentPrefixes: Set[String] =
-      Set(ValueConst, ValueSizeof, ValueAlloc, ValueParam, ValueField).map(_ + ":")
+      Set(ValueConst, ValueSizeof, ValueAlloc, ValueParam, ValueField, ValueVla).map(_ + ":")
 
   /** A nullary `get` accessor call (`p.get()`), resolved or not: its only expression argument is
     * the receiver.
@@ -353,11 +371,17 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     val declared = use match
       case i: Identifier =>
           i.refsTo.collectFirst { case l: Local => l }.filter(l =>
-              method.local.exists(_.id == l.id)
+              method.local.exists(_.id == l.id) || OverlayFacts.capturedLocal(i).exists(
+                _.id == l.id
+              )
           )
       case _ => None
     declared.orElse(method.local.name(name).headOption).flatMap { local =>
-        arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local)))
+        // a variable-length array: its bound, evaluated where it is declared, is its capacity -
+        // a value the program holds, not a declared count
+        local.tag.nameExact(io.appthreat.x2cpg.Defines.VlaSizeTag).value.headOption
+            .map(bound => (s"$ValueVla:${bound.trim}", List(local)))
+            .orElse(arrayExtent(local.typeFullName).map(n => (s"$ValueConst:$n", List(local))))
     }.orElse {
         // A member read without `this->`: the frontend types the identifier with the OWNER
         // class, so the member's declared array extent is the buffer's, with the member as
@@ -415,7 +439,18 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     * declared array local), or a compound literal written as an initializer list. All the
     * definitions must agree on the element count.
     */
+  /** How deep the view question is nested: `p = q + 1; q = r + 1; ...` walks definition to
+    * definition, and a pointer defined from itself (`p = p + 1`) would never end.
+    */
+  private var viewDepth = 0
+
   private def arrayViewExtentOf(use: Expression): Option[String] =
+    if viewDepth >= 4 then return None
+    viewDepth += 1
+    try arrayViewExtentOfNested(use)
+    finally viewDepth -= 1
+
+  private def arrayViewExtentOfNested(use: Expression): Option[String] =
     val defs = ownDefinitionsOf(use)
     if defs.isEmpty then return None
     val rhsValues = defs.flatMap { defNode =>
@@ -439,10 +474,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
               }
           case i: Identifier =>
               arrayExtentOfIdentifier(i, use.method)
+          // `p = buf + k`, `p = &buf[k]`: the view starts k elements in, and what is left of
+          // the array from there is the pointer's capacity
+          case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.addressOf" =>
+              extentOf(c, use.method, None).map(_._1).filter(_.startsWith(s"$ValueConst:"))
           case _ => None
     }
     Option.when(values.nonEmpty && values.size == 1)(values.head)
-  end arrayViewExtentOf
+  end arrayViewExtentOfNested
 
   /** The declared element count an identifier names: its own array local. */
   private def arrayExtentOfIdentifier(i: Identifier, method: Method): Option[String] =
@@ -568,15 +607,64 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>
           Option.when(roomlessTrailingMember(fieldAccess, member))(
             (s"$ValueConst:0", List(member))
-          ).orElse(arrayExtent(member.typeFullName)
-              // GNU's zero-length trailing array is the flexible member written before C99: its
-              // storage is what the allocation adds past the record, not a declared capacity
-              .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
-              .map(n => (s"$ValueConst:$n", List(member)))
-              .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
-              // a pointer member's capacity is wherever its allocation is
-              .orElse(memberExtents.get(member).map(v => (v, List(member)))))
+          ).orElse(flexibleRoomOf(fieldAccess, member).map(v => (v, List(member))))
+              .orElse(arrayExtent(member.typeFullName)
+                  // GNU's zero-length trailing array is the flexible member written before C99: its
+                  // storage is what the allocation adds past the record, not a declared capacity
+                  .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
+                  .map(n => (s"$ValueConst:$n", List(member)))
+                  .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
+                  // a pointer member's capacity is wherever its allocation is
+                  .orElse(memberExtents.get(member).map(v => (v, List(member)))))
       }
+
+  /** A flexible array member reached through a pointer whose every allocation is the record plus a
+    * size: `malloc(sizeof(*m) + n)` leaves the member the n bytes past the record (C99 6.7.2.1p18 -
+    * the member is as long as the object's bytes past its offset allow). The extent names the
+    * allocation's added size, `alloc:<n>`, as an allocation's own size argument would.
+    */
+  private def flexibleRoomOf(fieldAccess: Call, member: Member): Option[String] =
+    val flexible = member.tag.nameExact(io.appthreat.x2cpg.Defines.FlexibleMemberTag).nonEmpty ||
+        OverlayFacts.isTrailingMember(member) &&
+        (arrayExtent(member.typeFullName).contains(0) || member.typeFullName.trim.endsWith("[]"))
+    if !flexible || fieldAccess.name != "<operator>.indirectFieldAccess" then return None
+    fieldAccess.argumentOption(1).collect { case base: Identifier => base }.flatMap { base =>
+      val stores = OverlayFacts.reachingDefsIn(base).collect {
+          case d: Identifier if d.name == base.name =>
+              d._astIn.collectFirst {
+                  case a: Call
+                      if a.name == "<operator>.assignment" && a.argumentOption(1).exists(
+                        _.id == d.id
+                      ) => a
+              }
+      }.flatten
+      val added = stores.map { store =>
+          store.argumentOption(2).flatMap(allocationCallOf).flatMap { alloc =>
+              alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty) match
+                case List(sum: Call) if sum.name == "<operator>.addition" =>
+                    val operands = sum.argument.l.collect { case e: Expression => e }
+                    val (records, rest) = operands.partition {
+                        case sz: Call => sz.name.startsWith("<operator>.sizeOf")
+                        case _        => false
+                    }
+                    Option.when(records.size == 1 && rest.size == 1)(rest.head)
+                case _ => None
+          }
+      }
+      Option.when(stores.nonEmpty && added.forall(_.isDefined))(added.flatten)
+          .filter(_.map(_.code).distinct.size == 1)
+          .flatMap(_.headOption)
+          .map(n =>
+              IndexRange.literal(n).map(v => s"$ValueConst:$v").getOrElse(s"$ValueAlloc:${n.id}")
+          )
+    }
+  end flexibleRoomOf
+
+  private def allocationCallOf(e: AstNode): Option[Call] = e match
+    case c: Call if isAllocationCall(c) => Some(c)
+    case c: Call if c.name.startsWith("<operator>.cast") =>
+        c.argument.l.collectFirst { case inner: Call => inner }.flatMap(allocationCallOf)
+    case _ => None
 
   /** A flexible trailing member (`char data[]`, GNU's `char data[0]`) reached through a pointer
     * whose every allocation reaching the access is exactly the record - `malloc(sizeof(*p))` or
@@ -641,6 +729,12 @@ object ExtentPass:
   final val ValueField   = "field"
   final val ValueUnknown = "unknown"
 
+  /** `vla:<bound>` - a variable-length array, whose capacity is its bound as written, evaluated
+    * once where the array is declared: a capacity the program holds at run time, like an
+    * allocation's size argument.
+    */
+  final val ValueVla = "vla"
+
   /** The compiler builtins that evaluate to the size of the object a pointer addresses. */
   final val ObjectSizeBuiltins = Set("__builtin_object_size", "__builtin_dynamic_object_size")
 
@@ -648,3 +742,4 @@ object ExtentPass:
   private[taggers] val MaxObjectSize = BigInt(Long.MaxValue)
 
   def appliesTo(atom: Cpg): Boolean = MemoryApiPass.appliesTo(atom)
+end ExtentPass

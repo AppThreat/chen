@@ -195,6 +195,17 @@ object MemApiVocab:
   def apiOf(callName: String): String =
       builtinInventory.get(callName).map(_.apiName).getOrElse(callName)
 
+  /** The prefixes of input functions no single entry can list: a verification benchmark's
+    * `nondet_*` and `__VERIFIER_nondet_*` return the program's input. A call so named is an
+    * untrusted call.
+    */
+  lazy val untrustedPrefixes: List[String] =
+      Using(Source.fromResource(ResourcePath))(_.mkString).toOption.toList.flatMap { text =>
+          parse(text).toOption.toList.flatMap(
+            _.hcursor.downField("untrustedPrefixes").as[List[String]].toOption.getOrElse(Nil)
+          )
+      }
+
   /** The built-in vocabulary, for tests and diagnostics. */
   def builtInInventory: List[MemApiEntry] = builtin
 

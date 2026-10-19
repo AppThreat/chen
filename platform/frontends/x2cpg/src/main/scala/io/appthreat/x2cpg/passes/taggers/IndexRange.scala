@@ -241,7 +241,11 @@ private[taggers] final class IndexRange(
             // only returns the range follows by construction - a literal or an operator over
             // the parameters. A returned local carries whatever its definitions accumulated
             // (`type_select += 8` behind four guards), which this reader does not sum
-            val constructed = returns.forall(r => !r.isInstanceOf[Identifier])
+            val constructed = returns.forall {
+                case r: Identifier                                         => literal(r).isDefined
+                case r: Call if r.name == "<operator>.indirectFieldAccess" => literal(r).isDefined
+                case _                                                     => true
+            }
             if returns.nonEmpty && constructed && ranges.forall(_.isDefined) then
               Some(ranges.flatten.reduce(_.union(_)))
             else None
@@ -355,7 +359,45 @@ private[taggers] object IndexRange:
     // a header constant (`config::kNumLevels` is 7)
     case x: Expression if constValueOf(x).isDefined => constValueOf(x)
     case c: Call if c.name == "<operator>.minus"    => c.argumentOption(1).flatMap(literal).map(-_)
-    case _                                          => None
+    case i: Identifier                              => initCaptureValue(i.method, i.name)
+    // the same member read through the closure's `this`
+    case c: Call
+        if c.name == "<operator>.indirectFieldAccess" && c.argumentOption(1).exists(
+          _.code == "this"
+        ) =>
+        c.argument.l.collectFirst { case f: FieldIdentifier => f.canonicalName }
+            .flatMap(initCaptureValue(c.method, _))
+    case _ => None
+
+  /** The constant an init-capture holds, read in its lambda's body: `[len = 16]() { return len; }`
+    * names a closure member its initialiser set once, where the lambda was made. The lambda's
+    * METHOD_REF carries the capture (`init:len=16`); a body that writes the member itself is no
+    * longer reading that value.
+    */
+  private def initCaptureValue(method: Method, name: String): Option[BigInt] =
+    val writes = method.ast.isCall.l.exists(c =>
+        OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists {
+            case w: Identifier => w.name == name
+            case w: Call =>
+                w.name == "<operator>.indirectFieldAccess" &&
+                w.argument.l.exists {
+                    case f: FieldIdentifier => f.canonicalName == name
+                    case _                  => false
+                }
+            case _ => false
+        }
+    )
+    if writes || method.local.nameExact(name).nonEmpty || method.parameter.nameExact(name).nonEmpty
+    then None
+    else
+      method._refIn.collectAll[MethodRef].l.flatMap(
+        _.tag.nameExact(io.appthreat.x2cpg.Defines.CaptureTag).value.l
+      ).collect {
+          case c if c.startsWith(s"init:$name=") => c.stripPrefix(s"init:$name=")
+      }.distinct match
+        case List(v) => literalValue(v)
+        case _       => None
+  end initCaptureValue
 
   private def constValueOf(e: Expression): Option[BigInt] =
       e.tag.name(io.appthreat.x2cpg.Defines.ConstValueTag).value.headOption

@@ -76,6 +76,13 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
         }
     }
 
+    // a benchmark's input functions, by prefix: their results are the program's input
+    val prefixes = MemApiVocab.untrustedPrefixes
+    if prefixes.nonEmpty then
+      atom.call.filterNot(c => inventory.contains(c.name)).foreach { c =>
+          if prefixes.exists(c.name.startsWith) then record(TagUntrustedRead, c.name, c)
+      }
+
     // What chen concluded on its own (MemorySemanticsPass): wrappers, attribute-declared
     // allocators, nullable returns, inherited roles, capacity binders. Tagged exactly like the
     // inventory's entries so no consumer needs a second vocabulary; a declared entry wins.

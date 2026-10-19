@@ -24,6 +24,24 @@ private[taggers] object OverlayFacts:
     * name, field accesses by base and member, with addressOf/indexAccess/sizeOf unwrapped so
     * `&buf`, `buf[i]` and `sizeof(buf)` still talk about `buf`.
     */
+  /** The enclosing function's local a lambda body's identifier names, when the lambda captures it:
+    * the frontends bind a captured variable's uses in the body to the outer declaration, and tag
+    * the lambda's METHOD_REF with what it captures.
+    */
+  def capturedLocal(i: Identifier): Option[Local] =
+      i.refsTo.collectFirst { case l: Local => l }.filter { l =>
+        val own = i.method
+        !own.local.exists(_.id == l.id) && {
+            val refs = own._refIn.collectAll[MethodRef].l
+            refs.exists { r =>
+              val captures = r.tag.nameExact(io.appthreat.x2cpg.Defines.CaptureTag).value.l
+              captures.exists(c =>
+                  c == s"ref:${l.name}" || c == s"copy:${l.name}" || c.startsWith("default:")
+              )
+            }
+        }
+      }
+
   def variableKey(expr: AstNode): Option[String] = expr match
     case i: Identifier => Some(s"v:${i.name}")
     case c: Call =>
@@ -648,7 +666,7 @@ private[taggers] object OverlayFacts:
         }
     method.ast.collectAll[ControlStructure].foreach { cs =>
         cs.condition.foreach { cond =>
-            IndexRange.literal(cond).foreach { value =>
+            constantTruth(cond).map(t => if t then 1 else 0).foreach { value =>
               // what a true condition runs is everything but the condition and an `else`
               val (orElse, whenTrue) = cs.astChildren.filterNot(_.id == cond.id).l.partition {
                   case e: ControlStructure => e.controlStructureType == ControlStructureTypes.ELSE
@@ -666,13 +684,47 @@ private[taggers] object OverlayFacts:
     method.ast.isCall.nameExact(Operators.conditional).foreach { c =>
         (c.argumentOption(1), c.argumentOption(2), c.argumentOption(3)) match
           case (Some(cond), Some(whenTrue), Some(whenFalse)) =>
-              IndexRange.literal(cond).foreach { value =>
+              constantTruth(cond).map(t => if t then 1 else 0).foreach { value =>
                   ruleOut(cond, List(if value == 0 then whenTrue else whenFalse))
               }
           case _ => ()
     }
     cut.toMap
   end constantBranchExits
+
+  /** The truth of a condition spelled in constants: a literal or a value the frontend evaluated, a
+    * comparison of two such (`(0) - 7 >= 0`, a macro's guard on its own constant argument), and
+    * `!`, `&&` and `||` over them - an operand of unknown value decides `&&` and `||` only when the
+    * other operand does.
+    */
+  def constantTruth(cond: AstNode): Option[Boolean] = cond match
+    case c: Call if c.name == Operators.logicalNot =>
+        c.argumentOption(1).flatMap(constantTruth).map(!_)
+    case c: Call if c.name == Operators.logicalAnd || c.name == Operators.logicalOr =>
+        val and = c.name == Operators.logicalAnd
+        (
+          c.argumentOption(1).flatMap(constantTruth),
+          c.argumentOption(2).flatMap(constantTruth)
+        ) match
+          case (Some(l), Some(r))       => Some(if and then l && r else l || r)
+          case (Some(v), _) if v != and => Some(v)
+          case (_, Some(v)) if v != and => Some(v)
+          case _                        => None
+    case c: Call if ConstantComparisons.contains(c.name) && IndexRange.literal(c).isEmpty =>
+        for
+          l <- c.argumentOption(1).flatMap(IndexRange.literal)
+          r <- c.argumentOption(2).flatMap(IndexRange.literal)
+        yield ConstantComparisons(c.name)(l, r)
+    case other => IndexRange.literal(other).map(_ != 0)
+
+  private val ConstantComparisons: Map[String, (BigInt, BigInt) => Boolean] = Map(
+    Operators.lessThan          -> (_ < _),
+    Operators.lessEqualsThan    -> (_ <= _),
+    Operators.greaterThan       -> (_ > _),
+    Operators.greaterEqualsThan -> (_ >= _),
+    Operators.equals            -> (_ == _),
+    Operators.notEquals         -> (_ != _)
+  )
 
   /** The CFG nodes a path from the method's entry reaches once the branches constant conditions
     * rule out ([[constantBranchExits]]) are cut. A node no path reaches (a dead branch, or a

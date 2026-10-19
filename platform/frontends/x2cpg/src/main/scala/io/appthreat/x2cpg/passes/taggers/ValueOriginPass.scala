@@ -106,10 +106,35 @@ object ValueOriginPass:
     expr match
       case lit: Literal => Set((OriginConstant, lit.code))
       case i: Identifier =>
-          walkDefs(i, depth)
+          OverlayFacts.capturedLocal(i) match
+            // a lambda body reading what it captured: the value the enclosing function gave the
+            // variable, by its assignments there
+            case Some(outer) => capturedOrigins(outer, depth)
+            case None        => walkDefs(i, depth)
       case c: Call =>
           callOrigins(c, depth)
       case _ => Set.empty
+
+  /** The origins of every value the enclosing function assigns a captured local. A caller-param
+    * origin names the ENCLOSING function's parameter, whose callers the rules then ask.
+    */
+  private def capturedOrigins(outer: Local, depth: Int): Set[(String, String)] =
+    val method = outer._astIn.collectAll[Method].headOption.orElse {
+        var cursor: Option[StoredNode] = outer._astIn.nextOption()
+        var found: Option[Method]      = None
+        while found.isEmpty && cursor.isDefined do
+          cursor.get match
+            case m: Method => found = Some(m)
+            case other     => cursor = other._astIn.nextOption()
+        found
+    }
+    method.toList.flatMap(_.ast.isCall.nameExact("<operator>.assignment").l).filter(a =>
+        a.argumentOption(1).exists {
+            case i: Identifier => i.name == outer.name
+            case _             => false
+        }
+    ).flatMap(_.argumentOption(2).collect { case e: Expression => e })
+        .flatMap(originsOf(_, depth - 1)).toSet
 
   /** The origin names of an expression without their evidence, for consumers inside the overlay -
     * the call-site check asks only "is this passed length provably a constant".
@@ -135,6 +160,12 @@ object ValueOriginPass:
       frontier.foreach { node =>
           if seen.add(node) then
             node match
+              // a variable a call writes through its address (`fscanf(f, "%d", &n)`): the
+              // call defines it. An input function's output is the input; any other callee's is
+              // whatever it computed, which its arguments do not say
+              case i: Identifier if writingCallOf(i).isDefined =>
+                  writingCallOf(i).filter(c => writesInput(c, i))
+                      .foreach(c => out += ((OriginUntrustedRead, c.name)))
               case i: Identifier =>
                   // an intermediate assignment target: keep walking to its definitions
                   val exclude = OverlayFacts.expansionExclusionOf(i)
@@ -146,8 +177,27 @@ object ValueOriginPass:
       }
       frontier = next.toList
       hops -= 1
+    end while
     out.toSet
   end walkDefs
+
+  /** Does the input call write input through this address? Every output of a scanning call does; a
+    * reader writes input only through the argument the inventory names - `recvfrom`'s buffer, not
+    * the address length it reports back.
+    */
+  private def writesInput(call: Call, i: Identifier): Boolean =
+    val tag = MemoryApiPass.TagUntrustedRead
+    call.tag.name(tag).nonEmpty && {
+        val inputArgs = call.argument.l.filter(_.tag.name(tag).nonEmpty)
+        inputArgs.isEmpty || i._astIn.collectFirst { case a: Call => a }.exists(a =>
+            inputArgs.exists(_.id() == a.id())
+        )
+    }
+
+  /** The call a variable is handed to by address (`&n`), which defines it there. */
+  private def writingCallOf(i: Identifier): Option[Call] =
+      i._astIn.collectFirst { case a: Call if a.name == "<operator>.addressOf" => a }
+          .flatMap(_._astIn.collectFirst { case c: Call if !c.name.startsWith("<operator>") => c })
 
   /** The origin of a node the REACHING_DEF walk landed on. */
   private def classifyDef(d: StoredNode, depth: Int): Set[(String, String)] = d match
@@ -171,10 +221,13 @@ object ValueOriginPass:
           if c.tag.name(MemoryApiPass.TagUntrustedRead).l.nonEmpty then
             Set((OriginUntrustedRead, c.name))
           else
-            c.argument.l.collect { case e: Expression => e }
-                .filterNot(_.isFieldIdentifier)
-                .flatMap(originsOf(_, depth))
-                .toSet
+            filledArgument(c).map(api => Set((OriginUntrustedRead, api))).getOrElse(
+              c.argument.l.collect { case e: Expression => e }
+                  .filterNot(_.isFieldIdentifier)
+                  .flatMap(originsOf(_, depth))
+                  .toSet
+            )
+  end callOrigins
 
   /** The field's base expression: `m` in `m.len`, `hdr` in `hdr->len`. */
   private def baseOf(field: Call): Option[Expression] =
@@ -231,6 +284,60 @@ object ValueOriginPass:
               )
               .map(_.name)
       }
+
+  /** A call over bytes an untrusted read filled first: `fgets(line, n, f)` then `atoi(line)`, or
+    * `read(fd, buf, n)` then `strtol(buf, ...)`. The buffer is passed by address, so no definition
+    * of it reaches the call; the filling call must dominate this one and fill the same declaration.
+    * What the call computes from those bytes is the input's. The API's name is the evidence.
+    */
+  private def filledArgument(call: Call): Option[String] =
+    val args = call.argument.l.collect { case e: Expression => e }.filter(a => isBuffer(a))
+    if args.isEmpty then None
+    else
+      val fills = fillsOf(call.method)
+      if fills.isEmpty then None
+      else
+        val wanted = args.flatMap(bufferDecls(_)).toSet
+        if wanted.isEmpty then None
+        else
+          // the cheap question first: a fill of the same declaration, then its dominance
+          fills.iterator
+              .filter { case (fill, filled) =>
+                  fill.id != call.id && filled.intersect(wanted).nonEmpty
+              }
+              .find { case (fill, _) => call.dominatedBy.exists(_.id == fill.id) }
+              .map(_._1.name)
+
+  /** A method's untrusted reads, each with the declarations of the buffers it fills: computed once
+    * per method, since every call on an origin walk asks.
+    */
+  private val fillCache =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Method, List[(
+        Call,
+        Set[Long]
+      )]]())
+
+  private def fillsOf(method: Method): List[(Call, Set[Long])] =
+    val cached = fillCache.get(method)
+    if cached != null then cached
+    else
+      val computed = method.ast.isCall.l
+          .filter(_.tag.name(MemoryApiPass.TagUntrustedRead).nonEmpty)
+          .map(fill =>
+              fill -> fill.argument.l
+                  .filter(_.tag.name(MemoryApiPass.TagUntrustedRead).nonEmpty)
+                  .collect { case a: Expression => a }
+                  .flatMap(bufferDecls(_))
+                  .toSet
+          )
+          .filter(_._2.nonEmpty)
+      fillCache.put(method, computed)
+      computed
+
+  /** An argument that hands the callee bytes rather than a number: a pointer or array value. */
+  private def isBuffer(e: Expression): Boolean =
+    val t = Option(e.property("TYPE_FULL_NAME")).map(_.toString.trim).getOrElse("")
+    t.endsWith("*") || t.endsWith("]")
 
   /** The origins of a field read that the method itself stored to (`m.len = n; ... m.len`): the
     * stored values of every store that reaches the read with its base unchanged. The field's own
