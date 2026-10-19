@@ -1,0 +1,22 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_43f4b0ca062919 663
+  s_236e880d3ee8e7::t_f07c5c026a6862 1784-1791,1795,4991-4994,4996
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_236e880d3ee8e7::t_f07c5c026a6862 118-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "11f50feb80d5f33cd5847358a4f214187a37ddb0",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
