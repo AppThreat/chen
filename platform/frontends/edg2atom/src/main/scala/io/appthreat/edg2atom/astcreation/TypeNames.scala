@@ -51,6 +51,16 @@ final class TypeNames(unit: EdgaUnit):
   def target(id: Long): Option[Long] =
       resolved(id).flatMap(t => t.long("to").orElse(t.long("of")))
 
+  /** The bytes an object of the type occupies, when the front end computed it (0 is no size: an
+    * incomplete type, or a typedef the size is on the type it names).
+    */
+  def byteSize(id: Long): Option[Long] = resolved(id).flatMap(_.long("size")).filter(_ > 0)
+
+  /** The bytes a pointer type's pointee occupies. */
+  def pointeeSize(id: Long): Option[Long] =
+      resolved(id).filter(_.string("kind").contains("pointer")).flatMap(_.long("to"))
+          .flatMap(byteSize)
+
   private def nameOf(t: Value, depth: Int): String =
     if depth > 32 then return X2CpgDefines.Any
     def sub(id: Option[Long]): String =

@@ -183,7 +183,21 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
           callAst(operatorCall(e, code(e), Operators.cast, tpe), Seq(typeRef, init))
       case "lambda" => lambdaRefAst(e, e.long("t"), e.field("init"))
       case "temp_init" =>
-          e.field("init").map(initializerExpressionAst).getOrElse(Ast(unknownNode(e, code(e))))
+          val ast =
+              e.field("init").map(initializerExpressionAst).getOrElse(Ast(unknownNode(e, code(e))))
+          // a temporary destroyed at the end of its full-expression: what borrows from it
+          // (`make().c_str()`) is dangling from the next statement on. One a reference binding
+          // extends lives as long as its block, and is not marked
+          if e.field("init").exists(i =>
+                i.string("lifetime").contains("fullExpression") && i.long("destructor").isDefined
+            )
+          then
+            ast.root.foreach(tagNode(
+              _,
+              X2CpgDefines.LifetimeEndTag,
+              X2CpgDefines.TemporaryLifetime
+            ))
+          ast
       case "new_delete" => newDeleteAst(e)
       // `throw x`: the thrown value as the argument of `<operator>.throw`; a rethrow has none
       case "throw" =>
@@ -379,6 +393,10 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
             DispatchTypes.STATIC_DISPATCH,
             None,
             Some(typeOf(e))
+          )
+          // a conversion to a pointer type: the bytes an access through the result touches
+          e.long("t").flatMap(types.pointeeSize).foreach(size =>
+              tagNode(call, X2CpgDefines.PointeeSizeTag, size.toString)
           )
           val typeRef = Ast(typeRefNode(e, types(e.long("t")), typeOf(e)))
           callAst(call, Seq(typeRef) ++ operands.headOption.map(expressionAst).toSeq)
@@ -600,6 +618,9 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       val id = identifierNode(decl, name, name, tpe)
       Ast(id).withRefEdge(id, local)
     val value = aggregateOf(init) match
+      // a lambda the front end folded to a constant of its closure type: still the lambda
+      case Some(aggregate) if aggregate.long("lambdaRoutine").isDefined =>
+          foldedLambdaAst(init, aggregate)
       case Some(aggregate) if init.kind != "lambda" => aggregateAst(decl, aggregate, () => target())
       case _                                        => initializerExpressionAst(init)
     val written = codeOfAst(value)
