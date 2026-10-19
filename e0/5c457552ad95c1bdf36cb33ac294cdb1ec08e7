@@ -1,0 +1,35 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectLifetimesTests.scala
+  s_236e880d3ee8e7::t_431a1a855d93df 162-190,298-315
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UseAfterScopeTests.scala
+  s_236e880d3ee8e7::t_b547e10d899e8e 86-102,140-148
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UndefinedOperationRulesTests.scala
+  s_236e880d3ee8e7::t_34cfeaa32b7436 289-312,315-325,370-373,411-417
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NoReturnPathTests.scala
+  s_236e880d3ee8e7::t_dfd708d62d66ca 66-78,121-127
+  s_236e880d3ee8e7::t_7765cacbd21ecc 128-129
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/TemporaryLifetimeTests.scala
+  s_236e880d3ee8e7::t_47e16dc47da424 49-68,106-109
+  s_236e880d3ee8e7::t_43abeec6f973fb 110-112
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  s_236e880d3ee8e7::t_dfd708d62d66ca 157-178,227-239
+  s_236e880d3ee8e7::t_4e7e7fd7108067 240
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ClosureCaptureTests.scala
+  s_236e880d3ee8e7::t_3dec4863d5927a 64-71,124-125
+  s_236e880d3ee8e7::t_90df45404efb35 126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e05c457552ad95c1bdf36cb33ac294cdb1ec08e7",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
