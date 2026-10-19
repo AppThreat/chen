@@ -122,6 +122,8 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
             cfgForConditionalExpression(call)
         case call: Call if call.dispatchType == DispatchTypes.INLINED =>
             cfgForInlinedCall(call)
+        case call: Call if doesNotReturn(call) =>
+            cfgForNoReturnCall(call, inheritFringe = withinATryBlock(call))
         case block: Block if blockMatches(block) =>
             cfgForChildren(block)
         case _: Block =>
@@ -267,6 +269,21 @@ class CfgCreator(entryNode: Method, diffGraph: DiffGraphBuilder):
           entryNode = Option(actualRet),
           edges = singleEdge(actualRet, exitNode),
           if inheritFringe then childrenCfg.fringe else List()
+        )
+
+  /** A call that does not return ends its path the way a `return` does: its arguments, the call,
+    * then the method's exit. Nothing after it in the same block runs - an assignment there is no
+    * definition any later statement can see, and a guard whose branch ends in the call dominates
+    * what follows the branch. Inside a `try` the fringe stays, as for a return: a handler or a
+    * `finally` can still run.
+    */
+  protected def cfgForNoReturnCall(call: Call, inheritFringe: Boolean): Cfg =
+    val childrenCfg = cfgForChildren(call)
+    childrenCfg ++
+        Cfg(
+          entryNode = Option(call),
+          edges = singleEdge(call, exitNode),
+          if inheritFringe then List((call, AlwaysEdge)) else List()
         )
 
   /** The right hand side of a logical AND expression is only evaluated if the left hand side is
@@ -652,6 +669,66 @@ end CfgCreator
 
 object CfgCreator:
 
+  /** The C and C++ library's functions that do not return, for code whose headers are not read.
+    * Each is a free function whose name no program reuses: its call's full name is its own name, or
+    * `std::` qualifies it. A name a program might define for itself (BSD's `err`, `terminate`) is
+    * left to the attribute its header declares.
+    */
+  val NoReturnFunctions: Set[String] = Set(
+    "abort",
+    "exit",
+    "_exit",
+    "_Exit",
+    "quick_exit",
+    "__assert_fail",
+    "__assert_rtn",
+    "__assert_perror_fail",
+    "__builtin_trap",
+    "__builtin_unreachable",
+    "__builtin_abort",
+    "__builtin_exit",
+    "longjmp",
+    "siglongjmp",
+    "_longjmp",
+    "__longjmp_chk",
+    "pthread_exit",
+    "thrd_exit",
+    "__cxa_throw",
+    "__cxa_rethrow",
+    "__cxa_bad_cast",
+    "__cxa_bad_typeid",
+    "__cxa_pure_virtual"
+  )
+
+  /** `std::terminate` and C++23's `std::unreachable`: only as the standard library's. */
+  private val StdNoReturnFunctions: Set[String] = Set("terminate", "unreachable")
+
+  /** The attribute value that declares a function as never returning: GCC's `noreturn`, C11's
+    * `_Noreturn` and C++'s `[[noreturn]]`, as the C frontends tag a call's callee.
+    */
+  private val NoReturnAttribute = "noreturn"
+
+  /** A call that never returns: its callee is declared not to (the frontends tag the call with the
+    * declaration's attributes, whichever file declares it), or it is one of the library's
+    * terminators by its unqualified or `std::`-qualified name.
+    */
+  def doesNotReturn(call: Call): Boolean =
+      !call.name.startsWith("<operator") && (
+        call.tag.nameExact(io.appthreat.x2cpg.Defines.FunctionAttributeTag).valueExact(
+          NoReturnAttribute
+        ).nonEmpty ||
+            (NoReturnFunctions.contains(call.name) && {
+                val full = call.methodFullName
+                full == call.name || full == s"std.${call.name}" ||
+                full.startsWith(s"${call.name}:") || full.startsWith(s"std.${call.name}:")
+            }) ||
+            (StdNoReturnFunctions.contains(call.name) && {
+                val full = call.methodFullName
+                full == s"std.${call.name}" || full.startsWith(s"std.${call.name}:")
+            })
+      )
+
   implicit class FringeWrapper(fringe: List[(CfgNode, CfgEdgeType)]):
     def withEdgeType(edgeType: CfgEdgeType): List[(CfgNode, CfgEdgeType)] =
         fringe.map { case (x, _) => (x, edgeType) }
+end CfgCreator
