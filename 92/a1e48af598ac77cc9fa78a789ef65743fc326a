@@ -1,0 +1,24 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  s_236e880d3ee8e7::t_76785079e36bb9 173-179,215-217
+  s_236e880d3ee8e7::t_4b3e3b5eea50ea 218
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForTypesCreator.scala
+  s_236e880d3ee8e7::t_bfaff24ed03a61 163-167,173,177-187
+  s_236e880d3ee8e7::t_adb7e0c19c3c3a 14
+  s_236e880d3ee8e7::t_6f590092bee4ab 188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "92a1e48af598ac77cc9fa78a789ef65743fc326a",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
