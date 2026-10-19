@@ -1,0 +1,21 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/controlflow/cfgcreation/CfgCreator.scala
+  s_236e880d3ee8e7::t_cf7b36cbfa1f81 673-675,700,703-705,724-727
+  s_236e880d3ee8e7::t_091c965f98fac1 125-126,274-288,672,676-699,701-702,706-723,728-729
+  s_236e880d3ee8e7::t_0f7fae8d7461f3 730
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d170f92b917c2f1484c9a858d7c5e7d0603b8bda",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
