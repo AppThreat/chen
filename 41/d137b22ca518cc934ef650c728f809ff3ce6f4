@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReadValueArithmeticTests.scala
+  h_0926447d100ad2 1-268
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 872-881,886,888-889,1570-1577,1581-1587,2371-2373
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  h_0926447d100ad2 39-41,58-62,94-164,177,205-208,305,307-313,315-317,325
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 402-406,410,539-543,545-546,4011-4013,4020-4021,4666-4679,4786,4789-4808,4812-4817,5920-5928
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "41d137b22ca518cc934ef650c728f809ff3ce6f4",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
