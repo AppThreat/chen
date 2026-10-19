@@ -1,0 +1,23 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_eb3fa0a873dcb2::t_256b69fb1c0ae1 216-224,226-238
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemApiVocab.scala
+  s_eb3fa0a873dcb2::t_bee2e6bc6e538e 106-107,141-142
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  s_eb3fa0a873dcb2::t_a59a8da98e20fe 178-181,243-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a31becf45ec595f910b1c4e60ba628b7b6d1b81",
+  "prompts": {},
+  "sessions": {
+    "s_eb3fa0a873dcb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14a505c7-bd8c-4d25-b29c-3e3b8733af79",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
