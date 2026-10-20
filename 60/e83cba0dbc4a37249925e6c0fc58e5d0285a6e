@@ -1,0 +1,26 @@
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  h_0926447d100ad2 586-587,591-592,596-597,601-602,606-607,611-612,616-617,621-622,626-627,631-632,636-637,641-642,646-647,651-652
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 77-79,89,94-98,816,1298-1356,1564-1573,1584-1609,1667-1674,1676-1678,1692,2602-2603
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  h_0926447d100ad2 63-70,127-142,377-378,380-389,400-403,406-409,444-486,491-510,526
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemApiVocab.scala
+  h_0926447d100ad2 81-85,112-113,148-149
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  h_0926447d100ad2 182-191,257
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 4476-4483
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  h_0926447d100ad2 514-517,522-525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "60e83cba0dbc4a37249925e6c0fc58e5d0285a6e",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
