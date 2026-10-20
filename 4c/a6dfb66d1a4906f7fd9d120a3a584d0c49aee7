@@ -1,0 +1,16 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 1592-1605
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  h_0926447d100ad2 412-420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4ca6dfb66d1a4906f7fd9d120a3a584d0c49aee7",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
