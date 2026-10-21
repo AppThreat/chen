@@ -172,7 +172,10 @@ class EffectSummaryTests extends DataFlowCodeToCpgSuite:
         // busy_freep also reads through its parameter (`*pp` loads the slot), so its
         // derefs-param is honestly its second effect - a NULL `char **` would crash it
         effectsOf("busy_freep") shouldBe Set("effect:frees-param:1", "effect:derefs-param:1")
-        effectsOf("maybe_free") shouldBe empty
+        // a conditional free carries the maybe-frees fact: no unconditional summary (a
+        // false double free at every caller), but the ownership MAY leave, which is what a
+        // borrowing caller needs before calling the error-path return a leak
+        effectsOf("maybe_free") shouldBe Set("effect:maybe-frees-param:1")
         effectsOf("busy_alloc") shouldBe Set("effect:allocates-return")
     }
 

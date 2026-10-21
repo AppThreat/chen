@@ -90,6 +90,53 @@ end ValueOriginPass
 object ValueOriginPass:
   final val TagOrigin = "origin"
 
+  /** The origins a parameter's uses inherit from the callers, when every direct call site is
+    * visible and they all hand the same origin at that position: the callee's sink sees what the
+    * callers' arguments are (`badSink(data)` with a `fgets`-fed `data` is an untrusted read one
+    * function down - variant 41's shape, and the two-file variant 61 the same). Name-level like
+    * every summary: same-named methods that disagree carry nothing.
+    */
+  private val paramOriginCache =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Method, Map[Int, Set[
+        String
+      ]]]())
+
+  /** the methods whose parameter origins are being computed on this thread: a caller's argument can
+    * be its own parameter, and the recursion must stop instead of chasing a call cycle
+    */
+  private val paramOriginVisiting = new ThreadLocal[java.util.HashSet[Long]]:
+    override def initialValue() = new java.util.HashSet[Long]()
+
+  private[taggers] def paramOriginsOf(method: Method): Map[Int, Set[String]] =
+    val cached = paramOriginCache.get(method)
+    if cached != null then cached
+    else if !paramOriginVisiting.get().add(method.id()) then Map.empty
+    else
+      val computed =
+          try
+              if method._refIn.collectFirst { case r: MethodRef => r }.isDefined then Map.empty
+              else
+                val sites = method._callIn.collectAll[Call].l.distinct
+                if sites.isEmpty then Map.empty
+                else
+                  (1 to method.parameter.l.size).view.map { idx =>
+                    val argOrigins = sites.flatMap { site =>
+                        site.argumentOption(idx).collect { case e: Expression => e }
+                            .map(originsOf(_, MaxDepth).map(_._1).filterNot(
+                              _ == OriginUnknown
+                            ))
+                    }.toList
+                    val allAgree = argOrigins.nonEmpty &&
+                        argOrigins.forall(_.nonEmpty) &&
+                        argOrigins.map(_.mkString("+")).distinct.size == 1
+                    idx -> Option.when(allAgree)(argOrigins.head).getOrElse(Set.empty)
+                  }.toMap.filter(_._2.nonEmpty)
+          finally paramOriginVisiting.get().remove(method.id())
+      paramOriginCache.put(method, computed)
+      computed
+    end if
+  end paramOriginsOf
+
   final val OriginCallerParam   = "caller-param"
   final val OriginUntrustedRead = "untrusted-read"
   final val OriginConstant      = "constant"
@@ -199,12 +246,26 @@ object ValueOriginPass:
       i._astIn.collectFirst { case a: Call if a.name == "<operator>.addressOf" => a }
           .flatMap(_._astIn.collectFirst { case c: Call if !c.name.startsWith("<operator>") => c })
 
-  /** The origin of a node the REACHING_DEF walk landed on. */
+  /** The origin of a node the REACHING_DEF walk landed on. A parameter the callers all feed one
+    * origin takes THAT origin: what the callee's sink reads is what the callers handed it, and the
+    * generic `caller-param` answer is replaced by the specific one rather than diluted into
+    * `mixed`.
+    */
   private def classifyDef(d: StoredNode, depth: Int): Set[(String, String)] = d match
-    case p: MethodParameterIn => Set((OriginCallerParam, p.name))
-    case lit: Literal         => Set((OriginConstant, lit.code))
-    case c: Call              => callOrigins(c, depth - 1)
-    case _                    => Set.empty
+    case p: MethodParameterIn =>
+        // only an ATTACKER origin crosses the call: a parameter every caller feeds an
+        // untrusted read is untrusted one function down. Callers passing constants or
+        // fields keep the generic caller-param answer - the callers-bound questions the
+        // rules ask are the refined form of exactly that case, and replacing them with
+        // `constant` would silence what they conclude
+        val inherited = paramOriginsOf(p.method)
+            .getOrElse(p.index, Set.empty)
+            .filter(_ == OriginUntrustedRead)
+        if inherited.nonEmpty then inherited.map(o => (o, s"param:${p.name}"))
+        else Set((OriginCallerParam, p.name))
+    case lit: Literal => Set((OriginConstant, lit.code))
+    case c: Call      => callOrigins(c, depth - 1)
+    case _            => Set.empty
 
   private def callOrigins(c: Call, depth: Int): Set[(String, String)] =
     if depth < 0 then return Set.empty

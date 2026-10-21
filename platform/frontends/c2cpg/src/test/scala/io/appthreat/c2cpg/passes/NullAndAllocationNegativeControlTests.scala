@@ -315,7 +315,9 @@ class NullAndAllocationNegativeControlTests extends DataFlowCodeToCpgSuite:
     "not mark a for-loop body null" in { nullUsesIn("good_for_walk") shouldBe empty }
     "not mark a do-while body null" in { nullUsesIn("good_do_walk") shouldBe empty }
     "not summarise an error-path free" in {
-        effectsOf("init_or_free") shouldBe empty
+        // the maybe-frees fact, not a summary: the error-path return is not a leak of a
+        // block the callee may already have released
+        effectsOf("init_or_free") shouldBe Set("effect:maybe-frees-param:1")
         findingsIn("good_goto_fail_wrapper") shouldBe empty
     }
     "not report a double free through a nulling freep wrapper" in {

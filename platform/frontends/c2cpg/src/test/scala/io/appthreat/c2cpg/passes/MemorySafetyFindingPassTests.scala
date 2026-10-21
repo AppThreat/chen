@@ -429,7 +429,9 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
       }
 
       "fire on an unbounded untrusted-read length" in {
-          lenFinding("bad_tainted") shouldBe Set("MS-BOUND-002")
+          // MS-CONV-002 fires beside it: the length a signed input read gives, with no bound
+          // below, is also the sign-extension question
+          lenFinding("bad_tainted") shouldBe Set("MS-BOUND-002", "MS-CONV-002")
       }
 
       "stand down when the destination was sized from this copy's length" in {

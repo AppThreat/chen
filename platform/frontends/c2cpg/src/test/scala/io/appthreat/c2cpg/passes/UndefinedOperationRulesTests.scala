@@ -408,7 +408,12 @@ class UndefinedOperationRulesTests extends DataFlowCodeToCpgSuite:
       "report an amount outside [0, width), known or untrusted and unbounded" in {
           check(
             "MS-SHIFT-001",
-            Seq("bad_shift_by_input", "bad_shift_by_width", "bad_shift_negative_amount", "bad_shift_negative_value"),
+            Seq(
+              "bad_shift_by_input",
+              "bad_shift_by_width",
+              "bad_shift_negative_amount",
+              "bad_shift_negative_value"
+            ),
             Seq(
               "good_shift_masked",
               "good_shift_checked",
@@ -426,7 +431,11 @@ class UndefinedOperationRulesTests extends DataFlowCodeToCpgSuite:
       "report pointers into two different objects" in {
           check(
             "MS-PTR-001",
-            Seq("bad_index_in_other_string", "bad_distance_between_locals", "bad_wide_index_in_other_string"),
+            Seq(
+              "bad_index_in_other_string",
+              "bad_distance_between_locals",
+              "bad_wide_index_in_other_string"
+            ),
             Seq("good_index_in_same_string", "good_end_minus_start", "good_parameters")
           )
       }

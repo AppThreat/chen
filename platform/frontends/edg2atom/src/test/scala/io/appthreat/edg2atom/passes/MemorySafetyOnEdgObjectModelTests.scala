@@ -15,7 +15,9 @@ import io.shiftleft.semanticcpg.layers.LayerCreatorContext
   * ends, objects a block ends, and the C library's contracts. EDG's own facts (its type sizes, its
   * VLA bound, its flexible member, `_Noreturn`) feed the same rules.
   */
-class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() => new DefaultTestCpgWithEdg(".c")):
+class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() =>
+        new DefaultTestCpgWithEdg(".c")
+    ):
 
   private val edgaAvailable       = EdgaRunner.locate().isDefined
   private def requireEdga(): Unit = assume(edgaAvailable, "edga is not installed")
@@ -519,16 +521,33 @@ class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() => new Defaul
       "report division, shift, pointer difference and overlap as the CDT suite does" in {
           check(
             "MS-DIV-001",
-            Seq("bad_divide_input", "bad_modulo_input", "bad_float_divide", "bad_divide_by_literal_zero", "share"),
-            Seq("good_divide_checked", "good_divide_nonzero_guard", "good_divide_constant",
-                "good_divide_clamped", "good_divide_short_circuit", "good_float_checked",
-                "good_divide_parameter")
+            Seq(
+              "bad_divide_input",
+              "bad_modulo_input",
+              "bad_float_divide",
+              "bad_divide_by_literal_zero",
+              "share"
+            ),
+            Seq(
+              "good_divide_checked",
+              "good_divide_nonzero_guard",
+              "good_divide_constant",
+              "good_divide_clamped",
+              "good_divide_short_circuit",
+              "good_float_checked",
+              "good_divide_parameter"
+            )
           )
           check(
             "MS-SHIFT-001",
             Seq("bad_shift_by_input", "bad_shift_by_width", "bad_shift_negative_amount"),
-            Seq("good_shift_masked", "good_shift_checked", "good_shift_wide", "good_shift_parameter",
-                "good_shift_converted")
+            Seq(
+              "good_shift_masked",
+              "good_shift_checked",
+              "good_shift_wide",
+              "good_shift_parameter",
+              "good_shift_converted"
+            )
           )
           check(
             "MS-PTR-001",
@@ -556,8 +575,15 @@ class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() => new Defaul
           findingsIn("bad_fam_alloc").exists(_.startsWith("MS-BOUND")) shouldBe true
           findingsIn("bad_wider_read") should contain("MS-BOUND-003")
           findingsIn("bad_struct_of_int") should contain("MS-BOUND-003")
-          Seq("good_back_one", "good_offset_fits", "good_element_bytes", "good_vla_copy",
-              "good_fam_copy", "good_same_width", "good_struct_of_struct").foreach { m =>
+          Seq(
+            "good_back_one",
+            "good_offset_fits",
+            "good_element_bytes",
+            "good_vla_copy",
+            "good_fam_copy",
+            "good_same_width",
+            "good_struct_of_struct"
+          ).foreach { m =>
               withClue(m) { findingsIn(m).filter(_.startsWith("MS-BOUND")) shouldBe Set.empty }
           }
       }

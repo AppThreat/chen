@@ -15,8 +15,8 @@ import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
 /** An inner block's automatic objects - address-taken locals, decayed arrays, compound literals -
-  * end with the block; an access through a pointer into one, where the block has been left, reads
-  * a dead object. A `static` local, and an object of a block still open, stay live.
+  * end with the block; an access through a pointer into one, where the block has been left, reads a
+  * dead object. A `static` local, and an object of a block still open, stay live.
   */
 class UseAfterScopeTests extends DataFlowCodeToCpgSuite:
 

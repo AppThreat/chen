@@ -71,8 +71,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .map { case (call, rows) => call -> rows.map { case (_, arg, _) => arg }.distinct }
     // the promoted tiers: arms whose evidence earns MORE than their rule's own default
     // confidence (the stack-allocation and input-parsed-size arms of the
-    // uncontrolled-allocation rule)
-    val mediumConfidence = mutable.ListBuffer.empty[(StoredNode, String)]
+    // uncontrolled-allocation rule, and the arithmetic rules' definite arms)
+    val mediumConfidence = mutable.ListBuffer.empty[(StoredNode, String, String)]
 
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
@@ -81,9 +81,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     sourceOverread(record)
     pairedAdvanceWalk(record)
     ruleCapacityOverrun(record)
+    ruleUnwrittenArrayRead(record)
+    rulePlacementNewOverrun(record)
     ruleAttackerOffsetDestination(argsByCall, record)
     ruleWrongDeallocation(record)
     mediumConfidence ++= ruleUncontrolledAllocationSize(record)
+        .map { case (node, rule) => (node, "medium", rule) }
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
     ruleAllocationState(record)
@@ -91,6 +94,20 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     UndefinedOperationRules.undefinedShift(atom, e => ranges.of(e).map(r => (r.lo, r.hi)), record)
     UndefinedOperationRules.crossObjectPointerDifference(atom, record)
     UndefinedOperationRules.overlappingCopy(atom, record)
+    // the arithmetic rules' definite arms report above their rules' own medium, and their
+    // input arms below it: the renderer reads the per-finding override, not the rule default
+    ArithmeticRules.arithmeticOverflow(atom, record)
+        .foreach { case (node, rule, definite) =>
+            mediumConfidence += ((node, if definite then "high" else "low", rule))
+        }
+    ArithmeticRules.narrowingConversion(atom, record)
+        .foreach { case (node, rule, definite) =>
+            mediumConfidence += ((node, if definite then "high" else "low", rule))
+        }
+    ArithmeticRules.signExtensionToSize(atom, record)
+        .foreach { case (node, rule, definite) =>
+            mediumConfidence += ((node, if definite then "high" else "low", rule))
+        }
     ObjectAccessRules.accessThroughWiderType(atom, record)
     LifetimeRules.useAfterScope(atom, record)
     LifetimeRules.useOfDeadTemporary(atom, record)
@@ -101,11 +118,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     // the hypothesis tiers: a finding whose own arm is a may-claim reports below its rule's
     // confidence - the null-deref chained-parameter arm, and the invalidation rule's
     // reference-parameter arm
-    val lowConfidence = mutable.ListBuffer.empty[(StoredNode, String)]
-    lowConfidence ++= ruleNullDereference(record).map(_ -> RuleNullDeref)
+    val lowConfidence = mutable.ListBuffer.empty[(StoredNode, String, String)]
+    val nullResult    = ruleNullDereference(record)
+    lowConfidence ++= nullResult.hypothesis.map(n => (n, "low", RuleNullDeref))
+    mediumConfidence ++= nullResult.allocProduced.map(n => (n, "medium", RuleNullDeref))
     lowConfidence ++= ContainerInvalidationRules
         .containerInvalidation(atom, record)
-        .map(_ -> RuleContainerInvalidation)
+        .map(n => (n, "low", RuleContainerInvalidation))
 
     // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
     // computed by attacker arithmetic; most ALLOC-009 findings would otherwise share an INT-001
@@ -163,8 +182,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       dstGraph,
       findings.toList.filter(_._2.nonEmpty).flatMap { case (node, ruleIds) =>
           ruleIds.toList.map(ruleId => (node, TagFinding, ruleId))
-      } ++ lowConfidence.map { case (node, rule) => (node, TagConfidence, s"$rule=low") } ++
-          mediumConfidence.map { case (node, rule) => (node, TagConfidence, s"$rule=medium") } ++
+      } ++ lowConfidence.map { case (node, level, rule) =>
+          (node, TagConfidence, s"$rule=$level")
+      } ++
+          mediumConfidence.map { case (node, level, rule) =>
+              (node, TagConfidence, s"$rule=$level")
+          } ++
           heuristicFindings(findings).map { case (node, rule) =>
               (node, TagConfidence, s"$rule=low")
           }
@@ -269,10 +292,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     val family = enclosing.flatMap(c =>
                         tagValues(c, MemoryApiPass.TagFree).headOption
                     )
-                    record(
-                      node,
-                      if family.contains("file") then RuleDoubleClose else RuleDoubleFree
-                    )
+                    val rule =
+                        if family.contains("file") then RuleDoubleClose else RuleDoubleFree
+                    record(node, rule)
                   else record(node, RuleUseAfterFree)
               case _ => ()
         }
@@ -344,16 +366,36 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * `derefs-param` summary - exactly the evidence the state pass's arm 1 turns on, so the two arms
     * cannot disagree about what a dereference is.
     */
+  /** the null rule's two tiers: the hypothesis findings the renderer lowers to `low`, and the
+    * allocation-produced unchecked uses it raises to `medium`
+    */
+  final case class NullRuleResult(hypothesis: Set[StoredNode], allocProduced: Set[StoredNode])
+
   private def ruleNullDereference(
     record: (StoredNode, String) => Unit
-  ): Set[StoredNode] =
-    // arm 1: the state pass already asked the flow question
-    val stateFacts = atom.tag
+  ): NullRuleResult =
+    // arm 1: the state pass already asked the flow question. An unchecked use of an
+    // ALLOCATION's own result - the CWE-690 shape, malloc/calloc/realloc dereferenced with no
+    // check on any path - carries its own confidence: the arm is exact about what produced the
+    // value, whatever the rule's libavformat-motivated default
+    val promotedNulls = mutable.LinkedHashSet.empty[StoredNode]
+    atom.tag
         .name(AllocationStatePass.TagNullUse)
         .l
-        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
-        .distinct
-    stateFacts.foreach(node => record(node, RuleNullDeref))
+        .foreach { t =>
+          // the definite arm (a guard proved the pointer null here, or every definition
+          // of it is the NULL literal) is exact evidence and reports above the rule's
+          // libavformat-motivated default. The allocation-produced unchecked arm (CWE-690)
+          // stays at the rule's own low: the projects are not clean at medium with it
+          // (measured: 761 sites across the five projects, OpenSSL alone 289-317 - the
+          // wrappers' checks sit behind macro layers the reader cannot always see through),
+          // and the projects staying clean is the criterion the round set for this promotion
+          val definite = t.value.startsWith(AllocationStatePass.NullDefinite)
+          t._taggedByIn.collectAll[StoredNode].l.distinct.foreach { node =>
+            record(node, RuleNullDeref)
+            if definite then promotedNulls += node
+          }
+        }
 
     // the call positions that read through their argument: inventoried roles, and the callee
     // summaries the state pass concluded - one scan each, not a traversal per use
@@ -480,6 +522,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                         )
                     if !insideGuard && !redefinedInBetween && !narrowedByTernary(use, key) then
                       record(use, RuleNullDeref)
+                      // the check itself is the defect's other end: the author's own null
+                      // check one statement too late is where the fix goes, and reporting it
+                      // there names the missing ordering (the pair is one defect). The arm
+                      // reports at the rule's own low: the shape is structural, and the
+                      // good functions of several families carry late checks on pointers no
+                      // producer ever made nullable
+                      cs.condition.collectFirst { case c: Call => c }.foreach(c =>
+                          record(c, RuleNullDeref)
+                      )
                 case None
                     if paramNames.contains(use.name) && isTraversalChainBase(use) =>
                     // a parameter dereferenced with no guard on it anywhere, through a
@@ -496,7 +547,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         }
       end if
     }
-    hypothesis.toSet
+    NullRuleResult(hypothesis.toSet, promotedNulls.toSet)
   end ruleNullDereference
 
   /** Is `node` nested inside `cs`'s subtree? */
@@ -1996,6 +2047,20 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           end for
         }
     halfBoundedFirst.values.foreach(idx => record(idx, RuleNegativeIndexHazard))
+    // a copy whose destination or source starts BEFORE its object: `data = dataBuffer - 8;
+    // strcpy(data, source)` - a memory API's argument whose offset into its object is negative
+    // is the underwrite/underread the index arm reports for `p[-1]`, read at the copy
+    OverlayFacts.memoryArgumentSites(atom).foreach { case (call, arg, role) =>
+        if role == MemoryApiPass.TagDst || role == MemoryApiPass.TagSrc then
+          val bare = arg match
+            case c: Call if c.name == "<operator>.cast" =>
+                c.argument.l.collectFirst { case x: Expression => x }.getOrElse(arg)
+            case other => other
+          offsetOfAddress(bare, 0).filter(_ < 0).foreach { _ =>
+              if role == MemoryApiPass.TagDst then record(arg, RuleBufferUnderwrite)
+              else record(arg, RuleBufferUnderread)
+          }
+    }
     pointerWalkWraparound(record)
   end ruleIndexBounds
 
@@ -3878,8 +3943,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               .orElse(i.method.local.nameExact(i.name).headOption)
           local match
             case Some(l) if OverlayFacts.arrayExtent(l.typeFullName).isDefined => Some(BigInt(0))
-            case Some(_) =>
-                val stores = OverlayFacts.reachingDefsIn(i).collect {
+            case Some(_)                                                       =>
+                // a pointer whose every definition is an allocation sits at its object's start
+                val allocBacked = OverlayFacts.reachingDefsIn(i).collect {
                     case d: Identifier if d.name == i.name => d
                 }.flatMap(d =>
                     d._astIn.collectFirst {
@@ -3887,21 +3953,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                             if a.name == "<operator>.assignment" &&
                                 a.argumentOption(1).exists(_.id == d.id) => a
                     }
-                ).distinct
-                val writesOtherwise = OverlayFacts.reachingDefsIn(i).collect {
-                    case d: Identifier if d.name == i.name => d
-                }.exists(d =>
-                    d._astIn.collectFirst { case c: Call => c }.exists(c =>
-                        c.name != "<operator>.assignment" && OverlayFacts.isAssignmentOperator(
-                          c.name
-                        ) &&
-                            c.argumentOption(1).exists(_.id == d.id)
-                    )
-                )
-                val offsets = stores.map(_.argumentOption(2).collect { case e: Expression => e }
-                    .flatMap(offsetOfAddress(_, depth + 1)))
-                Option.when(!writesOtherwise && stores.nonEmpty && offsets.forall(_.isDefined) &&
-                    offsets.flatten.distinct.size == 1)(offsets.head).flatten
+                ).flatMap(_.argumentOption(2).toList)
+                if allocBacked.nonEmpty && allocBacked.forall(x =>
+                      allocThroughCasts(x).isDefined
+                  )
+                then Some(BigInt(0))
+                else offsetFromStores(i, depth)
             case None => None
           end match
       case c: Call if isFieldAccess(c) =>
@@ -3913,6 +3970,46 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     end match
   end offsetInObject
 
+  /** The offset a pointer's own stores state, when every store is an address expression and they
+    * all agree: the store-walking half of [[offsetInObject]]'s identifier case.
+    */
+  private def offsetFromStores(i: Identifier, depth: Int): Option[BigInt] =
+    val stores = OverlayFacts.reachingDefsIn(i).collect {
+        case d: Identifier if d.name == i.name => d
+    }.flatMap(d =>
+        d._astIn.collectFirst {
+            case a: Call
+                if a.name == "<operator>.assignment" &&
+                    a.argumentOption(1).exists(_.id == d.id) => a
+        }
+    ).distinct
+    val writesOtherwise = OverlayFacts.reachingDefsIn(i).collect {
+        case d: Identifier if d.name == i.name => d
+    }.exists(d =>
+        d._astIn.collectFirst { case c: Call => c }.exists(c =>
+            c.name != "<operator>.assignment" && OverlayFacts.isAssignmentOperator(c.name) &&
+                c.argumentOption(1).exists(_.id == d.id)
+        )
+    )
+    val offsets = stores.map(_.argumentOption(2).collect { case e: Expression => e }
+        .flatMap(offsetOfAddress(_, depth + 1)))
+    Option.when(!writesOtherwise && stores.nonEmpty && offsets.forall(_.isDefined) &&
+        offsets.flatten.distinct.size == 1)(offsets.head).flatten
+  end offsetFromStores
+
+  /** The allocation call an expression produces through casts, if any. A cast's OPERAND is its
+    * second argument - the first is the type placeholder.
+    */
+  private def allocThroughCasts(e: Expression): Option[Call] = e match
+    case c: Call
+        if tagValues(c, MemoryApiPass.TagAlloc).nonEmpty ||
+            tagValues(c, MemoryApiPass.TagRealloc).nonEmpty =>
+        Some(c)
+    case c: Call if c.name == "<operator>.cast" =>
+        c.argumentOption(2).orElse(c.argument.l.collectFirst { case x: Expression => x })
+            .flatMap(allocThroughCasts)
+    case _ => None
+
   /** The offset an address expression points at: `arr` (0), `arr + k`, `&arr[k]`. */
   private def offsetOfAddress(e: Expression, depth: Int): Option[BigInt] = e match
     case c: Call if c.name == "<operator>.cast" =>
@@ -3920,13 +4017,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           _,
           depth
         ))
-    case c: Call if c.name == "<operator>.addition" =>
+    case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
         val parts = c.argument.l.collect { case x: Expression => x }
         parts.find(p => IndexRange.literal(p).isEmpty).flatMap { base =>
             for
               k   <- parts.filterNot(_.id == base.id).headOption.flatMap(IndexRange.literal)
               off <- offsetInObject(base, depth)
-            yield off + k
+            yield if c.name == "<operator>.addition" then off + k else off - k
         }
     case c: Call if c.name == "<operator>.addressOf" =>
         c.argumentOption(1) match
@@ -4055,6 +4152,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     if hasByteElements(dst) then Some(n) else elementBytes(dst).map(_ * n)
                 )
             case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
+                val referenced = v.stripPrefix(s"${ExtentPass.ValueAlloc}:").toLongOption
                 OverlayFacts
                     .reachingDefsIn(dst)
                     .collect { case d: Identifier => d }
@@ -4064,13 +4162,24 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     .flatMap(_.argumentOption(2))
                     .flatMap(allocCallOf)
                     .flatMap { alloc =>
-                      // the count role is tagged `mem-len` too: calloc's two arguments
-                      val sizeArgs =
-                          alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-                      val literals = sizeArgs.flatMap(literalNumberOf)
-                      Option.when(sizeArgs.nonEmpty && literals.size == sizeArgs.size)(
-                        literals.product
-                      )
+                        // a C++ array new's extent names its ELEMENT count: the bytes are the
+                        // count times the constructed type's width. A scalar new constructs one
+                        // element of its type
+                        if alloc.name == "<operator>.new" then
+                          val count = referenced
+                              .flatMap(id => Option(atom.graph.node(id)))
+                              .collect { case e: Expression => e }
+                              .flatMap(literalNumberOf)
+                              .orElse(pointeeBytesOf(alloc).map(_ => 1L))
+                          count.flatMap(k => pointeeBytesOf(alloc).map(e => k * e))
+                        else
+                          // the count role is tagged `mem-len` too: calloc's two arguments
+                          val sizeArgs =
+                              alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                          val literals = sizeArgs.flatMap(literalNumberOf)
+                          Option.when(sizeArgs.nonEmpty && literals.size == sizeArgs.size)(
+                            literals.product
+                          )
                     }
                     .headOption
             case _ => None
@@ -4271,6 +4380,62 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 if attackerCount
               do record(idx, rule)
           }
+      // arm 4: a CONSTANT loop bound the base cannot hold - `for (i = 0; i < 100; i++)
+      // data[i] = source[i]` into `new char[50]`, `alloca(50)`, `malloc(10)` for ten ints (the
+      // CWE-131 element-size mismatch), and the CWE-193 off-by-one `i <= n` over an array of n.
+      // No attacker is asked about: the bound is a constant and the capacity is a fact
+      method.ast
+          .isCall
+          .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+          .l
+          .foreach { access =>
+              for
+                idx    <- access.argumentOption(2)
+                base   <- access.argumentOption(1)
+                loop   <- enclosingLoopOf(access)
+                cond   <- loop.condition.collect { case c: Call => c }
+                idxKey <- keyOf(idx)
+                rule   <- extentRule(base)
+                // the base's capacity in ELEMENTS: bytes over the element size, the CWE-131
+                // question (`malloc(10)` holds two and a half ints, not ten)
+                capElems <- extentCapacity(base).flatMap(bytes =>
+                    elementBytes(base).orElse(pointeeBytesOf(base)).filter(_ > 0).map(e =>
+                        BigInt(bytes / e)
+                    )
+                )
+              do
+                GuardPass.conjuncts(cond, holds = true).getOrElse(Nil).foreach {
+                    case (cmp, h) =>
+                        GuardPass.directionalFacts(cmp, h).foreach { case (bounded, above, bound) =>
+                            val inclusive = cmp.name == "<operator>.lessEqualsThan" ||
+                                cmp.name == "<operator>.greaterEqualsThan"
+                            if above && keyOf(bounded).contains(idxKey) then
+                              // a constant bound overruns when the indices it admits pass the
+                              // capacity; a bound that names the capacity itself with `<=` is the
+                              // one-past-the-end off-by-one (CWE-193)
+                              // the finding belongs to the LOOP statement, where the bound is
+                              // written and where both suites mark the flaw - not to the access
+                              // the bound admits
+                              IndexRange.literal(bound).foreach { k =>
+                                  if (inclusive && k >= capElems) || (!inclusive && k > capElems)
+                                  then record(cond, rule)
+                              }
+                              // the CWE-193 VLA shape: the loop bound is the array's own bound
+                              // variable and the comparison is inclusive - i reaches n on a[n]
+                              val vlaBound = base.tag
+                                  .name(ExtentPass.TagExtent)
+                                  .value
+                                  .l
+                                  .headOption
+                                  .filter(_.startsWith(s"${ExtentPass.ValueVla}:"))
+                                  .map(_.stripPrefix(s"${ExtentPass.ValueVla}:").trim)
+                              if inclusive && vlaBound.exists(b => keyOf(bound).contains(s"v:$b"))
+                              then
+                                record(cond, rule)
+                            end if
+                        }
+                }
+          }
     }
   end ruleCapacityOverrun
 
@@ -4308,10 +4473,14 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
 
   private def hasByteElements(dst: Expression): Boolean =
     val t = Option(dst.property("TYPE_FULL_NAME")).collect { case s: String => s }.getOrElse("")
-    // an array's element, or the pointee of a pointer into one (`buf + 4` is a `char*`)
-    val element = t.replaceAll("""\[[^\]]*\]""", "").replace("const ", "").trim
-        .stripSuffix("*").trim
-    MemorySafetyFindingPass.ByteTypes.contains(element)
+    // an array's element, or the pointee of a pointer into one (`buf + 4` is a `char*`). An
+    // ARRAY's element is what remains after the bound - `char *[6]` holds POINTERS, and a
+    // pointer element is never a byte however narrow its pointee; only a plain pointer's
+    // pointee (`char*`) is what the star strips to
+    val hadBrackets = t.contains('[')
+    val element     = t.replaceAll("""\[[^\]]*\]""", "").replace("const ", "").trim
+    if hadBrackets then !element.endsWith("*") && ByteTypes.contains(element)
+    else ByteTypes.contains(element.stripSuffix("*").trim)
 
   /** The (literal, node) pair of an expression when it is a plain literal - Function.unlift keeps
     * the for-comprehension shape of the arm-1 loop.
@@ -4440,24 +4609,60 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                         local.typeFullName.trim.endsWith("[]")
                       then record(i, RuleNonHeapFree)
                   }
-                  // the state pass's frame-storage fact (q = &x; free(q)), and a
-                  // definition that is a string literal (p = "literal"; free(p))
-                  if i.tag.name(AllocationStatePass.TagState).value.l
-                        .contains("stack-addr") ||
-                    OverlayFacts
-                        .reachingDefsIn(i)
-                        .collect { case d: Identifier => d }
-                        .flatMap(d =>
-                            d._astIn.collectFirst {
-                                case a: Call if a.name == "<operator>.assignment" => a
-                            }
-                        )
-                        .flatMap(_.argumentOption(2))
-                        .exists {
-                            case lit: Literal => lit.code.startsWith("\"")
-                            case _            => false
-                        }
+                  // the freed pointer's own definitions name the storage: an array the method
+                  // rebinds it to (`static char dataBuf[100]; data = dataBuf; delete data`),
+                  // a string literal, or a stack-family allocation (alloca)
+                  val defRhss = OverlayFacts
+                      .reachingDefsIn(i)
+                      .collect { case d: Identifier if d.name == i.name => d }
+                      .flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call
+                                  if a.name == "<operator>.assignment" &&
+                                      a.argumentOption(1).exists(_.id == d.id) => a
+                          }
+                      )
+                      .flatMap(_.argumentOption(2).toList)
+                  val namesDeclaredArray = defRhss.exists {
+                      case src: Identifier =>
+                          val srcLocal = src.refsTo.collectFirst { case l: Local => l }
+                              .orElse(src.method.local.nameExact(src.name).headOption)
+                          srcLocal.exists(l =>
+                              OverlayFacts.arrayExtent(l.typeFullName).isDefined ||
+                                  l.typeFullName.trim.endsWith("[]")
+                          )
+                      case _ => false
+                  }
+                  val namesStackAlloc = defRhss.exists(x =>
+                      allocThroughCasts(x).exists(a =>
+                          tagValues(a, MemoryApiPass.TagAlloc).contains("stack")
+                      )
+                  )
+                  val namesLiteral = defRhss.exists {
+                      case lit: Literal => lit.code.startsWith("\"")
+                      case _            => false
+                  }
+                  // CWE-761: a pointer the program WALKED (a loop whose condition reads
+                  // through it and whose update advances it) is no longer provably at its
+                  // block's start
+                  val walkedThenFreed = i.method.ast.isCall.l.exists { inc =>
+                      Set("<operator>.postIncrement", "<operator>.preIncrement").contains(
+                        inc.name
+                      ) && inc.argumentOption(1).exists {
+                          case t: Identifier => t.name == i.name
+                          case _             => false
+                      } && enclosingLoopOf(inc).exists(loop =>
+                          loop.condition.exists(cond =>
+                              cond.ast.isIdentifier.l.exists(_.name == i.name)
+                          )
+                      )
+                  }
+                  // the state pass's frame-storage fact (q = &x; free(q))
+                  if i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") ||
+                    namesDeclaredArray || namesStackAlloc || namesLiteral
                   then record(i, RuleNonHeapFree)
+                  if walkedThenFreed then
+                    record(i, RuleOffsetFree)
                   // CWE-761: the identifier's definition is pointer arithmetic over a
                   // tracked allocation
                   val defsAreOffsetArith = OverlayFacts
@@ -4522,6 +4727,178 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     }
   end ruleWrongDeallocation
 
+  /** MS-INIT-001 (CWE-457) for heap and stack ARRAYS: `new T[n]` default-initialised (no
+    * parenthesised initialiser - `new T[n]()` value-initialises and is not indeterminate),
+    * `alloca(n)` and `malloc(n)` storage read through before any element of it is written. The
+    * write question is method-wide and conservative: a write through the base (an index write, a
+    * memory call's destination) or a hand-off to any other call silences the arm, because a callee
+    * may fill the storage.
+    */
+  private def ruleUnwrittenArrayRead(record: (StoredNode, String) => Unit): Unit =
+      atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
+          method.ast
+              .isCall
+              .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+              .l
+              .foreach { access =>
+                  for
+                    base <- access.argumentOption(1)
+                    name <- base match
+                      case i: Identifier => Some(i.name)
+                      case _             => None
+                    if ruleIdFor(access) == RuleIndexRead
+                    // the base's own definitions are raw storage: a default-initialised array
+                    // new, an alloca, or a malloc
+                    alloc <-
+                      val rhss = OverlayFacts.reachingDefsIn(base).collect {
+                          case d: Identifier if d.name == name => d
+                      }.flatMap(d =>
+                          d._astIn.collectFirst {
+                              case a: Call
+                                  if a.name == "<operator>.assignment" &&
+                                      a.argumentOption(1).exists(_.id == d.id) => a
+                          }
+                      ).flatMap(_.argumentOption(2).toList)
+                      val allocs = rhss.flatMap(allocThroughCasts)
+                      Option.when(allocs.nonEmpty && rhss.size == allocs.size)(
+                        allocs.find(a =>
+                            isDefaultInitialisedArrayNew(a) ||
+                                tagValues(a, MemoryApiPass.TagAlloc).exists(fam =>
+                                    fam == "stack" || fam == "heap"
+                                )
+                        )
+                      ).flatten
+                  do
+                    // a write through the base counts wherever it stands in the store's
+                    // target: an element store (`data[0] = ...`) or a member of an element
+                    // (`data[0].intOne = ...`, where the index access nests inside the field
+                    // store's lvalue), or a memory call's destination
+                    def inStoreTarget(access: Call): Boolean =
+                      var cursor: Option[StoredNode] = access._astIn.nextOption()
+                      var child: StoredNode          = access
+                      var found                      = false
+                      while !found && cursor.isDefined do
+                        cursor.get match
+                          case a: Call if OverlayFacts.isAssignmentOperator(a.name) =>
+                              // the chain from the access up to this assignment ran
+                              // through the assignment's TARGET side
+                              found = a.argumentOption(1).exists(l =>
+                                  l.id == child.id ||
+                                      l.ast.collectAll[StoredNode].l.exists(_.id == access.id)
+                              )
+                              cursor = None
+                          case c: Call =>
+                              child = c; cursor = c._astIn.nextOption()
+                          case _ => cursor = None
+                      found
+                    val writesThrough = method.ast.isCall.l.exists { w =>
+                      val namesIt = w match
+                        case ix: Call
+                            if (ix.name == "<operator>.indexAccess" ||
+                                ix.name == "<operator>.indirectIndexAccess") &&
+                                inStoreTarget(ix) =>
+                            ix.argumentOption(1).collect {
+                                case i: Identifier => i.name
+                            }.toSet
+                        case _ =>
+                            w.argument.l.collect {
+                                case a: Expression
+                                    if a.tag
+                                        .name(MemoryApiPass.TagDst)
+                                        .nonEmpty => a
+                            }.flatMap(_.ast.collectAll[Identifier].l.map(_.name)).toSet
+                      namesIt.contains(name)
+                    }
+                    val handedOff = method.ast.isCall.l.exists(c =>
+                        !c.name.startsWith("<operator>") &&
+                            c.argument.l.collect { case i: Identifier => i.name }.contains(name)
+                    )
+                    if !writesThrough && !handedOff then record(access, RuleUninitialisedRead)
+              }
+      }
+  end ruleUnwrittenArrayRead
+
+  /** A `new T[n]` with no initialiser of its own: the array form with no array-initialiser
+    * argument. `new T[n]()` value-initialises every element and is not indeterminate storage.
+    */
+  private def isDefaultInitialisedArrayNew(a: Call): Boolean =
+      a.name == "<operator>.new" &&
+          a.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+              .contains(io.appthreat.x2cpg.Defines.AllocFormArray) &&
+          !a.argument.l.exists(x =>
+              x.isInstanceOf[Call] && x
+                  .asInstanceOf[Call]
+                  .name == "<operator>.arrayInitializer"
+          )
+
+  /** MS-BOUND-006/007 for a placement new: `new (buffer) T` constructs T where the placement
+    * argument points - a buffer the constructed type cannot fit is overrun the moment the
+    * constructor writes its first member. The shapes are structural: the buffer's allocation is
+    * `sizeof(X) - k` for a positive k (one byte short is the CWE-193 idiom), or a declared count
+    * below the type's own width.
+    */
+  private def rulePlacementNewOverrun(record: (StoredNode, String) => Unit): Unit =
+      atom.call
+          .nameExact("<operator>.new")
+          .filter(c =>
+              c.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+                  .contains(io.appthreat.x2cpg.Defines.AllocFormPlacement)
+          )
+          .l
+          .foreach { newCall =>
+            val placement = newCall.argument.l.collect { case e: Expression => e }
+                .filter(a => a.argumentIndex <= 2)
+                .collect { case i: Identifier => i }
+                .headOption
+            placement.foreach { buf =>
+              val rhss = OverlayFacts.reachingDefsIn(buf).collect {
+                  case d: Identifier if d.name == buf.name => d
+              }.flatMap(d =>
+                  d._astIn.collectFirst {
+                      case a: Call
+                          if a.name == "<operator>.assignment" &&
+                              a.argumentOption(1).exists(_.id == d.id) => a
+                  }
+              ).flatMap(_.argumentOption(2).toList)
+              // the buffer's allocation sized below the type it hosts: `alloca(sizeof(T) -
+              // 1)` - the subtraction's constant says how short it is
+              val shortByAllocation = rhss.exists {
+                  case c: Call =>
+                      allocThroughCasts(c).exists { alloc =>
+                          alloc.argument.l
+                              .filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+                              .exists {
+                                  case sub: Call if sub.name == "<operator>.subtraction" =>
+                                      val ops = sub.argument.l.collect {
+                                          case x: Expression => x
+                                      }
+                                      ops.exists {
+                                          case sz: Call =>
+                                              sz.name.startsWith("<operator>.sizeOf")
+                                          case _ => false
+                                      } &&
+                                      ops.drop(1).flatMap(IndexRange.literal).exists(_ >= 1)
+                                  case sz: Call if sz.name.startsWith("<operator>.sizeOf") =>
+                                      // `alloca(sizeof(T))` is exact; anything folded below
+                                      // the type's width is short
+                                      false
+                                  case _ => false
+                              }
+                      }
+                  case _ => false
+              }
+              // a declared buffer narrower than the constructed type
+              val shortByDeclaration = pointeeBytesOf(newCall).exists { required =>
+                  buf.method.local.nameExact(buf.name).l.headOption
+                      .flatMap(l => OverlayFacts.arrayExtent(l.typeFullName))
+                      .exists(n => n < required)
+              }
+              if shortByAllocation || shortByDeclaration then
+                record(newCall, RuleFixedExtentOverrun)
+            }
+          }
+  end rulePlacementNewOverrun
+
   /** MS-ALLOC-008/009: an allocation whose size is attacker-controlled with no bound above -
     * MS-INT-001's question without requiring the arithmetic. The constraint is deliberate: a plain
     * `struct-field` origin is NOT an attacker here (most of MS-INT-001's noise turns on
@@ -4569,22 +4946,89 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               val controlled = origins.contains(ValueOriginPass.OriginUntrustedRead) ||
                   (origins.contains(ValueOriginPass.OriginCallerParam) && unboundedAtCallers)
               if controlled && !bounded && !strlenDerivedSize(lenArg) then
+                // which rule owns the site: a PRODUCT by a factor of two bytes or more can wrap
+                // before it sizes the buffer - the CWE-680 chain's multiplication - while a
+                // product by a one-byte sizeof cannot wrap on any ABI chen models: the size is
+                // merely uncontrolled, which is CWE-789
+                val wrapPossible = lenArg match
+                  case c: Call if c.name == "<operator>.multiplication" =>
+                      val sizeofBytes = c.argument.l.collect { case e: Expression => e }
+                          .collect {
+                              case sz: Call if sz.name.startsWith("<operator>.sizeOf") => sz
+                          }
+                          .map(elementBytesOfExpression)
+                      !sizeofBytes.contains(Some(1L))
+                  case c: Call if c.name == "<operator>.addition" => true
+                  case _                                          => false
                 val arithmetic = lenArg match
                   case c: Call =>
                       c.name == "<operator>.multiplication" || c.name == "<operator>.addition"
                   case _ => false
                 record(
                   lenArg,
-                  if arithmetic then RuleUncontrolledSizeOverflow else RuleUncontrolledSize
+                  if arithmetic && wrapPossible then RuleUncontrolledSizeOverflow
+                  else RuleUncontrolledSize
                 )
                 val stackFamily =
                     tagValues(call, MemoryApiPass.TagAlloc).contains("stack")
-                if stackFamily || conversionParsedSize(lenArg) then
-                  promoted += (lenArg -> RuleUncontrolledSize)
+                // an input-read size is the attacker's own number with no derivation to bound:
+                // the stack family and the conversion-parsed sizes keep their existing promotion,
+                // and the input-read arm joins them at medium
+                if stackFamily || conversionParsedSize(lenArg) ||
+                  origins.contains(ValueOriginPass.OriginUntrustedRead)
+                then
+                  val rule =
+                      if arithmetic && wrapPossible then RuleUncontrolledSizeOverflow
+                      else RuleUncontrolledSize
+                  promoted += (lenArg -> rule)
+              end if
             end if
+        }
+    // the C++ array new's count is an allocation size the inventory's len role never sees (the
+    // count is ELEMENTS, not bytes): `new char[data]` with an input-read count is the CWE-789
+    // shape at the new's own argument
+    atom.call
+        .nameExact("<operator>.new")
+        .filter(c =>
+            c.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+                .contains(io.appthreat.x2cpg.Defines.AllocFormArray)
+        )
+        .l
+        .foreach { newCall =>
+            newCall.argument.l.collect { case e: Expression => e }
+                .filter(a => a.argumentIndex > 1 && !a.isInstanceOf[Call])
+                .find(a => IndexRange.literal(a).isDefined || a.isInstanceOf[Identifier])
+                .foreach { count =>
+                  val origins = ValueOriginPass.originNamesOf(count).filter(attackers.contains)
+                  val bounded = count.tag.name(GuardPass.TagAbove).nonEmpty ||
+                      ArithmeticRules.operandKeptInType(newCall, count)
+                  if origins.contains(ValueOriginPass.OriginUntrustedRead) && !bounded then
+                    record(count, RuleUncontrolledSize)
+                    promoted += (count -> RuleUncontrolledSize)
+                }
         }
     promoted.toList
   end ruleUncontrolledAllocationSize
+
+  /** The byte width a sizeof operand names, and the byte width of an integral expression's own
+    * type: 1 for `char`/`uint8_t` and a `sizeof(char)`.
+    */
+  private def elementBytesOfExpression(e: Expression): Option[Long] =
+      e match
+        case c: Call if c.name.startsWith("<operator>.sizeOf") =>
+            c.argumentOption(1).collect { case x: Expression => x }
+                .flatMap(pointeeBytesOf)
+                .orElse(IndexRange.literal(c).map(_.toLong).filter(_ > 0))
+        case _ => pointeeBytesOf(e)
+
+  private def pointeeBytesOf(e: Expression): Option[Long] =
+    val t    = String.valueOf(e.property("TYPE_FULL_NAME")).trim
+    val base = if t.endsWith("*") then t.stripSuffix("*").trim else t
+    OverlayFacts
+        .integralWidth(base)
+        .orElse(OverlayFacts.typedefTarget(atom, base).flatMap(OverlayFacts.integralWidth))
+        .map(w => w.toLong / 8)
+        .filter(_ > 0)
 
   /** A size whose every term is the length of a string that already exists in memory: `strlen(s)`,
     * `strlen(s) + 1`, a local defined so. Such an allocation is bounded by the string's own
@@ -5258,6 +5702,26 @@ object MemorySafetyFindingPass:
   /** A copy the library requires to be between disjoint objects, overlapping (CWE-475). */
   final val RuleOverlappingCopy = "MS-OVERLAP-001"
 
+  /** Arithmetic on a value the program reads whose result can leave the type it is kept in - the
+    * definite arm (constants) and the input arm (an input read feeds an operand) of CWE-190; the
+    * wrap below is CWE-191, the same arithmetic in the other direction.
+    */
+  final val RuleArithmeticOverflow = "MS-INT-003"
+
+  /** A narrowing conversion of a value that can exceed its target (CWE-197). */
+  final val RuleNarrowingConversion = "MS-CONV-001"
+
+  /** The wrap BELOW the type's floor - CWE-191, the same arithmetic MS-INT-003 asks in the other
+    * direction, carried as its own rule because a renderer names one CWE per finding.
+    */
+  final val RuleArithmeticUnderflow = "MS-INT-004"
+
+  /** A possibly-negative signed input value converted to an unsigned size - an allocation size, a
+    * copy length, `strncpy`'s count (CWE-194; CWE-195 is the same conversion named for the unsigned
+    * side).
+    */
+  final val RuleSignExtensionToSize = "MS-CONV-002"
+
   /** What a renderer needs per rule; the finding's own evidence (origin, extent, guards) is read
     * back from the tags on the offending node at render time.
     */
@@ -5447,12 +5911,14 @@ object MemorySafetyFindingPass:
       cwe = "CWE-401",
       kind = "memory-leak",
       severity = "medium",
-      // `low`. On a library like libavformat most leaks it reports are ownership the state
-      // pass cannot see - a buffer handed to
-      // avio_alloc_context or through an out-parameter, `return &s->pub`, a chained
-      // `a = b = av_strdup()` checked through `a`, an allocation inside a `||` guard. The
-      // must-leak claim is sound on the paths the pass models; it does not yet model ownership
-      // transfer into a callee, so a leak remains a hypothesis at library scale.
+      // `low`, kept after this round's promotion study: the state pass now concludes BORROWING
+      // from the callee's own body when the call resolves, and a hand-off to a declared
+      // non-retaining call (the printf family) is a read - so a firing here means every path
+      // freed, returned, stored or lent nothing. Promoting to medium was measured against
+      // Juliet with the support library linked: 132 of its good functions leak by omission
+      // (51 say "INCIDENTAL CWE-401" in a comment, 81 say nothing - CWE-457's never free at
+      // all), and no fact the graph carries separates them from the CWE-401 flaws. The
+      // borrowing model sharpens this low tier instead: the 401 family moves at low.
       confidence = "low",
       message = "an allocation is still live, un-freed and un-escaped at this exit - no path " +
           "from it reaches a free or hands ownership on"
@@ -5527,6 +5993,50 @@ object MemorySafetyFindingPass:
       message = "a check and a later use assume the same state holds at both - a path verified " +
           "by name and then opened by name, or a shared global read in a guard and written in " +
           "its branch - and another thread or process can change it in between"
+    ),
+    MemorySafetyRule(
+      id = RuleArithmeticOverflow,
+      cwe = "CWE-190",
+      kind = "arithmetic-overflow",
+      severity = "medium",
+      // the input arm reports at the rule's own medium: an operand an input read gives with no
+      // guard on the wrapping side. The definite arm (every definition of every operand a
+      // constant whose exact result leaves the type) carries a per-finding `high`
+      confidence = "medium",
+      message = "arithmetic whose result can leave the type it is kept in - every operand a " +
+          "constant whose exact result does not fit, or an operand an input read gives with no " +
+          "guard bounding the side that wraps and no clamp (a wrap below is CWE-191, the same " +
+          "arithmetic the other way)"
+    ),
+    MemorySafetyRule(
+      id = RuleArithmeticUnderflow,
+      cwe = "CWE-191",
+      kind = "arithmetic-underflow",
+      severity = "medium",
+      confidence = "medium",
+      message = "arithmetic whose result can leave the type's floor - every operand a constant " +
+          "whose exact result is below it, or an operand an input read gives with no guard " +
+          "bounding the side that wraps and no clamp (CWE-190 is the same arithmetic above)"
+    ),
+    MemorySafetyRule(
+      id = RuleNarrowingConversion,
+      cwe = "CWE-197",
+      kind = "narrowing-conversion",
+      severity = "medium",
+      confidence = "medium",
+      message = "a narrowing conversion of a value that can exceed its target - a constant the " +
+          "target cannot hold, or an input-read value with no guard bounding it inside the " +
+          "target's range and no clamp"
+    ),
+    MemorySafetyRule(
+      id = RuleSignExtensionToSize,
+      cwe = "CWE-194",
+      kind = "sign-extension-to-size",
+      severity = "high",
+      confidence = "medium",
+      message = "a possibly-negative signed input value in an unsigned size position - an " +
+          "allocation size, a copy length, strncpy's count - where the sign conversion turns a " +
+          "small negative into a near-maximum size"
     ),
     MemorySafetyRule(
       id = RuleBufferUnderwrite,

@@ -14,7 +14,8 @@ import io.shiftleft.semanticcpg.layers.LayerCreatorContext
   * reference must not outlive the local's frame, and the lambda's body reads the captured values -
   * their extents and their origins - from the enclosing function.
   */
-class MemorySafetyOnEdgClosureTests extends Code2CpgFixture(() => new DefaultTestCpgWithEdg(".cpp")):
+class MemorySafetyOnEdgClosureTests
+    extends Code2CpgFixture(() => new DefaultTestCpgWithEdg(".cpp")):
 
   private val edgaAvailable       = EdgaRunner.locate().isDefined
   private def requireEdga(): Unit = assume(edgaAvailable, "edga is not installed")
@@ -100,15 +101,19 @@ static std::function<int()> kept_ok;
           .flatMap(_.tag.nameExact("ms-finding").value.l).l.toSet
 
   private def lambdaFindingsWithin(method: String): Set[String] =
-      cpg.method.nameExact(method).ast.collectAll[io.shiftleft.codepropertygraph.generated.nodes.MethodRef]
+      cpg.method.nameExact(method).ast.collectAll[
+        io.shiftleft.codepropertygraph.generated.nodes.MethodRef
+      ]
           .flatMap(_._refOut.collectAll[io.shiftleft.codepropertygraph.generated.nodes.Method])
           .ast.collectAll[StoredNode].flatMap(_.tag.nameExact("ms-finding").value.l).l.toSet
 
   "a lambda's capture list" should {
       "tag what it captures by reference, by copy and by init-capture" in {
           requireEdga()
-          cpg.method.nameExact("bad_lambda_capture_index").ast.collectAll[io.shiftleft.codepropertygraph.generated.nodes.MethodRef]
-              .tag.nameExact("capture").value.l should contain allOf ("ref:buf", "copy:idx")
+          (cpg.method.nameExact("bad_lambda_capture_index").ast.collectAll[
+            io.shiftleft.codepropertygraph.generated.nodes.MethodRef
+          ]
+              .tag.nameExact("capture").value.l should contain).allOf("ref:buf", "copy:idx")
       }
   }
 
