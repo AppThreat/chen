@@ -1,0 +1,80 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ObjectAccessRules.scala
+  h_0926447d100ad2 100-105,108
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 97-110,121-124,127,185-190,295-297,369-373,376-382,385-398,525-531,533,550,2055-2062,3946,3958-3960,3977-3998,4000-4002,4004-4011,4169-4174,4176-4182,4409-4436,4476-4483,4662,4664-4665,4747-4748,4752-4770,4772-4816,4849-4860,4862-4894,4896-4898,4956-4958,4962,4978,4980-4984,5002-5007,5018-5022,5025-5031,5714-5718,5720-5721,5914-5921,6011-6020
+  s_236e880d3ee8e7::t_3c465672d35df5 74-75,84-85,89,532,2050-2054,2063,3947-3948,3956-3957,3961,3973-3976,3999,4003,4012,4020,4026,4155,4165-4168,4175,4383-4408,4437-4438,4612-4661,4730-4746,4749-4751,4771,4817-4848,4861,4895,4899-4901,4949-4955,4959-4961,4969-4970,4974-4977,4979,4987-5001,5008-5009,5013-5017,5023-5024,5032,5705-5713,5719,5722-5724,5997-6010,6021-6040
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemApiVocab.scala
+  h_0926447d100ad2 81-85,112-113,148-149
+  s_eb3fa0a873dcb2::t_bee2e6bc6e538e 111,147
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ClosureCaptureTests.scala
+  h_0926447d100ad2 98-99
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReadValueArithmeticTests.scala
+  h_0926447d100ad2 1-270
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ObjectOffsetTests.scala
+  h_0926447d100ad2 17-21
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  h_0926447d100ad2 9-12,22-24,26-31,45-47,59-60,63-92,95-97,106-107,109-131,133-196,198-199,203-210,225-250,253-289,295,297-306,312-314,348-444,446-448,451-511,515-534,538-543,545-555,565-584
+  s_236e880d3ee8e7::t_aa2cc01b5ba5f2 1-8,13-21,25,32-44,48-58,61-62,93-94,98-105,108,132,197,200-202,211-224,251-252,290-294,296,307-311,315-347,445,449-450,512-514,535-537,544,556-564,585-587
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UseAfterScopeTests.scala
+  h_0926447d100ad2 18-19
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  h_0926447d100ad2 586-587,591-592,596-597,601-602,606-607,611-612,616-617,621-622,626-627,631-632,636-637,641-642,646-647,651-652
+  h_0926447d100ad2 40-44,397-400,404-407,411-414,583-585,588-590,593-595,598-600,603-605,608-610,613-615,618-620,623-625,628-630,633-635,638-640,643-645,648-650
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgClosureTests.scala
+  h_0926447d100ad2 17-18,104-106,113-116
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  h_0926447d100ad2 101,104-105,107-108,111-120,122-137,250-251,255,264-268
+  h_0926447d100ad2 93-100,102-103,106,109-110,121,138-139,249,252-253,256-263
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  h_0926447d100ad2 182-191,253-254,257
+  s_eb3fa0a873dcb2::t_a59a8da98e20fe 178-181,255-256,258
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySafetyFindingPassTests.scala
+  s_eb3fa0a873dcb2::t_02cb9b878084ef 432-434
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  h_0926447d100ad2 514-517,522-525
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_eb3fa0a873dcb2::t_256b69fb1c0ae1 216-219,226
+  h_0926447d100ad2 220-225,227-238
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/UndefinedOperationRulesTests.scala
+  h_0926447d100ad2 411-416,434-438
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectModelTests.scala
+  h_0926447d100ad2 18-20,524-539,544-550,578-586
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/LibraryContractTests.scala
+  h_0926447d100ad2 166-168
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 77-79,89,94-98,119,144-145,147-154,156-157,174-181,476-487,515,519-520,522,533,549,568-595,738-747,752,816,829-841,901-910,915,917-918,1298-1418,1575-1586,1626-1639,1641,1649-1684,1740-1760,1763-1767,1808-1809,1839-1840,1850,1873-1886,1888-1901,1903-1905,2178-2184,2573-2575,2684-2685,2781-2783,2785-2787
+  s_236e880d3ee8e7::t_327207eb68cbdb 110-118,124-127,131-134,140-143,146,155,158-173,182-190,212,634-638,640-641,643-644,646-648,652-660,723-729,734-737,748-751,760,823-828,842-845,968-969,1103-1104,1130-1131,1425-1426,1567-1572,1596-1597,1803-1807,1810-1816,1818-1822,1824-1834,1841-1849,1857-1859,1872,2748-2754,2833
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/EffectSummaryTests.scala
+  h_0926447d100ad2 175-178
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NullAndAllocationNegativeControlTests.scala
+  h_0926447d100ad2 318-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8bbfbf82632cb87a8fc025f5a5ef13205f5d3cfc",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_eb3fa0a873dcb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14a505c7-bd8c-4d25-b29c-3e3b8733af79",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
