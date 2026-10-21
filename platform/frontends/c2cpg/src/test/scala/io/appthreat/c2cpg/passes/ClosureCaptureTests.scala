@@ -95,8 +95,8 @@ class ClosureCaptureTests extends DataFlowCodeToCpgSuite:
 
   "a lambda's capture list" should {
       "tag what it captures" in {
-          cpg.method.nameExact("bad_lambda_capture_index").ast.collectAll[MethodRef].tag
-              .nameExact("capture").value.l should contain allOf ("ref:buf", "copy:idx")
+          (cpg.method.nameExact("bad_lambda_capture_index").ast.collectAll[MethodRef].tag
+              .nameExact("capture").value.l should contain).allOf("ref:buf", "copy:idx")
       }
   }
 

@@ -175,6 +175,20 @@ class MemoryApiPass(atom: Cpg, externalConfig: Option[String] = None) extends Cp
     entry.free.foreach(family => record(TagFree, family, call))
     entry.realloc.foreach(family => record(TagRealloc, family, call))
 
+    // the call reads through what it is handed and keeps none of it: a borrow, not an escape
+    if entry.nonRetaining then
+      record(TagNonRetaining, api, call)
+
+    // the positions the call READS THROUGH, from this index on: the printf family's variadic
+    // tail. The tag sits on the ARGUMENT (as dst/src do), so the state pass and the null rule
+    // read the same positions the escape model does
+    entry.readsFrom.foreach { from =>
+        call.argument.l
+            .filter(a => a.argumentIndex >= from)
+            .collect { case s: StoredNode => s }
+            .foreach(n => record(TagReadsArg, api, n))
+    }
+
     // The entry DECLARES that its result may be NULL - pointer-returning allocators, the
     // strchr family. The fd-returning allocators (open, socket) deliberately do not: an int
     // fd's failure mode is -1, and conflating the two would turn checked fds into null-deref
@@ -235,6 +249,12 @@ object MemoryApiPass:
     * node, for the index rules' value ranges ([[IndexRange]]).
     */
   final val TagReturnRange = "mem-return-range"
+
+  /** The call reads through its arguments and retains none: the printf family. A hand-off to it is
+    * a borrow, not an escape, so the allocation state's ownership question stands down.
+    */
+  final val TagNonRetaining = "mem-nonretaining"
+  final val TagReadsArg     = "mem-reads-arg"
 
   /** The family inferred wrappers emit; the inventory's own families are unchanged. */
   private final val FamilyHeap = "heap"

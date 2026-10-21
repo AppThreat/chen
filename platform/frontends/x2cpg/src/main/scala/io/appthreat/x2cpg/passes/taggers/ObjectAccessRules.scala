@@ -97,10 +97,15 @@ object ObjectAccessRules:
                     )
                   then true
                   else
-                    callees.exists(_.tag.nameExact(AllocationStatePass.TagEffect).value.l
-                        .contains(s"effect:derefs-param:$index"))
+                    callees.exists(m =>
+                        m.tag.nameExact(AllocationStatePass.TagEffect).value.l
+                            .contains(s"effect:derefs-param:$index") ||
+                            m.tag.nameExact(AllocationStatePass.TagEffect).value.l
+                                .contains(s"effect:reads-param:$index")
+                    )
               Option.when(reads)((cast, RuleIndexRead))
           case _ => None
+        end match
       }
 
   private def isWritten(access: Call): Boolean =

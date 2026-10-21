@@ -37,7 +37,11 @@
     "`untrustedPrefixes` names the input functions of verification benchmarks by prefix: SV-COMP's `__VERIFIER_nondet_int` and CBMC's `nondet_*` return any value - the program's input - so their results are untrusted like getenv's.",
     "The readers that fill a caller's buffer (read, recv, fgets, fread, ...) declare it as `dst` beside `untrustedRead`: the bytes they write are bounded by their length argument, which the destination must hold (CBMC's library models assert `w_ok(buf, n)`)."
   ],
-  "untrustedPrefixes": ["__VERIFIER_nondet_", "nondet_", "__CPROVER_nondet"],
+  "untrustedPrefixes": [
+    "__VERIFIER_nondet_",
+    "nondet_",
+    "__CPROVER_nondet"
+  ],
   "apis": [
     {
       "name": "strcpy",
@@ -390,15 +394,24 @@
     },
     {
       "name": "fgetc",
-      "returnRange": [-1, 255]
+      "returnRange": [
+        -1,
+        255
+      ]
     },
     {
       "name": "getc",
-      "returnRange": [-1, 255]
+      "returnRange": [
+        -1,
+        255
+      ]
     },
     {
       "name": "getchar",
-      "returnRange": [-1, 255]
+      "returnRange": [
+        -1,
+        255
+      ]
     },
     {
       "name": "__memcpy_chk",
@@ -567,6 +580,76 @@
       "len": 3,
       "untrustedRead": 2,
       "objectSize": 4
+    },
+    {
+      "name": "printf",
+      "nonRetaining": true,
+      "readsFrom": 2
+    },
+    {
+      "name": "vprintf",
+      "nonRetaining": true,
+      "readsFrom": 2
+    },
+    {
+      "name": "fprintf",
+      "nonRetaining": true,
+      "readsFrom": 3
+    },
+    {
+      "name": "vfprintf",
+      "nonRetaining": true,
+      "readsFrom": 3
+    },
+    {
+      "name": "puts",
+      "nonRetaining": true,
+      "readsFrom": 1
+    },
+    {
+      "name": "putchar",
+      "nonRetaining": true,
+      "readsFrom": 1
+    },
+    {
+      "name": "fputs",
+      "nonRetaining": true,
+      "readsFrom": 1
+    },
+    {
+      "name": "perror",
+      "nonRetaining": true,
+      "readsFrom": 1
+    },
+    {
+      "name": "wprintf",
+      "nonRetaining": true,
+      "readsFrom": 2
+    },
+    {
+      "name": "vwprintf",
+      "nonRetaining": true,
+      "readsFrom": 2
+    },
+    {
+      "name": "fwprintf",
+      "nonRetaining": true,
+      "readsFrom": 3
+    },
+    {
+      "name": "vfwprintf",
+      "nonRetaining": true,
+      "readsFrom": 3
+    },
+    {
+      "name": "putwchar",
+      "nonRetaining": true,
+      "readsFrom": 1
+    },
+    {
+      "name": "putws",
+      "nonRetaining": true,
+      "readsFrom": 1
     }
   ]
 }

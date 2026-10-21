@@ -14,11 +14,11 @@ import io.appthreat.x2cpg.passes.taggers.{
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** A pointer is an object and an offset, and an access has a size: the bytes before the object
-  * are as much outside it as the bytes past its end; a view taken at an offset has what is left;
-  * an element count converts to bytes through the element's size; a variable-length array's bound
-  * and a flexible member's allocated room are capacities; and an access through a pointer
-  * converted to a wider type reads past a narrower object.
+/** A pointer is an object and an offset, and an access has a size: the bytes before the object are
+  * as much outside it as the bytes past its end; a view taken at an offset has what is left; an
+  * element count converts to bytes through the element's size; a variable-length array's bound and
+  * a flexible member's allocated room are capacities; and an access through a pointer converted to
+  * a wider type reads past a narrower object.
   */
 class ObjectOffsetTests extends DataFlowCodeToCpgSuite:
 

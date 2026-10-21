@@ -163,7 +163,9 @@ class LibraryContractTests extends DataFlowCodeToCpgSuite:
 
   "calloc" should {
       "not be an overflow site: it checks its own product" in {
-          findingsIn("good_calloc_product").filter(r => r == "MS-INT-001" || r == "MS-ALLOC-009") shouldBe
+          findingsIn("good_calloc_product").filter(r =>
+              r == "MS-INT-001" || r == "MS-ALLOC-009"
+          ) shouldBe
               Set.empty
       }
   }

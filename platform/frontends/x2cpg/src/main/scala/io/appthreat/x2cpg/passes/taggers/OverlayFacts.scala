@@ -511,15 +511,18 @@ private[taggers] object OverlayFacts:
         .flatten
         .distinct
 
-  /** The argument positions of one call that a `mem-dst`/`mem-src` role READS OR WRITES THROUGH,
-    * collected in one tag scan: the positions a possibly-null pointer is dereferenced at when
-    * handed to an inventoried memory call. The `len` role is deliberately absent - a length is an
-    * integer, not something the call reads through.
+  /** The argument positions of one call that a `mem-dst`/`mem-src`/`mem-reads-arg` role READS OR
+    * WRITES THROUGH, collected in one tag scan: the positions a possibly-null pointer is
+    * dereferenced at when handed to an inventoried memory call. The `len` role is deliberately
+    * absent - a length is an integer, not something the call reads through.
     */
   def memoryReadPositions(cpg: Cpg): Map[Long, Set[Int]] =
     val out = mutable.HashMap.empty[Long, mutable.LinkedHashSet[Int]]
     cpg.tag
-        .filter(t => t.name == MemoryApiPass.TagDst || t.name == MemoryApiPass.TagSrc)
+        .filter(t =>
+            t.name == MemoryApiPass.TagDst || t.name == MemoryApiPass.TagSrc ||
+                t.name == MemoryApiPass.TagReadsArg
+        )
         .l
         .foreach { t =>
             t._taggedByIn.collectFirst { case e: Expression => e } match

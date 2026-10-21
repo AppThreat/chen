@@ -78,6 +78,11 @@ object MemApiVocab:
     *   `s->nb_streams`. JSON `"increments": {"arg": 1, "field": "nb_streams"}`. The counter's
     *   definitions sit inside the callee, so no in-method walk can find them; a callee whose body
     *   is in the tree is inferred instead ([[MemorySemanticsPass]]).
+    * @param readsFrom
+    *   the first argument position the call READS THROUGH, and every position after it: the printf
+    *   family's variadic tail (`printf(f, p, q)` reads p and q). A `nonRetaining` entry without
+    *   read positions would hand its arguments to nobody - the use questions (a freed or
+    *   possibly-null pointer printed) read the positions this declares.
     * @param api
     *   the API this entry is a spelling of, when that is another entry: a FORTIFY wrapper
     *   (`__memcpy_chk`) or a compiler builtin (`__builtin_memcpy`) is `memcpy`. Tags are valued
@@ -103,7 +108,9 @@ object MemApiVocab:
     returnBits: Option[Int] = None,
     increments: Option[(Int, String)] = None,
     api: Option[String] = None,
-    objectSize: Option[Int] = None
+    objectSize: Option[Int] = None,
+    nonRetaining: Boolean = false,
+    readsFrom: Option[Int] = None
   ):
     /** The API name the entry's tags are valued with. */
     def apiName: String = api.getOrElse(name)
@@ -137,7 +144,9 @@ object MemApiVocab:
               if arg >= 1 && fld.nonEmpty
             yield (arg, fld),
         api = json.hcursor.get[String]("api").toOption.filter(_.nonEmpty),
-        objectSize = json.hcursor.get[Int]("objectSize").toOption
+        objectSize = json.hcursor.get[Int]("objectSize").toOption,
+        nonRetaining = json.hcursor.get[Boolean]("nonRetaining").toOption.getOrElse(false),
+        readsFrom = json.hcursor.get[Int]("readsFrom").toOption
       )
 
   /** @return

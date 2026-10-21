@@ -213,18 +213,29 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     * overlay never emits (a fact we do not have, dressed as one we do).
     */
   private def sizeArgValueOf(alloc: Call): Option[String] =
-    val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
-    def valueOf(arg: Expression): String = arg match
-      case sz: Call if sz.name.startsWith("<operator>.sizeOf") => s"$ValueSizeof:${sz.code}"
-      case sizeArg                                             => s"$ValueAlloc:${sizeArg.id}"
-    lenArgs match
-      case Nil        => None
-      case List(only) => Some(valueOf(only))
-      case several    =>
-          // every factor a constant: the product IS knowable, in bytes, from the allocation
-          Option.when(several.forall(IndexRange.literal(_).isDefined))(
-            s"$ValueAlloc:${several.head.id}"
-          )
+      // a C++ new carries no `len` role (its count is ELEMENTS, not bytes): the array form's
+      // extent argument after the type is its count, and the scalar form's capacity is the one
+      // element it constructs. Both reference an id the rules value with the element size
+      if alloc.name == "<operator>.new" then
+        arrayNewCountOf(alloc).orElse(
+          Option.when(
+            !alloc.tag.name(io.appthreat.x2cpg.Defines.AllocFormTag).value.l
+                .contains(io.appthreat.x2cpg.Defines.AllocFormArray)
+          )(s"$ValueAlloc:${alloc.id}")
+        )
+      else
+        val lenArgs = alloc.argument.l.filter(_.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
+        def valueOf(arg: Expression): String = arg match
+          case sz: Call if sz.name.startsWith("<operator>.sizeOf") => s"$ValueSizeof:${sz.code}"
+          case sizeArg                                             => s"$ValueAlloc:${sizeArg.id}"
+        lenArgs match
+          case Nil        => None
+          case List(only) => Some(valueOf(only))
+          case several    =>
+              // every factor a constant: the product IS knowable, in bytes, from the allocation
+              Option.when(several.forall(IndexRange.literal(_).isDefined))(
+                s"$ValueAlloc:${several.head.id}"
+              )
 
   private def isAllocationCall(c: Call): Boolean =
       c.tag.name(MemoryApiPass.TagAlloc).l.nonEmpty ||
