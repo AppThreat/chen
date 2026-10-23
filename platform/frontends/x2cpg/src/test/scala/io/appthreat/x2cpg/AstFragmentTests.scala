@@ -2,8 +2,8 @@ package io.appthreat.x2cpg
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
-import overflowdb.BatchedUpdate
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, NodeTypes}
+import overflowdb.{BatchedUpdate, DetachedNodeData, DetachedNodeGeneric}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.util.DiffTool
 import org.scalatest.matchers.should.Matchers
@@ -52,4 +52,51 @@ class AstFragmentTests extends AnyWordSpec with Matchers:
 
     "reject corrupt bytes so the caller recomputes" in:
       AstFragment.decodeIntoDiffGraph(Array[Byte](1, 2, 3, 4), new DiffGraphBuilder) shouldBe None
+
+    "hand the codec every node as a generic node holding its properties" in:
+      val parents  = Seq("a.B", "c.D")
+      val typeDecl = NewTypeDecl().name("Model").inheritsFromTypeFullName(parents)
+      val member   = NewMember().name("app").lineNumber(5)
+      val diff     = new DiffGraphBuilder
+      diff.addNode(typeDecl)
+      diff.addEdge(typeDecl, member, EdgeTypes.AST)
+
+      val changes = AstFragment.withGenericNodes(diff).get.iterator().asScala.toList
+      val nodes   = changes.collect { case n: DetachedNodeData => n }
+      val edges   = changes.collect { case e: BatchedUpdate.CreateEdge => e }
+      val propertiesByLabel = nodes.collect { case n: DetachedNodeGeneric =>
+          n.label -> n.keyvalues.grouped(2).map(kv => kv(0) -> kv(1)).toMap
+      }.toMap
+
+      nodes.map(_.getClass) shouldBe List(
+        classOf[DetachedNodeGeneric],
+        classOf[DetachedNodeGeneric]
+      )
+      propertiesByLabel(NodeTypes.TYPE_DECL) shouldBe Map(
+        "NAME"                         -> "Model",
+        "INHERITS_FROM_TYPE_FULL_NAME" -> parents.asJava
+      )
+      propertiesByLabel(NodeTypes.MEMBER) shouldBe Map("NAME" -> "app", "LINE_NUMBER" -> 5)
+      edges.map(e => (e.src, e.dst, e.label)) shouldBe List((nodes(0), nodes(1), EdgeTypes.AST))
+
+    "keep the properties of a node that reflection cannot read" in:
+      val member = new UnreflectableMember()
+      member.name("app")
+      val diff = new DiffGraphBuilder
+      diff.addNode(member)
+
+      val restored = new DiffGraphBuilder
+      AstFragment.decodeIntoDiffGraph(AstFragment.encode(diff, Nil).get, restored)
+
+      restored.iterator().asScala.collect { case n: DetachedNodeGeneric =>
+          n.keyvalues.toList
+      }.toList shouldBe List(List("NAME", "app"))
+
+    "not encode a diff that changes the graph beyond adding nodes and edges" in:
+      val existing = Cpg.emptyCpg.graph.addNode(NodeTypes.METHOD)
+      val diff     = new DiffGraphBuilder
+      diff.addNode(NewMethod().name("foo"))
+      diff.setNodeProperty(existing, "NAME", "bar")
+
+      AstFragment.encode(diff, Nil) shouldBe None
 end AstFragmentTests
