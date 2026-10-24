@@ -2,8 +2,16 @@ package io.appthreat.x2cpg
 
 import io.appthreat.x2cpg.passes.linking.NoBoundaryResolver
 import io.shiftleft.codepropertygraph.generated.SchemaInfo
+import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import overflowdb.BatchedUpdate.DiffGraphBuilder
-import overflowdb.{BatchedUpdate, BoundaryResolver, DetachedNodeData, DetachedNodeGeneric, Graph}
+import overflowdb.{
+    BatchedUpdate,
+    BoundaryResolver,
+    DetachedNodeData,
+    DetachedNodeGeneric,
+    Graph,
+    NodeOrDetachedNode
+}
 import overflowdb.storage.{DecodedFragment, GraphFragmentCodec}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
@@ -28,6 +36,11 @@ import scala.util.Try
   */
 object AstFragment:
 
+  /** Part of every fragment's cache key. Change it whenever [[encode]] writes something different
+    * for the same diff, so that no build reads a fragment an earlier one wrote.
+    */
+  val CacheRevision: String = "generic-nodes"
+
   /** Serialize a frontend's local diff graph plus its `usedTypes` sidecar, or `None` if the diff is
     * not a self-contained add-only fragment (property updates/removals, or an edge whose endpoint
     * is outside the diff) - exactly the cases `GraphFragmentCodec.encode` rejects.
@@ -36,9 +49,12 @@ object AstFragment:
       // Never throw: an unsupported property value (or any codec error) simply means this unit is
       // not cached and will be reparsed, rather than aborting the whole frontend run.
       Try {
-          Option(
-            GraphFragmentCodec.encode(diff, NoBoundaryResolver, SchemaInfo.schemaHash).orElse(null)
-          ).map { fragmentBytes =>
+          withGenericNodes(diff).flatMap { generic =>
+              Option(
+                GraphFragmentCodec.encode(generic, NoBoundaryResolver, SchemaInfo.schemaHash)
+                    .orElse(null)
+              )
+          }.map { fragmentBytes =>
             val baos = new ByteArrayOutputStream()
             val out  = new DataOutputStream(baos)
             out.writeInt(usedTypes.size)
@@ -49,6 +65,57 @@ object AstFragment:
             baos.toByteArray
           }
       }.toOption.flatten
+
+  /** A copy of `diff` in which every node is a `DetachedNodeGeneric` holding its properties, or
+    * `None` if the diff does more than add nodes and edges.
+    *
+    * The codec reads a generic node's properties directly, and any other node's, and any Scala
+    * collection value, by reflection. A native image registers none of the generated node classes
+    * for that, and there the codec wrote every node without properties.
+    */
+  private[x2cpg] def withGenericNodes(diff: DiffGraphBuilder): Option[DiffGraphBuilder] =
+    val changes = diff.iterator().asScala.toVector
+    val isAddOnly = changes.forall {
+        case _: DetachedNodeData | _: BatchedUpdate.CreateEdge => true
+        case _                                                 => false
+    }
+    if !isAddOnly then None
+    else
+      val copies = new java.util.IdentityHashMap[DetachedNodeData, DetachedNodeData]()
+      val copy   = new DiffGraphBuilder
+      def generic(node: DetachedNodeData): DetachedNodeData =
+        if !copies.containsKey(node) then
+          val g = node match
+            case n: NewNode => new DetachedNodeGeneric(n.label, javaKeyValues(n.properties)*)
+            case other      => other
+          copies.put(node, g)
+          copy.addNode(g)
+        copies.get(node)
+      def endpoint(node: NodeOrDetachedNode): NodeOrDetachedNode = node match
+        case d: DetachedNodeData => generic(d)
+        case other               => other
+      changes.foreach {
+          case n: DetachedNodeData => generic(n)
+          case _                   =>
+      }
+      changes.foreach {
+          case e: BatchedUpdate.CreateEdge =>
+              val properties = Option(e.propertiesAndKeys).getOrElse(Array.empty[Object])
+              copy.addEdge(endpoint(e.src), endpoint(e.dst), e.label, properties*)
+          case _ =>
+      }
+      Some(copy)
+    end if
+  end withGenericNodes
+
+  private def javaKeyValues(properties: Map[String, Any]): Array[Object] =
+      properties.iterator.flatMap { (key, value) =>
+        val javaValue = value match
+          case values: IterableOnce[?] =>
+              java.util.ArrayList[Object](values.iterator.map(_.asInstanceOf[Object]).toSeq.asJava)
+          case other => other.asInstanceOf[Object]
+        Iterator(key, javaValue)
+      }.toArray
 
   /** Reconstruct the cached nodes and edges into `diffGraph` and return the `usedTypes` sidecar.
     *

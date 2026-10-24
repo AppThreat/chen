@@ -1,16 +1,18 @@
 package io.appthreat.x2cpg.passes.frontend
 
+import io.appthreat.x2cpg.AstFragment
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit}
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.EdgeTypes
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes}
 import io.shiftleft.codepropertygraph.generated.nodes.{NewBlock, NewLiteral, NewMethod}
-import overflowdb.BatchedUpdate
+import overflowdb.{BatchedUpdate, DetachedNodeGeneric}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.util.DiffTool
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.nio.file.Files
+import java.nio.file.{Files, Paths}
+import java.security.MessageDigest
 import scala.jdk.CollectionConverters.*
 
 /** End-to-end check of the fragment-codec mode of [[AstCacheStore]]: a cold run parses the part and
@@ -28,6 +30,21 @@ class AstCacheStoreFragmentTests extends AnyWordSpec with Matchers:
     diff.addEdge(m, block, EdgeTypes.AST)
     diff.addEdge(block, lit, EdgeTypes.AST)
     diff
+
+  private def fragmentStore(dir: String): AstCacheStore =
+      new AstCacheStore(
+        enableAstCacheParam = true,
+        dir,
+        onlyAstCache = false,
+        useFragmentCache = true
+      )
+
+  private def keyBeforeRevision(key: CacheKey, fingerprint: String): String =
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.update(key.identity.getBytes("UTF-8"))
+    digest.update(fingerprint.getBytes("UTF-8"))
+    digest.update(key.content)
+    digest.digest().map("%02x".format(_)).mkString
 
   "AstCacheStore in fragment mode" should:
     "reuse the on-disk fragment on a warm run (no reparse) and reconstruct an identical graph" in:
@@ -67,4 +84,52 @@ class AstCacheStoreFragmentTests extends AnyWordSpec with Matchers:
       val diff = DiffTool.compare(gCold.graph, gWarm.graph).asScala.toList
       withClue(diff.mkString("\n")) { diff shouldBe empty }
       gWarm.graph.nodeCount() shouldBe 3
+
+    "find, for a warm restore, the fragment a cold run wrote" in:
+      val dir   = Files.createTempDirectory("astfragcache").toString
+      val store = fragmentStore(dir)
+      val key   = CacheKey("file1", "content-v1".getBytes("UTF-8"))
+
+      store.process(
+        new DiffGraphBuilder,
+        "file1",
+        Some(key),
+        "fp",
+        _ => (),
+        Some(ParsedUnit(buildUnit()))
+      )
+
+      store.fragmentFor(Some(key), "fp") shouldBe defined
+
+    "never serve a fragment an earlier build wrote for the same part" in:
+      val dir   = Files.createTempDirectory("astfragcache").toString
+      val store = fragmentStore(dir)
+      val key   = CacheKey("file1", "content-v1".getBytes("UTF-8"))
+      // What a native-image build wrote before this revision: the nodes, without their properties.
+      val stale = new DiffGraphBuilder
+      stale.addNode(new DetachedNodeGeneric(NodeTypes.METHOD))
+      Files.write(
+        Paths.get(dir, s"${keyBeforeRevision(key, "fp")}.frag"),
+        AstFragment.encode(stale, Nil).get
+      )
+
+      store.fragmentFor(Some(key), "fp") shouldBe None
+
+      var parses = 0
+      val warm   = new DiffGraphBuilder
+      store.process(
+        warm,
+        "file1",
+        Some(key),
+        "fp",
+        _ => (),
+        { parses += 1; Some(ParsedUnit(buildUnit())) }
+      )
+      val graph = Cpg.emptyCpg
+      BatchedUpdate.applyDiff(graph.graph, warm)
+
+      parses shouldBe 1
+      graph.graph.nodes(NodeTypes.METHOD).asScala.map(_.property("NAME")).toList shouldBe List(
+        "foo"
+      )
 end AstCacheStoreFragmentTests
