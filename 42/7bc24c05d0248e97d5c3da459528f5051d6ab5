@@ -1,0 +1,61 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_e335fe820b41b8::t_a4089f00e03226 74-104,274-276
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AlpineRecognizer.scala
+  s_e335fe820b41b8::t_0e92eee9cf51db 39
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_e335fe820b41b8::t_c6a5185641603b 300,401,473,594,600,615,650,659,678,699,731,754,757,766
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AstroRecognizer.scala
+  s_e335fe820b41b8::t_590a67268f17d9 57,71,74,89
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ComponentCallBridge.scala
+  s_e335fe820b41b8::t_683f3a42147eaa 49
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DataLinkBridge.scala
+  s_e335fe820b41b8::t_f04e6dbc882cf3 88-91,198,225
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_e335fe820b41b8::t_6168464087b02f 7-8,100,128,244,246,261,328,348-349,386,500,514,529,553,558,570,580,601,608,614,649-656,701-726,729-731,733,735-770,774,784,790,808,820,824
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/EmberRecognizer.scala
+  s_e335fe820b41b8::t_fa94b11e2930d7 55,85,145,162,233,320
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/GuardBridge.scala
+  s_e335fe820b41b8::t_a7a99b93914bed 41,185-195
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JQueryRecognizer.scala
+  s_e335fe820b41b8::t_a417f312c66c83 30,80,90,95,98,106,112,154
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_e335fe820b41b8::t_03a79a4f1861db 35-42
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_e335fe820b41b8::t_de5f88004b6c23 216-222,236-239,245-254,259-268,432,512,723,802-803,909-1023,1025,1027-1084,1086-1092,1097-1105
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/LitRecognizer.scala
+  s_e335fe820b41b8::t_d61fb8321e1be1 39,42,93
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/MemberTaintBridge.scala
+  s_e335fe820b41b8::t_d063e47d7e13cb 123,134,148,165
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NitroRecognizer.scala
+  s_e335fe820b41b8::t_e534cf7b4befcc 86,109,113,131,151,184,188,192,197-199,208
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NodeRecognizer.scala
+  s_e335fe820b41b8::t_4ceb2b63b5c5a7 153,156,232,240,286,304,331
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_e335fe820b41b8::t_08627e66885a61 160,176,194,203,215,240,366,405,486,554,585,607,624,636,653,669,726-729,739,748
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactiveBridge.scala
+  s_e335fe820b41b8::t_4d63250c7cfd4b 64,85-86,122,173,217,234,299
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/RegistryBridge.scala
+  s_e335fe820b41b8::t_211117165ffd85 21,53,56,70
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/SvelteRecognizer.scala
+  s_e335fe820b41b8::t_6a7b0c0abc7873 186,365,371
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ValidationBridge.scala
+  s_e335fe820b41b8::t_b1ea8e89926380 99,129
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/VueRecognizer.scala
+  s_e335fe820b41b8::t_65eddf27ef5d84 55-56,76,87,99,105,130,147,176,184,192,248,320,333,360,363,386,394,509,521,532,543
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "427bc24c05d0248e97d5c3da459528f5051d6ab5",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
