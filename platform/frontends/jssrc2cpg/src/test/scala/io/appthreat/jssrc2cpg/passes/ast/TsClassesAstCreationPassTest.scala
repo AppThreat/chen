@@ -41,6 +41,7 @@ class TsClassesAstCreationPassTest extends AbstractPassTest:
               direction.file.name.head shouldBe "code.ts"
               inside(direction.method.name(io.appthreat.x2cpg.Defines.StaticInitMethodName).l) {
                   case List(init) =>
+                      init.filename shouldBe "code.ts"
                       init.block.astChildren.isCall.code.head shouldBe "Up = 1"
               }
               inside(cpg.typeDecl("Direction").member.l) { case List(up, down, left, right) =>

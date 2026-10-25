@@ -24,8 +24,12 @@ class TSTypesTest extends AbstractPassTest:
       |""".stripMargin,
     tsTypes = true
   ) { cpg =>
-    val List(t) = cpg.identifier("this").l
-    t.dynamicTypeHintFullName shouldBe List("code.js::program:Foo")
+    // the arrow function's `this`, and the `this` the field initialiser writes `publicKey` to
+    val List(fieldThis, arrowThis) = cpg.identifier("this").l.sortBy(_.lineNumber.map(_.intValue))
+    arrowThis.lineNumber shouldBe Some(4)
+    arrowThis.dynamicTypeHintFullName shouldBe List("code.js::program:Foo")
+    fieldThis.lineNumber shouldBe Some(3)
+    fieldThis.dynamicTypeHintFullName shouldBe List("code.js::program:Foo")
   }
 
   "have correct types for empty method with rest parameter" in AstFixture(

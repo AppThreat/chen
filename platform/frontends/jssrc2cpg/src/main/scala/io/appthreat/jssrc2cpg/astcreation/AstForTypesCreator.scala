@@ -1,6 +1,6 @@
 package io.appthreat.jssrc2cpg.astcreation
 
-import io.appthreat.jssrc2cpg.datastructures.BlockScope
+import io.appthreat.jssrc2cpg.datastructures.{BlockScope, MethodScope}
 import io.appthreat.jssrc2cpg.parser.BabelNodeInfo
 import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
@@ -8,7 +8,13 @@ import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.{newBindingNode, newLocalNode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, ModifierTypes, Operators}
+import io.shiftleft.codepropertygraph.generated.{
+    DispatchTypes,
+    EdgeTypes,
+    EvaluationStrategies,
+    ModifierTypes,
+    Operators
+}
 import ujson.Value
 
 import scala.util.Try
@@ -272,7 +278,14 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           memberNode(nodeInfo, name, nodeInfo.code, typeFullName)
       case _ =>
           val name = nodeInfo.node match
-            case ClassProperty          => code(nodeInfo.json("key"))
+            // a string or number key names the member by its value (`"chunk" = v` is `chunk`)
+            case ClassProperty =>
+                safeStr(nodeInfo.json("key"), "value")
+                    .orElse(Try(nodeInfo.json("key")("value").num).toOption.map(n =>
+                        if n.isWhole then n.toLong.toString else n.toString
+                    ))
+                    .filter(_ => !safeBool(nodeInfo.json, "computed").contains(true))
+                    .getOrElse(code(nodeInfo.json("key")))
             case ClassPrivateProperty   => code(nodeInfo.json("key")("id"))
             case ObjectTypeProperty     => code(nodeInfo.json("key"))
             case ObjectTypeIndexer      => safeStr(nodeInfo.json("id"), "name").getOrElse("indexer")
@@ -292,7 +305,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     }
 
     if hasKey(nodeInfo.json, "value") && !nodeInfo.json("value").isNull then
-      val lhsAst = astForNode(nodeInfo.json("key"))
+      val lhsAst = astForClassFieldTarget(nodeInfo)
       val rhsAst = astForNodeWithFunctionReference(nodeInfo.json("value"))
       val callNode_ =
           callNode(
@@ -306,6 +319,33 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     else
       Ast()
   end astForClassMember
+
+  /** What a class field's initialiser assigns to. `x = v` in a class body sets the field `x` of
+    * `this` (the instance, or the class for a static field); it never writes a variable named `x`.
+    * Lowering the key as a plain identifier made `readonly Subject = Subject` read as a second
+    * assignment to the imported `Subject`.
+    */
+  private def astForClassFieldTarget(member: BabelNodeInfo): Ast =
+    val key      = createBabelNodeInfo(member.json("key"))
+    val thisNode = identifierNode(key, "this")
+    scope.addVariableReference(thisNode.name, thisNode)
+    if safeBool(member.json, "computed").contains(true) then
+      createIndexAccessCallAst(
+        Ast(thisNode),
+        astForNode(key.json),
+        key.lineNumber,
+        key.columnNumber
+      )
+    else
+      val field =
+          createFieldIdentifierNode(
+            nameOrCode(key),
+            key.lineNumber,
+            key.columnNumber,
+            Option(key.code)
+          )
+      createFieldAccessCallAst(thisNode, field, key.lineNumber, key.columnNumber)
+  end astForClassFieldTarget
 
   protected def astForEnum(tsEnum: BabelNodeInfo): Ast =
     val (typeName, typeFullName) = calcTypeNameAndFullName(tsEnum)
@@ -360,7 +400,10 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             calls,
             s"$typeFullName:${io.appthreat.x2cpg.Defines.StaticInitMethodName}",
             None,
-            Defines.Any
+            Defines.Any,
+            Option(parserResult.filename),
+            tsEnum.lineNumber,
+            tsEnum.columnNumber
           )
       Ast.storeInDiffGraph(Ast(typeDeclNode_).withChildren(member).withChild(init), diffGraph)
 
@@ -453,11 +496,26 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
 
     val constructor     = createClassConstructor(clazz, memberInitCalls)
     val constructorNode = constructor.methodNode
+    // Field initialisers run in the constructor, so their `this` (explicit, or the target of
+    // `x = v`) is the constructor's. They were built in the class scope, which has no `this` of
+    // its own, so without this they resolved to the file's `this`.
+    constructor.methodAst.nodes.collectFirst {
+        case p: NewMethodParameterIn if p.name == "this" => p
+    }.foreach(scope.addVariable("this", _, MethodScope))
 
     // adding all class methods / functions and uninitialized, non-static members
     allClassMembers
         .filter(member => isClassMethodOrUninitializedMember(member) && !isStaticMember(member))
         .map(m => astForClassMember(m, typeDeclNode_))
+
+    // Static initialisers and static blocks run with `this` bound to the class: they get their own
+    // scope, whose `this` is a parameter of the static init method.
+    val staticBlock = NewBlock().typeFullName(Defines.Any)
+    val staticThis =
+        parameterInNode(clazz, "this", "this", 0, false, EvaluationStrategies.BY_VALUE)
+            .dynamicTypeHintFullName(Seq(typeFullName))
+    scope.pushNewBlockScope(staticBlock)
+    scope.addVariable("this", staticThis, BlockScope)
 
     // adding all static members and retrieving their initialization calls
     val staticMemberInitCalls =
@@ -469,6 +527,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         staticInitBlock.map(block =>
             block("body").arr.toList.map(astForNodeWithFunctionReference)
         ).getOrElse(List.empty)
+    scope.popScope()
 
     methodAstParentStack.pop()
     dynamicInstanceTypeStack.pop()
@@ -476,12 +535,16 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     scope.popScope()
 
     if staticMemberInitCalls.nonEmpty || staticInitBlockAsts.nonEmpty then
+      // the file and position of the class, so the initialisers' code is placed in its file
       val init = staticInitMethodAst(
         staticMemberInitCalls ++ staticInitBlockAsts,
         s"$typeFullName:${io.appthreat.x2cpg.Defines.StaticInitMethodName}",
         None,
-        Defines.Any
-      )
+        Defines.Any,
+        Option(parserResult.filename),
+        clazz.lineNumber,
+        clazz.columnNumber
+      ).withChild(Ast(staticThis))
       Ast.storeInDiffGraph(init, diffGraph)
       diffGraph.addEdge(typeDeclNode_, init.nodes.head, EdgeTypes.AST)
 

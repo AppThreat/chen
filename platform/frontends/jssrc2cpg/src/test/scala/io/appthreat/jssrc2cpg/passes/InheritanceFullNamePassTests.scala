@@ -82,4 +82,46 @@ class InheritanceFullNamePassTests extends DataFlowCodeToCpgSuite:
       }
 
   }
+
+  "a base class bound by the class's file" should {
+      lazy val cpg = code(
+        """
+        |import { Component } from "react";
+        |import { Base } from "./base";
+        |
+        |class Local {}
+        |export class Widget extends Component {}
+        |export class Derived extends Base {}
+        |export class Near extends Local {}
+        |""".stripMargin,
+        "widget.js"
+      ).moreCode(
+        """
+        |export class Component {}
+        |export class Base {}
+        |""".stripMargin,
+        "base.js"
+      )
+
+      "be the package's type when imported from a package, not a project class of its name" in {
+          cpg.typeDecl.nameExact("Widget").inheritsFromTypeFullName.l should not contain
+              "base.js::program:Component"
+      }
+
+      "be the class of the project file a relative import names" in {
+          cpg.typeDecl.nameExact("Derived").inheritsFromTypeFullName.l shouldBe
+              List("base.js::program:Base")
+      }
+
+      "be the class of the same file" in {
+          cpg.typeDecl.nameExact("Near").inheritsFromTypeFullName.l shouldBe
+              List("widget.js::program:Local")
+      }
+
+      "stay as it is when the pass runs again" in {
+          val before = cpg.typeDecl.map(t => t.fullName -> t.inheritsFromTypeFullName.l).l.toMap
+          new JavaScriptInheritanceNamePass(cpg).createAndApply()
+          cpg.typeDecl.map(t => t.fullName -> t.inheritsFromTypeFullName.l).l.toMap shouldBe before
+      }
+  }
 end InheritanceFullNamePassTests

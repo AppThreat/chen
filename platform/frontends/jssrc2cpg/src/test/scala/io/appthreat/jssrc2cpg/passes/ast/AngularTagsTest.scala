@@ -265,8 +265,9 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
             "local.component.ts"
           ))
 
-          cpg.call.codeExact("this.label").size shouldBe 1
-          cpg.call.codeExact("this.other").size shouldBe 1
+          // the read, and the write of the field initialiser
+          cpg.call.codeExact("this.label").size shouldBe 2
+          cpg.call.codeExact("this.other").size shouldBe 2
           cpg.tag.name("framework-input").member.name.l shouldBe List("bio")
           cpg.tag.name("framework-input").call.code.l shouldBe List("this.bio")
       }

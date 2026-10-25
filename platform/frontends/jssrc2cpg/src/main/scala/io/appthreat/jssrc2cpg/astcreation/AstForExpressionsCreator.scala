@@ -274,7 +274,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
         case "<<="  => Operators.assignmentShiftLeft
         case ">>="  => Operators.assignmentArithmeticShiftRight
         case ">>>=" => Operators.assignmentLogicalShiftRight
-        case "??="  => Operators.notNullAssert
+        // a write of the target, like `||=` (it was lowered as a non-null assertion: no write)
+        case "??=" => Operators.assignmentOr
         case other =>
             logger.warn(s"Unknown assignment operator: '$other'")
             Operators.assignment

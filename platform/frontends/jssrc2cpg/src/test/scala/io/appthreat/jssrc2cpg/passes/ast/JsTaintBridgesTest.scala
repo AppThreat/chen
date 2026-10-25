@@ -104,6 +104,26 @@ class JsTaintBridgesTest extends DataFlowCodeToCpgSuite:
   }
 
   "The reactive bridge" should {
+      "not make an instance read of a field a source because a static field of its name is one" in {
+          val cpg = tagged(code(
+            """
+          |import { Component, inject } from '@angular/core';
+          |import { ActivatedRoute } from '@angular/router';
+          |@Component({ selector: 'app-s', template: '' })
+          |export class SComponent {
+          |  static orderId = inject(ActivatedRoute).snapshot.paramMap.get('id');
+          |  orderId = 'x';
+          |  route = inject(ActivatedRoute);
+          |  id = this.route.snapshot.paramMap.get('id');
+          |  open() { window.open('/ftp/' + this.orderId); window.open('/ftp/' + this.id); }
+          |}
+          |""".stripMargin,
+            "s.component.ts"
+          ))
+          cpg.tag.name("framework-input").call.code.l should contain("this.id")
+          cpg.tag.name("framework-input").call.code.l should not contain "this.orderId"
+      }
+
       "make a derived value a source, and a sanitising derivation a sanitiser" in {
           val cpg = tagged(code(
             """

@@ -3,7 +3,7 @@ package io.appthreat.jssrc2cpg.passes.ast
 import io.appthreat.jssrc2cpg.passes.AbstractPassTest
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.Identifier
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier}
 import io.shiftleft.codepropertygraph.generated.nodes.MethodRef
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.semanticcpg.language.*
@@ -167,6 +167,90 @@ class JsClassesAstCreationPassTest extends AbstractPassTest:
         eInitCall.code shouldBe "this.e = param1"
         fInitCall.code shouldBe "this.f = param2"
         gCall.code shouldBe "this.f.g = param2"
+      }
+
+      "write a field initialiser to a field of this, never to a variable of the field's name" in AstFixture(
+        """
+        |import { Subject } from "rxjs";
+        |class ClassA {
+        |  Subject = Subject;
+        |  #p = 1;
+        |  "s-k" = 2;
+        |  [Symbol.iterator] = 3;
+        |  a = this.b;
+        |  static S = Subject;
+        |  static {
+        |    this.t = 1;
+        |  }
+        |}""".stripMargin
+      ) { cpg =>
+        // the import is the only write of the imported local (the field key used to be a second)
+        val List(subjectLocal) = cpg.method.nameExact(":program").local.nameExact("Subject").l
+        cpg.assignment.target.isIdentifier.filter(_.refsTo.contains(subjectLocal)).code.l shouldBe
+            List("Subject")
+
+        val List(constructor) =
+            cpg.typeDecl.nameExact("ClassA").method.nameExact(
+              io.appthreat.x2cpg.Defines.ConstructorMethodName
+            ).l
+        val List(ctorThis) = constructor.parameter.nameExact("this").l
+        val List(subjectInit, pInit, skInit, iteratorInit, aInit) =
+            constructor.block.assignment.l
+        subjectInit.code shouldBe "Subject = Subject;"
+        val subjectTarget = subjectInit.argument(1).asInstanceOf[Call]
+        subjectTarget.name shouldBe Operators.fieldAccess
+        subjectTarget.code shouldBe "this.Subject"
+        subjectTarget.argument(2).asInstanceOf[FieldIdentifier].canonicalName shouldBe "Subject"
+        subjectTarget.argument(1).asInstanceOf[Identifier].refsTo.l shouldBe List(ctorThis)
+        subjectInit.argument(2).asInstanceOf[Identifier].refsTo.l shouldBe List(subjectLocal)
+
+        pInit.argument(1).asInstanceOf[Call].argument(2).asInstanceOf[
+          FieldIdentifier
+        ].canonicalName shouldBe "#p"
+        skInit.argument(1).asInstanceOf[Call].argument(2).asInstanceOf[
+          FieldIdentifier
+        ].canonicalName shouldBe "s-k"
+        // the member is named by the key's value, as the field access names it
+        cpg.typeDecl.nameExact("ClassA").member.name.l should contain("s-k")
+        iteratorInit.argument(1).asInstanceOf[Call].name shouldBe Operators.indexAccess
+        // an explicit `this` in an initialiser is the constructor's too
+        aInit.argument(2).asInstanceOf[Call].argument(1).asInstanceOf[Identifier].refsTo.l shouldBe
+            List(ctorThis)
+
+        // static initialisers and static blocks run with `this` bound to the class
+        val List(staticInit) =
+            cpg.typeDecl.nameExact("ClassA").method.nameExact(
+              io.appthreat.x2cpg.Defines.StaticInitMethodName
+            ).l
+        staticInit.filename shouldBe "code.js"
+        val List(staticThis) = staticInit.parameter.nameExact("this").l
+        staticThis.dynamicTypeHintFullName shouldBe Seq("code.js::program:ClassA")
+        val List(sInit, tInit) = staticInit.block.assignment.l
+        sInit.argument(1).asInstanceOf[Call].code shouldBe "this.S"
+        sInit.argument(1).asInstanceOf[Call].argument(1).asInstanceOf[Identifier].refsTo.l shouldBe
+            List(staticThis)
+        tInit.argument(1).asInstanceOf[Call].argument(1).asInstanceOf[Identifier].refsTo.l shouldBe
+            List(staticThis)
+      }
+
+      "write the members and nested names a destructuring assignment targets" in AstFixture(
+        """
+        |class ClassA {
+        |  load(x, y) {
+        |    ({ a: this.h, b: { c } } = x);
+        |    [this.p, [q]] = y;
+        |    this.k ??= x;
+        |  }
+        |}""".stripMargin
+      ) { cpg =>
+        val targets = cpg.assignment.target.code.l
+        (targets should contain).allOf("this.h", "c", "this.p", "q", "this.k")
+        cpg.assignment.filter(_.target.code == "this.h").source.code.l shouldBe List("_tmp_0.a")
+        cpg.assignment.filter(_.target.code == "this.k").name.l shouldBe
+            List(Operators.assignmentOr)
+        // the temporaries a nested part is read from are references to the temporary
+        cpg.identifier.filter(_.name.startsWith("_tmp")).filter(_._refOut.isEmpty).code.l shouldBe
+            empty
       }
 
       "have method for non-static method in ClassA AST" in AstFixture("""
