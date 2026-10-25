@@ -1,0 +1,89 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/MemberTaintBridge.scala
+  s_e335fe820b41b8::t_7fbc83a8f68ae4 150-151,175
+  s_e335fe820b41b8::t_d49ae1839da564 3,152-153,172-174,176-183
+  s_e335fe820b41b8::t_f38fb8e5d85a45 184,378,384,412
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsClassesAstCreationPassTest.scala
+  s_e335fe820b41b8::t_d292e38b782a00 172-186,234-235
+  s_e335fe820b41b8::t_ba35598d43f5e9 213-214
+  s_e335fe820b41b8::t_4ea60ea97eeea3 236-255
+  s_e335fe820b41b8::t_066a7945c10130 6,188-199,201-212,215-224,226-233
+  s_e335fe820b41b8::t_5e69e8bf283795 187
+  s_e335fe820b41b8::t_8599f33d3b43a5 225
+  s_e335fe820b41b8::t_5f2f2631274143 200
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForExpressionsCreator.scala
+  s_e335fe820b41b8::t_b927806e527ddb 277
+  s_e335fe820b41b8::t_4ea60ea97eeea3 278
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsTaintBridgesTest.scala
+  s_e335fe820b41b8::t_01ce2cca0f9e94 107-126
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptInheritanceNamePass.scala
+  s_e335fe820b41b8::t_f5775d7cec622e 52-53,59-74,76-84
+  s_e335fe820b41b8::t_22a7968d417f4d 54-58,75
+  s_e335fe820b41b8::t_4643cfa6fff28e 4,6-7,11-16,23-51,85-86
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTypesCreator.scala
+  s_e335fe820b41b8::t_ba35598d43f5e9 281-288
+  s_e335fe820b41b8::t_6fff26d0fcf05a 502
+  s_e335fe820b41b8::t_066a7945c10130 12-16
+  s_e335fe820b41b8::t_65fd0180054b10 308
+  s_e335fe820b41b8::t_d83f262d81307f 323-340,347-349
+  s_e335fe820b41b8::t_c04d5358f3f966 403-406,538,543-546
+  s_e335fe820b41b8::t_350efa7e66eecc 341-346
+  s_e335fe820b41b8::t_efc39767fb81cb 3,499-501,503-504,511-519,530,547
+  s_e335fe820b41b8::t_bc5cf214519bfe 11,17
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TSTypesTest.scala
+  s_e335fe820b41b8::t_f4691e89be68db 27-32
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForDeclarationsCreator.scala
+  s_e335fe820b41b8::t_4ea60ea97eeea3 824-827,885,892,924
+  s_e335fe820b41b8::t_1272d97d79486e 10-15,823
+  s_e335fe820b41b8::t_0a718d8d036f0a 615,643,678,695,738,755,863,901,937
+  s_e335fe820b41b8::t_b927806e527ddb 806-822,880-884,886-890,920-923,925-929
+  s_e335fe820b41b8::t_8c3175e4f87509 891,930
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/TypeRecoveryPassTests.scala
+  s_e335fe820b41b8::t_0902e29c12f11f 5-6,630-634,636-646
+  s_e335fe820b41b8::t_fcb695e99e57f1 574
+  s_e335fe820b41b8::t_19ba8adaf63678 577-581,584-608,614-615,617,621-622,624
+  s_e335fe820b41b8::t_22a7968d417f4d 627-628
+  s_e335fe820b41b8::t_8abf75a08efbe0 570,573
+  s_e335fe820b41b8::t_8dc6d520eea203 635
+  s_e335fe820b41b8::t_925d6f319fcb3e 547-569,571-572,575-576,582-583,609-610,647
+  s_e335fe820b41b8::t_d97727b61da296 611-613,616,618-620,623,625-626,629
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/InheritanceFullNamePassTests.scala
+  s_e335fe820b41b8::t_22a7968d417f4d 120-125
+  s_e335fe820b41b8::t_f5775d7cec622e 85-119,126
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_e335fe820b41b8::t_8a6a15975669c9 524-525,560-563
+  s_e335fe820b41b8::t_b0ec3a840d7c7b 526-527
+  s_e335fe820b41b8::t_234c7543e710c4 557
+  s_e335fe820b41b8::t_7ddac43737983d 489
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/AngularTagsTest.scala
+  s_e335fe820b41b8::t_8a6a15975669c9 268-270
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/TsClassesAstCreationPassTest.scala
+  s_e335fe820b41b8::t_ebf96b466c7d3f 44
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_e335fe820b41b8::t_7ddac43737983d 507-508,517
+  s_e335fe820b41b8::t_e9ddee6f0448b0 758-764,768
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeRecovery.scala
+  s_e335fe820b41b8::t_8a6a15975669c9 228-232,241,273
+  s_e335fe820b41b8::t_80b7f2f078f7f2 222-227,233-236,242-244,247-250,253,258-261,263-272
+  s_e335fe820b41b8::t_19ba8adaf63678 237-240,245-246
+  s_e335fe820b41b8::t_2a85500cab8230 251-252,254-256
+  s_e335fe820b41b8::t_b0ec3a840d7c7b 10
+  s_e335fe820b41b8::t_0e6bbc7e480942 257,262
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XInheritanceFullNamePass.scala
+  s_e335fe820b41b8::t_f16d3e5e10c45e 59-62,65,69-92,104,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ee28fb4d80d16bc78395c0f1a6a550e273ec32d1",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
