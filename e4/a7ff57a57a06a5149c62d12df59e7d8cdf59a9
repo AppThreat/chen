@@ -1,0 +1,32 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  s_e335fe820b41b8::t_a6d33591e93941 117,119-120,191-196,202,251
+  s_e335fe820b41b8::t_45600d99ebe0ed 118
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/linking/FragmentStitchTests.scala
+  s_e335fe820b41b8::t_a6d33591e93941 49-54
+  s_e335fe820b41b8::t_45600d99ebe0ed 91-92
+  s_e335fe820b41b8::t_420f1032669165 3
+build.sbt
+  s_e335fe820b41b8::t_956a7406b97721 120-121
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/AstFragment.scala
+  s_e335fe820b41b8::t_a6d33591e93941 5,32-57,67-72
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/AstFragmentTests.scala
+  s_e335fe820b41b8::t_45600d99ebe0ed 7,54-76,78-88
+  s_e335fe820b41b8::t_3584c301a3e44d 6,77
+  s_e335fe820b41b8::t_67e65b887fcc6b 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4a7ff57a57a06a5149c62d12df59e7d8cdf59a9",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
