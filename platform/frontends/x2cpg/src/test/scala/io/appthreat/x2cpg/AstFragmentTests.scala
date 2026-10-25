@@ -3,7 +3,8 @@ package io.appthreat.x2cpg
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
-import overflowdb.BatchedUpdate
+import io.shiftleft.semanticcpg.language.*
+import overflowdb.{BatchedUpdate, DetachedNodeData}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.util.DiffTool
 import org.scalatest.matchers.should.Matchers
@@ -49,6 +50,42 @@ class AstFragmentTests extends AnyWordSpec with Matchers:
 
       val diff = DiffTool.compare(direct.graph, viaFragment.graph).asScala.toList
       withClue(diff.mkString("\n")) { diff shouldBe empty }
+
+    "keep list properties and nodes that are only edge endpoints" in:
+      def withLists(): DiffGraphBuilder =
+        val diff = new DiffGraphBuilder
+        val call = NewCall().name("bar").methodFullName("bar").code("bar()").order(1)
+            .dynamicTypeHintFullName(Seq("a.B", "c.D")).possibleTypes(Seq("x.Y"))
+        val typeDecl = NewTypeDecl().name("T").fullName("m.T")
+        val member   = NewMember().name("field").typeFullName("ANY").code("field").order(1)
+        diff.addNode(call); diff.addNode(typeDecl)
+        // the member is in the diff only as this edge's endpoint
+        diff.addEdge(typeDecl, member, EdgeTypes.AST)
+        diff
+      val bytes = AstFragment.encode(withLists(), Nil)
+      bytes shouldBe defined
+
+      val restored = new DiffGraphBuilder
+      AstFragment.decodeIntoDiffGraph(bytes.get, restored) shouldBe Some(Nil)
+      val direct = Cpg.emptyCpg
+      BatchedUpdate.applyDiff(direct.graph, withLists())
+      val viaFragment = Cpg.emptyCpg
+      BatchedUpdate.applyDiff(viaFragment.graph, restored)
+
+      val diff = DiffTool.compare(direct.graph, viaFragment.graph).asScala.toList
+      withClue(diff.mkString("\n")) { diff shouldBe empty }
+      viaFragment.call.head.dynamicTypeHintFullName.toList shouldBe List("a.B", "c.D")
+      viaFragment.member.name.l shouldBe List("field")
+
+    "write no fragment for a node whose properties it cannot read" in:
+      val foreign = new DetachedNodeData:
+        private var refOrId: Object              = null
+        override def label(): String             = "METHOD"
+        override def getRefOrId(): Object        = refOrId
+        override def setRefOrId(r: Object): Unit = refOrId = r
+      val diff = unit()
+      diff.addNode(foreign)
+      AstFragment.encode(diff, Nil) shouldBe None
 
     "reject corrupt bytes so the caller recomputes" in:
       AstFragment.decodeIntoDiffGraph(Array[Byte](1, 2, 3, 4), new DiffGraphBuilder) shouldBe None

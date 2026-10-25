@@ -3,7 +3,7 @@ ThisBuild / organization := "io.appthreat"
 ThisBuild / version      := "4.0.0"
 ThisBuild / scalaVersion := "3.10.0"
 
-val cpgVersion = "3.1.0"
+val cpgVersion = "3.1.1"
 
 // NB: named `platformProject`, not `platform`, to avoid ambiguity with sbt's
 // own Keys.platform; the project id itself stays "platform" (see Projects.scala)

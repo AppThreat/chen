@@ -114,8 +114,10 @@ class AstCacheStore(
     registerUsedTypes: Seq[String] => Unit,
     createAst: => Option[ParsedUnit]
   ): Unit =
-    val partHash = if enableAstCache then computeEntryHash(cacheKey, fingerprint) else None
-    if fragmentsActive then processFragment(diffGraph, partHash, registerUsedTypes, createAst)
+    val fragments = fragmentsActive
+    val partHash =
+        if enableAstCache then computeEntryHash(cacheKey, fingerprint, fragments) else None
+    if fragments then processFragment(diffGraph, partHash, registerUsedTypes, createAst)
     else processClassic(diffGraph, partHash, registerUsedTypes, createAst)
 
   /** Fragment codec active when requested explicitly by this store or enabled globally (atom
@@ -186,12 +188,18 @@ class AstCacheStore(
       }
   end processFragment
 
-  private def computeEntryHash(cacheKey: => Option[CacheKey], fingerprint: String): Option[String] =
+  /** A fragment's key also covers [[AstFragment.CacheRevision]]; classic `.ast` keys do not. */
+  private def computeEntryHash(
+    cacheKey: => Option[CacheKey],
+    fingerprint: String,
+    fragment: Boolean
+  ): Option[String] =
       cacheKey.flatMap { key =>
           Try {
               val digest = MessageDigest.getInstance("SHA-256")
               digest.update(key.identity.getBytes("UTF-8"))
               if fingerprint.nonEmpty then digest.update(fingerprint.getBytes("UTF-8"))
+              if fragment then digest.update(AstFragment.CacheRevision.getBytes("UTF-8"))
               digest.update(key.content)
               digest.digest().map("%02x".format(_)).mkString
           }.toOption
@@ -240,7 +248,7 @@ class AstCacheStore(
     */
   def fragmentFor(cacheKey: => Option[CacheKey], fingerprint: String): Option[Array[Byte]] =
       if !enableAstCache then None
-      else loadFragmentBytes(computeEntryHash(cacheKey, fingerprint))
+      else loadFragmentBytes(computeEntryHash(cacheKey, fingerprint, fragment = true))
 
   private def loadFragmentBytes(partHash: Option[String]): Option[Array[Byte]] =
       partHash.flatMap { hash =>
