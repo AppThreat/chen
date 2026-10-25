@@ -357,8 +357,6 @@ object AngularRecognizer extends JsFrameworkRecognizer:
               )
               val fromInject = ctor.flatMap(m => Iterator(m).assignment.l).flatMap { a =>
                   (a.argumentOption(1), a.argumentOption(2).map(JsShapes.unwrap)) match
-                    case (Some(id: Identifier), Some(init: Call)) =>
-                        injected(init).map(id.name -> _)
                     case (Some(fa: Call), Some(init: Call)) if fa.code.startsWith("this.") =>
                         fieldName(fa).flatMap(f => injected(init).map(f -> _))
                     case _ => None
@@ -488,6 +486,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
       classMethods(td).iterator.flatMap(_.ast.isCall)
           .nameExact(Operators.fieldAccess)
           .codeExact(s"this.$member")
+          .filterNot(isAssignmentTarget)
 
   /** `@Input()` members and setters - of a component no template renders (a routed one, bound from
     * the URL); the others' are what their parents bind ([[bridgeInputs]]). An input transformed to
@@ -522,9 +521,10 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     * the same file that is also called `input`.
     *
     * The field initialiser `bio = input<string>('')` is lowered into the constructor as an
-    * assignment to an identifier with the code of the member, which is how the member is found. The
-    * field access `this.bio` is tagged, as for `@Input()`: it is under every read `this.bio()` and
-    * it is all there is when the signal is handed on without being called.
+    * assignment to `this.bio` whose code is the member's declaration, which is how the member is
+    * found and told apart from `this.bio = input()` in the constructor body (whose member's code is
+    * the write itself). The field access `this.bio` is tagged, as for `@Input()`: it is under every
+    * read `this.bio()` and it is all there is when the signal is handed on without being called.
     *
     * Not covered: an initialiser wrapped in `as T`, `!` or a conditional; `this.x = input()` in the
     * constructor body; an `input` reached through `import * as ng` or a re-export.
@@ -554,10 +554,13 @@ object AngularRecognizer extends JsFrameworkRecognizer:
                   for
                     enclosing <- initialiser.inCall.headOption
                     if enclosing.name == Operators.assignment
-                    if enclosing.argumentOption(1).exists(_.isInstanceOf[Identifier])
+                    if enclosing.argumentOption(1).exists(_.code.startsWith("this."))
                     if !initialiser.code.matches("(?s).*\\b(numberAttribute|booleanAttribute)\\b.*")
                     typeDecl <- initialiser.method.typeDecl
-                    member   <- typeDecl.member.codeExact(enclosing.code).headOption
+                    // a field initialiser's member code is the declaration (`bio = input('')`); a
+                    // member made by a write in the constructor body starts with `this.`
+                    member <- typeDecl.member.codeExact(enclosing.code)
+                        .filterNot(_.code.startsWith("this.")).headOption
                     if !fed.contains(typeDecl.id()) ||
                         unfollowable.contains(typeDecl.id() -> member.name)
                   do

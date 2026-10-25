@@ -2,6 +2,8 @@ package io.appthreat.jssrc2cpg.passes
 
 import io.appthreat.jssrc2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.appthreat.x2cpg.passes.frontend.ImportsPass.*
+import io.appthreat.x2cpg.passes.frontend.XTypeRecoveryConfig
+import io.shiftleft.codepropertygraph.generated.PropertyNames
 import io.shiftleft.semanticcpg.language.*
 
 class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite:
@@ -541,5 +543,106 @@ class TypeRecoveryPassTests extends DataFlowCodeToCpgSuite:
           cpg.call.name("info").methodFullName.head shouldBe "logger.info"
       }
 
+  }
+  "a class field assigned a call" should {
+
+      val cpg = code(
+        """
+              |import { inject } from "@angular/core";
+              |import { HttpClient } from "@angular/common/http";
+              |
+              |export class Api {
+              |  private readonly http = inject(HttpClient);
+              |  helper = class Helper { run() { return 1; } };
+              |
+              |  list() {
+              |    const local = inject(HttpClient);
+              |    local.head("/x");
+              |    new this.helper().run();
+              |    return this.http.get("/x");
+              |  }
+              |}
+              |""".stripMargin,
+        "api.ts"
+      )
+
+      "hold what the call returns, as a local assigned the call does" in {
+          // not the function `inject` itself; what it returns is unknown, so no claim is made
+          val List(get)  = cpg.call.nameExact("get").l
+          val List(head) = cpg.call.nameExact("head").l
+          (get.methodFullName should not).startWith("@angular/core:inject")
+          head.methodFullName shouldBe "@angular/core:inject:<returnValue>:head"
+      }
+
+      "keep the declared type of a field whose call returns nothing known" in {
+          // `inject` is external: its return is unknown, which is no reason to retype the field
+          cpg.member.nameExact("http").typeFullName.l should not contain "@angular/core:inject"
+      }
+
+      "hold a class assigned to it" in {
+          cpg.call.nameExact("run").methodFullName.l shouldBe List("api.ts::program:Api:Helper:run")
+      }
+  }
+
+  "a field written through this" should {
+
+      val cpg = code(
+        """
+              |import { EventEmitter } from "@angular/core";
+              |
+              |export class Card {
+              |  delete = new EventEmitter<string>();
+              |}
+              |
+              |export class Store {
+              |  delete(id: string) { return id; }
+              |}
+              |""".stripMargin,
+        "card.ts"
+      )
+
+      "type the member of its own class only" in {
+          cpg.typeDecl.nameExact("Card").member.nameExact("delete").typeFullName.l shouldBe
+              List("@angular/core:EventEmitter")
+          cpg.typeDecl.nameExact("Store").member.nameExact("delete").typeFullName.l should not contain
+              "@angular/core:EventEmitter"
+      }
+  }
+
+  "a field assigned an imported binding" should {
+
+      val cpg = code(
+        """
+              |import { uniq, Subject } from "lodash-es";
+              |
+              |export class Holder {
+              |  renamed = uniq;
+              |  Subject = Subject;
+              |}
+              |""".stripMargin,
+        "holder.ts"
+      )
+
+      "hold the binding's type, whatever the field is called" in {
+          val members =
+              cpg.typeDecl.nameExact("Holder").member.l.map(m => m.name -> m.typeFullName).toMap
+          members("renamed") shouldBe members("Subject").replace("Subject", "uniq")
+      }
+
+      "get it in a single iteration, while `this` is still typed by its hint only" in {
+          // atom recovers types in one iteration, without dummy types; reset what the fixture's run
+          // set and recover again that way
+          val reset = new overflowdb.BatchedUpdate.DiffGraphBuilder
+          cpg.typeDecl.nameExact("Holder").member.foreach(m =>
+              reset.setNodeProperty(m, PropertyNames.TYPE_FULL_NAME, "ANY")
+          )
+          cpg.identifier.nameExact("this").foreach(t =>
+              reset.setNodeProperty(t, PropertyNames.TYPE_FULL_NAME, "ANY")
+          )
+          overflowdb.BatchedUpdate.applyDiff(cpg.graph, reset)
+          new JavaScriptTypeRecoveryPass(cpg, XTypeRecoveryConfig(1, false)).createAndApply()
+          cpg.typeDecl.nameExact("Holder").member.nameExact("renamed").typeFullName.l shouldBe
+              List("lodash-es:uniq")
+      }
   }
 end TypeRecoveryPassTests

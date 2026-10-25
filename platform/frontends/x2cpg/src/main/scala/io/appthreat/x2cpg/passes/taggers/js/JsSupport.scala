@@ -504,7 +504,8 @@ object JsShapes:
                 case _           => None
             )
         // `this.handleMessage`: a method of the class, or a class property holding an arrow
-        // function (`handleMessage = (event) => {...}`, assigned in the constructor)
+        // function (`handleMessage = (event) => {...}`, lowered to `this.handleMessage = ...` in
+        // the constructor)
         case fa: Call
             if fa.name == Operators.fieldAccess && fieldBase(fa).exists(_.code == "this") =>
             fieldName(fa).flatMap { name =>
@@ -513,9 +514,7 @@ object JsShapes:
                       classMethods(td).iterator.flatMap(
                         _.ast.isCall.nameExact(Operators.assignment)
                       )
-                          .filter(_.argumentOption(1).exists(t =>
-                              t.code == s"this.$name" || t.code == name
-                          ))
+                          .filter(_.argumentOption(1).exists(_.code == s"this.$name"))
                           .flatMap(_.argumentOption(2)).collectFirst { case ref: MethodRef => ref }
                           .flatMap(callbackMethod)
                     )
@@ -756,10 +755,17 @@ object JsShapes:
   def hasDefaultExport(ctx: JsContext, file: String): Boolean =
       defaultExportValue(ctx, file).nonEmpty
 
+  /** An assignment operator, plain or compound. The schema spells several compound ones
+    * `<operators>.` (`assignmentOr`, which `||=` and `??=` lower to, `assignmentAnd`, the
+    * shifts...), so a `<operator>.assignment` prefix misses them.
+    */
+  def isAssignment(name: String): Boolean = AssignmentName.matches(name)
+  private val AssignmentName              = "<operators?>\\.assignment.*".r
+
   /** True for the target of an assignment (`x.y` in `x.y = v`), which is written, not read. */
   def isAssignmentTarget(e: Expression): Boolean =
       e.astParent match
-        case a: Call if a.name.startsWith("<operator>.assignment") =>
+        case a: Call if isAssignment(a.name) =>
             a.argumentOption(1).exists(_.id() == e.id())
         case _ => false
 

@@ -7,7 +7,12 @@ import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.{newDependencyNode, newLocalNode}
-import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewImport, NewTypeDecl}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    NewCall,
+    NewIdentifier,
+    NewImport,
+    NewTypeDecl
+}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes}
 import ujson.Value
 
@@ -607,7 +612,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
-    val fieldAccessTmpNode = identifierNode(element, localTmpName)
+    val fieldAccessTmpNode = tmpReference(element, localTmpName)
     val keyNode            = createFieldIdentifierNode(key.code, key.lineNumber, key.columnNumber)
     val accessAst = createFieldAccessCallAst(
       fieldAccessTmpNode,
@@ -635,7 +640,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
-    val fieldAccessTmpNode = identifierNode(element, localTmpName)
+    val fieldAccessTmpNode = tmpReference(element, localTmpName)
     val keyNode            = literalNode(element, index.toString, Option(Defines.Number))
     val accessAst = createIndexAccessCallAst(
       fieldAccessTmpNode,
@@ -670,7 +675,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
       case _ => astForNodeWithFunctionReference(lhsElement)
 
     val testAst =
-      val fieldAccessTmpNode = identifierNode(element, localTmpName)
+      val fieldAccessTmpNode = tmpReference(element, localTmpName)
       val keyNode            = literalNode(element, index.toString, Option(Defines.Number))
       val accessAst =
           createIndexAccessCallAst(
@@ -687,7 +692,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
         element.columnNumber
       )
     val falseAst =
-      val fieldAccessTmpNode = identifierNode(element, localTmpName)
+      val fieldAccessTmpNode = tmpReference(element, localTmpName)
       val keyNode            = literalNode(element, index.toString, Option(Defines.Number))
       createIndexAccessCallAst(
         fieldAccessTmpNode,
@@ -730,7 +735,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
       case _ => astForNodeWithFunctionReference(lhsElement)
 
     val testAst =
-      val fieldAccessTmpNode = identifierNode(element, localTmpName)
+      val fieldAccessTmpNode = tmpReference(element, localTmpName)
       val keyNode            = createFieldIdentifierNode(key.code, key.lineNumber, key.columnNumber)
       val accessAst =
           createFieldAccessCallAst(
@@ -747,7 +752,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
         element.columnNumber
       )
     val falseAst =
-      val fieldAccessTmpNode = identifierNode(element, localTmpName)
+      val fieldAccessTmpNode = tmpReference(element, localTmpName)
       val keyNode            = createFieldIdentifierNode(key.code, key.lineNumber, key.columnNumber)
       createFieldAccessCallAst(
         fieldAccessTmpNode,
@@ -798,6 +803,28 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     )
   end createParamAst
 
+  /** A destructuring target that is neither a name nor a default: a member (`{ a: this.h } = x`
+    * writes `this.h`) or a nested pattern (`{ a: { b } } = x`), assigned its part of the source.
+    * Emitted as a bare expression, the target's write was lost.
+    */
+  private def convertDestructingTarget(target: BabelNodeInfo, part: Ast, code: String): Ast =
+      target.node match
+        case ObjectPattern | ArrayPattern => astForDeconstruction(target, part, code)
+        case _ =>
+            val lhsAst = astForNode(target.json)
+            createAssignmentCallAst(
+              lhsAst,
+              part,
+              s"${codeOf(lhsAst.nodes.head)} = ${codeOf(part.nodes.head)}",
+              target.lineNumber,
+              target.columnNumber
+            )
+
+  private def tmpReference(node: BabelNodeInfo, localTmpName: String): NewIdentifier =
+    val tmp = identifierNode(node, localTmpName)
+    scope.addVariableReference(localTmpName, tmp)
+    tmp
+
   protected def astForDeconstruction(
     pattern: BabelNodeInfo,
     sourceAst: Ast,
@@ -833,7 +860,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
             val nodeInfo = createBabelNodeInfo(element)
             nodeInfo.node match
               case RestElement =>
-                  val arg1Ast = Ast(identifierNode(nodeInfo, localTmpName))
+                  val arg1Ast = Ast(tmpReference(nodeInfo, localTmpName))
                   astForSpreadOrRestElement(nodeInfo, Option(arg1Ast))
               case _ =>
                   val nodeInfo = createBabelNodeInfo(element("value"))
@@ -850,7 +877,19 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                           createBabelNodeInfo(element("key")),
                           localTmpName
                         )
-                    case _ => astForNodeWithFunctionReference(nodeInfo.json)
+                    case _ =>
+                        val key = createBabelNodeInfo(element("key"))
+                        convertDestructingTarget(
+                          nodeInfo,
+                          createFieldAccessCallAst(
+                            tmpReference(nodeInfo, localTmpName),
+                            createFieldIdentifierNode(key.code, key.lineNumber, key.columnNumber),
+                            nodeInfo.lineNumber,
+                            nodeInfo.columnNumber
+                          ),
+                          code
+                        )
+                  end match
             end match
           }
       case ArrayPattern =>
@@ -859,7 +898,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                   val nodeInfo = createBabelNodeInfo(element)
                   nodeInfo.node match
                     case RestElement =>
-                        val fieldAccessTmpNode = identifierNode(nodeInfo, localTmpName)
+                        val fieldAccessTmpNode = tmpReference(nodeInfo, localTmpName)
                         val keyNode =
                             literalNode(nodeInfo, index.toString, Option(Defines.Number))
                         val accessAst =
@@ -878,14 +917,24 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                           index,
                           localTmpName
                         )
-                    case _ => astForNodeWithFunctionReference(nodeInfo.json)
+                    case _ =>
+                        convertDestructingTarget(
+                          nodeInfo,
+                          createIndexAccessCallAst(
+                            tmpReference(nodeInfo, localTmpName),
+                            literalNode(nodeInfo, index.toString, Option(Defines.Number)),
+                            nodeInfo.lineNumber,
+                            nodeInfo.columnNumber
+                          ),
+                          code
+                        )
                   end match
               case _ => Ast()
           }
       case _ =>
           List(convertDestructingObjectElement(pattern, pattern, localTmpName))
 
-    val returnTmpNode = identifierNode(pattern, localTmpName)
+    val returnTmpNode = tmpReference(pattern, localTmpName)
     scope.popScope()
     localAstParentStack.pop()
 

@@ -56,16 +56,40 @@ abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPas
     case x: TypeDecl => Option(x.fullName)
     case _           => None
 
+  /** The qualified names a type declaration's file brings into scope: its imports and its own type
+    * declarations.
+    */
+  protected def qualifiedNamesInScope(td: TypeDecl): List[String] =
+    val callsOfInterest     = td.file.method.flatMap(_._callViaContainsOut)
+    val typeDeclsOfInterest = td.file.typeDecl
+    (callsOfInterest ++ typeDeclsOfInterest)
+        .flatMap(extractTypeDeclFromNode)
+        .filterNot(_.endsWith(moduleName))
+        .l
+
+  /** Stubs for inherited types that are imported from outside the CPG. */
+  protected def externalTypeStubs(
+    td: TypeDecl,
+    inherited: Seq[String],
+    qualifiedNames: List[String],
+    builder: DiffGraphBuilder
+  ): Seq[TypeDeclBase] =
+      qualifiedNames
+          .flatMap { qn =>
+              inherited.find(t => ImportStringHandling.namesIntersect(qn, t, pathSep)) match
+                case Some(path) => Option((qn, path))
+                case None       => None
+          }
+          .map { case (qualifiedName, inheritedNames) =>
+              xTypeFullName(qualifiedName, inheritedNames)
+          }
+          .map { case (name, fullName) => createTypeStub(name, fullName, builder) }
+
   protected def resolveInheritedTypeFullName(
     td: TypeDecl,
     builder: DiffGraphBuilder
   ): Seq[TypeDeclBase] =
-    val callsOfInterest     = td.file.method.flatMap(_._callViaContainsOut)
-    val typeDeclsOfInterest = td.file.typeDecl
-    val qualifiedNamesInScope = (callsOfInterest ++ typeDeclsOfInterest)
-        .flatMap(extractTypeDeclFromNode)
-        .filterNot(_.endsWith(moduleName))
-        .l
+    val qualifiedNamesInScope = this.qualifiedNamesInScope(td)
     val matchersInScope = qualifiedNamesInScope.map {
         case x if x.contains(pathSep) =>
             val splitName = x.split(pathSep)
@@ -77,23 +101,12 @@ abstract class XInheritanceFullNamePass(cpg: Cpg) extends ForkJoinParallelCpgPas
         validTypeDecls.filter(vt => td.inheritsFromTypeFullName.contains(vt.name))
     if filteredTypes.isEmpty then
       // Usually in the case of inheriting external types
-      qualifiedNamesInScope
-          .flatMap { qn =>
-              td.inheritsFromTypeFullName.find(t =>
-                  ImportStringHandling.namesIntersect(qn, t, pathSep)
-              ) match
-                case Some(path) => Option((qn, path))
-                case None       => None
-          }
-          .map { case (qualifiedName, inheritedNames) =>
-              xTypeFullName(qualifiedName, inheritedNames)
-          }
-          .map { case (name, fullName) => createTypeStub(name, fullName, builder) }
+      externalTypeStubs(td, td.inheritsFromTypeFullName, qualifiedNamesInScope, builder)
     else
       filteredTypes
   end resolveInheritedTypeFullName
 
-  private def createTypeStub(
+  protected def createTypeStub(
     name: String,
     fullName: String,
     builder: DiffGraphBuilder

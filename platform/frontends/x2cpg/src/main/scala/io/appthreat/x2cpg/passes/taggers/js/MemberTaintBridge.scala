@@ -1,6 +1,6 @@
 package io.appthreat.x2cpg.passes.taggers.js
 
-import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.{Cpg, ModifierTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.language.*
 
@@ -147,19 +147,14 @@ object MemberTaintBridge:
   private[js] def memberWrites(ctx: JsContext): List[(TypeDecl, String, Expression)] =
     val assignments = ctx.cpg.call.nameExact(Operators.assignment).l.flatMap { a =>
         (a.argumentOption(1), a.argumentOption(2)) match
-          // this.x = v
-          case (Some(fa: Call), Some(v)) if fa.name == Operators.fieldAccess =>
+          // this.x = v, which is also how a field initialiser `x = v` is lowered; a static
+          // initialiser or method writes the class, not an instance
+          case (Some(fa: Call), Some(v))
+              if fa.name == Operators.fieldAccess && !isStatic(a.method) =>
               (fieldBase(fa), fieldName(fa)) match
                 case (Some(b: Identifier), Some(field)) if b.name == "this" =>
                     enclosingTypeDecl(a.method).map(td => (td, field, v))
                 case _ => None
-          // `x = v` in a constructor: a field initialiser, lowered with the member's code
-          case (Some(id: Identifier), Some(v)) if a.method.name == "<init>" =>
-              a.method.typeDecl.flatMap(td =>
-                  td.member.nameExact(id.name).codeExact(a.code).headOption.map(_ =>
-                      (td, id.name, v)
-                  )
-              )
           case _ => None
     }
     val stores = ctx.cpg.call.filter(c => StoringMethods.contains(c.name)).l.flatMap { c =>
@@ -173,6 +168,19 @@ object MemberTaintBridge:
     }
     assignments ++ stores
   end memberWrites
+
+  /** A static initialiser or static method, or a function nested in one (whose full name extends
+    * the enclosing method's).
+    */
+  private def isStatic(m: Method): Boolean =
+    val parts = m.fullName.split(':')
+    (1 to parts.length).iterator
+        .map(n => parts.take(n).mkString(":"))
+        .flatMap(Cpg(using m.graph).method.fullNameExact(_))
+        .exists(x =>
+            x.name == io.appthreat.x2cpg.Defines.StaticInitMethodName ||
+                x.modifier.modifierTypeExact(ModifierTypes.STATIC).nonEmpty
+        )
 
   /** `this.q` in `this.q.set(v)`: written through, not read. */
   private def isStoreReceiver(fa: Call): Boolean =
@@ -367,13 +375,13 @@ object MemberTaintBridge:
                 id._reachingDefIn.foreach {
                     case p: MethodParameterIn => push(p)
                     case a: Call
-                        if a.name.startsWith("<operator>.assignment") &&
+                        if isAssignment(a.name) &&
                             a.argumentOption(1).exists(_.code == id.name) =>
                         a.argumentOption(2).foreach(push(_))
                     // `x` assigned as `x = v` is the definition node `x` itself in some lowerings
                     case d: Identifier if d.name == id.name =>
                         d.astParent match
-                          case a: Call if a.name.startsWith("<operator>.assignment") =>
+                          case a: Call if isAssignment(a.name) =>
                               a.argumentOption(2).foreach(push(_))
                           // a same-named identifier whose reaching definitions are the def chain
                           case _ =>
@@ -401,7 +409,7 @@ object MemberTaintBridge:
                           push(arg)
                         }
                 }
-            case c: Call if c.name.startsWith("<operator>.assignment") =>
+            case c: Call if isAssignment(c.name) =>
                 c.argumentOption(2).foreach(push(_))
             // `const [html, setHtml] = useState("")`: the state is what the setter is called with
             case c: Call if StateHooks.contains(c.name) && setterCalls(c).nonEmpty =>

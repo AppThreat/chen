@@ -7,7 +7,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{Operators, PropertyNames}
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.FieldAccess
+import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.{Assignment, FieldAccess}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 import scala.collection.mutable
@@ -218,6 +218,58 @@ private class RecoverForJavaScriptFile(
     rec: Option[String] = None
   ): Set[String] =
       super.visitIdentifierAssignedToMethodRef(i, m, Option("this"))
+
+  /** Field writes, which is also how class fields are lowered (`x = v` is `this.x = v`):
+    *   - `this.x = class X {}` stores the class under the field, as a field assigned a function
+    *     reference already is;
+    *   - `this.x = f(...)` stores what the call returns, as an identifier assigned the call does.
+    *     The base visit stores the callee's own types, so `http = inject(HttpClient)` typed the
+    *     field as the function `inject` and `this.http.get()` as `@angular/core:inject:get`.
+    */
+  override protected def visitAssignments(a: Assignment): Set[String] =
+      a.argumentOut.l match
+        case List(c: Call, t: TypeRef) if c.name == Operators.fieldAccess =>
+            assignTypesToCall(c, Set(t.typeFullName))
+        case List(c: Call, v: Call)
+            if c.name == Operators.fieldAccess && !v.name.startsWith("<operator>") =>
+            // a return nothing is known about is no type: the field keeps the type it has (the
+            // declared one, with TypeScript types), as a field written nowhere else does
+            assignTypesToCall(
+              c,
+              returnTypesOf(v).filterNot(_.endsWith(XTypeRecovery.DummyReturnType))
+            )
+        case _ => super.visitAssignments(a)
+
+  /** The classes whose member a field access names. `this.f` is a field of the class the method
+    * belongs to (or of an ancestor that declares it), not of every class with a member called `f`:
+    * with field initialisers lowered as `this.f = v`, `@Output() delete = new EventEmitter()` in
+    * one component typed the `delete` method of every other class.
+    */
+  override protected def getFieldParents(fa: FieldAccess): Set[String] =
+    val byName = super.getFieldParents(fa)
+    fa.argumentOption(1) match
+      // the frontend gives `this` the class it belongs to as its type hint, which becomes its type
+      // once the first iteration has set types from hints
+      case Some(base: Identifier) if base.name == "this" =>
+          (base.typeFullName +: base.dynamicTypeHintFullName)
+              .filterNot(t => t == Defines.Any || t == "this")
+              .flatMap(t => cpg.typeDecl.fullNameExact(t).l) match
+            case td +: _ =>
+                val ancestors = td.inheritsFromTypeFullName.map(_.split("[:.]").last).toSet
+                byName.filter(t =>
+                    t == td.fullName || ancestors.contains(t.split("[:.]").last)
+                )
+            case _ => byName
+      case _ => byName
+
+  /** The types a call returns, by the rules `visitIdentifierAssignedToCall` applies to a local. */
+  private def returnTypesOf(c: Call): Set[String] =
+      if symbolTable.contains(c) then methodReturnValues(symbolTable.get(c).toSeq)
+      else if c.argument.argumentIndex(0).headOption.exists(symbolTable.contains) then
+        setCallMethodFullNameFromBase(c)
+        if symbolTable.contains(c) then methodReturnValues(symbolTable.get(c).toSeq)
+        else Set(s"${c.name}$pathSep${XTypeRecovery.DummyReturnType}")
+      else Set(s"${c.name}$pathSep${XTypeRecovery.DummyReturnType}")
 
   override protected def visitIdentifierAssignedToTypeRef(
     i: Identifier,
