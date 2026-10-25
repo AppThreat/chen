@@ -2,6 +2,7 @@ package io.appthreat.x2cpg
 
 import io.appthreat.x2cpg.passes.linking.NoBoundaryResolver
 import io.shiftleft.codepropertygraph.generated.SchemaInfo
+import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import overflowdb.{BatchedUpdate, BoundaryResolver, DetachedNodeData, DetachedNodeGeneric, Graph}
 import overflowdb.storage.{DecodedFragment, GraphFragmentCodec}
@@ -28,6 +29,32 @@ import scala.util.Try
   */
 object AstFragment:
 
+  /** Part of every fragment's cache key. Change it whenever [[encode]] writes something different
+    * for the same diff, so that no build reads a fragment an earlier one wrote. "reader": before
+    * it, a native image wrote nodes without their properties (AppThreat/atom#286).
+    */
+  val CacheRevision: String = "reader"
+
+  /** Gives the codec the properties of cpg2's generated nodes, which it does not know, with Scala
+    * collection values as `java.util.List`. Plain calls, no reflection, so a native image writes
+    * the same fragments as the JVM.
+    */
+  val NewNodeProperties: GraphFragmentCodec.PropertyReader =
+    case node: NewNode =>
+        val properties = new java.util.LinkedHashMap[String, Object]()
+        node.properties.foreach { (key, value) =>
+            properties.put(key, javaValue(value))
+        }
+        properties
+    case _ => null
+
+  private def javaValue(value: Any): Object = value match
+    case values: IterableOnce[?] =>
+        val list = new java.util.ArrayList[Object]()
+        values.iterator.foreach(v => list.add(javaValue(v)))
+        list
+    case other => other.asInstanceOf[Object]
+
   /** Serialize a frontend's local diff graph plus its `usedTypes` sidecar, or `None` if the diff is
     * not a self-contained add-only fragment (property updates/removals, or an edge whose endpoint
     * is outside the diff) - exactly the cases `GraphFragmentCodec.encode` rejects.
@@ -37,7 +64,12 @@ object AstFragment:
       // not cached and will be reparsed, rather than aborting the whole frontend run.
       Try {
           Option(
-            GraphFragmentCodec.encode(diff, NoBoundaryResolver, SchemaInfo.schemaHash).orElse(null)
+            GraphFragmentCodec.encode(
+              diff,
+              NoBoundaryResolver,
+              SchemaInfo.schemaHash,
+              NewNodeProperties
+            ).orElse(null)
           ).map { fragmentBytes =>
             val baos = new ByteArrayOutputStream()
             val out  = new DataOutputStream(baos)

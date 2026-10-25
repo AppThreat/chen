@@ -1,5 +1,6 @@
 package io.appthreat.x2cpg.passes.linking
 
+import io.appthreat.x2cpg.AstFragment
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.SchemaInfo
 import io.shiftleft.codepropertygraph.generated.nodes.*
@@ -45,7 +46,12 @@ class FragmentStitchTests extends AnyWordSpec with Matchers:
   "the fragment foundation" should:
 
     "round-trip a chen frontend diff (encode -> applyFragment == direct apply)" in:
-      val bytes = GraphFragmentCodec.encode(selfContainedUnit(), NoBoundaryResolver, schemaHash)
+      val bytes = GraphFragmentCodec.encode(
+        selfContainedUnit(),
+        NoBoundaryResolver,
+        schemaHash,
+        AstFragment.NewNodeProperties
+      )
       bytes.isPresent shouldBe true
 
       val direct = Cpg.emptyCpg
@@ -82,7 +88,8 @@ class FragmentStitchTests extends AnyWordSpec with Matchers:
       unit.addEdge(call, barStored, EdgeTypes.CALL) // boundary: dst is external
 
       val resolver = new SymbolIndexBoundaryResolver(index)
-      val bytes    = GraphFragmentCodec.encode(unit, resolver, schemaHash)
+      val bytes =
+          GraphFragmentCodec.encode(unit, resolver, schemaHash, AstFragment.NewNodeProperties)
       bytes.isPresent shouldBe true
 
       BatchedUpdate.applyFragment(cpg.graph, bytes.get, schemaHash, resolver, null)
