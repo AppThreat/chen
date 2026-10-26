@@ -1,0 +1,36 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_e335fe820b41b8::t_fdf49d20708aa8 195-197,364-366,371-375
+  s_e335fe820b41b8::t_943f053eec1875 265-277,280-289
+  s_e335fe820b41b8::t_0d15b6c283fe3c 278-279
+  s_e335fe820b41b8::t_033efaeeecb243 376
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NodeRecognizer.scala
+  s_e335fe820b41b8::t_0b27175d543cd1 156-157,181,188,194,198-199,202,205,227,348-353,355-356
+  s_e335fe820b41b8::t_0d15b6c283fe3c 158-168,182-187,195,200-201
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_e335fe820b41b8::t_63aefd3467492b 554,726-729,731
+  s_e335fe820b41b8::t_8482d3ebe4edbf 583-584,589-590
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/SvelteRecognizer.scala
+  s_e335fe820b41b8::t_63aefd3467492b 365-366
+  s_e335fe820b41b8::t_8482d3ebe4edbf 370-372
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_e335fe820b41b8::t_bc2685d0b74533 348-365,694-724,822-838
+  s_e335fe820b41b8::t_1cd6528b1c8559 839
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_e335fe820b41b8::t_63aefd3467492b 258-259,264-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e7f8cbd1b2ffc0f623eb310cfc348d944d47f8aa",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
