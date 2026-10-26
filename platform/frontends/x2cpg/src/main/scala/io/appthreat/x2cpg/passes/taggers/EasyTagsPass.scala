@@ -39,12 +39,12 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   /** A response method called with something to send, also after `res.status(code)`. A
     * zero-argument `res.json()` is the Fetch API reading a response body, not a handler writing
-    * one. `res.json(x)` is no output either: the body is served as `application/json`, which a
-    * browser does not render - as for `Response.json(x)`; `jsonp` runs the callback name it is
-    * given and stays.
+    * one. `res.json(x)` writes the response body of an API handler - the data-egress view of
+    * reachables wants it even though a browser does not render `application/json` as HTML; `jsonp`
+    * runs the callback name it is given and stays.
     */
   private val JsResponseCall = java.util.regex.Pattern.compile(
-    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
+    "(?s)(res|ctx|context)(\\.status\\([^)]*\\))?\\.(append|attachment|cookie|download|end|format|json|jsonp|links|location|redirect|render|send|sendFile|sendStatus|set|setHeader|writeHead|vary)\\s*\\((?!\\s*\\)).*"
   )
 
   /** Response methods that set a header: one given only literals (`res.setHeader("X-Content-Type-
@@ -56,11 +56,14 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
   private val JsResponseWrite =
       java.util.regex.Pattern.compile("(?s)(ctx|context)\\.body\\s*=.*")
 
-  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`. A tagged
-    * template (`` db.sql`...${x}` ``) binds its values as parameters and is not one.
+  /** A call on a database handle: `db.query(...)`, `this.db.collection('x').find(...)`, an ORM's
+    * handle - `prisma.user.create(...)`, TypeORM's `this.userRepository.findOne(...)` and
+    * `getRepository(X).createQueryBuilder(...)` (Prisma model calls bind their arguments, like
+    * drizzle's `db.select` that the `db` arm already tags). A tagged template (`` db.sql`...${x}`
+    * ``) binds its values as parameters and is not one.
     */
   private val JsDatabaseCall = java.util.regex.Pattern.compile(
-    "(?s)(?i)(this\\.)?(db|dao|mongo|mongoclient)\\.[\\w$]+(\\.[\\w$]+|\\([^)]*\\))*\\s*\\(.*"
+    "(?s)(?i)((this\\.)?(db|dao|mongo|mongoclient|prisma)|this\\.[\\w$]*repository|getRepository\\([^)]*\\))\\s*\\.[\\w$]+(\\.[\\w$]+|\\([^)]*\\))*\\s*\\(.*"
   )
 
   /** A client/SDK action, as the callee of a call: `s3.upload`, `sqs.send`, `lambda.invoke`. The

@@ -14,9 +14,10 @@ import JsTags.*
   * Sinks: commands (`child_process`), files (`fs`, `fs/promises`, `fs-extra`), code (`vm`, a
   * computed `require`), SQL strings (`pg`, `mysql2`, `better-sqlite3`, `sqlite3`, `knex.raw`,
   * `sequelize.query`, prisma's `$queryRawUnsafe`, db0's `exec`/`prepare`, `postgres`'s `unsafe`)
-  * and outgoing requests (`http.request`, `got`, `undici`, `node-fetch`). A tagged template (``
-  * sql`... ${x}` ``, `` db.sql`...` ``) binds its values as parameters and is no SQL sink.
-  * `path.basename` keeps a file name inside its directory.
+  * outgoing requests (`http.request`, `got`, `undici`, `node-fetch`), and credential handling
+  * (`jsonwebtoken`'s `sign`, `bcrypt`/`bcryptjs`/`argon2` hashing). A tagged template (`` sql`...
+  * ${x}` ``, `` db.sql`...` ``) binds its values as parameters and is no SQL sink. `path.basename`
+  * keeps a file name inside its directory.
   *
   * Bindings are resolved through each file's imports and `require`s, including renames and
   * namespace imports (`import * as cp from 'node:child_process'`).
@@ -28,6 +29,13 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   private val CommandModule = "child_process"
   private val FileModules   = Seq("fs", "fs/promises", "fs-extra", "graceful-fs")
   private val CodeModule    = "vm"
+
+  /** A token signed or a password hashed with request data: no injection, but the credential
+    * handling a reviewer wants a flow to reach (jsonwebtoken and bcrypt each appear in three corpus
+    * projects, argon2 in one).
+    */
+  private val TokenModule     = "jsonwebtoken"
+  private val PasswordModules = Seq("bcrypt", "bcryptjs", "argon2")
 
   private val SqlPackages = Seq(
     "pg",
@@ -55,8 +63,10 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   )
 
   def applies(ctx: JsContext): Boolean =
-      ctx.modules.uses((Seq(CommandModule, CodeModule, "path", "http", "https") ++ FileModules ++
-          SqlPackages ++ ServerRequestPackages)*) || NitroRecognizer.isNitroProject(ctx)
+      ctx.modules.uses(
+        (Seq(CommandModule, CodeModule, "path", "http", "https", TokenModule) ++
+            FileModules ++ PasswordModules ++ SqlPackages ++ ServerRequestPackages)*
+      ) || NitroRecognizer.isNitroProject(ctx)
 
   private val CommandFunctions =
       Set("exec", "execSync", "spawn", "spawnSync", "execFile", "execFileSync", "fork")
@@ -130,6 +140,8 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     tagModuleCalls(ctx, Seq(CommandModule), CommandFunctions, Seq("shell-exec"))
     tagModuleCalls(ctx, FileModules, FileFunctions, Seq("file-io"))
     tagModuleCalls(ctx, Seq(CodeModule), CodeFunctions, CodeSink)
+    tagModuleCalls(ctx, Seq(TokenModule), Set("sign"), Seq("library-call"))
+    tagModuleCalls(ctx, PasswordModules, Set("hash", "compare", "verify"), Seq("library-call"))
     tagScriptConstructors(ctx)
     tagDynamicRequire(ctx)
     tagSql(ctx)

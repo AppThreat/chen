@@ -39,9 +39,24 @@ abstract class XTypeHintCallLinker(cpg: Cpg) extends CpgPass(cpg):
 
   override def run(builder: DiffGraphBuilder): Unit = linkCalls(builder)
 
+  /** A recovered hint name that matched no method by full name may still denote one this project
+    * declares under a fuller name. Frontends whose recovered names are relative to a compilation
+    * unit (JS/TS type recovery writes `Type:method`, the internal method is
+    * `<file>::program:Type:method`) override this to return that method's full name; the default
+    * keeps the name as it is, so nothing changes for them.
+    */
+  protected def resolveLocalTypeHint(methodName: String): Option[String] = None
+
   protected def linkCalls(builder: DiffGraphBuilder): Unit =
-    val callerAndCallees = calls.map(call => (call, calleeNames(call))).toList
-    val methodMap        = mapMethods(callerAndCallees, builder)
+    val callerAndCallees = calls
+        .map(call =>
+            (
+              call,
+              calleeNames(call).map(name => resolveLocalTypeHint(name).getOrElse(name)).distinct
+            )
+        )
+        .toList
+    val methodMap = mapMethods(callerAndCallees, builder)
     linkCallsToCallees(callerAndCallees, methodMap, builder)
     linkSpeculativeNamespaceNodes(methodMap.view.values.collectAll[NewMethod], builder)
 
@@ -79,6 +94,7 @@ abstract class XTypeHintCallLinker(cpg: Cpg) extends CpgPass(cpg):
       callerAndCallees.foreach { case (call, methodNames) =>
           methodNames
               .flatMap(methodMap.get)
+              .distinct
               .filter(m => call.callee(using NoResolve).fullNameExact(m.fullName).isEmpty)
               .foreach { m => linkCallToCallee(call, m, builder) }
           setCallees(call, methodNames, builder)

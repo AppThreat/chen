@@ -30,7 +30,7 @@ import JsTags.*
 object PackageAttribution:
 
   private val SinkTags =
-      Seq(OUTPUT, CODE_EXEC, HTTP_CLIENT, SSRF, "sql", "shell-exec", "file-io")
+      Seq(OUTPUT, CODE_EXEC, HTTP_CLIENT, SSRF, "sql", "shell-exec", "file-io", "library-call")
 
   /** The Node.js built-ins, each with what a sink attributed to it is about. A built-in has no purl
     * \- it is in no SBOM - so these tags, with the module's own name (`node:fs`), are what says

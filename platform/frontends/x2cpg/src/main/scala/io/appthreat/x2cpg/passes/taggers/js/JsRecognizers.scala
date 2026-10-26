@@ -62,6 +62,8 @@ object JsRecognizers:
     DomRecognizer,
     // Node.js core modules and database clients, on the server side of meta-frameworks
     NodeRecognizer,
+    // NestJS controllers: endpoints declared by decorators
+    NestRecognizer,
     AngularRecognizer,
     ReactRecognizer,
     VueRecognizer,
