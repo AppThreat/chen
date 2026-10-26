@@ -16,9 +16,8 @@ class CdxPass(
   atom: Cpg
 ) extends CpgPass(atom):
 
-  private val TAGS_COUNT    = 3
-  private val PKG_NS_SIZE   = 3
-  private val BOM_JSON_FILE = ".*(bom|cdx).json"
+  private val TAGS_COUNT  = 3
+  private val PKG_NS_SIZE = 3
 
   /** Component properties whose value is a list of package namespaces, matched after stripping an
     * optional `internal:` prefix so that cdxgen v13 SBOMs (`internal:Namespaces`) and older ones
@@ -30,7 +29,7 @@ class CdxPass(
   private val NAMESPACE_PROPERTIES = Set("Namespaces")
 
   override def run(dstGraph: DiffGraphBuilder): Unit =
-      atom.configFile.name(BOM_JSON_FILE).content.foreach { cdxData =>
+      BomFiles.contents(atom).foreach { cdxData =>
           parse(cdxData) match
             case Right(json) =>
                 val components =

@@ -357,10 +357,11 @@ final class JsProject(cpg: Cpg):
           .toMap
 
   /** The npm components of the project's CycloneDX SBOM by package name, each with the purls the
-    * SBOM gives it (one per version). Reachables requires cdxgen's SBOM in the project directory;
-    * it is read the way [[io.appthreat.x2cpg.passes.taggers.CdxPass]] finds it, and the purls are
-    * kept exactly as written so that cdxgen matches them to its components. Without an SBOM this is
-    * empty and no sink carries a purl.
+    * SBOM gives it (one per version). Reachables requires cdxgen's SBOM, in the project directory
+    * or given to atom (`--bom-file`, `--bom-dir`); it is read the way
+    * [[io.appthreat.x2cpg.passes.taggers.CdxPass]] finds it, and the purls are kept exactly as
+    * written so that cdxgen matches them to its components. Without an SBOM this is empty and no
+    * sink carries a purl.
     */
   lazy val bomPurls: Map[String, Seq[String]] =
     def purlsOf(components: Vector[io.circe.Json]): Vector[String] =
@@ -370,9 +371,8 @@ final class JsProject(cpg: Cpg):
                   Vector.empty
                 ))
         }
-    cpg.configFile.l
-        .filter(f => f.name.matches(".*(bom|cdx).json") && !f.name.contains("node_modules"))
-        .flatMap(f => io.circe.parser.parse(f.content).toOption)
+    io.appthreat.x2cpg.passes.taggers.BomFiles.contents(cpg)
+        .flatMap(io.circe.parser.parse(_).toOption)
         .flatMap(json =>
             purlsOf(json.hcursor.downField("components").as[Vector[io.circe.Json]].getOrElse(
               Vector.empty
