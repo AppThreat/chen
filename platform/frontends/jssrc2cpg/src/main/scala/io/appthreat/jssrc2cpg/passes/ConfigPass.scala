@@ -3,6 +3,7 @@ package io.appthreat.jssrc2cpg.passes
 import better.files.File
 import io.appthreat.jssrc2cpg.Config
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.passes.taggers.js.JsLockfiles
 import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewConfigFile
@@ -24,8 +25,6 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
       Set(".json", ".js", ".vue", ".svelte", ".html", ".pug", ".yaml", ".lock")
   protected val selectedExtensions: Set[String] =
       Set(".json", ".config.js", ".conf.js", ".vue", ".svelte", ".html", ".pug")
-  private val lockfileNames =
-      Set("yarn.lock", "pnpm-lock.yaml", "bun.lock")
 
   override def generateParts(): Array[File] =
       configFiles(config, allExtensions).toArray
@@ -39,7 +38,7 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
           .filterNot(_.contains(Defines.NodeModulesFolder))
           .filter(f =>
               selectedExtensions.exists(f.endsWith) ||
-                  lockfileNames.exists(name => f == name || f.endsWith(s"/$name"))
+                  JsLockfiles.FileNames.contains(JsLockfiles.baseName(f))
           )
           .map(File(_))
 

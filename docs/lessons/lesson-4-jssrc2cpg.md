@@ -307,13 +307,19 @@ it from a source (`ngOnInit` storing a route parameter that a click handler uses
 `useActionState`) and for the reads of a module-level variable inside functions, and makes a
 derivation that returns a sanitiser's result a sanitiser itself.
 
-**Package attribution.** Each sink the recognizers tag is also tagged with the `pkg:npm/...` purl
-of the package its callee is bound to - an import, a member of a module binding, a handle made from
-one (`pool = new pg.Pool()`), or for Angular the type a member was injected as - so reachable flows
-carry purls with no SBOM. Versions come from `package-lock.json` or else the `package.json` range;
-Node.js built-ins and modules no manifest declares (path aliases) get none. Sources are not
-attributed: a purl tag is a sink tag for reachables. A request sink - the part of a URL - carries
-the purl of the request it is passed to (`q` in `axios.get(q)`).
+**Package attribution.** Each sink tagged by the recognizers or by the earlier tag passes is also
+tagged with the `pkg:npm/...` purl of the package its callee is bound to - an import, a member of a
+module binding, a handle made from one (`pool = new pg.Pool()`), or for Angular the type a member was
+injected as - so reachable flows carry purls with no SBOM. Where none of those names a package, the
+callee's resolved name does when it starts with a module the project imports
+(`express:Response:send`). A member read made a sink (`resource.create.send`) is attributed through
+its base by the same rules. Versions come from the project's lockfiles (`package-lock.json`,
+`yarn.lock`, `pnpm-lock.yaml`, `bun.lock`), preferring the resolution that served a range a
+manifest declares over a transitive copy, or else from the `package.json` range; a name still
+resolved to more than one version (two workspaces pinned it apart) gets no version rather than a
+guess. Node.js built-ins and modules no manifest declares (path aliases) get no purl. Sources are
+not attributed: a purl tag is a sink tag for reachables. A request sink - the part of a URL -
+carries the purl of the request it is passed to (`q` in `axios.get(q)`).
 
 **Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
 much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is

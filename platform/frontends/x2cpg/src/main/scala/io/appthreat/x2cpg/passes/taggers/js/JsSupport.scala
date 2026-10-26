@@ -213,6 +213,9 @@ final class JsModules(cpg: Cpg):
 
   private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
 
+  /** Every module specifier imported anywhere in the graph, longest first. */
+  lazy val modulesLongestFirst: Seq[String] = imports.map(_.module).distinct.sortBy(-_.length)
+
   /** Every npm package imported anywhere in the graph. */
   val packages: Set[String] = imports.flatMap(_.packageName).toSet
 
@@ -338,12 +341,10 @@ final class JsProject(cpg: Cpg):
   private val DependencyKeys =
       Seq("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
 
-  val dependencies: Map[String, String] =
+  /** Every `(name, range)` the manifests declare, a name once per manifest that declares it. */
+  private val declarations: List[(String, String)] =
       cpg.configFile.l
-          .filter(f =>
-              (f.name == "package.json" || f.name.endsWith("/package.json") ||
-                  f.name.endsWith("\\package.json")) && !f.name.contains("node_modules")
-          )
+          .filter(f => JsLockfiles.baseName(f.name) == "package.json" && !isInstalled(f.name))
           .flatMap(f => io.circe.parser.parse(f.content).toOption)
           .flatMap { json =>
               DependencyKeys.flatMap(k =>
@@ -351,14 +352,22 @@ final class JsProject(cpg: Cpg):
                       .flatMap(_.toList.map((name, v) => name -> v.asString.getOrElse("")))
               )
           }
-          .toMap
 
-  /** The version each dependency resolved to: the project's lockfile - `package-lock.json`
+  val dependencies: Map[String, String] = declarations.toMap
+
+  private def isInstalled(path: String): Boolean = path.contains("node_modules")
+
+  /** The version each dependency resolved to: the project's lockfiles - `package-lock.json`
     * (lockfile v2/v3 `packages`, v1 `dependencies`), `yarn.lock` (v1 and berry), `pnpm-lock.yaml`
-    * (v6 and v9, from `importers`, the version each workspace resolved) or `bun.lock` - else the
-    * version a `package.json` range names (`^19.1.0` -> `19.1.0`). A range that names no version
-    * (`latest`, `workspace:*`, a URL) gives none. A name the lockfiles resolve to more than one
-    * version carries none either (see [[ambiguousVersions]]) rather than a guess.
+    * (v5, v6 and v9, the version each workspace resolved) or `bun.lock` - else the version a
+    * `package.json` range names (`^19.1.0` -> `19.1.0`). A range that names no version (`latest`,
+    * `workspace:*`, a URL) gives none.
+    *
+    * A yarn or pnpm lockfile resolves every range of a name on its own, so the resolutions that
+    * served a range the manifests declare are the project's own; a transitive `debug@^2` beside a
+    * declared `debug@^4` is not. A name still resolved to more than one version - two workspaces or
+    * two lockfiles pinned it apart - carries none (see [[ambiguousVersions]]) rather than a guess,
+    * and neither does its range.
     */
   lazy val resolvedVersions: Map[String, String] =
     val fromRanges = dependencies.flatMap { (name, range) =>
@@ -367,45 +376,28 @@ final class JsProject(cpg: Cpg):
             .filter(_ => !range.contains(":") && !range.contains("/"))
             .map(m => name -> m.group(1))
     }
-    val lockName: String => Boolean = {
-        case n
-            if n == "package-lock.json" || n.endsWith("/package-lock.json") ||
-                n.endsWith("\\package-lock.json") => true
-        case n if n == "yarn.lock" || n.endsWith("/yarn.lock")           => true
-        case n if n == "pnpm-lock.yaml" || n.endsWith("/pnpm-lock.yaml") => true
-        case n if n == "bun.lock" || n.endsWith("/bun.lock")             => true
-        case _                                                           => false
-    }
-    val fromLocks = cpg.configFile.l
-        .filter(f => lockName(f.name) && !f.name.contains("node_modules"))
-        .flatMap(f => JsLockfiles.versionsOf(f.name, f.content))
-    val resolutions = fromLocks.groupMap(_._1)(_._2)
-    val unambiguous = resolutions.collect {
-        case (name, versions) if versions.size == 1 =>
-            name -> versions.head
-    }
-    // the range names a guess the lockfile declined to make; it is no better here
-    val ambiguous = resolutions.collect { case (name, vs) if vs.size > 1 => name }.toSet
-    (fromRanges ++ unambiguous) -- ambiguous
-  end resolvedVersions
+    val unambiguous = lockVersions.collect { case (name, vs) if vs.size == 1 => name -> vs.head }
+    (fromRanges ++ unambiguous) -- ambiguousVersions
 
-  /** The names the yarn/pnpm/bun lockfiles resolve to more than one version (two workspaces pinned
-    * a package differently, or two ranges of one name resolved apart): no version is emitted for
-    * them. npm's own flat top-level resolution is kept as it always was.
+  /** The names the lockfiles resolve to more than one version for the project: no version is
+    * emitted for them.
     */
   lazy val ambiguousVersions: Set[String] =
-    val lockName: String => Boolean = {
-        case n if n == "yarn.lock" || n.endsWith("/yarn.lock")           => true
-        case n if n == "pnpm-lock.yaml" || n.endsWith("/pnpm-lock.yaml") => true
-        case n if n == "bun.lock" || n.endsWith("/bun.lock")             => true
-        case _                                                           => false
-    }
+      lockVersions.collect { case (name, vs) if vs.size > 1 => name }.toSet
+
+  /** The versions the lockfiles resolved each name to for the project's own manifests. */
+  private lazy val lockVersions: Map[String, Set[String]] =
+    val declared = declarations.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
     cpg.configFile.l
-        .filter(f => lockName(f.name) && !f.name.contains("node_modules"))
-        .flatMap(f => JsLockfiles.versionsOf(f.name, f.content))
-        .groupMap(_._1)(_._2)
-        .collect { case (name, versions) if versions.size > 1 => name }
-        .toSet
+        .filter(f => JsLockfiles.FileNames.contains(JsLockfiles.baseName(f.name)))
+        .filterNot(f => isInstalled(f.name))
+        .flatMap(f => JsLockfiles.resolutionsOf(f.name, f.content))
+        .groupBy(_.name)
+        .map { (name, resolutions) =>
+          val ranges = declared.getOrElse(name, Set.empty)
+          val direct = resolutions.filter(_.range.exists(ranges.contains))
+          name -> (if direct.nonEmpty then direct else resolutions).map(_.version).toSet
+        }
 
   /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
   def majorVersionOf(name: String): Option[Int] =

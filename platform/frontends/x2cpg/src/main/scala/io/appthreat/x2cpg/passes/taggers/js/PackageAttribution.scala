@@ -59,14 +59,11 @@ object PackageAttribution:
     // target (`q` in `axios.get(q)`), attributed to the request it is passed to. A member read
     // made a sink is attributed through its base. A sink tagged by an earlier pass counts too:
     // EasyTagsPass's response and SDK sinks are in the graph, not in this run's memo.
-    val requestSinkIds = ctx.tagger.taggedIds(HTTP_CLIENT, SSRF).toSet ++
-        ctx.cpg.tag.name(HTTP_CLIENT, SSRF).l.flatMap(_._taggedByIn.collect {
-            case e: Expression => e.id()
-        })
-    val sinkIds = ctx.tagger.taggedIds(SinkTags*).toSet ++
-        ctx.cpg.tag.name(SinkTags*).l.flatMap(_._taggedByIn.collect {
-            case e: Expression => e.id()
-        })
+    def taggedWith(names: Seq[String]): Set[Long] =
+        ctx.tagger.taggedIds(names*).toSet ++
+            ctx.cpg.tag.nameExact(names*)._taggedByIn.collect { case e: Expression => e.id() }
+    val requestSinkIds = taggedWith(Seq(HTTP_CLIENT, SSRF))
+    val sinkIds        = taggedWith(SinkTags)
     val attributed = sinkIds.iterator
         .flatMap(id => Option(ctx.cpg.graph.node(id)))
         .flatMap {
@@ -145,17 +142,10 @@ object PackageAttribution:
     typeOf: Expression => Option[JsTypeRef]
   ): Option[String] =
     val file = base.method.filename
-    memberPath(base) match
-      case Some(List(local)) =>
-          ctx.modules.resolve(file, local).flatMap(_.packageName)
-              .orElse(typeOf(base).flatMap(_.pkg))
-              .orElse(handlePackage(ctx, file, base))
-      case Some(path) if path.size >= 2 =>
-          ctx.modules.resolve(file, path.head).flatMap(_.packageName)
-              .filterNot(_ => path.head == "this")
-              .orElse(typeOf(base).flatMap(_.pkg))
-              .orElse(handlePackage(ctx, file, base))
-      case _ => typeOf(base).flatMap(_.pkg).orElse(handlePackage(ctx, file, base))
+    val root = memberPath(base).flatMap(_.headOption).filterNot(_ == "this")
+    root.flatMap(local => ctx.modules.resolve(file, local).flatMap(_.packageName))
+        .orElse(typeOf(base).flatMap(_.pkg))
+        .orElse(handlePackage(ctx, file, base))
 
   /** The package a resolved callee name already carries: `express:Response:send` is a call on
     * express's Response, `marked:parse` a call of marked's parse, `express` a call of the module
@@ -167,10 +157,8 @@ object PackageAttribution:
     val name = call.methodFullName
     if name.isEmpty || name.startsWith("<") || name.contains("::program") then None
     else
-      val imported = ctx.modules.imports.map(_.module).distinct
-      imported
-          .filter(m => name == m || name.startsWith(m + ":"))
-          .maxByOption(_.length)
+      ctx.modules.modulesLongestFirst
+          .find(m => name == m || name.startsWith(m + ":"))
           .flatMap(JsModules.packageOf)
 
   /** The package a handle was made from: `new pg.Pool()`, `axios.create()`, `$('#x')`. */

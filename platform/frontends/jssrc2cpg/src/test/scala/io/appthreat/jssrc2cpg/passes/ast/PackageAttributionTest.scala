@@ -141,6 +141,9 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
             """{ "name": "s", "dependencies": { "express": "^4.17.0" } }""",
             "package.json"
           ).moreCode(
+            """{ "name": "other", "dependencies": { "express": "^4.16.0" } }""",
+            "apps/other/package.json"
+          ).moreCode(
             """lockfileVersion: '9.0'
                 |
                 |importers:
@@ -162,6 +165,47 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           resolvedAsExpressResponse(cpg0)
           val cpg = tagged(cpg0)
           purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express")
+      }
+
+      "take the version that served the manifest's range, not a transitive copy's" in {
+          // one block serves both declared ranges; another package pulled in express 3
+          val cpg0 = expressServer.moreCode(
+            """{ "name": "s", "dependencies": { "express": "^4.17.1" } }""",
+            "package.json"
+          ).moreCode(
+            """{ "name": "t", "dependencies": { "express": "^4.17.0" } }""",
+            "tools/package.json"
+          ).moreCode(
+            """# yarn lockfile v1
+                |
+                |express@^3.0.0:
+                |  version "3.21.2"
+                |
+                |express@^4.17.0, express@^4.17.1:
+                |  version "4.17.1"
+                |""".stripMargin,
+            "yarn.lock"
+          )
+          resolvedAsExpressResponse(cpg0)
+          val cpg = tagged(cpg0)
+          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.17.1")
+      }
+
+      "read a v2 npm lockfile, which names every version twice" in {
+          val cpg0 = expressServer.moreCode(
+            """{ "name": "s", "dependencies": { "express": "^4.17.0" } }""",
+            "package.json"
+          ).moreCode(
+            """{
+                |  "lockfileVersion": 2,
+                |  "packages": { "": { "name": "s" }, "node_modules/express": { "version": "4.18.2" } },
+                |  "dependencies": { "express": { "version": "4.18.2" } }
+                |}""".stripMargin,
+            "package-lock.json"
+          )
+          resolvedAsExpressResponse(cpg0)
+          val cpg = tagged(cpg0)
+          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.18.2")
       }
 
       "leave a built-in the resolved name carries unattributed" in {

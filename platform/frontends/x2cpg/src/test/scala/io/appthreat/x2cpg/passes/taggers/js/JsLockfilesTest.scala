@@ -10,6 +10,9 @@ import org.scalatest.wordspec.AnyWordSpec
   */
 class JsLockfilesTest extends AnyWordSpec with Matchers:
 
+  private def versionsOf(fileName: String, content: String): Seq[(String, String)] =
+      JsLockfiles.resolutionsOf(fileName, content).map(r => r.name -> r.version)
+
   "the npm lockfile reader" should {
       "read the version of each top-level package" in {
           val content =
@@ -21,7 +24,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
                 |    "node_modules/node-fetch": { "version": "2.6.7" }
                 |  }
                 |}""".stripMargin
-          JsLockfiles.versionsOf("package-lock.json", content) should contain theSameElementsAs
+          versionsOf("package-lock.json", content) should contain theSameElementsAs
               Seq("express" -> "4.18.2", "node-fetch" -> "2.6.7")
       }
   }
@@ -48,7 +51,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
             |""".stripMargin
       "read the version each block resolved, one block serving several ranges" in {
           // both ranges name the same resolution, so the pair appears once per range
-          JsLockfiles.versionsOf("yarn.lock", content).distinct should contain theSameElementsAs Seq(
+          versionsOf("yarn.lock", content).distinct should contain theSameElementsAs Seq(
             "@types/express-serve-static-core" -> "4.17.33",
             "express"                          -> "4.17.1",
             "mongoose"                         -> "5.13.20"
@@ -59,7 +62,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
                                   |express@^4.18.0:
                                   |  version "4.18.2"
                                   |""".stripMargin
-          JsLockfiles.versionsOf("yarn.lock", apart).distinct should contain theSameElementsAs Seq(
+          versionsOf("yarn.lock", apart).distinct should contain theSameElementsAs Seq(
             "@types/express-serve-static-core" -> "4.17.33",
             "mongoose"                         -> "5.13.20",
             "express"                          -> "4.17.1",
@@ -89,7 +92,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
             |  linkType: soft
             |""".stripMargin
       "read registry resolutions and skip workspace keys" in {
-          JsLockfiles.versionsOf("yarn.lock", content) shouldBe Seq("@actions/core" -> "1.2.6")
+          versionsOf("yarn.lock", content) shouldBe Seq("@actions/core" -> "1.2.6")
       }
   }
 
@@ -115,7 +118,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
             |    resolution: {integrity: sha512-...}
             |""".stripMargin
       "read the top-level sections, peers stripped, not the hoisted packages" in {
-          JsLockfiles.versionsOf("pnpm-lock.yaml", content) should contain theSameElementsAs Seq(
+          versionsOf("pnpm-lock.yaml", content) should contain theSameElementsAs Seq(
             "@prisma/client" -> "5.2.0",
             "express"        -> "4.18.2",
             "@types/express" -> "4.17.17"
@@ -149,7 +152,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
             |    resolution: {integrity: sha512-...}
             |""".stripMargin
       "read what each importer resolved, not the hoisted packages" in {
-          JsLockfiles.versionsOf("pnpm-lock.yaml", content) should contain theSameElementsAs Seq(
+          versionsOf("pnpm-lock.yaml", content) should contain theSameElementsAs Seq(
             "prettier"    -> "3.9.9",
             "drizzle-orm" -> "0.45.3",
             "express"     -> "5.2.1"
@@ -173,7 +176,7 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
                 |        specifier: ^3.4.0
                 |        version: 3.4.2
                 |""".stripMargin
-          val found = JsLockfiles.versionsOf("pnpm-lock.yaml", apart)
+          val found = versionsOf("pnpm-lock.yaml", apart)
           found.count(_._1 == "prettier") shouldBe 2
           (found should contain).allOf("prettier" -> "3.9.9", "prettier" -> "3.4.2")
       }
@@ -200,18 +203,114 @@ class JsLockfilesTest extends AnyWordSpec with Matchers:
             |      },
             |    },
             |  },
+            |  // the hoisted copies, then a nested one keyed by its path
             |  "packages": {
+            |    "@babel/core/semver": ["semver@6.3.1", "", {}, "sha512-..."],
             |    "@lezer/common": ["@lezer/common@1.5.2", "", {"peerDependencies": {}}, "sha512-..."],
             |    "react": ["react@18.3.1", "", {"peerDependencies": {}}, "sha512-..."],
             |    "undici-types": ["undici-types@8.3.0", "", {}, "sha512-..."]
             |  }
             |}""".stripMargin
-      "read the resolved version of every package, comments and trailing commas tolerated" in {
-          // "*" (a workspace link) is no resolution and yields nothing
-          JsLockfiles.versionsOf("bun.lock", content).distinct should contain theSameElementsAs Seq(
+      "read the hoisted version of every package, comments and trailing commas tolerated" in {
+          versionsOf("bun.lock", content) should contain theSameElementsAs Seq(
             "@lezer/common" -> "1.5.2",
             "react"         -> "18.3.1",
             "undici-types"  -> "8.3.0"
+          )
+      }
+  }
+  "the readers" should {
+      "report a v2 npm lockfile's packages and dependencies sections, which agree" in {
+          val content =
+              """{
+                |  "lockfileVersion": 2,
+                |  "packages": {
+                |    "": { "name": "p" },
+                |    "node_modules/express": { "version": "4.18.2" },
+                |    "node_modules/express/node_modules/debug": { "version": "2.6.9" }
+                |  },
+                |  "dependencies": {
+                |    "express": { "version": "4.18.2" }
+                |  }
+                |}""".stripMargin
+          versionsOf("package-lock.json", content) shouldBe Seq(
+            "express" -> "4.18.2",
+            "express" -> "4.18.2"
+          )
+      }
+      "give each yarn key its range, berry's protocol stripped" in {
+          val content =
+              """__metadata:
+                |  version: 8
+                |
+                |"debug@npm:^4.1.0, debug@npm:^4.3.4":
+                |  version: 4.3.4
+                |  dependencies:
+                |    ms: "npm:2.1.2"
+                |""".stripMargin
+          JsLockfiles.resolutionsOf("yarn.lock", content) should contain theSameElementsAs Seq(
+            Resolution("debug", Some("^4.1.0"), "4.3.4"),
+            Resolution("debug", Some("^4.3.4"), "4.3.4")
+          )
+      }
+      "not take a yarn block's dependency named version... for the block's version" in {
+          val content =
+              """semver-tools@^1.0.0:
+                |  dependencies:
+                |    versions "2.0.0"
+                |  version "1.0.1"
+                |""".stripMargin
+          versionsOf("yarn.lock", content) shouldBe Seq("semver-tools" -> "1.0.1")
+      }
+      "skip a yarn alias, whose resolution is another package's" in {
+          val content =
+              """"string-width-cjs@npm:string-width@^4.2.0":
+                |  version "4.2.3"
+                |
+                |"@scope/a@^1.0.0":
+                |  version "1.0.0"
+                |""".stripMargin
+          versionsOf("yarn.lock", content) shouldBe Seq("@scope/a" -> "1.0.0")
+      }
+      "read pnpm v6/v9 specifiers as the ranges the versions served" in {
+          val content =
+              """lockfileVersion: '9.0'
+                |
+                |importers:
+                |
+                |  .:
+                |    dependencies:
+                |      express:
+                |        specifier: ^4.17.0
+                |        version: 4.18.2
+                |""".stripMargin
+          JsLockfiles.resolutionsOf("pnpm-lock.yaml", content) shouldBe Seq(
+            Resolution("express", Some("^4.17.0"), "4.18.2")
+          )
+      }
+      "read pnpm v5's inline versions, peers stripped, and not its specifiers" in {
+          val content =
+              """lockfileVersion: 5.4
+                |
+                |importers:
+                |
+                |  .:
+                |    specifiers:
+                |      '@prisma/client': ^4.0.0
+                |      express: ^4.18.2
+                |    dependencies:
+                |      '@prisma/client': 4.16.2_prisma@4.16.2
+                |      express: 4.18.2
+                |      local-lib: link:../lib
+                |
+                |packages:
+                |
+                |  /express/4.18.2:
+                |    resolution: {integrity: sha512-...}
+                |""".stripMargin
+          versionsOf("pnpm-lock.yaml", content) should contain theSameElementsAs Seq(
+            "@prisma/client" -> "4.16.2",
+            "express"        -> "4.18.2"
           )
       }
   }
