@@ -192,8 +192,9 @@ final class JsModules(cpg: Cpg):
   val imports: Seq[JsImport] =
       cpg.imports.l.flatMap { imp =>
         val entity = imp.importedEntity.getOrElse("")
-        val local  = imp.importedAs.getOrElse("")
-        val file   = Iterator(imp).call.file.name.headOption.getOrElse("")
+        // a destructured `require` names the property it binds: `execSync: shell`, `exec = noop`
+        val local = JsModules.boundName(imp.importedAs.getOrElse(""))
+        val file  = Iterator(imp).call.file.name.headOption.getOrElse("")
         if entity.isEmpty then None
         else
           val (written, specifier) = JsModules.splitEntity(entity)
@@ -260,6 +261,31 @@ final class JsModules(cpg: Cpg):
           )
           .map(_.local)
           .toSet
+
+  /** `(file, local)` for each local bound to one of `exported` of a package matching one of `pkgs`,
+    * under whatever name the file gave it: `import { exec as run }` and `const { exec: run } =
+    * require(...)` bind `run`.
+    */
+  def namedBindings(pkgs: Seq[String], exported: Set[String]): Set[(String, String)] =
+      imports
+          .filter(i =>
+              i.kind == ImportKind.Named && exported.contains(i.imported) &&
+                  i.packageName.exists(p => pkgs.exists(JsModules.packageMatches(p, _)))
+          )
+          .map(i => (i.file, i.local))
+          .toSet
+
+  /** Direct calls `local(...)` of one of `exported` of a package matching one of `pkgs`, renamed or
+    * not.
+    */
+  def namedImportCalls(pkgs: Seq[String], exported: Set[String]): Iterator[Call] =
+    val bound = namedBindings(pkgs, exported)
+    if bound.isEmpty then Iterator.empty
+    else
+      cpg.call.filter(c =>
+          bound.contains((c.method.filename, c.name)) &&
+              c.receiver.headOption.flatMap(JsShapes.memberPath).contains(List(c.name))
+      )
 
   /** Files that import from a package matching one of `pkgs`. */
   def filesImporting(pkgs: String*): Set[String] =
@@ -335,12 +361,18 @@ object JsModules:
       RequireDestructuring
           .findFirstMatchIn(code)
           .flatMap(m =>
-              m.group(1).split(',').map(_.split(':').map(_.trim)).collectFirst {
-                  case Array(exported) if exported == local     => exported
-                  case Array(exported, bound) if bound == local => exported
+              m.group(1).split(',').map(_.trim).collectFirst {
+                  case spec if boundName(spec) == local =>
+                      spec.takeWhile(c => c != ':' && c != '=').trim
               }
           )
           .getOrElse("")
+
+  /** The local a destructuring property binds: `execSync: shell` -> `shell`, `exec = noop` ->
+    * `exec`, `exec` -> `exec`.
+    */
+  def boundName(spec: String): String =
+      spec.substring(spec.lastIndexOf(':') + 1).takeWhile(_ != '=').trim
 
   def kindOf(code: String, local: String): ImportKind =
     val named = BraceContent

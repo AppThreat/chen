@@ -362,16 +362,14 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
   private def tagNavigation(ctx: JsContext): Unit =
     def unanchored(e: Expression): Boolean = !isObjectLiteral(e) && !hasFixedOrigin(e)
     // redirect(303, location) from @sveltejs/kit
-    val redirects = ctx.cpg.call.nameExact("redirect").filter(c =>
-        ctx.modules.localNamesOf(c.method.filename, "@sveltejs/kit", "redirect").contains(c.name) &&
-            c.argument.filter(_.argumentIndex == 2).exists(unanchored)
+    val redirects = ctx.modules.namedImportCalls(Seq("@sveltejs/kit"), Set("redirect")).filter(c =>
+        c.argument.filter(_.argumentIndex == 2).exists(unanchored)
     )
     ctx.tagger.tag(redirects, NavigationSink*)
     // goto(url) from $app/navigation
-    val gotos = ctx.cpg.call.nameExact("goto").filter(c =>
-        ctx.modules.importsOf(c.method.filename).exists(i =>
-            i.module == "$app/navigation" && i.local == c.name
-        ) && c.argument.filter(_.argumentIndex == 1).exists(unanchored)
+    val gotos = ctx.modules.namedImportCalls(Seq("$app"), Set("goto")).filter(c =>
+        ctx.modules.resolve(c.method.filename, c.name).exists(_.module == "$app/navigation") &&
+            c.argument.filter(_.argumentIndex == 1).exists(unanchored)
     )
     ctx.tagger.tag(gotos, NavigationSink*)
 end SvelteRecognizer

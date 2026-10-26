@@ -551,9 +551,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
         )
     ctx.tagger.tag(pages.flatMap(firstParam), INPUT)
     // cookies(), headers() and draftMode() read the incoming request
-    val requestReaders = ctx.cpg.call.nameExact("cookies", "headers").filter(c =>
-        ctx.modules.localNamesOf(c.method.filename, "next", c.name).contains(c.name)
-    )
+    val requestReaders = ctx.modules.namedImportCalls(Seq("next"), Set("cookies", "headers"))
     ctx.tagger.tag(requestReaders, INPUT)
   end tagNext
 
@@ -582,12 +580,14 @@ object ReactRecognizer extends JsFrameworkRecognizer:
       ctx.tagger.tag(params(f).iterator, INPUT)
     }
     // SolidStart: action(async (formData) => ...), query(async (id) => ..., 'key')
-    val wrappers = ctx.cpg.call.nameExact("action", "query", "createServerFn")
+    val wrapperNames = Set("action", "query", "createServerFn")
+    val wrappers = (ctx.cpg.call.nameExact(wrapperNames.toSeq*)
         .filter(c =>
             ctx.modules.importsOf(c.method.filename).exists(i =>
                 i.packageName.exists(p => p == "@solidjs/router" || p.startsWith("@tanstack/"))
             )
-        ).l
+        ) ++ ctx.modules.namedImportCalls(Seq("@solidjs/router", "@tanstack"), wrapperNames))
+        .dedup.l
     val solidFns =
         wrappers.flatMap(_.argument.filter(_.argumentIndex == 1).l.flatMap(callbacksIn(_)))
     ctx.tagger.tag(solidFns.flatMap(params).iterator, INPUT)
@@ -723,14 +723,12 @@ object ReactRecognizer extends JsFrameworkRecognizer:
           case b: Block if isObjectLiteral(b) =>
               objectProperties(b).flatMap(_.get("href")).exists(unanchored)
           case other => unanchored(other)
-    val redirects = ctx.cpg.call
-        .nameExact("redirect", "redirectDocument", "permanentRedirect", "replace")
-        .filter(c =>
-            c.receiver.headOption.flatMap(memberPath).exists(_.size == 1) &&
-                redirectPkgs.exists(p =>
-                    ctx.modules.localNamesOf(c.method.filename, p, c.name).contains(c.name)
-                ) && target(c).exists(leaves)
+    val redirects = ctx.modules
+        .namedImportCalls(
+          redirectPkgs,
+          Set("redirect", "redirectDocument", "permanentRedirect", "replace")
         )
+        .filter(c => target(c).exists(leaves))
     ctx.tagger.tag(redirects, NavigationSink*)
 
     // NextResponse.redirect(url) / Response.redirect(url); NextResponse.rewrite(url) proxies
