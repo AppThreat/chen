@@ -143,11 +143,24 @@ class AstGenRunner(config: Config):
             runAstGenNative(in, out).map { res =>
               cache.store(fp, out.path); res
             }
+    def written =
+        filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out).map((
+          in.toString(),
+          _
+        ))
     runResult match
-      case Success(_) =>
-          val parsed = filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out)
-          AstGenRunnerResult(parsed.map((in.toString(), _)))
-      case Failure(_) =>
-          AstGenRunnerResult()
+      case Success(_)   => AstGenRunnerResult(written)
+      case Failure(err) =>
+          // astgen writes each file's AST as it finishes it, so when it dies part way (out of
+          // memory, a crash) the files before are sound. The run is reported, never passed off as
+          // a project without sources; on stderr, since atom does not print chen's log.
+          val reason = Option(err.getMessage).toSeq.flatMap(_.linesIterator)
+              .filterNot(l => l.isBlank || l.trim.matches("\\d+: 0x.*"))
+              .takeRight(3)
+          val parsed = written
+          System.err.println(
+            s"astgen failed on $in, so the atom holds only the ${parsed.size} files it finished: ${reason.mkString(" | ")}"
+          )
+          AstGenRunnerResult(parsed)
   end execute
 end AstGenRunner
