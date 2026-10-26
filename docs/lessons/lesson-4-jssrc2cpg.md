@@ -307,13 +307,19 @@ it from a source (`ngOnInit` storing a route parameter that a click handler uses
 `useActionState`) and for the reads of a module-level variable inside functions, and makes a
 derivation that returns a sanitiser's result a sanitiser itself.
 
-**Package attribution.** Each sink the recognizers tag is also tagged with the `pkg:npm/...` purl
-of the package its callee is bound to - an import, a member of a module binding, a handle made from
-one (`pool = new pg.Pool()`), or for Angular the type a member was injected as - so reachable flows
-carry purls with no SBOM. Versions come from `package-lock.json` or else the `package.json` range;
-Node.js built-ins and modules no manifest declares (path aliases) get none. Sources are not
-attributed: a purl tag is a sink tag for reachables. A request sink - the part of a URL - carries
-the purl of the request it is passed to (`q` in `axios.get(q)`).
+**Package attribution.** Each sink tagged by the recognizers or by the earlier tag passes is also
+tagged with the purl of the npm package its callee is bound to - an import, a member of a module
+binding, a handle made from one (`pool = new pg.Pool()`), or for Angular the type a member was
+injected as. Where none of those names a package, the callee's resolved name does when it starts
+with a module the project imports (`express:Response:send`), and a member read made a sink
+(`resource.create.send`) is attributed through its base. The purl is the one the project's cdxgen
+SBOM (`bom.json`, which reachables requires) gives the package, written exactly as there; chen
+reads no lockfiles and makes up no purls, so a package the SBOM has no component for carries none,
+and one it has in several versions carries each. A Node.js built-in has no purl: its sink carries
+the module's name (`node:fs`) and what it is about (`file-io`; `http`, `web`, `network` for `http`;
+`database`, `sql` for `sqlite`). Sources are not attributed: a purl tag is a sink tag for
+reachables. A request sink - the part of a URL - carries the purl of the request it is passed to
+(`q` in `axios.get(q)`).
 
 **Def-use edges.** Two JavaScript-only refinements in the reaching-definition edges matter as
 much as any tag: a read of a read (`route.query.next`, `e.data.html`, `path.split('#')[1]`) is

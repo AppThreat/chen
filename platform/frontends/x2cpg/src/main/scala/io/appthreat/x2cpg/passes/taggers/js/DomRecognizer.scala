@@ -255,14 +255,17 @@ object DomRecognizer extends JsFrameworkRecognizer:
             }
         }
     }
-    // `axios(config)`, `ky(url)`, `ofetch(url)`, `$fetch(url)`: the binding called directly.
+    // `axios(config)`, `ky(url)`, `ofetch(url)`, `$fetch(url)`: the binding called directly,
+    // under whatever name the file gave it (`import { ofetch as get }`).
     val directCalls = ctx.cpg.call.filter { c =>
         c.receiver.headOption.flatMap(memberPath).exists {
             case List(binding) =>
                 binding == c.name && c.file.name.headOption.exists(f =>
-                    HttpClientPackages.exists(pkg =>
-                        ctx.modules.moduleBindingsOf(f, pkg).contains(binding) ||
-                            ctx.modules.localNamesOf(f, pkg, binding).contains(binding)
+                    ctx.modules.resolve(f, binding).exists(i =>
+                        i.kind != ImportKind.SideEffect &&
+                            i.packageName.exists(p =>
+                                HttpClientPackages.exists(JsModules.packageMatches(p, _))
+                            )
                     )
                 )
             case _ => false

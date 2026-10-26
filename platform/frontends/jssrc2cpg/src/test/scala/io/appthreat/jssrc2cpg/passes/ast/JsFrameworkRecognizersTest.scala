@@ -345,6 +345,24 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           flows(cpg, "redirect") should be > 0
       }
 
+      "tag request readers and redirects imported under another name" in {
+          val cpg = tagged(code(
+            """
+          |'use server';
+          |import { cookies as jar } from 'next/headers';
+          |import { redirect as go } from 'next/navigation';
+          |export async function save(formData) {
+          |  const next = formData.get('next');
+          |  const theme = (await jar()).get('theme');
+          |  go(next);
+          |}
+          |""".stripMargin,
+            "app/actions.ts"
+          ))
+          cpg.tag.name("framework-input").call.name.l shouldBe List("jar")
+          cpg.tag.name("redirect").call.code.l shouldBe List("go(next)")
+      }
+
       "tag a navigation through a hook result called in a nested handler" in {
           val cpg = tagged(code(
             """
@@ -637,6 +655,73 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "pool.query(`select * from t where a = '${req.a}'`)"
           )
       }
+
+      "bind CommonJS requires named like their package, and destructured ones, as imports do" in {
+          val cpg = tagged(code(
+            """
+          |const express = require('express');
+          |const axios = require('axios');
+          |const fs = require('fs');
+          |const { exec } = require('child_process');
+          |const app = express();
+          |app.get('/proxy', async (req, res) => {
+          |  const r = await axios.get(req.query.url);
+          |  fs.readFile(req.query.file, () => {});
+          |  exec(req.query.cmd);
+          |  res.send(r.data);
+          |});
+          |""".stripMargin,
+            "server.js"
+          ).moreCode(
+            """{ "name": "p", "dependencies": { "express": "^4.21.0", "axios": "^1.7.0" } }""",
+            "package.json"
+          ).moreCode(
+            """{ "bomFormat": "CycloneDX", "components": [ { "purl": "pkg:npm/axios@1.7.9" } ] }""",
+            "bom.json"
+          ))
+          cpg.tag.name("service-ingress").call.code.l should contain(
+            "axios.get(req.query.url)"
+          )
+          // the request's URL is the sink, so it carries the purl
+          cpg.call.nameExact("get").code("axios.*").argument(1).flatMap(
+            _.tag.name("pkg:npm/.*|http-client").name
+          ).l.sorted shouldBe List("http-client", "pkg:npm/axios@1.7.9")
+          cpg.tag.name("file-io").call.code.l should contain(
+            "fs.readFile(req.query.file, () => {})"
+          )
+          cpg.tag.name("shell-exec").call.code.l shouldBe List("exec(req.query.cmd)")
+      }
+
+      "tag functions imported or required under another name" in {
+          val cpg = tagged(code(
+            """
+          |import { exec as sh } from 'node:child_process';
+          |import { promisify } from 'node:util';
+          |import { promises as fsp } from 'node:fs';
+          |import { basename as base, join } from 'node:path';
+          |import { ofetch as fetchIt } from 'ofetch';
+          |const run = promisify(sh);
+          |export async function handler(req) {
+          |  sh(req.cmd);
+          |  await run(`ping ${req.host}`);
+          |  await fsp.readFile(join('/srv', base(req.file)));
+          |  await fetchIt(req.url);
+          |}
+          |""".stripMargin,
+            "lib/server.ts"
+          ).moreCode(
+            """
+          |const { execSync: shell } = require('child_process');
+          |module.exports = (req) => shell(req.cmd);
+          |""".stripMargin,
+            "lib/legacy.js"
+          ))
+          cpg.tag.name("shell-exec").call.code.l.sorted shouldBe
+              List("run(`ping ${req.host}`)", "sh(req.cmd)", "shell(req.cmd)")
+          cpg.tag.name("file-io").call.name.l shouldBe List("readFile")
+          cpg.tag.name("sanitizer-file-io").call.name.l shouldBe List("base")
+          cpg.call.nameExact("fetchIt").argument(1).tag.name.l should contain("http-client")
+      }
   }
 
   "The controller file heuristic" should {
@@ -672,7 +757,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
   }
 
   "Package attribution" should {
-      "name the npm package behind a sink from the project's manifests, without an SBOM" in {
+      "name the npm package behind a sink with the purl the project's SBOM gives it" in {
           val cpg = tagged(code(
             """
           |import { Component, inject } from '@angular/core';
@@ -697,8 +782,11 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             """{ "name": "p", "dependencies": { "@angular/core": "^20.3.0", "@angular/platform-browser": "^20.3.0", "axios": "~1.7.2" } }""",
             "package.json"
           ).moreCode(
-            """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/axios": { "version": "1.7.9" } } }""",
-            "package-lock.json"
+            """{ "bomFormat": "CycloneDX", "components": [
+              |  { "purl": "pkg:npm/%40angular/platform-browser@20.3.0" },
+              |  { "purl": "pkg:npm/axios@1.7.9" }
+              |] }""".stripMargin,
+            "bom.json"
           ))
           cpg.tag.name("pkg:npm/.*").call.map(c =>
               s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}"
@@ -729,6 +817,24 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           ))
           cpg.tag.name("framework-input").call.code.l should contain("page.url.searchParams")
           cpg.tag.name("redirect").call.code.l shouldBe List("redirect(303, next)")
+      }
+
+      "tag SvelteKit's redirect and goto imported under another name" in {
+          val cpg = tagged(code(
+            """
+          |import { page } from '$app/state';
+          |import { redirect as bounce } from '@sveltejs/kit';
+          |import { goto as visit } from '$app/navigation';
+          |export function go() {
+          |  const next = page.url.searchParams.get('next');
+          |  visit(next);
+          |  bounce(303, next);
+          |}
+          |""".stripMargin,
+            "src/lib/go.ts"
+          ))
+          cpg.tag.name("redirect").call.code.l.sorted shouldBe
+              List("bounce(303, next)", "visit(next)")
       }
 
       "resolve a route component's $props to the sibling load" in {

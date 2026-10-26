@@ -153,12 +153,19 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     val promisifiedLocals = ctx.cpg.call.nameExact("promisify").l.flatMap { p =>
         p.inAssignment.argument(1).isIdentifier.name.l.map(n => (p.method.filename, n))
     }.toSet
-    val calls = ctx.cpg.call.filter(c =>
-        functions.contains(callName(c)) || promisifiedLocals.contains((c.method.filename, c.name))
-    ).filter { c =>
-      val file = c.method.filename
-      files.contains(file) && moduleFunction(ctx, c, file, modules, functions)
-    }
+    // `import { exec as run }`: `run(cmd)` is called by the name the file gave it
+    val renamed = ctx.modules.namedBindings(modules, functions)
+    val calls =
+        ctx.cpg.call.filter(c =>
+            functions.contains(callName(c)) || promisifiedLocals.contains((
+              c.method.filename,
+              c.name
+            )) ||
+                renamed.contains((c.method.filename, c.name))
+        ).filter { c =>
+          val file = c.method.filename
+          files.contains(file) && moduleFunction(ctx, c, file, modules, functions)
+        }
     // Only a computed argument can carry anything in; a constant command or path is no finding.
     ctx.tagger.tag(calls.filter(hasComputedArgument), tags*)
   end tagModuleCalls
@@ -171,21 +178,31 @@ object NodeRecognizer extends JsFrameworkRecognizer:
     functions: Set[String]
   ): Boolean =
     val name = callName(c)
-    promisified(ctx, c, file, modules, functions) || functions.contains(name) && (
+    def namedFrom(local: String) =
+        modules.exists(m =>
+            ctx.modules.importsOf(file).exists(i =>
+                i.local == local && i.kind == ImportKind.Named &&
+                    i.packageName.exists(JsModules.packageMatches(_, m))
+            )
+        )
+    promisified(ctx, c, file, modules, functions) || (
       c.receiver.headOption.flatMap(memberPath) match
         // `exec(cmd)` - a named import, possibly renamed: the local name is what is called
         case Some(List(local)) =>
             modules.exists(m =>
                 functions.exists(f => ctx.modules.localNamesOf(file, m, f).contains(local))
-            ) || modules.exists(m => ctx.modules.moduleBindingsOf(file, m).contains(local))
+            ) || functions.contains(name) &&
+            modules.exists(m => ctx.modules.moduleBindingsOf(file, m).contains(local))
         // `cp.exec(cmd)`, `fs.promises.readFile(p)`
         case Some(path) if path.size >= 2 =>
-            modules.exists(m => ctx.modules.moduleBindingsOf(file, m).contains(path.head)) ||
-            // `fs.promises.readFile` where `promises` was imported: `import { promises } from 'fs'`
-            modules.exists(m => ctx.modules.localNamesOf(file, m, path.head).contains(path.head))
+            functions.contains(name) && (
+              modules.exists(m => ctx.modules.moduleBindingsOf(file, m).contains(path.head)) ||
+                  // `fsp.readFile` where `import { promises as fsp } from 'fs'`
+                  namedFrom(path.head)
+            )
         case _ =>
             // `require('child_process').exec(cmd)`
-            c.receiver.headOption.exists(r =>
+            functions.contains(name) && c.receiver.headOption.exists(r =>
                 modules.exists(m =>
                     r.code.contains(s"require(\"$m\")") || r.code.contains(s"require('$m')")
                 )
@@ -207,7 +224,7 @@ object NodeRecognizer extends JsFrameworkRecognizer:
                 case p: Call if p.name == "promisify" =>
                     p.argument.filter(_.argumentIndex == 1).headOption.exists {
                         case fn: Identifier =>
-                            functions.contains(fn.name) && modules.exists(m =>
+                            modules.exists(m =>
                                 functions.exists(f =>
                                     ctx.modules.localNamesOf(file, m, f).contains(fn.name)
                                 )
@@ -328,13 +345,13 @@ object NodeRecognizer extends JsFrameworkRecognizer:
 
   /** `path.basename(p)` keeps a name inside the directory it is joined to. */
   private def tagPathSanitizers(ctx: JsContext): Unit =
-    val basenames = ctx.cpg.call.nameExact("basename").filter { c =>
-      val file = c.method.filename
-      c.receiver.headOption.flatMap(memberPath).exists {
-          case List(local) => ctx.modules.localNamesOf(file, "path", "basename").contains(local)
-          case List(binding, _) => ctx.modules.moduleBindingsOf(file, "path").contains(binding)
-          case _                => false
-      }
+    val members = ctx.cpg.call.nameExact("basename").filter { c =>
+        c.receiver.headOption.flatMap(memberPath).exists {
+            case List(binding, _) =>
+                ctx.modules.moduleBindingsOf(c.method.filename, "path").contains(binding)
+            case _ => false
+        }
     }
-    ctx.tagger.tag(basenames, SANITIZER, sanitizerFor("file-io"))
+    val named = ctx.modules.namedImportCalls(Seq("path"), Set("basename"))
+    ctx.tagger.tag(members ++ named, SANITIZER, sanitizerFor("file-io"))
 end NodeRecognizer

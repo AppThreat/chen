@@ -192,11 +192,15 @@ final class JsModules(cpg: Cpg):
   val imports: Seq[JsImport] =
       cpg.imports.l.flatMap { imp =>
         val entity = imp.importedEntity.getOrElse("")
-        val local  = imp.importedAs.getOrElse("")
-        val file   = Iterator(imp).call.file.name.headOption.getOrElse("")
+        // a destructured `require` names the property it binds: `execSync: shell`, `exec = noop`
+        val local = JsModules.boundName(imp.importedAs.getOrElse(""))
+        val file  = Iterator(imp).call.file.name.headOption.getOrElse("")
         if entity.isEmpty then None
         else
-          val (written, name) = JsModules.splitEntity(entity)
+          val (written, specifier) = JsModules.splitEntity(entity)
+          // `const { exec } = require('child_process')` binds one export, like a named import
+          val name =
+              if specifier.isEmpty then JsModules.requiredName(imp.code, local) else specifier
           val module =
               if written.startsWith(".") then written
               else
@@ -204,14 +208,21 @@ final class JsModules(cpg: Cpg):
                     .map(aliases.relativeSpecifier(file, _))
                     .getOrElse(written)
           val kind =
-              if name.isEmpty then
-                if local.isEmpty || local == module then ImportKind.SideEffect
+              // `import 'reflect-metadata'` binds nothing; `const axios = require('axios')` binds
+              // the whole module, under the package's own name
+              if specifier.isEmpty && name.nonEmpty then ImportKind.Named
+              else if name.isEmpty then
+                if local.isEmpty || imp.code.trim.startsWith("import") then ImportKind.SideEffect
                 else ImportKind.Require
               else JsModules.kindOf(imp.code, local)
           Some(JsImport(file, if local.nonEmpty then local else name, module, name, kind))
+        end if
       }.distinct
 
   private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
+
+  /** Every module specifier imported anywhere in the graph, longest first. */
+  lazy val modulesLongestFirst: Seq[String] = imports.map(_.module).distinct.sortBy(-_.length)
 
   /** Every npm package imported anywhere in the graph. */
   val packages: Set[String] = imports.flatMap(_.packageName).toSet
@@ -250,6 +261,31 @@ final class JsModules(cpg: Cpg):
           )
           .map(_.local)
           .toSet
+
+  /** `(file, local)` for each local bound to one of `exported` of a package matching one of `pkgs`,
+    * under whatever name the file gave it: `import { exec as run }` and `const { exec: run } =
+    * require(...)` bind `run`.
+    */
+  def namedBindings(pkgs: Seq[String], exported: Set[String]): Set[(String, String)] =
+      imports
+          .filter(i =>
+              i.kind == ImportKind.Named && exported.contains(i.imported) &&
+                  i.packageName.exists(p => pkgs.exists(JsModules.packageMatches(p, _)))
+          )
+          .map(i => (i.file, i.local))
+          .toSet
+
+  /** Direct calls `local(...)` of one of `exported` of a package matching one of `pkgs`, renamed or
+    * not.
+    */
+  def namedImportCalls(pkgs: Seq[String], exported: Set[String]): Iterator[Call] =
+    val bound = namedBindings(pkgs, exported)
+    if bound.isEmpty then Iterator.empty
+    else
+      cpg.call.filter(c =>
+          bound.contains((c.method.filename, c.name)) &&
+              c.receiver.headOption.flatMap(JsShapes.memberPath).contains(List(c.name))
+      )
 
   /** Files that import from a package matching one of `pkgs`. */
   def filesImporting(pkgs: String*): Set[String] =
@@ -316,6 +352,28 @@ object JsModules:
 
   private val BraceContent = "\\{([^}]*)\\}".r
 
+  private val RequireDestructuring = "^\\s*\\{([^{}]*)\\}\\s*=\\s*require\\(".r
+
+  /** The export a destructured `require` binds to `local`: `{ exec } = require(...)` gives `exec`,
+    * `{ get: fetchIt } = require(...)` gives `get` for `fetchIt`. Empty for any other binding.
+    */
+  def requiredName(code: String, local: String): String =
+      RequireDestructuring
+          .findFirstMatchIn(code)
+          .flatMap(m =>
+              m.group(1).split(',').map(_.trim).collectFirst {
+                  case spec if boundName(spec) == local =>
+                      spec.takeWhile(c => c != ':' && c != '=').trim
+              }
+          )
+          .getOrElse("")
+
+  /** The local a destructuring property binds: `execSync: shell` -> `shell`, `exec = noop` ->
+    * `exec`, `exec` -> `exec`.
+    */
+  def boundName(spec: String): String =
+      spec.substring(spec.lastIndexOf(':') + 1).takeWhile(_ != '=').trim
+
   def kindOf(code: String, local: String): ImportKind =
     val named = BraceContent
         .findFirstMatchIn(code)
@@ -353,42 +411,31 @@ final class JsProject(cpg: Cpg):
           }
           .toMap
 
-  /** The version each dependency resolved to: `package-lock.json` (lockfile v2/v3 `packages`, v1
-    * `dependencies`) where there is one, else the version a `package.json` range names (`^19.1.0`
-    * -> `19.1.0`). A range that names no version (`latest`, `workspace:*`, a URL) gives none.
+  /** The npm components of the project's CycloneDX SBOM by package name, each with the purls the
+    * SBOM gives it (one per version). Reachables requires cdxgen's SBOM, in the project directory
+    * or given to atom (`--bom-file`, `--bom-dir`); it is read the way
+    * [[io.appthreat.x2cpg.passes.taggers.CdxPass]] finds it, and the purls are kept exactly as
+    * written so that cdxgen matches them to its components. Without an SBOM this is empty and no
+    * sink carries a purl.
     */
-  lazy val resolvedVersions: Map[String, String] =
-    val fromRanges = dependencies.flatMap { (name, range) =>
-        "(\\d+\\.\\d+\\.\\d+[\\w.+-]*|\\d+\\.\\d+|\\d+)".r
-            .findFirstMatchIn(range.dropWhile(c => !c.isDigit))
-            .filter(_ => !range.contains(":") && !range.contains("/"))
-            .map(m => name -> m.group(1))
-    }
-    val fromLocks = cpg.configFile.l
-        .filter(f =>
-            (f.name == "package-lock.json" || f.name.endsWith("/package-lock.json") ||
-                f.name.endsWith("\\package-lock.json")) && !f.name.contains("node_modules")
-        )
-        .flatMap(f => io.circe.parser.parse(f.content).toOption)
-        .flatMap { json =>
-          val v2 = json.hcursor.downField("packages").as[Map[String, io.circe.Json]].toOption
-              .toList.flatMap(_.toList.flatMap { (path, entry) =>
-                // the root package is keyed "", a nested copy "node_modules/a/node_modules/b"
-                val marker = path.lastIndexOf("node_modules/")
-                if marker < 0 || path.indexOf("node_modules/") != marker then None
-                else
-                  entry.hcursor.downField("version").as[String].toOption
-                      .map(path.substring(marker + "node_modules/".length) -> _)
-              })
-          val v1 = json.hcursor.downField("dependencies").as[Map[String, io.circe.Json]].toOption
-              .toList.flatMap(_.toList.flatMap((name, entry) =>
-                  entry.hcursor.downField("version").as[String].toOption.map(name -> _)
-              ))
-          v2 ++ v1
+  lazy val bomPurls: Map[String, Seq[String]] =
+    def purlsOf(components: Vector[io.circe.Json]): Vector[String] =
+        components.flatMap { c =>
+            c.hcursor.downField("purl").as[String].toOption.toVector ++
+                purlsOf(c.hcursor.downField("components").as[Vector[io.circe.Json]].getOrElse(
+                  Vector.empty
+                ))
         }
-        .toMap
-    fromRanges ++ fromLocks
-  end resolvedVersions
+    io.appthreat.x2cpg.passes.taggers.BomFiles.contents(cpg)
+        .flatMap(io.circe.parser.parse(_).toOption)
+        .flatMap(json =>
+            purlsOf(json.hcursor.downField("components").as[Vector[io.circe.Json]].getOrElse(
+              Vector.empty
+            ))
+        )
+        .distinct
+        .flatMap(purl => JsProject.npmPackageOf(purl).map(_ -> purl))
+        .groupMap(_._1)(_._2)
 
   /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
   def majorVersionOf(name: String): Option[Int] =
@@ -401,6 +448,21 @@ final class JsProject(cpg: Cpg):
 
   def hasFile(regex: String): Boolean = cpg.file.name(regex).nonEmpty
 end JsProject
+
+object JsProject:
+
+  /** The npm package a purl names: `pkg:npm/%40angular/core@20.3.0` -> `@angular/core`,
+    * `pkg:npm/express@4.22.3?x=y` -> `express`. Any other purl type names none.
+    */
+  def npmPackageOf(purl: String): Option[String] =
+      Option.when(purl.startsWith("pkg:npm/")) {
+          val path = java.net.URLDecoder.decode(
+            purl.stripPrefix("pkg:npm/").takeWhile(c => c != '?' && c != '#'),
+            "UTF-8"
+          )
+          val at = path.indexOf('@', 1)
+          if at > 0 then path.substring(0, at) else path
+      }.filter(_.nonEmpty)
 
 /** Structural helpers over the shapes jssrc2cpg lowers JavaScript to. */
 object JsShapes:
