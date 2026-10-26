@@ -637,6 +637,42 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "pool.query(`select * from t where a = '${req.a}'`)"
           )
       }
+
+      "bind CommonJS requires named like their package, and destructured ones, as imports do" in {
+          val cpg = tagged(code(
+            """
+          |const express = require('express');
+          |const axios = require('axios');
+          |const fs = require('fs');
+          |const { exec } = require('child_process');
+          |const app = express();
+          |app.get('/proxy', async (req, res) => {
+          |  const r = await axios.get(req.query.url);
+          |  fs.readFile(req.query.file, () => {});
+          |  exec(req.query.cmd);
+          |  res.send(r.data);
+          |});
+          |""".stripMargin,
+            "server.js"
+          ).moreCode(
+            """{ "name": "p", "dependencies": { "express": "^4.21.0", "axios": "^1.7.0" } }""",
+            "package.json"
+          ).moreCode(
+            """{ "bomFormat": "CycloneDX", "components": [ { "purl": "pkg:npm/axios@1.7.9" } ] }""",
+            "bom.json"
+          ))
+          cpg.tag.name("service-ingress").call.code.l should contain(
+            "axios.get(req.query.url)"
+          )
+          // the request's URL is the sink, so it carries the purl
+          cpg.call.nameExact("get").code("axios.*").argument(1).flatMap(
+            _.tag.name("pkg:npm/.*|http-client").name
+          ).l.sorted shouldBe List("http-client", "pkg:npm/axios@1.7.9")
+          cpg.tag.name("file-io").call.code.l should contain(
+            "fs.readFile(req.query.file, () => {})"
+          )
+          cpg.tag.name("shell-exec").call.code.l shouldBe List("exec(req.query.cmd)")
+      }
   }
 
   "The controller file heuristic" should {

@@ -196,7 +196,10 @@ final class JsModules(cpg: Cpg):
         val file   = Iterator(imp).call.file.name.headOption.getOrElse("")
         if entity.isEmpty then None
         else
-          val (written, name) = JsModules.splitEntity(entity)
+          val (written, specifier) = JsModules.splitEntity(entity)
+          // `const { exec } = require('child_process')` binds one export, like a named import
+          val name =
+              if specifier.isEmpty then JsModules.requiredName(imp.code, local) else specifier
           val module =
               if written.startsWith(".") then written
               else
@@ -204,11 +207,15 @@ final class JsModules(cpg: Cpg):
                     .map(aliases.relativeSpecifier(file, _))
                     .getOrElse(written)
           val kind =
-              if name.isEmpty then
-                if local.isEmpty || local == module then ImportKind.SideEffect
+              // `import 'reflect-metadata'` binds nothing; `const axios = require('axios')` binds
+              // the whole module, under the package's own name
+              if specifier.isEmpty && name.nonEmpty then ImportKind.Named
+              else if name.isEmpty then
+                if local.isEmpty || imp.code.trim.startsWith("import") then ImportKind.SideEffect
                 else ImportKind.Require
               else JsModules.kindOf(imp.code, local)
           Some(JsImport(file, if local.nonEmpty then local else name, module, name, kind))
+        end if
       }.distinct
 
   private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
@@ -318,6 +325,22 @@ object JsModules:
       pkg == wanted || pkg.startsWith(s"$wanted/")
 
   private val BraceContent = "\\{([^}]*)\\}".r
+
+  private val RequireDestructuring = "^\\s*\\{([^{}]*)\\}\\s*=\\s*require\\(".r
+
+  /** The export a destructured `require` binds to `local`: `{ exec } = require(...)` gives `exec`,
+    * `{ get: fetchIt } = require(...)` gives `get` for `fetchIt`. Empty for any other binding.
+    */
+  def requiredName(code: String, local: String): String =
+      RequireDestructuring
+          .findFirstMatchIn(code)
+          .flatMap(m =>
+              m.group(1).split(',').map(_.split(':').map(_.trim)).collectFirst {
+                  case Array(exported) if exported == local     => exported
+                  case Array(exported, bound) if bound == local => exported
+              }
+          )
+          .getOrElse("")
 
   def kindOf(code: String, local: String): ImportKind =
     val named = BraceContent
