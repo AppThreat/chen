@@ -1,0 +1,27 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_e335fe820b41b8::t_95da21a75c2ced 374-375
+  s_e335fe820b41b8::t_6f988d93c47635 360-364
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/BomFiles.scala
+  s_e335fe820b41b8::t_95da21a75c2ced 1-20
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPass.scala
+  s_e335fe820b41b8::t_6f988d93c47635 19-20
+  s_e335fe820b41b8::t_95da21a75c2ced 32
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/BomFilesTest.scala
+  s_e335fe820b41b8::t_6f988d93c47635 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09d424d5da2097d2e97f3a2c8a00da23710ad6e8",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
