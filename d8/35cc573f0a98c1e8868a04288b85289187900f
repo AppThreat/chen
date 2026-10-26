@@ -1,0 +1,25 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_e335fe820b41b8::t_c21f3395425b2f 640-646,648-651,653-666,671,673
+  s_e335fe820b41b8::t_2626ed65a0d372 647,652,672
+  s_e335fe820b41b8::t_0162a47e4d7f36 667-670
+  s_e335fe820b41b8::t_e629df343ceaac 674-675
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_e335fe820b41b8::t_41be3db278cae9 199-202,210-214,218,329-342
+  s_e335fe820b41b8::t_72edd9fe968697 343-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d835cc573f0a98c1e8868a04288b85289187900f",
+  "prompts": {},
+  "sessions": {
+    "s_e335fe820b41b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "120fe233-8899-4149-b780-6eac261dbd9d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
