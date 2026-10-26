@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.taggers.js
 
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
+import io.shiftleft.codepropertygraph.generated.nodes.{Expression, TypeDecl}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
@@ -31,6 +32,9 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   /** Calls and field reads are queried by most recognizers; materialised once per run. */
   lazy val fieldAccesses: List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
       cpg.call.nameExact(io.shiftleft.codepropertygraph.generated.Operators.fieldAccess).l
+
+  /** Every field write of every class, built once per run. */
+  lazy val memberWrites: List[(TypeDecl, String, Expression)] = MemberTaintBridge.memberWrites(this)
 
   /** The template elements that render a project component, resolved once. */
   lazy val elements: ComponentCallBridge.Elements = ComponentCallBridge.resolve(this)

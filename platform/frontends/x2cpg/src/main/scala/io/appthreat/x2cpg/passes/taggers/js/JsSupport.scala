@@ -954,23 +954,30 @@ object JsIndexes:
         ]()
       )
 
+  private def methodIndex(graph: overflowdb.Graph): java.util.TreeMap[String, List[Method]] =
+      methodIndexes.computeIfAbsent(
+        graph,
+        _ =>
+          val tree = new java.util.TreeMap[String, List[Method]]()
+          Cpg(using graph).method.foreach { m =>
+              tree.merge(m.fullName, List(m), (a, b) => a ++ b)
+          }
+          tree
+      )
+
+  /** The methods with exactly this full name. */
+  def methodsNamed(graph: overflowdb.Graph, fullName: String): List[Method] =
+      methodIndex(graph).getOrDefault(fullName, Nil)
+
   /** Methods whose full name starts with `prefix`. */
   def methodsUnder(graph: overflowdb.Graph, prefix: String): List[Method] =
-    val index = methodIndexes.computeIfAbsent(
-      graph,
-      _ =>
-        val tree = new java.util.TreeMap[String, List[Method]]()
-        Cpg(using graph).method.foreach { m =>
-            tree.merge(m.fullName, List(m), (a, b) => a ++ b)
-        }
-        tree
-    )
+    val index = methodIndex(graph)
     import scala.jdk.CollectionConverters.*
     index.subMap(prefix, true, prefix + Char.MaxValue, true).values().asScala.flatten.toList
 
   /** The method with exactly this full name. */
   def methodByFullName(graph: overflowdb.Graph, fullName: String): Option[Method] =
-      methodsUnder(graph, fullName).find(_.fullName == fullName)
+      methodsNamed(graph, fullName).headOption
 
   /** What a method assigns to a plain variable, by name (`x = v` -> v). */
   def assignedValues(m: Method, name: String): List[Expression] =

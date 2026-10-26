@@ -42,7 +42,7 @@ object MemberTaintBridge:
   private val MaxOtherSources     = 6
 
   def run(ctx: JsContext): Unit =
-    val classWrites = memberWrites(ctx)
+    val classWrites = ctx.memberWrites
     val localWrites = localRefWrites(ctx)
     if classWrites.isEmpty && localWrites.isEmpty then return
     // an Angular component's template reads its members by bare name
@@ -149,10 +149,10 @@ object MemberTaintBridge:
         (a.argumentOption(1), a.argumentOption(2)) match
           // this.x = v, which is also how a field initialiser `x = v` is lowered; a static
           // initialiser or method writes the class, not an instance
-          case (Some(fa: Call), Some(v))
-              if fa.name == Operators.fieldAccess && !isStatic(a.method) =>
+          case (Some(fa: Call), Some(v)) if fa.name == Operators.fieldAccess =>
               (fieldBase(fa), fieldName(fa)) match
-                case (Some(b: Identifier), Some(field)) if b.name == "this" =>
+                case (Some(b: Identifier), Some(field))
+                    if b.name == "this" && !isStatic(a.method) =>
                     enclosingTypeDecl(a.method).map(td => (td, field, v))
                 case _ => None
           case _ => None
@@ -176,7 +176,7 @@ object MemberTaintBridge:
     val parts = m.fullName.split(':')
     (1 to parts.length).iterator
         .map(n => parts.take(n).mkString(":"))
-        .flatMap(Cpg(using m.graph).method.fullNameExact(_))
+        .flatMap(JsIndexes.methodsNamed(m.graph, _))
         .exists(x =>
             x.name == io.appthreat.x2cpg.Defines.StaticInitMethodName ||
                 x.modifier.modifierTypeExact(ModifierTypes.STATIC).nonEmpty

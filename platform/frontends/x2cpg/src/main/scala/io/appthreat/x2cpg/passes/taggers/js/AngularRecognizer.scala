@@ -137,7 +137,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
     * { alias: 'promoHtml' })`).
     */
   private def inputNames(ctx: JsContext, td: TypeDecl): Map[String, String] =
-    val initialisers = MemberTaintBridge.memberWrites(ctx).filter(_._1.id() == td.id())
+    val initialisers = ctx.memberWrites.filter(_._1.id() == td.id())
         .groupMap(_._2)(_._3.code)
     val annotated = ctx.cpg.annotation.nameExact("Input").l.flatMap { a =>
         a.astParent match
@@ -209,7 +209,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   def bridgeInputs(ctx: JsContext): Unit =
     val bindings = templateBindings(ctx)
     if bindings.isEmpty then return
-    val members        = MemberTaintBridge.memberWrites(ctx).groupMap(w => (w._1.id(), w._2))(_._3)
+    val members        = ctx.memberWrites.groupMap(w => (w._1.id(), w._2))(_._3)
     lazy val templates = componentTemplates(ctx).groupMap(_._1.id())(_._2)
     bindings.filter(b => isFollowable(b._3, b._4))
         .groupMap(b => (b._1, b._2))(b => (b._3, b._4)).foreach { case ((child, input), from) =>
