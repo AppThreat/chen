@@ -14,9 +14,13 @@ import JsTags.*
   * The package is the one the callee is bound to: a named or default import (`import { redirect }
   * from 'next/navigation'`), a member of a module binding (`axios.get`, `DOMPurify.sanitize`), a
   * handle made from one (`pool = new pg.Pool()` -> `pool.query`), or - for Angular - the type a
-  * member was injected as (`this.sanitizer` from `@angular/platform-browser`). The version is the
-  * one `package-lock.json` resolved, or else the one the `package.json` range names; without either
-  * the purl carries no version. Node.js built-ins are no package.
+  * member was injected as (`this.sanitizer` from `@angular/platform-browser`). Where none of those
+  * names a package, the resolved callee name already carries one (`express:Response:send`). A
+  * member read made a sink (`resource.list`) is attributed through its base, by the same rules as a
+  * call receiver. The version is the one the project's lockfile resolved (`package-lock.json`,
+  * `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`), or else the one the `package.json` range names; a
+  * package the lockfiles resolve to more than one version carries no version rather than a guess.
+  * Node.js built-ins are no package.
   *
   * Only sinks are attributed: a purl tag is itself a sink tag for reachables (`pkg.*`), so on a
   * source it would make the source a sink too.
@@ -52,23 +56,35 @@ object PackageAttribution:
   def run(ctx: JsContext, typeOf: Expression => Option[JsTypeRef]): Unit =
     val versions = ctx.project.resolvedVersions
     // A sink call is attributed itself; a request sink is the part of the URL that decides the
-    // target (`q` in `axios.get(q)`), attributed to the request it is passed to.
-    val requestSinkIds = ctx.tagger.taggedIds(HTTP_CLIENT, SSRF).toSet
-    val sinks = ctx.tagger.taggedIds(SinkTags*).toSet.iterator
+    // target (`q` in `axios.get(q)`), attributed to the request it is passed to. A member read
+    // made a sink is attributed through its base. A sink tagged by an earlier pass counts too:
+    // EasyTagsPass's response and SDK sinks are in the graph, not in this run's memo.
+    val requestSinkIds = ctx.tagger.taggedIds(HTTP_CLIENT, SSRF).toSet ++
+        ctx.cpg.tag.name(HTTP_CLIENT, SSRF).l.flatMap(_._taggedByIn.collect {
+            case e: Expression => e.id()
+        })
+    val sinkIds = ctx.tagger.taggedIds(SinkTags*).toSet ++
+        ctx.cpg.tag.name(SinkTags*).l.flatMap(_._taggedByIn.collect {
+            case e: Expression => e.id()
+        })
+    val attributed = sinkIds.iterator
         .flatMap(id => Option(ctx.cpg.graph.node(id)))
         .flatMap {
             case e: Expression if requestSinkIds.contains(e.id()) && requestOf(e).nonEmpty =>
-                requestOf(e).map(_ -> e)
-            case c: Call if !c.name.startsWith("<operator>") => Some(c -> c)
-            case _                                           => None
+                requestOf(e).map(request => packageOf(ctx, request, typeOf) -> e)
+            case c: Call if c.name == Operators.fieldAccess =>
+                fieldBase(c).map(base => packageOfBase(ctx, base, typeOf) -> c)
+            case c: Call if !c.name.startsWith("<operator>") =>
+                Some(packageOf(ctx, c, typeOf) -> c)
+            case _ => None
         }
     // With manifests in the project, a module they do not declare is no package of it - a
     // tsconfig path alias (`@components/x`), a workspace-relative import.
     val declared = ctx.project.dependencies.keySet ++ versions.keySet
-    sinks.foreach { (call, sink) =>
-        packageOf(ctx, call, typeOf).filterNot(isBuiltin)
-            .filter(pkg => declared.isEmpty || declared.contains(pkg)).foreach { pkg =>
-                ctx.tagger.tag(Iterator(sink), purl(pkg, versions.get(pkg)))
+    attributed.foreach { (pkg, sink) =>
+        pkg.filterNot(isBuiltin)
+            .filter(p => declared.isEmpty || declared.contains(p)).foreach { p =>
+                ctx.tagger.tag(Iterator(sink), purl(p, versions.get(p)))
             }
     }
   end run
@@ -105,7 +121,7 @@ object PackageAttribution:
     def binding(local: String): Option[String] =
         ctx.modules.resolve(file, local).flatMap(_.packageName)
     val callee = call.receiver.headOption.flatMap(memberPath)
-    callee match
+    val fromReceiver = callee match
       // `redirect(url)`, `exec(cmd)`, `$(html)`
       case Some(List(local)) => binding(local)
       // `axios.get(url)`, `DOMPurify.sanitize(x)`, `this.sanitizer.bypassSecurityTrustHtml(x)`
@@ -116,7 +132,46 @@ object PackageAttribution:
               )
           }
       case _ => receiverOf(call).flatMap(r => handlePackage(ctx, file, r))
+    fromReceiver.orElse(packageOfResolvedName(ctx, call))
   end packageOf
+
+  /** The package behind a member read made a sink (`resource.list`): its base, by the same rules as
+    * a call receiver - the binding the base's root name is imported as, the injected type it
+    * resolved to, or the import a handle was made from.
+    */
+  private def packageOfBase(
+    ctx: JsContext,
+    base: Expression,
+    typeOf: Expression => Option[JsTypeRef]
+  ): Option[String] =
+    val file = base.method.filename
+    memberPath(base) match
+      case Some(List(local)) =>
+          ctx.modules.resolve(file, local).flatMap(_.packageName)
+              .orElse(typeOf(base).flatMap(_.pkg))
+              .orElse(handlePackage(ctx, file, base))
+      case Some(path) if path.size >= 2 =>
+          ctx.modules.resolve(file, path.head).flatMap(_.packageName)
+              .filterNot(_ => path.head == "this")
+              .orElse(typeOf(base).flatMap(_.pkg))
+              .orElse(handlePackage(ctx, file, base))
+      case _ => typeOf(base).flatMap(_.pkg).orElse(handlePackage(ctx, file, base))
+
+  /** The package a resolved callee name already carries: `express:Response:send` is a call on
+    * express's Response, `marked:parse` a call of marked's parse, `express` a call of the module
+    * itself. The module part can itself contain `:` (`node:fs`) and `/` (`@angular/common/http`),
+    * so the prefix is matched against the module specifiers this project imports - longest first -
+    * rather than split at a separator. A built-in the file never imports still names no package.
+    */
+  private def packageOfResolvedName(ctx: JsContext, call: Call): Option[String] =
+    val name = call.methodFullName
+    if name.isEmpty || name.startsWith("<") || name.contains("::program") then None
+    else
+      val imported = ctx.modules.imports.map(_.module).distinct
+      imported
+          .filter(m => name == m || name.startsWith(m + ":"))
+          .maxByOption(_.length)
+          .flatMap(JsModules.packageOf)
 
   /** The package a handle was made from: `new pg.Pool()`, `axios.create()`, `$('#x')`. */
   private def handlePackage(ctx: JsContext, file: String, receiver: Expression): Option[String] =

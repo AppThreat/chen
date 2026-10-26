@@ -17,11 +17,15 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
 
   // Single-file components (.vue, .svelte) are treated as configuration
   // artifacts alongside the usual config/script files so their content is
-  // queryable via configFile nodes.
+  // queryable via configFile nodes. The non-npm lockfiles (yarn, pnpm, bun) are
+  // config files too: package attribution reads the version each dependency
+  // resolved to from them, the way it reads package-lock.json.
   protected val allExtensions: Set[String] =
-      Set(".json", ".js", ".vue", ".svelte", ".html", ".pug")
+      Set(".json", ".js", ".vue", ".svelte", ".html", ".pug", ".yaml", ".lock")
   protected val selectedExtensions: Set[String] =
       Set(".json", ".config.js", ".conf.js", ".vue", ".svelte", ".html", ".pug")
+  private val lockfileNames =
+      Set("yarn.lock", "pnpm-lock.yaml", "bun.lock")
 
   override def generateParts(): Array[File] =
       configFiles(config, allExtensions).toArray
@@ -33,7 +37,10 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
       SourceFiles
           .determine(config.inputPath, extensions)
           .filterNot(_.contains(Defines.NodeModulesFolder))
-          .filter(f => selectedExtensions.exists(f.endsWith))
+          .filter(f =>
+              selectedExtensions.exists(f.endsWith) ||
+                  lockfileNames.exists(name => f == name || f.endsWith(s"/$name"))
+          )
           .map(File(_))
 
   override def runOnPart(diffGraph: DiffGraphBuilder, file: File): Unit =
