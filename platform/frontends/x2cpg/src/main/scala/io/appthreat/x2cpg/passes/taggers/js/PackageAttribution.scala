@@ -7,9 +7,11 @@ import io.shiftleft.semanticcpg.language.*
 import JsShapes.*
 import JsTags.*
 
-/** Names the npm package behind each sink the recognizers tagged, with a `pkg:npm/...` purl tag -
-  * the attribution `CdxPass` gives from an SBOM, here from the project's own manifests. A request
-  * sink - the part of a URL that decides the target - carries the package of the request.
+/** Tags each sink the recognizers or the earlier tag passes found with the purl of the npm package
+  * behind it, as the project's CycloneDX SBOM names that package. Reachables requires cdxgen's SBOM
+  * in the project directory, and the SBOM owns package identity and versions; what this adds is the
+  * code analysis that says which package a sink belongs to. A request sink - the part of a URL that
+  * decides the target - carries the package of the request.
   *
   * The package is the one the callee is bound to: a named or default import (`import { redirect }
   * from 'next/navigation'`), a member of a module binding (`axios.get`, `DOMPurify.sanitize`), a
@@ -17,10 +19,10 @@ import JsTags.*
   * member was injected as (`this.sanitizer` from `@angular/platform-browser`). Where none of those
   * names a package, the resolved callee name already carries one (`express:Response:send`). A
   * member read made a sink (`resource.list`) is attributed through its base, by the same rules as a
-  * call receiver. The version is the one the project's lockfile resolved (`package-lock.json`,
-  * `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`), or else the one the `package.json` range names; a
-  * package the lockfiles resolve to more than one version carries no version rather than a guess.
-  * Node.js built-ins are no package.
+  * call receiver. Node.js built-ins are no package, even where the SBOM has an npm namesake
+  * (`events`, `util`, `buffer`): Node resolves those specifiers to the built-in. A sink attributed
+  * to one carries the built-in's name (`node:fs`) and what it is about (`file-io`; `http`, `web`,
+  * `network` for `http`; `database`, `sql` for `sqlite`) instead of a purl.
   *
   * Only sinks are attributed: a purl tag is itself a sink tag for reachables (`pkg.*`), so on a
   * source it would make the source a sink too.
@@ -30,31 +32,42 @@ object PackageAttribution:
   private val SinkTags =
       Seq(OUTPUT, CODE_EXEC, HTTP_CLIENT, SSRF, "sql", "shell-exec", "file-io")
 
-  private val NodeBuiltins = Set(
-    "fs",
-    "path",
-    "child_process",
-    "vm",
-    "http",
-    "https",
-    "url",
-    "util",
-    "crypto",
-    "os",
-    "net",
-    "tls",
-    "zlib",
-    "stream",
-    "events",
-    "buffer",
-    "querystring",
-    "dns",
-    "worker_threads",
-    "sqlite"
+  /** The Node.js built-ins, each with what a sink attributed to it is about. A built-in has no purl
+    * \- it is in no SBOM - so these tags, with the module's own name (`node:fs`), are what says
+    * which part of the platform a flow reaches. `framework` and `event` are deliberately absent:
+    * they are reachables source tags, and a sink must not become a source.
+    */
+  private val NodeBuiltins: Map[String, Seq[String]] = Map(
+    "fs"             -> Seq("file-io"),
+    "path"           -> Seq("file-io"),
+    "http"           -> Seq("http", "web", "network"),
+    "https"          -> Seq("http", "web", "network", "ssl"),
+    "http2"          -> Seq("http", "web", "network", "ssl"),
+    "net"            -> Seq("network", "socket"),
+    "dgram"          -> Seq("network", "socket"),
+    "tls"            -> Seq("network", "ssl"),
+    "dns"            -> Seq("network"),
+    "url"            -> Seq("web", "parse"),
+    "querystring"    -> Seq("web", "parse"),
+    "child_process"  -> Seq("shell-exec"),
+    "vm"             -> Seq("code-execution"),
+    "worker_threads" -> Seq("concurrent"),
+    "cluster"        -> Seq("concurrent"),
+    "crypto"         -> Seq("crypto", "security"),
+    "sqlite"         -> Seq("database", "sql"),
+    "zlib"           -> Seq("stream"),
+    "stream"         -> Seq("stream"),
+    "readline"       -> Seq("stream"),
+    "os"             -> Seq("system"),
+    "process"        -> Seq("system"),
+    "util"           -> Nil,
+    "events"         -> Nil,
+    "buffer"         -> Nil,
+    "assert"         -> Nil,
+    "timers"         -> Nil
   )
 
   def run(ctx: JsContext, typeOf: Expression => Option[JsTypeRef]): Unit =
-    val versions = ctx.project.resolvedVersions
     // A sink call is attributed itself; a request sink is the part of the URL that decides the
     // target (`q` in `axios.get(q)`), attributed to the request it is passed to. A member read
     // made a sink is attributed through its base. A sink tagged by an earlier pass counts too:
@@ -75,14 +88,19 @@ object PackageAttribution:
                 Some(packageOf(ctx, c, typeOf) -> c)
             case _ => None
         }
-    // With manifests in the project, a module they do not declare is no package of it - a
-    // tsconfig path alias (`@components/x`), a workspace-relative import.
-    val declared = ctx.project.dependencies.keySet ++ versions.keySet
+    // The purl is the SBOM's: a package the SBOM has no component for (a path alias, a workspace
+    // package) carries none, and one it has in several versions carries each, as cdxgen
+    // attributes JavaScript usages to every component of the package.
+    // A built-in is tagged with its name and what it is about instead.
+    val bom = ctx.project.bomPurls
     attributed.foreach { (pkg, sink) =>
-        pkg.filterNot(isBuiltin)
-            .filter(p => declared.isEmpty || declared.contains(p)).foreach { p =>
-                ctx.tagger.tag(Iterator(sink), purl(p, versions.get(p)))
-            }
+        pkg.foreach { p =>
+            builtinOf(p) match
+              case Some(module) =>
+                  ctx.tagger.tag(Iterator(sink), (s"node:$module" +: NodeBuiltins(module))*)
+              case None =>
+                  bom.getOrElse(p, Nil).foreach(purl => ctx.tagger.tag(Iterator(sink), purl))
+        }
     }
   end run
 
@@ -101,13 +119,9 @@ object PackageAttribution:
         case c: Call if !c.name.startsWith("<operator>") && e.argumentIndex >= 1 => Some(c)
         case _                                                                   => None
 
-  private def isBuiltin(pkg: String): Boolean =
-      NodeBuiltins.contains(pkg) || NodeBuiltins.contains(pkg.stripPrefix("node:"))
-
-  /** `pkg:npm/%40angular/core@20.3.0`: the scope's `@` percent-encoded, as the purl spec asks. */
-  def purl(pkg: String, version: Option[String]): String =
-    val name = if pkg.startsWith("@") then "%40" + pkg.drop(1) else pkg
-    version.filter(_.nonEmpty).map(v => s"pkg:npm/$name@$v").getOrElse(s"pkg:npm/$name")
+  /** The built-in a package name is (`fs`, `node:fs`), if it is one. */
+  private def builtinOf(pkg: String): Option[String] =
+      Some(pkg.stripPrefix("node:")).filter(NodeBuiltins.contains)
 
   private def packageOf(
     ctx: JsContext,

@@ -3,7 +3,6 @@ package io.appthreat.jssrc2cpg.passes
 import better.files.File
 import io.appthreat.jssrc2cpg.Config
 import io.appthreat.x2cpg.SourceFiles
-import io.appthreat.x2cpg.passes.taggers.js.JsLockfiles
 import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewConfigFile
@@ -18,11 +17,9 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
 
   // Single-file components (.vue, .svelte) are treated as configuration
   // artifacts alongside the usual config/script files so their content is
-  // queryable via configFile nodes. The non-npm lockfiles (yarn, pnpm, bun) are
-  // config files too: package attribution reads the version each dependency
-  // resolved to from them, the way it reads package-lock.json.
+  // queryable via configFile nodes.
   protected val allExtensions: Set[String] =
-      Set(".json", ".js", ".vue", ".svelte", ".html", ".pug", ".yaml", ".lock")
+      Set(".json", ".js", ".vue", ".svelte", ".html", ".pug")
   protected val selectedExtensions: Set[String] =
       Set(".json", ".config.js", ".conf.js", ".vue", ".svelte", ".html", ".pug")
 
@@ -36,10 +33,7 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
       SourceFiles
           .determine(config.inputPath, extensions)
           .filterNot(_.contains(Defines.NodeModulesFolder))
-          .filter(f =>
-              selectedExtensions.exists(f.endsWith) ||
-                  JsLockfiles.FileNames.contains(JsLockfiles.baseName(f))
-          )
+          .filter(f => selectedExtensions.exists(f.endsWith))
           .map(File(_))
 
   override def runOnPart(diffGraph: DiffGraphBuilder, file: File): Unit =

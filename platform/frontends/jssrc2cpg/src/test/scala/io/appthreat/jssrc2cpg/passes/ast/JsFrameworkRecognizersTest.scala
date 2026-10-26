@@ -672,7 +672,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
   }
 
   "Package attribution" should {
-      "name the npm package behind a sink from the project's manifests, without an SBOM" in {
+      "name the npm package behind a sink with the purl the project's SBOM gives it" in {
           val cpg = tagged(code(
             """
           |import { Component, inject } from '@angular/core';
@@ -697,8 +697,11 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             """{ "name": "p", "dependencies": { "@angular/core": "^20.3.0", "@angular/platform-browser": "^20.3.0", "axios": "~1.7.2" } }""",
             "package.json"
           ).moreCode(
-            """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/axios": { "version": "1.7.9" } } }""",
-            "package-lock.json"
+            """{ "bomFormat": "CycloneDX", "components": [
+              |  { "purl": "pkg:npm/%40angular/platform-browser@20.3.0" },
+              |  { "purl": "pkg:npm/axios@1.7.9" }
+              |] }""".stripMargin,
+            "bom.json"
           ))
           cpg.tag.name("pkg:npm/.*").call.map(c =>
               s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}"

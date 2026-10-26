@@ -8,7 +8,7 @@ import io.shiftleft.semanticcpg.language.*
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 
 /** The npm-package attribution of a tagged sink: the resolved-callee-name fallback, member-read
-  * sinks attributed through their base, and versions from the yarn/pnpm lockfiles.
+  * sinks attributed through their base, and the purl taken from the project's SBOM.
   */
 class PackageAttributionTest extends DataFlowCodeToCpgSuite:
 
@@ -35,6 +35,11 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           }
       }.sorted
 
+  /** A cdxgen-shaped SBOM with these component purls. */
+  private def bom(purls: String*): String =
+      purls.map(p => s"""{ "type": "library", "purl": "$p" }""")
+          .mkString("""{ "bomFormat": "CycloneDX", "components": [""", ", ", "] }")
+
   /** The fixture chain starts fresh per test: the harness forbids adding code once the graph was
     * read.
     */
@@ -55,17 +60,7 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           // `res` is a plain parameter: no import binding, no injected type, no handle. Typed
           // astgen runs resolve the callee to `express:Response:send` - retarget the name the
           // way they do, and the module prefix names the package.
-          val cpg0 = expressServer.moreCode(
-            """{ "name": "s", "dependencies": { "express": "^4.17.1" } }""",
-            "package.json"
-          ).moreCode(
-            """# yarn lockfile v1
-                |
-                |express@^4.17.1:
-                |  version "4.17.1"
-                |""".stripMargin,
-            "yarn.lock"
-          )
+          val cpg0 = expressServer.moreCode(bom("pkg:npm/express@4.17.1"), "bom.json")
           resolvedAsExpressResponse(cpg0)
           val cpg = tagged(cpg0)
           purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.17.1")
@@ -87,17 +82,7 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           |}
           |""".stripMargin,
             "server.ts"
-          ).moreCode(
-            """{ "name": "s", "dependencies": { "finale-rest": "^1.2.2" } }""",
-            "package.json"
-          ).moreCode(
-            """# yarn lockfile v1
-                |
-                |finale-rest@^1.2.2:
-                |  version "1.3.0"
-                |""".stripMargin,
-            "yarn.lock"
-          ))
+          ).moreCode(bom("pkg:npm/finale-rest@1.3.0"), "bom.json"))
           val purls = cpg.tag.name("pkg:npm/.*").l.flatMap { t =>
               t._taggedByIn.collectFirst {
                   case c: io.shiftleft.codepropertygraph.generated.nodes.Call =>
@@ -110,116 +95,91 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           )
       }
 
-      "read the version the pnpm lockfile resolved, not the one the range names" in {
+      "carry no purl without an SBOM, whatever the manifests and lockfiles say" in {
           val cpg0 = expressServer.moreCode(
             """{ "name": "s", "dependencies": { "express": "^4.17.0" } }""",
             "package.json"
           ).moreCode(
-            """lockfileVersion: '9.0'
-                |
-                |importers:
-                |
-                |  .:
-                |    dependencies:
-                |      express:
-                |        specifier: ^4.17.0
-                |        version: 4.18.2
-                |
-                |packages:
-                |  express@4.18.2:
-                |    resolution: {integrity: sha512-...}
-                |""".stripMargin,
-            "pnpm-lock.yaml"
-          )
-          resolvedAsExpressResponse(cpg0)
-          val cpg = tagged(cpg0)
-          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.18.2")
-      }
-
-      "carry no version when the lockfile resolves a name to more than one version" in {
-          val cpg0 = expressServer.moreCode(
-            """{ "name": "s", "dependencies": { "express": "^4.17.0" } }""",
-            "package.json"
-          ).moreCode(
-            """{ "name": "other", "dependencies": { "express": "^4.16.0" } }""",
-            "apps/other/package.json"
-          ).moreCode(
-            """lockfileVersion: '9.0'
-                |
-                |importers:
-                |
-                |  .:
-                |    dependencies:
-                |      express:
-                |        specifier: ^4.17.0
-                |        version: 4.18.2
-                |
-                |  apps/other:
-                |    dependencies:
-                |      express:
-                |        specifier: ^4.16.0
-                |        version: 4.16.4
-                |""".stripMargin,
-            "pnpm-lock.yaml"
-          )
-          resolvedAsExpressResponse(cpg0)
-          val cpg = tagged(cpg0)
-          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express")
-      }
-
-      "take the version that served the manifest's range, not a transitive copy's" in {
-          // one block serves both declared ranges; another package pulled in express 3
-          val cpg0 = expressServer.moreCode(
-            """{ "name": "s", "dependencies": { "express": "^4.17.1" } }""",
-            "package.json"
-          ).moreCode(
-            """{ "name": "t", "dependencies": { "express": "^4.17.0" } }""",
-            "tools/package.json"
-          ).moreCode(
-            """# yarn lockfile v1
-                |
-                |express@^3.0.0:
-                |  version "3.21.2"
-                |
-                |express@^4.17.0, express@^4.17.1:
-                |  version "4.17.1"
-                |""".stripMargin,
-            "yarn.lock"
-          )
-          resolvedAsExpressResponse(cpg0)
-          val cpg = tagged(cpg0)
-          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.17.1")
-      }
-
-      "read a v2 npm lockfile, which names every version twice" in {
-          val cpg0 = expressServer.moreCode(
-            """{ "name": "s", "dependencies": { "express": "^4.17.0" } }""",
-            "package.json"
-          ).moreCode(
-            """{
-                |  "lockfileVersion": 2,
-                |  "packages": { "": { "name": "s" }, "node_modules/express": { "version": "4.18.2" } },
-                |  "dependencies": { "express": { "version": "4.18.2" } }
-                |}""".stripMargin,
+            """{ "lockfileVersion": 3, "packages": { "": {}, "node_modules/express": { "version": "4.18.2" } } }""",
             "package-lock.json"
           )
           resolvedAsExpressResponse(cpg0)
-          val cpg = tagged(cpg0)
-          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.18.2")
+          purlsOf(tagged(cpg0)) shouldBe Nil
       }
 
-      "leave a built-in the resolved name carries unattributed" in {
+      "carry the purl of every version the SBOM has of the package, as cdxgen attributes usages" in {
+          val cpg0 = expressServer.moreCode(
+            bom(
+              "pkg:npm/express@4.16.4",
+              "pkg:npm/express@4.18.2",
+              "pkg:npm/%40types/express@4.17.21"
+            ),
+            "bom.json"
+          )
+          resolvedAsExpressResponse(cpg0)
+          purlsOf(tagged(cpg0)) shouldBe Seq(
+            "send" -> "pkg:npm/express@4.16.4",
+            "send" -> "pkg:npm/express@4.18.2"
+          )
+      }
+
+      "read a scoped package's purl from a nested component, exactly as the SBOM writes it" in {
           val cpg = tagged(code(
             """
-          |import { writeFile } from 'node:fs/promises';
-          |export function save(p: string, data: string) { writeFile(p, data); }
+          |import { Component, inject } from '@angular/core';
+          |import { ActivatedRoute } from '@angular/router';
+          |import { DomSanitizer } from '@angular/platform-browser';
+          |@Component({ selector: 'app-p', template: '' })
+          |export class PComponent {
+          |  private route = inject(ActivatedRoute);
+          |  private sanitizer = inject(DomSanitizer);
+          |  load() { this.html = this.sanitizer.bypassSecurityTrustHtml(this.route.snapshot.queryParams.q); }
+          |}
+          |""".stripMargin,
+            "p.component.ts"
+          ).moreCode(
+            """{ "bomFormat": "CycloneDX", "components": [ { "purl": "pkg:npm/%40angular/core@20.3.0",
+              |  "components": [ { "purl": "pkg:npm/%40angular/platform-browser@20.3.0?arch=any" } ] } ] }"""
+                .stripMargin,
+            "bom.json"
+          ))
+          purlsOf(cpg) shouldBe Seq(
+            "bypassSecurityTrustHtml" -> "pkg:npm/%40angular/platform-browser@20.3.0?arch=any"
+          )
+      }
+
+      "tag a built-in with its name and kind, not a purl, even when the SBOM has its namesake" in {
+          // `fs` on npm is a placeholder package; Node resolves the specifier to the built-in
+          val cpg = tagged(code(
+            """
+          |import { writeFile } from 'fs';
+          |export function save(p: string, data: string) { writeFile(p, data, () => {}); }
           |""".stripMargin,
             "io.ts"
-          ).moreCode(
-            """{ "name": "s", "dependencies": { "typescript": "^5.0.0" } }""",
-            "package.json"
-          ))
-          cpg.call.nameExact("writeFile").map(c => c.tag.name.l).l shouldBe List(List("file-io"))
+          ).moreCode(bom("pkg:npm/fs@0.0.1-security"), "bom.json"))
+          cpg.call.nameExact("writeFile").map(c => c.tag.name.l.sorted).l shouldBe
+              List(List("file-io", "node:fs"))
+      }
+
+      "tag a built-in http request with what it reaches, the source untouched" in {
+          val cpg = tagged(code(
+            """
+          |import express from 'express';
+          |import https from 'node:https';
+          |const app = express();
+          |app.get('/p', (req, res) => { https.get(req.query.url); res.send('ok'); });
+          |""".stripMargin,
+            "proxy.ts"
+          ).moreCode(bom("pkg:npm/express@4.21.2"), "bom.json"))
+          val sinkTags = cpg.tag.name("node:https").l.flatMap(_._taggedByIn).flatMap {
+              case n: io.shiftleft.codepropertygraph.generated.nodes.StoredNode =>
+                  n._taggedByOut.collect {
+                      case t: io.shiftleft.codepropertygraph.generated.nodes.Tag => t.name
+                  }
+          }.distinct.sorted
+          (sinkTags should contain).allOf("node:https", "http", "web", "network", "ssl")
+          sinkTags should not contain "framework"
+          sinkTags.filter(_.startsWith("pkg:")) shouldBe empty
       }
   }
 end PackageAttributionTest

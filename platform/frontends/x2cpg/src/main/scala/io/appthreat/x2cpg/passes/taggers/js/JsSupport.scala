@@ -341,10 +341,12 @@ final class JsProject(cpg: Cpg):
   private val DependencyKeys =
       Seq("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
 
-  /** Every `(name, range)` the manifests declare, a name once per manifest that declares it. */
-  private val declarations: List[(String, String)] =
+  val dependencies: Map[String, String] =
       cpg.configFile.l
-          .filter(f => JsLockfiles.baseName(f.name) == "package.json" && !isInstalled(f.name))
+          .filter(f =>
+              (f.name == "package.json" || f.name.endsWith("/package.json") ||
+                  f.name.endsWith("\\package.json")) && !f.name.contains("node_modules")
+          )
           .flatMap(f => io.circe.parser.parse(f.content).toOption)
           .flatMap { json =>
               DependencyKeys.flatMap(k =>
@@ -352,52 +354,33 @@ final class JsProject(cpg: Cpg):
                       .flatMap(_.toList.map((name, v) => name -> v.asString.getOrElse("")))
               )
           }
+          .toMap
 
-  val dependencies: Map[String, String] = declarations.toMap
-
-  private def isInstalled(path: String): Boolean = path.contains("node_modules")
-
-  /** The version each dependency resolved to: the project's lockfiles - `package-lock.json`
-    * (lockfile v2/v3 `packages`, v1 `dependencies`), `yarn.lock` (v1 and berry), `pnpm-lock.yaml`
-    * (v5, v6 and v9, the version each workspace resolved) or `bun.lock` - else the version a
-    * `package.json` range names (`^19.1.0` -> `19.1.0`). A range that names no version (`latest`,
-    * `workspace:*`, a URL) gives none.
-    *
-    * A yarn or pnpm lockfile resolves every range of a name on its own, so the resolutions that
-    * served a range the manifests declare are the project's own; a transitive `debug@^2` beside a
-    * declared `debug@^4` is not. A name still resolved to more than one version - two workspaces or
-    * two lockfiles pinned it apart - carries none (see [[ambiguousVersions]]) rather than a guess,
-    * and neither does its range.
+  /** The npm components of the project's CycloneDX SBOM by package name, each with the purls the
+    * SBOM gives it (one per version). Reachables requires cdxgen's SBOM in the project directory;
+    * it is read the way [[io.appthreat.x2cpg.passes.taggers.CdxPass]] finds it, and the purls are
+    * kept exactly as written so that cdxgen matches them to its components. Without an SBOM this is
+    * empty and no sink carries a purl.
     */
-  lazy val resolvedVersions: Map[String, String] =
-    val fromRanges = dependencies.flatMap { (name, range) =>
-        "(\\d+\\.\\d+\\.\\d+[\\w.+-]*|\\d+\\.\\d+|\\d+)".r
-            .findFirstMatchIn(range.dropWhile(c => !c.isDigit))
-            .filter(_ => !range.contains(":") && !range.contains("/"))
-            .map(m => name -> m.group(1))
-    }
-    val unambiguous = lockVersions.collect { case (name, vs) if vs.size == 1 => name -> vs.head }
-    (fromRanges ++ unambiguous) -- ambiguousVersions
-
-  /** The names the lockfiles resolve to more than one version for the project: no version is
-    * emitted for them.
-    */
-  lazy val ambiguousVersions: Set[String] =
-      lockVersions.collect { case (name, vs) if vs.size > 1 => name }.toSet
-
-  /** The versions the lockfiles resolved each name to for the project's own manifests. */
-  private lazy val lockVersions: Map[String, Set[String]] =
-    val declared = declarations.groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
-    cpg.configFile.l
-        .filter(f => JsLockfiles.FileNames.contains(JsLockfiles.baseName(f.name)))
-        .filterNot(f => isInstalled(f.name))
-        .flatMap(f => JsLockfiles.resolutionsOf(f.name, f.content))
-        .groupBy(_.name)
-        .map { (name, resolutions) =>
-          val ranges = declared.getOrElse(name, Set.empty)
-          val direct = resolutions.filter(_.range.exists(ranges.contains))
-          name -> (if direct.nonEmpty then direct else resolutions).map(_.version).toSet
+  lazy val bomPurls: Map[String, Seq[String]] =
+    def purlsOf(components: Vector[io.circe.Json]): Vector[String] =
+        components.flatMap { c =>
+            c.hcursor.downField("purl").as[String].toOption.toVector ++
+                purlsOf(c.hcursor.downField("components").as[Vector[io.circe.Json]].getOrElse(
+                  Vector.empty
+                ))
         }
+    cpg.configFile.l
+        .filter(f => f.name.matches(".*(bom|cdx).json") && !f.name.contains("node_modules"))
+        .flatMap(f => io.circe.parser.parse(f.content).toOption)
+        .flatMap(json =>
+            purlsOf(json.hcursor.downField("components").as[Vector[io.circe.Json]].getOrElse(
+              Vector.empty
+            ))
+        )
+        .distinct
+        .flatMap(purl => JsProject.npmPackageOf(purl).map(_ -> purl))
+        .groupMap(_._1)(_._2)
 
   /** The major version a dependency's range pins (`^19.1.0` -> 19, `~18.3` -> 18), when it does. */
   def majorVersionOf(name: String): Option[Int] =
@@ -410,6 +393,21 @@ final class JsProject(cpg: Cpg):
 
   def hasFile(regex: String): Boolean = cpg.file.name(regex).nonEmpty
 end JsProject
+
+object JsProject:
+
+  /** The npm package a purl names: `pkg:npm/%40angular/core@20.3.0` -> `@angular/core`,
+    * `pkg:npm/express@4.22.3?x=y` -> `express`. Any other purl type names none.
+    */
+  def npmPackageOf(purl: String): Option[String] =
+      Option.when(purl.startsWith("pkg:npm/")) {
+          val path = java.net.URLDecoder.decode(
+            purl.stripPrefix("pkg:npm/").takeWhile(c => c != '?' && c != '#'),
+            "UTF-8"
+          )
+          val at = path.indexOf('@', 1)
+          if at > 0 then path.substring(0, at) else path
+      }.filter(_.nonEmpty)
 
 /** Structural helpers over the shapes jssrc2cpg lowers JavaScript to. */
 object JsShapes:
