@@ -1,0 +1,30 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeHintCallLinker.scala
+  h_6a4cc5cdf68def 8-9,17-39
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  h_6a4cc5cdf68def 73,77-86
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/ExpressOrmSinkTagsTest.scala
+  h_6a4cc5cdf68def 1-163
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  h_6a4cc5cdf68def 1046,1067-1071
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/NestJsControllerTagsTest.scala
+  h_6a4cc5cdf68def 1-165
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XTypeHintCallLinker.scala
+  h_6a4cc5cdf68def 42-49,51-59,97
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_6a4cc5cdf68def 241-253,279-303
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  h_6a4cc5cdf68def 42-44,47,59-76,79,536-545
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/PackageAttribution.scala
+  h_6a4cc5cdf68def 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db702a22d1519c023a8388bb523a83b3ef92425b",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
