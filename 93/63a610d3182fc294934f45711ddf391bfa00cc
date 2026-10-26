@@ -1,0 +1,24 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ConfigPass.scala
+  h_6a4cc5cdf68def 20-22,24,27-28,40-43
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/PackageAttributionTest.scala
+  h_6a4cc5cdf68def 1-181
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsLockfiles.scala
+  h_6a4cc5cdf68def 1-169
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  h_6a4cc5cdf68def 356-361,370-378,380-389,392-409
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/PackageAttribution.scala
+  h_6a4cc5cdf68def 17-23,59-70,74-79,84-87,124,135,138-175
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/js/JsLockfilesTest.scala
+  h_6a4cc5cdf68def 1-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9363a610d3182fc294934f45711ddf391bfa00cc",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
