@@ -1,0 +1,32 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_236e880d3ee8e7::t_1aa32c9cc97fac 618-622,634
+  s_236e880d3ee8e7::t_e3bf53b9220e29 623-633
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_236e880d3ee8e7::t_8d62064ca08028 683-686
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_236e880d3ee8e7::t_963a9edffb3b2a 2961-2966,4379-4387
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgObjectModelTests.scala
+  s_236e880d3ee8e7::t_0a42f9395124be 32-45,627-630
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReadValueArithmeticTests.scala
+  s_236e880d3ee8e7::t_963a9edffb3b2a 182-191,301-302
+  s_236e880d3ee8e7::t_d96667ebe42808 303
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NullAndAllocationNegativeControlTests.scala
+  s_236e880d3ee8e7::t_a7851c601828c9 319,321-322,324-337,443-444
+  s_236e880d3ee8e7::t_4d98171a191f2c 320,323,445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7f60c6f8e91b6d40eaf620ec1507301ddf90f81b",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
