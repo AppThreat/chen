@@ -1043,7 +1043,7 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
   }
 
   "Pages router responses" should {
-      "redirect to a returned destination, and send JSON and fixed headers as no output" in {
+      "redirect to a returned destination, send JSON as the response, and keep fixed headers as no output" in {
           val cpg = tagged(code(
             """
           |export const getServerSideProps = async (context) => {
@@ -1064,10 +1064,11 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
             "pages/api/echo.ts"
           ).moreCode("""{ "dependencies": { "next": "15.5.0" } }""", "package.json"))
           cpg.tag.name("redirect").identifier.lineNumber.l.map(_.intValue) shouldBe List(5)
-          cpg.tag.name("framework-output").call.filter(
-            _.file.name.headOption.contains("pages/api/echo.ts")
-          )
-              .l shouldBe empty
+          // res.json(x) writes the response body of an API handler; a header set only with
+          // literals writes what the code says and stays no output
+          cpg.tag.name("framework-output").call
+              .filter(_.file.name.headOption.contains("pages/api/echo.ts"))
+              .code.l shouldBe List("res.status(200).json({ q: req.query.q })")
       }
   }
 end JsFrameworkRecognizersTest

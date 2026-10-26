@@ -70,8 +70,24 @@ class AstGenRunner(config: Config):
           file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match
             case filePath if TypeDefinitionFileExtensions.exists(filePath.endsWith) => false
             case filePath if isIgnoredByUserConfig(filePath)                        => false
+            case filePath if isTranspiledCopy(filePath)                             => false
             case _                                                                  => true
       }
+
+  /** A `dist/` directory next to a `src/` sibling is the transpiled copy of that source: it
+    * declares every class a second time, which makes a recovered `Type:method` callee name match
+    * both the copy and the original, and no unique method can be picked. The copy is dropped here,
+    * where the files are chosen - flows are not deduplicated after the fact. A `dist/` without a
+    * `src/` sibling stays: it can be the only code a package ships.
+    */
+  private def isTranspiledCopy(filePath: String): Boolean =
+    // Only directories inside the project count: a project checked out under some `dist/` stays
+    val root     = Paths.get(config.inputPath).toAbsolutePath.normalize
+    val relative = root.relativize(Paths.get(filePath).toAbsolutePath.normalize)
+    val dirs     = (0 until relative.getNameCount - 1).map(relative.getName(_).toString)
+    dirs.indices.exists(i =>
+        dirs(i) == "dist" && dirs.take(i).foldLeft(root)(_.resolve(_)).resolve("src").toFile.isDirectory
+    )
 
   /** Changes the file-extension by renaming this file; if file does not have an extension, it adds
     * the extension. If file does not exist (or is a directory) no change is done and the current

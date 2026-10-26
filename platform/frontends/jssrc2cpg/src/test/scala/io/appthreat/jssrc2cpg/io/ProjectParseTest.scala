@@ -44,9 +44,26 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll:
         |""".stripMargin)
     dir
 
+  /** A project with its transpiled `dist/` committed next to `src/`, a `dist/` with no `src/`
+    * sibling, and the whole project checked out under a `dist/` that has a `src/` sibling outside
+    * it.
+    */
+  private val outerDir: File = File.newTemporaryDirectory("jssrc2cpgTestsDist")
+
+  private val projectWithDist: File =
+    (outerDir / "src").createDirectories()
+    val dir = outerDir / "dist" / "app"
+    List("src/a.js", "dist/a.js", "pkg/dist/b.js", "c.js").foreach { testFile =>
+      val file = dir / testFile
+      file.createIfNotExists(createParents = true)
+      file.write(s"""console.log("$testFile");""")
+    }
+    dir
+
   override def afterAll(): Unit =
     projectWithSubfolders.delete(swallowIOExceptions = true)
     projectWithBrokenFile.delete(swallowIOExceptions = true)
+    outerDir.delete(swallowIOExceptions = true)
 
   private object ProjectParseTestsFixture:
     def apply(projectDir: File)(f: Cpg => Unit): Unit =
@@ -74,6 +91,15 @@ class ProjectParseTest extends JsSrc2CpgSuite with BeforeAndAfterAll:
       "recover from broken input file" in ProjectParseTestsFixture(projectWithBrokenFile) { cpg =>
           cpg.file.name.l should (contain("good.js").and(not) contain "broken.js")
       }
+
+      "drop a dist/ copy next to src/ inside the project, and nothing outside it" in
+          ProjectParseTestsFixture(projectWithDist) { cpg =>
+              cpg.file.name.filterNot(_ == "<unknown>").sorted.l shouldBe List(
+                "c.js",
+                "pkg/dist/b.js",
+                "src/a.js"
+              )
+          }
 
       "handle utf8 correctly" in ProjectParseTestsFixture(projectWithUtf8) { cpg =>
           cpg.fieldAccess.argument(2).code.l shouldBe List("debug")
