@@ -143,6 +143,36 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    funcPtr(data);
     |}
     |
+    |/* Juliet's variant 31: the second release frees a copy of the same pointer */
+    |void bad_double_free_through_copy(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    {
+    |        char *dataCopy = data;
+    |        char *data = dataCopy;
+    |        free(data);
+    |    }
+    |}
+    |
+    |void release_it(char *q)
+    |{
+    |    free(q);
+    |}
+    |
+    |/* the first release freed the old block: the double free is the callee's and the last one */
+    |void bad_rebound_then_released(void)
+    |{
+    |    char *p = (char *)malloc(8);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |    p = (char *)malloc(8);
+    |    if (p == NULL) exit(-1);
+    |    release_it(p);
+    |    free(p);
+    |}
+    |
     |void good_free_once(void)
     |{
     |    char *p = (char *)malloc(100);
@@ -400,6 +430,15 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
             .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
         sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
         findingsIn("good_free_once") should not contain "MS-ALLOC-001"
+        def siteLines(m: String) = cpg.method.name(m).ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001"))
+            .flatMap(_.lineNumber).map(_.toInt).l.distinct
+        siteLines("bad_double_free_through_copy").size shouldBe 2
+        val firstFree = cpg.method.name("bad_rebound_then_released").call.nameExact("free")
+            .flatMap(_.lineNumber).map(_.toInt).l.min
+        siteLines("bad_rebound_then_released") should not be empty
+        siteLines("bad_rebound_then_released") should not contain firstFree
         findingsIn("good_free_elements_then_container") should not contain "MS-ALLOC-001"
     }
     "report a release a file-static flag a caller set decides (CWE-415 across a call)" in {

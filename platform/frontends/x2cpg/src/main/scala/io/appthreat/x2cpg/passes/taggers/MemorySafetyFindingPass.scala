@@ -348,6 +348,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             )
             .sortBy(c => c.lineNumber.map(_.toInt).getOrElse(0))
             .lastOption
+        firstLine = first.lineNumber.map(_.toInt).getOrElse(0)
+        // a rebinding to a fresh value between the two means the earlier release freed another
+        // block: the second one's freed state came from somewhere else (a callee's summary). A
+        // copy (`char *data = dataCopy`, variant 31) carries the same block along
+        if !arg.method.ast.isCall.nameExact("<operator>.assignment").l.exists(a =>
+            a.lineNumber.exists(l => l.toInt > firstLine && l.toInt < secondLine) &&
+                a.argumentOption(1).exists(lhs => stripCasts(lhs).code == stripCasts(arg).code) &&
+                !a.argumentOption(2).collect { case e: Expression => stripCasts(e) }
+                    .exists(_.isInstanceOf[Identifier])
+        )
         target <- first.argumentOption(1)
       yield target
 

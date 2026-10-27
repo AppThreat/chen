@@ -104,8 +104,6 @@ object ObjectAccessRules:
           ))
       case c: Call if c.name == Operators.addressOf =>
           c.argumentOption(1).collect { case i: Identifier => i }.flatMap(localOf).flatMap(sizeOf)
-      // a parameter points where its callers say: the object every resolved call site hands it,
-      // when they agree on its size (a caller the graph does not resolve leaves it unknown)
       // an allocation of a constant size holds exactly that many bytes
       case c: Call
           if c.tag.nameExact(MemoryApiPass.TagAlloc).nonEmpty ||
@@ -114,6 +112,8 @@ object ObjectAccessRules:
           val values = sizes.flatMap(IndexRange.literal)
           Option.when(sizes.nonEmpty && values.size == sizes.size)(values.product)
               .filter(_.isValidLong).map(_.toLong)
+      // a parameter points where its callers say: the object every resolved call site hands it,
+      // when they agree on its size (a caller the graph does not resolve leaves it unknown)
       case i: Identifier if localOf(i).isEmpty =>
           i.method.parameter.nameExact(i.name).headOption.flatMap { p =>
             val sites = p.method.callIn.l

@@ -1694,7 +1694,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   )
               case _ => false
             )
-            rhs match
+            // a macro invocation that spells an allocator (`tmp = curlx_realloc(p, n)`) produces
+            // what its expansion's one allocating call produces
+            val producer = rhs match
+              case m: Call
+                  if m.dispatchType == io.shiftleft.codepropertygraph.generated.DispatchTypes.INLINED =>
+                  m.ast.isCall.l.filter(inner =>
+                      callFacts.get(inner.id()).exists(_.isAllocCall)
+                  ) match
+                    case List(only) => only
+                    case _          => m
+              case other => other
+            producer match
               case _: Call if lhsIsErrorCode => out = out - lhs
               case rhsCall: Call if callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
                   // nullable is the CALL's own declared fact: pointer-returning
@@ -2038,8 +2049,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 }
             )
             .sortBy(_.lineNumber.map(_.toInt).getOrElse(0))
-        stores.lastOption.flatMap(_.argumentOption(2)).flatMap(IndexRange.literal)
-            .exists(_ != 0)
+        // every store before the call is a nonzero constant, and the last one runs whenever the
+        // call does: `if (x) badStatic = 1;` leaves the flag unknown on the other path
+        val callControllers = c._cdgIn.l.map(_.id()).toSet
+        stores.nonEmpty && stores.forall(
+          _.argumentOption(2).flatMap(IndexRange.literal).exists(_ != 0)
+        ) && stores.last._cdgIn.l.forall(n => callControllers.contains(n.id()))
       val summaryFreeFacts: Set[String] = effectsInForce.collect {
           case e if e.startsWith("effect:frees-param-if-static:") =>
               val Array(idx, flag) = e.stripPrefix("effect:frees-param-if-static:").split(":", 2)
@@ -2375,15 +2390,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
   /** The variable a call's result is stored into, through any casts: `tmp = (T *)realloc(p, n)`. */
   private def assignedTarget(c: Call): Option[String] =
-    var node: AstNode = c
-    var parent        = node._astIn.collectFirst { case p: Call => p }
-    while parent.exists(_.name == "<operator>.cast") do
-      node = parent.get
-      parent = node._astIn.collectFirst { case p: Call => p }
+    // through casts and through the macro invocation that spells the call: `arr =
+    // curlx_realloc(elem, n)` stores the expansion's realloc (a block under the INLINED call)
+    // into arr, not into elem
+    def isInlined(n: AstNode): Boolean = n match
+      case m: Call =>
+          m.dispatchType == io.shiftleft.codepropertygraph.generated.DispatchTypes.INLINED
+      case _ => false
+    def up(n: AstNode): Option[AstNode] = n._astIn.nextOption().collect { case a: AstNode => a }
+    var parent                          = up(c)
+    while parent.exists {
+          case p: Call  => p.name == "<operator>.cast" || isInlined(p)
+          case b: Block => up(b).exists(isInlined)
+          case _        => false
+      }
+    do parent = parent.flatMap(up)
     parent
-        .filter(_.name == "<operator>.assignment")
+        .collect { case a: Call if a.name == "<operator>.assignment" => a }
         .flatMap(a => a.argument.l.find(_.argumentIndex == 1))
         .flatMap(trackedNameOf)
+  end assignedTarget
 
   /** The node's own declared type is a pointer: the null questions are pointer questions, and an
     * integer counter born `= 0` is not a null pointer awaiting a check.

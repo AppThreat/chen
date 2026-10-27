@@ -264,6 +264,19 @@ object ArithmeticRules:
         case other => cursor = other._astIn.nextOption()
     found
 
+  /** The statement a `break` leaves: the innermost loop or switch around it. */
+  private def breakTargetOf(n: CfgNode): Option[ControlStructure] =
+    var cursor: Option[io.shiftleft.codepropertygraph.generated.nodes.StoredNode] =
+        n._astIn.nextOption()
+    var found: Option[ControlStructure] = None
+    while found.isEmpty && cursor.isDefined do
+      cursor.get match
+        case cs: ControlStructure
+            if Set("FOR", "WHILE", "DO", "SWITCH").contains(cs.controlStructureType) =>
+            found = Some(cs)
+        case other => cursor = other._astIn.nextOption()
+    found
+
   /** A dominating guard bounds the key's variable on the side `above`: the author's own claim,
     * valued or not.
     */
@@ -297,12 +310,18 @@ object ArithmeticRules:
                     thenBranch.ast.isControlStructure.l.exists(j =>
                         j.controlStructureType == "GOTO"
                     ) ||
-                    (siteLoop.exists(loop => loop.ast.exists(_ == cs)) &&
-                        thenBranch.ast.isControlStructure.l.exists(j =>
-                            j.controlStructureType == "BREAK" ||
-                                j.controlStructureType == "CONTINUE"
-                        ))
+                    // the jump must leave the site's own loop: a break inside an inner loop or a
+                    // switch in the branch exits only that
+                    thenBranch.ast.isControlStructure.l.exists(j =>
+                        (j.controlStructureType == "BREAK" &&
+                            siteLoop.exists(l => breakTargetOf(j).exists(_.id() == l.id()))) ||
+                            (j.controlStructureType == "CONTINUE" &&
+                                siteLoop.exists(l =>
+                                    enclosingLoopBodyOf(j).exists(_.id() == l.id())
+                                ))
+                    )
                 }
+          end exitsEarly
           val siteLine = site.lineNumber.map(_.intValue).getOrElse(-1)
           site.method.ast.collectAll[ControlStructure].l.exists { cs =>
               cs.controlStructureType == "IF" &&

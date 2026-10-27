@@ -362,6 +362,54 @@ class NullAndAllocationNegativeControlTests extends DataFlowCodeToCpgSuite:
     |    free(kv);
     |    return 0;
     |}
+    |
+    |/* curl's glob_set: a failed realloc jumps to the cleanup with the old block still live */
+    |#define my_realloc(p, n) realloc(p, n)
+    |int good_realloc_into_temp(const char *pattern, int done)
+    |{
+    |    char **elem = NULL;
+    |    size_t palloc = 0;
+    |    while (!done) {
+    |        if (*pattern == 0) goto error;
+    |        if (*pattern == ',') {
+    |            if (!palloc) {
+    |                char **arr = my_realloc(elem, palloc * 2 * sizeof(char *));
+    |                if (!arr) {
+    |                    goto error;
+    |                }
+    |                elem = arr;
+    |                goto error;
+    |            }
+    |        }
+    |    }
+    |error:
+    |    free(elem);
+    |    return 1;
+    |}
+    |
+    |int bad_realloc_plain_stale_read(size_t n)
+    |{
+    |    char *p = malloc(8);
+    |    if (p == NULL) return 1;
+    |    char *tmp = realloc(p, n);
+    |    if (tmp != NULL) {
+    |        p[0] = 'x';
+    |        free(tmp);
+    |    }
+    |    return 0;
+    |}
+    |
+    |int bad_realloc_macro_stale_read(size_t n)
+    |{
+    |    char *p = malloc(8);
+    |    if (p == NULL) return 1;
+    |    char *tmp = my_realloc(p, n);
+    |    if (tmp != NULL) {
+    |        p[0] = 'x';
+    |        free(tmp);
+    |    }
+    |    return 0;
+    |}
     |""".stripMargin,
     "null_alloc_controls.c"
   )
@@ -466,5 +514,11 @@ class NullAndAllocationNegativeControlTests extends DataFlowCodeToCpgSuite:
         findingsIn("good_walk_then_dup").filter(
           _.contains(MemorySafetyFindingPass.RuleOffsetFree)
         ) shouldBe empty
+    }
+    "not read a failed realloc's input as released on the cleanup path" in {
+        findingsIn("good_realloc_into_temp") shouldBe empty
+        // the successful side still consumed the input: a read of it there is a use after free
+        findingsIn("bad_realloc_plain_stale_read") should contain("MS-ALLOC-002")
+        findingsIn("bad_realloc_macro_stale_read") should contain("MS-ALLOC-002")
     }
 end NullAndAllocationNegativeControlTests
