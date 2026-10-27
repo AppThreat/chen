@@ -201,6 +201,46 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    }
       |}
 
+      |static int badStaticCpp = 0;
+      |static void cppSink(int *data) {
+      |    if (badStaticCpp) { delete[] data; }
+      |}
+      |void bad_cpp_static_flag() {
+      |    int *data = new int[100];
+      |    delete[] data;
+      |    badStaticCpp = 1;
+      |    cppSink(data);
+      |}
+      |static char *releasedSource(char *data) {
+      |    data = (char *)malloc(100);
+      |    if (data == NULL) exit(-1);
+      |    free(data);
+      |    return data;
+      |}
+      |void bad_source_returns_released() {
+      |    char *data = NULL;
+      |    data = releasedSource(data);
+      |    free(data);
+      |}
+      |static char *liveSource(char *data) {
+      |    data = (char *)malloc(100);
+      |    if (data == NULL) exit(-1);
+      |    return data;
+      |}
+      |void good_source_returns_live() {
+      |    char *data = NULL;
+      |    data = liveSource(data);
+      |    free(data);
+      |}
+      |static void pointerSink(char *data) { free(data); }
+      |void bad_pointer_sink() {
+      |    void (*funcPtr)(char *) = pointerSink;
+      |    char *data = (char *)malloc(100);
+      |    if (data == NULL) exit(-1);
+      |    free(data);
+      |    funcPtr(data);
+      |}
+      |
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -283,6 +323,15 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
             findingsIn("good_overread_alias_strlen") should not contain "MS-BOUND-003"
             findingsIn("bad_overread_alias_wcslen") should contain("MS-BOUND-003")
             findingsIn("good_overread_alias_wcslen") should not contain "MS-BOUND-003"
+        }
+    }
+
+    "a double free that crosses a call" should {
+        "be found through a flag, a returned released pointer and a function pointer" in {
+            findingsIn("bad_cpp_static_flag") should contain("MS-ALLOC-001")
+            findingsIn("bad_source_returns_released") should contain("MS-ALLOC-001")
+            findingsIn("good_source_returns_live") should not contain "MS-ALLOC-001"
+            findingsIn("bad_pointer_sink") should contain("MS-ALLOC-001")
         }
     }
 

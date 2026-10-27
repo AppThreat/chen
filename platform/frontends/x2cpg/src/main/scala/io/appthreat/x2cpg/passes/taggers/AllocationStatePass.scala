@@ -636,9 +636,30 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       case d: Call if d.name == "<operator>.indirection" =>
           d.argumentOption(1).collect { case i: Identifier => i.name }
       case _ => None
+    // a free whose only controlling conditions are null checks of the freed pointer itself - the
+    // `if (data == NULL) exit(-1);` that precedes it, or `if (p) free(p)` - releases the block
+    // whenever there is one to release: the summary reads it as unconditional
+    def onlyNullChecksOf(c: Call): Boolean =
+      argAt(c.argument.l, 1).map(unwrapCasts).collect { case i: Identifier => i.name }.exists { n =>
+          val conds = c._cdgIn.l
+          conds.nonEmpty && conds.forall {
+              case cmp: Call
+                  if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+                  val args = cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }
+                  args.exists { case i: Identifier => i.name == n; case _ => false } &&
+                  args.exists(isNullLiteral)
+              case cmp: Call if cmp.name == "<operator>.logicalNot" =>
+                  cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }.exists {
+                      case i: Identifier => i.name == n
+                      case _             => false
+                  }
+              case i: Identifier => i.name == n
+              case _             => false
+          }
+      }
     calls.foreach {
         case c
-            if roleOf(c).free.nonEmpty && c._cdgIn.isEmpty =>
+            if roleOf(c).free.nonEmpty && (c._cdgIn.isEmpty || onlyNullChecksOf(c)) =>
             argAt(c.argument.l, 1).map(unwrapCasts).foreach { freed =>
               val via = viaPointeeOf(freed)
               if !via.exists(nulledThrough.contains) then
@@ -655,8 +676,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // caller), but the ownership MAY leave - a caller that treats the hand-off as
             // a borrow would report the error-path return as a leak of a block the callee
             // already released
+            // the one condition is a file-static flag (`if (badStatic) free(data)`): the free
+            // happens whenever a caller has stored a nonzero constant into the flag before the
+            // call - a summary the call site settles
+            val staticFlag = c._cdgIn.l match
+              case List(i: Identifier)
+                  if method.local.l.forall(_.name != i.name) &&
+                      method.parameter.l.forall(_.name != i.name) => Some(i.name)
+              case _ => None
             argAt(c.argument.l, 1).map(unwrapCasts).foreach { freed =>
-                paramOf(freed).foreach(idx => effects += s"effect:maybe-frees-param:$idx")
+                paramOf(freed).foreach { idx =>
+                  effects += s"effect:maybe-frees-param:$idx"
+                  staticFlag.foreach(flag => effects += s"effect:frees-param-if-static:$idx:$flag")
+                }
             }
         case c if c.name == "<operator>.assignment" =>
             val dstEternal = argAt(c.argument.l, 1).map(unwrapCasts).exists {
@@ -727,6 +759,34 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             e.stripPrefix("effect:frees-param:")
     }
     freedUnconditionally.foreach { i => effects -= s"effect:maybe-frees-param:$i" }
+    // every value returned is a pointer the method itself released unconditionally and did not
+    // rebind afterwards: `data = new T; delete data; return data;` hands the caller a dangling one
+    val returnsFreed = valueReturns.nonEmpty && valueReturns.forall { e =>
+        unwrapCasts(e) match
+          case i: Identifier =>
+              val retLine = i.lineNumber.map(_.toInt).getOrElse(0)
+              val frees = method.ast.isCall.l.filter(fc =>
+                  roles.getOrElse(fc.id(), RoleInfoNone).free.nonEmpty &&
+                      (fc._cdgIn.isEmpty || onlyNullChecksOf(fc)) &&
+                      fc.lineNumber.exists(_.toInt < retLine) &&
+                      argAt(fc.argument.l, 1).map(unwrapCasts).exists {
+                          case a: Identifier => a.name == i.name
+                          case _             => false
+                      }
+              )
+              frees.nonEmpty && {
+                  val freeLine = frees.flatMap(_.lineNumber).map(_.toInt).max
+                  !method.ast.isCall.nameExact("<operator>.assignment").l.exists(a =>
+                      a.lineNumber.exists(l => l.toInt > freeLine && l.toInt < retLine) &&
+                          argAt(a.argument.l, 1).exists {
+                              case t: Identifier => t.name == i.name
+                              case _             => false
+                          }
+                  )
+              }
+          case _ => false
+    }
+    if returnsFreed then effects += "effect:returns-freed"
     if returnsPointer && anchored && valueReturns.nonEmpty &&
       valueReturns.forall(flowsFromAllocation)
     then
@@ -828,7 +888,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             .flatMap { a =>
                 (
                   a.argumentOption(1).collect { case i: Identifier => i.name },
-                  a.argumentOption(2).collect { case i: Identifier => i.name }
+                  a.argumentOption(2).collect {
+                      case i: Identifier => i.name
+                      case m: MethodRef  => m.code.stripPrefix("&")
+                      case ad: Call if ad.name == "<operator>.addressOf" =>
+                          ad.argumentOption(1).map(_.code).getOrElse("")
+                  }
                 ) match
                   case (Some(lhs), Some(rhs)) =>
                       atom.method.nameExact(rhs).l
@@ -1656,6 +1721,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     )
               case rhsCall: Call
                   if effectsByName.get(rhsCall.name)
+                      .exists(_.contains("effect:returns-freed")) =>
+                  // the callee's summary says every value it returns is a pointer it released
+                  out = out.updated(lhs, Tracked(StFreed, rhsCall.id))
+              case rhsCall: Call
+                  if effectsByName.get(rhsCall.name)
                       .exists(_.contains("effect:allocates-return")) &&
                       !callFacts.get(rhsCall.id()).exists(_.isAllocCall) =>
                   // The callee's own summary says every value it returns is a fresh
@@ -1839,7 +1909,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // on. It falls through to the generic argument escape below - leaving it tracked-live
     // would report every later exit as a leak of a resource the object now owns (leveldb's
     // env-wrapper shape)
-    if isOperatorCall(cf.name) && cf.name != "<operator>.new" then ()
+    if isOperatorCall(cf.name) && cf.name != "<operator>.new" &&
+      !(cf.name == "<operator>.pointerCall" && c._callOut.collectAll[Method].l.size == 1)
+    then ()
     // a compile-time query keeps nothing it is handed (`__builtin_object_size(p, 0)` in a
     // fortified call's expansion), and inside a macro that stands for an inventoried API
     // (`memset` defined as `__builtin___memset_chk(...)`) the expansion's call IS the macro's
@@ -1938,7 +2010,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       // interprocedural free as a tag lookup, the existing double-free fact carrying the report.
       // It runs last because the summary is MORE SPECIFIC than "escaped": the callee did not
       // merely take the pointer, it released it.
-      effectsInForce.foreach {
+      // a conditional free the callee guards with a file-static flag happens when the caller has
+      // set the flag to a nonzero constant before this call
+      def flagSetBefore(flag: String): Boolean =
+        val line = c.lineNumber.map(_.toInt).getOrElse(0)
+        val stores = c.method.ast.isCall.nameExact("<operator>.assignment").l
+            .filter(a =>
+                a.lineNumber.exists(_.toInt < line) && a.argumentOption(1).exists {
+                    case i: Identifier => i.name == flag
+                    case _             => false
+                }
+            )
+            .sortBy(_.lineNumber.map(_.toInt).getOrElse(0))
+        stores.lastOption.flatMap(_.argumentOption(2)).flatMap(IndexRange.literal)
+            .exists(_ != 0)
+      val summaryFreeFacts: Set[String] = effectsInForce.collect {
+          case e if e.startsWith("effect:frees-param-if-static:") =>
+              val Array(idx, flag) = e.stripPrefix("effect:frees-param-if-static:").split(":", 2)
+              if flagSetBefore(flag) then s"effect:frees-param:$idx" else ""
+      }.filter(_.nonEmpty)
+      (effectsInForce ++ summaryFreeFacts).foreach {
           case e if e.startsWith("effect:frees-param:") =>
               val idx = e.stripPrefix("effect:frees-param:").toInt
               argAt(cf.args, idx).foreach { arg =>
@@ -1950,6 +2041,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         // free site, which is how the rule tells a double free from a
                         // use-after-free
                         record(operand, TagState, ValueSummaryFreed)
+                        // the callee's own release of that parameter is a site of the same
+                        // finding: the suites mark the flaw where the second release is written
+                        (c._callOut.collectAll[Method].l.distinct match
+                          case Nil =>
+                              val viaPointer: List[Method] = fpTargets.get(cf.name)
+                                  .flatMap(id => Option(atom.graph.node(id)))
+                                  .collect { case m: Method => m }.toList
+                              if viaPointer.nonEmpty then viaPointer
+                              else atom.method.nameExact(cf.name).filterNot(_.isExternal).l
+                          case linked => linked) match
+                          case List(callee) =>
+                              callee.parameter.l.find(_.index == idx).foreach { param =>
+                                  callee.ast.isCall.l.filter(fc => fc.tag.name(MemoryApiPass.TagFree).nonEmpty)
+                                      .flatMap(fc => fc.argumentOption(1).collect { case e: Expression => unwrapCast(e) })
+                                      .collect { case i: Identifier if i.name == param.name => i }
+                                      .foreach(i => record(i, TagState, ValueSummaryFreed))
+                              }
+                          case _ => ()
                       if t.state != StNullable then
                         out = withGroup(out, name, t.aliases, StFreed)
                         out = out.updated(name, t.copy(state = StFreed))

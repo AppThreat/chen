@@ -79,6 +79,70 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    free(elem);
     |}
     |
+    |static int badStatic = 0;
+    |static void staticSink(char *data)
+    |{
+    |    if (badStatic) free(data);
+    |}
+    |void bad_static_flag_sink(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    badStatic = 1;
+    |    staticSink(data);
+    |}
+    |
+    |void good_static_flag_other_pointer(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    char *other = (char *)malloc(100);
+    |    if (data == NULL || other == NULL) exit(-1);
+    |    free(data);
+    |    badStatic = 1;
+    |    staticSink(other);
+    |}
+    |
+    |static char *releasedSource(char *data)
+    |{
+    |    data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    return data;
+    |}
+    |void bad_source_returns_released(void)
+    |{
+    |    char *data = NULL;
+    |    data = releasedSource(data);
+    |    free(data);
+    |}
+    |
+    |static char *liveSource(char *data)
+    |{
+    |    data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    return data;
+    |}
+    |void good_source_returns_live(void)
+    |{
+    |    char *data = NULL;
+    |    data = liveSource(data);
+    |    free(data);
+    |}
+    |
+    |static void pointerSink(char *data)
+    |{
+    |    free(data);
+    |}
+    |void bad_pointer_sink(void)
+    |{
+    |    void (*funcPtr)(char *) = pointerSink;
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    funcPtr(data);
+    |}
+    |
     |void good_free_once(void)
     |{
     |    char *p = (char *)malloc(100);
@@ -216,6 +280,22 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    if (p) free(p);
     |}
     |
+    |static int badStaticCpp = 0;
+    |static void cppSink(int *data)
+    |{
+    |    if (badStaticCpp)
+    |    {
+    |        delete[] data;
+    |    }
+    |}
+    |void bad_cpp_static_flag(void)
+    |{
+    |    int *data = new int[100];
+    |    delete[] data;
+    |    badStaticCpp = 1;
+    |    cppSink(data);
+    |}
+    |
     |void bad_new_overflowed_bytes(void)
     |{
     |    int data = -1;
@@ -321,6 +401,24 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
         sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
         findingsIn("good_free_once") should not contain "MS-ALLOC-001"
         findingsIn("good_free_elements_then_container") should not contain "MS-ALLOC-001"
+    }
+    "report a release a file-static flag a caller set decides (CWE-415 across a call)" in {
+        findingsIn("bad_static_flag_sink") should contain("MS-ALLOC-001")
+        findingsIn("good_static_flag_other_pointer") should not contain "MS-ALLOC-001"
+    }
+    "report the callee's own release as a site of the same double free" in {
+        findingsIn("bad_cpp_static_flag") should contain("MS-ALLOC-001")
+        val sites = cpg.method.name("cppSink").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
+        sites should not be empty
+    }
+    "report a pointer a callee returns after releasing it, freed again by the caller" in {
+        findingsIn("bad_source_returns_released") should contain("MS-ALLOC-001")
+        findingsIn("good_source_returns_live") should not contain "MS-ALLOC-001"
+    }
+    "report a release through a local function pointer" in {
+        findingsIn("bad_pointer_sink") should contain("MS-ALLOC-001")
     }
     "stay silent when the walk is over a copy and the original is freed" in {
         findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
