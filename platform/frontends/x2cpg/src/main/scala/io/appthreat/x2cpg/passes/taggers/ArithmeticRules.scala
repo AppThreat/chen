@@ -250,6 +250,18 @@ object ArithmeticRules:
           }
       }
 
+  /** The operand is capped ABOVE before the site: the question an allocation's size asks (a lower
+    * bound, `data > strlen(s)`, leaves every large value through). A guard on the other side, or
+    * the operand's own lower-bound tag, does not count.
+    */
+  private[taggers] def operandBoundedAbove(site: Call, opnd: Expression): Boolean =
+      variableKey(opnd).exists(k => guardBounds(site, k, above = true)) ||
+          opnd.tag.name(GuardPass.TagAbove).nonEmpty ||
+          opnd.tag.name(MemoryApiPass.TagClamp).nonEmpty || (withoutCasts(opnd) match
+            case i: Identifier => clampedByRedefinition(i)
+            case _             => false
+          )
+
   /** Nothing the program does lets the operand leave its type here: a guard the author wrote around
     * the operation (either side), a clamp in the expression, the operand's own tag - or, for a
     * parameter, a bound EVERY caller's argument carries at its call site (the good 41 sources cap

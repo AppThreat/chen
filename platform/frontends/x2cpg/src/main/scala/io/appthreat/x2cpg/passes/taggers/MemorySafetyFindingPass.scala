@@ -5082,8 +5082,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 .find(a => IndexRange.literal(a).isDefined || a.isInstanceOf[Identifier])
                 .foreach { count =>
                   val origins = ValueOriginPass.originNamesOf(count).filter(attackers.contains)
-                  val bounded = count.tag.name(GuardPass.TagAbove).nonEmpty ||
-                      ArithmeticRules.operandKeptInType(newCall, count)
+                  val bounded = ArithmeticRules.operandBoundedAbove(newCall, count)
                   if origins.contains(ValueOriginPass.OriginUntrustedRead) && !bounded then
                     record(count, RuleUncontrolledSize)
                     promoted += (count -> RuleUncontrolledSize)
@@ -5129,14 +5128,19 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 if c.name == "<operator>.addition" || c.name == "<operator>.multiplication" =>
                 c.argument.l.collect { case x: Expression => x }.forall(go(_, depth - 1))
             case i: Identifier =>
-                val defs = OverlayFacts
-                    .reachingDefsIn(i)
-                    .collect { case d: Identifier => d }
+                val defIds = OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                val defs = defIds
                     .flatMap(_._astIn.collectFirst {
                         case a: Call if a.name == "<operator>.assignment" => a
                     })
                     .flatMap(_.argumentOption(2))
-                defs.nonEmpty && defs.forall(go(_, depth - 1))
+                // the `&data` an `fscanf` fills is a definition too, a value the program did not
+                // derive from a string: it ends the exemption
+                val filledByCall = defIds.exists(d =>
+                    d._astIn.collectFirst { case c: Call => c }
+                        .exists(_.name == "<operator>.addressOf")
+                )
+                defs.nonEmpty && !filledByCall && defs.forall(go(_, depth - 1))
             case _ => false
     go(lenArg, 3)
   end strlenDerivedSize

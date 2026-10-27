@@ -166,6 +166,71 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |#include <stdio.h>
     |#include <string.h>
     |
+    |/* the Juliet CWE-789 / CWE-680 shapes over C++ new[] and scanf-filled sizes */
+    |void bad_new_count_lower_bound(void)
+    |{
+    |    size_t data = 0;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+    |    if (data > strlen("hello"))
+    |    {
+    |        char *p = new char[data];
+    |        strcpy(p, "hello");
+    |        delete[] p;
+    |    }
+    |}
+    |
+    |void good_new_count_capped(void)
+    |{
+    |    size_t data = 0;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+    |    if (data > strlen("hello") && data < 1000)
+    |    {
+    |        char *p = new char[data];
+    |        strcpy(p, "hello");
+    |        delete[] p;
+    |    }
+    |}
+    |
+    |void bad_scanf_size_after_init(void)
+    |{
+    |    size_t data = 0;
+    |    fscanf(stdin, "%zu", &data);
+    |    char *p = (char *)malloc(data * sizeof(char));
+    |    if (p) free(p);
+    |}
+    |
+    |void good_strlen_size_after_init(const char *s)
+    |{
+    |    size_t data = 0;
+    |    data = strlen(s);
+    |    char *p = (char *)malloc(data * sizeof(char));
+    |    if (p) free(p);
+    |}
+    |
+    |void bad_new_overflowed_bytes(void)
+    |{
+    |    int data = -1;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = atoi(inputBuffer);
+    |    size_t dataBytes = data * sizeof(int);
+    |    int *intPointer = (int *)new char[dataBytes];
+    |    for (size_t i = 0; i < (size_t)data; i++)
+    |    {
+    |        intPointer[i] = 0;
+    |    }
+    |    delete[] intPointer;
+    |}
+    |""".stripMargin,
+        "r10alloc.cpp"
+      )
+      .moreCode(
+        """
+    |#include <stdlib.h>
+    |#include <stdio.h>
+    |#include <string.h>
+    |
     |/* the CWE-789 shape: attacker-controlled sizes with and without the cap */
     |void bad_malloc_from_input(const char *userInput)
     |{
@@ -288,6 +353,21 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     }
 
   "MS-ALLOC-008/009 (uncontrolled size)" should:
+    "fire on a new[] count with only a lower bound (CWE-789)" in {
+        findingsIn("bad_new_count_lower_bound") should contain("MS-ALLOC-008")
+    }
+    "stay silent on a new[] count capped above" in {
+        findingsIn("good_new_count_capped") should not contain "MS-ALLOC-008"
+    }
+    "fire on a scanf-filled size whose initialiser is a constant" in {
+        findingsIn("bad_scanf_size_after_init") should contain("MS-ALLOC-008")
+    }
+    "stay silent on a strlen-derived size with a constant initialiser" in {
+        findingsIn("good_strlen_size_after_init") should not contain "MS-ALLOC-008"
+    }
+    "fire on the write over a new[] sized by overflowed arithmetic (CWE-680)" in {
+        findingsIn("bad_new_overflowed_bytes") should contain("MS-BOUND-007")
+    }
     "fire on an attacker-controlled malloc size (CWE-789)" in {
         findingsIn("bad_malloc_from_input") shouldBe Set("MS-ALLOC-008")
     }

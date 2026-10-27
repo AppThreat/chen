@@ -81,6 +81,50 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    free(p);
       |}
       |
+      |void bad_new_count_lower_bound() {
+      |    size_t data = 0;
+      |    char inputBuffer[20] = "";
+      |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+      |    if (data > strlen("hello")) {
+      |        char *p = new char[data];
+      |        strcpy(p, "hello");
+      |        delete[] p;
+      |    }
+      |}
+      |void good_new_count_capped() {
+      |    size_t data = 0;
+      |    char inputBuffer[20] = "";
+      |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+      |    if (data > strlen("hello") && data < 1000) {
+      |        char *p = new char[data];
+      |        strcpy(p, "hello");
+      |        delete[] p;
+      |    }
+      |}
+      |void bad_scanf_size_after_init() {
+      |    size_t data = 0;
+      |    fscanf(stdin, "%zu", &data);
+      |    char *p = (char *)malloc(data * sizeof(char));
+      |    if (p) free(p);
+      |}
+      |void good_strlen_size_after_init(const char *s) {
+      |    size_t data = 0;
+      |    data = strlen(s);
+      |    char *p = (char *)malloc(data * sizeof(char));
+      |    if (p) free(p);
+      |}
+      |void bad_new_overflowed_bytes() {
+      |    int data = -1;
+      |    char inputBuffer[20] = "";
+      |    if (fgets(inputBuffer, 20, stdin) != NULL) data = atoi(inputBuffer);
+      |    size_t dataBytes = data * sizeof(int);
+      |    int *intPointer = (int *)new char[dataBytes];
+      |    for (size_t i = 0; i < (size_t)data; i++) {
+      |        intPointer[i] = 0;
+      |    }
+      |    delete[] intPointer;
+      |}
+      |
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -142,6 +186,18 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
                 .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-ALLOC-001")).l
             sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
             findingsIn("good_free_once") should not contain "MS-ALLOC-001"
+        }
+    }
+
+    "an allocation size the program reads" should {
+        "be uncontrolled when only a lower bound or a scanf-filled definition stands" in {
+            findingsIn("bad_new_count_lower_bound") should contain("MS-ALLOC-008")
+            findingsIn("good_new_count_capped") should not contain "MS-ALLOC-008"
+            findingsIn("bad_scanf_size_after_init") should contain("MS-ALLOC-008")
+            findingsIn("good_strlen_size_after_init") should not contain "MS-ALLOC-008"
+        }
+        "overrun a new[] sized by overflowed arithmetic at the write" in {
+            findingsIn("bad_new_overflowed_bytes") should contain("MS-BOUND-007")
         }
     }
 
