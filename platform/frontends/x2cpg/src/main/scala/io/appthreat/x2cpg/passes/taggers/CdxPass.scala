@@ -69,11 +69,16 @@ class CdxPass(
       processJvmPurl(compPurl, compType, descTags, claimedForms, unambiguousJvmGroups, dstGraph)
   end processComponent
 
-  /** The package name a purl carries: no version, qualifiers or namespace. `pkg:pypi/django@5.2.17`
-    * is `django`, `pkg:maven/org.springframework/spring-web@6.1.0` is `spring-web`.
+  /** The versionless coordinate a purl names: its type, namespace and name. Version, qualifiers
+    * (`?platform=aarch64-linux-gnu`) and subpath do not distinguish packages, so every purl of one
+    * package compares equal - nokogiri's three platform-qualified purls on lobsters keep claiming
+    * together, and a versionless purl joins its versioned siblings. Two packages whose purls end in
+    * the same name are still different packages: `pkg:maven/org.a/utils` and
+    * `pkg:maven/org.b/utils` both reduced to the bare name `utils`, and the second group was let
+    * into the namespace the first had claimed.
     */
-  private def purlName(purl: String): String =
-      purl.split("@").headOption.getOrElse("").split("/").lastOption.getOrElse("")
+  private def purlCoordinate(purl: String): String =
+      purl.split("#").head.split("@").head.split("\\?").head.stripPrefix("pkg:")
 
   /** Claims a namespace form for the package `purl` names; true when the caller must tag.
     *
@@ -95,8 +100,8 @@ class CdxPass(
             claimedForms(bpkg) = mutable.Set(purl)
             true
         case Some(purls) =>
-            val name = purlName(purl)
-            if !purls.contains(purl) && purls.forall(purlName(_) == name) then
+            val coordinate = purlCoordinate(purl)
+            if !purls.contains(purl) && purls.forall(purlCoordinate(_) == coordinate) then
               purls.add(purl)
               true
             else false
@@ -181,8 +186,10 @@ class CdxPass(
           "pkg:pypi"
         )
       then
+        // A purl that carries no version can still carry qualifiers
+        // (`pkg:pypi/django?x`), which are not part of the package name.
         val pkgName = purl
-            .split("@").head
+            .split("[@?#]").head
             .replace("pkg:pypi/", "")
             .replace("python-", "")
             .replace("-", "_")

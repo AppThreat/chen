@@ -269,6 +269,92 @@ class CdxPassTests extends AnyWordSpec with Matchers:
           ) { cpg =>
               cpg.call.name("getBean").tag.name.toSet shouldBe empty
           }
+
+      "not let a same-named component of another group into a claimed namespace" in
+          JvmFixture(
+            components =
+                Seq(
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.a/utils@1.0.0",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.shared"}
+            ]"""
+                  ),
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.b/utils@2.0.0",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.shared"}
+            ]"""
+                  )
+                ),
+            calls = Seq(("load", "org.shared.Callee", "load"))
+          ) { cpg =>
+            // both purls end in `utils`; the bare-name comparison read them as one
+            // package and let the second group tag the namespace the first claimed
+            val tags = cpg.call.name("load").tag.name.toSet
+            tags should contain("pkg:maven/org.a/utils@1.0.0")
+            tags should not.contain("pkg:maven/org.b/utils@2.0.0")
+          }
+
+      "claim a namespace for every version and qualifier of one package" in
+          JvmFixture(
+            components =
+                Seq(
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.a/utils@1.0.0?type=jar",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.a"}
+            ]"""
+                  ),
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.a/utils@2.0.0?type=aar",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.a"}
+            ]"""
+                  )
+                ),
+            calls = Seq(("load", "org.a.Callee", "load"))
+          ) { cpg =>
+            val tags = cpg.call.name("load").tag.name.toSet
+            tags should contain("pkg:maven/org.a/utils@1.0.0?type=jar")
+            tags should contain("pkg:maven/org.a/utils@2.0.0?type=aar")
+          }
+
+      "claim a namespace for a versionless purl that carries qualifiers" in
+          JvmFixture(
+            components =
+                Seq(
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.a/utils?type=jar",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.a"}
+            ]"""
+                  ),
+                  componentJson(
+                    name = "utils",
+                    purl = "pkg:maven/org.a/utils@2.0.0",
+                    extra = """,
+            "properties": [
+              {"name": "internal:Namespaces", "value": "org.a"}
+            ]"""
+                  )
+                ),
+            calls = Seq(("load", "org.a.Callee", "load"))
+          ) { cpg =>
+            val tags = cpg.call.name("load").tag.name.toSet
+            tags should contain("pkg:maven/org.a/utils?type=jar")
+            tags should contain("pkg:maven/org.a/utils@2.0.0")
+          }
   }
 end CdxPassTests
 
@@ -277,6 +363,13 @@ object CdxPassTests:
   /** A JVM graph whose calls sit under the package roots the JVM tests key off. */
   private object JvmFixture:
     def apply[T](components: Seq[String])(fun: Cpg => T): T =
+        apply(components, Seq.empty)(fun)
+    def apply[T](
+      components: Seq[String],
+      calls: Seq[(String, String, String)]
+    )(
+      fun: Cpg => T
+    ): T =
       val bom =
           s"""{
             "bomFormat": "CycloneDX",
@@ -304,6 +397,13 @@ object CdxPassTests:
               .typeFullName("org.springframework.beans.Factory")
               .code("getBean")
         )
+        calls.foreach { case (name, typeFullName, code) =>
+            graph.addNode(
+              NewCall().name(name).methodFullName(s"$typeFullName.$name:void()").typeFullName(
+                typeFullName
+              ).code(code)
+            )
+        }
       }.cpg
       new CdxPass(cpg).createAndApply()
       fun(cpg)
