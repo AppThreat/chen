@@ -680,6 +680,10 @@ private[taggers] object OverlayFacts:
                     ruleOut(cond, if value == 0 then whenTrue else orElse)
                 case ControlStructureTypes.WHILE | ControlStructureTypes.FOR if value == 0 =>
                     ruleOut(cond, whenTrue)
+                // `do { ... } while (0)`: the body runs once, and the false condition's back edge
+                // into it is on no path (the macro idiom OpenSSL's trace blocks expand to)
+                case ControlStructureTypes.DO if value == 0 =>
+                    ruleOut(cond, whenTrue)
                 case _ => ()
             }
         }

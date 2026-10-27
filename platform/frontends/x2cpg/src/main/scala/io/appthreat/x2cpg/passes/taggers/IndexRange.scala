@@ -375,28 +375,32 @@ private[taggers] object IndexRange:
     * longer reading that value.
     */
   private def initCaptureValue(method: Method, name: String): Option[BigInt] =
-    val writes = method.ast.isCall.l.exists(c =>
-        OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists {
-            case w: Identifier => w.name == name
-            case w: Call =>
-                w.name == "<operator>.indirectFieldAccess" &&
-                w.argument.l.exists {
-                    case f: FieldIdentifier => f.canonicalName == name
-                    case _                  => false
-                }
-            case _ => false
-        }
-    )
-    if writes || method.local.nameExact(name).nonEmpty || method.parameter.nameExact(name).nonEmpty
+    // the cheap answers first: only a closure body captures, and a name the method declares or
+    // receives is its own. The write scan walks the whole body, so it runs last
+    val captures = method._refIn.collectAll[MethodRef].l.flatMap(
+      _.tag.nameExact(io.appthreat.x2cpg.Defines.CaptureTag).value.l
+    ).collect {
+        case c if c.startsWith(s"init:$name=") => c.stripPrefix(s"init:$name=")
+    }.distinct
+    if captures.isEmpty || method.local.nameExact(name).nonEmpty ||
+      method.parameter.nameExact(name).nonEmpty
     then None
     else
-      method._refIn.collectAll[MethodRef].l.flatMap(
-        _.tag.nameExact(io.appthreat.x2cpg.Defines.CaptureTag).value.l
-      ).collect {
-          case c if c.startsWith(s"init:$name=") => c.stripPrefix(s"init:$name=")
-      }.distinct match
-        case List(v) => literalValue(v)
-        case _       => None
+      val writes = method.ast.isCall.l.exists(c =>
+          OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists {
+              case w: Identifier => w.name == name
+              case w: Call =>
+                  w.name == "<operator>.indirectFieldAccess" &&
+                  w.argument.l.exists {
+                      case f: FieldIdentifier => f.canonicalName == name
+                      case _                  => false
+                  }
+              case _ => false
+          }
+      )
+      captures match
+        case List(v) if !writes => literalValue(v)
+        case _                  => None
   end initCaptureValue
 
   private def constValueOf(e: Expression): Option[BigInt] =

@@ -2958,6 +2958,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
   /** Is `walk` nested inside a while/for/do loop? */
   private def insideLoop(walk: Call): Boolean = enclosingLoopOf(walk).isDefined
 
+  /** Every while/for/do loop around `node`, innermost first. */
+  private def enclosingLoopsOf(node: AstNode): List[ControlStructure] =
+      enclosingLoopOf(node) match
+        case Some(loop) => loop :: enclosingLoopsOf(loop)
+        case None       => Nil
+
   /** The innermost while/for/do loop `node` sits in. The walk is cycle-safe: a macro expansion
     * wired under its own argument gives a node two AST parents, and a plain parent walk can then
     * chase that re-joining edge forever.
@@ -4282,7 +4288,6 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           conds.flatMap(c => GuardPass.conjuncts(c, holds).getOrElse(Nil)).flatMap {
               case (cmp, h) => GuardPass.directionalFacts(cmp, h)
           }
-      val holdsFacts                           = factsAt(holds = true)
       val rejectsFacts                         = factsAt(holds = false)
       def keyOf(e: Expression): Option[String] = OverlayFacts.variableKey(e)
       def isConstantish(e: Expression): Boolean = e match
@@ -4371,7 +4376,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 idxKey <- keyOf(idx)
                 if ruleIdFor(access) == RuleIndexWrite
                 if idx.tag.name(GuardPass.TagByExtent).l.isEmpty
-                attackerCount = holdsFacts.exists { case (bounded, above, bound) =>
+                // the facts of the loops AROUND this write: a bound another loop of the method
+                // tests (`for (; i < top; i++) ...; for (; i < max; i++) dst[i] = 0;`) does not
+                // hold here
+                loopFacts = enclosingLoopsOf(access).flatMap(_.condition.collect { case c: Call =>
+                    c
+                })
+                    .flatMap(c => GuardPass.conjuncts(c, holds = true).getOrElse(Nil))
+                    .flatMap { case (cmp, h) => GuardPass.directionalFacts(cmp, h) }
+                attackerCount = loopFacts.exists { case (bounded, above, bound) =>
                     above && keyOf(bounded).contains(idxKey) &&
                     ValueOriginPass.originNamesOf(bound).exists(attackers.contains) &&
                     !isConstantish(bound) && !cappedAbove(bound) &&
@@ -4623,7 +4636,35 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           }
                       )
                       .flatMap(_.argumentOption(2).toList)
-                  val namesDeclaredArray = defRhss.exists {
+                  // every definition must name such storage: one that may also be heap
+                  // (`storage = n < N ? stack : malloc(n)`) is released behind the author's
+                  // own `if (storage != stack)`
+                  // a callee handed the pointer's address may store a heap block through it
+                  // (`unsigned char *iv = iv_intern; derive_iv(..., &iv); ...; free(iv)`)
+                  val addressHanded = i.method.ast.isCall.l.exists { c =>
+                      (!c.name.startsWith("<operator>") || c.name == "<operator>.pointerCall") &&
+                      c.argument.l.exists(_.ast.isCall.name("<operator>.addressOf").l.exists(
+                        _.argument.l.exists {
+                            case x: Identifier => x.name == i.name
+                            case _             => false
+                        }
+                      ))
+                  }
+                  val onlyNonHeap = !addressHanded && defRhss.nonEmpty && defRhss.forall {
+                      case _: Identifier | _: Literal                  => true
+                      case a: Call if a.name == "<operator>.addressOf" => true
+                      // a NULL the preprocessor left as a cast is no storage at all
+                      case x
+                          if AllocationStatePass.isNullLiteral(
+                            x,
+                            c => c.argument.l.collect { case e: Expression => e }.lastOption
+                          ) => true
+                      case x =>
+                          allocThroughCasts(x).exists(a =>
+                              tagValues(a, MemoryApiPass.TagAlloc).contains("stack")
+                          )
+                  }
+                  val namesDeclaredArray = onlyNonHeap && defRhss.exists {
                       case src: Identifier =>
                           val srcLocal = src.refsTo.collectFirst { case l: Local => l }
                               .orElse(src.method.local.nameExact(src.name).headOption)
@@ -4633,18 +4674,31 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           )
                       case _ => false
                   }
-                  val namesStackAlloc = defRhss.exists(x =>
+                  val namesStackAlloc = onlyNonHeap && defRhss.exists(x =>
                       allocThroughCasts(x).exists(a =>
                           tagValues(a, MemoryApiPass.TagAlloc).contains("stack")
                       )
                   )
-                  val namesLiteral = defRhss.exists {
+                  val namesLiteral = onlyNonHeap && defRhss.exists {
                       case lit: Literal => lit.code.startsWith("\"")
                       case _            => false
                   }
                   // CWE-761: a pointer the program WALKED (a loop whose condition reads
                   // through it and whose update advances it) is no longer provably at its
                   // block's start
+                  // the walk must still be what the free sees: an assignment to the name between
+                  // the walking loop and the free rebinds it
+                  // (`while (isspace(*kv)) kv++; ... kv = OPENSSL_strdup(kv); free(kv)`)
+                  val freeLine = i.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                  def reboundAfter(loop: ControlStructure): Boolean =
+                    val loopEnd = loop.ast.lineNumber.l.map(_.toInt).maxOption.getOrElse(0)
+                    i.method.ast.isCall.name("<operator>.assignment").l.exists { a =>
+                      val line = a.lineNumber.map(_.toInt).getOrElse(0)
+                      line > loopEnd && line <= freeLine && a.argumentOption(1).exists {
+                          case t: Identifier => t.name == i.name
+                          case _             => false
+                      }
+                    }
                   val walkedThenFreed = i.method.ast.isCall.l.exists { inc =>
                       Set("<operator>.postIncrement", "<operator>.preIncrement").contains(
                         inc.name
@@ -4654,11 +4708,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       } && enclosingLoopOf(inc).exists(loop =>
                           loop.condition.exists(cond =>
                               cond.ast.isIdentifier.l.exists(_.name == i.name)
-                          )
+                          ) && !reboundAfter(loop)
                       )
                   }
                   // the state pass's frame-storage fact (q = &x; free(q))
-                  if i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") ||
+                  if (i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") &&
+                        (defRhss.isEmpty || onlyNonHeap)) ||
                     namesDeclaredArray || namesStackAlloc || namesLiteral
                   then record(i, RuleNonHeapFree)
                   if walkedThenFreed then

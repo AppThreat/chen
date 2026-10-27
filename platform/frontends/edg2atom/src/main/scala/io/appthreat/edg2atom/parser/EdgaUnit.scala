@@ -70,6 +70,9 @@ final case class Pos(file: Long, line: Int, column: Int)
 object EdgaUnit:
   def parse(text: String): EdgaUnit = new EdgaUnit(ujson.read(text))
 
+  /** The document straight from the bytes edga wrote: no intermediate string of the whole unit */
+  def parseBytes(bytes: Array[Byte]): EdgaUnit = new EdgaUnit(ujson.read(bytes))
+
   def pos(v: Value): Option[Pos] =
       v match
         case ujson.Arr(items) if items.size == 3 =>

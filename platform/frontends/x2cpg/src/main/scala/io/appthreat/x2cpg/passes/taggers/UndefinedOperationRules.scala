@@ -404,6 +404,7 @@ object UndefinedOperationRules:
           )
       case _ => false
     if reduced(amount) then return true
+    if complementBounded(amount, use, width) then return true
     val key = OverlayFacts.variableKey(withoutCasts(amount))
     key.exists { k =>
       var above = false
@@ -450,6 +451,65 @@ object UndefinedOperationRules:
       above && below
     }
   end shiftAmountBounded
+
+  /** A complement amount `K - x` whose x the dominating guards pin: `if (bits > 32) return; if
+    * (bits && bits != 32) mask = ~0u << (32 - bits);` leaves bits in [1, 31], so the amount is too.
+    * A bare `x` holding (a truthiness test) and `x != K` holding exclude one value each.
+    */
+  private def complementBounded(amount: Expression, use: Call, width: Int): Boolean =
+      withoutCasts(amount) match
+        case sub: Call if sub.name == Operators.subtraction =>
+            (sub.argumentOption(1), sub.argumentOption(2)) match
+              case (Some(kExpr: Expression), Some(xExpr: Expression)) =>
+                  (literalNumber(kExpr), OverlayFacts.variableKey(withoutCasts(xExpr))) match
+                    case (Some(k), Some(key)) =>
+                        var hi: Option[BigDecimal] = None
+                        var lo: Option[BigDecimal] =
+                            Option.when(isUnsignedType(xExpr))(BigDecimal(0))
+                        val excluded = mutable.Set.empty[BigDecimal]
+                        def truthy(cond: Expression): Boolean = cond match
+                          case i: Identifier => isKey(i, key)
+                          case c: Call if c.name == Operators.logicalAnd =>
+                              c.argument.l.collect { case e: Expression => e }.exists(truthy)
+                          case _ => false
+                        GuardPass.guardingControllers(use).foreach { controller =>
+                          if GuardPass.holdsAtOpt(controller, use).contains(true) &&
+                            truthy(controller)
+                          then excluded += 0
+                          GuardPass.conjunctsAt(controller, use).foreach { case (cmp, holds) =>
+                              if cmp.name == Operators.notEquals && holds then
+                                cmp.argument.l.collect { case e: Expression => e } match
+                                  case List(a, b) if isKey(a, key) =>
+                                      literalNumber(b).foreach(excluded += _)
+                                  case List(a, b) if isKey(b, key) =>
+                                      literalNumber(a).foreach(excluded += _)
+                                  case _ => ()
+                              GuardPass.directionalFacts(cmp, holds).foreach {
+                                  case (bounded, isAbove, bound) if isKey(bounded, key) =>
+                                      literalNumber(bound).foreach { v =>
+                                        val strict = GuardPass.isStrict(cmp, holds)
+                                        if isAbove then
+                                          val h = if strict then v - 1 else v
+                                          hi = Some(hi.fold(h)(_.min(h)))
+                                        else
+                                          val l = if strict then v + 1 else v
+                                          lo = Some(lo.fold(l)(_.max(l)))
+                                      }
+                                  case _ => ()
+                              }
+                          }
+                        }
+                        (lo, hi) match
+                          case (Some(l0), Some(h0)) =>
+                              var l = l0
+                              var h = h0
+                              while l <= h && excluded.contains(l) do l += 1
+                              while h >= l && excluded.contains(h) do h -= 1
+                              l <= h && k - h >= 0 && k - l < width
+                          case _ => false
+                    case _ => false
+              case _ => false
+        case _ => false
 
   /** The width, in bits, of the shift's left operand after the integer promotions: anything
     * narrower than `int` is an `int`. None when the type is not one whose width every target this

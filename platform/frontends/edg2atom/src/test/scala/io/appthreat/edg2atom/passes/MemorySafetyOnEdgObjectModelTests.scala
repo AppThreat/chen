@@ -29,6 +29,20 @@ class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() =>
       |#include <stdlib.h>
       |#include <string.h>
       |#include <alloca.h>
+      |unsigned long good_small_anonymous_union(const unsigned long *a)
+      |{
+      |    union { unsigned long bn[3]; unsigned int ui[6]; } buf;
+      |    int i;
+      |    for (i = 0; i < 3; i++) buf.bn[i] = a[i];
+      |    return buf.bn[0];
+      |}
+      |unsigned long good_large_anonymous_union(const unsigned long *a)
+      |{
+      |    union { unsigned long bn[4]; unsigned int ui[8]; } buf;
+      |    int i;
+      |    for (i = 0; i < 4; i++) buf.bn[i] = a[i];
+      |    return buf.bn[0];
+      |}
       |int bad_divide_input(int total)
       |{
       |    char line[32];
@@ -610,6 +624,10 @@ class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() =>
   }
 
   "the library's contracts" should {
+      "read each anonymous union's own member bound" in {
+          requireEdga()
+          findingsIn("good_large_anonymous_union") shouldBe Set.empty
+      }
       "hold for release, realloc and length-bounded writers" in {
           requireEdga()
           findingsIn("bad_free_alloca") shouldBe Set("MS-ALLOC-005")

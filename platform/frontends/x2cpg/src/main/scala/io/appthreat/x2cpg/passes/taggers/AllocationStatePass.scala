@@ -1289,6 +1289,77 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     found
   end guardedInExpression
 
+  /** The line spans of the loops around `node`, walked cycle-safely (an expansion can give a node
+    * two AST parents).
+    */
+  private def enclosingLoopSpans(node: AstNode): List[(Int, Int)] =
+    val seen                       = mutable.HashSet.empty[Long]
+    val spans                      = mutable.ListBuffer.empty[(Int, Int)]
+    var cursor: Option[StoredNode] = node._astIn.nextOption()
+    while cursor.isDefined do
+      val current = cursor.get
+      if !seen.add(current.id()) then cursor = None
+      else
+        current match
+          case cs: ControlStructure =>
+              val t = cs.controlStructureType.toUpperCase
+              if t == "WHILE" || t == "FOR" || t == "DO" then
+                val lines = cs.ast.lineNumber.l.map(_.toInt)
+                if lines.nonEmpty then spans += ((lines.min, lines.max))
+              cursor = cs._astIn.nextOption()
+          case _: Method => cursor = None
+          case other     => cursor = other._astIn.nextOption()
+    spans.toList
+
+  /** Each method's calls, listed once: the null arm asks them per use */
+  private val callsByMethod = new java.util.concurrent.ConcurrentHashMap[Long, List[Call]]()
+  private def callsOf(m: Method): List[Call] =
+      callsByMethod.computeIfAbsent(m.id(), _ => m.ast.isCall.l)
+
+  /** Per method, per variable name, the lines of the stores and increments that redefine it beyond
+    * NULL: neither the NULL literal nor a plain copy of another name. Built once per method.
+    */
+  private val redefinitionsByMethod =
+      new java.util.concurrent.ConcurrentHashMap[Long, Map[String, List[Int]]]()
+  private def redefinitionLinesOf(m: Method): Map[String, List[Int]] =
+      redefinitionsByMethod.computeIfAbsent(
+        m.id(),
+        _ =>
+            callsOf(m).filter(c => RedefiningOps.contains(c.name)).flatMap { a =>
+                a.argumentOption(1).collect { case i: Identifier => i.name }.filter(_ =>
+                    !a.argumentOption(2).exists {
+                        case _: Identifier => true
+                        case _             => false
+                    } && !a.argumentOption(2).forall(isNullLiteral)
+                ).map(_ -> a.lineNumber.map(_.toInt).getOrElse(Int.MaxValue))
+            }.groupMap(_._1)(_._2)
+      )
+
+  private val RedefiningOps = Set(
+    "<operator>.assignment",
+    "<operator>.assignmentPlus",
+    "<operator>.assignmentMinus",
+    "<operator>.assignmentMult",
+    "<operator>.postIncrement",
+    "<operator>.preIncrement",
+    "<operator>.postDecrement",
+    "<operator>.preDecrement"
+  )
+
+  /** The states a reassignment from something the transfer cannot name makes stale: the variable
+    * now holds another value, so neither its NULL, its frame provenance nor the release of the
+    * object it used to hold says anything about it (`free(p); p = wrapper_alloc(n); use(p)`)
+    */
+  private def staleOnRebind(state: AllocState, rhs: AstNode, lhs: String): Boolean =
+      state == StNull || state == StNullReset || state == StStackAddr ||
+          ((state == StFreed || state == StMaybeFreed) && !handsBackItself(rhs, lhs))
+
+  /** Is the variable itself an argument of the producer it is rebound to? `data = badSource(data)`
+    * may return the very object the callee released, so its freed state is not stale.
+    */
+  private def handsBackItself(rhs: AstNode, lhs: String): Boolean =
+      rhs.ast.isIdentifier.l.exists(_.name == lhs)
+
   private def noteNullUse(
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
     use: StoredNode,
@@ -1309,32 +1380,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     def redefinedBeyondNullBefore(use: StoredNode, name: String): Boolean = use match
       case n: io.shiftleft.codepropertygraph.generated.nodes.Expression =>
           val useLine = n.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
-          n.method.ast.isCall
-              .name(
-                "<operator>.assignment",
-                "<operator>.assignmentPlus",
-                "<operator>.assignmentMinus",
-                "<operator>.assignmentMult",
-                "<operator>.postIncrement",
-                "<operator>.preIncrement",
-                "<operator>.postDecrement",
-                "<operator>.preDecrement"
-              )
-              .l
-              .exists { a =>
-                  a.argumentOption(1).exists {
-                      case i: Identifier => i.name == name
-                      case _             => false
-                  } &&
-                  a.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) < useLine &&
-                  // a plain-identifier rhs is NEUTRAL: the transfer's own alias copy carries
-                  // the source's state - the copies variant's `dataCopy = data` of a NULL is
-                  // null, and the copy is not a redefinition beyond it
-                  !a.argumentOption(2).exists {
-                      case _: Identifier => true
-                      case _             => false
-                  } && !a.argumentOption(2).forall(isNullLiteral)
-              }
+          // a plain-identifier rhs is NEUTRAL: the transfer's own alias copy carries the
+          // source's state - the copies variant's `dataCopy = data` of a NULL is null, and the
+          // copy is not a redefinition beyond it
+          redefinitionLinesOf(n.method).getOrElse(name, Nil).exists(_ < useLine)
       case _ => false
     // the DEFINITE claim carries the arithmetic arm's own discipline: every assignment to
     // the variable before this use must be the NULL literal (at least one is) or a plain
@@ -1346,18 +1395,35 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     def definiteNullDefined(use: StoredNode, name: String): Boolean = use match
       case n: io.shiftleft.codepropertygraph.generated.nodes.Expression =>
           val useLine = n.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
-          val writes = n.method.ast.isCall.name("<operator>.assignment").l
-              .filter(a =>
-                  a.argumentOption(1).exists {
-                      case i: Identifier => i.name == name
-                      case _             => false
-                  } && a.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= useLine
+          // a loop around the use carries the back edge: a write later in its body reaches the
+          // use on the next iteration (`prev = NULL; while (...) { prev->next = ...; prev = curr; }`)
+          val loopSpans = enclosingLoopSpans(n)
+          def reaches(a: Call): Boolean =
+            val line = a.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+            line <= useLine || loopSpans.exists((lo, hi) => line >= lo && line <= hi)
+          def assignmentsTo(v: String): List[Call] =
+              callsOf(n.method).filter(a =>
+                  a.name == "<operator>.assignment" &&
+                      a.argumentOption(1).exists {
+                          case i: Identifier => i.name == v
+                          case _             => false
+                      }
               )
-              .toList
+          // a copy is neutral only when its source is itself null on every write: `dataCopy =
+          // data` of `data = NULL` is null, `prev = curr` of a list cursor is not
+          def nullOnly(v: String, depth: Int): Boolean =
+            val sources = assignmentsTo(v).flatMap(_.argumentOption(2).toList)
+            sources.nonEmpty && sources.forall {
+                case s if isNullLiteral(s) => true
+                case i: Identifier =>
+                    depth > 0 && i.name != v && nullOnly(i.name, depth - 1)
+                case _ => false
+            }
+          val writes     = assignmentsTo(name).filter(reaches)
           val stores     = writes.flatMap(a => a.argumentOption(2).toList)
           val nullStores = stores.count(s => isNullLiteral(s))
           val copiesOnly = stores.filterNot(s => isNullLiteral(s)).forall {
-              case _: Identifier => true
+              case i: Identifier => nullOnly(i.name, 2)
               case _             => false
           }
           // the address may sit behind a cast or inside a nested argument expression
@@ -1370,24 +1436,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   depth - 1
                 )).toSet
             case _ => Set.empty
-          val addressHanded = n.method.ast.isCall.l.exists { c =>
-              !c.name.startsWith("<operator>") &&
+          // a call through a function pointer (`meth->compute_key(&sec, ...)`) writes as well
+          val addressHanded = callsOf(n.method).exists { c =>
+              (!c.name.startsWith("<operator>") || c.name == "<operator>.pointerCall") &&
               c.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= useLine &&
               c.argument.l.exists(namesAddressedUnder(_, 3).contains(name))
           }
-          val incremented = n.method.ast.isCall
-              .name(
-                "<operator>.postIncrement",
-                "<operator>.preIncrement",
-                "<operator>.postDecrement",
-                "<operator>.preDecrement"
+          val incremented = callsOf(n.method)
+              .filter(c =>
+                  Set(
+                    "<operator>.postIncrement",
+                    "<operator>.preIncrement",
+                    "<operator>.postDecrement",
+                    "<operator>.preDecrement"
+                  ).contains(c.name)
               )
-              .l
               .exists(a =>
                   a.argumentOption(1).exists {
                       case i: Identifier => i.name == name
                       case _             => false
-                  } && a.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) < useLine
+                  } && reaches(a)
               )
           writes.nonEmpty && nullStores > 0 && copiesOnly && !addressHanded && !incremented
       case _ => false
@@ -1409,9 +1477,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   c.tag.name(MemoryApiPass.TagRealloc).nonEmpty
           )
       }
+      // a null state the definite discipline above did not confirm (a guard's failing side on
+      // a value some call produced) is a path the author may have correlated away, so it stays
+      // with the hypotheses rather than the exact evidence
       val kind =
-          if t.state == StNull then NullDefinite
-          else if allocProduced then NullUncheckedAlloc
+          if allocProduced then NullUncheckedAlloc
           else NullUnchecked
       nullUseFacts += ((t.site, use, name, kind))
     end if
@@ -1630,7 +1700,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         // `Allocate` behind a reinterpret_cast): the old state must not
                         // survive it for the questions that read provenance exactly
                         if out.get(lhs).exists(t =>
-                              t.state == StNull || t.state == StNullReset || t.state == StStackAddr
+                              staleOnRebind(t.state, rhs, lhs)
                           )
                         then out = out - lhs
               // a null store makes a NULL state only for a POINTER destination: the literal
@@ -1658,8 +1728,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                               // became whatever that carries, and the definite questions
                               // (every definition NULL, frame provenance) must not speak
                               if out.get(lhs).exists(t =>
-                                    t.state == StNull || t.state == StNullReset ||
-                                        t.state == StStackAddr
+                                    staleOnRebind(t.state, rhs, lhs)
                                 )
                               then out = out - lhs
                         // `p = tmp` after `tmp = realloc(p, n)`: the block moved back into p,
@@ -1679,7 +1748,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         // know) must not keep the declared-array provenance alive to a
                         // later release of the reassigned pointer
                         if out.get(lhs).exists(t =>
-                              t.state == StNull || t.state == StNullReset || t.state == StStackAddr
+                              staleOnRebind(t.state, rhs, lhs)
                           )
                         then out = out - lhs
             end match
@@ -2116,25 +2185,32 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     a: Map[String, Tracked],
     b: Map[String, Tracked]
   ): Map[String, Tracked] =
-      (a.keySet ++ b.keySet).iterator
-          .map { name =>
-              (a.get(name), b.get(name)) match
-                case (Some(ta), Some(tb)) =>
-                    // the site is the SMALLER id, whatever the fold order: an order-dependent
-                    // merge let the worklist oscillate between (Allocated, s1) and
-                    // (Allocated, s2) around allocation loops and never terminate
-                    name -> Tracked(
+      // most joins meet the same state from both sides: start from one side and merge only the
+      // entries the other changes, instead of rebuilding the map
+      if (a eq b) || b.isEmpty then a
+      else if a.isEmpty then b
+      else
+        var merged = a
+        b.foreach { (name, tb) =>
+            a.get(name) match
+              case Some(ta) if ta == tb => ()
+              case Some(ta)             =>
+                  // the site is the SMALLER id, whatever the fold order: an order-dependent
+                  // merge let the worklist oscillate between (Allocated, s1) and
+                  // (Allocated, s2) around allocation loops and never terminate
+                  merged = merged.updated(
+                    name,
+                    Tracked(
                       joinStates(ta.state, tb.state),
                       math.min(ta.site, tb.site),
                       nullable = ta.nullable || tb.nullable,
                       checked = ta.checked && tb.checked,
                       aliases = ta.aliases.intersect(tb.aliases)
                     )
-                case (Some(t), None) => name -> t
-                case (None, Some(t)) => name -> t
-                case _               => name -> Tracked(StEscaped, 0L)
-          }
-          .toMap
+                  )
+              case None => merged = merged.updated(name, tb)
+        }
+        merged
 
   /** The leak fact an exit carries: the JOIN of the state over every visit of that exit, not the
     * latest visit's - the join is commutative, so the claim does not depend on the order the

@@ -72,7 +72,7 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
             logger.warn(s"edga timed out on $file")
             None
           else if Files.size(out) == 0 then None
-          else Some(EdgaUnit.parse(Files.readString(out, StandardCharsets.UTF_8)))
+          else Some(EdgaUnit.parseBytes(Files.readAllBytes(out)))
         catch
           case e: Exception =>
               logger.warn(s"edga failed on $file: ${e.getMessage}")

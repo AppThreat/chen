@@ -179,6 +179,41 @@ class ReadValueArithmeticTests extends DataFlowCodeToCpgSuite:
       |    v = *p + seed;
       |    return v;
       |}
+      |int good_zero_the_tail(int *out, const int *src, int n)
+      |{
+      |    int buf[4];
+      |    int i;
+      |    for (i = 0; i < n; i++)
+      |        out[i] = src[i];
+      |    for (; i < 4; i++)
+      |        buf[i] = 0;
+      |    return buf[0];
+      |}
+      |#define MAXBITCHUNK ((size_t)1 << (sizeof(size_t) * 8 - 4))
+      |size_t good_unsigned_macro_product(void)
+      |{
+      |    return MAXBITCHUNK * 8;
+      |}
+      |unsigned bad_complement_shift(FILE *f)
+      |{
+      |    unsigned bits;
+      |    if (fscanf(f, "%u", &bits) != 1 || bits > 32)
+      |        return 0;
+      |    if (bits != 32)
+      |        return 0xffffffffu << (32 - bits);
+      |    return 0;
+      |}
+      |unsigned good_complement_shift(FILE *f)
+      |{
+      |    unsigned bits;
+      |    if (fscanf(f, "%u", &bits) != 1)
+      |        return 0;
+      |    if (bits > 32)
+      |        return 0;
+      |    if (bits && bits != 32)
+      |        return 0xffffffffu << (32 - bits);
+      |    return 0;
+      |}
       |""".stripMargin,
     "read_values.c"
   )
@@ -262,6 +297,15 @@ class ReadValueArithmeticTests extends DataFlowCodeToCpgSuite:
             Seq("bad_free_after_walk"),
             Seq("good_free_of_cursor")
           )
+      }
+      "bound a loop write by its own loop's test, not another loop's" in {
+          check("MS-BOUND-006", Nil, Seq("good_zero_the_tail"))
+      }
+      "keep a product computed at size_t quiet" in {
+          check("MS-INT-003", Nil, Seq("good_unsigned_macro_product"))
+      }
+      "read a truthiness test as excluding the complement shift's zero" in {
+          check("MS-SHIFT-001", Seq("bad_complement_shift"), Seq("good_complement_shift"))
       }
       "report the definite NULL dereference" in {
           check("MS-NULL-001", Seq("bad_definite_null"), Seq("good_loop_within_alloca"))

@@ -101,23 +101,30 @@ object ValueOriginPass:
         String
       ]]]())
 
-  /** the methods whose parameter origins are being computed on this thread: a caller's argument can
-    * be its own parameter, and the recursion must stop instead of chasing a call cycle
+  /** set while the callers' arguments are being classified: inheritance is ONE call deep, so a
+    * caller's own parameter answers caller-param there instead of asking its callers in turn. That
+    * keeps the walk linear in the call sites and the answer independent of the order methods are
+    * asked in
     */
-  private val paramOriginVisiting = new ThreadLocal[java.util.HashSet[Long]]:
-    override def initialValue() = new java.util.HashSet[Long]()
+  private val MaxInheritingSites = 8
+
+  private val inheriting = new ThreadLocal[Boolean]:
+    override def initialValue() = false
 
   private[taggers] def paramOriginsOf(method: Method): Map[Int, Set[String]] =
     val cached = paramOriginCache.get(method)
     if cached != null then cached
-    else if !paramOriginVisiting.get().add(method.id()) then Map.empty
     else
+      inheriting.set(true)
       val computed =
           try
               if method._refIn.collectFirst { case r: MethodRef => r }.isDefined then Map.empty
               else
-                val sites = method._callIn.collectAll[Call].l.distinct
-                if sites.isEmpty then Map.empty
+                // agreement is asked of a few callers only: a helper with many call sites
+                // (a template instantiated everywhere) almost never sees one origin from all
+                // of them, and walking each one's arguments is what costs
+                val sites = method._callIn.collectAll[Call].take(MaxInheritingSites + 1).l.distinct
+                if sites.isEmpty || sites.size > MaxInheritingSites then Map.empty
                 else
                   (1 to method.parameter.l.size).view.map { idx =>
                     val argOrigins = sites.flatMap { site =>
@@ -128,10 +135,10 @@ object ValueOriginPass:
                     }.toList
                     val allAgree = argOrigins.nonEmpty &&
                         argOrigins.forall(_.nonEmpty) &&
-                        argOrigins.map(_.mkString("+")).distinct.size == 1
+                        argOrigins.map(_.toList.sorted.mkString("+")).distinct.size == 1
                     idx -> Option.when(allAgree)(argOrigins.head).getOrElse(Set.empty)
                   }.toMap.filter(_._2.nonEmpty)
-          finally paramOriginVisiting.get().remove(method.id())
+          finally inheriting.set(false)
       paramOriginCache.put(method, computed)
       computed
     end if
@@ -197,7 +204,32 @@ object ValueOriginPass:
     * OverlayFacts.expansionExclusionOf, so the argument-to-argument edges of its enclosing call (a
     * guard's other operand, a memory call's sibling arguments) are not read as definitions.
     */
+  /** walkDefs answers, per graph, keyed by the identifier, the depth left and whether the walk is
+    * inside a callers' agreement: a large function re-asks the same identifiers from every
+    * expression that uses them, and without the memo the walk is exponential in the nesting
+    */
+  private val walkCache =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[AnyRef, java.util.concurrent.ConcurrentHashMap[
+          (Long, Int, Boolean),
+          Set[(String, String)]
+        ]]()
+      )
+
   private def walkDefs(start: Identifier, depth: Int): Set[(String, String)] =
+    val perGraph = walkCache.computeIfAbsent(
+      start.graph,
+      _ => new java.util.concurrent.ConcurrentHashMap()
+    )
+    val key = (start.id(), depth, inheriting.get())
+    val hit = perGraph.get(key)
+    if hit != null then hit
+    else
+      val computed = walkDefsUncached(start, depth)
+      perGraph.putIfAbsent(key, computed)
+      computed
+
+  private def walkDefsUncached(start: Identifier, depth: Int): Set[(String, String)] =
     val out                        = mutable.LinkedHashSet.empty[(String, String)]
     val seen                       = mutable.LinkedHashSet.empty[StoredNode]
     var frontier: List[StoredNode] = List(start)
@@ -226,7 +258,7 @@ object ValueOriginPass:
       hops -= 1
     end while
     out.toSet
-  end walkDefs
+  end walkDefsUncached
 
   /** Does the input call write input through this address? Every output of a scanning call does; a
     * reader writes input only through the argument the inventory names - `recvfrom`'s buffer, not
@@ -258,9 +290,11 @@ object ValueOriginPass:
         // fields keep the generic caller-param answer - the callers-bound questions the
         // rules ask are the refined form of exactly that case, and replacing them with
         // `constant` would silence what they conclude
-        val inherited = paramOriginsOf(p.method)
-            .getOrElse(p.index, Set.empty)
-            .filter(_ == OriginUntrustedRead)
+        val inherited =
+            if inheriting.get() then Set.empty[String]
+            else
+              paramOriginsOf(p.method).getOrElse(p.index, Set.empty)
+                  .filter(_ == OriginUntrustedRead)
         if inherited.nonEmpty then inherited.map(o => (o, s"param:${p.name}"))
         else Set((OriginCallerParam, p.name))
     case lit: Literal => Set((OriginConstant, lit.code))
