@@ -387,6 +387,142 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             cpg.tag.name("pkg:gem/parser@1.8.1").l shouldBe empty
           }
 
+      "reject the lobsters false families the case rule removed" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "mail", purl = "pkg:gem/mail@2.8.1"),
+                componentJson(name = "oauth", purl = "pkg:gem/oauth@1.1.1")
+              )
+          )(
+            Seq(
+              "logger.debug(\"mod mail delivered\")" -> "notice",
+              "session[\"/oauth/token\"]"            -> "token"
+            )
+          ) { cpg =>
+            // a `mod mail` string literal is not the mail gem, a `/oauth/token`
+            // URL is not the oauth gem: a Ruby constant must start uppercase
+            cpg.identifier.name("notice").tag.name.toSet shouldBe empty
+            cpg.identifier.name("token").tag.name.toSet shouldBe empty
+          }
+
+      "nest a hyphenated gem's name into a constant path" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "rack-attack", purl = "pkg:gem/rack-attack@6.7.0"),
+                componentJson(name = "pdf-reader", purl = "pkg:gem/pdf-reader@2.5.0")
+              )
+          )(
+            Seq(
+              "Rack::Attack.throttle(req)"        -> "req",
+              "Rack::Utils.escape(html)"          -> "html",
+              "PDF::Reader.new(pdf_stream).pages" -> "pages"
+            )
+          ) { cpg =>
+            // `rack-attack` nests as `Rack::Attack`: the gem name's `-` segments
+            // are the `::` chain of the constant
+            cpg.identifier.name("req").tag.name.toSet should contain(
+              "pkg:gem/rack-attack@6.7.0"
+            )
+            // Rack::Utils is rack's own namespace, not rack-attack's
+            cpg.identifier.name("html").tag.name.toSet shouldBe empty
+            cpg.identifier.name("pages").tag.name.toSet should contain(
+              "pkg:gem/pdf-reader@2.5.0"
+            )
+          }
+
+      "camelize underscore words within one constant segment" in
+          RubyFixture(components =
+              Seq(
+                componentJson(
+                  name = "unicode-display_width",
+                  purl = "pkg:gem/unicode-display_width@1.2.0"
+                ),
+                componentJson(
+                  name = "active_support",
+                  purl = "pkg:gem/active_support@8.0.0"
+                )
+              )
+          )(
+            Seq(
+              "Unicode::DisplayWidth.of(str)"                 -> "str",
+              "ActiveSupport::Notifications.subscribe(event)" -> "payload"
+            )
+          ) { cpg =>
+            // `_` joins the words of one segment; only `-` nests
+            cpg.identifier.name("str").tag.name.toSet should contain(
+              "pkg:gem/unicode-display_width@1.2.0"
+            )
+            cpg.identifier.name("payload").tag.name.toSet should contain(
+              "pkg:gem/active_support@8.0.0"
+            )
+          }
+
+      "give a parent gem only the calls its child gems do not claim" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "rack", purl = "pkg:gem/rack@3.2.7"),
+                componentJson(name = "rack-attack", purl = "pkg:gem/rack-attack@6.7.0")
+              )
+          )(
+            Seq(
+              "Rack::Attack.throttle(req)" -> "req",
+              "Rack::Utils.escape(html)"   -> "html"
+            )
+          ) { cpg =>
+            // the child's constant path shadows the parent's `::.*` suffix:
+            // Rack::Attack.throttle belongs to rack-attack alone
+            cpg.identifier.name("req").tag.name.toSet should contain(
+              "pkg:gem/rack-attack@6.7.0"
+            )
+            cpg.identifier.name("req").tag.name.toSet should not.contain(
+              "pkg:gem/rack@3.2.7"
+            )
+            // calls the child does not match stay with the parent
+            cpg.identifier.name("html").tag.name.toSet should contain(
+              "pkg:gem/rack@3.2.7"
+            )
+          }
+
+      "leave a parent gem the calls of a child that is not in the SBOM" in
+          RubyFixture(components =
+              Seq(componentJson(name = "rack", purl = "pkg:gem/rack@3.2.7"))
+          )(
+            Seq(
+              "Rack::Attack.throttle(req)" -> "req",
+              "Rack::Utils.escape(html)"   -> "html"
+            )
+          ) { cpg =>
+            // without rack-attack in the BOM nothing shadows the parent
+            cpg.identifier.name("req").tag.name.toSet should contain(
+              "pkg:gem/rack@3.2.7"
+            )
+            cpg.identifier.name("html").tag.name.toSet should contain(
+              "pkg:gem/rack@3.2.7"
+            )
+          }
+
+      "drop a trailing -ruby segment the code does not reference" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "sentry-ruby", purl = "pkg:gem/sentry-ruby@5.28.0"),
+                componentJson(name = "concurrent-ruby", purl = "pkg:gem/concurrent-ruby@1.3.8")
+              )
+          )(
+            Seq(
+              "Sentry.capture_message(msg)"       -> "msg",
+              "Concurrent::Promise.execute(task)" -> "task"
+            )
+          ) { cpg =>
+            // sentry-ruby defines Sentry, concurrent-ruby defines Concurrent:
+            // a trailing -ruby names no constant the code writes
+            cpg.identifier.name("msg").tag.name.toSet should contain(
+              "pkg:gem/sentry-ruby@5.28.0"
+            )
+            cpg.identifier.name("task").tag.name.toSet should contain(
+              "pkg:gem/concurrent-ruby@1.3.8"
+            )
+          }
+
       "give Ruby the component type under its namespaced tag only" in
           RubyFixture(components =
               Seq(componentJson(

@@ -38,9 +38,10 @@ class CdxPass(
                     )
                 val claimedForms         = mutable.Map[String, mutable.Set[String]]()
                 val unambiguousJvmGroups = jvmGroupsNamingOneComponent(components)
+                val gemPaths             = rubyGemConstantPaths(components)
 
                 components.foreach(
-                  processComponent(_, claimedForms, unambiguousJvmGroups, dstGraph)
+                  processComponent(_, claimedForms, unambiguousJvmGroups, gemPaths, dstGraph)
                 )
                 applyGenericJobs(dstGraph)
             case Left(error) =>
@@ -51,6 +52,7 @@ class CdxPass(
     comp: Json,
     claimedForms: mutable.Map[String, mutable.Set[String]],
     unambiguousJvmGroups: Set[String],
+    gemPaths: Set[List[String]],
     dstGraph: DiffGraphBuilder
   ): Unit =
     val cursor          = comp.hcursor
@@ -67,7 +69,7 @@ class CdxPass(
         processProperties(cursor, compPurl, compType, descTags, claimedForms, dstGraph)
     if !taggedFromProperties then
       processJvmPurl(compPurl, compType, descTags, claimedForms, unambiguousJvmGroups, dstGraph)
-      processGemPurl(compPurl, compType, descTags, claimedForms, dstGraph)
+      processGemPurl(compPurl, compType, descTags, claimedForms, gemPaths, dstGraph)
   end processComponent
 
   /** The versionless coordinate a purl names: its type, namespace and name. Version, qualifiers
@@ -175,26 +177,99 @@ class CdxPass(
 
   private def isJvmLanguage: Boolean = JvmLanguages.contains(language)
 
-  /** Tags a Ruby component by the module its purl names, for SBOMs that declare no namespaces.
+  /** Tags a Ruby component by the constant path its purl names, for SBOMs that declare no
+    * namespaces.
     *
     * The `Namespaces` property is the precise answer, but it only exists when the generator opened
     * the gems; an ordinary `cdxgen -t ruby` SBOM built from the lockfile carries none, and the Ruby
     * path was then a no-op: every component was read, none was tagged, and no reachables flow could
     * carry a purl (lobsters: 195 flows, 0 purls). A gem purl carries the gem name
-    * (`pkg:gem/bcrypt@3.1.22`), and the camelized name is the module root the application's calls
-    * actually reference.
+    * (`pkg:gem/rack-attack@6.7.0`), and the constant path the name conventionally nests is what the
+    * application's calls actually reference.
+    *
+    * When the SBOM also carries a gem whose name extends this one (`rack` and `rack-attack`), the
+    * child's constant path shadows the parent: `Rack::Attack.throttle` matches both gems' patterns,
+    * and the call belongs to the more specific gem. The pass computes every gem's path upfront - so
+    * the decision reads the whole SBOM, not the component order - and [[tagRuby]] leaves the
+    * shadowed calls to the child. When the child is absent, nothing is shadowed and the parent
+    * keeps every call its own pattern matches.
     */
   private def processGemPurl(
     purl: String,
     compType: String,
     descTags: List[String],
     claimedForms: mutable.Map[String, mutable.Set[String]],
+    gemPaths: Set[List[String]],
     dstGraph: DiffGraphBuilder
   ): Unit =
-      if language == Languages.RUBYSRC && purl.startsWith("pkg:gem/") then
-        val bpkg = normalizePackage(purl.stripPrefix("pkg:gem/").split("@").head)
-        if bpkg.nonEmpty && claim(bpkg, purl, claimedForms) then
-          tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
+      if language == Languages.RUBYSRC then
+        rubyGemName(purl).foreach { gem =>
+          val path = rubyConstantPath(gem)
+          val bpkg = rubyModulePattern(path)
+          if bpkg.nonEmpty && claim(bpkg, purl, claimedForms) then
+            val shadowers = gemPaths
+                .filter(child => child != path && child.take(path.length) == path)
+                .map(rubyModulePattern)
+                .toList
+            tagByLanguage(bpkg, purl, compType, descTags, dstGraph, shadowers = shadowers)
+        }
+
+  /** The gem name a `pkg:gem` purl carries, without version, platform qualifier or subpath. */
+  private def rubyGemName(purl: String): Option[String] =
+      Option.when(purl.startsWith("pkg:gem/"))(
+        purl.stripPrefix("pkg:gem/").split("[@?#]").head
+      ).filter(_.nonEmpty)
+
+  /** The constant path every `pkg:gem` component in this SBOM conventionally names, e.g.
+    * `pkg:gem/rack-attack` -> `Rack::Attack`. Read once per SBOM, so a child gem shadows its parent
+    * whichever component comes first.
+    */
+  private def rubyGemConstantPaths(components: Vector[Json]): Set[List[String]] =
+      components
+          .flatMap(c => rubyGemName(c.hcursor.downField("purl").as[String].getOrElse("")))
+          .map(rubyConstantPath)
+          .toSet
+
+  /** The constant path a gem name conventionally nests: `-` separates `::` segments and `_` joins
+    * the words within one (`net-http` -> `Net::HTTP`, `rack-attack` -> `Rack::Attack`,
+    * `active_support` -> `ActiveSupport`, `unicode-display_width` -> `Unicode::DisplayWidth`).
+    *
+    * A trailing `-ruby`/`-rb` segment is dropped: it names no constant the code references -
+    * `sentry-ruby` and `concurrent-ruby` define `Sentry` and `Concurrent`. Measured on lobsters: 4
+    * of the 52 hyphenated gems are referenced under this convention path, and `Sentry` is the only
+    * reference the dropped segment reaches (6 in config/initializers/telebugs.rb); `Concurrent` is
+    * not referenced at all, so the drop adds no false match there. Two referenced gems stay
+    * unmatched: `rack-mini-profiler` writes `Rack::MiniProfiler` (fused tail) and `ruby-vips`
+    * writes `Vips` - both listed in the T15 Part 2 report rather than turned into heuristics on one
+    * corpus each.
+    */
+  private def rubyConstantPath(gem: String): List[String] =
+    val segments = gem.split("-").toList
+    val kept =
+        if segments.length > 1 && Set("ruby", "rb").contains(segments.last) then
+          segments.dropRight(
+            1
+          )
+        else segments
+    kept.map(_.split("_").map(word =>
+        if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1)
+    ).mkString)
+
+  /** The full-name pattern for a constant path: each segment camelized with only its first letter
+    * case-sensitive (a Ruby constant must start uppercase, the rest varies - `SecureRandom`,
+    * `JSON`), segments chained with `::`, delimited the way Ruby delimits constants - a `::` chain,
+    * a method dot, any other non-word character (underscore included, so `mod_mail` is not `mail`),
+    * or the ends of the snippet.
+    */
+  private def rubyModulePattern(path: List[String]): String =
+      if path.isEmpty then ""
+      else
+        val constants = path.map { segment =>
+            if segment.isEmpty then segment
+            else s"${segment.head}(?i:${segment.drop(1)})"
+        }
+        "((.*[^A-Za-z0-9_:])|)(::)?" + constants.mkString("::") +
+            "(::.*|\\..*|[^A-Za-z0-9_].*)?"
 
   private def processPypiComponent(
     cursor: HCursor,
@@ -313,22 +388,29 @@ class CdxPass(
     compType: String,
     descTags: List[String],
     dstGraph: DiffGraphBuilder,
-    tagCallMethods: Boolean = false
+    tagCallMethods: Boolean = false,
+    shadowers: List[String] = Nil
   ): Unit =
       // `tagCallMethods` is only set by the pypi path, whose language always lands in tagGeneric.
       language match
         case lang if lang == Languages.RUBYSRC =>
-            tagRuby(bpkg, purl, dstGraph)
+            tagRuby(bpkg, purl, shadowers, dstGraph)
         case lang if lang == Languages.NEWC || lang == Languages.C =>
             tagCpp(bpkg, purl, compType, descTags, dstGraph)
         case _ =>
             tagGeneric(bpkg, purl, compType, descTags, tagCallMethods)
   end tagByLanguage
 
-  /** Tags the arguments of every call whose code names the component's module with the component's
-    * exact purl. reachables' Ruby query (`collectRubySpecificFlows`) sources from parameters in
-    * routes, controller and model files, and the purl travels with the flow when its path crosses
-    * one of these arguments.
+  /** Tags the arguments of every call whose code names the component's constant path with the
+    * component's exact purl. reachables' Ruby query (`collectRubySpecificFlows`) sources from
+    * parameters in routes, controller and model files, and the purl travels with the flow when its
+    * path crosses one of these arguments.
+    *
+    * Calls a child gem's constant path also matches (`Rack::Attack.throttle` matches the `rack`
+    * pattern's `::.*` suffix just as it matches `rack-attack`) are left to the child: the
+    * [[processGemPurl shadowers]] are matched here, so a parent purl lands only where no child
+    * claims. When the child gem is absent from the SBOM the shadower list is empty and the parent
+    * keeps every call its own pattern matches.
     *
     * The former `framework-input` / `<compType>-input` / `<compType>-value` tags are gone: they
     * derived request-data sources from the component's type - the framework-as-source problem
@@ -340,9 +422,14 @@ class CdxPass(
   private def tagRuby(
     bpkg: String,
     purl: String,
+    shadowers: List[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
-      atom.call.code(bpkg).argument.newTagNode(purl).store()(using dstGraph)
+    val shadowerPatterns = shadowers.map(_.r)
+    val owned = atom.call.code(bpkg).filterNot { call =>
+        shadowerPatterns.exists(_.matches(call.code))
+    }
+    owned.argument.newTagNode(purl).store()(using dstGraph)
 
   private def tagCpp(
     bpkg: String,
@@ -483,30 +570,29 @@ class CdxPass(
     if parts.length > 1 then s"${parts.mkString("\\.")}.*"
     else s"${parts.head}\\..*"
 
-  /** The full-name pattern shape for Ruby: the constant the code writes for the module
-    * (`securerandom` -> `SecureRandom`, `json` -> `JSON.parse`), delimited the way Ruby delimits
-    * constants - a `::` chain, a method dot, any other non-word character (underscore included, so
-    * `mod_mail` is not `mail`), or the ends of the snippet. Only the constant's first letter is
-    * case-sensitive, because a Ruby constant must start uppercase while the rest of the name varies
-    * (`SecureRandom`, `ActiveRecord`); that is what separates the gem from words that merely
-    * contain it - Rails' `format.json` responder label, a `mod mail` string literal and an
-    * `/oauth/token` URL are not the json, mail and oauth gems, and on lobsters' flows they made up
-    * most of those purls before the case rule. The former `.*(::)?<Name>(::).*` form required a
-    * lowercase name followed by `::`, which no real call site satisfies - on lobsters all 186 gem
-    * components matched zero calls, so no flow could carry a purl.
+  /** The full-name pattern shape for Ruby: the constant path the code writes for the module
+    * (`securerandom` -> `SecureRandom`, `json` -> `JSON.parse`, a `Namespaces` value `Net::HTTP` ->
+    * `Net::HTTP`), delimited the way Ruby delimits constants - a `::` chain, a method dot, any
+    * other non-word character (underscore included, so `mod_mail` is not `mail`), or the ends of
+    * the snippet. Only each constant's first letter is case-sensitive, because a Ruby constant must
+    * start uppercase while the rest of the name varies (`SecureRandom`, `ActiveRecord`); that is
+    * what separates the gem from words that merely contain it - Rails' `format.json` responder
+    * label, a `mod mail` string literal and an `/oauth/token` URL are not the json, mail and oauth
+    * gems, and on lobsters' flows they made up most of those purls before the case rule. The former
+    * `.*(::)?<Name>(::).*` form required a lowercase name followed by `::`, which no real call site
+    * satisfies - on lobsters all 186 gem components matched zero calls, so no flow could carry a
+    * purl. Gem purls do not come through here: [[rubyConstantPath]] nests their `-` segments, and
+    * [[rubyModulePattern]] builds the pattern for both paths.
     */
   private def toRubyModuleForm(str: String): String =
     if str.isEmpty then return str
-    val head = str.split("::").head
-    val camel = head
-        .split("[-_]")
-        .map(word => if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1))
-        .mkString
-    // Ruby constants start with an uppercase letter; the rest matches either case
-    // (`SecureRandom`, `ActiveRecord`), so only the first letter is case-sensitive.
-    val rest     = camel.drop(1)
-    val constant = if rest.isEmpty then camel else s"${camel.head}(?i:$rest)"
-    "((.*[^A-Za-z0-9_:])|)(::)?" + constant + "(::.*|\\..*|[^A-Za-z0-9_].*)?"
+    rubyModulePattern(
+      str.split("::").toList.map(
+        _.split("_").map(word =>
+            if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1)
+        ).mkString
+      )
+    )
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 end CdxPass
