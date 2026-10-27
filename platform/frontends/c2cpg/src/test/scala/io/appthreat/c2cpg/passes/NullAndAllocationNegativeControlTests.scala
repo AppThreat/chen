@@ -283,6 +283,85 @@ class NullAndAllocationNegativeControlTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |    return 0;
     |}
+    |
+    |/* a list cursor copied into prev is not the NULL prev started as */
+    |void good_list_insert(struct node **head, struct node *item)
+    |{
+    |    struct node *prev = NULL, *curr = *head;
+    |    while (curr != NULL && curr->v < item->v) {
+    |        prev = curr;
+    |        curr = curr->next;
+    |    }
+    |    item->next = curr;
+    |    if (*head == curr)
+    |        *head = item;
+    |    else
+    |        prev->next = item;
+    |}
+    |
+    |/* storage that is either a frame array or a heap block, released behind its own test */
+    |int good_stack_or_heap(int n)
+    |{
+    |    int stack[16];
+    |    int *storage;
+    |    if (n < 16)
+    |        storage = stack;
+    |    else
+    |        storage = malloc(n * sizeof(*storage));
+    |    if (storage == NULL)
+    |        return 0;
+    |    storage[0] = n;
+    |    if (storage != stack)
+    |        free(storage);
+    |    return 1;
+    |}
+    |
+    |/* freed, then rebound to what an unknown producer returns: the release is of the old block */
+    |char *fetch_buffer(int n);
+    |int good_rebound_after_free(int n)
+    |{
+    |    char *buf = malloc(16);
+    |    if (buf == NULL)
+    |        return -1;
+    |    buf[0] = 0;
+    |    free(buf);
+    |    buf = fetch_buffer(n);
+    |    if (buf == NULL)
+    |        return -1;
+    |    buf[0] = 1;
+    |    return buf[1];
+    |}
+    |
+    |/* a do-while(0) block runs once: its false condition never re-enters the body */
+    |int good_free_in_do_while_zero(struct node *head)
+    |{
+    |    struct node *curr;
+    |    char *list = malloc(16);
+    |    if (list == NULL)
+    |        return -1;
+    |    do {
+    |        for (curr = head; curr != NULL; curr = curr->next) {
+    |            if (curr->v < 0) {
+    |                free(list);
+    |                return -1;
+    |            }
+    |        }
+    |        free(list);
+    |    } while (0);
+    |    return 0;
+    |}
+    |
+    |/* a walked pointer rebound to a fresh copy before the free */
+    |int good_walk_then_dup(char *kv)
+    |{
+    |    while (*kv == ' ')
+    |        kv++;
+    |    kv = strdup(kv);
+    |    if (kv == NULL)
+    |        return -1;
+    |    free(kv);
+    |    return 0;
+    |}
     |""".stripMargin,
     "null_alloc_controls.c"
   )
@@ -366,5 +445,26 @@ class NullAndAllocationNegativeControlTests extends DataFlowCodeToCpgSuite:
         // derefs-param:1 is honest (`*out` loads through the slot); no allocator claim
         effectsOf("alloc_into_param") shouldBe Set("effect:derefs-param:1")
         findingsIn("good_int_returning_allocator") shouldBe empty
+    }
+    "not claim a definite null for a list cursor copied into prev" in {
+        nullUsesIn("good_list_insert").filter(
+          _.startsWith(AllocationStatePass.NullDefinite)
+        ) shouldBe empty
+    }
+    "not report a frame array release behind the author's own test" in {
+        findingsIn("good_stack_or_heap").filter(
+          _.contains(MemorySafetyFindingPass.RuleNonHeapFree)
+        ) shouldBe empty
+    }
+    "not keep a freed state across a rebinding to an unknown producer" in {
+        findingsIn("good_rebound_after_free") shouldBe empty
+    }
+    "not follow a do-while(0) back edge into a second free" in {
+        findingsIn("good_free_in_do_while_zero") shouldBe empty
+    }
+    "not report a walked pointer rebound before the free" in {
+        findingsIn("good_walk_then_dup").filter(
+          _.contains(MemorySafetyFindingPass.RuleOffsetFree)
+        ) shouldBe empty
     }
 end NullAndAllocationNegativeControlTests

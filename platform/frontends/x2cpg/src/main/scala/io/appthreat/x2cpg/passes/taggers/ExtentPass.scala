@@ -615,19 +615,24 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     case _ => None
 
   private def extentOfField(fieldAccess: Call): Option[(String, List[StoredNode])] =
-      OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>
-          Option.when(roomlessTrailingMember(fieldAccess, member))(
-            (s"$ValueConst:0", List(member))
-          ).orElse(flexibleRoomOf(fieldAccess, member).map(v => (v, List(member))))
-              .orElse(arrayExtent(member.typeFullName)
-                  // GNU's zero-length trailing array is the flexible member written before C99: its
-                  // storage is what the allocation adds past the record, not a declared capacity
-                  .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
-                  .map(n => (s"$ValueConst:$n", List(member)))
-                  .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
-                  // a pointer member's capacity is wherever its allocation is
-                  .orElse(memberExtents.get(member).map(v => (v, List(member)))))
-      }
+    // the access's own type, when the frontend gives it as an array, names this member's bound
+    // exactly. The member lookup goes by type name, and every per-function anonymous union of a
+    // file shares one (`<unnamed>`): bn_nist.c's 192-bit union lent its `bn[3]` to the 256-bit one.
+    // It corrects a member the lookup found; it never gives an extent to one the lookup missed
+    val ownCount = arrayExtent(fieldAccess.typeFullName).filter(_ > 0)
+    OverlayFacts.memberRefOf(atom, fieldAccess).flatMap { member =>
+        Option.when(roomlessTrailingMember(fieldAccess, member))(
+          (s"$ValueConst:0", List(member))
+        ).orElse(flexibleRoomOf(fieldAccess, member).map(v => (v, List(member))))
+            .orElse(ownCount.orElse(arrayExtent(member.typeFullName))
+                // GNU's zero-length trailing array is the flexible member written before C99: its
+                // storage is what the allocation adds past the record, not a declared capacity
+                .filterNot(n => n == 0 && OverlayFacts.isTrailingMember(member))
+                .map(n => (s"$ValueConst:$n", List(member)))
+                .orElse(siblingLengthOf(member).map(sib => (s"$ValueField:$sib", List(member))))
+                // a pointer member's capacity is wherever its allocation is
+                .orElse(memberExtents.get(member).map(v => (v, List(member)))))
+    }
 
   /** A flexible array member reached through a pointer whose every allocation is the record plus a
     * size: `malloc(sizeof(*m) + n)` leaves the member the n bytes past the record (C99 6.7.2.1p18 -

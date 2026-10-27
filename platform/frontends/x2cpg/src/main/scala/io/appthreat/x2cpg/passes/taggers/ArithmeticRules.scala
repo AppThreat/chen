@@ -388,14 +388,32 @@ object ArithmeticRules:
                   val guarded   = ops.exists(operandKeptInType(c, _))
                   val opndTypes = ops.map(operandComputationType)
                   val width     = math.max(opndTypes.map(_._1).max, 32)
-                  val unsigned  = opndTypes.exists((w, u) => u && w == width)
+                  // the frontend's own type for the computation counts too: a macro's
+                  // `(size_t)1 << 60` operand may reach here untyped while the product is size_t
+                  val unsigned = opndTypes.exists((w, u) => u && w == width) ||
+                      isUnsignedIntegral(c.typeFullName)
                   exact
                       .filter(v => !unsigned && leavesSignedComputation(v, width))
                       .filter(_ => !guarded)
                       .map(_ => (c, true))
                 else
+                  // the input arm asks the same question the definite arm does: a wrap of a
+                  // SIGNED computation (an unsigned one is modular arithmetic the language
+                  // defines), and one an operand masked into a small range cannot reach
+                  val opndTypes = ops.map(operandComputationType)
+                  val width     = math.max(opndTypes.map(_._1).max, 32)
+                  val unsigned = opndTypes.exists((w, u) => u && w == width) ||
+                      isUnsignedIntegral(c.typeFullName)
+                  val masked = ops.exists(o =>
+                      withoutCasts(o) match
+                        case and: Call if and.name == "<operator>.and" =>
+                            and.argument.l.collect { case e: Expression => e }
+                                .flatMap(IndexRange.literal)
+                                .exists(m => m >= 0 && m < (BigInt(1) << 30))
+                        case _ => false
+                  )
                   ops.find(opnd =>
-                      inputFed(opnd) && !lengthDerived(opnd)
+                      !unsigned && !masked && inputFed(opnd) && !lengthDerived(opnd)
                   ).filter { opnd =>
                       !operandKeptInType(c, opnd) && !widenedBeyond(c, keptIn)
                   }.map(opnd => (c, false))
@@ -472,7 +490,23 @@ object ArithmeticRules:
             }.flatMap(promotedTypeOf)
           )
       case other =>
-          ofType(String.valueOf(other.property("TYPE_FULL_NAME")).trim)
+          ofType(String.valueOf(other.property("TYPE_FULL_NAME")).trim).orElse(other match
+            // an operator the frontend left untyped takes its operands' computation: a shift
+            // computes in its left operand's type (`(size_t)1 << 60` is size_t), the binary
+            // arithmetic in the usual conversion of both
+            case c: Call
+                if c.name == "<operator>.shiftLeft" || c.name == "<operator>.arithmeticShiftRight" =>
+                c.argumentOption(1).collect { case e: Expression => e }.flatMap(promotedTypeOf)
+            case c: Call if ArithOps.contains(c.name) =>
+                val parts = operandsOf(c).flatMap(promotedTypeOf)
+                Option.when(parts.nonEmpty) {
+                    val w = parts.map(_._1).max
+                    (w, parts.exists((pw, pu) => pu && pw == w))
+                }
+            case _ => None
+          )
+    end match
+  end promotedTypeOf
 
   /** The computation an operand takes part in, with the literal ladder as the fallback: a constant
     * the frontends left untyped (`ULONG_MAX`'s macro body, its node typed ANY) keeps the signedness
