@@ -339,7 +339,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
             .filter(c =>
                 c != second && (tagValues(c, MemoryApiPass.TagFree).nonEmpty) &&
                     c.lineNumber.exists(_.toInt < secondLine) &&
-                    c.argumentOption(1).exists(a => OverlayFacts.variableKey(a).contains(key))
+                    // the same pointer expression: `free(elem[i])` shares `elem`'s variable key and
+                    // releases something else
+                    c.argumentOption(1).exists(a =>
+                        OverlayFacts.variableKey(a).contains(key) && stripCasts(a).code ==
+                            stripCasts(arg).code
+                    )
             )
             .sortBy(c => c.lineNumber.map(_.toInt).getOrElse(0))
             .lastOption
@@ -4180,7 +4185,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 v.stripPrefix(s"${ExtentPass.ValueConst}:").toLongOption.flatMap(n =>
                     // a byte array counts bytes; any other element type converts through the
                     // size the frontend computed for the declared object
-                    if hasByteElements(dst) then Some(n) else elementBytes(dst).map(_ * n)
+                    if hasByteElements(dst) then Some(n)
+                    else elementBytes(dst).orElse(pointeeBytesOf(dst)).map(_ * n)
                 )
             case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
                 val referenced = v.stripPrefix(s"${ExtentPass.ValueAlloc}:").toLongOption
@@ -4418,6 +4424,38 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 if attackerCount
               do record(idx, rule)
           }
+      // the largest value a loop bound can take: a literal, or a variable defined as the length of a
+      // string held in an object of known extent (`destLen = strlen(dest)` over `char dest[100]`
+      // is at most 99 - the terminator takes the last element)
+      def boundMaximum(bound: Expression, depth: Int = 2): Option[BigInt] =
+        IndexRange.literal(bound).orElse {
+            stripCasts(bound) match
+              // a term and a constant: `sourceLen + 1` reaches the term's maximum plus one
+              case c: Call if c.name == "<operator>.addition" && depth > 0 =>
+                  c.argument.l.collect { case e: Expression => e } match
+                    case List(l, r) =>
+                        boundMaximum(l, depth - 1).zip(IndexRange.literal(r)).map(_ + _).orElse(
+                          boundMaximum(r, depth - 1).zip(IndexRange.literal(l)).map(_ + _)
+                        )
+                    case _ => None
+              case i: Identifier =>
+                  val defs = OverlayFacts.reachingDefsIn(i)
+                      .collect { case d: Identifier if d.name == i.name => d }
+                  val rhss = defs.flatMap(_._astIn.collectFirst {
+                      case a: Call if a.name == "<operator>.assignment" => a
+                  }).flatMap(_.argumentOption(2))
+                  if defs.isEmpty || rhss.size != defs.size then None
+                  else
+                    val maxima = rhss.map {
+                        case c: Call if isStrlen(c) || c.name == "wcslen" =>
+                            c.argumentOption(1).collect { case e: Expression => e }
+                                .flatMap(declaredOneDimCount).map(_ - 1)
+                        case other => IndexRange.literal(other)
+                    }
+                    if maxima.forall(_.isDefined) then Some(maxima.flatten.max) else None
+              case _ => None
+        }
+
       // arm 4: a CONSTANT loop bound the base cannot hold - `for (i = 0; i < 100; i++)
       // data[i] = source[i]` into `new char[50]`, `alloca(50)`, `malloc(10)` for ten ints (the
       // CWE-131 element-size mismatch), and the CWE-193 off-by-one `i <= n` over an array of n.
@@ -4454,9 +4492,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                               // the finding belongs to the LOOP statement, where the bound is
                               // written and where both suites mark the flaw - not to the access
                               // the bound admits
-                              IndexRange.literal(bound).foreach { k =>
+                              boundMaximum(bound).foreach { k =>
                                   if (inclusive && k >= capElems) || (!inclusive && k > capElems)
-                                  then record(cond, rule)
+                                  then
+                                    // a READ the bound carries past the extent is an over-read at
+                                    // the read, where the suites mark it; a write's flaw is the
+                                    // loop statement
+                                    if ruleIdFor(access) == RuleIndexRead then
+                                      record(idx, RuleIndexRead)
+                                    else record(cond, rule)
                               }
                               // the CWE-193 VLA shape: the loop bound is the array's own bound
                               // variable and the comparison is inclusive - i reaches n on a[n]

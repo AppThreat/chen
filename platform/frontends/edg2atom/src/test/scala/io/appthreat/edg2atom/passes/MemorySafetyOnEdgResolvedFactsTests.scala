@@ -30,6 +30,7 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |#include <cstdio>
       |#include <cstdlib>
       |#include <cstring>
+      |#include <cwchar>
       |#include <string>
       |
       |static void copy_into(char *dst, const char *src) {
@@ -125,6 +126,81 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    delete[] intPointer;
       |}
       |
+      |void bad_overread_alias_strlen()
+      |{
+      |    char *data;
+      |    char small[50];
+      |    char big[100];
+      |    char dest[100];
+      |    memset(small, 'A', 49);
+      |    small[49] = '\0';
+      |    memset(big, 'C', 99);
+      |    big[99] = '\0';
+      |    data = small;
+      |    size_t i, destLen;
+      |    memset(dest, 'C', 99);
+      |    dest[99] = '\0';
+      |    destLen = strlen(dest);
+      |    for (i = 0; i < destLen; i++)
+      |    {
+      |        dest[i] = data[i];
+      |    }
+      |}
+      |
+      |void good_overread_alias_strlen()
+      |{
+      |    char *data;
+      |    char big[100];
+      |    char dest[100];
+      |    memset(big, 'A', 99);
+      |    big[99] = '\0';
+      |    data = big;
+      |    size_t i, destLen;
+      |    memset(dest, 'C', 99);
+      |    dest[99] = '\0';
+      |    destLen = strlen(dest);
+      |    for (i = 0; i < destLen; i++)
+      |    {
+      |        dest[i] = data[i];
+      |    }
+      |}
+      |
+      |void bad_overread_alias_wcslen()
+      |{
+      |    wchar_t *data;
+      |    wchar_t small[50];
+      |    wchar_t dest[100];
+      |    wmemset(small, L'A', 49);
+      |    small[49] = L'\0';
+      |    data = small;
+      |    size_t i, destLen;
+      |    wmemset(dest, L'C', 99);
+      |    dest[99] = L'\0';
+      |    destLen = wcslen(dest);
+      |    for (i = 0; i < destLen; i++)
+      |    {
+      |        dest[i] = data[i];
+      |    }
+      |}
+      |
+      |void good_overread_alias_wcslen()
+      |{
+      |    wchar_t *data;
+      |    wchar_t big[100];
+      |    wchar_t dest[100];
+      |    wmemset(big, L'A', 99);
+      |    big[99] = L'\0';
+      |    data = big;
+      |    size_t i, destLen;
+      |    wmemset(dest, L'C', 99);
+      |    dest[99] = L'\0';
+      |    destLen = wcslen(dest);
+      |    for (i = 0; i < destLen; i++)
+      |    {
+      |        dest[i] = data[i];
+      |    }
+      |}
+
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -198,6 +274,15 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
         }
         "overrun a new[] sized by overflowed arithmetic at the write" in {
             findingsIn("bad_new_overflowed_bytes") should contain("MS-BOUND-007")
+        }
+    }
+
+    "a loop bounded by a string's length over a pointer to a smaller buffer" should {
+        "report the read of the smaller buffer and stay silent on the larger" in {
+            findingsIn("bad_overread_alias_strlen") should contain("MS-BOUND-003")
+            findingsIn("good_overread_alias_strlen") should not contain "MS-BOUND-003"
+            findingsIn("bad_overread_alias_wcslen") should contain("MS-BOUND-003")
+            findingsIn("good_overread_alias_wcslen") should not contain "MS-BOUND-003"
         }
     }
 

@@ -72,6 +72,13 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |void good_free_elements_then_container(char **elem, unsigned long n)
+    |{
+    |    unsigned long i;
+    |    for (i = 0; i < n; i++) free(elem[i]);
+    |    free(elem);
+    |}
+    |
     |void good_free_once(void)
     |{
     |    char *p = (char *)malloc(100);
@@ -313,6 +320,7 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
             .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
         sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
         findingsIn("good_free_once") should not contain "MS-ALLOC-001"
+        findingsIn("good_free_elements_then_container") should not contain "MS-ALLOC-001"
     }
     "stay silent when the walk is over a copy and the original is freed" in {
         findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"

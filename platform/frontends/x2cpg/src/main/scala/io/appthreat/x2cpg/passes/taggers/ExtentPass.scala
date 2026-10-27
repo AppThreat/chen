@@ -577,15 +577,11 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                 .find(IndexRange.literal(_).isDefined)
                 .map(e => s"$ValueAlloc:${e.id}")
         }.orElse {
-            // a count the program computes (`new char[dataBytes]`): the first argument after the
-            // element type is the count whatever its value, a variable or an arithmetic operator
-            newCall.argument.l.collect { case e: Expression => e }
+            // a count held in a variable (`new char[dataBytes]`): the first argument after the
+            // element type. An arithmetic count (`new char[size + 5]`) stays unknown - the offset
+            // rules would read its sum as a capacity they cannot compare
+            newCall.argument.l.collect { case e: Identifier => e }
                 .find(a => a.argumentIndex == 2)
-                .filter {
-                    case _: Identifier => true
-                    case c: Call       => c.name.startsWith("<operator>.")
-                    case _             => false
-                }
                 .map(e => s"$ValueAlloc:${e.id}")
         }
 
