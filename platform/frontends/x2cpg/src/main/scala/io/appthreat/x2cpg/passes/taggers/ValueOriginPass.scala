@@ -96,10 +96,19 @@ object ValueOriginPass:
     * function down - variant 41's shape, and the two-file variant 61 the same). Name-level like
     * every summary: same-named methods that disagree carry nothing.
     */
+  // per graph: node references compare by id alone, so a cache keyed by the node would hand one
+  // graph's answer to another graph's method with the same id
   private val paramOriginCache =
-      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Method, Map[Int, Set[
-        String
-      ]]]())
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[
+        AnyRef,
+        java.util.concurrent.ConcurrentHashMap[Long, Map[Int, Set[String]]]
+      ]())
+
+  private def paramOriginsOfGraph(method: Method) =
+      paramOriginCache.computeIfAbsent(
+        method.graph,
+        _ => new java.util.concurrent.ConcurrentHashMap()
+      )
 
   /** set while the callers' arguments are being classified: inheritance is ONE call deep, so a
     * caller's own parameter answers caller-param there instead of asking its callers in turn. That
@@ -112,7 +121,7 @@ object ValueOriginPass:
     override def initialValue() = false
 
   private[taggers] def paramOriginsOf(method: Method): Map[Int, Set[String]] =
-    val cached = paramOriginCache.get(method)
+    val cached = paramOriginsOfGraph(method).get(method.id())
     if cached != null then cached
     else
       inheriting.set(true)
@@ -139,7 +148,7 @@ object ValueOriginPass:
                     idx -> Option.when(allAgree)(argOrigins.head).getOrElse(Set.empty)
                   }.toMap.filter(_._2.nonEmpty)
           finally inheriting.set(false)
-      paramOriginCache.put(method, computed)
+      paramOriginsOfGraph(method).put(method.id(), computed)
       computed
     end if
   end paramOriginsOf
@@ -407,13 +416,16 @@ object ValueOriginPass:
     * per method, since every call on an origin walk asks.
     */
   private val fillCache =
-      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Method, List[(
-        Call,
-        Set[Long]
-      )]]())
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap[
+        AnyRef,
+        java.util.concurrent.ConcurrentHashMap[Long, List[(Call, Set[Long])]]
+      ]())
+
+  private def fillsOfGraph(method: Method) =
+      fillCache.computeIfAbsent(method.graph, _ => new java.util.concurrent.ConcurrentHashMap())
 
   private def fillsOf(method: Method): List[(Call, Set[Long])] =
-    val cached = fillCache.get(method)
+    val cached = fillsOfGraph(method).get(method.id())
     if cached != null then cached
     else
       val computed = method.ast.isCall.l
@@ -426,7 +438,7 @@ object ValueOriginPass:
                   .toSet
           )
           .filter(_._2.nonEmpty)
-      fillCache.put(method, computed)
+      fillsOfGraph(method).put(method.id(), computed)
       computed
 
   /** An argument that hands the callee bytes rather than a number: a pointer or array value. */

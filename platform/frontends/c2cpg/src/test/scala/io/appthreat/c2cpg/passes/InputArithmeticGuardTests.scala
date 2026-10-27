@@ -15,6 +15,8 @@ class InputArithmeticGuardTests extends DataFlowCodeToCpgSuite:
     """
     |#include <stdio.h>
     |#include <stdlib.h>
+    |#include <string.h>
+    |#include <wchar.h>
 
 |int bad_input_sum(void)
 |{
@@ -105,6 +107,80 @@ class InputArithmeticGuardTests extends DataFlowCodeToCpgSuite:
 |    int core = ((x >> 4) & 0x3fff) + 1;
 |    return core + 4;
 |}
+|void bad_overread_alias_strlen(void)
+|{
+|    char *data;
+|    char small[50];
+|    char big[100];
+|    char dest[100];
+|    memset(small, 'A', 49);
+|    small[49] = '\0';
+|    memset(big, 'C', 99);
+|    big[99] = '\0';
+|    data = small;
+|    size_t i, destLen;
+|    memset(dest, 'C', 99);
+|    dest[99] = '\0';
+|    destLen = strlen(dest);
+|    for (i = 0; i < destLen; i++)
+|    {
+|        dest[i] = data[i];
+|    }
+|}
+|
+|void good_overread_alias_strlen(void)
+|{
+|    char *data;
+|    char big[100];
+|    char dest[100];
+|    memset(big, 'A', 99);
+|    big[99] = '\0';
+|    data = big;
+|    size_t i, destLen;
+|    memset(dest, 'C', 99);
+|    dest[99] = '\0';
+|    destLen = strlen(dest);
+|    for (i = 0; i < destLen; i++)
+|    {
+|        dest[i] = data[i];
+|    }
+|}
+|
+|void bad_overread_alias_wcslen(void)
+|{
+|    wchar_t *data;
+|    wchar_t small[50];
+|    wchar_t dest[100];
+|    wmemset(small, L'A', 49);
+|    small[49] = L'\0';
+|    data = small;
+|    size_t i, destLen;
+|    wmemset(dest, L'C', 99);
+|    dest[99] = L'\0';
+|    destLen = wcslen(dest);
+|    for (i = 0; i < destLen; i++)
+|    {
+|        dest[i] = data[i];
+|    }
+|}
+|
+|void good_overread_alias_wcslen(void)
+|{
+|    wchar_t *data;
+|    wchar_t big[100];
+|    wchar_t dest[100];
+|    wmemset(big, L'A', 99);
+|    big[99] = L'\0';
+|    data = big;
+|    size_t i, destLen;
+|    wmemset(dest, L'C', 99);
+|    dest[99] = L'\0';
+|    destLen = wcslen(dest);
+|    for (i = 0; i < destLen; i++)
+|    {
+|        dest[i] = data[i];
+|    }
+|}
     |""".stripMargin,
     "input_arith.c"
   )
@@ -145,5 +221,19 @@ class InputArithmeticGuardTests extends DataFlowCodeToCpgSuite:
     }
     "stand down on a masked field plus a small constant" in {
         findingsIn("good_masked_field_sum") should not contain "MS-INT-003"
+    }
+
+  "a loop bounded by a string's length over a pointer to a smaller buffer" should:
+    "report the read of the smaller buffer (char)" in {
+        findingsIn("bad_overread_alias_strlen") should contain("MS-BOUND-003")
+    }
+    "stay silent when the pointer names a buffer as large as the string's (char)" in {
+        findingsIn("good_overread_alias_strlen") should not contain "MS-BOUND-003"
+    }
+    "report the read of the smaller buffer (wchar_t)" in {
+        findingsIn("bad_overread_alias_wcslen") should contain("MS-BOUND-003")
+    }
+    "stay silent when the pointer names a buffer as large as the string's (wchar_t)" in {
+        findingsIn("good_overread_alias_wcslen") should not contain "MS-BOUND-003"
     }
 end InputArithmeticGuardTests
