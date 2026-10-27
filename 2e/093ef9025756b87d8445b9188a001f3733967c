@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InputArithmeticGuardTests.scala
+  s_7e900a9e3d6d42::t_3ea19ae7dddd55 149-182
+  s_7e900a9e3d6d42::t_e2ac6fe9dbb19b 18-19,109-148,225-238
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_7e900a9e3d6d42::t_3ea19ae7dddd55 99-100,102-111,124,151,419-425,428,441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e093ef9025756b87d8445b9188a001f3733967c",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
