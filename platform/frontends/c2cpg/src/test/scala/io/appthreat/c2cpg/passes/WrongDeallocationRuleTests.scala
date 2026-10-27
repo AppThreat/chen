@@ -43,6 +43,26 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |/* the Juliet CWE-761 shape: the walk moves the pointer, the free follows the walk */
+    |void bad_walk_then_free(char *data)
+    |{
+    |    for (; *data != '\0'; data++)
+    |    {
+    |        if (*data == 'x') break;
+    |    }
+    |    free(data);
+    |}
+    |
+    |void good_walk_a_copy(char *data)
+    |{
+    |    char *cursor = data;
+    |    for (; *cursor != '\0'; cursor++)
+    |    {
+    |        if (*cursor == 'x') break;
+    |    }
+    |    free(data);
+    |}
+    |
     |void bad_free_static(void)
     |{
     |    static char buf[64];
@@ -198,6 +218,16 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
   "MS-ALLOC-005/006/007 (wrong deallocation)" should:
     "fire on a free of pointer arithmetic over the allocation (CWE-761)" in {
         findingsIn("bad_free_offset") should contain("MS-ALLOC-006")
+    }
+    "report a walked-then-freed pointer at the walk's increment, where the suite marks it" in {
+        val walks = cpg.method.name("bad_walk_then_free").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-006"))
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.Call].l
+        walks.map(_.code) shouldBe List("data++")
+    }
+    "stay silent when the walk is over a copy and the original is freed" in {
+        findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
     }
     "stay silent when the arithmetic result is not what is freed" in {
         findingsIn("good_free_original") should not contain "MS-ALLOC-006"

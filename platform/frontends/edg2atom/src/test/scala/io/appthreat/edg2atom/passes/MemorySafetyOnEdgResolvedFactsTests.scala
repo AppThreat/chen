@@ -6,7 +6,7 @@ import io.appthreat.edg2atom.testfixtures.DefaultTestCpgWithEdg
 import io.appthreat.x2cpg.X2Cpg
 import io.appthreat.x2cpg.passes.taggers.*
 import io.appthreat.x2cpg.testfixtures.Code2CpgFixture
-import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, StoredNode}
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 
@@ -55,6 +55,20 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    copy_len(buf, user, 8);
       |}
       |
+      |void bad_walk_then_free(char *data) {
+      |    for (; *data != '\0'; data++) {
+      |        if (*data == 'x') break;
+      |    }
+      |    free(data);
+      |}
+      |void good_walk_a_copy(char *data) {
+      |    char *cursor = data;
+      |    for (; *cursor != '\0'; cursor++) {
+      |        if (*cursor == 'x') break;
+      |    }
+      |    free(data);
+      |}
+      |
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -97,6 +111,16 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
         "apply at the call spelled with the lambda's variable" in {
             findingsIn("bad_lambda_length") should contain("MS-BOUND-006")
             findingsIn("good_lambda_length") should not contain "MS-BOUND-006"
+        }
+    }
+
+    "a pointer walked by a loop and then freed" should {
+        "be reported at the walk's increment" in {
+            val walks = cpg.method.nameExact("bad_walk_then_free").ast.collectAll[StoredNode]
+                .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-ALLOC-006"))
+                .collectAll[Call].l
+            walks.map(_.code) shouldBe List("data++")
+            findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
         }
     }
 

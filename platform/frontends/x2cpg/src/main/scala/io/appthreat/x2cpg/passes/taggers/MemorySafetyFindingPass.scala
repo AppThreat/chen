@@ -4699,7 +4699,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           case _             => false
                       }
                     }
-                  val walkedThenFreed = i.method.ast.isCall.l.exists { inc =>
+                  val walkIncrements = i.method.ast.isCall.l.filter { inc =>
                       Set("<operator>.postIncrement", "<operator>.preIncrement").contains(
                         inc.name
                       ) && inc.argumentOption(1).exists {
@@ -4711,13 +4711,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           ) && !reboundAfter(loop)
                       )
                   }
+                  val walkedThenFreed = walkIncrements.nonEmpty
                   // the state pass's frame-storage fact (q = &x; free(q))
                   if (i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") &&
                         (defRhss.isEmpty || onlyNonHeap)) ||
                     namesDeclaredArray || namesStackAlloc || namesLiteral
                   then record(i, RuleNonHeapFree)
-                  if walkedThenFreed then
-                    record(i, RuleOffsetFree)
+                  // reported where the suite marks it: the walk's increment, the statement that moves
+                  // the pointer off the block's start
+                  if walkedThenFreed then walkIncrements.foreach(record(_, RuleOffsetFree))
                   // CWE-761: the identifier's definition is pointer arithmetic over a
                   // tracked allocation
                   val defsAreOffsetArith = OverlayFacts
