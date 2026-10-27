@@ -1,0 +1,25 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_236e880d3ee8e7::t_538e524b9292e1 1349-1356,1697,1725,1745
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/ZzAtomProbe.scala
+  s_236e880d3ee8e7::t_53d61b23326b70 10-37
+  s_236e880d3ee8e7::t_35acd8095efb52 1-9
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/NullAndAllocationNegativeControlTests.scala
+  s_236e880d3ee8e7::t_53d61b23326b70 319-334,459-460
+  s_236e880d3ee8e7::t_4f784526980bf3 461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8422f6a8155eb0952ea7b0205616e1b4dd8ee9e0",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
