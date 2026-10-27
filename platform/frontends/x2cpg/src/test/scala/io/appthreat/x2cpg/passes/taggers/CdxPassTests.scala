@@ -367,16 +367,21 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             Seq(
               "BCrypt::Password.create(secret)" -> "secret",
               "JSON.parse(text)"                -> "text",
+              "format.json { render body }"     -> "body",
               "SearchParser.new.parse(params)"  -> "params"
             )
           ) { cpg =>
             cpg.identifier.name("secret").tag.name.toSet should contain(
               "pkg:gem/bcrypt@3.1.22"
             )
-            // acronym constant: the gem name matches case-insensitively
+            // only the constant's first letter is case-sensitive, which is what
+            // keeps the BCrypt and JSON gems matchable
             cpg.identifier.name("text").tag.name.toSet should contain(
               "pkg:gem/json@2.18.0"
             )
+            // Rails' responder label is not the json gem: a Ruby constant must
+            // start uppercase
+            cpg.identifier.name("body").tag.name.toSet shouldBe empty
             // a constant the gem name is merely embedded in is not the gem
             cpg.identifier.name("params").tag.name.toSet shouldBe empty
             cpg.tag.name("pkg:gem/parser@1.8.1").l shouldBe empty

@@ -483,13 +483,17 @@ class CdxPass(
     if parts.length > 1 then s"${parts.mkString("\\.")}.*"
     else s"${parts.head}\\..*"
 
-  /** The full-name pattern shape for Ruby: the camelized constant the code writes for the module
-    * (`bcrypt` -> the `BCrypt`-shaped `Bcrypt`, `json` -> `JSON.parse`), delimited the way Ruby
-    * delimits constants - a `::` chain, a method dot, any other non-word character, or the ends of
-    * the snippet, matched case-insensitively so acronym constants (`BCrypt`, `JSON`, `I18n`) match
-    * their lowercase gem names. The former `.*(::)?<Name>(::).*` form required a lowercase name
-    * followed by `::`, which no real call site satisfies - on lobsters all 186 gem components
-    * matched zero calls, so no flow could carry a purl.
+  /** The full-name pattern shape for Ruby: the constant the code writes for the module
+    * (`securerandom` -> `SecureRandom`, `json` -> `JSON.parse`), delimited the way Ruby delimits
+    * constants - a `::` chain, a method dot, any other non-word character (underscore included, so
+    * `mod_mail` is not `mail`), or the ends of the snippet. Only the constant's first letter is
+    * case-sensitive, because a Ruby constant must start uppercase while the rest of the name varies
+    * (`SecureRandom`, `ActiveRecord`); that is what separates the gem from words that merely
+    * contain it - Rails' `format.json` responder label, a `mod mail` string literal and an
+    * `/oauth/token` URL are not the json, mail and oauth gems, and on lobsters' flows they made up
+    * most of those purls before the case rule. The former `.*(::)?<Name>(::).*` form required a
+    * lowercase name followed by `::`, which no real call site satisfies - on lobsters all 186 gem
+    * components matched zero calls, so no flow could carry a purl.
     */
   private def toRubyModuleForm(str: String): String =
     if str.isEmpty then return str
@@ -498,7 +502,11 @@ class CdxPass(
         .split("[-_]")
         .map(word => if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1))
         .mkString
-    "(?i)(.*[^A-Za-z0-9_:]|)(::)?" + camel + "(::.*|\\..*|[^A-Za-z0-9_].*)?"
+    // Ruby constants start with an uppercase letter; the rest matches either case
+    // (`SecureRandom`, `ActiveRecord`), so only the first letter is case-sensitive.
+    val rest     = camel.drop(1)
+    val constant = if rest.isEmpty then camel else s"${camel.head}(?i:$rest)"
+    "((.*[^A-Za-z0-9_:])|)(::)?" + constant + "(::.*|\\..*|[^A-Za-z0-9_].*)?"
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 end CdxPass
