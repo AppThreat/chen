@@ -1,0 +1,16 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/CdxPass.scala
+  h_6a4cc5cdf68def 70,173-193,314,321-332,338,479-486,489-494
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/CdxPassTests.scala
+  h_6a4cc5cdf68def 13,272-318,324-350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "440aa454ec3b48011e17e0a53339863e11d0ba96",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
