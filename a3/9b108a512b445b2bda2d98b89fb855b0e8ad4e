@@ -1,0 +1,29 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_7e900a9e3d6d42::t_8d5c80b96f2e8f 5137-5143
+  s_7e900a9e3d6d42::t_583a3d1cc058dd 5085,5131-5132
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/WrongDeallocationRuleTests.scala
+  s_7e900a9e3d6d42::t_699e414d45800b 169-233,356-370
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_7e900a9e3d6d42::t_c5d3f758d044fe 84-127,192-201
+  s_7e900a9e3d6d42::t_4fc1fc0575a294 202-203
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  s_7e900a9e3d6d42::t_48a76a6e3522ad 253-264
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_7e900a9e3d6d42::t_3265d0d230dfe1 579-589
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a39b108a512b445b2bda2d98b89fb855b0e8ad4e",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

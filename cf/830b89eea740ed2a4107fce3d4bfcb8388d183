@@ -1,0 +1,25 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/WrongDeallocationRuleTests.scala
+  s_7e900a9e3d6d42::t_4043a8df79de35 46-65,222-231
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_7e900a9e3d6d42::t_1bb066299071d7 4720-4722
+  s_7e900a9e3d6d42::t_483a24a2b52baa 4702,4714
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_7e900a9e3d6d42::t_c0d8b228ca1d80 9,58-71,117-123
+  s_7e900a9e3d6d42::t_6cb65257834194 124-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cf830b89eea740ed2a4107fce3d4bfcb8388d183",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

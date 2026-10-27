@@ -1,0 +1,31 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_7e900a9e3d6d42::t_3fec97e8552e7e 204-243,329-334
+  s_7e900a9e3d6d42::t_68dc7f6a83debc 335-337
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/WrongDeallocationRuleTests.scala
+  s_7e900a9e3d6d42::t_b5a06c7ca13774 84,86,88,94-95,104-105,107,112,114,118-119,121,125,127,131-132,134,136,138,144-145,283-298,410-411
+  s_7e900a9e3d6d42::t_dbcd3d47a4ae06 92,96-103,407
+  s_7e900a9e3d6d42::t_8e6fd351312664 82-83,85,87,89-91,93,106,108-111,113,115-117,120,122-124,126,128-130,133,135,137,139-143,405-406,408-409,412-422
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_7e900a9e3d6d42::t_e68eedad267444 639-659,662
+  s_7e900a9e3d6d42::t_91218a7d313119 769-770
+  s_7e900a9e3d6d42::t_883a7bbf7e56a3 891-896
+  s_7e900a9e3d6d42::t_3154b97da40e41 1724-1726
+  s_7e900a9e3d6d42::t_3c34f275489931 1912-1914
+  s_7e900a9e3d6d42::t_922a3bdc8b01ab 679-686,688-691,762-768,771-789,1722-1723,2013-2032,2044-2061
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "065d7100450753c9eb47651758042f3eb15cc8e1",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
