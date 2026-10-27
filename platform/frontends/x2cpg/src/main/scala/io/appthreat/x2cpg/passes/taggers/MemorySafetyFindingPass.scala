@@ -295,6 +295,11 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     val rule =
                         if family.contains("file") then RuleDoubleClose else RuleDoubleFree
                     record(node, rule)
+                    // the suite marks the first release too ("the bad sink frees data as well"):
+                    // the release that makes the second one a double free is a site of the same
+                    // finding
+                    if rule == RuleDoubleFree then
+                      firstReleaseBefore(node, enclosing).foreach(record(_, rule))
                   else record(node, RuleUseAfterFree)
               case _ => ()
         }
@@ -320,6 +325,26 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleMismatchedFree))
   end ruleAllocationState
+
+  /** The nearest release of the same variable before a double free's argument, in the same
+    * method: the free call whose argument is the pointer the second release sees freed.
+    */
+  private def firstReleaseBefore(node: StoredNode, secondFree: Option[Call]): Option[StoredNode] =
+      for
+        arg <- Some(node).collect { case a: Expression => a }
+        key <- OverlayFacts.variableKey(arg)
+        second <- secondFree
+        secondLine = second.lineNumber.map(_.toInt).getOrElse(0)
+        first <- arg.method.ast.isCall.l
+            .filter(c =>
+                c != second && (tagValues(c, MemoryApiPass.TagFree).nonEmpty) &&
+                    c.lineNumber.exists(_.toInt < secondLine) &&
+                    c.argumentOption(1).exists(a => OverlayFacts.variableKey(a).contains(key))
+            )
+            .sortBy(c => c.lineNumber.map(_.toInt).getOrElse(0))
+            .lastOption
+        target <- first.argumentOption(1)
+      yield target
 
   /** A macro invocation that frees the argument it is handed (`xfree(p)` spelling `free(p)`, or a
     * wrapper that frees and resets): the argument is the free site, not a use of the freed pointer.

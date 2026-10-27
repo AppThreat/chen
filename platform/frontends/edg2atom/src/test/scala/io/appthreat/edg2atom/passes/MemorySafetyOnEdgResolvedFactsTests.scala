@@ -69,6 +69,18 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    free(data);
       |}
       |
+      |void bad_double_free() {
+      |    char *p = (char *)malloc(100);
+      |    if (p == NULL) exit(-1);
+      |    free(p);
+      |    free(p);
+      |}
+      |void good_free_once() {
+      |    char *p = (char *)malloc(100);
+      |    if (p == NULL) exit(-1);
+      |    free(p);
+      |}
+      |
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -121,6 +133,15 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
                 .collectAll[Call].l
             walks.map(_.code) shouldBe List("data++")
             findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
+        }
+    }
+
+    "a double free" should {
+        "be reported at both releases" in {
+            val sites = cpg.method.nameExact("bad_double_free").ast.collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+                .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-ALLOC-001")).l
+            sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
+            findingsIn("good_free_once") should not contain "MS-ALLOC-001"
         }
     }
 

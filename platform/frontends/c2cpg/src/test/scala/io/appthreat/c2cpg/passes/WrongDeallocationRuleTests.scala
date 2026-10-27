@@ -63,6 +63,22 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    free(data);
     |}
     |
+    |/* the Juliet CWE-415 shape: the suite marks the first release too */
+    |void bad_double_free(void)
+    |{
+    |    char *p = (char *)malloc(100);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |    free(p);
+    |}
+    |
+    |void good_free_once(void)
+    |{
+    |    char *p = (char *)malloc(100);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |}
+    |
     |void bad_free_static(void)
     |{
     |    static char buf[64];
@@ -225,6 +241,13 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
             .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-006"))
             .collectAll[io.shiftleft.codepropertygraph.generated.nodes.Call].l
         walks.map(_.code) shouldBe List("data++")
+    }
+    "report both releases of a double free (CWE-415)" in {
+        val sites = cpg.method.name("bad_double_free").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
+        sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
+        findingsIn("good_free_once") should not contain "MS-ALLOC-001"
     }
     "stay silent when the walk is over a copy and the original is freed" in {
         findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
