@@ -660,7 +660,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         }
     calls.foreach {
         case c
-            if roleOf(c).free.nonEmpty && (c._cdgIn.isEmpty || onlyNullChecksOf(c)) =>
+            if roleOf(c).free.nonEmpty && c._cdgIn.isEmpty =>
             argAt(c.argument.l, 1).map(unwrapCasts).foreach { freed =>
               val via = viaPointeeOf(freed)
               if !via.exists(nulledThrough.contains) then
@@ -1721,8 +1721,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         )
                     )
               case rhsCall: Call
-                  if effectsByName.get(rhsCall.name)
-                      .exists(_.contains("effect:returns-freed")) =>
+                  if (rhsCall._callOut.collectAll[Method].l.distinct match
+                    case List(only) => effectsByMethod.get(only.id())
+                    case _          => effectsByName.get(rhsCall.name)
+                  ).exists(_.contains("effect:returns-freed")) =>
                   // the callee's summary says every value it returns is a pointer it released
                   out = out.updated(lhs, Tracked(StFreed, rhsCall.id))
               case rhsCall: Call
@@ -1992,8 +1994,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             concluded
         trackedNameOf(operand).foreach { name =>
             useState.get(name).foreach { t =>
-              if (t.state == StFreed || t.state == StMaybeFreed) && !summaryFreesThis then
-                record(operand, TagState, stateName(t.state))
+              // handing a dangling pointer to a callee whose body never mentions that parameter is
+              // not a use of the freed block; a call through a function pointer takes only the callee's
+              // release effects, as before
+              val calleeIgnores = cf.name == "<operator>.pointerCall" || viaAddress.isEmpty &&
+                  (c._callOut.collectAll[Method].l.distinct match
+                    case List(only) =>
+                        !only.isExternal && only.block.astChildren.nonEmpty &&
+                        only.parameter.l.find(_.index == arg.argumentIndex).exists(p =>
+                            !only.block.ast.isIdentifier.l.exists(_.name == p.name)
+                        )
+                    case _ => false
+                  )
+              if (t.state == StFreed || t.state == StMaybeFreed) && !summaryFreesThis &&
+                !calleeIgnores
+              then record(operand, TagState, stateName(t.state))
               if viaAddress.isEmpty && summaryDerefsArgs.contains(arg.argumentIndex) then
                 noteNullUse(nullUseFacts, operand, name, t)
               if !borrowed then

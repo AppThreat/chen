@@ -298,8 +298,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     // the suite marks the first release too ("the bad sink frees data as well"):
                     // the release that makes the second one a double free is a site of the same
                     // finding
-                    // (a release on SOME path only - maybe-freed - names no single first release)
-                    if rule == RuleDoubleFree && state != "maybe-freed" then
+                    if rule == RuleDoubleFree then
                       firstReleaseBefore(node, enclosing).foreach(record(_, rule))
                   else record(node, RuleUseAfterFree)
               case _ => ()

@@ -29,7 +29,10 @@ object ObjectAccessRules:
           operand <- cast.argument.l.collect { case e: Expression => e }.lastOption
           bytes   <- objectBytes(operand)
           if pointee > bytes
-          (node, rule) <- accessOf(cast).toList ++ accessesThroughVariable(cast)
+          (node, rule) <- accessOf(cast).toList ++ accessesThroughVariable(cast).filter {
+              case (a: Call, _) => accessWidth(atom, a).exists(_ > bytes)
+              case _            => false
+          }
         do record(node, rule)
     }
     // the same question without the frontend's pointee size: the access's own width (the
