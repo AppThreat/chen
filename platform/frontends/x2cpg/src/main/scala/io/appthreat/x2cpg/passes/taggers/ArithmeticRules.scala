@@ -210,6 +210,60 @@ object ArithmeticRules:
         case _ => false
       )
 
+  /** The value ranges the definitions of a local give (a mask, a constant, a bounded sum). No enum
+    * facts and no caller facts: the question here is the operand's own value.
+    */
+  private val valueRanges = new java.util.WeakHashMap[AnyRef, IndexRange]()
+
+  /** The range is only as good as the definitions it reads: a variable whose address is taken (an
+    * `fscanf(&n)` fills it) has a definition the walk does not see, and `n = 0` before it would
+    * read as the whole answer.
+    */
+  private def rangesOf(graph: AnyRef, e: Expression): Option[IndexRange.Range] =
+    val addressTaken = e.ast.isIdentifier.l.exists { i =>
+        i.method.ast.isCall.nameExact("<operator>.addressOf").l.exists(a =>
+            a.argumentOption(1).exists {
+                case x: Identifier => x.name == i.name
+                case _             => false
+            }
+        )
+    }
+    if addressTaken then None else rangesOfUnchecked(graph, e)
+
+  private def rangesOfUnchecked(graph: AnyRef, e: Expression): Option[IndexRange.Range] =
+    val ir = valueRanges.synchronized {
+        Option(valueRanges.get(graph)).getOrElse {
+            val made = IndexRange(
+              {
+                  case i: Identifier => i.typeFullName
+                  case c: Call       => c.typeFullName
+                  case l: Literal    => l.typeFullName
+                  case _             => ""
+              },
+              _ => false,
+              _ => None
+            )
+            valueRanges.put(graph, made)
+            made
+        }
+    }
+    ir.of(e)
+
+  private val NoReturnCalls = Set("exit", "abort", "_exit", "_Exit", "quick_exit", "longjmp")
+
+  /** The innermost loop whose body holds the node. */
+  private def enclosingLoopBodyOf(n: CfgNode): Option[ControlStructure] =
+    var cursor: Option[io.shiftleft.codepropertygraph.generated.nodes.StoredNode] =
+        n._astIn.nextOption()
+    var found: Option[ControlStructure] = None
+    while found.isEmpty && cursor.isDefined do
+      cursor.get match
+        case cs: ControlStructure
+            if Set("FOR", "WHILE", "DO").contains(cs.controlStructureType) =>
+            found = Some(cs)
+        case other => cursor = other._astIn.nextOption()
+    found
+
   /** A dominating guard bounds the key's variable on the side `above`: the author's own claim,
     * valued or not.
     */
@@ -226,16 +280,35 @@ object ArithmeticRules:
           // an EARLY-EXIT guard bounds the statement that follows it at its NOT-holding
           // polarity: `if (x < 0 || x > 100) return; use x` runs the use where both sides
           // failed, and a failing disjunction makes every disjunct fail
+          // the way out of the if-branch: a return, a goto, a call that does not return, or - when
+          // the site sits in the same loop body - a break or continue (the loop's own side of
+          // the guard: `for (...) { if (n > MAX) break; use(n); }`)
+          val siteLoop = enclosingLoopBodyOf(site)
           def exitsEarly(cs: ControlStructure): Boolean =
-              cs.astChildren.l
-                  .filterNot(
-                    _.isInstanceOf[io.shiftleft.codepropertygraph.generated.nodes.Expression]
-                  )
-                  .headOption
-                  .exists(thenBranch => thenBranch.ast.isReturn.l.nonEmpty)
+            // the branch taken when the condition holds: the child after the condition, a block
+            // or a single unbraced statement (`if (bad) exit(1);`)
+            val condIds = cs.condition.l.map(_.id()).toSet
+            cs.astChildren.l.filterNot(n => condIds.contains(n.id()))
+                .sortBy(_.order.intValue)
+                .headOption
+                .exists { thenBranch =>
+                    thenBranch.ast.isReturn.l.nonEmpty ||
+                    thenBranch.ast.isCall.l.exists(c => NoReturnCalls.contains(c.name)) ||
+                    thenBranch.ast.isControlStructure.l.exists(j =>
+                        j.controlStructureType == "GOTO"
+                    ) ||
+                    (siteLoop.exists(loop => loop.ast.exists(_ == cs)) &&
+                        thenBranch.ast.isControlStructure.l.exists(j =>
+                            j.controlStructureType == "BREAK" ||
+                                j.controlStructureType == "CONTINUE"
+                        ))
+                }
           val siteLine = site.lineNumber.map(_.intValue).getOrElse(-1)
           site.method.ast.collectAll[ControlStructure].l.exists { cs =>
               cs.controlStructureType == "IF" &&
+              // the guard protects what FOLLOWS it: a site inside the branch that exits is on the
+              // path where the condition held
+              !cs.ast.exists(_.id() == site.id()) &&
               cs.condition.exists(cond =>
                   cond.lineNumber.map(_.intValue).getOrElse(Int.MaxValue) < siteLine &&
                       exitsEarly(cs)
@@ -424,8 +497,15 @@ object ArithmeticRules:
                                 .exists(m => m >= 0 && m < (BigInt(1) << 30))
                         case _ => false
                   )
+                  // an operand whose definitions bound its value well inside the type - a
+                  // masked field plus one - cannot carry the sum past it
+                  def smallValue(o: Expression): Boolean =
+                      rangesOf(atom.graph, o).exists(r =>
+                          r.hi < (BigInt(1) << 30) && r.lo > -(BigInt(1) << 30)
+                      )
                   ops.find(opnd =>
-                      !unsigned && !masked && inputFed(opnd) && !lengthDerived(opnd)
+                      !unsigned && !masked && inputFed(opnd) && !lengthDerived(opnd) &&
+                          !smallValue(opnd)
                   ).filter { opnd =>
                       !operandKeptInType(c, opnd) && !widenedBeyond(c, keptIn)
                   }.map(opnd => (c, false))
@@ -449,7 +529,10 @@ object ArithmeticRules:
                           !operandKeptInType(c, i)
                     )(i)
                   }.orElse(
-                    Option.when(inputFed(i) && !operandKeptInType(c, i) && !widenedBeyond(
+                    Option.when(!isPointer(i.typeFullName) && inputFed(i) && !operandKeptInType(
+                      c,
+                      i
+                    ) && !widenedBeyond(
                       c,
                       kept
                     ))(i)
@@ -622,7 +705,8 @@ object ArithmeticRules:
                     val input            = inputFed(i)
                     val boundedBelow = i.tag.name(GuardPass.TagBelow).nonEmpty ||
                         variableKey(i).exists(k => guardBounds(call, k, above = false))
-                    if (negativeConstant || input) && !boundedBelow then
+                    val nonNegative = rangesOf(atom.graph, i).exists(_.lo >= 0)
+                    if (negativeConstant || input) && !boundedBelow && !nonNegative then
                       record(lenArg, RuleSignExtensionToSize)
                       promoted += ((lenArg, RuleSignExtensionToSize, negativeConstant))
               case _ => ()

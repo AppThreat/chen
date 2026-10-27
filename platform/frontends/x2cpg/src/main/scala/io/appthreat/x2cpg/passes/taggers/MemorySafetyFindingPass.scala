@@ -298,7 +298,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     // the suite marks the first release too ("the bad sink frees data as well"):
                     // the release that makes the second one a double free is a site of the same
                     // finding
-                    if rule == RuleDoubleFree then
+                    // (a release on SOME path only - maybe-freed - names no single first release)
+                    if rule == RuleDoubleFree && state != "maybe-freed" then
                       firstReleaseBefore(node, enclosing).foreach(record(_, rule))
                   else record(node, RuleUseAfterFree)
               case _ => ()
@@ -326,13 +327,13 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .foreach(node => record(node, RuleMismatchedFree))
   end ruleAllocationState
 
-  /** The nearest release of the same variable before a double free's argument, in the same
-    * method: the free call whose argument is the pointer the second release sees freed.
+  /** The nearest release of the same variable before a double free's argument, in the same method:
+    * the free call whose argument is the pointer the second release sees freed.
     */
   private def firstReleaseBefore(node: StoredNode, secondFree: Option[Call]): Option[StoredNode] =
       for
-        arg <- Some(node).collect { case a: Expression => a }
-        key <- OverlayFacts.variableKey(arg)
+        arg    <- Some(node).collect { case a: Expression => a }
+        key    <- OverlayFacts.variableKey(arg)
         second <- secondFree
         secondLine = second.lineNumber.map(_.toInt).getOrElse(0)
         first <- arg.method.ast.isCall.l
@@ -4428,33 +4429,33 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       // string held in an object of known extent (`destLen = strlen(dest)` over `char dest[100]`
       // is at most 99 - the terminator takes the last element)
       def boundMaximum(bound: Expression, depth: Int = 2): Option[BigInt] =
-        IndexRange.literal(bound).orElse {
-            stripCasts(bound) match
-              // a term and a constant: `sourceLen + 1` reaches the term's maximum plus one
-              case c: Call if c.name == "<operator>.addition" && depth > 0 =>
-                  c.argument.l.collect { case e: Expression => e } match
-                    case List(l, r) =>
-                        boundMaximum(l, depth - 1).zip(IndexRange.literal(r)).map(_ + _).orElse(
-                          boundMaximum(r, depth - 1).zip(IndexRange.literal(l)).map(_ + _)
-                        )
-                    case _ => None
-              case i: Identifier =>
-                  val defs = OverlayFacts.reachingDefsIn(i)
-                      .collect { case d: Identifier if d.name == i.name => d }
-                  val rhss = defs.flatMap(_._astIn.collectFirst {
-                      case a: Call if a.name == "<operator>.assignment" => a
-                  }).flatMap(_.argumentOption(2))
-                  if defs.isEmpty || rhss.size != defs.size then None
-                  else
-                    val maxima = rhss.map {
-                        case c: Call if isStrlen(c) || c.name == "wcslen" =>
-                            c.argumentOption(1).collect { case e: Expression => e }
-                                .flatMap(declaredOneDimCount).map(_ - 1)
-                        case other => IndexRange.literal(other)
-                    }
-                    if maxima.forall(_.isDefined) then Some(maxima.flatten.max) else None
-              case _ => None
-        }
+          IndexRange.literal(bound).orElse {
+              stripCasts(bound) match
+                // a term and a constant: `sourceLen + 1` reaches the term's maximum plus one
+                case c: Call if c.name == "<operator>.addition" && depth > 0 =>
+                    c.argument.l.collect { case e: Expression => e } match
+                      case List(l, r) =>
+                          boundMaximum(l, depth - 1).zip(IndexRange.literal(r)).map(_ + _).orElse(
+                            boundMaximum(r, depth - 1).zip(IndexRange.literal(l)).map(_ + _)
+                          )
+                      case _ => None
+                case i: Identifier =>
+                    val defs = OverlayFacts.reachingDefsIn(i)
+                        .collect { case d: Identifier if d.name == i.name => d }
+                    val rhss = defs.flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    }).flatMap(_.argumentOption(2))
+                    if defs.isEmpty || rhss.size != defs.size then None
+                    else
+                      val maxima = rhss.map {
+                          case c: Call if isStrlen(c) || c.name == "wcslen" =>
+                              c.argumentOption(1).collect { case e: Expression => e }
+                                  .flatMap(declaredOneDimCount).map(_ - 1)
+                          case other => IndexRange.literal(other)
+                      }
+                      if maxima.forall(_.isDefined) then Some(maxima.flatten.max) else None
+                case _ => None
+          }
 
       // arm 4: a CONSTANT loop bound the base cannot hold - `for (i = 0; i < 100; i++)
       // data[i] = source[i]` into `new char[50]`, `alloca(50)`, `malloc(10)` for ten ints (the

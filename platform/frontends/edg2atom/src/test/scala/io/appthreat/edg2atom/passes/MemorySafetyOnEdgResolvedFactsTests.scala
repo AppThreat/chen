@@ -241,6 +241,51 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    funcPtr(data);
       |}
       |
+      |int bad_input_sum() {
+      |    char buf[20] = "";
+      |    int a = 0;
+      |    if (fgets(buf, 20, stdin) != NULL) a = atoi(buf);
+      |    int r = a + 1;
+      |    return r;
+      |}
+      |int good_exit_after_failing_disjunction() {
+      |    char buf[20] = "";
+      |    int a = 0;
+      |    if (fgets(buf, 20, stdin) != NULL) a = atoi(buf);
+      |    if (a < 0 || a > 100) exit(1);
+      |    int r = a + 1;
+      |    return r;
+      |}
+      |int good_break_side_of_loop() {
+      |    char buf[20] = "";
+      |    int a = 0;
+      |    int r = 0;
+      |    if (fgets(buf, 20, stdin) != NULL) a = atoi(buf);
+      |    for (int i = 0; i < 3; i++) {
+      |        if (a > 100) break;
+      |        r = a + 1;
+      |    }
+      |    return r;
+      |}
+      |void good_pointer_walk_over_input() {
+      |    char buf[20] = "";
+      |    char *p = buf;
+      |    if (fgets(buf, 20, stdin) == NULL) return;
+      |    while (*p) p++;
+      |}
+      |
+      |struct small_t { int i; };
+      |void bad_member_past_allocation() {
+      |    struct small_t *p = (struct small_t *)malloc(1);
+      |    p->i = atoi("1");
+      |}
+      |void good_member_in_allocation() {
+      |    struct small_t *p = (struct small_t *)malloc(sizeof(struct small_t));
+      |    if (p == NULL) return;
+      |    p->i = atoi("1");
+      |    free(p);
+      |}
+      |
       |struct table_t {
       |    char slots[4];
       |    char &operator[](int i) { return slots[i]; }
@@ -298,7 +343,9 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
 
     "a double free" should {
         "be reported at both releases" in {
-            val sites = cpg.method.nameExact("bad_double_free").ast.collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+            val sites = cpg.method.nameExact("bad_double_free").ast.collectAll[
+              io.shiftleft.codepropertygraph.generated.nodes.AstNode
+            ]
                 .filter(_.tag.nameExact("ms-finding").value.l.contains("MS-ALLOC-001")).l
             sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
             findingsIn("good_free_once") should not contain "MS-ALLOC-001"
@@ -335,9 +382,26 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
         }
     }
 
+    "arithmetic on an input-fed value" should {
+        "stand down after an exit or a break side, and never wrap a pointer" in {
+            findingsIn("bad_input_sum") should contain("MS-INT-003")
+            findingsIn("good_exit_after_failing_disjunction") should not contain "MS-INT-003"
+            findingsIn("good_break_side_of_loop") should not contain "MS-INT-003"
+            findingsIn("good_pointer_walk_over_input") should not contain "MS-INT-003"
+        }
+    }
+
+    "a struct member written through a pointer to a smaller allocation" should {
+        "be reported at the write" in {
+            findingsIn("bad_member_past_allocation") should contain("MS-BOUND-004")
+            findingsIn("good_member_in_allocation") should not contain "MS-BOUND-004"
+        }
+    }
+
     "an operator's member index with an unbounded caller" should {
         "read out of bounds inside the operator" in {
             findingsOf("operator []") should contain("MS-BOUND-003")
         }
     }
+  end if
 end MemorySafetyOnEdgResolvedFactsTests

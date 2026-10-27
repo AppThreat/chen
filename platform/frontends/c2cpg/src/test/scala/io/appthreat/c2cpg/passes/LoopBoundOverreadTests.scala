@@ -5,9 +5,9 @@ import io.appthreat.x2cpg.passes.taggers.*
 import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
 import io.shiftleft.semanticcpg.language.*
 
-/** A loop bound held in a variable that carries a string's length (`n = strlen(dest)` over
-  * `char dest[100]` is at most 99) against a read through a pointer to a smaller buffer: the
-  * over-read the loop's index reaches at the read itself.
+/** A loop bound held in a variable that carries a string's length (`n = strlen(dest)` over `char
+  * dest[100]` is at most 99) against a read through a pointer to a smaller buffer: the over-read
+  * the loop's index reaches at the read itself.
   */
 class LoopBoundOverreadTests extends DataFlowCodeToCpgSuite:
 
@@ -119,3 +119,4 @@ class LoopBoundOverreadTests extends DataFlowCodeToCpgSuite:
     "stay silent when the pointer names a buffer as large as the string's (wchar_t)" in {
         findingsIn("good_overread_alias_wcslen") should not contain "MS-BOUND-003"
     }
+end LoopBoundOverreadTests

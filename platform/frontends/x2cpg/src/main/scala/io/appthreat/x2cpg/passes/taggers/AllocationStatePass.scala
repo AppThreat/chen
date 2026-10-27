@@ -640,23 +640,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // `if (data == NULL) exit(-1);` that precedes it, or `if (p) free(p)` - releases the block
     // whenever there is one to release: the summary reads it as unconditional
     def onlyNullChecksOf(c: Call): Boolean =
-      argAt(c.argument.l, 1).map(unwrapCasts).collect { case i: Identifier => i.name }.exists { n =>
-          val conds = c._cdgIn.l
-          conds.nonEmpty && conds.forall {
-              case cmp: Call
-                  if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
-                  val args = cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }
-                  args.exists { case i: Identifier => i.name == n; case _ => false } &&
-                  args.exists(isNullLiteral)
-              case cmp: Call if cmp.name == "<operator>.logicalNot" =>
-                  cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }.exists {
-                      case i: Identifier => i.name == n
-                      case _             => false
-                  }
-              case i: Identifier => i.name == n
-              case _             => false
-          }
-      }
+        argAt(c.argument.l, 1).map(unwrapCasts).collect { case i: Identifier => i.name }.exists {
+            n =>
+              val conds = c._cdgIn.l
+              conds.nonEmpty && conds.forall {
+                  case cmp: Call
+                      if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+                      val args = cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }
+                      args.exists { case i: Identifier => i.name == n; case _ => false } &&
+                      args.exists(isNullLiteral)
+                  case cmp: Call if cmp.name == "<operator>.logicalNot" =>
+                      cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }.exists {
+                          case i: Identifier => i.name == n
+                          case _             => false
+                      }
+                  case i: Identifier => i.name == n
+                  case _             => false
+              }
+        }
     calls.foreach {
         case c
             if roleOf(c).free.nonEmpty && (c._cdgIn.isEmpty || onlyNullChecksOf(c)) =>
@@ -2050,15 +2051,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                                   .collect { case m: Method => m }.toList
                               if viaPointer.nonEmpty then viaPointer
                               else atom.method.nameExact(cf.name).filterNot(_.isExternal).l
-                          case linked => linked) match
+                          case linked => linked
+                        ) match
                           case List(callee) =>
                               callee.parameter.l.find(_.index == idx).foreach { param =>
-                                  callee.ast.isCall.l.filter(fc => fc.tag.name(MemoryApiPass.TagFree).nonEmpty)
-                                      .flatMap(fc => fc.argumentOption(1).collect { case e: Expression => unwrapCast(e) })
+                                  callee.ast.isCall.l.filter(fc =>
+                                      fc.tag.name(MemoryApiPass.TagFree).nonEmpty
+                                  )
+                                      .flatMap(fc =>
+                                          fc.argumentOption(1).collect { case e: Expression =>
+                                              unwrapCast(e)
+                                          }
+                                      )
                                       .collect { case i: Identifier if i.name == param.name => i }
                                       .foreach(i => record(i, TagState, ValueSummaryFreed))
                               }
                           case _ => ()
+                        end match
+                      end if
                       if t.state != StNullable then
                         out = withGroup(out, name, t.aliases, StFreed)
                         out = out.updated(name, t.copy(state = StFreed))
