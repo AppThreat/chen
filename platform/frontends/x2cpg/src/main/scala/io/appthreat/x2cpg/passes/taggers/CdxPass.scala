@@ -67,6 +67,7 @@ class CdxPass(
         processProperties(cursor, compPurl, compType, descTags, claimedForms, dstGraph)
     if !taggedFromProperties then
       processJvmPurl(compPurl, compType, descTags, claimedForms, unambiguousJvmGroups, dstGraph)
+      processGemPurl(compPurl, compType, descTags, claimedForms, dstGraph)
   end processComponent
 
   /** The versionless coordinate a purl names: its type, namespace and name. Version, qualifiers
@@ -173,6 +174,27 @@ class CdxPass(
       Set(Languages.JAVA, Languages.JAVASRC, "JAR", "JIMPLE", "ANDROID", "APK", "DEX")
 
   private def isJvmLanguage: Boolean = JvmLanguages.contains(language)
+
+  /** Tags a Ruby component by the module its purl names, for SBOMs that declare no namespaces.
+    *
+    * The `Namespaces` property is the precise answer, but it only exists when the generator opened
+    * the gems; an ordinary `cdxgen -t ruby` SBOM built from the lockfile carries none, and the Ruby
+    * path was then a no-op: every component was read, none was tagged, and no reachables flow could
+    * carry a purl (lobsters: 195 flows, 0 purls). A gem purl carries the gem name
+    * (`pkg:gem/bcrypt@3.1.22`), and the camelized name is the module root the application's calls
+    * actually reference.
+    */
+  private def processGemPurl(
+    purl: String,
+    compType: String,
+    descTags: List[String],
+    claimedForms: mutable.Map[String, mutable.Set[String]],
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+      if language == Languages.RUBYSRC && purl.startsWith("pkg:gem/") then
+        val bpkg = normalizePackage(purl.stripPrefix("pkg:gem/").split("@").head)
+        if bpkg.nonEmpty && claim(bpkg, purl, claimedForms) then
+          tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
 
   private def processPypiComponent(
     cursor: HCursor,
@@ -296,29 +318,31 @@ class CdxPass(
       // `tagCallMethods` is only set by the pypi path, whose language always lands in tagGeneric.
       language match
         case lang if lang == Languages.RUBYSRC =>
-            tagRuby(bpkg, purl, compType, dstGraph)
+            tagRuby(bpkg, purl, dstGraph)
         case lang if lang == Languages.NEWC || lang == Languages.C =>
             tagCpp(bpkg, purl, compType, descTags, dstGraph)
         case _ =>
             tagGeneric(bpkg, purl, compType, descTags, tagCallMethods)
   end tagByLanguage
 
+  /** Tags the arguments of every call whose code names the component's module with the component's
+    * exact purl. reachables' Ruby query (`collectRubySpecificFlows`) sources from parameters in
+    * routes, controller and model files, and the purl travels with the flow when its path crosses
+    * one of these arguments.
+    *
+    * The former `framework-input` / `<compType>-input` / `<compType>-value` tags are gone: they
+    * derived request-data sources from the component's type - the framework-as-source problem
+    * [[tagGeneric]] no longer has - and they had never fired on the corpus, because the old module
+    * pattern matched no call code at all. Parameters of controller methods keep their
+    * `framework-input` from the recogniser (ChennaiTagsPass.tagRubyRoutes), which reads the routes
+    * and controllers, not the SBOM.
+    */
   private def tagRuby(
     bpkg: String,
     purl: String,
-    compType: String,
     dstGraph: DiffGraphBuilder
   ): Unit =
-    atom.call.code(bpkg).argument.newTagNode(purl).store()(using dstGraph)
-    atom.call.code(bpkg).receiver.isMethod.where(_.fullName(
-      s"((app|config)${Pattern.quote(File.separator)})?(routes|controller(s)?|model(s)?|application).*\\.rb.*"
-    ))
-        .parameter.newTagNode("framework-input").store()(using dstGraph)
-    atom.call.code(bpkg).receiver.newTagNode(s"$compType-value").store()(using dstGraph)
-    atom.call.code(bpkg).callee(using NoResolve).isMethod.parameter.newTagNode(s"$compType-input")
-        .store()(
-          using dstGraph
-        )
+      atom.call.code(bpkg).argument.newTagNode(purl).store()(using dstGraph)
 
   private def tagCpp(
     bpkg: String,
@@ -459,9 +483,22 @@ class CdxPass(
     if parts.length > 1 then s"${parts.mkString("\\.")}.*"
     else s"${parts.head}\\..*"
 
+  /** The full-name pattern shape for Ruby: the camelized constant the code writes for the module
+    * (`bcrypt` -> the `BCrypt`-shaped `Bcrypt`, `json` -> `JSON.parse`), delimited the way Ruby
+    * delimits constants - a `::` chain, a method dot, any other non-word character, or the ends of
+    * the snippet, matched case-insensitively so acronym constants (`BCrypt`, `JSON`, `I18n`) match
+    * their lowercase gem names. The former `.*(::)?<Name>(::).*` form required a lowercase name
+    * followed by `::`, which no real call site satisfies - on lobsters all 186 gem components
+    * matched zero calls, so no flow could carry a purl.
+    */
   private def toRubyModuleForm(str: String): String =
     if str.isEmpty then return str
-    s".*(::)?${str.split("::").head}(::).*"
+    val head = str.split("::").head
+    val camel = head
+        .split("[-_]")
+        .map(word => if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1))
+        .mkString
+    "(?i)(.*[^A-Za-z0-9_:]|)(::)?" + camel + "(::.*|\\..*|[^A-Za-z0-9_].*)?"
 
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 end CdxPass

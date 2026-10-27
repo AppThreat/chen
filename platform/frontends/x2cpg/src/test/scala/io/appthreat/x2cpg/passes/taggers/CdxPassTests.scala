@@ -10,7 +10,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class CdxPassTests extends AnyWordSpec with Matchers:
 
-  import CdxPassTests.{Fixture, JvmFixture}
+  import CdxPassTests.{Fixture, JvmFixture, RubyFixture}
 
   private def componentJson(name: String, purl: String, extra: String = ""): String =
       s"""{"type": "library", "name": "$name", "purl": "$purl"$extra}"""
@@ -355,10 +355,84 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             tags should contain("pkg:maven/org.a/utils?type=jar")
             tags should contain("pkg:maven/org.a/utils@2.0.0")
           }
+
+      "tag a Ruby component from its gem purl when the SBOM declares no namespaces" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "bcrypt", purl = "pkg:gem/bcrypt@3.1.22"),
+                componentJson(name = "json", purl = "pkg:gem/json@2.18.0"),
+                componentJson(name = "parser", purl = "pkg:gem/parser@1.8.1")
+              )
+          )(
+            Seq(
+              "BCrypt::Password.create(secret)" -> "secret",
+              "JSON.parse(text)"                -> "text",
+              "SearchParser.new.parse(params)"  -> "params"
+            )
+          ) { cpg =>
+            cpg.identifier.name("secret").tag.name.toSet should contain(
+              "pkg:gem/bcrypt@3.1.22"
+            )
+            // acronym constant: the gem name matches case-insensitively
+            cpg.identifier.name("text").tag.name.toSet should contain(
+              "pkg:gem/json@2.18.0"
+            )
+            // a constant the gem name is merely embedded in is not the gem
+            cpg.identifier.name("params").tag.name.toSet shouldBe empty
+            cpg.tag.name("pkg:gem/parser@1.8.1").l shouldBe empty
+          }
+
+      "give Ruby the component type under its namespaced tag only" in
+          RubyFixture(components =
+              Seq(componentJson(
+                name = "rails",
+                purl = "pkg:gem/rails@8.1.3.1",
+                extra = """,
+            "type": "framework",
+            "tags": ["framework"]"""
+              ))
+          )(
+            Seq("Rails.application.name" -> "name")
+          ) { cpg =>
+            cpg.identifier.name("name").tag.name.toSet should contain(
+              "pkg:gem/rails@8.1.3.1"
+            )
+            // framework-as-source: the component type and its description words
+            // must not become source tags, on Ruby just as on the generic path
+            cpg.tag.name("framework-input").l shouldBe empty
+            cpg.tag.name("framework").l shouldBe empty
+          }
   }
 end CdxPassTests
 
 object CdxPassTests:
+
+  /** A Ruby graph whose calls carry the code snippets the gem patterns key off, each with one
+    * identifier argument the purl tags land on.
+    */
+  private object RubyFixture:
+    def apply[T](components: Seq[String])(calls: Seq[(String, String)])(fun: Cpg => T): T =
+      val bom =
+          s"""{
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "components": [${components.mkString(",")}]
+          }"""
+      val cpg = MockCpg().withMetaData(Languages.RUBYSRC, Nil).withCustom { (graph, _) =>
+        graph.addNode(NewConfigFile().name("bom.json").content(bom))
+        calls.foreach { case (code, argument) =>
+            val call = NewCall().name("invoke").methodFullName("app.rb:<module>.invoke").code(code)
+            val argumentNode = NewIdentifier().name(argument).code(argument)
+                .typeFullName("ANY").argumentIndex(1).order(1)
+            graph.addNode(call)
+            graph.addNode(argumentNode)
+            graph.addEdge(call, argumentNode, EdgeTypes.ARGUMENT)
+        }
+      }.cpg
+      new CdxPass(cpg).createAndApply()
+      fun(cpg)
+    end apply
+  end RubyFixture
 
   /** A JVM graph whose calls sit under the package roots the JVM tests key off. */
   private object JvmFixture:
