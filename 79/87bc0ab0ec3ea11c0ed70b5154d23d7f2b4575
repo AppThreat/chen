@@ -1,0 +1,32 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_7e900a9e3d6d42::t_8be0bc635174d1 4427-4429,4431-4432,4444,4446-4448,4453-4454,4457-4458,4495
+  s_7e900a9e3d6d42::t_aa5c958fd5e7ec 4449-4450
+  s_7e900a9e3d6d42::t_f0b92dde0ab42a 342-347
+  s_7e900a9e3d6d42::t_cc4d695912281b 4188-4189,4430,4433-4443,4445,4451-4452,4455-4456,4497-4503
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/WrongDeallocationRuleTests.scala
+  s_7e900a9e3d6d42::t_670456b2b3ed18 75-81,323
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/LoopBoundOverreadTests.scala
+  s_7e900a9e3d6d42::t_df5353ba94d2da 1-121
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_7e900a9e3d6d42::t_0bfeab72a18852 33,129-203,280-288
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_7e900a9e3d6d42::t_741eff30f72e24 580-583
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/OverlayFacts.scala
+  s_7e900a9e3d6d42::t_345807a8e92d93 404-408
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7987bc0ab0ec3ea11c0ed70b5154d23d7f2b4575",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
