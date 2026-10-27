@@ -1,0 +1,40 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/LoopBoundOverreadTests.scala
+  s_7e900a9e3d6d42::t_452ec4ea61920f 8-10,122
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ObjectAccessRules.scala
+  s_7e900a9e3d6d42::t_452ec4ea61920f 25-91,106-110
+  s_7e900a9e3d6d42::t_f8ec156108ef43 111-113
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InputArithmeticGuardTests.scala
+  s_7e900a9e3d6d42::t_0cf42f53348f1a 1-7,9,11-85,102-124,126-127,129-130,132-133,135-136,138-139,141,146,148
+  s_7e900a9e3d6d42::t_452ec4ea61920f 10,149
+  s_7e900a9e3d6d42::t_1bc8acaab18457 8,86-101,125,128,131,134,137,140,142-145,147
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  s_7e900a9e3d6d42::t_1bc8acaab18457 244-288,385-399
+  s_7e900a9e3d6d42::t_452ec4ea61920f 346-348,406
+  s_7e900a9e3d6d42::t_747746c8180b61 400
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ArithmeticRules.scala
+  s_7e900a9e3d6d42::t_05267faf83e1a8 215,218-233
+  s_7e900a9e3d6d42::t_452ec4ea61920f 213-214,238-266,283-286,288-305,532-535
+  s_7e900a9e3d6d42::t_b9988eee770ad6 309-311,708
+  s_7e900a9e3d6d42::t_966d0c0b31f164 216-217,234-237,500-505,507-508,709
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_7e900a9e3d6d42::t_452ec4ea61920f 643-660,2054-2055,2058-2065,2070-2071
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_7e900a9e3d6d42::t_452ec4ea61920f 330-331,335-336,4432-4458
+  s_7e900a9e3d6d42::t_93d775c2eb65c2 301-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32797e8a7c084bc68fe7bb76632c9cbd772ab474",
+  "prompts": {},
+  "sessions": {
+    "s_7e900a9e3d6d42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3832b21c-aa27-4447-9217-9600cd81ade7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
