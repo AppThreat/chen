@@ -36,11 +36,11 @@ class CdxPass(
                     json.hcursor.downField("components").focus.flatMap(_.asArray).getOrElse(
                       Vector.empty
                     )
-                val donePkgs             = mutable.Set[String]()
+                val claimedForms         = mutable.Map[String, mutable.Set[String]]()
                 val unambiguousJvmGroups = jvmGroupsNamingOneComponent(components)
 
                 components.foreach(
-                  processComponent(_, donePkgs, unambiguousJvmGroups, dstGraph)
+                  processComponent(_, claimedForms, unambiguousJvmGroups, dstGraph)
                 )
                 applyGenericJobs(dstGraph)
             case Left(error) =>
@@ -49,7 +49,7 @@ class CdxPass(
 
   private def processComponent(
     comp: Json,
-    donePkgs: mutable.Set[String],
+    claimedForms: mutable.Map[String, mutable.Set[String]],
     unambiguousJvmGroups: Set[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
@@ -62,12 +62,44 @@ class CdxPass(
     val descTags = if compTags.nonEmpty then compTags.take(TAGS_COUNT)
     else CdxTagVocab.extractDescTags(compDescription).take(TAGS_COUNT)
 
-    processPypiComponent(cursor, compPurl, compType, descTags, donePkgs, dstGraph)
+    processPypiComponent(cursor, compPurl, compType, descTags, claimedForms, dstGraph)
     val taggedFromProperties =
-        processProperties(cursor, compPurl, compType, descTags, donePkgs, dstGraph)
+        processProperties(cursor, compPurl, compType, descTags, claimedForms, dstGraph)
     if !taggedFromProperties then
-      processJvmPurl(compPurl, compType, descTags, donePkgs, unambiguousJvmGroups, dstGraph)
+      processJvmPurl(compPurl, compType, descTags, claimedForms, unambiguousJvmGroups, dstGraph)
   end processComponent
+
+  /** The package name a purl carries: no version, qualifiers or namespace. `pkg:pypi/django@5.2.17`
+    * is `django`, `pkg:maven/org.springframework/spring-web@6.1.0` is `spring-web`.
+    */
+  private def purlName(purl: String): String =
+      purl.split("@").headOption.getOrElse("").split("/").lastOption.getOrElse("")
+
+  /** Claims a namespace form for the package `purl` names; true when the caller must tag.
+    *
+    * A package present in several versions (DefectDojo pins django 5.2.17 and 6.1.2, bleach and
+    * markdown too) claims its namespaces from every version, so the nodes carry each version's
+    * exact purl and cdxgen can attach callstack evidence to each component. Which component the
+    * SBOM lists first, or whether registry metadata enriched it, must not change that. A DIFFERENT
+    * package taking an already claimed namespace is still refused: two distributions providing one
+    * namespace (pyyaml and ruamel-yaml both provide `yaml`) are indistinguishable at the call site,
+    * and letting the second one tag would misattribute.
+    */
+  private def claim(
+    bpkg: String,
+    purl: String,
+    claimedForms: mutable.Map[String, mutable.Set[String]]
+  ): Boolean =
+      claimedForms.get(bpkg) match
+        case None =>
+            claimedForms(bpkg) = mutable.Set(purl)
+            true
+        case Some(purls) =>
+            val name = purlName(purl)
+            if !purls.contains(purl) && purls.forall(purlName(_) == name) then
+              purls.add(purl)
+              true
+            else false
 
   /** Maven group ids that exactly one component in this SBOM belongs to.
     *
@@ -108,7 +140,7 @@ class CdxPass(
     purl: String,
     compType: String,
     descTags: List[String],
-    donePkgs: mutable.Set[String],
+    claimedForms: mutable.Map[String, mutable.Set[String]],
     unambiguousJvmGroups: Set[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
@@ -123,7 +155,7 @@ class CdxPass(
             )
             .foreach { group =>
               val bpkg = normalizePackage(group)
-              if bpkg.nonEmpty && donePkgs.add(bpkg) then
+              if bpkg.nonEmpty && claim(bpkg, purl, claimedForms) then
                 tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
             }
 
@@ -142,7 +174,7 @@ class CdxPass(
     purl: String,
     compType: String,
     descTags: List[String],
-    donePkgs: mutable.Set[String],
+    claimedForms: mutable.Map[String, mutable.Set[String]],
     dstGraph: DiffGraphBuilder
   ): Unit =
       if (language == Languages.PYTHON || language == Languages.PYTHONSRC) && purl.startsWith(
@@ -171,7 +203,7 @@ class CdxPass(
         nsCandidates.distinct.filter(_.nonEmpty).foreach { ns =>
           val forms = Set(toPyModuleForm(ns), s"$ns\\..*")
           forms.foreach { bpkg =>
-              if bpkg.nonEmpty && donePkgs.add(bpkg) then
+              if bpkg.nonEmpty && claim(bpkg, purl, claimedForms) then
                 // `methodFullName` is the pypi path's own traversal: a module-form
                 // pattern matches the call's method, not its type. Everything else a
                 // component implies - the purl on types and parameters, the component
@@ -191,7 +223,7 @@ class CdxPass(
     purl: String,
     compType: String,
     descTags: List[String],
-    donePkgs: mutable.Set[String],
+    claimedForms: mutable.Map[String, mutable.Set[String]],
     dstGraph: DiffGraphBuilder
   ): Boolean =
     var tagged     = false
@@ -213,7 +245,7 @@ class CdxPass(
               bpkg = normalizePackage(bpkg)
               if bpkg.nonEmpty then
                 tagged = true
-                if donePkgs.add(bpkg) then
+                if claim(bpkg, purl, claimedForms) then
                   tagByLanguage(bpkg, purl, compType, descTags, dstGraph)
             )
     }
@@ -330,9 +362,18 @@ class CdxPass(
       methodMatcher = CdxPatternMatcher(methodPattern),
       callMethodMatcher = Option.when(tagCallMethods)(CdxPatternMatcher(bpkg)),
       purl = purl,
-      compTypeTag = Option.when(compType != "library")(compType),
-      descTags = descTags
+      // The component type and description words describe the package; on calls,
+      // identifiers and parameters they used to land under their bare names, and
+      // those names are the reachables source/sink vocabulary (`framework` is a
+      // source tag, `http`, `sql` and `rpc` are sinks). An enriched component then
+      // made every call into it read as request data - on DefectDojo, 95,007 flows
+      // started at `django, framework, http` calls, all of them plumbing. They are
+      // namespaced instead, so no reachables query can match them while the
+      // information stays on the node.
+      compTypeTag = Option.when(compType != "library")(s"comp-type:$compType"),
+      descTags = descTags.map(t => s"comp-desc:$t")
     )
+  end tagGeneric
 
   /** One `tagGeneric` request, applied later by [[applyGenericJobs]]. */
   private case class GenericJob(

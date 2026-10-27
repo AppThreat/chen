@@ -104,7 +104,10 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             // the pypi pass claims the pattern from Namespaces and applies the purl;
             // the property pass must still apply the generic half (compType = framework)
             cpg.call.name("routing").tag.name.toSet should contain("pkg:pypi/django@4.2")
-            cpg.call.name("routing").tag.name.toSet should contain("framework")
+            // namespaced, so it cannot collide with the `framework` source tag the
+            // reachables queries match
+            cpg.call.name("routing").tag.name.toSet should contain("comp-type:framework")
+            cpg.tag.name("framework").l shouldBe empty
             // the manifest path must not become a namespace pattern
             cpg.tag.name.l.filter(_.contains("requirements")) shouldBe empty
           }
@@ -150,12 +153,75 @@ class CdxPassTests extends AnyWordSpec with Matchers:
               )
           ) { cpg =>
             // no `tags` array: CdxPass re-derives from the description with the
-            // vendored vocabulary, and must produce cdxgen's sorted output
-            cpg.identifier.name("pyyamlObj").tag.name.toSet should contain("http")
-            cpg.identifier.name("pyyamlObj").tag.name.toSet should contain("wsgi")
+            // vendored vocabulary, and must produce cdxgen's sorted output -
+            // namespaced with comp-desc:, since `http` and `wsgi` are sink/source
+            // tag names the reachables queries match
+            cpg.identifier.name("pyyamlObj").tag.name.toSet should contain("comp-desc:http")
+            cpg.identifier.name("pyyamlObj").tag.name.toSet should contain("comp-desc:wsgi")
+            cpg.tag.name("http").l shouldBe empty
             // leading-boundary near-miss: chen's old rule produced `auth` for any
             // description containing " authentication"; the vendored rule must not
             cpg.tag.name("auth").l shouldBe empty
+          }
+
+      "tag every version of a package that claims a namespace, whichever comes first" in
+          Fixture(components =
+              Seq(
+                componentJson(
+                  name = "django",
+                  purl = "pkg:pypi/django@5.2.17",
+                  extra = """,
+            "type": "library" """
+                ),
+                componentJson(
+                  name = "django",
+                  purl = "pkg:pypi/django@6.1.2",
+                  extra = """,
+            "type": "framework",
+            "tags": ["django", "framework", "http"],
+            "properties": [
+              {"name": "internal:Namespaces", "value": "django"}
+            ]"""
+                )
+              )
+          ) { cpg =>
+            // both versions' exact purls land, so cdxgen can attach evidence to
+            // each component; the enriched second version's type and description
+            // tags stay namespaced
+            val routingTags = cpg.call.name("routing").tag.name.toSet
+            routingTags should contain("pkg:pypi/django@5.2.17")
+            routingTags should contain("pkg:pypi/django@6.1.2")
+            routingTags should contain("comp-type:framework")
+            routingTags should contain("comp-desc:django")
+            cpg.tag.name("framework").l shouldBe empty
+            cpg.tag.name("http").l shouldBe empty
+          }
+
+      "let the component order decide neither purls nor tags" in
+          Fixture(components =
+              Seq(
+                componentJson(
+                  name = "django",
+                  purl = "pkg:pypi/django@6.1.2",
+                  extra = """,
+            "type": "framework",
+            "tags": ["django", "framework", "http"],
+            "properties": [
+              {"name": "internal:Namespaces", "value": "django"}
+            ]"""
+                ),
+                componentJson(
+                  name = "django",
+                  purl = "pkg:pypi/django@5.2.17",
+                  extra = """,
+            "type": "library" """
+                )
+              )
+          ) { cpg =>
+            val routingTags = cpg.call.name("routing").tag.name.toSet
+            routingTags should contain("pkg:pypi/django@5.2.17")
+            routingTags should contain("pkg:pypi/django@6.1.2")
+            routingTags should contain("comp-type:framework")
           }
       "tag a JVM component from its purl when the SBOM declares no namespaces" in
           JvmFixture(components =
