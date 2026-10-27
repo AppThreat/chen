@@ -295,6 +295,11 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                     val rule =
                         if family.contains("file") then RuleDoubleClose else RuleDoubleFree
                     record(node, rule)
+                    // the suite marks the first release too ("the bad sink frees data as well"):
+                    // the release that makes the second one a double free is a site of the same
+                    // finding
+                    if rule == RuleDoubleFree then
+                      firstReleaseBefore(node, enclosing).foreach(record(_, rule))
                   else record(node, RuleUseAfterFree)
               case _ => ()
         }
@@ -320,6 +325,41 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleMismatchedFree))
   end ruleAllocationState
+
+  /** The nearest release of the same variable before a double free's argument, in the same method:
+    * the free call whose argument is the pointer the second release sees freed.
+    */
+  private def firstReleaseBefore(node: StoredNode, secondFree: Option[Call]): Option[StoredNode] =
+      for
+        arg    <- Some(node).collect { case a: Expression => a }
+        key    <- OverlayFacts.variableKey(arg)
+        second <- secondFree
+        secondLine = second.lineNumber.map(_.toInt).getOrElse(0)
+        first <- arg.method.ast.isCall.l
+            .filter(c =>
+                c != second && (tagValues(c, MemoryApiPass.TagFree).nonEmpty) &&
+                    c.lineNumber.exists(_.toInt < secondLine) &&
+                    // the same pointer expression: `free(elem[i])` shares `elem`'s variable key and
+                    // releases something else
+                    c.argumentOption(1).exists(a =>
+                        OverlayFacts.variableKey(a).contains(key) && stripCasts(a).code ==
+                            stripCasts(arg).code
+                    )
+            )
+            .sortBy(c => c.lineNumber.map(_.toInt).getOrElse(0))
+            .lastOption
+        firstLine = first.lineNumber.map(_.toInt).getOrElse(0)
+        // a rebinding to a fresh value between the two means the earlier release freed another
+        // block: the second one's freed state came from somewhere else (a callee's summary). A
+        // copy (`char *data = dataCopy`, variant 31) carries the same block along
+        if !arg.method.ast.isCall.nameExact("<operator>.assignment").l.exists(a =>
+            a.lineNumber.exists(l => l.toInt > firstLine && l.toInt < secondLine) &&
+                a.argumentOption(1).exists(lhs => stripCasts(lhs).code == stripCasts(arg).code) &&
+                !a.argumentOption(2).collect { case e: Expression => stripCasts(e) }
+                    .exists(_.isInstanceOf[Identifier])
+        )
+        target <- first.argumentOption(1)
+      yield target
 
   /** A macro invocation that frees the argument it is handed (`xfree(p)` spelling `free(p)`, or a
     * wrapper that frees and resets): the argument is the free site, not a use of the freed pointer.
@@ -4155,7 +4195,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 v.stripPrefix(s"${ExtentPass.ValueConst}:").toLongOption.flatMap(n =>
                     // a byte array counts bytes; any other element type converts through the
                     // size the frontend computed for the declared object
-                    if hasByteElements(dst) then Some(n) else elementBytes(dst).map(_ * n)
+                    if hasByteElements(dst) then Some(n)
+                    else elementBytes(dst).orElse(pointeeBytesOf(dst)).map(_ * n)
                 )
             case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") =>
                 val referenced = v.stripPrefix(s"${ExtentPass.ValueAlloc}:").toLongOption
@@ -4393,6 +4434,38 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 if attackerCount
               do record(idx, rule)
           }
+      // the largest value a loop bound can take: a literal, or a variable defined as the length of a
+      // string held in an object of known extent (`destLen = strlen(dest)` over `char dest[100]`
+      // is at most 99 - the terminator takes the last element)
+      def boundMaximum(bound: Expression, depth: Int = 2): Option[BigInt] =
+          IndexRange.literal(bound).orElse {
+              stripCasts(bound) match
+                // a term and a constant: `sourceLen + 1` reaches the term's maximum plus one
+                case c: Call if c.name == "<operator>.addition" && depth > 0 =>
+                    c.argument.l.collect { case e: Expression => e } match
+                      case List(l, r) =>
+                          boundMaximum(l, depth - 1).zip(IndexRange.literal(r)).map(_ + _).orElse(
+                            boundMaximum(r, depth - 1).zip(IndexRange.literal(l)).map(_ + _)
+                          )
+                      case _ => None
+                case i: Identifier =>
+                    val defs = OverlayFacts.reachingDefsIn(i)
+                        .collect { case d: Identifier if d.name == i.name => d }
+                    val rhss = defs.flatMap(_._astIn.collectFirst {
+                        case a: Call if a.name == "<operator>.assignment" => a
+                    }).flatMap(_.argumentOption(2))
+                    if defs.isEmpty || rhss.size != defs.size then None
+                    else
+                      val maxima = rhss.map {
+                          case c: Call if isStrlen(c) || c.name == "wcslen" =>
+                              c.argumentOption(1).collect { case e: Expression => e }
+                                  .flatMap(declaredOneDimCount).map(_ - 1)
+                          case other => IndexRange.literal(other)
+                      }
+                      if maxima.forall(_.isDefined) then Some(maxima.flatten.max) else None
+                case _ => None
+          }
+
       // arm 4: a CONSTANT loop bound the base cannot hold - `for (i = 0; i < 100; i++)
       // data[i] = source[i]` into `new char[50]`, `alloca(50)`, `malloc(10)` for ten ints (the
       // CWE-131 element-size mismatch), and the CWE-193 off-by-one `i <= n` over an array of n.
@@ -4429,9 +4502,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                               // the finding belongs to the LOOP statement, where the bound is
                               // written and where both suites mark the flaw - not to the access
                               // the bound admits
-                              IndexRange.literal(bound).foreach { k =>
+                              boundMaximum(bound).foreach { k =>
                                   if (inclusive && k >= capElems) || (!inclusive && k > capElems)
-                                  then record(cond, rule)
+                                  then
+                                    // a READ the bound carries past the extent is an over-read at
+                                    // the read, where the suites mark it; a write's flaw is the
+                                    // loop statement
+                                    if ruleIdFor(access) == RuleIndexRead then
+                                      record(idx, RuleIndexRead)
+                                    else record(cond, rule)
                               }
                               // the CWE-193 VLA shape: the loop bound is the array's own bound
                               // variable and the comparison is inclusive - i reaches n on a[n]
@@ -4699,7 +4778,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           case _             => false
                       }
                     }
-                  val walkedThenFreed = i.method.ast.isCall.l.exists { inc =>
+                  val walkIncrements = i.method.ast.isCall.l.filter { inc =>
                       Set("<operator>.postIncrement", "<operator>.preIncrement").contains(
                         inc.name
                       ) && inc.argumentOption(1).exists {
@@ -4711,13 +4790,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           ) && !reboundAfter(loop)
                       )
                   }
+                  val walkedThenFreed = walkIncrements.nonEmpty
                   // the state pass's frame-storage fact (q = &x; free(q))
                   if (i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") &&
                         (defRhss.isEmpty || onlyNonHeap)) ||
                     namesDeclaredArray || namesStackAlloc || namesLiteral
                   then record(i, RuleNonHeapFree)
-                  if walkedThenFreed then
-                    record(i, RuleOffsetFree)
+                  // reported where the suite marks it: the walk's increment, the statement that moves
+                  // the pointer off the block's start
+                  if walkedThenFreed then walkIncrements.foreach(record(_, RuleOffsetFree))
                   // CWE-761: the identifier's definition is pointer arithmetic over a
                   // tracked allocation
                   val defsAreOffsetArith = OverlayFacts
@@ -5055,8 +5136,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 .find(a => IndexRange.literal(a).isDefined || a.isInstanceOf[Identifier])
                 .foreach { count =>
                   val origins = ValueOriginPass.originNamesOf(count).filter(attackers.contains)
-                  val bounded = count.tag.name(GuardPass.TagAbove).nonEmpty ||
-                      ArithmeticRules.operandKeptInType(newCall, count)
+                  val bounded = ArithmeticRules.operandBoundedAbove(newCall, count)
                   if origins.contains(ValueOriginPass.OriginUntrustedRead) && !bounded then
                     record(count, RuleUncontrolledSize)
                     promoted += (count -> RuleUncontrolledSize)
@@ -5102,14 +5182,19 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 if c.name == "<operator>.addition" || c.name == "<operator>.multiplication" =>
                 c.argument.l.collect { case x: Expression => x }.forall(go(_, depth - 1))
             case i: Identifier =>
-                val defs = OverlayFacts
-                    .reachingDefsIn(i)
-                    .collect { case d: Identifier => d }
+                val defIds = OverlayFacts.reachingDefsIn(i).collect { case d: Identifier => d }
+                val defs = defIds
                     .flatMap(_._astIn.collectFirst {
                         case a: Call if a.name == "<operator>.assignment" => a
                     })
                     .flatMap(_.argumentOption(2))
-                defs.nonEmpty && defs.forall(go(_, depth - 1))
+                // the `&data` an `fscanf` fills is a definition too, a value the program did not
+                // derive from a string: it ends the exemption
+                val filledByCall = defIds.exists(d =>
+                    d._astIn.collectFirst { case c: Call => c }
+                        .exists(_.name == "<operator>.addressOf")
+                )
+                defs.nonEmpty && !filledByCall && defs.forall(go(_, depth - 1))
             case _ => false
     go(lenArg, 3)
   end strlenDerivedSize

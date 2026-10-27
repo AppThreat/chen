@@ -576,6 +576,13 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                 .filter(a => a.argumentIndex > 1 && !a.isInstanceOf[Call])
                 .find(IndexRange.literal(_).isDefined)
                 .map(e => s"$ValueAlloc:${e.id}")
+        }.orElse {
+            // a count held in a variable (`new char[dataBytes]`): the first argument after the
+            // element type. An arithmetic count (`new char[size + 5]`) stays unknown - the offset
+            // rules would read its sum as a capacity they cannot compare
+            newCall.argument.l.collect { case e: Identifier => e }
+                .find(a => a.argumentIndex == 2)
+                .map(e => s"$ValueAlloc:${e.id}")
         }
 
   /** The capacity parameter beside a buffer parameter: adjacency in the signature plus the

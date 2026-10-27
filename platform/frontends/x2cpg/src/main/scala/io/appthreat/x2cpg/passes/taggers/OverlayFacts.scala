@@ -401,7 +401,11 @@ private[taggers] object OverlayFacts:
     "int32_t"            -> 32,
     "uint32_t"           -> 32,
     "int64_t"            -> 64,
-    "uint64_t"           -> 64
+    "uint64_t"           -> 64,
+    // the LP64 ABIs chen models (Linux, macOS); EDG states the target's own size per object
+    "wchar_t"  -> 32,
+    "char32_t" -> 32,
+    "char16_t" -> 16
   )
 
   /** Reaching definitions backwards from `node`, breadth-first with a hop budget: the walk the

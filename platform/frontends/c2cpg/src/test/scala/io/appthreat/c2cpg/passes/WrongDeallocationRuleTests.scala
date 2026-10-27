@@ -43,6 +43,143 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |    free(p);
     |}
     |
+    |/* the Juliet CWE-761 shape: the walk moves the pointer, the free follows the walk */
+    |void bad_walk_then_free(char *data)
+    |{
+    |    for (; *data != '\0'; data++)
+    |    {
+    |        if (*data == 'x') break;
+    |    }
+    |    free(data);
+    |}
+    |
+    |void good_walk_a_copy(char *data)
+    |{
+    |    char *cursor = data;
+    |    for (; *cursor != '\0'; cursor++)
+    |    {
+    |        if (*cursor == 'x') break;
+    |    }
+    |    free(data);
+    |}
+    |
+    |/* the Juliet CWE-415 shape: the suite marks the first release too */
+    |void bad_double_free(void)
+    |{
+    |    char *p = (char *)malloc(100);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |    free(p);
+    |}
+    |
+    |void good_free_elements_then_container(char **elem, unsigned long n)
+    |{
+    |    unsigned long i;
+    |    for (i = 0; i < n; i++) free(elem[i]);
+    |    free(elem);
+    |}
+    |
+    |static int badStatic = 0;
+    |static void staticSink(char *data)
+    |{
+    |    if (badStatic) free(data);
+    |}
+    |void bad_static_flag_sink(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    badStatic = 1;
+    |    staticSink(data);
+    |}
+    |
+    |void good_static_flag_other_pointer(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    char *other = (char *)malloc(100);
+    |    if (data == NULL || other == NULL) exit(-1);
+    |    free(data);
+    |    badStatic = 1;
+    |    staticSink(other);
+    |}
+    |
+    |static char *releasedSource(char *data)
+    |{
+    |    data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    return data;
+    |}
+    |void bad_source_returns_released(void)
+    |{
+    |    char *data = NULL;
+    |    data = releasedSource(data);
+    |    free(data);
+    |}
+    |
+    |static char *liveSource(char *data)
+    |{
+    |    data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    return data;
+    |}
+    |void good_source_returns_live(void)
+    |{
+    |    char *data = NULL;
+    |    data = liveSource(data);
+    |    free(data);
+    |}
+    |
+    |static void pointerSink(char *data)
+    |{
+    |    free(data);
+    |}
+    |void bad_pointer_sink(void)
+    |{
+    |    void (*funcPtr)(char *) = pointerSink;
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    funcPtr(data);
+    |}
+    |
+    |/* Juliet's variant 31: the second release frees a copy of the same pointer */
+    |void bad_double_free_through_copy(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    free(data);
+    |    {
+    |        char *dataCopy = data;
+    |        char *data = dataCopy;
+    |        free(data);
+    |    }
+    |}
+    |
+    |void release_it(char *q)
+    |{
+    |    free(q);
+    |}
+    |
+    |/* the first release freed the old block: the double free is the callee's and the last one */
+    |void bad_rebound_then_released(void)
+    |{
+    |    char *p = (char *)malloc(8);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |    p = (char *)malloc(8);
+    |    if (p == NULL) exit(-1);
+    |    release_it(p);
+    |    free(p);
+    |}
+    |
+    |void good_free_once(void)
+    |{
+    |    char *p = (char *)malloc(100);
+    |    if (p == NULL) exit(-1);
+    |    free(p);
+    |}
+    |
     |void bad_free_static(void)
     |{
     |    static char buf[64];
@@ -130,6 +267,87 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     |#include <stdio.h>
     |#include <string.h>
     |
+    |/* the Juliet CWE-789 / CWE-680 shapes over C++ new[] and scanf-filled sizes */
+    |void bad_new_count_lower_bound(void)
+    |{
+    |    size_t data = 0;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+    |    if (data > strlen("hello"))
+    |    {
+    |        char *p = new char[data];
+    |        strcpy(p, "hello");
+    |        delete[] p;
+    |    }
+    |}
+    |
+    |void good_new_count_capped(void)
+    |{
+    |    size_t data = 0;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = strtoul(inputBuffer, NULL, 0);
+    |    if (data > strlen("hello") && data < 1000)
+    |    {
+    |        char *p = new char[data];
+    |        strcpy(p, "hello");
+    |        delete[] p;
+    |    }
+    |}
+    |
+    |void bad_scanf_size_after_init(void)
+    |{
+    |    size_t data = 0;
+    |    fscanf(stdin, "%zu", &data);
+    |    char *p = (char *)malloc(data * sizeof(char));
+    |    if (p) free(p);
+    |}
+    |
+    |void good_strlen_size_after_init(const char *s)
+    |{
+    |    size_t data = 0;
+    |    data = strlen(s);
+    |    char *p = (char *)malloc(data * sizeof(char));
+    |    if (p) free(p);
+    |}
+    |
+    |static int badStaticCpp = 0;
+    |static void cppSink(int *data)
+    |{
+    |    if (badStaticCpp)
+    |    {
+    |        delete[] data;
+    |    }
+    |}
+    |void bad_cpp_static_flag(void)
+    |{
+    |    int *data = new int[100];
+    |    delete[] data;
+    |    badStaticCpp = 1;
+    |    cppSink(data);
+    |}
+    |
+    |void bad_new_overflowed_bytes(void)
+    |{
+    |    int data = -1;
+    |    char inputBuffer[20] = "";
+    |    if (fgets(inputBuffer, 20, stdin) != NULL) data = atoi(inputBuffer);
+    |    size_t dataBytes = data * sizeof(int);
+    |    int *intPointer = (int *)new char[dataBytes];
+    |    for (size_t i = 0; i < (size_t)data; i++)
+    |    {
+    |        intPointer[i] = 0;
+    |    }
+    |    delete[] intPointer;
+    |}
+    |""".stripMargin,
+        "r10alloc.cpp"
+      )
+      .moreCode(
+        """
+    |#include <stdlib.h>
+    |#include <stdio.h>
+    |#include <string.h>
+    |
     |/* the CWE-789 shape: attacker-controlled sizes with and without the cap */
     |void bad_malloc_from_input(const char *userInput)
     |{
@@ -199,6 +417,51 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     "fire on a free of pointer arithmetic over the allocation (CWE-761)" in {
         findingsIn("bad_free_offset") should contain("MS-ALLOC-006")
     }
+    "report a walked-then-freed pointer at the walk's increment, where the suite marks it" in {
+        val walks = cpg.method.name("bad_walk_then_free").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-006"))
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.Call].l
+        walks.map(_.code) shouldBe List("data++")
+    }
+    "report both releases of a double free (CWE-415)" in {
+        val sites = cpg.method.name("bad_double_free").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
+        sites.flatMap(_.lineNumber).map(_.toInt).distinct.size shouldBe 2
+        findingsIn("good_free_once") should not contain "MS-ALLOC-001"
+        def siteLines(m: String) = cpg.method.name(m).ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.AstNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001"))
+            .flatMap(_.lineNumber).map(_.toInt).l.distinct
+        siteLines("bad_double_free_through_copy").size shouldBe 2
+        val firstFree = cpg.method.name("bad_rebound_then_released").call.nameExact("free")
+            .flatMap(_.lineNumber).map(_.toInt).l.min
+        siteLines("bad_rebound_then_released") should not be empty
+        siteLines("bad_rebound_then_released") should not contain firstFree
+        findingsIn("good_free_elements_then_container") should not contain "MS-ALLOC-001"
+    }
+    "report a release a file-static flag a caller set decides (CWE-415 across a call)" in {
+        findingsIn("bad_static_flag_sink") should contain("MS-ALLOC-001")
+        findingsIn("good_static_flag_other_pointer") should not contain "MS-ALLOC-001"
+    }
+    "report the callee's own release as a site of the same double free" in {
+        findingsIn("bad_cpp_static_flag") should contain("MS-ALLOC-001")
+        val sites = cpg.method.name("cppSink").ast
+            .collectAll[io.shiftleft.codepropertygraph.generated.nodes.StoredNode]
+            .filter(_.tag.name("ms-finding").value.l.contains("MS-ALLOC-001")).l
+        sites should not be empty
+    }
+    "report a pointer a callee returns after releasing it, freed again by the caller" in {
+        findingsIn("bad_source_returns_released") should contain("MS-ALLOC-001")
+        findingsIn("good_source_returns_live") should not contain "MS-ALLOC-001"
+    }
+    "report a release through a local function pointer" in {
+        findingsIn("bad_pointer_sink") should contain("MS-ALLOC-001")
+    }
+    "stay silent when the walk is over a copy and the original is freed" in {
+        findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
+    }
     "stay silent when the arithmetic result is not what is freed" in {
         findingsIn("good_free_original") should not contain "MS-ALLOC-006"
     }
@@ -235,6 +498,21 @@ class WrongDeallocationRuleTests extends DataFlowCodeToCpgSuite:
     }
 
   "MS-ALLOC-008/009 (uncontrolled size)" should:
+    "fire on a new[] count with only a lower bound (CWE-789)" in {
+        findingsIn("bad_new_count_lower_bound") should contain("MS-ALLOC-008")
+    }
+    "stay silent on a new[] count capped above" in {
+        findingsIn("good_new_count_capped") should not contain "MS-ALLOC-008"
+    }
+    "fire on a scanf-filled size whose initialiser is a constant" in {
+        findingsIn("bad_scanf_size_after_init") should contain("MS-ALLOC-008")
+    }
+    "stay silent on a strlen-derived size with a constant initialiser" in {
+        findingsIn("good_strlen_size_after_init") should not contain "MS-ALLOC-008"
+    }
+    "fire on the write over a new[] sized by overflowed arithmetic (CWE-680)" in {
+        findingsIn("bad_new_overflowed_bytes") should contain("MS-BOUND-007")
+    }
     "fire on an attacker-controlled malloc size (CWE-789)" in {
         findingsIn("bad_malloc_from_input") shouldBe Set("MS-ALLOC-008")
     }
