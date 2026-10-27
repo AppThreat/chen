@@ -483,6 +483,26 @@ class CdxPassTests extends AnyWordSpec with Matchers:
             )
           }
 
+      "give a child gem its multi-line calls too" in
+          RubyFixture(components =
+              Seq(
+                componentJson(name = "rack", purl = "pkg:gem/rack@3.2.7"),
+                componentJson(name = "rack-attack", purl = "pkg:gem/rack-attack@6.7.0")
+              )
+          )(
+            Seq(
+              "Rack::Attack.throttle(\"logins/ip\",\n  limit: 5) do |req|\n  req.ip\nend" -> "req"
+            )
+          ) { cpg =>
+            // the parent's code filter spans lines, so the shadower has to as well
+            cpg.identifier.name("req").tag.name.toSet should contain(
+              "pkg:gem/rack-attack@6.7.0"
+            )
+            cpg.identifier.name("req").tag.name.toSet should not.contain(
+              "pkg:gem/rack@3.2.7"
+            )
+          }
+
       "leave a parent gem the calls of a child that is not in the SBOM" in
           RubyFixture(components =
               Seq(componentJson(name = "rack", purl = "pkg:gem/rack@3.2.7"))

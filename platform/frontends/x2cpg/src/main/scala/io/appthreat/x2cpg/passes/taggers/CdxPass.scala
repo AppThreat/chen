@@ -425,7 +425,10 @@ class CdxPass(
     shadowers: List[String],
     dstGraph: DiffGraphBuilder
   ): Unit =
-    val shadowerPatterns = shadowers.map(_.r)
+    // `(?s)` as overflowdb compiles the `code(bpkg)` filter: call code spans lines (a `do`
+    // block), and a shadower that cannot cross a newline would hand multi-line child calls to
+    // the parent.
+    val shadowerPatterns = shadowers.map(pattern => s"(?s)$pattern".r)
     val owned = atom.call.code(bpkg).filterNot { call =>
         shadowerPatterns.exists(_.matches(call.code))
     }
