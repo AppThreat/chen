@@ -153,12 +153,13 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     val name = text.trim
     if name.isEmpty || !(name.head.isLetter || name.head == '_') then None
     else
-      val invocations =
-          unit.invocations.values.filter(i => i.string("name").contains(name)).flatMap(
-            _.long("id")
-          ).toSet
-      nodes(root).find(n => n.kind == "constant" && n.long("mi").exists(invocations.contains))
-          .flatMap(_.string("value"))
+      // both indexes are built once: the scans they replace ran for every macro argument
+      invocationIdsByName.getOrElse(name, Set.empty) match
+        case ids if ids.isEmpty => None
+        case ids =>
+            constantsByInvocation(root).collectFirst {
+                case (mi, value) if ids.contains(mi) => value
+            }.flatten
 
   private def outermostWithin(root: Value, start: Pos, end: Pos): Option[Value] =
     def within(p: Pos): Boolean =
@@ -177,6 +178,22 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
       then found = Some(n)
       else children(n).foreach(queue.enqueue)
     found
+
+  private lazy val invocationIdsByName: Map[String, Set[Long]] =
+      unit.invocations.values.toSeq.flatMap(i =>
+          for n <- i.string("name"); id <- i.long("id") yield n -> id
+      ).groupMap(_._1)(_._2).view.mapValues(_.toSet).toMap
+
+  // per root, the constants an expansion left, in the order the walk met them
+  private val constantsByRoot = new java.util.IdentityHashMap[Value, Seq[(Long, Option[String])]]()
+  private def constantsByInvocation(root: Value): Seq[(Long, Option[String])] =
+    var cached = constantsByRoot.get(root)
+    if cached == null then
+      cached = nodes(root).filter(_.kind == "constant").flatMap(n =>
+          n.long("mi").map(mi => (mi, n.string("value")))
+      ).toSeq
+      constantsByRoot.put(root, cached)
+    cached
 
   private def nodes(root: Value): Iterator[Value] =
       Iterator.single(root) ++ children(root).iterator.flatMap(nodes)

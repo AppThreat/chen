@@ -653,24 +653,41 @@ object InitAndFormatRules:
         gen.getOrElse(n.id(), Set.empty).flatMap(g =>
             if g.contains('.') then Set(g, s"${g.takeWhile(_ != '.')}.*") else Set(g)
         )
-    val in       = mutable.LongMap.empty[Set[String]]
-    val out      = mutable.LongMap.empty[Set[String]]
+    // the fixpoint runs on bitsets over the names it meets: unions of string sets at every step
+    // were most of the rule's time on a large function
+    val index                  = mutable.HashMap.empty[String, Int]
+    def bit(name: String): Int = index.getOrElseUpdate(name, index.size)
+    val genBits                = mutable.LongMap.empty[scala.collection.immutable.BitSet]
+    nodes.foreach { n =>
+      val g = genOf(n)
+      if g.nonEmpty then genBits(n.id()) = scala.collection.immutable.BitSet(g.toSeq.map(bit)*)
+    }
+    val empty    = scala.collection.immutable.BitSet.empty
+    val in       = mutable.LongMap.empty[scala.collection.immutable.BitSet]
+    val out      = mutable.LongMap.empty[scala.collection.immutable.BitSet]
     val worklist = mutable.Queue.from(nodes)
     val queued   = mutable.HashSet.from(nodes.map(_.id()))
     var steps    = 0
+    // the live neighbours of each node, once: the fixpoint revisits nodes many times
+    val predsOf = mutable.LongMap.empty[List[Long]]
+    val succsOf = mutable.LongMap.empty[List[CfgNode]]
+    nodes.foreach { n =>
+      predsOf(n.id()) = n._cfgIn.collectAll[CfgNode].l.map(_.id()).filter(live.contains)
+      succsOf(n.id()) = n._cfgOut.collectAll[CfgNode].l.filter(x => live.contains(x.id()))
+    }
     while worklist.nonEmpty && steps < 400000 do
       steps += 1
       val n = worklist.dequeue()
       queued -= n.id()
       // a predecessor only a dead branch reaches contributes nothing: its writes are on no path
-      val preds = n._cfgIn.collectAll[CfgNode].l.filter(p => live.contains(p.id()))
-      val inSet =
-          preds.foldLeft(Set.empty[String])((acc, p) => acc ++ out.getOrElse(p.id(), Set.empty))
+      val inSet = predsOf.getOrElse(n.id(), Nil).foldLeft(empty)((acc, p) =>
+          acc | out.getOrElse(p, empty)
+      )
       in(n.id()) = inSet
-      val o = inSet ++ genOf(n)
+      val o = inSet | genBits.getOrElse(n.id(), empty)
       if !out.get(n.id()).contains(o) then
         out(n.id()) = o
-        n._cfgOut.collectAll[CfgNode].filter(s => live.contains(s.id())).foreach { s =>
+        succsOf.getOrElse(n.id(), Nil).foreach { s =>
             if queued.add(s.id()) then worklist.enqueue(s)
         }
     if worklist.nonEmpty then return // did not converge: say nothing
@@ -679,7 +696,7 @@ object InitAndFormatRules:
         in.get(node.id()).foreach { s =>
           val sameLine =
               node.lineNumber.exists(n => declLine.get(shown.takeWhile(_ != '.')).contains(n.toInt))
-          if !sameLine && !accepted.exists(s.contains) then
+          if !sameLine && !accepted.exists(a => index.get(a).exists(s.contains)) then
             record(node, MemorySafetyFindingPass.RuleUninitialisedRead)
         }
     }

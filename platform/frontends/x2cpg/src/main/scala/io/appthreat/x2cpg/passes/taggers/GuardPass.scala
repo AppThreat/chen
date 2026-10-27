@@ -324,6 +324,20 @@ object GuardPass:
     * node.
     */
   private[taggers] def guardingControllers(node: CfgNode): List[Call] =
+      // asked for the same node by every guard and rule that reads it: computed once per graph
+      controllersCache
+          .computeIfAbsent(node.graph, _ => new java.util.concurrent.ConcurrentHashMap())
+          .computeIfAbsent(node.id(), _ => guardingControllersUncached(node))
+
+  private val controllersCache =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[
+          AnyRef,
+          java.util.concurrent.ConcurrentHashMap[Long, List[Call]]
+        ]()
+      )
+
+  private def guardingControllersUncached(node: CfgNode): List[Call] =
     val controllers = node.controlledBy.collect { case c: Call => c }.l
     val dominating  = node.dominatedBy.l
     val dominators  = dominating.map(_.id()).toSet
@@ -428,20 +442,31 @@ object GuardPass:
       def isAlias(e: Expression): Boolean = withoutCasts(e) match
         case i: Identifier => OverlayFacts.declOf(i).exists(d => aliases.contains(d.id()))
         case _             => false
-      val writers = method.ast.isCall.l.filter { c =>
-          if !c.name.startsWith("<operator>") then
-            c.argument.l.exists(a =>
-                isAddressOf(a) || isAlias(a) || (namesVariable(a) && bindsToMutableReference(c, a))
-            )
-          else if OverlayFacts.isAssignmentOperator(c.name) then
-            c.argumentOption(1).collect { case t: Call => t }.exists { target =>
-                (target.name == "<operator>.indirection" ||
-                    target.name == "<operator>.indirectIndexAccess" ||
-                    target.name == "<operator>.indirectFieldAccess") &&
-                target.argumentOption(1).collect { case x: Expression => x }.exists(isAlias)
-            }
-          else false
-      }
+      // the variable's writers do not depend on the guard and use asked about: list them once
+      val writers = aliasWritersCache
+          .computeIfAbsent(u.graph, _ => new java.util.concurrent.ConcurrentHashMap())
+          .computeIfAbsent(
+            variable.map(_.id()).getOrElse(-1L),
+            _ =>
+                method.ast.isCall.l.filter { c =>
+                    if !c.name.startsWith("<operator>") then
+                      c.argument.l.exists(a =>
+                          isAddressOf(a) || isAlias(a) || (namesVariable(
+                            a
+                          ) && bindsToMutableReference(c, a))
+                      )
+                    else if OverlayFacts.isAssignmentOperator(c.name) then
+                      c.argumentOption(1).collect { case t: Call => t }.exists { target =>
+                          (target.name == "<operator>.indirection" ||
+                              target.name == "<operator>.indirectIndexAccess" ||
+                              target.name == "<operator>.indirectFieldAccess") &&
+                          target.argumentOption(1).collect { case x: Expression => x }.exists(
+                            isAlias
+                          )
+                      }
+                    else false
+                }
+          )
       // a writer that runs after the guard and before the use, on some path
       writers.exists { w =>
           w.id() != g.id() &&
@@ -452,6 +477,14 @@ object GuardPass:
   end changedThroughAlias
 
   private val AddressTakenKind = "address-taken"
+
+  private val aliasWritersCache =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[
+          AnyRef,
+          java.util.concurrent.ConcurrentHashMap[Long, List[Call]]
+        ]()
+      )
 
   /** Can the access path `path` (`p->space`, a member of an element) hold another value at `to`
     * than it held at `from`, on some CFG path between them? Any call can change it - the callee may
@@ -719,13 +752,55 @@ object GuardPass:
       target match
         case t: CfgNode =>
             val (onTrue, onFalse) = branchSuccessors(condition).getOrElse((Nil, Nil))
-            def reaches(from: List[CfgNode]): Boolean =
-                cfgReaches(from, t.id(), avoid = condition.id())
-            (reaches(onTrue), reaches(onFalse)) match
+            // each branch's reachable set once per condition: every target the guard is asked
+            // about is then a lookup, not a fresh walk of the method's CFG
+            // a set the budget cut short answers by the targeted walk, exactly as before
+            def reaches(branch: Boolean, from: List[CfgNode]): Boolean =
+                reachableFrom(condition, branch, from) match
+                  case Some(set) => set.contains(t.id())
+                  case None      => cfgReaches(from, t.id(), avoid = condition.id())
+            (reaches(true, onTrue), reaches(false, onFalse)) match
               case (true, false) => Some(true)
               case (false, true) => Some(false)
               case _             => None
         case _ => None
+
+  private val branchReach =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[AnyRef, java.util.concurrent.ConcurrentHashMap[
+          (Long, Boolean),
+          Option[Set[Long]]
+        ]]()
+      )
+
+  /** The CFG nodes reachable from one branch of `condition` without passing the condition again, or
+    * None when the walk ran out of budget (an unknown path may reach anything).
+    */
+  private def reachableFrom(
+    condition: Call,
+    branch: Boolean,
+    from: List[CfgNode]
+  ): Option[Set[Long]] =
+    val perGraph = branchReach.computeIfAbsent(
+      condition.graph,
+      _ => new java.util.concurrent.ConcurrentHashMap()
+    )
+    perGraph.computeIfAbsent(
+      (condition.id(), branch),
+      _ =>
+        val seen     = mutable.HashSet.empty[Long]
+        val frontier = mutable.Stack.from(from)
+        var left     = 20000
+        while frontier.nonEmpty && left > 0 do
+          val n = frontier.pop()
+          // the condition is reached (a loop's back edge) but never walked through
+          if n.id() == condition.id() then seen.add(n.id())
+          else if seen.add(n.id()) then
+            left -= 1
+            n._cfgOut.collectAll[CfgNode].foreach(frontier.push)
+        Option.when(left > 0)(seen.toSet)
+    )
+  end reachableFrom
 
   /** The condition's CFG successors split into the branch taken when it holds and the one taken
     * when it does not: the true branch starts inside the structure (its then or body), the false
@@ -763,6 +838,34 @@ object GuardPass:
     targetId: Long,
     avoid: Set[Long],
     budget: Int = 20000
+  ): Boolean =
+    if from.isEmpty then return false
+    // the same question recurs from every guard and use of a method: answer it once per graph
+    val perGraph = reachCache.computeIfAbsent(
+      from.head.graph,
+      _ => new java.util.concurrent.ConcurrentHashMap()
+    )
+    val key = (from.map(_.id()).sorted, targetId, avoid, budget)
+    val hit = perGraph.get(key)
+    if hit != null then hit.booleanValue()
+    else
+      val answer = cfgReachesAvoidingUncached(from, targetId, avoid, budget)
+      perGraph.putIfAbsent(key, java.lang.Boolean.valueOf(answer))
+      answer
+
+  private val reachCache =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[AnyRef, java.util.concurrent.ConcurrentHashMap[
+          (List[Long], Long, Set[Long], Int),
+          java.lang.Boolean
+        ]]()
+      )
+
+  private def cfgReachesAvoidingUncached(
+    from: List[CfgNode],
+    targetId: Long,
+    avoid: Set[Long],
+    budget: Int
   ): Boolean =
     val seen     = mutable.HashSet.empty[Long]
     val frontier = mutable.Stack.from(from)
