@@ -700,14 +700,6 @@
       "name": "putws",
       "nonRetaining": true,
       "readsFrom": 1
-    },
-    {
-      "name": "rand",
-      "untrustedCall": true
-    },
-    {
-      "name": "rand_r",
-      "untrustedCall": true
     }
   ]
 }

@@ -4360,8 +4360,10 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .map { case (c, rows) => c -> rows.map { case (_, arg, _) => arg }.distinct }
 
     // the fill facts: a memset/wmemset (a dst role, no src role) whose length is a literal,
-    // keyed by the buffer it fills - the content the string starts with
-    lazy val fillBounds: Map[String, BigInt] =
+    // keyed by the method and the buffer it fills - the content the string starts with. A
+    // variable key is a bare name, so the method is part of the key: a fill of `data` in one
+    // function says nothing about another function's `data`
+    lazy val fillBounds: Map[(Long, String), List[(Int, BigInt)]] =
         OverlayFacts.memoryArgumentSites(atom)
             .groupBy { case (call, _, _) => call }
             .collect {
@@ -4373,8 +4375,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       k   <- OverlayFacts.variableKey(dst)
                       n <- rows.collect { case (_, a, MemoryApiPass.TagLen) => a }
                           .flatMap(IndexRange.literal).headOption
-                    yield (k, n)
-            }.flatten.toMap
+                    yield ((call.method.id(), k), (call.lineNumber.map(_.toInt).getOrElse(0), n))
+            }.flatten.toList.groupMap(_._1)(_._2)
 
     // a literal, a constant the frontend evaluated (`HDR_LEN`, `COUNT`, `sizeof(int)`), or a
     // value every return of the callee states
@@ -4490,15 +4492,26 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                             .maxOption.getOrElse(0L)
                     }
                     .orElse(perDefBytes.maxOption)
-                Option.when(
-                  last.exists { case (_, alloc) =>
-                      tagValues(alloc, MemoryApiPass.TagRealloc).nonEmpty
-                  } || allocsPerDef.sizeIs == perDefBytes.size
-                )(capacity.getOrElse(0L)).orElse(
+                // no definition here (a parameter: the caller's argument is the allocation)
+                // states nothing on this side - an empty agreement is not a capacity of zero
+                val agreed = allocsPerDef.nonEmpty && (last.exists { case (_, alloc) =>
+                    tagValues(alloc, MemoryApiPass.TagRealloc).nonEmpty
+                } || allocsPerDef.sizeIs == perDefBytes.size)
+                (if agreed then capacity else None).orElse(
                   referenced
                       .flatMap(id => Option(atom.graph.node(id)))
                       .collect { case e: Expression => e }
-                      .flatMap(sizeArgBytesOf(_))
+                      .flatMap { count =>
+                          // a `new T[n]` argument counts elements: bytes are n times T's width,
+                          // and a T the data model cannot size leaves the capacity unknown
+                          count._astIn.collectFirst { case c: Call => c } match
+                            case Some(alloc) if alloc.name == "<operator>.new" =>
+                                for
+                                  n  <- sizeArgBytesOf(count)
+                                  el <- pointeeBytesOf(alloc)
+                                yield n * el
+                            case _ => sizeArgBytesOf(count)
+                      }
                 )
             case _ => None
         }
@@ -4551,9 +4564,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       * than the buffer's room.
       */
     def fillBoundOf(e: Expression, at: Expression): Option[BigInt] =
-        OverlayFacts.variableKey(e).flatMap { k =>
-            fillBounds.get(k)
-        }
+      val useLine = at.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+      OverlayFacts.variableKey(e).flatMap { k =>
+          // the last fill before the use, in the same method
+          fillBounds.getOrElse((at.method.id(), k), Nil).filter(_._1 < useLine)
+              .maxByOption(_._1).map(_._2)
+      }
 
     def boundMaximum(bound: Expression, depth: Int = 2): Option[BigInt] =
         IndexRange.literal(bound).orElse {
@@ -4635,7 +4651,6 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                 .orElse(src.tag.name(ExtentPass.TagCallerExtent).value.l.headOption)
         for
           src <- srcArgs
-          if src.method.name.contains("overread")
           len <- Option.when(exactCopier)({
               val b = lenArgs.collectFirst(Function.unlift(literalNumberOfAs)).orElse(
                 lenArgs.headOption.flatMap(l =>
@@ -4722,23 +4737,26 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         end if
     }
 
-    // arm 3: the implicit-length copy family whose SOURCE's length the graph KNOWS - a
-    // declared array (`wchar_t source[100]` into `malloc(50*sizeof(wchar_t))`, the
-    // c_dest_wchar_t_cat shape) or a string literal. The copy can move every element the
-    // source holds plus its terminator, so a source array longer than the destination's
-    // element capacity overruns it: no attacker is asked about, the lengths are facts.
-    // Appending copies (`strcat`/`wcscat`) only ADD to what the destination already holds,
-    // so a source as long as the destination is the exact-fill case and stays quiet
+    // arm 3: the implicit-length copy family whose SOURCE's content the graph KNOWS - a string
+    // literal, or a buffer filled to a literal length before the copy (`wmemset(source, L'C',
+    // 99)` copied into `malloc(50*sizeof(wchar_t))`, the c_dest_wchar_t_cat shape). The copy
+    // moves that content plus its terminator, so content past the destination's element
+    // capacity overruns it: no attacker is asked about, the lengths are facts. An appending
+    // copy (`strcat`/`wcscat`) moves at least as much
     sitesByCall.foreach { case (call, args) =>
         val dstArgs = args.filter(a => a.tag.name(MemoryApiPass.TagDst).l.nonEmpty)
         val srcArgs = args.filter(a => a.tag.name(MemoryApiPass.TagSrc).l.nonEmpty)
         val lenArgs = args.filter(a => a.tag.name(MemoryApiPass.TagLen).l.nonEmpty)
         if dstArgs.nonEmpty && srcArgs.nonEmpty && lenArgs.isEmpty then
           for
-            dst      <- dstArgs.headOption
-            src      <- srcArgs.headOption
-            rule     <- extentRule(dst)
-            srcCount <- declaredOneDimCount(src).orElse(stringLiteralLengthOf(src))
+            dst  <- dstArgs.headOption
+            src  <- srcArgs.headOption
+            rule <- extentRule(dst)
+            // the elements the copy moves: the content the source is stated to hold - a
+            // literal's characters or a fill before the copy - plus the terminator. A declared
+            // array's size is its room, not its content: `strcpy(small, line)` from a large
+            // but short buffer is not an overrun
+            srcCount <- stringLiteralLengthOf(src).orElse(fillBoundOf(src, call)).map(_ + 1)
             // the destination's capacity in ELEMENTS: a wide-character copy moves elements,
             // a byte copy bytes - the malloc argument counts bytes either way
             capElems <- extentCapacity(dst).flatMap(bytes =>

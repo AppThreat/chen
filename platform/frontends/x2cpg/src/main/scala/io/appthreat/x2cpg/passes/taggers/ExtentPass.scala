@@ -480,6 +480,9 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     */
   private var paramDepth = 0
 
+  /** Set when a walk under the current one stopped at the depth limit. */
+  private var cutBelow = false
+
   private val paramExtents =
       new java.util.concurrent.ConcurrentHashMap[Long, Option[String]]()
 
@@ -491,8 +494,13 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     val computed = paramExtents.get(p.id())
     if computed != null then computed
     else
+      // a walk cut at the depth limit is not an answer: it is not cached, so the same parameter
+      // asked from a shallower caller still gets the exact one
+      if paramDepth >= 2 then
+        cutBelow = true
+        return None
       val answer =
-          if paramDepth >= 2 || p.method.isExternal then None
+          if p.method.isExternal then None
           else
             paramDepth += 1
             try
@@ -507,7 +515,10 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                   values.head
                 )
             finally paramDepth -= 1
-      paramExtents.putIfAbsent(p.id(), answer)
+      // an answer that a deeper walk cut short underneath is not exact either
+      // (the flag stays up for every enclosing walk, and clears at the outermost)
+      if !cutBelow then paramExtents.putIfAbsent(p.id(), answer)
+      if paramDepth == 0 then cutBelow = false
       answer
     end if
   end paramExtentFromCallSitesOf

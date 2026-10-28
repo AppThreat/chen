@@ -339,6 +339,19 @@ object ValueOriginPass:
     end match
   end callOrigins
 
+  // per graph: the defined methods by name, built once - a name lookup on every call of an
+  // origin walk would otherwise scan every method in the graph
+  private val definedByName =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[AnyRef, Map[String, List[Method]]]()
+      )
+
+  private def definedMethodsNamed(graph: overflowdb.Graph, name: String): List[Method] =
+      definedByName.computeIfAbsent(
+        graph,
+        _ => Cpg(graph).method.filterNot(_.isExternal).l.groupBy(_.name)
+      ).getOrElse(name, Nil)
+
   /** set while a callee's returns are being classified: `f` returns `g()` which returns a parameter
     * \- the walk must stop at one return level, or mutual wrappers never end.
     */
@@ -357,8 +370,9 @@ object ValueOriginPass:
         val callee = call._callOut.collectAll[Method].l.distinct match
           case List(m) => Some(m)
           case _ =>
-              val same = Cpg(call.graph).method.nameExact(call.name).filterNot(_.isExternal).l
-              Option.when(same.sizeIs == 1)(same.head)
+              definedMethodsNamed(call.graph, call.name) match
+                case List(only) => Some(only)
+                case _          => None
         callee.filterNot(m => m.isExternal || m.id == call.method.id).flatMap { m =>
           val returns = m.ast.isReturn.l
               .flatMap(_.astChildren.collectFirst { case e: Expression => e })

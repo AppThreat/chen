@@ -298,6 +298,71 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     |        free(data);
     |    }
     |}
+    |
+    |/* the same read past a smaller source, in a function the suites' names do not mark */
+    |void copy_measured_by_other(void)
+    |{
+    |    char *data = (char *)malloc(50*sizeof(char));
+    |    if (data == NULL) exit(-1);
+    |    memset(data, 'A', 50-1);
+    |    data[50-1] = '\0';
+    |    {
+    |        char dest[100];
+    |        memset(dest, 'C', 100-1);
+    |        dest[100-1] = '\0';
+    |        memmove(dest, data, strlen(dest)*sizeof(char));
+    |        free(data);
+    |    }
+    |}
+    |
+    |/* a fill in another function says nothing about this one's buffer of the same name */
+    |void fills_its_own_source(void)
+    |{
+    |    wchar_t source[200];
+    |    wmemset(source, L'C', 200-1);
+    |    source[200-1] = L'\0';
+    |}
+    |void good_unfilled_source_of_same_name(const wchar_t *in)
+    |{
+    |    wchar_t *data = (wchar_t *)malloc(50*sizeof(wchar_t));
+    |    if (data == NULL) exit(-1);
+    |    data[0] = L'\0';
+    |    {
+    |        wchar_t source[200];
+    |        wcsncpy(source, in, 10);
+    |        source[10] = L'\0';
+    |        wcscat(data, source);
+    |        free(data);
+    |    }
+    |}
+    |
+    |/* a sink called through a function pointer with a caller buffer large enough: the
+    |   parameter has no definition of its own, which states no capacity - not a capacity of 0 */
+    |static void fp_good_sink(char *data)
+    |{
+    |    char source[100];
+    |    memset(source, 'C', 100-1);
+    |    source[100-1] = '\0';
+    |    memcpy(data, source, 100*sizeof(char));
+    |}
+    |void good_fp_caller_fits(void)
+    |{
+    |    char *data;
+    |    void (*funcPtr)(char *) = fp_good_sink;
+    |    char *dataBuffer = (char *)malloc(100*sizeof(char));
+    |    if (dataBuffer == NULL) exit(-1);
+    |    data = dataBuffer;
+    |    funcPtr(data);
+    |}
+    |
+    |/* a large buffer holding a short string: its room is not its content */
+    |void good_strcpy_from_large_short_buffer(void)
+    |{
+    |    char line[256];
+    |    char small[16];
+    |    snprintf(line, sizeof(line), "%d", 7);
+    |    strcpy(small, line);
+    |}
     |""".stripMargin,
     "capacity.c"
   )
@@ -401,5 +466,23 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     "read past a source smaller than the string the copy measures" in {
         findingsIn("bad_t4_overread_src_bound") should contain("MS-BOUND-003")
         findingsIn("good_t4_overread_src_fits") should not contain "MS-BOUND-003"
+    }
+    "read past a smaller source whatever the function is named" in {
+        findingsIn("copy_measured_by_other") should contain("MS-BOUND-003")
+    }
+
+  "the capacity a caller hands a parameter" should:
+    "not read a parameter without definitions as a zero-byte buffer" in {
+        findingsIn("fp_good_sink").filter(_.startsWith("MS-BOUND-00")) shouldBe empty
+    }
+
+  "the source content facts" should:
+    "not carry a fill from one function to another's buffer of the same name" in {
+        findingsIn("good_unfilled_source_of_same_name") should not contain "MS-BOUND-007"
+    }
+    "not read a large buffer's declared room as the string it holds" in {
+        findingsIn("good_strcpy_from_large_short_buffer").filter(
+          _.startsWith("MS-BOUND-00")
+        ) shouldBe empty
     }
 end CapacityOverrunRuleTests

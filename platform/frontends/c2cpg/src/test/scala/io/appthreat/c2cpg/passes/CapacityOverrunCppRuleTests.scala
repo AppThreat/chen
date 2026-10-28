@@ -97,6 +97,29 @@ class CapacityOverrunCppRuleTests extends Code2CpgFixture(() => new DataFlowCppT
       |    OneIntClass *classOne = new(data) OneIntClass;
       |    classOne->intOne = 5;
       |}
+    |#include <cstring>
+    |void sink_new_bad(int *data)
+    |{
+    |    int source[100] = {0};
+    |    memcpy(data, source, 100*sizeof(int));
+    |    delete [] data;
+    |}
+    |void caller_new_bad()
+    |{
+    |    int *data = new int[50];
+    |    sink_new_bad(data);
+    |}
+    |void sink_new_good(int *data)
+    |{
+    |    int source[100] = {0};
+    |    memcpy(data, source, 100*sizeof(int));
+    |    delete [] data;
+    |}
+    |void caller_new_good()
+    |{
+    |    int *data = new int[100];
+    |    sink_new_good(data);
+    |}
     """.stripMargin,
     "placement.cpp"
   )
@@ -111,6 +134,12 @@ class CapacityOverrunCppRuleTests extends Code2CpgFixture(() => new DataFlowCppT
   private def findingsIn(method: String): Set[String] =
       cpg.method.nameExact(method).ast.collectAll[StoredNode]
           .flatMap(_.tag.nameExact("ms-finding").value.l).l.toSet
+
+  "a new[] buffer a caller hands a sink" should:
+    "count the caller's new[] in elements, not bytes" in {
+        findingsIn("sink_new_bad") should contain("MS-BOUND-007")
+        findingsIn("sink_new_good") should not contain "MS-BOUND-007"
+    }
 
   "a placement new of a class larger than its buffer" should:
     "overrun a declared buffer shorter than the constructed class" in {
