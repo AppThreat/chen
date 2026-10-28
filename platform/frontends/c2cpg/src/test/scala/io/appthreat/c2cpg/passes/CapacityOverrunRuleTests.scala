@@ -22,6 +22,8 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     |#include <stdlib.h>
     |#include <stdio.h>
     |#include <string.h>
+    |#include <wchar.h>
+    |#define ALLOCA alloca
     |
     |/* the CWE-121 shapes: strcpy/sprintf into a declared array - the copy family with
     |   NO length argument, so MS-BOUND-002 (which reads the mem-len argument) could
@@ -154,6 +156,148 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
     |    struct put_bit_context pb;
     |    init_put_bits(&pb, buffer, sizeof(buffer));
     |}
+    |
+    |/* the alloca alias: the buffer's extent carries through `data = dataBadBuffer`,
+    |   counted in elements of wchar_t, not bytes - the loop bound wcslen(source) + 1
+    |   walks one element past the short of the two allocas (the CWE-193 shape) */
+    |void bad_alloca_alias_loop(void)
+    |{
+    |    wchar_t *data;
+    |    wchar_t *dataBadBuffer = (wchar_t *)ALLOCA((10)*sizeof(wchar_t));
+    |    wchar_t *dataGoodBuffer = (wchar_t *)ALLOCA((10+1)*sizeof(wchar_t));
+    |    data = dataBadBuffer;
+    |    data[0] = L'\\0';
+    |    {
+    |        wchar_t source[10+1] = L"AAAAAAAAAA";
+    |        size_t i, sourceLen;
+    |        sourceLen = wcslen(source);
+    |        for (i = 0; i < sourceLen + 1; i++)
+    |            data[i] = source[i];
+    |    }
+    |}
+    |
+    |void good_alloca_alias_loop(void)
+    |{
+    |    wchar_t *data;
+    |    wchar_t *dataBadBuffer = (wchar_t *)ALLOCA((10)*sizeof(wchar_t));
+    |    wchar_t *dataGoodBuffer = (wchar_t *)ALLOCA((10+1)*sizeof(wchar_t));
+    |    data = dataGoodBuffer;
+    |    data[0] = L'\\0';
+    |    {
+    |        wchar_t source[10+1] = L"AAAAAAAAAA";
+    |        size_t i, sourceLen;
+    |        sourceLen = wcslen(source);
+    |        for (i = 0; i < sourceLen + 1; i++)
+    |            data[i] = source[i];
+    |    }
+    |}
+    |
+    |/* an appending copy whose source's length the graph knows: the declared array
+    |   `source[100]` is longer than the 50-element allocation it is appended to */
+    |void bad_wcscat_past_heap(void)
+    |{
+    |    wchar_t *data = (wchar_t *)malloc(50*sizeof(wchar_t));
+    |    if (data == NULL) exit(-1);
+    |    data[0] = L'\\0';
+    |    {
+    |        wchar_t source[100];
+    |        wmemset(source, L'C', 100-1);
+    |        source[100-1] = L'\\0';
+    |        wcscat(data, source);
+    |        free(data);
+    |    }
+    |}
+    |
+    |void good_wcscat_heap_fits(void)
+    |{
+    |    wchar_t *data = (wchar_t *)malloc(100*sizeof(wchar_t));
+    |    if (data == NULL) exit(-1);
+    |    data[0] = L'\\0';
+    |    {
+    |        wchar_t source[100];
+    |        wmemset(source, L'C', 100-1);
+    |        source[100-1] = L'\\0';
+    |        wcscat(data, source);
+    |        free(data);
+    |    }
+    |}
+    |
+    |/* the shapes that cross a call: the buffer's extent travels with the argument, and the
+    |   length a string's own content bounds - the sink writes past a smaller caller
+    |   buffer, the return hands back a pointer before its object */
+    |void t4_bad_sink(int *data)
+    |{
+    |    int source[100] = {0};
+    |    memcpy(data, source, 100*sizeof(int));
+    |}
+    |void t4_good_sink(int *data)
+    |{
+    |    int source[100] = {0};
+    |    memcpy(data, source, 100*sizeof(int));
+    |}
+    |void bad_t4_param_small(void)
+    |{
+    |    int dataBadBuffer[50];
+    |    int *data = dataBadBuffer;
+    |    t4_bad_sink(data);
+    |}
+    |void good_t4_param_fits(void)
+    |{
+    |    int dataGoodBuffer[100];
+    |    int *data = dataGoodBuffer;
+    |    t4_good_sink(data);
+    |}
+    |
+    |static wchar_t *t4_before_source(wchar_t *data)
+    |{
+    |    wchar_t *dataBuffer = (wchar_t *)malloc(100*sizeof(wchar_t));
+    |    if (dataBuffer == NULL) exit(-1);
+    |    wmemset(dataBuffer, L'A', 100-1);
+    |    dataBuffer[100-1] = L'\0';
+    |    data = dataBuffer - 8;
+    |    return data;
+    |}
+    |void bad_t4_returned_before(void)
+    |{
+    |    wchar_t *data = NULL;
+    |    data = t4_before_source(data);
+    |    {
+    |        wchar_t source[100];
+    |        wmemset(source, L'C', 100-1);
+    |        source[100-1] = L'\0';
+    |        wcsncpy(data, source, 100-1);
+    |        free(data);
+    |    }
+    |}
+    |
+    |void bad_t4_overread_src_bound(void)
+    |{
+    |    char *data = (char *)malloc(50);
+    |    if (data == NULL) exit(-1);
+    |    memset(data, 'A', 50-1);
+    |    data[50-1] = '\0';
+    |    {
+    |        char dest[100];
+    |        memset(dest, 'C', 100-1);
+    |        dest[100-1] = '\0';
+    |        memmove(dest, data, strlen(dest)*sizeof(char));
+    |        free(data);
+    |    }
+    |}
+    |void good_t4_overread_src_fits(void)
+    |{
+    |    char *data = (char *)malloc(100);
+    |    if (data == NULL) exit(-1);
+    |    memset(data, 'A', 100-1);
+    |    data[100-1] = '\0';
+    |    {
+    |        char dest[100];
+    |        memset(dest, 'C', 100-1);
+    |        dest[100-1] = '\0';
+    |        memmove(dest, data, strlen(dest)*sizeof(char));
+    |        free(data);
+    |    }
+    |}
     |""".stripMargin,
     "capacity.c"
   )
@@ -234,5 +378,28 @@ class CapacityOverrunRuleTests extends DataFlowCodeToCpgSuite:
 
     "stay silent when the binder is handed the buffer's real size" in {
         findingsIn("good_context_sized_right") shouldBe empty
+    }
+
+  "the buffer shapes round 10 left open" should:
+    "carry the alloca extent through the alias and count elements, not bytes" in {
+        findingsIn("bad_alloca_alias_loop") should contain("MS-BOUND-007")
+        findingsIn("good_alloca_alias_loop") should not contain "MS-BOUND-007"
+    }
+    "fire on wcscat whose declared-array source is longer than the heap buffer" in {
+        findingsIn("bad_wcscat_past_heap") should contain("MS-BOUND-007")
+        findingsIn("good_wcscat_heap_fits") should not contain "MS-BOUND-007"
+    }
+
+  "the shapes that cross a call" should:
+    "measure a sink's copy against the buffer the caller hands it" in {
+        findingsIn("t4_bad_sink") should contain("MS-BOUND-006")
+        findingsIn("t4_good_sink") should not contain "MS-BOUND-006"
+    }
+    "underwrite through a pointer a helper returned from before its object" in {
+        findingsIn("bad_t4_returned_before") should contain("MS-BOUND-009")
+    }
+    "read past a source smaller than the string the copy measures" in {
+        findingsIn("bad_t4_overread_src_bound") should contain("MS-BOUND-003")
+        findingsIn("good_t4_overread_src_fits") should not contain "MS-BOUND-003"
     }
 end CapacityOverrunRuleTests

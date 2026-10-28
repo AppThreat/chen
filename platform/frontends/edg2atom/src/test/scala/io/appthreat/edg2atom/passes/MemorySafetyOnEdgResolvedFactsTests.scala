@@ -32,6 +32,8 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |#include <cstring>
       |#include <cwchar>
       |#include <string>
+      |#include <alloca.h>
+      |#define ALLOCA alloca
       |
       |static void copy_into(char *dst, const char *src) {
       |    strcpy(dst, src);
@@ -295,6 +297,150 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    int idx = atoi(user);
       |    t[idx] = 'x';
       |}
+      |
+      |class TwoIntsClass { public: int intOne; int intTwo; };
+      |class OneIntClass { public: int intOne; };
+      |void bad_placement_declare() {
+      |    char *data;
+      |    char dataBadBuffer[sizeof(OneIntClass)];
+      |    char dataGoodBuffer[sizeof(TwoIntsClass)];
+      |    data = dataBadBuffer;
+      |    TwoIntsClass *classTwo = new(data) TwoIntsClass;
+      |    classTwo->intOne = 5;
+      |    classTwo->intTwo = 10;
+      |}
+      |void good_placement_declare_right() {
+      |    char *data;
+      |    char dataBadBuffer[sizeof(OneIntClass)];
+      |    char dataGoodBuffer[sizeof(TwoIntsClass)];
+      |    data = dataGoodBuffer;
+      |    TwoIntsClass *classTwo = new(data) TwoIntsClass;
+      |    classTwo->intOne = 5;
+      |    classTwo->intTwo = 10;
+      |}
+      |void bad_placement_alloca() {
+      |    char *data;
+      |    char *dataBadBuffer = (char *)ALLOCA(sizeof(OneIntClass));
+      |    char *dataGoodBuffer = (char *)ALLOCA(sizeof(TwoIntsClass));
+      |    data = dataBadBuffer;
+      |    TwoIntsClass *classTwo = new(data) TwoIntsClass;
+      |    classTwo->intOne = 5;
+      |    classTwo->intTwo = 10;
+      |}
+      |void good_placement_alloca_right() {
+      |    char *data;
+      |    char *dataBadBuffer = (char *)ALLOCA(sizeof(OneIntClass));
+      |    char *dataGoodBuffer = (char *)ALLOCA(sizeof(TwoIntsClass));
+      |    data = dataGoodBuffer;
+      |    TwoIntsClass *classTwo = new(data) TwoIntsClass;
+      |    classTwo->intOne = 5;
+      |    classTwo->intTwo = 10;
+      |}
+      |
+      |void bad_alloca_alias_loop() {
+      |    wchar_t *data;
+      |    wchar_t *dataBadBuffer = (wchar_t *)ALLOCA((10)*sizeof(wchar_t));
+      |    wchar_t *dataGoodBuffer = (wchar_t *)ALLOCA((10+1)*sizeof(wchar_t));
+      |    data = dataBadBuffer;
+      |    data[0] = L'\0';
+      |    {
+      |        wchar_t source[10+1] = L"AAAAAAAAAA";
+      |        size_t i, sourceLen;
+      |        sourceLen = wcslen(source);
+      |        for (i = 0; i < sourceLen + 1; i++) {
+      |            data[i] = source[i];
+      |        }
+      |    }
+      |}
+      |void good_alloca_alias_loop() {
+      |    wchar_t *data;
+      |    wchar_t *dataBadBuffer = (wchar_t *)ALLOCA((10)*sizeof(wchar_t));
+      |    wchar_t *dataGoodBuffer = (wchar_t *)ALLOCA((10+1)*sizeof(wchar_t));
+      |    data = dataGoodBuffer;
+      |    data[0] = L'\0';
+      |    {
+      |        wchar_t source[10+1] = L"AAAAAAAAAA";
+      |        size_t i, sourceLen;
+      |        sourceLen = wcslen(source);
+      |        for (i = 0; i < sourceLen + 1; i++) {
+      |            data[i] = source[i];
+      |        }
+      |    }
+      |}
+      |
+      |int good_bool_flag_count() {
+      |    const char *a = getenv("A"), *b = getenv("B");
+      |    int n = (a != NULL) + (b != NULL) + !(a == b);
+      |    return n + 1;
+      |}
+      |char *good_pointer_plus_len(char *cur, size_t len) {
+      |    if (fgets(cur, 20, stdin) == NULL) return cur;
+      |    return cur + len;
+      |}
+      |
+      |void t4_bad_sink(int *data) {
+      |    int source[100] = {0};
+      |    memcpy(data, source, 100*sizeof(int));
+      |}
+      |void t4_good_sink(int *data) {
+      |    int source[100] = {0};
+      |    memcpy(data, source, 100*sizeof(int));
+      |}
+      |void bad_t4_param_small() {
+      |    int dataBadBuffer[50];
+      |    int *data = dataBadBuffer;
+      |    t4_bad_sink(data);
+      |}
+      |void good_t4_param_fits() {
+      |    int dataGoodBuffer[100];
+      |    int *data = dataGoodBuffer;
+      |    t4_good_sink(data);
+      |}
+      |
+      |static wchar_t *t4_before_source(wchar_t *data) {
+      |    wchar_t *dataBuffer = (wchar_t *)malloc(100*sizeof(wchar_t));
+      |    if (dataBuffer == NULL) exit(-1);
+      |    wmemset(dataBuffer, L'A', 100-1);
+      |    dataBuffer[100-1] = L'\0';
+      |    data = dataBuffer - 8;
+      |    return data;
+      |}
+      |void bad_t4_returned_before() {
+      |    wchar_t *data = NULL;
+      |    data = t4_before_source(data);
+      |    {
+      |        wchar_t source[100];
+      |        wmemset(source, L'C', 100-1);
+      |        source[100-1] = L'\0';
+      |        wcsncpy(data, source, 100-1);
+      |        free(data);
+      |    }
+      |}
+      |
+      |void bad_wcscat_past_heap() {
+      |    wchar_t *data = (wchar_t *)malloc(50*sizeof(wchar_t));
+      |    if (data == NULL) exit(-1);
+      |    data[0] = L'\0';
+      |    {
+      |        wchar_t source[100];
+      |        wmemset(source, L'C', 100-1);
+      |        source[100-1] = L'\0';
+      |        wcscat(data, source);
+      |        free(data);
+      |    }
+      |}
+      |void good_wcscat_heap_fits() {
+      |    wchar_t *data = (wchar_t *)malloc(100*sizeof(wchar_t));
+      |    if (data == NULL) exit(-1);
+      |    data[0] = L'\0';
+      |    {
+      |        wchar_t source[100];
+      |        wmemset(source, L'C', 100-1);
+      |        source[100-1] = L'\0';
+      |        wcscat(data, source);
+      |        free(data);
+      |    }
+      |}
       |""".stripMargin,
       "resolved.cpp"
     )
@@ -401,6 +547,43 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
     "an operator's member index with an unbounded caller" should {
         "read out of bounds inside the operator" in {
             findingsOf("operator []") should contain("MS-BOUND-003")
+        }
+    }
+
+    "a placement new of a class larger than its buffer" should {
+        "overrun a declared buffer shorter than the constructed class, and an alloca sized by a smaller one" in {
+            findingsIn("bad_placement_declare") should contain("MS-BOUND-006")
+            findingsIn("good_placement_declare_right") should not contain "MS-BOUND-006"
+            findingsIn("bad_placement_alloca") should contain("MS-BOUND-006")
+            findingsIn("good_placement_alloca_right") should not contain "MS-BOUND-006"
+        }
+    }
+
+    "the buffer shapes round 10 left open" should {
+        "carry the alloca extent through the alias, counting elements" in {
+            findingsIn("bad_alloca_alias_loop") should contain("MS-BOUND-007")
+            findingsIn("good_alloca_alias_loop") should not contain "MS-BOUND-007"
+        }
+        "fire on wcscat whose declared-array source is longer than the heap buffer" in {
+            findingsIn("bad_wcscat_past_heap") should contain("MS-BOUND-007")
+            findingsIn("good_wcscat_heap_fits") should not contain "MS-BOUND-007"
+        }
+    }
+
+    "the shapes that cross a call" should {
+        "measure a sink's copy against the buffer the caller hands it" in {
+            findingsIn("t4_bad_sink") should contain("MS-BOUND-006")
+            findingsIn("t4_good_sink") should not contain "MS-BOUND-006"
+        }
+        "underwrite through a pointer a helper returned from before its object" in {
+            findingsIn("bad_t4_returned_before") should contain("MS-BOUND-009")
+        }
+    }
+
+    "the arithmetic the language bounds" should {
+        "never read a wrap in boolean operands or a pointer step" in {
+            findingsIn("good_bool_flag_count") should not contain "MS-INT-003"
+            findingsIn("good_pointer_plus_len") should not contain "MS-INT-003"
         }
     }
   end if
