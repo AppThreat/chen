@@ -1,0 +1,55 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ExtentPass.scala
+  s_ccd076faf9aa60::t_5cf36618963da9 49-53
+  s_ccd076faf9aa60::t_cf217c48c54856 692-711,715,718-721
+  s_ccd076faf9aa60::t_7e2f57f4ec837c 717,722-738,746-747,753
+  s_ccd076faf9aa60::t_abd160fa5ee798 712-714,716
+  s_ccd076faf9aa60::t_77d2d422e29d66 54-56,97-106,154-155,480,489,743,895-899
+  s_ccd076faf9aa60::t_e08e44aeb9430b 750
+  s_ccd076faf9aa60::t_6bb2b53ea6fcc6 152-153,459-466,469-470,889-890,893-894
+  s_ccd076faf9aa60::t_84e313d30a6cc2 467-468,891-892
+  s_ccd076faf9aa60::t_b7c93864bb6ced 107-108,455-458,471,478-479,481-488,490-516,682-684,687-691,739-742,744-745,748-749,751-752,887-888,900
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_ccd076faf9aa60::t_3a538b9b2e9c57 4512-4518,4522-4526,4537,4552,4851,4864-4873,4881,4896
+  s_ccd076faf9aa60::t_73f2a75a790aaa 4253,4477-4483,4486-4490,4492,4494-4497
+  s_ccd076faf9aa60::t_4118029b37ef63 4635
+  s_ccd076faf9aa60::t_0ebc1f3b930d1f 4638
+  s_ccd076faf9aa60::t_9a5f4c2f49857f 4455-4470,4472-4476
+  s_ccd076faf9aa60::t_84e313d30a6cc2 2237,4508,4510-4511,4527-4531
+  s_ccd076faf9aa60::t_ea0518d9bb1dd3 4631
+  s_ccd076faf9aa60::t_814ea23ea302a5 813
+  s_ccd076faf9aa60::t_4074fbed92ad1b 4260
+  s_ccd076faf9aa60::t_30df320ebb821a 4423-4426,4436,4629-4630,4632-4633
+  s_ccd076faf9aa60::t_2e435a3c2ec5d4 4639,4644,4660,5014
+  s_ccd076faf9aa60::t_cf1041d7eadb6c 4451-4454,4484,4491,4596
+  s_ccd076faf9aa60::t_f0d7b08adef2bb 4498-4501
+  s_ccd076faf9aa60::t_a2f1b16bd55c87 4646
+  s_ccd076faf9aa60::t_e08e44aeb9430b 4258
+  s_ccd076faf9aa60::t_27ec1dc7fff4a5 810-812,814-816,4437-4439
+  s_ccd076faf9aa60::t_66aa5434dc98d5 817-840,853,870,4618
+  s_ccd076faf9aa60::t_4ea17ab589d82c 4440,4444-4445,4450,4493,4502
+  s_ccd076faf9aa60::t_75084d98ef07cc 4422
+  s_ccd076faf9aa60::t_e5f2a1152a5f59 4447-4449
+  s_ccd076faf9aa60::t_0243c66a4b3cba 4598,4640-4643,4645,4647-4658,4661,4747
+  s_ccd076faf9aa60::t_e6b7e1c7787c47 858-862,2247
+  s_ccd076faf9aa60::t_d8a170d8fc6fe2 4509
+  s_ccd076faf9aa60::t_7bb25f8ea81f5c 4634
+  s_ccd076faf9aa60::t_fe44fbd1daeddf 97-101,700-702,803-809,841-852,854-857,863-869,871-873,2168-2172,2179-2200,2205-2236,2238-2246,2248-2269,2344-2353,4232-4252,4254-4257,4259,4261-4267,4332,4345-4348,4362-4378,4519-4521,4532-4536,4538-4551,4553-4555,4558-4595,4597,4599-4602,4605,4607-4611,4613-4617,4623-4628,4636-4637,4659,4725-4746,4748-4759,4999-5013,5015-5019,5418-5419,5421,5425-5453,5455-5465,5467-5522,6145-6146,6150
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ValueOriginPass.scala
+  s_ccd076faf9aa60::t_8d0e84eff869d6 135-136,140-144,167-171,303-304,331-333,339,342-387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9160ee2bfa43782848258cbfa659356626054a3f",
+  "prompts": {},
+  "sessions": {
+    "s_ccd076faf9aa60": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "session_0ee22ba9045b31133f76fc3dbc4dfa72",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
