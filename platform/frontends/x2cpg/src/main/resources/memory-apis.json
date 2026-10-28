@@ -112,6 +112,56 @@
       "len": 3
     },
     {
+      "name": "wmemcpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "wmemmove",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "wmemset",
+      "dst": 1,
+      "len": 3
+    },
+    {
+      "name": "wcscpy",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "wcpcpy",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "wcscat",
+      "dst": 1,
+      "src": 2
+    },
+    {
+      "name": "wcsncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "wcsncat",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
+      "name": "wcpncpy",
+      "dst": 1,
+      "src": 2,
+      "len": 3
+    },
+    {
       "name": "sprintf",
       "dst": 1,
       "src": 2

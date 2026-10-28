@@ -448,6 +448,82 @@ private[taggers] object OverlayFacts:
       bfs(node, maxHops)(n => n._reachingDefOut.collectAll[StoredNode].l)
           .collect { case i: Identifier => i }
 
+  /** The argument of a call site that binds parameter `p`: both spellings the frontends give a
+    * resolved call keep the C convention - the callee's parameter 1 is the site's argument 1,
+    * direct and pointer calls alike.
+    */
+  def siteArgumentOf(site: Call, p: MethodParameterIn): Option[Expression] =
+      site.argumentOption(p.index).collect { case e: Expression => e }
+
+  private val callSitesCache =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[AnyRef, java.util.concurrent.ConcurrentHashMap[
+          Long,
+          List[Call]
+        ]]()
+      )
+
+  private def callSitesGraphCache(graph: AnyRef) =
+      callSitesCache.computeIfAbsent(graph, _ => new java.util.concurrent.ConcurrentHashMap())
+
+  /** The resolved call sites of a defined method: the calls whose CALL edge names it, plus the
+    * pointer calls of a local every assignment of which names exactly one method of its file -
+    * `funcPtr = badSink; funcPtr(data)` calls badSink, as the graph's own assignment says. The
+    * resolution the call-site questions share (extents, offsets, origins). Computed once per
+    * method, per graph: node references compare by id alone.
+    */
+  def resolvedCallSitesOf(method: Method, maxSites: Int = 8): List[Call] =
+    val cached = callSitesGraphCache(method.graph).get(method.id())
+    if cached != null then cached
+    else
+      val direct = method._callIn.collectAll[Call].l
+      val viaPointer =
+          if direct.nonEmpty then Nil
+          else
+            // the bodies that name this method: a METHOD_REF (`fp = badSink` in C), or an
+            // identifier the front end resolves to the function (the C++ spelling)
+            val refNodes = method._refIn.collectAll[MethodRef].l.map(r => r: AstNode) ++
+                method._refIn.collectAll[Identifier].l.map(r => r: AstNode)
+            refNodes.flatMap { ref =>
+                ref._astIn.collectAll[Method].l.flatMap { caller =>
+                  val namesThis = (a: Call) =>
+                      a.argumentOption(2).exists {
+                          case i: Identifier =>
+                              i.id == ref.id ||
+                              i._refOut.collectAll[Method].exists(_.id == method.id)
+                          case other => other.id == ref.id
+                      }
+                  val assigns = caller.ast.isCall.nameExact("<operator>.assignment").l
+                      .filter(namesThis)
+                  val fpNames = assigns
+                      .flatMap(_.argumentOption(1).collect { case i: Identifier => i.name })
+                      .toSet
+                  if fpNames.isEmpty then Nil
+                  else
+                    // every assignment of the pointer must name this same method: a
+                    // pointer two bodies share resolves to neither
+                    val other =
+                        caller.ast.isCall.nameExact("<operator>.assignment").l
+                            .filter(_.argumentOption(1).exists {
+                                case i: Identifier => fpNames.contains(i.name)
+                                case _             => false
+                            })
+                            .filterNot(namesThis)
+                    if other.nonEmpty then Nil
+                    else
+                      caller.ast.isCall.name("<operator>.pointerCall").l
+                          .filter(c => fpNames.contains(c.name))
+                }
+            }.l
+      val computed = (direct ++ viaPointer)
+          .filterNot(c => c.method.id == method.id)
+          .distinct
+          .take(maxSites)
+      callSitesGraphCache(method.graph).put(method.id(), computed)
+      computed
+    end if
+  end resolvedCallSitesOf
+
   /** The nodes an expression's definition walk must not cross: the argument subtree of its
     * ENCLOSING call, unless that call is an assignment. A comparison's other operand and a memory
     * call's sibling arguments did not define the value (on graphs built with the memory-API flow

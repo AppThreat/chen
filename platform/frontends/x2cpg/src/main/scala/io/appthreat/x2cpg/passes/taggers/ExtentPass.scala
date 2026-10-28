@@ -46,6 +46,14 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
   import ExtentPass.*
   import OverlayFacts.*
 
+  // the extents parameters inherit from their callers, tagged apart (see TagCallerExtent):
+  // the room a caller's argument spells is evidence the capacity-overrun arms read, not a
+  // fact the buffer's own declaration carries - the contract and index rules see none of it
+  private val callerExtents = mutable.LinkedHashMap.empty[StoredNode, String]
+
+  // the room a copy's own source reads from, tagged apart for the same reason
+  private val srcExtents = mutable.LinkedHashMap.empty[StoredNode, String]
+
   override def run(dstGraph: DiffGraphBuilder): Unit =
     if !MemoryApiPass.appliesTo(atom) then return
     val argExtents  = mutable.LinkedHashMap.empty[StoredNode, String]
@@ -84,6 +92,18 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
                     decls.foreach(d => declExtents(d) = value)
                 case None =>
                     argExtents(dst) = ValueUnknown
+            }
+
+            // the read side: how much room the copy's source has is the same fact the
+            // destination's capacity is, and the overread question asks it of every src -
+            // tagged apart, a fact about the read, not the buffer's own declaration
+            rows.collect { case (_, e, MemoryApiPass.TagSrc) => e }.distinct.foreach { src =>
+                if !srcExtents.contains(src) then
+                  extentOf(src, call.method, None) match
+                    case Some((value, decls)) =>
+                        srcExtents(src) = value
+                    case None =>
+                        srcExtents(src) = ValueUnknown
             }
 
             dstArgs.foreach { dst =>
@@ -129,6 +149,10 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
       dstGraph,
       (argExtents.toList ++ declExtents.toList).map { case (node, value) =>
           (node, TagExtent, value)
+      } ++ callerExtents.toList.map { case (node, value) =>
+          (node, TagCallerExtent, value)
+      } ++ srcExtents.toList.map { case (node, value) =>
+          (node, TagSrcExtent, value)
       }
     )
 
@@ -429,10 +453,77 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
         // source's own spelling
         smartPointerExtentOf(use).map(v => (v, List.empty[StoredNode]))
     }.orElse {
+        // A parameter's buffer is wherever the callers' arguments point: when every resolved
+        // call site hands the same extent, that is the capacity the callee can rely on - and
+        // a local function pointer every assignment names to one body of its file resolves
+        // to it, as the allocation state reads them. The fact is tagged `caller-extent`, a
+        // step apart from the declaration's own: the capacity-overrun arms read it, the
+        // contract and index rules see none of it
+        use match
+          case i: Identifier =>
+              i.refsTo.collectFirst { case p: MethodParameterIn => p }
+                  .flatMap(paramExtentFromCallSitesOf)
+                  .map { v =>
+                    callerExtents(i) = v
+                    None
+                  }
+                  .getOrElse(None)
+          case _ => None
+    }.orElse {
         // A pointer whose definition is an inventoried allocation.
         allocExtentOf(use).map(v => (v, List.empty))
     }
   end extentOfVariable
+
+  /** How deep the callers' arguments are asked: `f(g(x))` chains a parameter's extent through two
+    * calls, and a parameter handed to itself would never end.
+    */
+  private var paramDepth = 0
+
+  /** Set when a walk under the current one stopped at the depth limit. */
+  private var cutBelow = false
+
+  private val paramExtents =
+      new java.util.concurrent.ConcurrentHashMap[Long, Option[String]]()
+
+  /** The extent every resolved call site of the parameter's method hands it, when they all hand
+    * one: the callers' arguments' own extents, read in the callers. Bounded like the other
+    * summaries - a helper many sites call almost never sees one extent from all of them.
+    */
+  private def paramExtentFromCallSitesOf(p: MethodParameterIn): Option[String] =
+    val computed = paramExtents.get(p.id())
+    if computed != null then computed
+    else
+      // a walk cut at the depth limit is not an answer: it is not cached, so the same parameter
+      // asked from a shallower caller still gets the exact one
+      if paramDepth >= 2 then
+        cutBelow = true
+        return None
+      val answer =
+          if p.method.isExternal then None
+          else
+            paramDepth += 1
+            try
+              val sites = OverlayFacts.resolvedCallSitesOf(p.method, MaxCallSites)
+              if sites.isEmpty then None
+              else
+                val values = sites.flatMap { site =>
+                    OverlayFacts.siteArgumentOf(site, p)
+                        .flatMap(extentOf(_, site.method, None).map(_._1))
+                }
+                Option.when(values.size == sites.size && values.toSet.sizeIs == 1)(
+                  values.head
+                )
+            finally paramDepth -= 1
+      // an answer that a deeper walk cut short underneath is not exact either
+      // (the flag stays up for every enclosing walk, and clears at the outermost)
+      if !cutBelow then paramExtents.putIfAbsent(p.id(), answer)
+      if paramDepth == 0 then cutBelow = false
+      answer
+    end if
+  end paramExtentFromCallSitesOf
+
+  private val MaxCallSites = 8
 
   /** The definitions of the used variable itself. The reaching-definition walk is transitive, so it
     * also returns the definitions of whatever fed them (`server = host` behind `found =
@@ -599,18 +690,78 @@ class ExtentPass(atom: Cpg) extends CpgPass(atom):
     * pointer's producer may be a realloc - `p = av_realloc(p, n)` sizes p exactly like a malloc
     * does. The allocation may also sit under a cast (`p = (char *)malloc(n)`); missing it would
     * leave `buf = (char *)malloc(10)` with extent `unknown` and a constant overflow of it invisible
-    * to every bounds rule.
+    * to every bounds rule. A definition may name an intermediate pointer rather than the allocation
+    * (`p = buf; buf = alloca(n)`, the alloca alias): the chain is followed, each hop the reaching
+    * definitions of the identifier the right-hand side names.
     */
   private def allocExtentOf(use: Expression): Option[String] =
-      OverlayFacts
-          .reachingDefsIn(use)
-          .collect { case d: Identifier => d }
-          .flatMap { defNode =>
-              defNode._astIn.collectFirst { case a: Call if a.name == "<operator>.assignment" => a }
-          }
-          .flatMap(assignment => assignment.argumentOption(2).flatMap(allocCallOf))
-          .flatMap(sizeArgValueOf)
-          .headOption
+      allocExtentOf(use, 0)
+
+  private def allocExtentOf(use: Expression, depth: Int): Option[String] =
+      if depth >= 4 then None
+      else
+        // the variable's own assignments in the method, not the flow's reaching set: which
+        // branch the engine lets reach a use is a build-order question, and the capacity a
+        // buffer's extent states may not wobble with it. Every assignment must resolve, and
+        // the SMALLEST stated capacity is the one the program can rely on. A REALLOCATION is
+        // the exception - its own size replaces every capacity before it
+        val defs = use.method.ast
+            .isCall
+            .nameExact("<operator>.assignment")
+            .l
+            .filter(a =>
+                a.argumentOption(1).exists {
+                    case i: Identifier => i.name == nameOf(use)
+                    case _             => false
+                }
+            )
+            .flatMap(_.argumentOption(2).collect { case e: Expression => e })
+        if defs.isEmpty then None
+        else
+          val values  = defs.flatMap(rhs => allocExtentValueOf(rhs, depth))
+          val realloc = defs.flatMap(rhs => allocExtentValueOfOfRealloc(rhs, depth)).minOption
+          // an assignment that states no allocation (`data = NULL`, `data = getSource(data)`)
+          // blocks nothing: the capacity is what the ALLOCATING assignments state, and two
+          // allocations that disagree state no single one
+          realloc.orElse(
+            Option.when(values.nonEmpty && values.toSet.sizeIs == 1)(values.head)
+          )
+
+  private def nameOf(use: Expression): String = use match
+    case i: Identifier => i.name
+    case _             => ""
+
+  /** The extent value of the allocation a right-hand side produces, when that allocation is a
+    * REALLOCATOR (`buf = realloc(buf, 8)`): the one def that replaces every capacity before it.
+    */
+  private def allocExtentValueOfOfRealloc(e: Expression, depth: Int): Option[String] = e match
+    case c: Call
+        if isAllocationCall(c) &&
+            c.tag.name(MemoryApiPass.TagRealloc).l.nonEmpty =>
+        sizeArgValueOf(c)
+    case c: Call if c.name.startsWith("<operator>.cast") =>
+        c.argument.l.collectFirst { case inner: Call => inner }
+            .flatMap(allocExtentValueOfOfRealloc(_, depth))
+    case c: Call =>
+        c.ast.collectAll[Call].l
+            .find(x => isAllocationCall(x) && x.tag.name(MemoryApiPass.TagRealloc).l.nonEmpty)
+            .flatMap(sizeArgValueOf)
+    case _ => None
+
+  /** The extent value the allocation a right-hand side produces states: directly, under a cast,
+    * nested in the expansion of a macro-spelled wrapper (`ALLOCA(n)`), or behind one more alias (`p
+    * \= buf; buf = alloca(n)`).
+    */
+  private def allocExtentValueOf(e: Expression, depth: Int): Option[String] = e match
+    case c: Call if isAllocationCall(c) => sizeArgValueOf(c)
+    case c: Call if c.name.startsWith("<operator>.cast") =>
+        c.argument.l.collectFirst { case inner: Call => inner }
+            .flatMap(allocExtentValueOf(_, depth))
+    case i: Identifier => allocExtentOf(i, depth + 1)
+    // a conditional expression holds one of two values: no single allocation describes it
+    case c: Call if !ConditionalOps.contains(c.name) =>
+        c.ast.collectAll[Call].l.find(isAllocationCall).flatMap(sizeArgValueOf)
+    case _ => None
 
   /** The allocation call an expression produces, through casts - shared by the member-extent scan
     * and the def walk.
@@ -743,6 +894,20 @@ end ExtentPass
 
 object ExtentPass:
   final val TagExtent = "extent"
+
+  /** The spellings the frontends give `c ? a : b`: two values behind one name. */
+  final val ConditionalOps = Set("<operator>.conditional", "<operator>.ternary")
+
+  /** The extent a parameter inherited from its resolved callers, tagged apart from the
+    * declaration's own `extent`: evidence the capacity-overrun arms measure with, invisible to the
+    * rules that ask a buffer's OWN declaration for its room.
+    */
+  final val TagCallerExtent = "caller-extent"
+
+  /** The extent a memory call's own source argument reads from - a fact about the read, tagged
+    * apart from the buffer's declaration. The overread arm measures with it.
+    */
+  final val TagSrcExtent = "src-extent"
 
   final val ValueConst   = "const"
   final val ValueOffset  = "offset"

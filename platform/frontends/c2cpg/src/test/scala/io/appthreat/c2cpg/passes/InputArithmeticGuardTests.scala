@@ -181,6 +181,25 @@ class InputArithmeticGuardTests extends DataFlowCodeToCpgSuite:
 |        dest[i] = data[i];
 |    }
 |}
+    |
+    |int good_bool_flag_count(void)
+    |{
+    |    const char *a = getenv("A"), *b = getenv("B");
+    |    int n = (a != NULL) + (b != NULL) + !(a == b);
+    |    return n + 1;
+    |}
+    |
+    |int good_bool_converted_count(char *buf)
+    |{
+    |    int n = (int)(buf[0] != 0) - (int)(buf[1] != 0);
+    |    return n + 1;
+    |}
+    |
+    |char *good_pointer_plus_len(char *cur, size_t len)
+    |{
+    |    if (fgets(cur, 20, stdin) == NULL) return cur;
+    |    return cur + len;
+    |}
     |""".stripMargin,
     "input_arith.c"
   )
@@ -221,6 +240,13 @@ class InputArithmeticGuardTests extends DataFlowCodeToCpgSuite:
     }
     "stand down on a masked field plus a small constant" in {
         findingsIn("good_masked_field_sum") should not contain "MS-INT-003"
+    }
+    "never treat boolean operands as a wrap - flags, comparisons, and their conversions" in {
+        findingsIn("good_bool_flag_count") should not contain "MS-INT-003"
+        findingsIn("good_bool_converted_count") should not contain "MS-INT-003"
+    }
+    "never treat a pointer plus a length as integer arithmetic" in {
+        findingsIn("good_pointer_plus_len") should not contain "MS-INT-003"
     }
 
   "a loop bounded by a string's length over a pointer to a smaller buffer" should:
