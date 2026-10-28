@@ -201,6 +201,7 @@ class JsIndexesTest extends DataFlowCodeToCpgSuite:
       "compute.predicateFunction",
       "lookup.methodsInFile",
       "lookup.typeDecls",
+      "lookup.fieldAccesses",
       "visit.instanceReads"
     ).map(k => k -> JsStats.get(k)).toMap
 
@@ -261,6 +262,7 @@ class JsIndexesTest extends DataFlowCodeToCpgSuite:
 
       "visit only the field accesses that name the member, when finding reads off an instance" in {
           smallModules("visit.instanceReads") should be > 0L
+          smallModules("lookup.fieldAccesses") should be > 0L
           // the class of each write is found through the type-declaration index
           smallModules("lookup.typeDecls") should be > 0L
           largeModules("visit.instanceReads").toDouble should be <=

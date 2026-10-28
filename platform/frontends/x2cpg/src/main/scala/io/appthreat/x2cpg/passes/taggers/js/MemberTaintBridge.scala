@@ -239,7 +239,7 @@ object MemberTaintBridge:
     * the same file or in one importing the class.
     */
   private def instanceReads(ctx: JsContext, td: TypeDecl, member: String): Iterator[Call] =
-      ctx.fieldAccessesByName.getOrElse(member, Nil).iterator
+      ctx.fieldAccessesOf(member).iterator
           .tapEach(_ => JsStats.visited("instanceReads"))
           .filter(fa => !isAssignmentTarget(fa))
           .filter(fa =>

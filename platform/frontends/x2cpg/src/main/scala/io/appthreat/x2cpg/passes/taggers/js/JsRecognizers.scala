@@ -47,6 +47,11 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   lazy val generatedFiles: Set[String] =
       if JsGeneratedFiles.enabled then JsGeneratedFiles.in(cpg) else Set.empty
 
+  /** The field accesses that name `member`, in graph order. */
+  def fieldAccessesOf(member: String): List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
+    JsStats.looked("fieldAccesses")
+    fieldAccessesByName.getOrElse(member, Nil)
+
   /** Calls by name of a function, for functions no call edge reaches: keyed on the name and file
     * the answer depends on, so the same-named functions of a minified bundle share one answer.
     */
