@@ -1,0 +1,23 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsIndexesTest.scala
+  s_05089e10f126db::t_95771930a87af4 204,265
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_05089e10f126db::t_95771930a87af4 50-54
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/MemberTaintBridge.scala
+  s_05089e10f126db::t_95771930a87af4 242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d61dde64df8349406d29dee873216af932fc7f45",
+  "prompts": {},
+  "sessions": {
+    "s_05089e10f126db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c5691786-af38-40c4-81f9-da97309d9e40",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
