@@ -47,6 +47,19 @@ object ArithmeticRules:
     "<operator>.minus"
   )
 
+  /** The comparison and logical operators: their result is a boolean whatever the operands read. */
+  private val BooleanOps = Set(
+    "<operator>.equals",
+    "<operator>.notEquals",
+    "<operator>.lessThan",
+    "<operator>.lessEqualsThan",
+    "<operator>.greaterThan",
+    "<operator>.greaterEqualsThan",
+    "<operator>.logicalAnd",
+    "<operator>.logicalOr",
+    "<operator>.logicalNot"
+  )
+
   private val IncrementOps = Set(
     "<operator>.postIncrement",
     "<operator>.preIncrement",
@@ -451,6 +464,12 @@ object ArithmeticRules:
     record: (StoredNode, String) => Unit
   ): List[(StoredNode, String, Boolean)] =
     val promoted = mutable.ListBuffer.empty[(StoredNode, String, Boolean)]
+    // an operand whose definitions bound its value well inside the type - a masked field
+    // plus one - cannot carry the sum past it
+    def smallValue(o: Expression): Boolean =
+        rangesOf(atom.graph, o).exists(r =>
+            r.hi < (BigInt(1) << 30) && r.lo > -(BigInt(1) << 30)
+        )
     atom.method.filterNot(m => m.isExternal || m.name == "<global>").l.foreach { method =>
         method.ast.isCall.l.foreach { c =>
           val keptIn = storeDestinationOf(c).getOrElse(c.typeFullName)
@@ -516,15 +535,14 @@ object ArithmeticRules:
                                 .exists(m => m >= 0 && m < (BigInt(1) << 30))
                         case _ => false
                   )
-                  // an operand whose definitions bound its value well inside the type - a
-                  // masked field plus one - cannot carry the sum past it
-                  def smallValue(o: Expression): Boolean =
-                      rangesOf(atom.graph, o).exists(r =>
-                          r.hi < (BigInt(1) << 30) && r.lo > -(BigInt(1) << 30)
-                      )
+                  // pointer arithmetic (`ptr + len`, a `char*` result): the sum moves an
+                  // address, it does not wrap an integer type
+                  val pointerArith = isPointer(String.valueOf(c.property("TYPE_FULL_NAME")).trim) ||
+                      ops.exists(o => isPointer(operandTypeOf(o)))
                   ops.find(opnd =>
-                      !unsigned && !masked && inputFed(opnd) && !lengthDerived(opnd) &&
-                          !smallValue(opnd)
+                      !pointerArith && !unsigned && !masked && !booleanSum(opnd, 3, Set.empty) &&
+                          !isPointer(operandTypeOf(opnd)) && inputFed(opnd) &&
+                          !lengthDerived(opnd) && !smallValue(opnd)
                   ).filter { opnd =>
                       !operandKeptInType(c, opnd) && !widenedBeyond(c, keptIn)
                   }.map(opnd => (c, false))
@@ -548,13 +566,16 @@ object ArithmeticRules:
                           !operandKeptInType(c, i)
                     )(i)
                   }.orElse(
-                    Option.when(!isPointer(i.typeFullName) && inputFed(i) && !operandKeptInType(
-                      c,
-                      i
-                    ) && !widenedBeyond(
-                      c,
-                      kept
-                    ))(i)
+                    Option.when(
+                      !isPointer(i.typeFullName) && !booleanTyped(i) &&
+                          inputFed(i) && !smallValue(i) && !operandKeptInType(
+                            c,
+                            i
+                          ) && !widenedBeyond(
+                            c,
+                            kept
+                          )
+                    )(i)
                   ).map(i => (i, constantDefOf(i).isDefined))
                 }
             case _ => None
@@ -579,6 +600,59 @@ object ArithmeticRules:
     }
     promoted.toList
   end arithmeticOverflow
+
+  /** The type an operand is kept in, casts aside: the pointer test the step arms ask reads this. */
+  private def operandTypeOf(opnd: Expression): String =
+      String.valueOf(opnd.property("TYPE_FULL_NAME")).trim
+
+  /** A boolean-typed operand, or one that IS a comparison or a logical operation - through the
+    * conversion that carries it into the arithmetic (`static_cast<int>(s.empty()) - 1`): `flag + 1`
+    * and `a + (b != c)` compute in {0, 1} - arithmetic the language bounds, not a wrap the input
+    * chooses.
+    */
+  private def booleanTyped(opnd: Expression): Boolean =
+    val bare = withoutCasts(opnd)
+    val t    = operandTypeOf(bare)
+    val throughCast = opnd match
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argumentOption(2).orElse(c.argumentOption(1)).collect { case e: Expression => e }
+      case _ => None
+    Set("bool", "_Bool", "BOOL", "boolean").contains(t) ||
+    (bare match
+      case c: Call => BooleanOps.contains(c.name)
+      case _       => false
+    ) || throughCast.exists(booleanTyped)
+
+  /** A variable every definition of which is boolean arithmetic: the sum of comparisons counts
+    * matches (`n = (a != NULL) + (b != NULL)`), a value in [0, N] by construction.
+    */
+  private def booleanFed(opnd: Expression, depth: Int, seen: Set[String]): Boolean =
+      withoutCasts(opnd) match
+        case i: Identifier if depth >= 0 && !seen.contains(i.name) =>
+            val rhss = reachingDefsIn(i)
+                .collect { case d: Identifier if d.name == i.name => d }
+                .flatMap(d =>
+                    d._astIn.collectFirst {
+                        case a: Call
+                            if a.name == "<operator>.assignment" &&
+                                a.argumentOption(1).exists(_.id == d.id) =>
+                            a.argumentOption(2).collect { case e: Expression => e }
+                    }.toList.flatten
+                )
+            rhss.nonEmpty && rhss.forall(booleanSum(_, depth, seen + i.name))
+        case _ => booleanTyped(opnd)
+
+  private def booleanSum(e: Expression, depth: Int, seen: Set[String]): Boolean =
+      booleanTyped(e) || (depth > 0 && (withoutCasts(e) match
+        case c: Call if ArithOps.contains(c.name) =>
+            c.argument.l.collect { case x: Expression => x }
+                .forall(booleanSum(_, depth - 1, seen))
+        // the variable a definition writes is another nesting level of the same question,
+        // not a descent: the budget is spent on the expression, not the spelling - a self-
+        // referential chain (`n = n + 1`) ends at the seen set
+        case i: Identifier => booleanFed(i, depth, seen)
+        case _             => false
+      ))
 
   /** The width the operand's value computes in: its own declared type, arithmetic promoted to at
     * least 32 bits. A cast WIDER than this converts nothing away.

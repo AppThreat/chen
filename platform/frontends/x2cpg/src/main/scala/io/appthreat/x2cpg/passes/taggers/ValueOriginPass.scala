@@ -132,15 +132,16 @@ object ValueOriginPass:
                 // agreement is asked of a few callers only: a helper with many call sites
                 // (a template instantiated everywhere) almost never sees one origin from all
                 // of them, and walking each one's arguments is what costs
-                val sites = method._callIn.collectAll[Call].take(MaxInheritingSites + 1).l.distinct
-                if sites.isEmpty || sites.size > MaxInheritingSites then Map.empty
+                val sites = OverlayFacts.resolvedCallSitesOf(method, MaxInheritingSites)
+                if sites.isEmpty then Map.empty
                 else
                   (1 to method.parameter.l.size).view.map { idx =>
                     val argOrigins = sites.flatMap { site =>
-                        site.argumentOption(idx).collect { case e: Expression => e }
-                            .map(originsOf(_, MaxDepth).map(_._1).filterNot(
-                              _ == OriginUnknown
-                            ))
+                      val param = method.parameter.l.find(_.index == idx)
+                      param.flatMap(OverlayFacts.siteArgumentOf(site, _))
+                          .map(originsOf(_, MaxDepth).map(_._1).filterNot(
+                            _ == OriginUnknown
+                          ))
                     }.toList
                     val allAgree = argOrigins.nonEmpty &&
                         argOrigins.forall(_.nonEmpty) &&
@@ -162,6 +163,11 @@ object ValueOriginPass:
 
   final val MaxDepth = 3
   final val MaxHops  = 8
+
+  /** The most returns a return-origin summary reads: a helper returns one value, however many exit
+    * paths spell it.
+    */
+  private val MaxReturnSites = 8
 
   /** (origin, evidence) for an expression, or nothing when nothing is derivable. */
   private def originsOf(expr: Expression, depth: Int): Set[(String, String)] =
@@ -294,11 +300,8 @@ object ValueOriginPass:
     */
   private def classifyDef(d: StoredNode, depth: Int): Set[(String, String)] = d match
     case p: MethodParameterIn =>
-        // only an ATTACKER origin crosses the call: a parameter every caller feeds an
-        // untrusted read is untrusted one function down. Callers passing constants or
-        // fields keep the generic caller-param answer - the callers-bound questions the
-        // rules ask are the refined form of exactly that case, and replacing them with
-        // `constant` would silence what they conclude
+        // a parameter the method itself fills from a scan (`fscanf(f, "%d", &data)`): every
+        // value that flows out is the input's - the caller's argument was overwritten
         val inherited =
             if inheriting.get() then Set.empty[String]
             else
@@ -325,13 +328,62 @@ object ValueOriginPass:
           if c.tag.name(MemoryApiPass.TagUntrustedRead).l.nonEmpty then
             Set((OriginUntrustedRead, c.name))
           else
-            filledArgument(c).map(api => Set((OriginUntrustedRead, api))).getOrElse(
+            filledArgument(c).map(api => Set((OriginUntrustedRead, api))).orElse(
+              returnOriginsOf(c, depth)
+            ).getOrElse(
               c.argument.l.collect { case e: Expression => e }
                   .filterNot(_.isFieldIdentifier)
                   .flatMap(originsOf(_, depth))
                   .toSet
             )
+    end match
   end callOrigins
+
+  /** set while a callee's returns are being classified: `f` returns `g()` which returns a parameter
+    * \- the walk must stop at one return level, or mutual wrappers never end.
+    */
+  private val inReturnOrigins = new ThreadLocal[Boolean]:
+    override def initialValue() = false
+
+  /** The origins a DEFINED callee states at every one of its value returns, when they all name one
+    * origin: `data = badSource(data)` takes what badSource returns, and what it returns is the scan
+    * it fed (variants 42 and 61 - the helper in this tree or the one beside it). One resolved body
+    * per call edge; a name several defined bodies share carries nothing, like every name-level
+    * summary here. Set against re-entry.
+    */
+  private def returnOriginsOf(call: Call, depth: Int): Option[Set[(String, String)]] =
+      if depth < 0 || inReturnOrigins.get() then None
+      else
+        val callee = call._callOut.collectAll[Method].l.distinct match
+          case List(m) => Some(m)
+          case _ =>
+              val same = Cpg(call.graph).method.nameExact(call.name).filterNot(_.isExternal).l
+              Option.when(same.sizeIs == 1)(same.head)
+        callee.filterNot(m => m.isExternal || m.id == call.method.id).flatMap { m =>
+          val returns = m.ast.isReturn.l
+              .flatMap(_.astChildren.collectFirst { case e: Expression => e })
+              .take(MaxReturnSites)
+          if returns.isEmpty then None
+          else
+            inReturnOrigins.set(true)
+            try
+              val originSets = returns.map(originsOf(_, depth - 1))
+              Option.when(
+                originSets.forall(_.nonEmpty) &&
+                    originSets.map(_.map(_._1).toList.sorted.mkString("+")).distinct.sizeIs == 1
+              )(
+                originSets.head
+              ).flatMap { set =>
+                // only an INPUT origin crosses a return: the helper every return of which
+                // reads what a scan gave it hands that read to its caller (the variants 42
+                // and 61 source shape). Every other origin keeps the paths it had - a
+                // struct-field or parameter answer is the rules' own one-deep question
+                val input = set.filter(_._1 == OriginUntrustedRead)
+                Option.when(input.nonEmpty)(input)
+              }
+            finally inReturnOrigins.set(false)
+        }
+  end returnOriginsOf
 
   /** The field's base expression: `m` in `m.len`, `hdr` in `hdr->len`. */
   private def baseOf(field: Call): Option[Expression] =
