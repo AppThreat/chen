@@ -1,0 +1,103 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_05089e10f126db::t_6ad62db2fa4a8c 662
+  s_05089e10f126db::t_d2446052146eee 142,252
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/RegistryBridge.scala
+  s_05089e10f126db::t_6ad62db2fa4a8c 53,70
+  s_05089e10f126db::t_49705331f03ca0 56
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsIndexesTest.scala
+  s_05089e10f126db::t_9de14fbe4c9d43 202-203,257-258,264-265
+  s_05089e10f126db::t_49705331f03ca0 83
+  s_05089e10f126db::t_a996ae61090d64 215
+  s_05089e10f126db::t_bc747689f36798 5-8,23-24,32-34,40-42,46-47,60,71,75-77,80-81,118-125,144-146,165-167,221-222,227,229-230
+  s_05089e10f126db::t_b63fb2ecc6661e 248-251
+  s_05089e10f126db::t_43f35eb9732e6d 190,206-214,216-220,223-226,231-232,237-239,243-245,255-256,259,263,266-267
+  s_05089e10f126db::t_0495cdf51b65d7 4,9,134-143,147-164,168-180
+  s_05089e10f126db::t_1a3dbc85f2a893 1-3,10-22,25-31,35-39,43-45,48-59,61-70,72-74,78-79,82,84-117,126-133,181-189,191-201,204-205,228,233-236,240-242,246-247,252-254,260-262,268-270
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/extra/parent.component.ts
+  s_05089e10f126db::t_aa44e6ad666e05 1-10
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular.golden
+  s_05089e10f126db::t_02460e8441f37b 1-22,25-31,33-35,37-80,82-136,139-145,147-149,151-194,196-232,235-428
+  s_05089e10f126db::t_aa44e6ad666e05 23-24,32,36,81,137-138,146,150,195,233-234
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/dom.golden
+  s_05089e10f126db::t_02460e8441f37b 1-21
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/react.golden
+  s_05089e10f126db::t_02460e8441f37b 1-50
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/MemberTaintBridge.scala
+  s_05089e10f126db::t_d2446052146eee 242-244
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactiveBridge.scala
+  s_05089e10f126db::t_d2446052146eee 232-242
+  s_05089e10f126db::t_98314aa6562a6a 97-99,120,146-147,149,151-160,163-168,170-171,177-178,180
+  s_05089e10f126db::t_0495cdf51b65d7 148,169
+  s_05089e10f126db::t_bc747689f36798 96,172-176,179,251-253
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/GuardBridge.scala
+  s_05089e10f126db::t_d2446052146eee 185,188-197
+  s_05089e10f126db::t_b66a4e5a8b328d 198
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_05089e10f126db::t_bc747689f36798 694-696
+  s_05089e10f126db::t_6ad62db2fa4a8c 607,669,706
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_05089e10f126db::t_d2446052146eee 564
+  s_05089e10f126db::t_6ad62db2fa4a8c 764
+  s_05089e10f126db::t_aaf65c972a59b8 906,1002-1011,1014-1015,1018-1019,1022-1023,1026-1027,1030-1031,1034-1035,1038-1082,1087,1095,1123-1126,1130-1131,1134,1136-1143,1145,1147
+  s_05089e10f126db::t_bc747689f36798 1109-1119,1135
+  s_05089e10f126db::t_cc6023538e1c4e 1012-1013,1016-1017,1020-1021,1024-1025,1028-1029,1032-1033,1036-1037
+  s_05089e10f126db::t_aa44e6ad666e05 1127-1129,1132-1133,1144,1146
+  s_05089e10f126db::t_9013f65cc8c164 1090-1094,1096-1108,1120-1122,1148
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/extra/child.component.ts
+  s_05089e10f126db::t_aa44e6ad666e05 1-7
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_05089e10f126db::t_9cb35058eef680 44
+  s_05089e10f126db::t_bc747689f36798 42-43,54-57,63-66
+  s_05089e10f126db::t_d2446052146eee 39-41,45,50-53,58-62,67
+  s_05089e10f126db::t_44fd18a7b19c7f 46-49
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/vue.golden
+  s_05089e10f126db::t_02460e8441f37b 1-50
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsTaggerSnapshotTest.scala
+  s_05089e10f126db::t_9de14fbe4c9d43 5-35,57-61
+  s_05089e10f126db::t_bc747689f36798 40-55
+  s_05089e10f126db::t_73afd48e5292be 1-4,36-39,56,62-68
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/Services/product.service.ts
+  s_05089e10f126db::t_63691da039dd34 1-36
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/Services/request.interceptor.ts
+  s_05089e10f126db::t_668dfa8b5033e2 1-29
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/Services/user.service.ts
+  s_05089e10f126db::t_e37b23a33d0261 1-82
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/login/login.component.html
+  s_05089e10f126db::t_78060fd0694184 1-104
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/login/login.component.ts
+  s_05089e10f126db::t_a8258eca6f3e6b 1-150
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/search-result/search-result.component.html
+  s_05089e10f126db::t_50016ee6c1aacf 1-57
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/search-result/search-result.component.ts
+  s_05089e10f126db::t_0a6e5e6afad1a1 1-211
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/track-result/track-result.component.html
+  s_05089e10f126db::t_7e54956efd31a0 1-84
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular/track-result/track-result.component.ts
+  s_05089e10f126db::t_d4f54731137332 1-66
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/dom/page.js
+  s_05089e10f126db::t_9f211b3e809b58 1-14
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/react/App.jsx
+  s_05089e10f126db::t_ff78dbc6d7935a 1-25
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/react/guards.js
+  s_05089e10f126db::t_d455e235f7af9d 1-3
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/vue/Profile.vue
+  s_05089e10f126db::t_03e35f42eedf1a 1-10
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/vue/store.js
+  s_05089e10f126db::t_0954f13ccdcd47 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4634eba5a4f0cb412c34a18ab7b75a5b766766be",
+  "prompts": {},
+  "sessions": {
+    "s_05089e10f126db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c5691786-af38-40c4-81f9-da97309d9e40",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
