@@ -1,0 +1,21 @@
+dom=	<empty>:?	METHOD_PARAMETER_IN	p1
+framework-input=	page.js:11	CALL	w.label
+framework-input=	page.js:12	CALL	location.search
+framework-input=	page.js:4	CALL	location.hash
+framework-input=	page.js:5	CALL	this.label
+framework-input=	page.js:9	CALL	location.search
+framework-output=	page.js:10	CALL	document.write(key)
+framework-output=	page.js:11	CALL	document.body.innerHTML = w.label
+framework-output=	page.js:12	CALL	window.open(new URLSearchParams(location.search).get('next'))
+framework-output=	page.js:5	CALL	el.innerHTML = this.label
+predicate=	page.js:2	CALL	Object.hasOwn(SAFE, k)
+redirect=	page.js:12	CALL	window.open(new URLSearchParams(location.search).get('next'))
+service-ingress=	page.js:13	CALL	fetch('/api?q=' + key)
+service-ingress=	page.js:13	METHOD_PARAMETER_IN	d
+service-ingress=	page.js:13	METHOD_PARAMETER_IN	r
+validation=	page.js:2	METHOD	function isKnown(k) { return Object.hasOwn(SAFE, k); }
+via:page.js#4=	page.js:11	CALL	w.label
+via:page.js#4=	page.js:5	CALL	this.label
+xss=	page.js:10	CALL	document.write(key)
+xss=	page.js:11	CALL	document.body.innerHTML = w.label
+xss=	page.js:5	CALL	el.innerHTML = this.label

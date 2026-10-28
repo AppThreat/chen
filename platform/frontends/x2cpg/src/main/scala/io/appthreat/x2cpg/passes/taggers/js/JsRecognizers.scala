@@ -36,6 +36,35 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   /** Every field write of every class, built once per run. */
   lazy val memberWrites: List[(TypeDecl, String, Expression)] = MemberTaintBridge.memberWrites(this)
 
+  /** Field accesses by the field they name, in graph order: a search for one member's reads asks
+    * for that member's list, not for every access in the project.
+    */
+  lazy val fieldAccessesByName
+    : Map[String, List[io.shiftleft.codepropertygraph.generated.nodes.Call]] =
+      fieldAccesses.flatMap(fa => JsShapes.fieldName(fa).map(_ -> fa)).groupMap(_._1)(_._2)
+
+  /** The files that look generated - empty unless skipping them is switched on. */
+  lazy val generatedFiles: Set[String] =
+      if JsGeneratedFiles.enabled then JsGeneratedFiles.in(cpg) else Set.empty
+
+  /** Calls by name of a function, for functions no call edge reaches: keyed on the name and file
+    * the answer depends on, so the same-named functions of a minified bundle share one answer.
+    */
+  private[js] val callerFallbacks =
+      mutable.HashMap.empty[
+        (String, String),
+        List[io.shiftleft.codepropertygraph.generated.nodes.Call]
+      ]
+
+  /** The project function a call names, for a call no edge resolves: keyed by the calling file and
+    * the name.
+    */
+  private[js] val predicateFunctions =
+      mutable.HashMap.empty[
+        (String, String),
+        Option[io.shiftleft.codepropertygraph.generated.nodes.Method]
+      ]
+
   /** The template elements that render a project component, resolved once. */
   lazy val elements: ComponentCallBridge.Elements = ComponentCallBridge.resolve(this)
 end JsContext

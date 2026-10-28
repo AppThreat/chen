@@ -1,0 +1,50 @@
+UNKNOWN_METHOD=FULL_NAME,pinia:defineStore,ALIAS,defineStore,RECEIVER,this	store.js:1	CALL	require("pinia")
+UNKNOWN_METHOD=FULL_NAME,vue-router:useRoute,ALIAS,useRoute,RECEIVER,this	Profile.vue:3	CALL	require("vue-router")
+UNKNOWN_METHOD=FULL_NAME,vue:computed,ALIAS,computed,RECEIVER,this	Profile.vue:2	CALL	require("vue")
+UNKNOWN_METHOD=FULL_NAME,vue:ref,ALIAS,ref,RECEIVER,this	Profile.vue:2	CALL	require("vue")
+UNKNOWN_METHOD=FULL_NAME,vue:watch,ALIAS,watch,RECEIVER,this	Profile.vue:2	CALL	require("vue")
+UNKNOWN_TYPE_DECL=pinia:defineStore	store.js:1	CALL	require("pinia")
+UNKNOWN_TYPE_DECL=vue-router:useRoute	Profile.vue:3	CALL	require("vue-router")
+UNKNOWN_TYPE_DECL=vue:computed	Profile.vue:2	CALL	require("vue")
+UNKNOWN_TYPE_DECL=vue:ref	Profile.vue:2	CALL	require("vue")
+UNKNOWN_TYPE_DECL=vue:watch	Profile.vue:2	CALL	require("vue")
+framework-input=	Profile.vue:10	IDENTIFIER	id
+framework-input=	Profile.vue:4	CALL	useRoute()
+framework-input=	Profile.vue:5	CALL	computed(() => route.params.id)
+framework-input=	Profile.vue:5	IDENTIFIER	route
+framework-input=	Profile.vue:7	IDENTIFIER	html
+framework-input=	Profile.vue:7	IDENTIFIER	id
+framework-input=	Profile.vue:7	METHOD_PARAMETER_IN	value
+framework-input=	Profile.vue:8	CALL	html.value
+framework-input=	Profile.vue:8	IDENTIFIER	html
+framework-input=	Profile.vue:8	IDENTIFIER	id
+framework-input=	store.js:4	CALL	location.hash
+framework-input=	store.js:4	CALL	this.note
+framework-output=	Profile.vue:8	CALL	document.body.innerHTML = html.value + id.value
+framework-output=	store.js:4	CALL	document.write(this.note)
+via:Profile.vue#4=	Profile.vue:10	IDENTIFIER	id
+via:Profile.vue#4=	Profile.vue:5	CALL	computed(() => route.params.id)
+via:Profile.vue#4=	Profile.vue:5	IDENTIFIER	route
+via:Profile.vue#4=	Profile.vue:7	IDENTIFIER	html
+via:Profile.vue#4=	Profile.vue:7	IDENTIFIER	id
+via:Profile.vue#4=	Profile.vue:7	METHOD_PARAMETER_IN	value
+via:Profile.vue#4=	Profile.vue:8	CALL	html.value
+via:Profile.vue#4=	Profile.vue:8	IDENTIFIER	html
+via:Profile.vue#4=	Profile.vue:8	IDENTIFIER	id
+via:Profile.vue#5=	Profile.vue:10	IDENTIFIER	id
+via:Profile.vue#5=	Profile.vue:5	CALL	computed(() => route.params.id)
+via:Profile.vue#5=	Profile.vue:7	IDENTIFIER	html
+via:Profile.vue#5=	Profile.vue:7	IDENTIFIER	id
+via:Profile.vue#5=	Profile.vue:7	METHOD_PARAMETER_IN	value
+via:Profile.vue#5=	Profile.vue:8	CALL	html.value
+via:Profile.vue#5=	Profile.vue:8	IDENTIFIER	html
+via:Profile.vue#5=	Profile.vue:8	IDENTIFIER	id
+via:Profile.vue#6=	Profile.vue:7	IDENTIFIER	html
+via:Profile.vue#6=	Profile.vue:8	IDENTIFIER	html
+via:Profile.vue#7=	Profile.vue:7	IDENTIFIER	html
+via:Profile.vue#7=	Profile.vue:7	METHOD_PARAMETER_IN	value
+via:Profile.vue#7=	Profile.vue:8	CALL	html.value
+via:Profile.vue#7=	Profile.vue:8	IDENTIFIER	html
+via:store.js#4=	store.js:4	CALL	this.note
+xss=	Profile.vue:8	CALL	document.body.innerHTML = html.value + id.value
+xss=	store.js:4	CALL	document.write(this.note)

@@ -182,14 +182,19 @@ object GuardBridge:
   private def predicateFunction(ctx: JsContext, c: Call): Option[Method] =
       c._callOut.collectFirst { case m: Method if !m.isExternal => m }.orElse {
           val file = c.method.filename
-          ctx.cpg.file.nameExact(file).method.nameExact(c.name).headOption.orElse(
-            ctx.modules.resolve(file, c.name).filter(_.module.startsWith(".")).flatMap { imp =>
-              val base = JsModules.resolveRelative(file, imp.module)
-              ctx.cpg.method.internal.nameExact(imp.imported)
-                  .find(m => m.filename == base || m.filename.startsWith(base + "."))
-            }
-          )
+          ctx.predicateFunctions.getOrElseUpdate((file, c.name), namedPredicate(ctx, file, c.name))
       }.filter(m => !m.isExternal && params(m).nonEmpty)
+
+  /** The function `name` that a call in `file` refers to: one of the file, else one it imports. */
+  private def namedPredicate(ctx: JsContext, file: String, name: String): Option[Method] =
+    JsStats.computed("predicateFunction")
+    JsIndexes.methodsInFile(ctx.cpg.graph, file, name).headOption.orElse(
+      ctx.modules.resolve(file, name).filter(_.module.startsWith(".")).flatMap { imp =>
+        val base = JsModules.resolveRelative(file, imp.module)
+        JsIndexes.internalMethodsByName(ctx.cpg.graph, imp.imported)
+            .find(m => m.filename == base || m.filename.startsWith(base + "."))
+      }
+    )
 
   /** A regular expression literal, or a local holding one, that matches whole strings only. */
   private def isAnchoredRegex(e: Expr): Boolean =

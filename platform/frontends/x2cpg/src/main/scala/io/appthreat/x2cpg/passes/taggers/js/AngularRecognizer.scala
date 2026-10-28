@@ -139,7 +139,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
   private def inputNames(ctx: JsContext, td: TypeDecl): Map[String, String] =
     val initialisers = ctx.memberWrites.filter(_._1.id() == td.id())
         .groupMap(_._2)(_._3.code)
-    val annotated = ctx.cpg.annotation.nameExact("Input").l.flatMap { a =>
+    val annotated = JsIndexes.annotationsNamed(ctx.cpg.graph, "Input").flatMap { a =>
         a.astParent match
           case m: Member if m.typeDecl.id() == td.id() => Some(m.name -> a.code)
           case m: Method if enclosingTypeDecl(m).exists(_.id() == td.id()) =>
@@ -249,7 +249,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
 
   /** Reads of a component member in its template: `term`, and `caption()` for a signal. */
   def templateReads(ctx: JsContext, template: String, member: String): List[CfgNode] =
-    val methods = ctx.cpg.method.filenameExact(template).l
+    val methods = JsIndexes.methodsByFile(ctx.cpg.graph, template)
     methods.flatMap(_.ast.isIdentifier.nameExact(member)).filterNot(isAssignmentTarget) ++
         methods.flatMap(_.call.nameExact(member))
 
@@ -659,7 +659,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
       // Calls of the producer methods are producers themselves.
       producerMethods.foreach { (m, behind) =>
         val owner = enclosingTypeDecl(m)
-        ctx.cpg.call.nameExact(m.name).foreach { c =>
+        JsIndexes.callsNamed(ctx.cpg.graph, m.name).foreach { c =>
           val calledOnOwner = receiverOf(c).exists { r =>
               di.typeOf(r).exists(t => owner.exists(_.name == t.name) && t.pkg.isEmpty) ||
               (r.code == "this" && owner.exists(o => enclosingTypeDecl(c.method).contains(o)))
