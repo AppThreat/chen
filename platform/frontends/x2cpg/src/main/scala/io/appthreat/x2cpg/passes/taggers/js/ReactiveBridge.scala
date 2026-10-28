@@ -120,7 +120,7 @@ object ReactiveBridge:
       if bridgeCapturedParameters(ctx, captured) then grew = true
       if bridgeStateSetters(ctx) then grew = true
       // watch(source, (value) => ...)
-      ctx.cpg.call.nameExact(Watchers.toSeq*).foreach { w =>
+      Watchers.toList.flatMap(JsIndexes.callsNamed(ctx.cpg.graph, _)).foreach { w =>
         val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
         if args.size >= 2 then
           val tainted = args.head match
@@ -167,17 +167,16 @@ object ReactiveBridge:
   private def capturedParameterCandidates(
     ctx: JsContext
   ): List[(Method, MethodParameterIn, List[Identifier])] =
-      ctx.cpg.method.internal.filterNot(_.name == ":program")
-          .filterNot(m => ctx.generatedFiles.contains(m.filename)).l.flatMap { m =>
-            lazy val nested = nestedMethods(m)
-            params(m).flatMap { p =>
-                if nested.isEmpty then None
-                else
-                  Some(capturedReads(ctx, m, p.name).toList).filter(_.nonEmpty).map(
-                    (m, p, _)
-                  )
-            }
-          }
+      ctx.cpg.method.internal.filterNot(_.name == ":program").l.flatMap { m =>
+        lazy val nested = nestedMethods(m)
+        params(m).flatMap { p =>
+            if nested.isEmpty then None
+            else
+              Some(capturedReads(ctx, m, p.name).toList).filter(_.nonEmpty).map(
+                (m, p, _)
+              )
+        }
+      }
 
   /** `const [html, setHtml] = useState("")`, set from a message handler: the engine has no edge
     * from the setter's argument to the state, so where a source reaches what the setter is called

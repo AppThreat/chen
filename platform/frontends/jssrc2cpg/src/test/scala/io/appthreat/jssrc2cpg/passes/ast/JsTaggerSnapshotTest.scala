@@ -11,7 +11,8 @@ import scala.jdk.CollectionConverters.*
 
 /** The tags the JS taggers put on real framework sources, byte for byte: the indexes and memos of
   * the taggers must change how fast they run, never what they find. Each fixture directory has a
-  * golden file written by the tagger as it was before them (`UPDATE_GOLDEN=1` rewrites it).
+  * golden file written by the tagger as it was before them. `UPDATE_GOLDEN=<dir>` writes fresh
+  * goldens into `<dir>` (point it at this suite's `src/test/resources/js-tagger-snapshots`).
   *
   * Angular is a subset of the OWASP Juice Shop frontend; the React, Vue and DOM fixtures are small
   * apps that exercise the same bridges.
@@ -50,9 +51,11 @@ class JsTaggerSnapshotTest extends DataFlowCodeToCpgSuite:
       s"The $dir fixture" should {
           "carry exactly the tags the golden file records" in {
               val actual = snapshot(dir)
+              sys.env.get("UPDATE_GOLDEN").foreach(out =>
+                  Files.writeString(Paths.get(out).resolve(s"$dir.golden"), actual)
+              )
               val golden = root.resolve(s"$dir.golden")
-              if sys.env.contains("UPDATE_GOLDEN") || !Files.exists(golden) then
-                Files.writeString(golden, actual)
+              withClue(s"$golden exists: ") { Files.exists(golden) shouldBe true }
               withClue(s"$dir has tags at all: ") { actual.linesIterator.size should be > 3 }
               // the lookups the fixture's framework makes go through the indexes
               if dir == "angular" then

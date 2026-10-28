@@ -1087,39 +1087,6 @@ object JsIndexes:
     nameIndexes.clear()
 end JsIndexes
 
-/** Generated and minified files: bundles hold most of a project's nodes, and the per-method bridges
-  * gain nothing from them that a hand-written source would not give better. Detected by cheap
-  * properties of the text - a source-map comment, or lines so long no one wrote them.
-  *
-  * Skipping them is off unless `-Dchen.js.skipGenerated=true`: it changes what is tagged.
-  */
-object JsGeneratedFiles:
-
-  /** Average line length (characters) above which a file is taken for generated code. */
-  val MinifiedLineLength = 400
-
-  /** Files shorter than this are never taken for generated code: one long line is not a bundle. */
-  val MinimumSize = 2048
-
-  val enabled: Boolean = java.lang.Boolean.getBoolean("chen.js.skipGenerated")
-
-  private val SourceMap = "(?m)^\\s*//[#@]\\s*sourceMappingURL=".r
-
-  def looksGenerated(text: String): Boolean =
-      if text.length < MinimumSize then false
-      else
-        val lines = text.count(_ == '\n') + 1
-        text.length / lines >= MinifiedLineLength || SourceMap.findFirstIn(text.takeRight(512)).isDefined
-
-  /** The files of the project that look generated, read from disk under the project's root. */
-  def in(cpg: Cpg): Set[String] =
-    val root = cpg.metaData.root.headOption.getOrElse("")
-    cpg.file.name.l.filter(f => f != "<unknown>" && f != "<empty>").filter { f =>
-      val path = java.nio.file.Paths.get(root).resolve(f)
-      scala.util.Try(java.nio.file.Files.readString(path)).toOption.exists(looksGenerated)
-    }.toSet
-end JsGeneratedFiles
-
 /** Counts of the work the taggers do, for tests that assert complexity rather than time: how often
   * each index was built and asked, and how many candidates the searches behind it examined.
   */

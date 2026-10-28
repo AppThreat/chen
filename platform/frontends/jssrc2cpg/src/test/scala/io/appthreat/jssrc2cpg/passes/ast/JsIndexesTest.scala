@@ -1,12 +1,7 @@
 package io.appthreat.jssrc2cpg.passes.ast
 
 import io.appthreat.jssrc2cpg.testfixtures.{DataFlowCodeToCpgSuite, DataFlowTestCpg}
-import io.appthreat.x2cpg.passes.taggers.js.{
-    JsFrameworkRecognizersPass,
-    JsGeneratedFiles,
-    JsIndexes,
-    JsStats
-}
+import io.appthreat.x2cpg.passes.taggers.js.{JsFrameworkRecognizersPass, JsIndexes, JsStats}
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 
@@ -131,53 +126,6 @@ class JsIndexesTest extends DataFlowCodeToCpgSuite:
           shape shouldBe before
           ids(JsIndexes.callsNamed(g, "helper")) shouldBe ids(cpg.call.nameExact("helper").l)
           ids(JsIndexes.methodsByName(g, "helper")) shouldBe ids(cpg.method.nameExact("helper").l)
-      }
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Generated files
-  // ---------------------------------------------------------------------------------------------
-
-  "The generated-file detector" should {
-
-      "never take hand-written sources for generated code" in {
-          val handWritten =
-              (0 until 200).map(i => s"export function f$i(a, b) { return a + b + $i; }")
-                  .mkString("\n")
-          handWritten.length should be > JsGeneratedFiles.MinimumSize
-          JsGeneratedFiles.looksGenerated(handWritten) shouldBe false
-          // a long literal is not a bundle either
-          JsGeneratedFiles.looksGenerated("const t = `" + "x" * 5000 + "`;\n" * 30) shouldBe false
-          JsGeneratedFiles.looksGenerated("function f() {}") shouldBe false
-      }
-
-      "take a minified bundle on a few long lines for generated code" in {
-          val minified = (0 until 400).map(i => s"function a$i(e,t){return e+t+$i}").mkString(";")
-          minified.length should be > JsGeneratedFiles.MinimumSize
-          JsGeneratedFiles.looksGenerated(minified) shouldBe true
-          JsGeneratedFiles.looksGenerated(minified + "\n" + minified) shouldBe true
-      }
-
-      "take a source-mapped file for generated code, however it is wrapped" in {
-          val wrapped = (0 until 200).map(i => s"export function f$i(a) {\n  return a + $i;\n}")
-              .mkString("\n") + "\n//# sourceMappingURL=app.js.map\n"
-          JsGeneratedFiles.looksGenerated(wrapped) shouldBe true
-          JsGeneratedFiles.looksGenerated(
-            wrapped.replace("sourceMappingURL", "sourceName")
-          ) shouldBe
-              false
-      }
-
-      "skip nothing unless switched on" in {
-          JsGeneratedFiles.enabled shouldBe false
-          val cpg = fixture()
-          io.appthreat.x2cpg.passes.taggers.js.JsContext(
-            cpg,
-            io.appthreat.x2cpg.passes.taggers.js.JsModules(cpg),
-            io.appthreat.x2cpg.passes.taggers.js.JsTagger(
-              new overflowdb.BatchedUpdate.DiffGraphBuilder
-            )
-          ).generatedFiles shouldBe empty
       }
   }
 

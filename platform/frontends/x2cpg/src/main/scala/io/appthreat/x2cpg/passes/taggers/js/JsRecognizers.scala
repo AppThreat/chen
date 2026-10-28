@@ -43,10 +43,6 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
     : Map[String, List[io.shiftleft.codepropertygraph.generated.nodes.Call]] =
       fieldAccesses.flatMap(fa => JsShapes.fieldName(fa).map(_ -> fa)).groupMap(_._1)(_._2)
 
-  /** The files that look generated - empty unless skipping them is switched on. */
-  lazy val generatedFiles: Set[String] =
-      if JsGeneratedFiles.enabled then JsGeneratedFiles.in(cpg) else Set.empty
-
   /** The field accesses that name `member`, in graph order. */
   def fieldAccessesOf(member: String): List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
     JsStats.looked("fieldAccesses")
