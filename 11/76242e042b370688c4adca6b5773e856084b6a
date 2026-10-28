@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/CapacityOverrunCppRuleTests.scala
+  h_0926447d100ad2 1-132
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/CapacityOverrunRuleTests.scala
+  h_0926447d100ad2 25-26,159-300,382-404
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/InputArithmeticGuardTests.scala
+  h_0926447d100ad2 184-202,244-250
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  h_0926447d100ad2 35-36,300-443,552-588
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1176242e042b370688c4adca6b5773e856084b6a",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
