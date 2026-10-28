@@ -1,0 +1,14 @@
+.github/workflows/project-sync.yml
+  h_0926447d100ad2 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07c8ed3af6adf3824b38796ac98f57b625ab2beb",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
