@@ -1,0 +1,23 @@
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Body,ALIAS,Body,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Controller,ALIAS,Controller,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Get,ALIAS,Get,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Param,ALIAS,Param,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Post,ALIAS,Create,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,@nestjs/common:Query,ALIAS,Query,RECEIVER,this	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_METHOD=FULL_NAME,child_process:exec,ALIAS,exec,RECEIVER,this	app.controller.ts:2	CALL	require("child_process")
+UNKNOWN_TYPE_DECL=@nestjs/common:Body	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=@nestjs/common:Controller	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=@nestjs/common:Get	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=@nestjs/common:Param	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=@nestjs/common:Post	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=@nestjs/common:Query	app.controller.ts:1	CALL	require("@nestjs/common")
+UNKNOWN_TYPE_DECL=child_process:exec	app.controller.ts:2	CALL	require("child_process")
+framework-input=	app.controller.ts:12	METHOD_PARAMETER_IN	body: any
+framework-input=	app.controller.ts:17	METHOD_PARAMETER_IN	x: string
+framework-input=	app.controller.ts:7	METHOD_PARAMETER_IN	id: string
+framework-input=	app.controller.ts:7	METHOD_PARAMETER_IN	q: string
+framework-output=	app.controller.ts:8	CALL	this.db.query('select * from items where id = ' + id + q)
+framework-route=	app.controller.ts:11	METHOD	@Create()   add(@Body() body: any) {     exec(body.cmd);     return body;   }
+framework-route=	app.controller.ts:6	METHOD	@Get(':id')   find(@Param('id') id: string, @Query('q') q: string) {     return this.db.query('select * from items where id = ' + id + q);   }
+node:child_process=	app.controller.ts:13	CALL	exec(body.cmd)
+shell-exec=	app.controller.ts:13	CALL	exec(body.cmd)
