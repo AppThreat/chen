@@ -244,9 +244,7 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // every way to a client call binds a name from one of the packages in the call's own file
     val clientCalls = ctx.cpg.call.filter { c =>
         HttpClientMethods.contains(c.name) &&
-        ctx.modules.importsAny(c.method.filename, HttpClientPackages) && {
-            JsStats.visited("gate.client"); true
-        } &&
+        ctx.modules.gate(c.method.filename, HttpClientPackages, "client") &&
         receiverOf(c).exists { r =>
             memberPath(r).exists {
                 case List(binding) =>
@@ -263,18 +261,14 @@ object DomRecognizer extends JsFrameworkRecognizer:
     val directCalls = ctx.cpg.call.filter { c =>
         c.receiver.headOption.flatMap(memberPath).exists {
             case List(binding) =>
-                binding == c.name && {
-                    val f = c.method.filename
-                    ctx.modules.importsAny(f, HttpClientPackages) && {
-                        JsStats.visited("gate.direct"); true
-                    } &&
-                    ctx.modules.resolve(f, binding).exists(i =>
-                        i.kind != ImportKind.SideEffect &&
-                            i.packageName.exists(p =>
-                                HttpClientPackages.exists(JsModules.packageMatches(p, _))
-                            )
-                    )
-                }
+                val f = c.method.filename
+                binding == c.name && ctx.modules.gate(f, HttpClientPackages, "direct") &&
+                ctx.modules.resolve(f, binding).exists(i =>
+                    i.kind != ImportKind.SideEffect &&
+                        i.packageName.exists(p =>
+                            HttpClientPackages.exists(JsModules.packageMatches(p, _))
+                        )
+                )
             case _ => false
         }
     }
@@ -708,28 +702,25 @@ object DomRecognizer extends JsFrameworkRecognizer:
     tagOriginChecks(ctx)
     val sanitizerPackages = HtmlSanitizers.map(_._1).toSeq
     val htmlSanitizerCalls = ctx.cpg.call.filter { c =>
-        (ctx.modules.importsAny(c.method.filename, sanitizerPackages) && {
-            JsStats.visited("gate.sanitizer"); true
-        } &&
-            HtmlSanitizers.exists { (pkg, names) =>
-                Some(c.method.filename).exists { f =>
-                  val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
-                  calleePath(c).exists {
-                      // `DOMPurify.sanitize(x)`, `he.encode(x)`
-                      case List(binding, method) =>
-                          names.contains(method) && moduleBindings.contains(binding)
-                      // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
-                      case List(binding) =>
-                          moduleBindings.contains(binding) ||
-                          names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
-                      case _ => false
-                  }
-                }
-            }) ||
-        // DOMPurify loaded from a script tag is a global
-        (c.name == "sanitize" && calleePath(c).exists(_.headOption.exists(h =>
-            h == "DOMPurify" || h == "purify"
-        )))
+      val f = c.method.filename
+      (ctx.modules.gate(f, sanitizerPackages, "sanitizer") &&
+          HtmlSanitizers.exists { (pkg, names) =>
+            val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
+            calleePath(c).exists {
+                // `DOMPurify.sanitize(x)`, `he.encode(x)`
+                case List(binding, method) =>
+                    names.contains(method) && moduleBindings.contains(binding)
+                // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
+                case List(binding) =>
+                    moduleBindings.contains(binding) ||
+                    names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
+                case _ => false
+            }
+          }) ||
+      // DOMPurify loaded from a script tag is a global
+      (c.name == "sanitize" && calleePath(c).exists(_.headOption.exists(h =>
+          h == "DOMPurify" || h == "purify"
+      )))
     }
     ctx.tagger.tag(htmlSanitizerCalls, SANITIZER, sanitizerFor(XSS))
 

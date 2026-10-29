@@ -223,11 +223,11 @@ final class JsModules(cpg: Cpg):
 
   private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
 
-  /** Each file's imports by local name; the first import of a name wins, as `find` would. */
   /** Each file's imports by package name: a bundle has many imports of few packages. */
   private lazy val byFilePackage: Map[String, Map[String, Seq[JsImport]]] =
       byFile.view.mapValues(_.flatMap(i => i.packageName.map(_ -> i)).groupMap(_._1)(_._2)).toMap
 
+  /** Each file's imports by local name; the first import of a name wins, as `find` would. */
   private lazy val byFileLocal: Map[String, Map[String, JsImport]] =
       byFile.view.mapValues(_.reverseIterator.map(i => i.local -> i).toMap).toMap
 
@@ -352,6 +352,14 @@ final class JsModules(cpg: Cpg):
 
   /** True when `file` imports from a package matching one of `pkgs`. */
   def importsAny(file: String, pkgs: Seq[String]): Boolean = filesImporting(pkgs*).contains(file)
+
+  /** `importsAny` as a recognizer's per-call gate. The calls that pass it are counted as
+    * `gate.<kind>`, so tests can see that calls in other files do no further work.
+    */
+  private[js] def gate(file: String, pkgs: Seq[String], kind: String): Boolean =
+    val passes = importsAny(file, pkgs)
+    if passes then JsStats.visited(s"gate.$kind")
+    passes
 end JsModules
 
 object JsModules:

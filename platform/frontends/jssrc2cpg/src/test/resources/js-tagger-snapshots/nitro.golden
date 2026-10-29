@@ -1,0 +1,18 @@
+UNKNOWN_METHOD=FULL_NAME,child_process:execSync,ALIAS,execSync,RECEIVER,this	server/api/user.get.ts:1	CALL	require("child_process")
+UNKNOWN_METHOD=FULL_NAME,fs:readFileSync,ALIAS,readFileSync,RECEIVER,this	lib/session.ts:2	CALL	require("fs")
+UNKNOWN_METHOD=FULL_NAME,h3:getCookie,ALIAS,getCookie,RECEIVER,this	lib/session.ts:1	CALL	require("h3")
+UNKNOWN_METHOD=FULL_NAME,h3:readBody,ALIAS,readBody,RECEIVER,this	lib/session.ts:1	CALL	require("h3")
+UNKNOWN_TYPE_DECL=child_process:execSync	server/api/user.get.ts:1	CALL	require("child_process")
+UNKNOWN_TYPE_DECL=fs:readFileSync	lib/session.ts:2	CALL	require("fs")
+UNKNOWN_TYPE_DECL=h3:getCookie	lib/session.ts:1	CALL	require("h3")
+UNKNOWN_TYPE_DECL=h3:readBody	lib/session.ts:1	CALL	require("h3")
+file-io=	lib/session.ts:7	CALL	readFileSync(`/data/${id}/${form.file}`, 'utf8')
+framework-input=	lib/session.ts:5	CALL	getCookie(event, 'session')
+framework-input=	lib/session.ts:6	CALL	readBody(event)
+framework-input=	server/api/user.get.ts:3	METHOD_PARAMETER_IN	event
+framework-input=	server/api/user.get.ts:4	CALL	getQuery(event)
+framework-input=	server/api/user.get.ts:5	CALL	readBody(event)
+framework-route=	server/api/user.get.ts:3	METHOD	async (event) => {   const { name } = getQuery(event)   const body = await readBody(event)   return execSync(`id ${name} ${body.flag}`).toString() }
+node:child_process=	server/api/user.get.ts:6	CALL	execSync(`id ${name} ${body.flag}`)
+node:fs=	lib/session.ts:7	CALL	readFileSync(`/data/${id}/${form.file}`, 'utf8')
+shell-exec=	server/api/user.get.ts:6	CALL	execSync(`id ${name} ${body.flag}`)
