@@ -15,7 +15,8 @@ import scala.jdk.CollectionConverters.*
   * goldens into `<dir>` (point it at this suite's `src/test/resources/js-tagger-snapshots`).
   *
   * Angular is a subset of the OWASP Juice Shop frontend; the React, Vue and DOM fixtures are small
-  * apps that exercise the same bridges.
+  * apps that exercise the same bridges, and the Node, Svelte, Nest and Nitro ones cover the
+  * recognizers that ask the import queries per call.
   */
 class JsTaggerSnapshotTest extends DataFlowCodeToCpgSuite:
 
@@ -47,7 +48,7 @@ class JsTaggerSnapshotTest extends DataFlowCodeToCpgSuite:
         }
     }.sorted.mkString("\n") + "\n"
 
-  Seq("angular", "react", "vue", "dom").foreach { dir =>
+  Seq("angular", "react", "vue", "dom", "node", "svelte", "nest", "nitro").foreach { dir =>
       s"The $dir fixture" should {
           "carry exactly the tags the golden file records" in {
               val actual = snapshot(dir)

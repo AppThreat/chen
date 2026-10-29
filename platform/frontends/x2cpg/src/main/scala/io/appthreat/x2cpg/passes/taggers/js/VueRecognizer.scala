@@ -335,7 +335,7 @@ object VueRecognizer extends JsFrameworkRecognizer:
             case fa: Call => fieldName(fa).contains("props")
             case _        => false
         } && (a.method.filename.endsWith(".vue") ||
-            ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains("vue"))) &&
+            ctx.modules.importsAny(a.method.filename, Seq("vue"))) &&
         !fed.contains(a.method.filename) && callbackMethod(a.argumentOption(2).get).isEmpty
     }.l
     declarations.groupBy(_.method.filename).foreach { (file, decls) =>

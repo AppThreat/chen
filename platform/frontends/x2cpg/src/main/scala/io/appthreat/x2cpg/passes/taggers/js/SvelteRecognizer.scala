@@ -314,12 +314,11 @@ object SvelteRecognizer extends JsFrameworkRecognizer:
     val pageReads = ctx.fieldAccesses.filterNot(isAssignmentTarget).filter { fa =>
         fieldName(fa).exists(PageFields.contains) && fieldBase(fa).exists {
             case id: Identifier =>
+                val file = id.method.filename
                 id.name == "$page" ||
-                (id.name == "page" || ctx.modules.localNamesOf(id.method.filename, "$app", "page")
+                (id.name == "page" || ctx.modules.localNamesOf(file, "$app", "page")
                     .contains(id.name)) &&
-                ctx.modules.importsOf(id.method.filename).exists(i =>
-                    i.module == "$app/state" || i.module == "$app/stores"
-                )
+                ctx.modules.importsModule(file, "$app/state", "$app/stores")
             case _ => false
         }
     }

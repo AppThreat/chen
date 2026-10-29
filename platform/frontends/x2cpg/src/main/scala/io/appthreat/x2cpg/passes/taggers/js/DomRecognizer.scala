@@ -241,14 +241,15 @@ object DomRecognizer extends JsFrameworkRecognizer:
     // `$fetch` is Nuxt/Nitro's global ofetch instance.
     val globalFetch = ctx.cpg.call.nameExact("fetch", "$fetch")
         .filter(isGlobalCall(_, Set("fetch", "$fetch")))
+    // every way to a client call binds a name from one of the packages in the call's own file
     val clientCalls = ctx.cpg.call.filter { c =>
-        HttpClientMethods.contains(c.name) && receiverOf(c).exists { r =>
+        HttpClientMethods.contains(c.name) &&
+        ctx.modules.gate(c.method.filename, HttpClientPackages, "client") &&
+        receiverOf(c).exists { r =>
             memberPath(r).exists {
                 case List(binding) =>
-                    c.file.name.headOption.exists(f =>
-                        HttpClientPackages.exists(pkg =>
-                            ctx.modules.moduleBindingsOf(f, pkg).contains(binding)
-                        )
+                    HttpClientPackages.exists(pkg =>
+                        ctx.modules.moduleBindingsOf(c.method.filename, pkg).contains(binding)
                     ) || isClientInstance(ctx, r)
                 case List("this", _) => isClientInstance(ctx, r)
                 case _               => false
@@ -260,13 +261,13 @@ object DomRecognizer extends JsFrameworkRecognizer:
     val directCalls = ctx.cpg.call.filter { c =>
         c.receiver.headOption.flatMap(memberPath).exists {
             case List(binding) =>
-                binding == c.name && c.file.name.headOption.exists(f =>
-                    ctx.modules.resolve(f, binding).exists(i =>
-                        i.kind != ImportKind.SideEffect &&
-                            i.packageName.exists(p =>
-                                HttpClientPackages.exists(JsModules.packageMatches(p, _))
-                            )
-                    )
+                val f = c.method.filename
+                binding == c.name && ctx.modules.gate(f, HttpClientPackages, "direct") &&
+                ctx.modules.resolve(f, binding).exists(i =>
+                    i.kind != ImportKind.SideEffect &&
+                        i.packageName.exists(p =>
+                            HttpClientPackages.exists(JsModules.packageMatches(p, _))
+                        )
                 )
             case _ => false
         }
@@ -281,16 +282,18 @@ object DomRecognizer extends JsFrameworkRecognizer:
   /** `api.get(...)` where `api = axios.create(...)` (or `ky.create`/`extend`, `ofetch.create`). */
   private def isClientInstance(ctx: JsContext, receiver: Expression): Boolean =
     val file = receiver.method.filename
-    JsValues.origin(receiver) match
-      case c: Call if c.name == "create" || c.name == "extend" =>
-          receiverOf(c).flatMap(memberPath).exists {
-              case List(binding) =>
-                  HttpClientPackages.exists(pkg =>
-                      ctx.modules.moduleBindingsOf(file, pkg).contains(binding)
-                  )
-              case _ => false
-          }
-      case _ => false
+    if !ctx.modules.importsAny(file, HttpClientPackages) then false
+    else
+      JsValues.origin(receiver) match
+        case c: Call if c.name == "create" || c.name == "extend" =>
+            receiverOf(c).flatMap(memberPath).exists {
+                case List(binding) =>
+                    HttpClientPackages.exists(pkg =>
+                        ctx.modules.moduleBindingsOf(file, pkg).contains(binding)
+                    )
+                case _ => false
+            }
+        case _ => false
 
   // -----------------------------------------------------------------------------------------
   // Sinks
@@ -697,26 +700,27 @@ object DomRecognizer extends JsFrameworkRecognizer:
 
   private def tagSanitizers(ctx: JsContext): Unit =
     tagOriginChecks(ctx)
+    val sanitizerPackages = HtmlSanitizers.map(_._1).toSeq
     val htmlSanitizerCalls = ctx.cpg.call.filter { c =>
-        HtmlSanitizers.exists { (pkg, names) =>
-            c.file.name.headOption.exists { f =>
-              val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
-              calleePath(c).exists {
-                  // `DOMPurify.sanitize(x)`, `he.encode(x)`
-                  case List(binding, method) =>
-                      names.contains(method) && moduleBindings.contains(binding)
-                  // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
-                  case List(binding) =>
-                      moduleBindings.contains(binding) ||
-                      names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
-                  case _ => false
-              }
+      val f = c.method.filename
+      (ctx.modules.gate(f, sanitizerPackages, "sanitizer") &&
+          HtmlSanitizers.exists { (pkg, names) =>
+            val moduleBindings = ctx.modules.moduleBindingsOf(f, pkg)
+            calleePath(c).exists {
+                // `DOMPurify.sanitize(x)`, `he.encode(x)`
+                case List(binding, method) =>
+                    names.contains(method) && moduleBindings.contains(binding)
+                // `sanitizeHtml(x)`, `filterXSS(x)` - a default or named binding called directly
+                case List(binding) =>
+                    moduleBindings.contains(binding) ||
+                    names.exists(n => ctx.modules.localNamesOf(f, pkg, n).contains(binding))
+                case _ => false
             }
-        } ||
-        // DOMPurify loaded from a script tag is a global
-        (c.name == "sanitize" && calleePath(c).exists(_.headOption.exists(h =>
-            h == "DOMPurify" || h == "purify"
-        )))
+          }) ||
+      // DOMPurify loaded from a script tag is a global
+      (c.name == "sanitize" && calleePath(c).exists(_.headOption.exists(h =>
+          h == "DOMPurify" || h == "purify"
+      )))
     }
     ctx.tagger.tag(htmlSanitizerCalls, SANITIZER, sanitizerFor(XSS))
 
