@@ -173,7 +173,9 @@ final case class JsImport(
   /** The npm package the specifier names (`@scope/pkg/sub` -> `@scope/pkg`), or None for a relative
     * or absolute path.
     */
-  def packageName: Option[String] = JsModules.packageOf(module)
+  lazy val packageName: Option[String] =
+    JsStats.computed("packageOf")
+    JsModules.packageOf(module)
 
 /** The imports of a graph, indexed by file and by package.
   *
@@ -221,6 +223,53 @@ final class JsModules(cpg: Cpg):
 
   private val byFile: Map[String, Seq[JsImport]] = imports.groupBy(_.file)
 
+  /** Each file's imports by local name; the first import of a name wins, as `find` would. */
+  /** Each file's imports by package name: a bundle has many imports of few packages. */
+  private lazy val byFilePackage: Map[String, Map[String, Seq[JsImport]]] =
+      byFile.view.mapValues(_.flatMap(i => i.packageName.map(_ -> i)).groupMap(_._1)(_._2)).toMap
+
+  private lazy val byFileLocal: Map[String, Map[String, JsImport]] =
+      byFile.view.mapValues(_.reverseIterator.map(i => i.local -> i).toMap).toMap
+
+  /** What one file binds from one package: the locals bound to the whole module, and the locals
+    * bound to each exported name. One answer for `moduleBindingsOf` and `localNamesOf`.
+    */
+  private final case class PackageBindings(
+    module: Set[String],
+    named: Map[String, Set[String]],
+    namedLocals: Set[String]
+  )
+
+  private val NoBindings = PackageBindings(Set.empty, Map.empty, Set.empty)
+
+  // per graph: a JsModules is built once per JsContext. Callers may run in parallel.
+  private val bindingsMemo =
+      new java.util.concurrent.ConcurrentHashMap[(String, String), PackageBindings]()
+
+  private val filesMemo =
+      new java.util.concurrent.ConcurrentHashMap[Seq[String], Set[String]]()
+
+  private def bindingsOf(file: String, pkg: String): PackageBindings =
+      bindingsMemo.computeIfAbsent(
+        (file, pkg),
+        _ =>
+          JsStats.computed("importFilter")
+          val byPackage = byFilePackage.getOrElse(file, Map.empty)
+          JsStats.visited("importFilter", byPackage.size)
+          val matching =
+              byPackage.iterator.filter((p, _) => JsModules.packageMatches(p, pkg))
+                  .flatMap(_._2).toSeq
+          if matching.isEmpty then NoBindings
+          else
+            PackageBindings(
+              matching.filter(i => i.kind != ImportKind.Named && i.kind != ImportKind.SideEffect)
+                  .map(_.local).toSet,
+              matching.filter(_.kind == ImportKind.Named).groupMap(_.imported)(_.local)
+                  .view.mapValues(_.toSet).toMap,
+              matching.filter(_.kind == ImportKind.Named).map(_.local).toSet
+            )
+      )
+
   /** Every module specifier imported anywhere in the graph, longest first. */
   lazy val modulesLongestFirst: Seq[String] = imports.map(_.module).distinct.sortBy(-_.length)
 
@@ -233,34 +282,29 @@ final class JsModules(cpg: Cpg):
   def uses(pkgs: String*): Boolean =
       packages.exists(p => pkgs.exists(q => JsModules.packageMatches(p, q)))
 
-  def importsOf(file: String): Seq[JsImport] = byFile.getOrElse(file, Nil)
+  def importsOf(file: String): Seq[JsImport] =
+    val imps = byFile.getOrElse(file, Nil)
+    JsStats.visited("importsOf", imps.size)
+    imps
 
   /** The binding a local name refers to in a file, if it came from an import. */
   def resolve(file: String, local: String): Option[JsImport] =
-      importsOf(file).find(_.local == local)
+      byFileLocal.get(file).flatMap(_.get(local))
 
   /** Local names bound in a file to `exported` of a module matching `pkg`. Covers renamed imports
     * (`import { input as field }`).
     */
   def localNamesOf(file: String, pkg: String, exported: String): Set[String] =
-      importsOf(file)
-          .filter(i =>
-              i.kind == ImportKind.Named && i.imported == exported &&
-                  i.packageName.exists(JsModules.packageMatches(_, pkg))
-          )
-          .map(_.local)
-          .toSet
+      bindingsOf(file, pkg).named.getOrElse(exported, Set.empty)
+
+  /** Local names bound in a file to any named export of a module matching `pkg`. */
+  def namedLocalsOf(file: String, pkg: String): Set[String] =
+      bindingsOf(file, pkg).namedLocals
 
   /** Local names bound in a file to the whole module - a default, namespace or `require` binding.
     */
   def moduleBindingsOf(file: String, pkg: String): Set[String] =
-      importsOf(file)
-          .filter(i =>
-              i.kind != ImportKind.Named && i.kind != ImportKind.SideEffect &&
-                  i.packageName.exists(JsModules.packageMatches(_, pkg))
-          )
-          .map(_.local)
-          .toSet
+      bindingsOf(file, pkg).module
 
   /** `(file, local)` for each local bound to one of `exported` of a package matching one of `pkgs`,
     * under whatever name the file gave it: `import { exec as run }` and `const { exec: run } =
@@ -289,10 +333,25 @@ final class JsModules(cpg: Cpg):
 
   /** Files that import from a package matching one of `pkgs`. */
   def filesImporting(pkgs: String*): Set[String] =
-      imports
-          .filter(i => i.packageName.exists(p => pkgs.exists(JsModules.packageMatches(p, _))))
-          .map(_.file)
-          .toSet
+      filesMemo.computeIfAbsent(
+        pkgs,
+        _ =>
+          JsStats.computed("filesImporting")
+          imports
+              .filter(i => i.packageName.exists(p => pkgs.exists(JsModules.packageMatches(p, _))))
+              .map(_.file)
+              .toSet
+      )
+
+  private lazy val modulesByFile: Map[String, Set[String]] =
+      byFile.view.mapValues(_.map(_.module).toSet).toMap
+
+  /** True when `file` imports one of the module specifiers exactly as written. */
+  def importsModule(file: String, modules: String*): Boolean =
+      modulesByFile.get(file).exists(ms => modules.exists(ms.contains))
+
+  /** True when `file` imports from a package matching one of `pkgs`. */
+  def importsAny(file: String, pkgs: Seq[String]): Boolean = filesImporting(pkgs*).contains(file)
 end JsModules
 
 object JsModules:
@@ -348,7 +407,8 @@ object JsModules:
     * matches `next` (the package `next/navigation` resolves to).
     */
   def packageMatches(pkg: String, wanted: String): Boolean =
-      pkg == wanted || pkg.startsWith(s"$wanted/")
+      pkg == wanted ||
+          (pkg.length > wanted.length && pkg.charAt(wanted.length) == '/' && pkg.startsWith(wanted))
 
   private val BraceContent = "\\{([^}]*)\\}".r
 

@@ -80,7 +80,7 @@ object NitroRecognizer extends JsFrameworkRecognizer:
     val serverFiles = ctx.cpg.file.name(ServerFileRegex).name.toSet
     def inServer(c: CfgNode): Boolean =
         serverFiles.contains(c.method.filename) ||
-            ctx.modules.importsOf(c.method.filename).exists(_.packageName.contains("h3"))
+            ctx.modules.importsAny(c.method.filename, Seq("h3"))
 
     // Handlers registered by wrapping: defineEventHandler(async (event) => ...)
     val handlers = ctx.cpg.call.nameExact(HandlerFactories.toSeq*).l.flatMap { call =>

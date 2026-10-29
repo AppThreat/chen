@@ -191,12 +191,7 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   ): Boolean =
     val name = callName(c)
     def namedFrom(local: String) =
-        modules.exists(m =>
-            ctx.modules.importsOf(file).exists(i =>
-                i.local == local && i.kind == ImportKind.Named &&
-                    i.packageName.exists(JsModules.packageMatches(_, m))
-            )
-        )
+        modules.exists(m => ctx.modules.namedLocalsOf(file, m).contains(local))
     promisified(ctx, c, file, modules, functions) || (
       c.receiver.headOption.flatMap(memberPath) match
         // `exec(cmd)` - a named import, possibly renamed: the local name is what is called
@@ -330,22 +325,26 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   /** Outgoing requests from server code: `got(url)`, `http.get(url)`, `request(url)` from undici.
     */
   private def tagServerRequests(ctx: JsContext): Unit =
+    val requestPackages = ServerRequestPackages ++ Seq("http", "https")
     val directClients = ctx.cpg.call.filter { c =>
       val file = c.method.filename
-      c.receiver.headOption.flatMap(memberPath) match
-        case Some(List(local)) =>
-            ServerRequestPackages.exists(p =>
-                ctx.modules.moduleBindingsOf(file, p).contains(local) ||
-                    ctx.modules.localNamesOf(file, p, "request").contains(local) ||
-                    ctx.modules.localNamesOf(file, p, "fetch").contains(local)
-            )
-        case Some(List(binding, method)) =>
-            (Set("get", "post", "put", "patch", "delete", "head", "request", "stream").contains(
-              method
-            )) && (ServerRequestPackages ++ Seq("http", "https")).exists(p =>
-                ctx.modules.moduleBindingsOf(file, p).contains(binding)
-            )
-        case _ => false
+      if !ctx.modules.importsAny(file, requestPackages) then false
+      else
+        JsStats.visited("gate.serverRequest")
+        c.receiver.headOption.flatMap(memberPath) match
+          case Some(List(local)) =>
+              ServerRequestPackages.exists(p =>
+                  ctx.modules.moduleBindingsOf(file, p).contains(local) ||
+                      ctx.modules.localNamesOf(file, p, "request").contains(local) ||
+                      ctx.modules.localNamesOf(file, p, "fetch").contains(local)
+              )
+          case Some(List(binding, method)) =>
+              (Set("get", "post", "put", "patch", "delete", "head", "request", "stream").contains(
+                method
+              )) && (ServerRequestPackages ++ Seq("http", "https")).exists(p =>
+                  ctx.modules.moduleBindingsOf(file, p).contains(binding)
+              )
+          case _ => false
     }.l
     ctx.tagger.tag(directClients.iterator, INGRESS)
     directClients.foreach(p => ctx.tagger.tag(JsValues.consumersOf(p).iterator, INGRESS))
@@ -358,7 +357,9 @@ object NodeRecognizer extends JsFrameworkRecognizer:
   /** `path.basename(p)` keeps a name inside the directory it is joined to. */
   private def tagPathSanitizers(ctx: JsContext): Unit =
     val members = ctx.cpg.call.nameExact("basename").filter { c =>
-        c.receiver.headOption.flatMap(memberPath).exists {
+        ctx.modules.importsAny(c.method.filename, Seq("path")) && c.receiver.headOption.flatMap(
+          memberPath
+        ).exists {
             case List(binding, _) =>
                 ctx.modules.moduleBindingsOf(c.method.filename, "path").contains(binding)
             case _ => false

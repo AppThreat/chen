@@ -583,9 +583,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     val wrapperNames = Set("action", "query", "createServerFn")
     val wrappers = (ctx.cpg.call.nameExact(wrapperNames.toSeq*)
         .filter(c =>
-            ctx.modules.importsOf(c.method.filename).exists(i =>
-                i.packageName.exists(p => p == "@solidjs/router" || p.startsWith("@tanstack/"))
-            )
+            ctx.modules.importsAny(c.method.filename, Seq("@solidjs/router", "@tanstack"))
         ) ++ ctx.modules.namedImportCalls(Seq("@solidjs/router", "@tanstack"), wrapperNames))
         .dedup.l
     val solidFns =

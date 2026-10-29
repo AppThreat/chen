@@ -605,7 +605,7 @@ object AngularRecognizer extends JsFrameworkRecognizer:
             a.argumentOption(1).exists {
                 case fa: Call => fieldName(fa).exists(routeKeys.contains)
                 case _        => false
-            } && ctx.modules.importsOf(a.method.filename).exists(_.packageName.contains(RoutePkg))
+            } && ctx.modules.importsAny(a.method.filename, Seq(RoutePkg))
         )
         .flatMap(_.argumentOption(2))
         .flatMap(v => v.ast.collectAll[MethodRef].flatMap(r => callbackMethod(r)))
