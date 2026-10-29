@@ -604,7 +604,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
             case (a: Call, fn :: Nil) if a.name == Operators.assignment =>
                 a.argumentOption(1).collect { case id: Identifier => id.name }.foreach { name =>
                   val defining = w.method.filename
-                  ctx.cpg.call.nameExact(name)
+                  JsIndexes.callsNamed(ctx.cpg.graph, name)
                       .filter { c =>
                         val file = c.method.filename
                         file == defining || ctx.modules.resolve(file, name).exists(i =>
@@ -666,7 +666,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     }
     if hooks.isEmpty then return
     hooks.foreach { (file, name, cb) =>
-        ctx.cpg.call.nameExact(name).filter { c =>
+        JsIndexes.callsNamed(ctx.cpg.graph, name).filter { c =>
           val f = c.method.filename
           f == file || ctx.modules.resolve(f, name).exists(i =>
               i.module.startsWith(".") && file.startsWith(JsModules.resolveRelative(f, i.module))
@@ -691,7 +691,9 @@ object ReactRecognizer extends JsFrameworkRecognizer:
                     val byIdentifier = attr.ast.isIdentifier.l.flatMap(resolveComponent(ctx, _))
                     val byElement = attr.ast.collectAll[TemplateDom].nameExact("JSXElement").l
                         .flatMap(e => jsxComponentName(e.code))
-                        .flatMap(nm => ctx.cpg.method.internal.nameExact(nm).headOption)
+                        .flatMap(nm =>
+                            JsIndexes.internalMethodsByName(ctx.cpg.graph, nm).headOption
+                        )
                     (byIdentifier ++ byElement).foreach(tagHandler(ctx, _))
               }
           }
@@ -701,7 +703,7 @@ object ReactRecognizer extends JsFrameworkRecognizer:
     Option.when(name.nonEmpty && name.charAt(0).isUpper)(name)
 
   private def resolveComponent(ctx: JsContext, id: Identifier): Option[Method] =
-      callbackMethod(id).orElse(ctx.cpg.method.internal.nameExact(id.name).headOption)
+      callbackMethod(id).orElse(JsIndexes.internalMethodsByName(ctx.cpg.graph, id.name).headOption)
 
   private def tagNavigation(ctx: JsContext): Unit =
     def target(c: Call): Option[Expression] = c.argument.filter(_.argumentIndex == 1).headOption

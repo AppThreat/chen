@@ -561,7 +561,7 @@ object JsShapes:
             ).orElse(
               // an imported function (`loader: previewLoader` in a router config): the one
               // project function of that name, if it is unambiguous
-              Cpg(using id.graph).method.internal.nameExact(id.name).l match
+              JsIndexes.internalMethodsByName(id.graph, id.name) match
                 case only :: Nil => Some(only)
                 case _           => None
             )
@@ -761,7 +761,7 @@ object JsShapes:
     * lower to `exports["default"] = Card`, an arrow function to a reference to it.
     */
   def defaultExportValue(ctx: JsContext, file: String): Option[Expression] =
-      ctx.cpg.file.nameExact(file).method.nameExact(":program")
+      JsIndexes.methodsInFile(ctx.cpg.graph, file, ":program").iterator
           .flatMap(_.ast.isCall.nameExact(Operators.assignment))
           .find(_.argumentOption(1).exists(_.code.matches("""exports\[["']default["']\]""")))
           .flatMap(_.argumentOption(2))
@@ -903,7 +903,7 @@ object JsShapes:
     */
   def enclosingTypeDecl(m: Method): Option[TypeDecl] =
       m.parameter.nameExact("this").typeFullName.headOption
-          .flatMap(t => Cpg(using m.graph).typeDecl.fullNameExact(t).headOption)
+          .flatMap(t => JsIndexes.typeDeclsByFullName(m.graph, t).headOption)
           .orElse(m.definingTypeDecl)
 
   /** The methods of a class, with the arrow functions nested in them (whose `this` is the class's).
@@ -999,11 +999,119 @@ object JsIndexes:
         )
         .getOrElse(name, Nil)
 
+  /** The graph-wide name lookups, each built by one sweep of its node kind the first time it is
+    * asked for. A starting traversal such as `cpg.call.nameExact(x)` scans every node of its kind,
+    * so inside a loop over calls or methods it is quadratic - on a minified bundle, which holds
+    * most of a project's nodes, it is what the run spends its time on. The taggers add tags and
+    * edges only, never nodes of these kinds, so an index built once stays exact for the run.
+    */
+  private final class NameIndexes(graph: overflowdb.Graph):
+    private def cpg = Cpg(using graph)
+
+    lazy val calls: Map[String, List[Call]] =
+      JsStats.built("calls")
+      cpg.call.l.groupBy(_.name)
+
+    lazy val methods: Map[String, List[Method]] =
+      JsStats.built("methods")
+      cpg.method.l.groupBy(_.name)
+
+    lazy val internalMethods: Map[String, List[Method]] =
+      JsStats.built("internalMethods")
+      cpg.method.internal.l.groupBy(_.name)
+
+    lazy val methodsInFile: Map[(String, String), List[Method]] =
+      JsStats.built("methodsInFile")
+      cpg.method.l.groupBy(m => (m.filename, m.name))
+
+    lazy val methodsByFile: Map[String, List[Method]] =
+      JsStats.built("methodsByFile")
+      cpg.method.l.groupBy(_.filename)
+
+    lazy val typeDecls: Map[String, List[TypeDecl]] =
+      JsStats.built("typeDecls")
+      cpg.typeDecl.l.groupBy(_.fullName)
+
+    lazy val annotations: Map[String, List[Annotation]] =
+      JsStats.built("annotations")
+      cpg.annotation.l.groupBy(_.name)
+  end NameIndexes
+
+  private val nameIndexes =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[overflowdb.Graph, NameIndexes]()
+      )
+
+  private def names(graph: overflowdb.Graph): NameIndexes =
+      nameIndexes.computeIfAbsent(graph, g => NameIndexes(g))
+
+  /** `cpg.call.nameExact(name)`, in graph order. */
+  def callsNamed(graph: overflowdb.Graph, name: String): List[Call] =
+    JsStats.looked("calls")
+    names(graph).calls.getOrElse(name, Nil)
+
+  /** `cpg.method.nameExact(name)`, in graph order. */
+  def methodsByName(graph: overflowdb.Graph, name: String): List[Method] =
+    JsStats.looked("methods")
+    names(graph).methods.getOrElse(name, Nil)
+
+  /** `cpg.method.internal.nameExact(name)`, in graph order. */
+  def internalMethodsByName(graph: overflowdb.Graph, name: String): List[Method] =
+    JsStats.looked("internalMethods")
+    names(graph).internalMethods.getOrElse(name, Nil)
+
+  /** `cpg.method.filenameExact(file).nameExact(name)`, in graph order. */
+  def methodsInFile(graph: overflowdb.Graph, file: String, name: String): List[Method] =
+    JsStats.looked("methodsInFile")
+    names(graph).methodsInFile.getOrElse((file, name), Nil)
+
+  /** `cpg.method.filenameExact(file)`, in graph order. */
+  def methodsByFile(graph: overflowdb.Graph, file: String): List[Method] =
+    JsStats.looked("methodsByFile")
+    names(graph).methodsByFile.getOrElse(file, Nil)
+
+  /** `cpg.typeDecl.fullNameExact(fullName)`, in graph order. */
+  def typeDeclsByFullName(graph: overflowdb.Graph, fullName: String): List[TypeDecl] =
+    JsStats.looked("typeDecls")
+    names(graph).typeDecls.getOrElse(fullName, Nil)
+
+  /** `cpg.annotation.nameExact(name)`, in graph order. */
+  def annotationsNamed(graph: overflowdb.Graph, name: String): List[Annotation] =
+    JsStats.looked("annotations")
+    names(graph).annotations.getOrElse(name, Nil)
+
   /** Forget everything built for a graph (between runs over a mutated graph). */
-  def clear(): Unit =
-    methodIndexes.clear()
-    assignmentIndexes.clear()
+  def clear(graph: overflowdb.Graph): Unit =
+    methodIndexes.remove(graph)
+    assignmentIndexes.remove(graph)
+    nameIndexes.remove(graph)
 end JsIndexes
+
+/** Counts of the work the taggers do, for tests that assert complexity rather than time: how often
+  * each index was built and asked, and how many candidates the searches behind it examined.
+  */
+object JsStats:
+  // per thread: suites that run taggers side by side must not see each other's work
+  private val counters = new ThreadLocal[mutable.HashMap[String, Long]]:
+    override def initialValue(): mutable.HashMap[String, Long] = mutable.HashMap.empty
+
+  private def add(key: String, n: Long): Unit =
+    val m = counters.get()
+    m.update(key, m.getOrElse(key, 0L) + n)
+
+  private[js] def built(kind: String): Unit  = add(s"build.$kind", 1)
+  private[js] def looked(kind: String): Unit = add(s"lookup.$kind", 1)
+
+  /** `n` more candidates examined by the search `kind`. */
+  private[js] def visited(kind: String, n: Long = 1): Unit = add(s"visit.$kind", n)
+
+  /** `kind` computed once more (a memo miss). */
+  private[js] def computed(kind: String): Unit = add(s"compute.$kind", 1)
+
+  def get(key: String): Long = counters.get().getOrElse(key, 0L)
+
+  def reset(): Unit = counters.get().clear()
+end JsStats
 
 /** Where values come from and where asynchronous values go. */
 object JsValues:

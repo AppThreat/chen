@@ -36,6 +36,36 @@ final class JsContext(val cpg: Cpg, val modules: JsModules, val tagger: JsTagger
   /** Every field write of every class, built once per run. */
   lazy val memberWrites: List[(TypeDecl, String, Expression)] = MemberTaintBridge.memberWrites(this)
 
+  /** Field accesses by the field they name, in graph order: a search for one member's reads asks
+    * for that member's list, not for every access in the project.
+    */
+  lazy val fieldAccessesByName
+    : Map[String, List[io.shiftleft.codepropertygraph.generated.nodes.Call]] =
+      fieldAccesses.flatMap(fa => JsShapes.fieldName(fa).map(_ -> fa)).groupMap(_._1)(_._2)
+
+  /** The field accesses that name `member`, in graph order. */
+  def fieldAccessesOf(member: String): List[io.shiftleft.codepropertygraph.generated.nodes.Call] =
+    JsStats.looked("fieldAccesses")
+    fieldAccessesByName.getOrElse(member, Nil)
+
+  /** Calls by name of a function, for functions no call edge reaches: keyed on the name and file
+    * the answer depends on, so the same-named functions of a minified bundle share one answer.
+    */
+  private[js] val callerFallbacks =
+      mutable.HashMap.empty[
+        (String, String),
+        List[io.shiftleft.codepropertygraph.generated.nodes.Call]
+      ]
+
+  /** The project function a call names, for a call no edge resolves: keyed by the calling file and
+    * the name.
+    */
+  private[js] val predicateFunctions =
+      mutable.HashMap.empty[
+        (String, String),
+        Option[io.shiftleft.codepropertygraph.generated.nodes.Method]
+      ]
+
   /** The template elements that render a project component, resolved once. */
   lazy val elements: ComponentCallBridge.Elements = ComponentCallBridge.resolve(this)
 end JsContext
@@ -81,7 +111,7 @@ object JsRecognizers:
 
   /** Runs every applicable recognizer, emitting through `tagger`. */
   def run(cpg: Cpg, tagger: JsTagger): Unit =
-    JsIndexes.clear()
+    JsIndexes.clear(cpg.graph)
     val ctx = JsContext(cpg, JsModules(cpg), tagger)
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)

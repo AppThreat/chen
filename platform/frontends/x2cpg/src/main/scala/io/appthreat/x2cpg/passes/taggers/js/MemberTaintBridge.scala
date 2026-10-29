@@ -239,8 +239,9 @@ object MemberTaintBridge:
     * the same file or in one importing the class.
     */
   private def instanceReads(ctx: JsContext, td: TypeDecl, member: String): Iterator[Call] =
-      ctx.fieldAccesses.iterator
-          .filter(fa => fieldName(fa).contains(member) && !isAssignmentTarget(fa))
+      ctx.fieldAccessesOf(member).iterator
+          .tapEach(_ => JsStats.visited("instanceReads"))
+          .filter(fa => !isAssignmentTarget(fa))
           .filter(fa =>
               fieldBase(fa).exists {
                   case id: Identifier if id.name != "this" =>

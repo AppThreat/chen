@@ -50,10 +50,10 @@ object RegistryBridge:
                         .filter(_.module.startsWith(".")).toList
                         .flatMap { imp =>
                           val module = JsModules.resolveRelative(fa.method.filename, imp.module)
-                          ctx.cpg.method.internal.nameExact(member)
+                          JsIndexes.internalMethodsByName(ctx.cpg.graph, member)
                               .filter(m =>
                                   m.filename == module || m.filename.startsWith(module + ".")
-                              ).l
+                              )
                         }
                 case _ => Nil
           case id: Identifier =>
@@ -67,7 +67,7 @@ object RegistryBridge:
 
   /** Calls of a function from its module or from modules importing it by name. */
   private def callersOf(ctx: JsContext, fn: Method): List[Call] =
-      ctx.cpg.call.nameExact(fn.name).l.filter { c =>
+      JsIndexes.callsNamed(ctx.cpg.graph, fn.name).filter { c =>
         val file = c.method.filename
         file == fn.filename || ctx.modules.resolve(file, fn.name).exists(i =>
             i.module.startsWith(".") &&

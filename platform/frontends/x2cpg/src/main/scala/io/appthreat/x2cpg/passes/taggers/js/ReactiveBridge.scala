@@ -93,9 +93,10 @@ object ReactiveBridge:
           case _ => None
     }
     if assignments.isEmpty then return
-    val done  = mutable.HashSet.empty[(Long, String)]
-    var round = 0
-    var grew  = true
+    val done     = mutable.HashSet.empty[(Long, String)]
+    val captured = capturedParameterCandidates(ctx)
+    var round    = 0
+    var grew     = true
     while grew && round < MaxRounds do
       grew = false
       round += 1
@@ -116,10 +117,10 @@ object ReactiveBridge:
                 ctx.tagger.tagVia(readsIn(method, name), found.tag, found.places(value)*)
             }
       }
-      if bridgeCapturedParameters(ctx) then grew = true
+      if bridgeCapturedParameters(ctx, captured) then grew = true
       if bridgeStateSetters(ctx) then grew = true
       // watch(source, (value) => ...)
-      ctx.cpg.call.nameExact(Watchers.toSeq*).foreach { w =>
+      Watchers.toList.flatMap(JsIndexes.callsNamed(ctx.cpg.graph, _)).foreach { w =>
         val args = w.argument.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).l
         if args.size >= 2 then
           val tainted = args.head match
@@ -142,26 +143,40 @@ object ReactiveBridge:
     * reaches an argument some caller passes, the captured reads are tagged with it. Returns whether
     * anything new was tagged.
     */
-  private def bridgeCapturedParameters(ctx: JsContext): Boolean =
+  private def bridgeCapturedParameters(
+    ctx: JsContext,
+    candidates: List[(Method, MethodParameterIn, List[Identifier])]
+  ): Boolean =
     var grew = false
-    ctx.cpg.method.internal.filterNot(_.name == ":program").l.foreach { m =>
-      lazy val nested = nestedMethods(m)
-      params(m).foreach { p =>
-          if nested.nonEmpty then
-            val reads = capturedReads(ctx, m, p.name).toList
-            if reads.nonEmpty && !reads.forall(r => ctx.tagger.has(r.id(), JsTags.INPUT)) then
-              callersOf(ctx, m).iterator
-                  .flatMap(_.argument.filter(_.argumentIndex == p.index).l)
-                  .flatMap(arg => MemberTaintBridge.sourceOf(ctx, arg).map(_ -> arg))
-                  .nextOption()
-                  .foreach { (found, arg) =>
-                    if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
-                    ctx.tagger.tagVia(reads, found.tag, found.places(arg)*)
-                  }
-      }
+    candidates.foreach { (m, p, reads) =>
+        if !reads.forall(r => ctx.tagger.has(r.id(), JsTags.INPUT)) then
+          callersOf(ctx, m).iterator
+              .flatMap(_.argument.filter(_.argumentIndex == p.index).l)
+              .flatMap(arg => MemberTaintBridge.sourceOf(ctx, arg).map(_ -> arg))
+              .nextOption()
+              .foreach { (found, arg) =>
+                if reads.exists(r => !ctx.tagger.has(r.id(), found.tag)) then grew = true
+                ctx.tagger.tagVia(reads, found.tag, found.places(arg)*)
+              }
     }
     grew
-  end bridgeCapturedParameters
+
+  /** The (function, parameter, captured reads) triples that can ever be bridged: the reads are
+    * facts of the AST, so they are found once, not in every round.
+    */
+  private def capturedParameterCandidates(
+    ctx: JsContext
+  ): List[(Method, MethodParameterIn, List[Identifier])] =
+      ctx.cpg.method.internal.filterNot(_.name == ":program").l.flatMap { m =>
+        lazy val nested = nestedMethods(m)
+        params(m).flatMap { p =>
+            if nested.isEmpty then None
+            else
+              Some(capturedReads(ctx, m, p.name).toList).filter(_.nonEmpty).map(
+                (m, p, _)
+              )
+        }
+      }
 
   /** `const [html, setHtml] = useState("")`, set from a message handler: the engine has no edge
     * from the setter's argument to the state, so where a source reaches what the setter is called
@@ -213,9 +228,17 @@ object ReactiveBridge:
   private def callersOf(ctx: JsContext, fn: Method): List[Call] =
     val resolved = fn._callIn.collect { case c: Call => c }.l ++ ctx.tagger.callSitesOf(fn)
     if resolved.nonEmpty then resolved
-    else
-      ctx.cpg.call.nameExact(fn.name).l.filter { c =>
-        val file = c.method.filename
+    else ctx.callerFallbacks.getOrElseUpdate((fn.name, fn.filename), callersByName(ctx, fn))
+
+  /** The calls by name of a function from its own file or from a file that imports it. Whether a
+    * calling file qualifies is decided once per file.
+    */
+  private def callersByName(ctx: JsContext, fn: Method): List[Call] =
+    JsStats.computed("callersOf")
+    val byName = JsIndexes.callsNamed(ctx.cpg.graph, fn.name)
+    JsStats.visited("callersOf", byName.size.toLong)
+    val fileQualifies = mutable.HashMap.empty[String, Boolean]
+    def qualifies(file: String): Boolean =
         file == fn.filename || ctx.modules.resolve(file, fn.name).exists { i =>
           val module = i.module
           if module.startsWith(".") then
@@ -224,7 +247,9 @@ object ReactiveBridge:
             (module.startsWith("@/") || module.startsWith("~/") || module.startsWith("$lib/")) &&
             fn.filename.contains(module.dropWhile(_ != '/'))
         }
-      }
+    byName.filter(c =>
+        fileQualifies.getOrElseUpdate(c.method.filename, qualifies(c.method.filename))
+    )
 
   /** A derivation call whose callback returns a source is itself a source: the wrapper holds that
     * value. Tagging the call - not only reads of a local it was assigned to - carries the taint out

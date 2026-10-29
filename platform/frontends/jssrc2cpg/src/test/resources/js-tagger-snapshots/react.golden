@@ -1,0 +1,50 @@
+RESOLVED_METHOD=FULL_NAME,guards.js::program:go,ALIAS,go,RECEIVER,this	App.jsx:2	CALL	require("./guards")
+RESOLVED_METHOD=FULL_NAME,guards.js::program:isSafePath,ALIAS,isSafePath,RECEIVER,this	App.jsx:2	CALL	require("./guards")
+RESOLVED_TYPE_DECL=guards.js::program:go	App.jsx:2	CALL	require("./guards")
+RESOLVED_TYPE_DECL=guards.js::program:isSafePath	App.jsx:2	CALL	require("./guards")
+UNKNOWN_METHOD=FULL_NAME,react:useEffect,ALIAS,useEffect,RECEIVER,this	App.jsx:1	CALL	require("react")
+UNKNOWN_METHOD=FULL_NAME,react:useMemo,ALIAS,useMemo,RECEIVER,this	App.jsx:1	CALL	require("react")
+UNKNOWN_METHOD=FULL_NAME,react:useState,ALIAS,useState,RECEIVER,this	App.jsx:1	CALL	require("react")
+UNKNOWN_TYPE_DECL=react:useEffect	App.jsx:1	CALL	require("react")
+UNKNOWN_TYPE_DECL=react:useMemo	App.jsx:1	CALL	require("react")
+UNKNOWN_TYPE_DECL=react:useState	App.jsx:1	CALL	require("react")
+exported=	guards.js:2	METHOD	function isSafePath(p) { return ALLOWED.includes(p); }
+exported=	guards.js:3	METHOD	function go(url) { location.assign(url); }
+framework-input=	App.jsx:15	IDENTIFIER	html
+framework-input=	App.jsx:15	IDENTIFIER	query
+framework-input=	App.jsx:15	IDENTIFIER	shout
+framework-input=	App.jsx:24	CALL	location.search
+framework-input=	App.jsx:24	CALL	location.search
+framework-input=	App.jsx:6	CALL	window.location.search
+framework-input=	App.jsx:7	CALL	useMemo(() => query.toUpperCase(), [query])
+framework-input=	App.jsx:7	IDENTIFIER	query
+framework-input=	App.jsx:7	IDENTIFIER	query
+framework-input=	App.jsx:9	IDENTIFIER	setHtml
+framework-input=	App.jsx:9	METHOD_PARAMETER_IN	e
+framework-output=	App.jsx:13	CALL	window.location = next
+framework-output=	App.jsx:15	CALL	_tmp_4.__html
+framework-output=	App.jsx:15	CALL	_tmp_4.__html = html + shout
+framework-output=	App.jsx:15	CALL	html + shout
+framework-output=	App.jsx:15	CALL	{{ __html: html + shout }}
+framework-output=	App.jsx:15	TEMPLATE_DOM	dangerouslySetInnerHTML={{ __html: html + shout }}
+framework-output=	guards.js:3	CALL	location.assign(url)
+predicate=	guards.js:2	CALL	ALLOWED.includes(p)
+redirect=	App.jsx:13	CALL	window.location = next
+redirect=	guards.js:3	CALL	location.assign(url)
+sanitizer=	App.jsx:13	IDENTIFIER	next
+validation=	guards.js:2	METHOD	function isSafePath(p) { return ALLOWED.includes(p); }
+via:App.jsx#5=	App.jsx:15	IDENTIFIER	html
+via:App.jsx#5=	App.jsx:9	IDENTIFIER	setHtml
+via:App.jsx#6=	App.jsx:15	IDENTIFIER	query
+via:App.jsx#6=	App.jsx:15	IDENTIFIER	shout
+via:App.jsx#6=	App.jsx:7	CALL	useMemo(() => query.toUpperCase(), [query])
+via:App.jsx#6=	App.jsx:7	IDENTIFIER	query
+via:App.jsx#6=	App.jsx:7	IDENTIFIER	query
+via:App.jsx#7=	App.jsx:15	IDENTIFIER	shout
+via:App.jsx#7=	App.jsx:7	CALL	useMemo(() => query.toUpperCase(), [query])
+via:App.jsx#9=	App.jsx:15	IDENTIFIER	html
+via:App.jsx#9=	App.jsx:9	IDENTIFIER	setHtml
+xss=	App.jsx:15	CALL	_tmp_4.__html
+xss=	App.jsx:15	CALL	_tmp_4.__html = html + shout
+xss=	App.jsx:15	CALL	html + shout
+xss=	App.jsx:15	CALL	{{ __html: html + shout }}
