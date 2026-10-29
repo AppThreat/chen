@@ -1,0 +1,33 @@
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nest/app.controller.ts
+  s_a8b850349d15dc::t_7e8c687b2eeae0 1-18
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/node/other.js
+  s_a8b850349d15dc::t_7e8c687b2eeae0 1-8
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/node/server.js
+  s_a8b850349d15dc::t_7e8c687b2eeae0 1-25
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/svelte/src/lib/nav.js
+  s_a8b850349d15dc::t_7e8c687b2eeae0 1-10
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/svelte/src/routes/+server.js
+  s_a8b850349d15dc::t_7e8c687b2eeae0 1-11
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nest.golden
+  s_a8b850349d15dc::t_9eda95b98ae691 1-23
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/node.golden
+  s_a8b850349d15dc::t_998ad34c941baf 1-81
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/svelte.golden
+  s_a8b850349d15dc::t_d9fa581987ae3c 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b7c81c914396da29a7db00fdcb8fe23f7d101bd3",
+  "prompts": {},
+  "sessions": {
+    "s_a8b850349d15dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9db13116-09cf-4a2a-8de8-a3158b144f2f",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
