@@ -1,0 +1,35 @@
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nitro.golden
+  s_236e880d3ee8e7::t_15e57207b9bee0 1-18
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nitro/lib/session.ts
+  s_236e880d3ee8e7::t_15e57207b9bee0 1-8
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_236e880d3ee8e7::t_b4466464efce0e 705-723
+  s_236e880d3ee8e7::t_21087f455e2cf8 247,264-271
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NodeRecognizer.scala
+  s_236e880d3ee8e7::t_b4466464efce0e 332-345,359-364
+  s_236e880d3ee8e7::t_21087f455e2cf8 331,346
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nitro/server/api/user.get.ts
+  s_236e880d3ee8e7::t_15e57207b9bee0 1-7
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_236e880d3ee8e7::t_21087f455e2cf8 230,355-362
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/nitro/lib/local.ts
+  s_236e880d3ee8e7::t_15e57207b9bee0 1-7
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsTaggerSnapshotTest.scala
+  s_236e880d3ee8e7::t_15e57207b9bee0 18-19,51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "da1f953499c6650b63e2dcdd9151c01fad3a6c7b",
+  "prompts": {},
+  "sessions": {
+    "s_236e880d3ee8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "52eeaa6b-eddb-4834-83cf-34eb1a185cc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
