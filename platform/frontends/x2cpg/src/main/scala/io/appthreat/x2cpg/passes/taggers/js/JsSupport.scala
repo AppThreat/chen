@@ -1081,10 +1081,10 @@ object JsIndexes:
     names(graph).annotations.getOrElse(name, Nil)
 
   /** Forget everything built for a graph (between runs over a mutated graph). */
-  def clear(): Unit =
-    methodIndexes.clear()
-    assignmentIndexes.clear()
-    nameIndexes.clear()
+  def clear(graph: overflowdb.Graph): Unit =
+    methodIndexes.remove(graph)
+    assignmentIndexes.remove(graph)
+    nameIndexes.remove(graph)
 end JsIndexes
 
 /** Counts of the work the taggers do, for tests that assert complexity rather than time: how often

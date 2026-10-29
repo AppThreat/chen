@@ -111,7 +111,7 @@ object JsRecognizers:
 
   /** Runs every applicable recognizer, emitting through `tagger`. */
   def run(cpg: Cpg, tagger: JsTagger): Unit =
-    JsIndexes.clear()
+    JsIndexes.clear(cpg.graph)
     val ctx = JsContext(cpg, JsModules(cpg), tagger)
     all.foreach { recognizer =>
         if recognizer.applies(ctx) then recognizer.run(ctx)
