@@ -1,0 +1,46 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_a8b850349d15dc::t_6cc14879f24970 346-352
+  s_a8b850349d15dc::t_9e098421738bc8 237-241,243,268-269,285-288,299-302
+  s_a8b850349d15dc::t_62d4ceff73735b 176-178,226-236,242,244-267,270-272,292,298,307,336-345,353-354
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NitroRecognizer.scala
+  s_a8b850349d15dc::t_6cc14879f24970 83
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DomRecognizer.scala
+  s_a8b850349d15dc::t_9e098421738bc8 247-250,253-254,266-270,277,291-302,709,711-713
+  s_a8b850349d15dc::t_1f1721d35e667b 246
+  s_a8b850349d15dc::t_45b70f7c2aea91 714-716
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ReactRecognizer.scala
+  s_a8b850349d15dc::t_6cc14879f24970 586
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsModulesTest.scala
+  s_a8b850349d15dc::t_688ea125bb9d02 245-246,260-267,275-280,288
+  s_a8b850349d15dc::t_993c04905f67db 1-219,223-244,247-258,291-293
+  s_a8b850349d15dc::t_98c166c30508e0 220-222,259,268-274,282-286,289-290
+  s_a8b850349d15dc::t_eb95df79f21ddd 281
+  s_a8b850349d15dc::t_df62aa6aab4756 287
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/AngularRecognizer.scala
+  s_a8b850349d15dc::t_6cc14879f24970 608
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/SvelteRecognizer.scala
+  s_a8b850349d15dc::t_6cc14879f24970 317,319,321
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/VueRecognizer.scala
+  s_a8b850349d15dc::t_6cc14879f24970 338
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/NodeRecognizer.scala
+  s_a8b850349d15dc::t_0a14cf17f75cbb 331
+  s_a8b850349d15dc::t_9e098421738bc8 194,332-334
+  s_a8b850349d15dc::t_6cc14879f24970 328,360-362
+  s_a8b850349d15dc::t_644860fdd6af4a 335-337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1d1a2ea7d11c2d5bf084c9b4bd448fdae020f1b8",
+  "prompts": {},
+  "sessions": {
+    "s_a8b850349d15dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9db13116-09cf-4a2a-8de8-a3158b144f2f",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
