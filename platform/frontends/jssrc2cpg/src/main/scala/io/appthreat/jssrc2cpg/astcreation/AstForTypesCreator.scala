@@ -85,7 +85,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     )
 
     members.zipWithIndex.foreach { case (member, idx) =>
-        astForClassMember(member, aliasTypeDeclNode, idx + 1)
+        astForClassMember(member, aliasTypeDeclNode, idx + 1, isPatternMember = alias.node == ObjectPattern)
     }
 
     typeDeclNodeAst.root.foreach(diffGraph.addEdge(methodAstParentStack.head, _, EdgeTypes.AST))
@@ -235,7 +235,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   private def astForClassMember(
     classElement: Value,
     typeDeclNode: NewTypeDecl,
-    order: Int = -1
+    order: Int = -1,
+    isPatternMember: Boolean = false
   ): Ast =
     val nodeInfo     = createBabelNodeInfo(classElement)
     val typeFullName = typeFor(nodeInfo)
@@ -304,7 +305,11 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       decoratorAst.root.foreach(diffGraph.addEdge(memberNode_, _, EdgeTypes.AST))
     }
 
-    if hasKey(nodeInfo.json, "value") && !nodeInfo.json("value").isNull then
+    // A member of an object-pattern parameter (`{ t, data: postId = '' }`) is not a field with an
+    // initialiser: the shorthand `value` repeats the key, and the destructuring assignment lowers
+    // the binding itself. Building the `this.key = value` assignment here would leave the
+    // identifiers of that discarded AST without a parent.
+    if !isPatternMember && hasKey(nodeInfo.json, "value") && !nodeInfo.json("value").isNull then
       val lhsAst = astForClassFieldTarget(nodeInfo)
       val rhsAst = astForNodeWithFunctionReference(nodeInfo.json("value"))
       val callNode_ =

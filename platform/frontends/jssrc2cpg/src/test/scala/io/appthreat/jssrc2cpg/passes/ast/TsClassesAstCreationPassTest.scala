@@ -373,7 +373,7 @@ class TsClassesAstCreationPassTest extends AbstractPassTest:
         credentialsType.member.typeFullName.toSet shouldBe Set(Defines.Any)
         val List(credentialsParam) = cpg.parameter.nameExact("param1_0").l
         credentialsParam.typeFullName shouldBe "code.ts::program:apiCall:_anon_cdecl"
-        cpg.all.collectAll[CfgNode].whereNot(_._astIn).size shouldBe 4
+        cpg.all.collectAll[CfgNode].whereNot(_._astIn).size shouldBe 0
         cpg.identifier.count(_.refsTo.size > 1) shouldBe 0
         cpg.identifier.whereNot(_.refsTo).size shouldBe 0
       }
