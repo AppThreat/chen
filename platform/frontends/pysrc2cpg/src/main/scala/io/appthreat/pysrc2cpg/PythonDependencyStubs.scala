@@ -409,6 +409,19 @@ object PythonDependencyStubs:
     end if
   end packageIndex
 
+  /** Top-level import name -> purl, over every dependency origin the input discovers: each
+    * origin's dist-info directories contribute their `top_level.txt` names (see packageIndex). A
+    * name that two origins claim with different purls (PyYAML and ruamel-yaml both ship `yaml`)
+    * is left out, so the mapping stays honest where it is ambiguous.
+    */
+  def modulePurlIndex(inputPath: Path, config: Py2CpgOnFileSystemConfig): Map[String, String] =
+    val claims = discoverOrigins(inputPath, config).filterNot(_.isTypeshed)
+        .flatMap(o => packageIndex(o).toList)
+        .groupBy(_._1)
+        .view
+        .mapValues(_.map(_._2).toSet)
+    claims.collect { case (name, purls) if purls.size == 1 => name -> purls.head }.toMap
+
   /** Import names from `top_level.txt`, one per line; an empty file or a missing file is `Nil`. */
   private def topLevelOf(distInfoDir: Path): List[String] =
     val f = distInfoDir.resolve("top_level.txt")
