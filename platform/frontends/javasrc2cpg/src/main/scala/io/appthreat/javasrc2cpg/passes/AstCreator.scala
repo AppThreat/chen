@@ -1,5 +1,6 @@
 package io.appthreat.javasrc2cpg.passes
 
+import com.github.javaparser.StaticJavaParser
 import com.github.javaparser.ast.Modifier
 import com.github.javaparser.ast.`type`.TypeParameter
 import com.github.javaparser.ast.{CompilationUnit, Node, NodeList, PackageDeclaration}
@@ -60,7 +61,7 @@ import com.github.javaparser.ast.expr.{
     UnaryExpr,
     VariableDeclarationExpr
 }
-import com.github.javaparser.ast.nodeTypes.{NodeWithName, NodeWithSimpleName}
+import com.github.javaparser.ast.nodeTypes.{NodeWithAnnotations, NodeWithName, NodeWithSimpleName}
 import com.github.javaparser.ast.stmt.{
     AssertStmt,
     BlockStmt,
@@ -89,6 +90,7 @@ import com.github.javaparser.ast.stmt.{
 }
 import com.github.javaparser.resolution.UnsolvedSymbolException
 import com.github.javaparser.resolution.declarations.{
+    ResolvedAnnotationDeclaration,
     ResolvedFieldDeclaration,
     ResolvedMethodDeclaration,
     ResolvedMethodLikeDeclaration,
@@ -124,6 +126,7 @@ import io.appthreat.javasrc2cpg.util.{
     BindingTableAdapterForJavaparser,
     BindingTableAdapterForLambdas,
     BindingTableEntry,
+    JavaLangTypes,
     LambdaBindingInfo,
     NameConstants
 }
@@ -179,6 +182,7 @@ import io.appthreat.x2cpg.utils.AstPropertiesUtil.*
 import io.appthreat.x2cpg.utils.NodeBuilders
 import io.appthreat.x2cpg.AstNodeBuilder
 import io.shiftleft.codepropertygraph.generated.nodes.AstNode.PropertyDefaults
+import io.shiftleft.codepropertygraph.generated.nodes.NewTag
 import io.shiftleft.codepropertygraph.generated.nodes.MethodParameterIn.PropertyDefaults as ParameterDefaults
 import io.shiftleft.passes.IntervalKeyPool
 import org.slf4j.LoggerFactory
@@ -199,6 +203,7 @@ import io.appthreat.javasrc2cpg.util.{
     BindingTableAdapterForJavaparser,
     BindingTableAdapterForLambdas,
     BindingTableEntry,
+    JavaLangTypes,
     LambdaBindingInfo,
     NameConstants
 }
@@ -245,6 +250,11 @@ class AstCreator(
 
   private val scope = Scope()
 
+  private val LombokSlf4j     = "lombok.extern.slf4j.Slf4j"
+  private val LombokData      = "lombok.Data"
+  private val LombokGetter    = "lombok.Getter"
+  private val Slf4jLoggerType = "org.slf4j.Logger"
+
   private val typeInfoCalc: TypeInfoCalculator = TypeInfoCalculator(global, symbolSolver)
   private val partialConstructorQueue: mutable.ArrayBuffer[PartialConstructor] =
       mutable.ArrayBuffer.empty
@@ -267,7 +277,25 @@ class AstCreator(
   def createAst(): DiffGraphBuilder =
     val ast = astForTranslationUnit(javaParserAst)
     storeInDiffGraph(ast)
+    storeThrowsTags()
     diffGraph
+
+  /** The `throws` clauses, resolved while each method's scope was live, as one tag per clause on
+    * the method: the schema has no node and no position for a throws type, and the callsites slice
+    * reads the type and its own line from these tags (chen#245, decision 0001 P1).
+    */
+  private val pendingThrowsTags = mutable.ArrayBuffer.empty[(NewMethod, String, Int)]
+
+  private def storeThrowsTags(): Unit =
+      pendingThrowsTags.foreach { case (methodNode, throwsType, line) =>
+          diffGraph.addEdge(
+            methodNode,
+            NewTag().name("callsites-throws").value(
+              ujson.write(ujson.Obj("type" -> throwsType, "line" -> line))
+            ),
+            EdgeTypes.TAGGED_BY
+          )
+      }
 
   /** Copy nodes/edges of given `AST` into the diff graph
     */
@@ -322,6 +350,7 @@ class AstCreator(
     */
   private def astForTranslationUnit(compilationUnit: CompilationUnit): Ast =
       try
+        augmentLombokMembers(compilationUnit)
         val namespaceBlock =
             namespaceBlockForPackageDecl(compilationUnit.getPackageDeclaration.toScala)
 
@@ -961,6 +990,86 @@ class AstCreator(
     ast
   end astForRecordCanonicalConstructor
 
+  /** Adds the members Lombok generates to the JavaParser AST, before any member is lowered.
+    *
+    * Generated code is code too (decision 0001, P1). Without these, `log.info(...)` has an untyped
+    * receiver and a getter hides the uses behind its return type (`payment.getCard().getNumber()`),
+    * which is where the resolution stopped (chen#245). The members are ordinary members of the
+    * JavaParser AST once added, so the ordinary lowering builds their nodes and the ordinary
+    * resolver handles calls on them - including the return type the next link of a chain resolves
+    * from. Delombok stays the fuller treatment: when it ran, the generated members are already in
+    * the parsed source and nothing is added.
+    *
+    * An annotation counts by its resolved name, so a Lombok the classpath does not name adds
+    * nothing - the source of truth is the classpath, not the bare name.
+    */
+  private def augmentLombokMembers(compilationUnit: CompilationUnit): Unit =
+      compilationUnit.findAll(classOf[ClassOrInterfaceDeclaration]).asScala.foreach { classDecl =>
+          if !classDecl.isInterface then
+            if carriesAnnotation(classDecl, LombokSlf4j) &&
+              !classDecl.getFields.asScala.exists(
+                _.getVariables.asScala.exists(_.getNameAsString == "log")
+              )
+            then
+              // No initialiser: the generated field's own call would be a use of generated code
+              // the compiler attributes to nothing a source file wrote.
+              StaticJavaParser.parseBodyDeclaration(
+                s"private static final $Slf4jLoggerType log;"
+              ) match
+                case field: FieldDeclaration => classDecl.getMembers.addFirst(field)
+                case _                       =>
+
+            val classGetter =
+                carriesAnnotation(classDecl, LombokGetter) || carriesAnnotation(
+                  classDecl,
+                  LombokData
+                )
+            val settersWanted       = carriesAnnotation(classDecl, LombokData)
+            val declaredMethodNames = classDecl.getMethods.asScala.map(_.getNameAsString).toSet
+
+            classDecl.getFields.asScala
+                .filterNot(_.isStatic)
+                .filterNot(_.isFinal && !settersWanted)
+                .foreach { field =>
+                  val fieldGetter =
+                      classGetter || carriesAnnotation(field, LombokGetter)
+                  field.getVariables.asScala
+                      .filterNot(_.getNameAsString.startsWith("$"))
+                      .foreach { variable =>
+                        val name       = variable.getNameAsString
+                        val fieldType  = variable.getTypeAsString
+                        val getterName = accessorName("get", name, fieldType)
+                        if fieldGetter && !declaredMethodNames.contains(getterName) then
+                          val getter = classDecl.addMethod(getterName, Modifier.Keyword.PUBLIC)
+                          getter.setType(StaticJavaParser.parseType(fieldType))
+                          getter.setBody(StaticJavaParser.parseBlock(s"{ return this.$name; }"))
+                        val setterName = accessorName("set", name, fieldType)
+                        if settersWanted && !field.isFinal &&
+                          !declaredMethodNames.contains(setterName)
+                        then
+                          val setter = classDecl.addMethod(setterName, Modifier.Keyword.PUBLIC)
+                          setter.setType(StaticJavaParser.parseType("void"))
+                          setter.addParameter(fieldType, name)
+                          setter.setBody(StaticJavaParser.parseBlock(s"{ this.$name = $name; }"))
+                      }
+                }
+      }
+  end augmentLombokMembers
+
+  /** Lombok names a boolean field's getter `isFoo`, every other `getFoo`. */
+  private def accessorName(prefix: String, fieldName: String, typeAsString: String): String =
+    val capitalized = fieldName.capitalize
+    if prefix == "get" && typeAsString == TypeConstants.Boolean then s"is$capitalized"
+    else s"$prefix$capitalized"
+
+  /** Whether `node` carries the annotation whose resolved, fully qualified name is `fullName`. */
+  private def carriesAnnotation(node: NodeWithAnnotations[?], fullName: String): Boolean =
+      node.getAnnotations.asScala.exists { annotation =>
+          tryWithSafeStackOverflow(annotation.resolve()).toOption
+              .collect { case decl: ResolvedAnnotationDeclaration => decl.getQualifiedName }
+              .contains(fullName)
+      }
+
   private def astForDefaultConstructor(): Ast =
     val typeFullName = scope.enclosingTypeDeclFullName
     val signature    = s"${TypeConstants.Void}()"
@@ -1265,16 +1374,10 @@ class AstCreator(
 
   private def guessTypeFullName(initString: String): String =
       initString match
-        case x
-            if Seq(
-              "Override",
-              "Deprecated",
-              "SuppressWarnings",
-              "SafeVarargs",
-              "FunctionalInterface",
-              "Native"
-            ).contains(x) => s"java.lang.$x"
-        case y if y.startsWith("java.") => y
+        // Every java.lang name, not a hand-picked few: `@Deprecated` and `@SafeVarargs` under a
+        // wildcard import resolve here once the scope's guess is out of the way (chen#245).
+        case x if JavaLangTypes.contains(x) => s"java.lang.$x"
+        case y if y.startsWith("java.")     => y
         case z
             if Seq(
               "byte",
@@ -1491,6 +1594,15 @@ class AstCreator(
       line(methodDeclaration.getType),
       column(methodDeclaration.getType)
     )
+
+    methodDeclaration.getThrownExceptions.asScala.foreach { thrownType =>
+      val typeFullName = typeInfoCalc
+          .fullName(thrownType)
+          .orElse(scope.lookupType(thrownType.asString))
+      typeFullName.foreach { t =>
+          pendingThrowsTags += ((methodNode, t, line(thrownType).map(_.intValue).getOrElse(-1)))
+      }
+    }
 
     val annotationAsts =
         methodDeclaration.getAnnotations.asScala.map(astForAnnotationExpr).toSeq

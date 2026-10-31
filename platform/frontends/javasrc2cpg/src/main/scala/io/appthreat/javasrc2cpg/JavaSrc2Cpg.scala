@@ -40,10 +40,20 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config]:
             astCreationPass.global.usedTypes.keys().asScala.toList,
             cpg
           ).createAndApply()
+          // Two rounds: a link whose base this pass itself resolves in the first one (`cart
+          // .getSecurity().login()`, the getter Lombok-generated) only then carries the type the
+          // next link's match needs (chen#245). The parts of the second round are the calls still
+          // carrying an unresolved signature, so a graph the first round settled costs a filter.
+          new TypeInferencePass(cpg).createAndApply()
           new TypeInferencePass(cpg).createAndApply()
         // After type inference, so the reflective call sites it rewrites carry their final
         // methodFullNames, and before the overlays, so the call linkers see ordinary calls.
         new ReflectionLoweringPass(cpg).createAndApply()
+        if config.enableTypeRecovery then
+          // The call site atom passes `enableTypeRecovery = true`; until now nothing read the
+          // flag, so Java type recovery never ran (chen#245). Measured on the callsites Java
+          // subset before it was kept.
+          typeRecoveryPasses(cpg, Some(config)).foreach(_.createAndApply())
       }
 end JavaSrc2Cpg
 

@@ -2,6 +2,7 @@ package io.appthreat.javasrc2cpg.scope
 
 import io.appthreat.javasrc2cpg.passes.ExpectedType
 import io.appthreat.javasrc2cpg.scope.Scope.ScopeVariable
+import io.appthreat.javasrc2cpg.util.JavaLangTypes
 import Scope.*
 import JavaScopeElement.*
 import io.shiftleft.codepropertygraph.generated.nodes.{
@@ -37,7 +38,12 @@ trait JavaScopeElement:
 
   def getNameWithWildcardPrefix(name: String): Option[String] =
       wildcardImports match
-        case SingleWildcard(prefix) => Some(s"$prefix.$name")
+        // A guess names a type the wildcard package need not declare: `@Override` under
+        // `import javax.servlet.annotation.*` would become `javax.servlet.annotation.Override`
+        // (chen#245). `java.lang` is imported on demand by every compilation unit, so its names
+        // resolve there and the guess must not win them; the caller's fallback names them.
+        case SingleWildcard(prefix) if !JavaLangTypes.contains(name) =>
+            Some(s"$prefix.$name")
 
         case _ => None
 
