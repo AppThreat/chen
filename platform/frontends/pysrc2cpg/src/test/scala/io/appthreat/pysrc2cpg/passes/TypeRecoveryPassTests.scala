@@ -1524,6 +1524,24 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       }
   }
 
+  "a from-import of a name its module shares" should {
+      lazy val cpg = code("""
+        |from datetime import datetime
+        |from os import path as os
+        |
+        |def f(a):
+        |    os.join(a, a)
+        |    return datetime.now()
+        |""".stripMargin).cpg
+
+      "keep the imported entity as the binding's type (good twin of the plain dotted import)" in {
+          val List(nowCall) = cpg.call.nameExact("now").l
+          nowCall.methodFullName shouldBe "datetime.datetime.now"
+          val List(joinCall) = cpg.call.nameExact("join").l
+          joinCall.methodFullName shouldBe "os.path.join"
+      }
+  }
+
   "an aliased dotted import" should {
       lazy val cpg = code("""
         |import os.path as p

@@ -178,11 +178,15 @@ private class RecoverForPythonFile(
         symbolTable.put(LocalVar(name), boundTypes)
         bindingKeyOf(i).foreach(k => symbolTable.put(k, boundTypes))
 
-  /** `import a.b` (no alias argument, entity under the bound name), as opposed to
-    * `from a import b as a`, which binds the same name to the same entity.
+  /** `import a.b`: the lowering's `from` argument is empty and there is no alias, as opposed to
+    * `from a import a` or `from a import b as a`, which bind the same name to a dotted entity.
     */
   private def isPlainDottedImport(i: Import, name: String): Boolean =
       i.importedEntity.exists(_.startsWith(s"$name.")) &&
+          i.call.argument.exists {
+              case from: Literal => from.argumentIndex == 1 && from.code.isEmpty
+              case _             => false
+          } &&
           !i.call.argument.exists(_.argumentIndex == 3)
 
   override def visitImport(i: Import): Unit =
