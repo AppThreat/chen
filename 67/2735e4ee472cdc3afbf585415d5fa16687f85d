@@ -1,0 +1,49 @@
+platform/frontends/javasrc2cpg/src/test/resources/make-stub-jar.sh
+  s_b37b12b5351861::t_c20d29f423adc6 1-113
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/scope/JavaScopeElement.scala
+  s_b37b12b5351861::t_0f67687c2bc340 5
+  s_b37b12b5351861::t_32b2e4120d5c6c 41-46
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_b37b12b5351861::t_9ea150315dd8a8 993-1072
+  s_b37b12b5351861::t_78da1d105bc1d9 1380
+  s_b37b12b5351861::t_615035c4c7b299 3,64,93,129,185,206,253-257,280,283-299,353,1377-1379,1598-1606
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/util/JavaLangTypes.scala
+  s_b37b12b5351861::t_b7433e759636af 4
+  s_b37b12b5351861::t_3937725a200515 22,24
+  s_b37b12b5351861::t_865b8a12112ec4 1-3,5-21,23,25-30
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/LibraryUseResolutionTests.scala
+  s_b37b12b5351861::t_9c134374c878e8 1-2,5-6,15-18,20,24,26-42,44-53,55-62,64-68,70-80,82,84-85,88-89,91,94-97,99-111,113,115-124,126-132,134-139,141-162,164,166-170,172-180,182-187,189-203,206-207,228,232-234,236-242
+  s_b37b12b5351861::t_67b8469cdf2217 3-4,7-14,19,21-23,25,54,69,81,86-87,92,98,112,125,140,163,188,204-205,208-227,229-231
+  s_b37b12b5351861::t_ac195789aba642 43,63,83,90,93,114,133,165,171,181,235,243-254
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/TypeInferencePass.scala
+  s_b37b12b5351861::t_8e3865e67aceb1 45,49-64
+  s_33e216b52f7264::t_f74e2a47b8453e 65
+platform/frontends/javasrc2cpg/src/main/resources/java-lang-types.txt
+  s_b37b12b5351861::t_0ba5269c7d64d5 1-145
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/JavaSrc2Cpg.scala
+  s_b37b12b5351861::t_e25cdec34d7cab 43-47,52-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "672735e4ee472cdc3afbf585415d5fa16687f85d",
+  "prompts": {},
+  "sessions": {
+    "s_33e216b52f7264": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b5bd5ac-bfb2-42b7-9515-4155ee9ab246",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
