@@ -54,6 +54,113 @@ private class RecoverForPythonFile(
             case None     => Some(types)
         }
 
+  /** Import aliases whose entity the resolver could not verify (an unknown type declaration, or a
+    * whole unknown module). Their resolved path names a namespace, not the type of the values
+    * bound to them, so it must not propagate onto other variables (a `value = SKIP_HEADER`
+    * assignment is what named `value.strip()` `urllib3.util.SKIP_HEADER.strip`).
+    */
+  private val unknownValueAliases = scala.collection.mutable.HashSet.empty[String]
+
+  /** The declaration a captured local stands for, one CLOSURE_BINDING level at a time: the binding
+    * sharing the local's `closureBindingId` hangs off the capturing method's method reference and
+    * refers to the next declaration out.
+    */
+  private val outermostOfLocal = scala.collection.mutable.HashMap.empty[Long, Declaration]
+
+  private def outermostDeclaration(l: Local): Declaration =
+      outermostOfLocal.getOrElseUpdate(
+        l.id(), {
+            var current: Declaration = l
+            var depth                = 0
+            var following            = true
+            while following && depth < 32 do
+              depth += 1
+              following = false
+              current match
+                case cur: Local if cur.closureBindingId.isDefined =>
+                    val cbid = cur.closureBindingId.get
+                    val next = cur.method._refIn.collectAll[MethodRef]
+                        .flatMap(_._captureOut)
+                        .collectAll[ClosureBinding]
+                        .find(_.closureBindingId.contains(cbid))
+                        .flatMap(_._refOut.collectFirst { case d: Declaration => d })
+                    next.foreach { d =>
+                        if d.id() != cur.id() then
+                          current = d
+                          following = true
+                    }
+                case _ =>
+            current
+        }
+      )
+
+  /** The scopes whose variables share the module-wide name: the module method itself, and the
+    * synthetic `<body>` method the front end lowers each class body into (class-level variables
+    * are the class's fields, not locals of a method body).
+    */
+  private def isNamespaceScope(d: Declaration): Boolean =
+      enclosingMethodOf(d).exists(m => m.name == "<module>" || m.name == "<body>")
+
+  private def enclosingMethodOf(d: Declaration): Option[Method] = d match
+    case l: Local             => l.method.headOption
+    case p: MethodParameterIn => Some(p.method)
+    case _                    => None
+
+  /** The symbol key for a declaration's scope: the method's full name plus the name. Keeps each
+    * method's locals and parameters apart from the module binding of the same name, which keeps
+    * its plain name.
+    */
+  private def scopedKey(scope: String, name: String): LocalKey =
+      LocalVar(s"$scope$pathSep$name")
+
+  private def keyOfDeclaration(n: AstNode, fallbackName: String): LocalKey =
+      n match
+        case p: MethodParameterIn => scopedKey(p.method.fullName, p.name)
+        case l: Local =>
+            outermostDeclaration(l) match
+              case outer if isNamespaceScope(outer) => LocalVar(l.name)
+              case outer =>
+                  scopedKey(enclosingMethodOf(outer).map(_.fullName).getOrElse(""), l.name)
+        case id: Identifier =>
+            id._refOut.collectFirst { case d: Declaration => d } match
+              case Some(p: MethodParameterIn) => scopedKey(p.method.fullName, p.name)
+              case Some(l: Local)             => keyOfDeclaration(l, fallbackName)
+              case _                          => LocalVar(fallbackName)
+        case _ => LocalVar(fallbackName)
+
+  private def fromNodeToLocalPythonKey(node: AstNode): Option[LocalKey] =
+      node match
+        case n: Method            => Option(CallAlias(n.name, Option("self")))
+        case n: MethodParameterIn => Some(scopedKey(n.method.fullName, n.name))
+        case n: Identifier        => Some(keyOfDeclaration(n, n.name))
+        case n: Local             => Some(keyOfDeclaration(n, n.name))
+        case _                    => SBKey.fromNodeToLocalKey(node)
+
+  /** The key of the local an import lowers to: the target identifier's declaration. A module-level
+    * import binds the module scope (the plain name); a function-level import binds inside its
+    * method, so its uses resolve under that method's scoped key.
+    */
+  private def bindingKeyOf(i: Import): Option[LocalKey] =
+      i.call.headOption.flatMap { importCall =>
+          val assignment = importCall._astIn.collectFirst {
+              case a: Call if a.name == Operators.assignment => a
+          }.orElse(
+              // several aliases of one import statement lower to a block of assignments
+              importCall._astIn.collectFirst { case b: Block => b }.flatMap(
+                _.astChildren.isCall.nameExact(Operators.assignment)
+                    .find(_.argumentOut.exists(_.id() == importCall.id()))
+              )
+          )
+          assignment.flatMap(
+            _.argument.collectFirst { case id: Identifier if id.argumentIndex == 1 => id }
+          ).map(lhs => keyOfDeclaration(lhs, lhs.name))
+      }
+
+  private def putImportBinding(i: Import, name: String, types: Set[String]): Unit =
+      if types.nonEmpty then
+        symbolTable.put(LocalVar(name), types)
+        bindingKeyOf(i).foreach(k => symbolTable.put(k, types))
+
   override def visitImport(i: Import): Unit =
       if i.importedAs.isDefined && i.importedEntity.isDefined then
         import io.appthreat.x2cpg.passes.frontend.ImportsPass.*
@@ -63,23 +170,25 @@ private class RecoverForPythonFile(
             case ResolvedMethod(fullName, alias, receiver, _) =>
                 symbolTable.put(CallAlias(alias, receiver), fullName)
             case ResolvedTypeDecl(fullName, _) =>
-                symbolTable.put(LocalVar(entityName), fullName)
+                putImportBinding(i, entityName, Set(fullName))
             case ResolvedMember(basePath, memberName, _) =>
                 val memberTypes = cpg.typeDecl
                     .fullNameExact(basePath)
                     .member
                     .nameExact(memberName)
                     .flatMap(m => m.typeFullName +: m.dynamicTypeHintFullName)
-                    .filterNot(_ == "ANY")
+                    .filterNot(_ == Constants.ANY)
                     .toSet
-                symbolTable.put(LocalVar(entityName), memberTypes)
+                putImportBinding(i, entityName, memberTypes)
             case UnknownMethod(fullName, alias, receiver, _) =>
                 symbolTable.put(CallAlias(alias, receiver), fullName)
             case UnknownTypeDecl(fullName, _) =>
-                symbolTable.put(LocalVar(entityName), fullName)
+                unknownValueAliases += entityName
+                putImportBinding(i, entityName, Set(fullName))
             case UnknownImport(path, _) =>
+                unknownValueAliases += entityName
                 symbolTable.put(CallAlias(entityName), path)
-                symbolTable.put(LocalVar(entityName), path)
+                putImportBinding(i, entityName, Set(path))
         }
 
   override def visitAssignments(a: OpNodes.Assignment): Set[String] =
@@ -90,6 +199,22 @@ private class RecoverForPythonFile(
               case Some(mRef) => visitIdentifierAssignedToMethodRef(i, mRef)
               case None       => super.visitAssignments(a)
         case _ => super.visitAssignments(a)
+
+  override protected def visitIdentifierAssignedToIdentifier(
+    x: Identifier,
+    y: Identifier
+  ): Set[String] =
+      // An alias whose entity the resolver could not verify keeps its namespace path as the
+      // binding's entry (receiver resolution needs it), but that path is not the type of the
+      // values assigned from it: it would name `value.strip()` after
+      // `urllib3.util.SKIP_HEADER.strip`. Only this propagation is blocked.
+      if unknownValueAliases.contains(y.name) && declarationIsNamespaceBound(y) then Set.empty
+      else super.visitIdentifierAssignedToIdentifier(x, y)
+
+  private def declarationIsNamespaceBound(id: Identifier): Boolean =
+      id._refOut.collectFirst { case l: Local => l }
+          .map(outermostDeclaration)
+          .exists(isNamespaceScope)
 
   /** Determines if a function call is a constructor by following the heuristic that Python classes
     * are typically camel-case and start with an upper-case character.
@@ -136,6 +261,24 @@ private class RecoverForPythonFile(
     else
       val constructorPaths = symbolTable.get(c).map(_.stripSuffix(s"${pathSep}__init__"))
       associateTypes(i, constructorPaths)
+
+  override protected def visitIdentifierAssignedToCallRetVal(i: Identifier, c: Call): Set[String] =
+      if symbolTable.contains(c) then super.visitIdentifierAssignedToCallRetVal(i, c)
+      else if c.argument.exists(_.argumentIndex == 0) then
+        val callFullNames = (c.argument(0) match
+          case recv: Identifier =>
+              // the receiver's own scope first (a parameter or a local of this method), then the
+              // module-wide name (an import binding), then a call alias
+              if symbolTable.contains(recv) then symbolTable.get(recv)
+              else if symbolTable.contains(LocalVar(recv.name)) then
+                symbolTable.get(LocalVar(recv.name))
+              else if symbolTable.contains(CallAlias(recv.name)) then
+                symbolTable.get(CallAlias(recv.name))
+              else Set.empty
+          case _ => Set.empty
+        ).map(_.concat(s"$pathSep${c.name}")).toSeq
+        associateTypes(i, methodReturnValues(callFullNames))
+      else super.visitIdentifierAssignedToCallRetVal(i, c)
 
   override def visitIdentifierAssignedToCall(i: Identifier, c: Call): Set[String] =
       // Ignore legacy import representation
@@ -195,6 +338,21 @@ private class RecoverForPythonFile(
           .get(LocalVar(baseName))
           .flatMap(memberTypesInHierarchy(_, fieldName))
           .toSet
+
+  /** Field loads through a base whose declaration is a parameter or a local of this method resolve
+    * under that base's own scope key; the name-keyed base behaviour stays for module bindings.
+    */
+  override protected def getFieldBaseType(base: Identifier, fi: FieldIdentifier): Set[String] =
+      if symbolTable.contains(base) then
+        val baseTypes = symbolTable.get(base)
+        val direct = baseTypes
+            .flatMap(t => typeDeclIterator(t).member.nameExact(fi.canonicalName))
+            .typeFullNameNot("ANY")
+            .flatMap(m => m.typeFullName +: m.dynamicTypeHintFullName)
+            .toSet
+        if direct.nonEmpty then direct
+        else baseTypes.flatMap(memberTypesInHierarchy(_, fi.canonicalName)).toSet
+      else super.getFieldBaseType(base, fi)
 
   /** Member types for `memberName` as visible on `typeFullName` or inherited from a base class
     * whose TYPE_DECL is an ingested dependency (`isExternal`): `flask.Request`'s `args` lives on
@@ -334,12 +492,24 @@ private class RecoverForPythonFile(
   end resolveMethodInHierarchy
 
   override protected def setTypeForDynamicDispatchCall(call: Call, i: Identifier): Unit =
+      // A call the frontend lowers with only a callee receiver (`handler(request)`) has no base:
+      // its first real argument sits at index 1, and naming the call after that argument's type
+      // invents a member that was never called (`aiohttp.web.Request.handler`). Member and
+      // instance calls carry their base at argument index 0, which is what the base behaviour
+      // expects.
+      if i.argumentIndex != 0 then
+        persistType(i, symbolTable.get(i))
+        // The base leaves the call unnamed on this path; keep the source-text callee hint it
+        // uses when no argument is in the table (`handler(a)` resolves to `handler`), so both
+        // shapes agree.
+        if symbolTable.get(call).isEmpty && !call.name.startsWith("<operator>") then
+          storeCallTypeInfo(call, Seq(call.code.takeWhile(_ != '(')))
       // `self`/`this` is a file-scoped symbol in the base symbol table, so it accumulates the
       // type of *every* class defined in the file. The base then builds one `<Class>.method`
       // candidate per class, and the call linker — faced with several — refuses to pick,
       // leaving `self.method()` as `<unknownFullName>`. Scope `self` to the enclosing method's
       // own class (and its hierarchy) so a single, correct callee survives.
-      if (i.name == "self" || i.name == "this") && symbolTable.get(call).isEmpty
+      else if (i.name == "self" || i.name == "this") && symbolTable.get(call).isEmpty
         && !call.name.startsWith("<operator>")
       then
         val enclosing =
@@ -352,6 +522,19 @@ private class RecoverForPythonFile(
 
   override protected def isConstructor(name: String): Boolean =
       name.nonEmpty && name.charAt(0).isUpper
+
+  override protected def setTypeForFieldAccess(
+    fieldAccess: Call,
+    i: Identifier,
+    f: FieldIdentifier
+  ): Unit =
+    // The base falls back to the module-wide call alias for an identifier it cannot find in the
+    // table. A parameter or local of this method that shares an alias's name is not that alias
+    // (a shadowing `requests` must not take `import requests`'s names), so the alias only applies
+    // to identifiers bound at the module scope.
+    if symbolTable.contains(i) || declarationIsNamespaceBound(i) then
+      super.setTypeForFieldAccess(fieldAccess, i, f)
+    else persistType(i, symbolTable.get(i))
 
   override def prepopulateSymbolTable(): Unit =
     // Factory return-types are committed through a *separate* diff applied
@@ -390,19 +573,21 @@ private class RecoverForPythonFile(
             )
     }
     overflowdb.BatchedUpdate.applyDiff(cpg.graph, factoryDiff)
+    // Keyed by each node's own scope (see fromNodeToLocalPythonKey), so a concrete type written
+    // onto a method's parameter or local does not leak onto the module binding of the same name.
     cu.ast.isIdentifier.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
         .foreach { id =>
-          symbolTable.put(LocalVar(id.name), id.typeFullName)
+          symbolTable.put(id, Set(id.typeFullName))
           recordDeclaredType(id.name, Set(id.typeFullName) ++ id.dynamicTypeHintFullName)
         }
     cu.ast.isLocal.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
         .foreach { local =>
-          symbolTable.put(LocalVar(local.name), local.typeFullName)
+          symbolTable.put(local, Set(local.typeFullName))
           recordDeclaredType(local.name, Set(local.typeFullName) ++ local.dynamicTypeHintFullName)
         }
     cu.ast.isParameter.filterNot(_.typeFullName.matches("(?i)(any|null|void|unknown)"))
         .foreach { param =>
-          symbolTable.put(LocalVar(param.name), param.typeFullName)
+          symbolTable.put(param, Set(param.typeFullName))
           recordDeclaredType(param.name, Set(param.typeFullName) ++ param.dynamicTypeHintFullName)
         }
     super.prepopulateSymbolTable()
@@ -601,6 +786,8 @@ private class RecoverForPythonFile(
         if symbolTable.contains(c) then symbolTable.get(c).toSeq
         else
           c.argument.find(_.argumentIndex == 0) match
+            case Some(recv: Identifier) if symbolTable.contains(recv) =>
+                symbolTable.get(recv).map(_.concat(s"$pathSep${c.name}")).toSeq
             case Some(recv: Identifier) if symbolTable.contains(LocalVar(recv.name)) =>
                 symbolTable.get(LocalVar(recv.name)).map(_.concat(s"$pathSep${c.name}")).toSeq
             case Some(recv: Identifier) if symbolTable.contains(CallAlias(recv.name)) =>
@@ -611,12 +798,4 @@ private class RecoverForPythonFile(
       methodReturnValues(calleeFullNames).filterNot(t =>
           t == Constants.ANY || XTypeRecovery.isDummyType(t)
       )
-
-  /** Replaces the `this` prefix with the Pythonic `self` prefix for instance methods of functions
-    * local to this compilation unit.
-    */
-  private def fromNodeToLocalPythonKey(node: AstNode): Option[LocalKey] =
-      node match
-        case n: Method => Option(CallAlias(n.name, Option("self")))
-        case _         => SBKey.fromNodeToLocalKey(node)
 end RecoverForPythonFile

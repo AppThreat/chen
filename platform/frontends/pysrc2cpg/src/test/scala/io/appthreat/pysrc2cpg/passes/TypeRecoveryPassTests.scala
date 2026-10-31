@@ -25,10 +25,12 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
         |z.append(4)
         |""".stripMargin).cpg
 
-      "resolve 'x' identifier types despite shadowing" in {
+      "resolve 'x' identifier types per scope when a local shadows the module variable" in {
           val List(xOuterScope, xInnerScope) = cpg.identifier("x").take(2).l
-          xOuterScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
-          xInnerScope.dynamicTypeHintFullName shouldBe Seq("__builtin.int")
+          xOuterScope.typeFullName shouldBe "__builtin.int"
+          // the inner `x = "foo"` binds the function's own `x`; the module's int must not
+          // leak into it
+          xInnerScope.typeFullName shouldBe "__builtin.str"
       }
 
       "resolve 'y' and 'z' identifier collection types" in {
@@ -1374,7 +1376,7 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
 
       "have correct methodFullName for `foo`" in {
           cpg.call("foo").l match
-            case List(fooCall) => fooCall.methodFullName shouldBe "__builtin.int.foo"
+            case List(fooCall) => fooCall.methodFullName shouldBe "foo"
             case result        => fail(s"Expected single foo call but got $result")
       }
 
@@ -1403,6 +1405,78 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
             "__builtin.dict[__builtin.str, __builtin.float]"
           )
           cpg.identifier("z").typeFullName.headOption shouldBe Some("__builtin.float")
+      }
+  }
+
+  "a parameter that shadows an imported name" should {
+      lazy val cpg = code("""
+        |import requests
+        |
+        |requests.get("http://example.com")
+        |
+        |def shadow(requests):
+        |    return requests.get(x)
+        |""".stripMargin).cpg
+
+      "not take the import's names on the parameter's uses" in {
+          val shadowUses = cpg.identifier.nameExact("requests").where(_.method.nameExact("shadow")).l
+          shadowUses should not be empty
+          shadowUses.map(_.typeFullName).toSet shouldBe Set("ANY")
+          shadowUses.flatMap(_.dynamicTypeHintFullName).toSet shouldBe empty
+      }
+
+      "still resolve the module-level use of the import (good twin)" in {
+          val List(moduleGet) = cpg.call.nameExact("get").where(_.method.nameExact("<module>")).l
+          moduleGet.methodFullName shouldBe "requests.get"
+      }
+  }
+
+  "a call without a receiver" should {
+      lazy val cpg = code("""
+        |from aiohttp import web
+        |
+        |def f(request: web.Request):
+        |    handler(request)
+        |    return request.post()
+        |""".stripMargin).cpg
+
+      "not be named as a member of an argument's type" in {
+          val List(handlerCall) = cpg.call.nameExact("handler").l
+          handlerCall.methodFullName shouldBe "handler"
+          handlerCall.dynamicTypeHintFullName shouldBe empty
+      }
+
+      "still resolve a method call on the typed parameter (good twin)" in {
+          val List(postCall) = cpg.call.nameExact("post").l
+          postCall.methodFullName shouldBe "aiohttp.web.Request.post"
+      }
+  }
+
+  "a local assigned from an unverifiable import alias" should {
+      lazy val cpg = code("""
+        |from urllib3.util import SKIP_HEADER
+        |
+        |value = SKIP_HEADER
+        |
+        |def f():
+        |    return value.strip()
+        |
+        |def g(text: str):
+        |    return text.upper()
+        |""".stripMargin).cpg
+
+      "not take the alias's module path as its type" in {
+          val valueUses = cpg.identifier.nameExact("value").l
+          valueUses should not be empty
+          valueUses.map(_.typeFullName).toSet shouldBe Set("ANY")
+          val List(stripCall) = cpg.call.nameExact("strip").l
+          stripCall.methodFullName should not be "urllib3.util.SKIP_HEADER.strip"
+      }
+
+      "still type a genuinely str-typed variable (good twin)" in {
+          cpg.identifier.nameExact("text").typeFullName.toSet shouldBe Set("__builtin.str")
+          val List(upperCall) = cpg.call.nameExact("upper").l
+          upperCall.methodFullName shouldBe "__builtin.str.upper"
       }
   }
 end TypeRecoveryPassTests
