@@ -1008,6 +1008,7 @@ class AstCreator(
                     // the snippet parsed standalone, so its nodes carry positions of their own;
                     // the generated field is nobody's writing and gets none
                     field.stream().forEach(node => node.setRange(null))
+                    markGenerated(field)
                     classDecl.getMembers.addFirst(field)
                 case _ =>
 
@@ -1035,6 +1036,7 @@ class AstCreator(
                           val getter = classDecl.addMethod(getterName, Modifier.Keyword.PUBLIC)
                           getter.setType(StaticJavaParser.parseType(fieldType))
                           getter.setBody(StaticJavaParser.parseBlock(s"{ return this.$name; }"))
+                          markGenerated(getter)
                         val setterName = accessorName("set", name, fieldType)
                         if settersWanted && !field.isFinal &&
                           !declaredMethodNames.contains(setterName)
@@ -1043,10 +1045,26 @@ class AstCreator(
                           setter.setType(StaticJavaParser.parseType("void"))
                           setter.addParameter(fieldType, name)
                           setter.setBody(StaticJavaParser.parseBlock(s"{ this.$name = $name; }"))
+                          markGenerated(setter)
                       }
                 }
       }
   end augmentLombokMembers
+
+  /** The `@Slf4j` annotation of a type, when it resolves to Lombok's. */
+  private def slf4jAnnotationOf(classDecl: ClassOrInterfaceDeclaration) =
+      classDecl.getAnnotations.asScala.find { annotation =>
+          tryWithSafeStackOverflow(annotation.resolve()).toOption
+              .collect { case decl: ResolvedAnnotationDeclaration => decl.getQualifiedName }
+              .contains(LombokSlf4j)
+      }
+
+  /** Marks a synthesized member the way Lombok's processor does, so generated code is a use in its
+    * own right (decision 0001, P1). The annotation resolves only with Lombok on the classpath,
+    * which is the same condition the members are synthesized under.
+    */
+  private def markGenerated(member: BodyDeclaration[?]): Unit =
+      member.addAnnotation(StaticJavaParser.parseAnnotation("@lombok.Generated"))
 
   /** Lombok names a boolean field's getter `isFoo`, every other `getFoo`. */
   private def accessorName(prefix: String, fieldName: String, typeAsString: String): String =
@@ -4606,14 +4624,21 @@ class AstCreator(
       case (_, Some(resolved)) if resolved.isPrimitive =>
           resolved.asPrimitive().name().toLowerCase()
       case _ => TypeConstants.Any
+    // The call sits at its member name, not at the start of the whole chain: a fluent chain
+    // spanning lines resolves every link, and each link is a use at its own line (chen#245).
+    val memberBegin = call.getName.getBegin.toScala
     val callRoot = NewCall()
         .name(callName)
         .methodFullName(methodFullName)
         .signature(signature)
         .code(callCode)
         .dispatchType(dispatchType)
-        .lineNumber(line(call))
-        .columnNumber(column(call))
+        .lineNumber(
+          memberBegin.map(_.line).map(Integer.valueOf).orElse(line(call))
+        )
+        .columnNumber(
+          memberBegin.map(_.column).map(Integer.valueOf).orElse(column(call))
+        )
         .typeFullName(typeFullNameStr)
     callRoot.dynamicTypeHintFullName(
       packagesJarMappings
