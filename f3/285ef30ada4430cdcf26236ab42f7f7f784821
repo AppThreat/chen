@@ -1,0 +1,21 @@
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreationPass.scala
+  s_b37b12b5351861::t_a971ea4a854ea8 36-43
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/JavaSrc2Cpg.scala
+  s_b37b12b5351861::t_281273c980fc79 21-22,40,66-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3285ef30ada4430cdcf26236ab42f7f7f784821",
+  "prompts": {},
+  "sessions": {
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
