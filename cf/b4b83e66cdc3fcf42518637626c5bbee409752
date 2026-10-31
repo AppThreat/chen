@@ -1,0 +1,21 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeRecovery.scala
+  s_79a7c562b49300::t_2fec2bd8c2cc87 181-182,186-189
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/TypeRecoveryPassTests.scala
+  s_79a7c562b49300::t_707556c3fbc76d 1527-1544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfb4b83e66cdc3fcf42518637626c5bbee409752",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
