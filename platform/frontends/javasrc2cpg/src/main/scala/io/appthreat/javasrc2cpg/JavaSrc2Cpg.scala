@@ -18,6 +18,8 @@ import io.appthreat.x2cpg.passes.frontend.{
 }
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.NewConfigFile
+import overflowdb.BatchedUpdate
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.passes.CpgPassBase
 
@@ -35,6 +37,7 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config]:
         astCreationPass.createAndApply()
         astCreationPass.clearJavaParserCaches()
         new ConfigFileCreationPass(cpg).createAndApply()
+        storeDependencyClasspath(config, cpg, astCreationPass)
         if !config.skipTypeInfPass then
           TypeNodePass.withRegisteredTypes(
             astCreationPass.global.usedTypes.keys().asScala.toList,
@@ -59,6 +62,27 @@ end JavaSrc2Cpg
 
 object JavaSrc2Cpg:
   val language: String = Languages.JAVASRC
+
+  /** The resolved dependency classpath as a config file of the atom: the slice reads it to map a
+    * class to the Maven artifact of the jar that carries it. Empty when no dependencies were
+    * resolved, so a project built without them carries no mapping.
+    */
+  private def storeDependencyClasspath(
+    config: Config,
+    cpg: Cpg,
+    astCreationPass: AstCreationPass
+  ): Unit =
+    val jars = astCreationPass.dependencyJarPaths
+    if jars.nonEmpty then
+      val diff = new BatchedUpdate.DiffGraphBuilder
+      diff.addNode(
+        NewConfigFile()
+            .name(DependencyClasspathFileName)
+            .content(ujson.write(ujson.Arr.from(jars.map(jar => ujson.Str(jar)))))
+      )
+      BatchedUpdate.applyDiff(cpg.graph, diff)
+
+  val DependencyClasspathFileName = "java-classpath.json"
 
   val sourceFileExtensions: Set[String] = Set(".java")
 

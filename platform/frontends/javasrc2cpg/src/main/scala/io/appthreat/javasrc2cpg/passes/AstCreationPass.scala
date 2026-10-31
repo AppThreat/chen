@@ -33,6 +33,14 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
   val (sourceParser, symbolSolver, packagesJarMappings) =
       initParserAndUtils(config, sourceFilenames)
 
+  /** The dependency jars the classpath was resolved to, in resolution order: the jars the
+    * frontend's types were resolved from, which the callsites slice of the atom reads to map a
+    * class to the Maven artifact that carries it.
+    */
+  val dependencyJarPaths: List[String] =
+      if config.fetchDependencies then getDependencyList(config.inputPath).sorted
+      else List.empty
+
   override def generateParts(): Array[String] = sourceFilenames
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
