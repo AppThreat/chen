@@ -586,6 +586,17 @@ class PythonAstVisitor(
         )
     edgeBuilder.astEdge(methodReturnNode, methodNode, 2)
     contextStack.setCurrentMethodReturnNode(methodReturnNode)
+    // the return annotation's own line: a multi-line signature puts it on a later line than the
+    // def, and the METHOD_RETURN node has no position of its own, so the callsites slice reads
+    // the line from this tag
+    returns.foreach { r =>
+        val line = lineAndColOf(r).line
+        if line > 0 then
+            edgeBuilder.taggedByEdge(
+              methodNode,
+              nodeBuilder.tagNode("callsites-return-line", line.toString)
+            )
+    }
 
     val bodyOrder = new AutoIncIndex(1)
     bodyProvider().foreach { bodyStmt =>
