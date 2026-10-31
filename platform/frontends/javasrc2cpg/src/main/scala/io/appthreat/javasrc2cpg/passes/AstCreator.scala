@@ -1006,11 +1006,18 @@ class AstCreator(
               ) match
                 case field: FieldDeclaration =>
                     // the snippet parsed standalone, so its nodes carry positions of their own;
-                    // the generated field is nobody's writing and gets none
+                    // javac attributes the generated field to the annotation that asked for it
                     field.stream().forEach(node => node.setRange(null))
+                    slf4jAnnotationOf(classDecl).foreach { ann =>
+                        ann.getRange.toScala.foreach { range =>
+                          field.setRange(range)
+                          field.getVariables.asScala.foreach(_.setRange(range))
+                        }
+                    }
                     markGenerated(field)
                     classDecl.getMembers.addFirst(field)
                 case _ =>
+            end if
 
             val classGetter =
                 carriesAnnotation(classDecl, LombokGetter) || carriesAnnotation(
