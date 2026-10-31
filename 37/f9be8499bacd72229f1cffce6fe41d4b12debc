@@ -1,0 +1,23 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonAstVisitorHelpers.scala
+  s_c130237d85d968::t_91a5ffaaea9ce5 131-134
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeRecovery.scala
+  s_c130237d85d968::t_a42ec9b3018a21 163-168
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/TypeRecoveryPassTests.scala
+  s_c130237d85d968::t_e70246b8b26264 1482-1516
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "37f9be8499bacd72229f1cffce6fe41d4b12debc",
+  "prompts": {},
+  "sessions": {
+    "s_c130237d85d968": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_22357300-4561-4ca2-a12b-e0a36396896e",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
