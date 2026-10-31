@@ -1,0 +1,44 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonTypeRecovery.scala
+  s_c130237d85d968::t_c487744472b45c 526-534,536-538
+  s_c130237d85d968::t_c44c14a86239a3 145-150,152-153
+  s_c130237d85d968::t_412f3db917a8b6 203-210,212-213,215-216,218
+  s_c130237d85d968::t_f7e22ee5b5feed 495-499,512
+  s_c130237d85d968::t_d98e69933f79f2 500-506
+  s_c130237d85d968::t_7546b7d03f26bd 143-144,151,154-157,159,162
+  s_c130237d85d968::t_bceb3dbfc17f81 122-123
+  s_c130237d85d968::t_9e5b8fa3513890 57-96,108-120,124-142,158,160-161,163,173,180,182,186-187,189,191
+  s_c130237d85d968::t_edd64c99671f91 103-107
+  s_c130237d85d968::t_e36f42a89a05f7 265-282
+  s_c130237d85d968::t_1102e54e62446e 100,342-356
+  s_c130237d85d968::t_911763d19d523c 576-577
+  s_c130237d85d968::t_4dfb5f3afcd8fb 789-790
+  s_c130237d85d968::t_634fb2be8c2580 97-99
+  s_c130237d85d968::t_0f1c7d136aa8cd 101-102
+  s_c130237d85d968::t_9ab1d69ce37897 121
+  s_c130237d85d968::t_221b476af3f994 211
+  s_c130237d85d968::t_1356e4bdaaef2d 214
+  s_c130237d85d968::t_a13d3cccc6549e 217
+  s_c130237d85d968::t_9c09527332f731 535
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/TypeRecoveryPassTests.scala
+  s_c130237d85d968::t_69b1d44c47597f 30,33
+  s_c130237d85d968::t_bbe8744a9bd25b 1410-1462,1466-1476,1480-1481
+  s_c130237d85d968::t_363d03161614d5 1463-1465,1477-1479
+  s_c130237d85d968::t_4d833da92c8fbd 28,31-32
+  s_c130237d85d968::t_22361cf8195c8d 1379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a41ed871f9fc43f97aa3a2d33e817b4bada6a535",
+  "prompts": {},
+  "sessions": {
+    "s_c130237d85d968": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_22357300-4561-4ca2-a12b-e0a36396896e",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
