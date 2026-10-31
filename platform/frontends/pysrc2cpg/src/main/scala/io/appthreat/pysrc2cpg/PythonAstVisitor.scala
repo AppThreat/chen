@@ -590,12 +590,12 @@ class PythonAstVisitor(
     // def, and the METHOD_RETURN node has no position of its own, so the callsites slice reads
     // the line from this tag
     returns.foreach { r =>
-        val line = lineAndColOf(r).line
-        if line > 0 then
-            edgeBuilder.taggedByEdge(
-              methodNode,
-              nodeBuilder.tagNode("callsites-return-line", line.toString)
-            )
+      val line = lineAndColOf(r).line
+      if line > 0 then
+        edgeBuilder.taggedByEdge(
+          methodNode,
+          nodeBuilder.tagNode("callsites-return-line", line.toString)
+        )
     }
 
     val bodyOrder = new AutoIncIndex(1)
@@ -2764,12 +2764,16 @@ class PythonAstVisitor(
       contextStack.addSpecialVariable(localNode)
 
     val blockNode =
-        createBlock(handlerTypeNodes ++ exceptHandler.body.map(convert), lineAndColOf(exceptHandler))
+        createBlock(
+          handlerTypeNodes ++ exceptHandler.body.map(convert),
+          lineAndColOf(exceptHandler)
+        )
     addAstChildNodes(blockNode, 1, specialTargetLocals)
 
     contextStack.pop()
 
     blockNode
+  end convert
 
   def convert(parameters: ast.Arguments, startIndex: Int): Iterable[nodes.NewMethodParameterIn] =
     val autoIncIndex = new AutoIncIndex(startIndex)

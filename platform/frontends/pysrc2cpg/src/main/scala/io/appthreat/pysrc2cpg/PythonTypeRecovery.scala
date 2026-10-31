@@ -55,9 +55,9 @@ private class RecoverForPythonFile(
         }
 
   /** Import aliases whose entity the resolver could not verify (an unknown type declaration, or a
-    * whole unknown module). Their resolved path names a namespace, not the type of the values
-    * bound to them, so it must not propagate onto other variables (a `value = SKIP_HEADER`
-    * assignment is what named `value.strip()` `urllib3.util.SKIP_HEADER.strip`).
+    * whole unknown module). Their resolved path names a namespace, not the type of the values bound
+    * to them, so it must not propagate onto other variables (a `value = SKIP_HEADER` assignment is
+    * what named `value.strip()` `urllib3.util.SKIP_HEADER.strip`).
     */
   private val unknownValueAliases = scala.collection.mutable.HashSet.empty[String]
 
@@ -95,8 +95,8 @@ private class RecoverForPythonFile(
       )
 
   /** The scopes whose variables share the module-wide name: the module method itself, and the
-    * synthetic `<body>` method the front end lowers each class body into (class-level variables
-    * are the class's fields, not locals of a method body).
+    * synthetic `<body>` method the front end lowers each class body into (class-level variables are
+    * the class's fields, not locals of a method body).
     */
   private def isNamespaceScope(d: Declaration): Boolean =
       enclosingMethodOf(d).exists(m => m.name == "<module>" || m.name == "<body>")
@@ -107,8 +107,8 @@ private class RecoverForPythonFile(
     case _                    => None
 
   /** The symbol key for a declaration's scope: the method's full name plus the name. Keeps each
-    * method's locals and parameters apart from the module binding of the same name, which keeps
-    * its plain name.
+    * method's locals and parameters apart from the module binding of the same name, which keeps its
+    * plain name.
     */
   private def scopedKey(scope: String, name: String): LocalKey =
       LocalVar(s"$scope$pathSep$name")
@@ -142,18 +142,18 @@ private class RecoverForPythonFile(
     */
   private def bindingKeyOf(i: Import): Option[LocalKey] =
       i.call.headOption.flatMap { importCall =>
-          val assignment = importCall._astIn.collectFirst {
-              case a: Call if a.name == Operators.assignment => a
-          }.orElse(
-              // several aliases of one import statement lower to a block of assignments
-              importCall._astIn.collectFirst { case b: Block => b }.flatMap(
-                _.astChildren.isCall.nameExact(Operators.assignment)
-                    .find(_.argumentOut.exists(_.id() == importCall.id()))
-              )
+        val assignment = importCall._astIn.collectFirst {
+            case a: Call if a.name == Operators.assignment => a
+        }.orElse(
+          // several aliases of one import statement lower to a block of assignments
+          importCall._astIn.collectFirst { case b: Block => b }.flatMap(
+            _.astChildren.isCall.nameExact(Operators.assignment)
+                .find(_.argumentOut.exists(_.id() == importCall.id()))
           )
-          assignment.flatMap(
-            _.argument.collectFirst { case id: Identifier if id.argumentIndex == 1 => id }
-          ).map(lhs => keyOfDeclaration(lhs, lhs.name))
+        )
+        assignment.flatMap(
+          _.argument.collectFirst { case id: Identifier if id.argumentIndex == 1 => id }
+        ).map(lhs => keyOfDeclaration(lhs, lhs.name))
       }
 
   private def putImportBinding(i: Import, name: String, types: Set[String]): Unit =
@@ -168,9 +168,9 @@ private class RecoverForPythonFile(
               // `import xml.etree.ElementTree` also makes `xml.etree` reachable as a module
               val segments = i.importedEntity.get.split('.')
               (2 until segments.length).foreach { n =>
-                  val prefix = segments.take(n).mkString(".")
-                  if !symbolTable.contains(LocalVar(prefix)) then
-                    symbolTable.put(LocalVar(prefix), Set(prefix))
+                val prefix = segments.take(n).mkString(".")
+                if !symbolTable.contains(LocalVar(prefix)) then
+                  symbolTable.put(LocalVar(prefix), Set(prefix))
               }
               symbolTable.put(LocalVar(i.importedEntity.get), types)
               Set(name)
@@ -356,9 +356,13 @@ private class RecoverForPythonFile(
       // A load through a plain dotted import's binding (`tmp0 = os.path`) takes the module the
       // full path names, which the import recorded under that path, not a member of `os`.
       case List(base: Identifier, _: FieldIdentifier)
-          if symbolTable.contains(LocalVar(getFieldName(fa))) && declarationIsNamespaceBound(base) =>
+          if symbolTable.contains(LocalVar(getFieldName(fa))) && declarationIsNamespaceBound(
+            base
+          ) =>
           associateTypes(i, symbolTable.get(LocalVar(getFieldName(fa))))
       case _ => super.visitIdentifierAssignedToFieldLoad(i, fa)
+    end match
+  end visitIdentifierAssignedToFieldLoad
 
   /** Field loads through a receiver whose member lives on an inherited dependency base resolve
     * through the hierarchy walk; everything else keeps the base behaviour.
@@ -561,13 +565,13 @@ private class RecoverForPythonFile(
     i: Identifier,
     f: FieldIdentifier
   ): Unit =
-    // The base falls back to the module-wide call alias for an identifier it cannot find in the
-    // table. A parameter or local of this method that shares an alias's name is not that alias
-    // (a shadowing `requests` must not take `import requests`'s names), so the alias only applies
-    // to identifiers bound at the module scope.
-    if symbolTable.contains(i) || declarationIsNamespaceBound(i) then
-      super.setTypeForFieldAccess(fieldAccess, i, f)
-    else persistType(i, symbolTable.get(i))
+      // The base falls back to the module-wide call alias for an identifier it cannot find in the
+      // table. A parameter or local of this method that shares an alias's name is not that alias
+      // (a shadowing `requests` must not take `import requests`'s names), so the alias only applies
+      // to identifiers bound at the module scope.
+      if symbolTable.contains(i) || declarationIsNamespaceBound(i) then
+        super.setTypeForFieldAccess(fieldAccess, i, f)
+      else persistType(i, symbolTable.get(i))
 
   override def prepopulateSymbolTable(): Unit =
     // Factory return-types are committed through a *separate* diff applied

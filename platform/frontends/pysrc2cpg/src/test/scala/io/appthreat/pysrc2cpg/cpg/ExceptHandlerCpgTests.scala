@@ -19,11 +19,16 @@ class ExceptHandlerCpgTests extends PySrc2CpgFixture:
               |        pass""".stripMargin,
             "test.py"
           )
-          val List(handlerUse) = cpg.identifier.nameExact("requests").whereNot(_.method.nameExact("<module>")).l
-          handlerUse.lineNumber shouldBe cpg.call.nameExact("<operator>.fieldAccess").filter(_.code == "requests.ConnectionError").lineNumber.headOption
+          val List(handlerUse) =
+              cpg.identifier.nameExact("requests").whereNot(_.method.nameExact("<module>")).l
+          handlerUse.lineNumber shouldBe cpg.call.nameExact("<operator>.fieldAccess").filter(
+            _.code == "requests.ConnectionError"
+          ).lineNumber.headOption
           // the use resolves to the import binding through the closure chain
           handlerUse.refsTo.nonEmpty shouldBe true
-          cpg.all.collectAll[FieldIdentifier].map(_.canonicalName).l should contain("ConnectionError")
+          cpg.all.collectAll[FieldIdentifier].map(_.canonicalName).l should contain(
+            "ConnectionError"
+          )
       }
 
       "lower each member of a tuple of handler classes to a reference" in {
@@ -57,7 +62,8 @@ class ExceptHandlerCpgTests extends PySrc2CpgFixture:
               |        pass""".stripMargin,
             "test.py"
           )
-          val handlerUses = cpg.identifier.nameExact("grp").whereNot(_.method.nameExact("<module>")).l
+          val handlerUses =
+              cpg.identifier.nameExact("grp").whereNot(_.method.nameExact("<module>")).l
           handlerUses should not be empty
           handlerUses.filterNot(_.refsTo.nonEmpty) shouldBe empty
       }

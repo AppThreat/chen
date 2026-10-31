@@ -1419,7 +1419,8 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
         |""".stripMargin).cpg
 
       "not take the import's names on the parameter's uses" in {
-          val shadowUses = cpg.identifier.nameExact("requests").where(_.method.nameExact("shadow")).l
+          val shadowUses =
+              cpg.identifier.nameExact("requests").where(_.method.nameExact("shadow")).l
           shadowUses should not be empty
           shadowUses.map(_.typeFullName).toSet shouldBe Set("ANY")
           shadowUses.flatMap(_.dynamicTypeHintFullName).toSet shouldBe empty

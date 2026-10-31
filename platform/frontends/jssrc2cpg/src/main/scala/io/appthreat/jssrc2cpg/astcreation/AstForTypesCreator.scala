@@ -85,7 +85,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     )
 
     members.zipWithIndex.foreach { case (member, idx) =>
-        astForClassMember(member, aliasTypeDeclNode, idx + 1, isPatternMember = alias.node == ObjectPattern)
+        astForClassMember(
+          member,
+          aliasTypeDeclNode,
+          idx + 1,
+          isPatternMember = alias.node == ObjectPattern
+        )
     }
 
     typeDeclNodeAst.root.foreach(diffGraph.addEdge(methodAstParentStack.head, _, EdgeTypes.AST))
@@ -493,14 +498,14 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     // TYPE_DECL no TAGGED_BY edge), so the tags hang off the class's TYPE_REF and the callsites
     // slice reads the clause (extends vs implements) and the position from them.
     def heritageTag(kind: String, info: BabelNodeInfo): Unit =
-        val line = info.lineNumber.map(_.intValue).getOrElse(-1)
-        diffGraph.addEdge(
-          typeRefNode_,
-          NewTag()
-              .name("callsites-heritage")
-              .value(ujson.write(ujson.Obj("base" -> info.code, "kind" -> kind, "line" -> line))),
-          EdgeTypes.TAGGED_BY
-        )
+      val line = info.lineNumber.map(_.intValue).getOrElse(-1)
+      diffGraph.addEdge(
+        typeRefNode_,
+        NewTag()
+            .name("callsites-heritage")
+            .value(ujson.write(ujson.Obj("base" -> info.code, "kind" -> kind, "line" -> line))),
+        EdgeTypes.TAGGED_BY
+      )
     superClassInfo.foreach(heritageTag("extends", _))
     implementsInfo.foreach(heritageTag("implements", _))
 

@@ -9,29 +9,29 @@ class DestructuredArrowParamsTest extends AbstractPassTest:
   "AST generation for destructured parameters of arrow functions" should {
 
       "parent every identifier of an object-pattern parameter of an arrow in an object literal" in
-        AstFixture("""
+          AstFixture("""
           |import { t } from "i18next";
           |const actions = {
           |  name: ({ t, isMenu }) => t("x"),
           |};
           |""".stripMargin) { cpg =>
-          cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
-          cpg.identifier.nameExact("t").whereNot(_.refsTo).l shouldBe empty
-          // the arrow's use of `t` REFs the destructured local, not a name match
-          val List(tLocal) = cpg.local.nameExact("t").where(_.method.nameExact("anonymous")).l
-          val List(tUse)   = cpg.call.nameExact("t").receiver.collect { case i: Identifier => i }.l
-          tUse.refsTo.map(_.id).l shouldBe List(tLocal.id)
-        }
+            cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
+            cpg.identifier.nameExact("t").whereNot(_.refsTo).l shouldBe empty
+            // the arrow's use of `t` REFs the destructured local, not a name match
+            val List(tLocal) = cpg.local.nameExact("t").where(_.method.nameExact("anonymous")).l
+            val List(tUse) = cpg.call.nameExact("t").receiver.collect { case i: Identifier => i }.l
+            tUse.refsTo.map(_.id).l shouldBe List(tLocal.id)
+          }
 
       "parent every identifier of an object-pattern parameter of an arrow as a class property initialiser" in
-        AstFixture("""
+          AstFixture("""
           |class Menu {
           |  handler = ({ t, isMenu }) => t("x");
           |}
           |""".stripMargin) { cpg =>
-          cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
-          cpg.identifier.nameExact("t").whereNot(_.refsTo).l shouldBe empty
-        }
+            cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
+            cpg.identifier.nameExact("t").whereNot(_.refsTo).l shouldBe empty
+          }
 
       "parent every identifier of an array-pattern parameter of an arrow" in AstFixture("""
         |const handlers = {
@@ -48,20 +48,20 @@ class DestructuredArrowParamsTest extends AbstractPassTest:
         |  run({ t }) { return t("x"); }
         |}
         |""".stripMargin) { cpg =>
-        cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
+          cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
       }
 
       "keep the good twin, a function declaration, free of orphans and with one REF per identifier" in
-        AstFixture("""
+          AstFixture("""
           |function f({ t, isMenu }) { return t("x"); }
           |""".stripMargin) { cpg =>
-          cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
-          cpg.identifier.count(_.refsTo.size > 1) shouldBe 0
-          cpg.identifier.whereNot(_.refsTo).size shouldBe 0
-          cpg.typeDecl.nameExact("_anon_cdecl").member.name.l should contain theSameElementsAs List(
-            "t",
-            "isMenu"
-          )
-        }
+            cpg.identifier.filter(_._astIn.isEmpty).l shouldBe empty
+            cpg.identifier.count(_.refsTo.size > 1) shouldBe 0
+            cpg.identifier.whereNot(_.refsTo).size shouldBe 0
+            cpg.typeDecl.nameExact("_anon_cdecl").member.name.l should contain theSameElementsAs List(
+              "t",
+              "isMenu"
+            )
+          }
   }
 end DestructuredArrowParamsTest
