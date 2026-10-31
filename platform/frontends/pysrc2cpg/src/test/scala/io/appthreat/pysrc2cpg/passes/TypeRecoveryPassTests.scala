@@ -1479,4 +1479,39 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
           upperCall.methodFullName shouldBe "__builtin.str.upper"
       }
   }
+
+  "a plain dotted import" should {
+      lazy val cpg = code("""
+        |import os.path
+        |
+        |def f(a, b):
+        |    return os.path.join(a, b)
+        |""".stripMargin).cpg
+
+      "bind the first segment, what Python binds, so uses resolve through REF edges" in {
+          // the lowering no longer names the binding `os.path`; `os` is the name Python binds
+          cpg.identifier.nameExact("os.path").l shouldBe empty
+          cpg.local.nameExact("os").where(_.method.nameExact("<module>")).l should not be empty
+          cpg.identifier.nameExact("os").whereNot(_.refsTo).l shouldBe empty
+          val List(joinCall) = cpg.call.nameExact("join").l
+          joinCall.methodFullName shouldBe "os.path.join"
+      }
+  }
+
+  "an aliased dotted import" should {
+      lazy val cpg = code("""
+        |import os.path as p
+        |
+        |def f(a, b):
+        |    return p.join(a, b)
+        |""".stripMargin).cpg
+
+      "keep binding the alias alone (good twin)" in {
+          val List(binding) = cpg.imports.l
+          binding.importedAs shouldBe Some("p")
+          cpg.local.nameExact("p").where(_.method.nameExact("<module>")).l should not be empty
+          val List(joinCall) = cpg.call.nameExact("join").l
+          joinCall.methodFullName shouldBe "os.path.join"
+      }
+  }
 end TypeRecoveryPassTests

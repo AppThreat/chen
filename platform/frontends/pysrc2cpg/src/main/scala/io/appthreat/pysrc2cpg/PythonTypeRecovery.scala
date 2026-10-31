@@ -160,6 +160,12 @@ private class RecoverForPythonFile(
       if types.nonEmpty then
         symbolTable.put(LocalVar(name), types)
         bindingKeyOf(i).foreach(k => symbolTable.put(k, types))
+        // A plain dotted import binds the top-level package (`import os.path` binds `os`), but
+        // member loads of the full path (`tmp0 = os.path` in the callee lowering) resolve through
+        // the path's own name, so it keeps an entry of its own.
+        types.toList match
+          case List(entity) if entity.startsWith(s"$name.") => symbolTable.put(LocalVar(entity), types)
+          case _                                            =>
 
   override def visitImport(i: Import): Unit =
       if i.importedAs.isDefined && i.importedEntity.isDefined then

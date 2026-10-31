@@ -128,7 +128,10 @@ trait PythonAstVisitorHelpers:
     val folded = foldedSpellings(rawCode)
     val importAssignNodes =
         names.map { alias =>
-          val importedAsIdentifierName = alias.asName.getOrElse(alias.name)
+          // `import a.b` binds the top-level package `a` (Python's own binding rule); naming the
+          // binding `a.b` left later uses of `a` linked to a fresh local with no assignment, so
+          // they resolved to nothing.
+          val importedAsIdentifierName = alias.asName.getOrElse(alias.name.split('.').head)
           val importAssignLhsIdentifierNode =
               createIdentifierNode(importedAsIdentifierName, Store, lineAndCol)
           // the bound name is tagged with every folded spelling of the module path, the imported
