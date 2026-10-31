@@ -23,59 +23,36 @@ import io.shiftleft.semanticcpg.language.*
   * its extension unless the specifier names one, or the directory of an `index` file - as a
   * relative specifier resolves.
   */
-final class JsPathAliases(cpg: Cpg):
+object JsPathAliases:
 
-  private val ScriptExtensions =
-      Seq(
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".mts",
-        ".cjs",
-        ".cts",
-        ".vue",
-        ".svelte",
-        ".astro",
-        ".gjs",
-        ".gts"
+  /** The config files of the graph, parsed once per graph and shared by every holder of a
+    * `JsPathAliases`: the same K files would otherwise be re-parsed by every pass that resolves
+    * specifiers, which made the parse the top allocator of the callsites command on a large JS
+    * project (chen#258). Cleared with the other per-graph JS indexes.
+    */
+  private val parsedConfigs =
+      java.util.Collections.synchronizedMap(
+        new java.util.WeakHashMap[overflowdb.Graph, Vector[(String, String, io.circe.Json)]]()
       )
 
-  private def normalize(path: String): String =
-    val parts = scala.collection.mutable.ArrayBuffer.empty[String]
-    path.replace('\\', '/').split("/").foreach {
-        case "" | "." =>
-        case ".."     => if parts.nonEmpty then parts.dropRightInPlace(1)
-        case part     => parts += part
-    }
-    parts.mkString("/")
+  private[js] def clearConfigs(graph: overflowdb.Graph): Unit = parsedConfigs.remove(graph)
 
-  private def dirOf(path: String): String =
+  private def parseConfigs(cpg: Cpg): Vector[(String, String, io.circe.Json)] =
+      cpg.configFile.l
+          .map { f =>
+            val name = f.name.replace('\\', '/')
+            JsStats.computed("pathAliasConfig")
+            (name, dirOf(name), parseJsonc(f.content))
+          }
+          .collect { case (name, dir, Some(json)) => (name, dir, json) }
+          .toVector
+
+  private[js] def configsOf(cpg: Cpg): Vector[(String, String, io.circe.Json)] =
+      parsedConfigs.computeIfAbsent(cpg.graph, _ => parseConfigs(cpg))
+
+  private[js] def dirOf(path: String): String =
     val p = path.replace('\\', '/')
     if p.contains('/') then p.substring(0, p.lastIndexOf('/')) else ""
-
-  private def join(dir: String, rest: String): String =
-      normalize(if dir.isEmpty then rest else s"$dir/$rest")
-
-  /** Every project file's path without its extension, and the directory of each `index` file. */
-  private lazy val bases: Set[String] =
-      cpg.file.name.l.map(_.replace('\\', '/')).flatMap { f =>
-        val ext  = ScriptExtensions.find(f.endsWith)
-        val base = ext.map(e => f.dropRight(e.length)).getOrElse(f)
-        val asIs = Seq(f, base)
-        if base.endsWith("/index") then asIs :+ base.dropRight("/index".length) else asIs
-      }.toSet
-
-  /** Config files by kind: (directory, parsed JSON). */
-  private def configs(names: String*): List[(String, io.circe.Json)] =
-      cpg.configFile.l
-          .filter(f =>
-            val n = f.name.replace('\\', '/')
-            names.exists(k => n == k || n.endsWith(s"/$k")) && !n.contains("node_modules")
-          )
-          .flatMap(f => parseJsonc(f.content).map(dirOf(f.name) -> _))
-          .sortBy(-_._1.length)
 
   /** JSON with comments and trailing commas, as tsconfig files are written. */
   private def parseJsonc(text: String): Option[io.circe.Json] =
@@ -106,6 +83,58 @@ final class JsPathAliases(cpg: Cpg):
     end while
     io.circe.parser.parse(out.toString.replaceAll(",(\\s*[}\\]])", "$1")).toOption
   end parseJsonc
+end JsPathAliases
+
+final class JsPathAliases(cpg: Cpg):
+
+  private val ScriptExtensions =
+      Seq(
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".mts",
+        ".cjs",
+        ".cts",
+        ".vue",
+        ".svelte",
+        ".astro",
+        ".gjs",
+        ".gts"
+      )
+
+  private def normalize(path: String): String =
+    val parts = scala.collection.mutable.ArrayBuffer.empty[String]
+    path.replace('\\', '/').split("/").foreach {
+        case "" | "." =>
+        case ".."     => if parts.nonEmpty then parts.dropRightInPlace(1)
+        case part     => parts += part
+    }
+    parts.mkString("/")
+
+  private def join(dir: String, rest: String): String =
+      normalize(if dir.isEmpty then rest else s"$dir/$rest")
+
+  /** Every project file's path without its extension, and the directory of each `index` file. */
+  private lazy val bases: Set[String] =
+      cpg.file.name.l.map(_.replace('\\', '/')).flatMap { f =>
+        val ext  = ScriptExtensions.find(f.endsWith)
+        val base = ext.map(e => f.dropRight(e.length)).getOrElse(f)
+        val asIs = Seq(f, base)
+        if base.endsWith("/index") then asIs :+ base.dropRight("/index".length) else asIs
+      }.toSet
+
+  /** Config files by kind: (directory, parsed JSON), read from the per-graph parse. */
+  private def configs(names: String*): List[(String, io.circe.Json)] =
+      JsPathAliases.configsOf(cpg)
+          .filter((name, _, _) =>
+              names.exists(k => name == k || name.endsWith(s"/$k")) &&
+                  !name.contains("node_modules")
+          )
+          .map((_, dir, json) => dir -> json)
+          .toList
+          .sortBy(-_._1.length)
 
   /** `paths` patterns of each tsconfig/jsconfig: (config dir, base dir, pattern, targets). */
   private lazy val pathPatterns: List[(String, String, String, List[String])] =
@@ -204,8 +233,8 @@ final class JsPathAliases(cpg: Cpg):
 
   /** A relative specifier from `fromFile` to the project path `target`. */
   def relativeSpecifier(fromFile: String, target: String): String =
-    val from   = dirOf(fromFile.replace('\\', '/')).split("/").filter(_.nonEmpty).toList
-    val to     = target.split("/").filter(_.nonEmpty).toList
+    val from = JsPathAliases.dirOf(fromFile.replace('\\', '/')).split("/").filter(_.nonEmpty).toList
+    val to   = target.split("/").filter(_.nonEmpty).toList
     val common = from.zip(to).takeWhile(_ == _).size
     val ups    = from.size - common
     val down   = to.drop(common).mkString("/")

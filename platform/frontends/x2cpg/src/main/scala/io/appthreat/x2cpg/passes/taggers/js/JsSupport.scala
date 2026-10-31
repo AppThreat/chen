@@ -1153,6 +1153,7 @@ object JsIndexes:
     methodIndexes.remove(graph)
     assignmentIndexes.remove(graph)
     nameIndexes.remove(graph)
+    JsPathAliases.clearConfigs(graph)
 end JsIndexes
 
 /** Counts of the work the taggers do, for tests that assert complexity rather than time: how often
