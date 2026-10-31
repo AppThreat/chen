@@ -2746,8 +2746,15 @@ class PythonAstVisitor(
       specialTargetLocals.append(localNode)
       contextStack.addSpecialVariable(localNode)
 
+    // the handler's class, and each member of a tuple of them, is a value reference at its own
+    // position: without a node there, no consumer can mark the `except requests.ConnectionError`
+    // line as a use of requests
+    val handlerTypeNodes =
+        exceptHandler.typ.toList.map(t => convert(t))
+
     val blockNode = createBlock(exceptHandler.body.map(convert), lineAndColOf(exceptHandler))
     addAstChildNodes(blockNode, 1, specialTargetLocals)
+    addAstChildNodes(blockNode, specialTargetLocals.size + 1, handlerTypeNodes)
 
     contextStack.pop()
 
