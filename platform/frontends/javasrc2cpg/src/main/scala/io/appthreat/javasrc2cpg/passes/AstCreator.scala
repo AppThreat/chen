@@ -553,7 +553,13 @@ class AstCreator(
               scope.enclosingTypeDeclFullName.getOrElse(Defines.UnresolvedNamespace)
           val fullName =
               composeMethodFullName(enclosingDeclName, Defines.StaticInitMethodName, signature)
-          staticInitMethodAst(staticInits.toList, fullName, Some(signature), TypeConstants.Void)
+          staticInitMethodAst(
+            staticInits.toList,
+            fullName,
+            Some(signature),
+            TypeConstants.Void,
+            fileName = Some(filename)
+          )
       }
 
   private def codeForTypeDecl(typ: TypeDeclaration[?], isInterface: Boolean): String =
@@ -1016,8 +1022,12 @@ class AstCreator(
               StaticJavaParser.parseBodyDeclaration(
                 s"private static final $Slf4jLoggerType log;"
               ) match
-                case field: FieldDeclaration => classDecl.getMembers.addFirst(field)
-                case _                       =>
+                case field: FieldDeclaration =>
+                    // the snippet parsed standalone, so its nodes carry positions of their own;
+                    // the generated field is nobody's writing and gets none
+                    field.stream().forEach(node => node.setRange(null))
+                    classDecl.getMembers.addFirst(field)
+                case _ =>
 
             val classGetter =
                 carriesAnnotation(classDecl, LombokGetter) || carriesAnnotation(
