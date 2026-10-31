@@ -85,7 +85,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     )
 
     members.zipWithIndex.foreach { case (member, idx) =>
-        astForClassMember(member, aliasTypeDeclNode, idx + 1)
+        astForClassMember(
+          member,
+          aliasTypeDeclNode,
+          idx + 1,
+          isPatternMember = alias.node == ObjectPattern
+        )
     }
 
     typeDeclNodeAst.root.foreach(diffGraph.addEdge(methodAstParentStack.head, _, EdgeTypes.AST))
@@ -235,7 +240,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
   private def astForClassMember(
     classElement: Value,
     typeDeclNode: NewTypeDecl,
-    order: Int = -1
+    order: Int = -1,
+    isPatternMember: Boolean = false
   ): Ast =
     val nodeInfo     = createBabelNodeInfo(classElement)
     val typeFullName = typeFor(nodeInfo)
@@ -304,7 +310,11 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
       decoratorAst.root.foreach(diffGraph.addEdge(memberNode_, _, EdgeTypes.AST))
     }
 
-    if hasKey(nodeInfo.json, "value") && !nodeInfo.json("value").isNull then
+    // A member of an object-pattern parameter (`{ t, data: postId = '' }`) is not a field with an
+    // initialiser: the shorthand `value` repeats the key, and the destructuring assignment lowers
+    // the binding itself. Building the `this.key = value` assignment here would leave the
+    // identifiers of that discarded AST without a parent.
+    if !isPatternMember && hasKey(nodeInfo.json, "value") && !nodeInfo.json("value").isNull then
       val lhsAst = astForClassFieldTarget(nodeInfo)
       val rhsAst = astForNodeWithFunctionReference(nodeInfo.json("value"))
       val callNode_ =
@@ -452,10 +462,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val astParentType     = methodAstParentStack.head.label
     val astParentFullName = methodAstParentStack.head.properties("FULL_NAME").toString
 
-    val superClass = Try(createBabelNodeInfo(clazz.json("superClass")).code).toOption.toSeq
-    val implements = Try(
-      clazz.json("implements").arr.map(createBabelNodeInfo(_).code)
+    val superClassInfo = Try(createBabelNodeInfo(clazz.json("superClass"))).toOption.toSeq
+    val implementsInfo = Try(
+      clazz.json("implements").arr.map(createBabelNodeInfo)
     ).toOption.toSeq.flatten
+    val superClass = superClassInfo.map(_.code)
+    val implements = implementsInfo.map(_.code)
     val mixins =
         Try(clazz.json("mixins").arr.map(createBabelNodeInfo(_).code)).toOption.toSeq.flatten
 
@@ -480,6 +492,22 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     diffGraph.addEdge(methodAstParentStack.head, typeDeclNode_, EdgeTypes.AST)
 
     val typeRefNode_ = typeRefNode(clazz, s"class $typeName", typeFullName)
+
+    // One tag per heritage base, carrying the clause it came from and the base's own line. No node
+    // marks a base, and the TYPE_DECL's line is its first decorator's (the schema also gives
+    // TYPE_DECL no TAGGED_BY edge), so the tags hang off the class's TYPE_REF and the callsites
+    // slice reads the clause (extends vs implements) and the position from them.
+    def heritageTag(kind: String, info: BabelNodeInfo): Unit =
+      val line = info.lineNumber.map(_.intValue).getOrElse(-1)
+      diffGraph.addEdge(
+        typeRefNode_,
+        NewTag()
+            .name("callsites-heritage")
+            .value(ujson.write(ujson.Obj("base" -> info.code, "kind" -> kind, "line" -> line))),
+        EdgeTypes.TAGGED_BY
+      )
+    superClassInfo.foreach(heritageTag("extends", _))
+    implementsInfo.foreach(heritageTag("implements", _))
 
     methodAstParentStack.push(typeDeclNode_)
     dynamicInstanceTypeStack.push(typeFullName)
