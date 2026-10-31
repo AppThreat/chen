@@ -1,0 +1,26 @@
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/cpg/ExceptHandlerCpgTests.scala
+  s_c130237d85d968::t_a5fe7649996857 1-22,24,27-40,47-61,63-81
+  s_c130237d85d968::t_08b04f9e656371 25-26
+  s_c130237d85d968::t_7219eb2990031b 23
+  s_c130237d85d968::t_b670c5f552ae3d 41-43
+  s_c130237d85d968::t_3f06ed70b4aa20 62
+  s_c130237d85d968::t_221d20c1ae9260 44-46
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonAstVisitor.scala
+  s_c130237d85d968::t_99bfdfc1031128 2749-2754,2757
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5b4074413c36072c51d8c0b426a7789598600aa3",
+  "prompts": {},
+  "sessions": {
+    "s_c130237d85d968": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_22357300-4561-4ca2-a12b-e0a36396896e",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
