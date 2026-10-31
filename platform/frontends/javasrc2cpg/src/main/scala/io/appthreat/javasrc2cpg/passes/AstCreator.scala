@@ -277,25 +277,7 @@ class AstCreator(
   def createAst(): DiffGraphBuilder =
     val ast = astForTranslationUnit(javaParserAst)
     storeInDiffGraph(ast)
-    storeThrowsTags()
     diffGraph
-
-  /** The `throws` clauses, resolved while each method's scope was live, as one tag per clause on
-    * the method: the schema has no node and no position for a throws type, and the callsites slice
-    * reads the type and its own line from these tags (chen#245, decision 0001 P1).
-    */
-  private val pendingThrowsTags = mutable.ArrayBuffer.empty[(NewMethod, String, Int)]
-
-  private def storeThrowsTags(): Unit =
-      pendingThrowsTags.foreach { case (methodNode, throwsType, line) =>
-          diffGraph.addEdge(
-            methodNode,
-            NewTag().name("callsites-throws").value(
-              ujson.write(ujson.Obj("type" -> throwsType, "line" -> line))
-            ),
-            EdgeTypes.TAGGED_BY
-          )
-      }
 
   /** Copy nodes/edges of given `AST` into the diff graph
     */
@@ -1605,14 +1587,27 @@ class AstCreator(
       column(methodDeclaration.getType)
     )
 
-    methodDeclaration.getThrownExceptions.asScala.foreach { thrownType =>
-      val typeFullName = typeInfoCalc
-          .fullName(thrownType)
-          .orElse(scope.lookupType(thrownType.asString))
-      typeFullName.foreach { t =>
-          pendingThrowsTags += ((methodNode, t, line(thrownType).map(_.intValue).getOrElse(-1)))
-      }
-    }
+    // The throws clauses ride on the method's own AST as tags: the schema has no node and no
+    // position for a throws type, and the callsites slice reads the type and its own line from
+    // them (chen#245, decision 0001 P1). Resolved while the method's scope is live.
+    val throwsAsts = methodDeclaration.getThrownExceptions.asScala.flatMap { thrownType =>
+        typeInfoCalc
+            .fullName(thrownType)
+            .orElse(scope.lookupType(thrownType.asString))
+            .map { t =>
+              val tag = NewTag()
+                  .name("callsites-throws")
+                  .value(
+                    ujson.write(
+                      ujson.Obj(
+                        "type" -> t,
+                        "line" -> line(thrownType).map(_.intValue).getOrElse(-1)
+                      )
+                    )
+                  )
+              Ast(tag).withTaggedByEdge(methodNode, tag)
+            }
+    }.toSeq
 
     val annotationAsts =
         methodDeclaration.getAnnotations.asScala.map(astForAnnotationExpr).toSeq
@@ -1621,7 +1616,7 @@ class AstCreator(
 
     scope.popScope()
 
-    methodAstWithAnnotations(
+    val methodAst = methodAstWithAnnotations(
       methodNode,
       thisAst ++ parameterAsts,
       bodyAst,
@@ -1629,6 +1624,7 @@ class AstCreator(
       modifiers,
       annotationAsts
     )
+    throwsAsts.foldLeft(methodAst)(_.merge(_))
   end astForMethod
 
   private def constructorReturnNode(constructorDeclaration: ConstructorDeclaration)
