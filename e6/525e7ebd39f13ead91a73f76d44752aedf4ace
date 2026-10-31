@@ -1,0 +1,24 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTypesCreator.scala
+  s_c130237d85d968::t_f4c04f2fb0f970 460-462,464-465
+  s_c130237d85d968::t_c0220bae403cee 491-506
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular.golden
+  s_c130237d85d968::t_ad5012e638386d 233-238
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/TsClassesAstCreationPassTest.scala
+  s_c130237d85d968::t_48ee6c91495c9f 381-396
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e6525e7ebd39f13ead91a73f76d44752aedf4ace",
+  "prompts": {},
+  "sessions": {
+    "s_c130237d85d968": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_22357300-4561-4ca2-a12b-e0a36396896e",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
