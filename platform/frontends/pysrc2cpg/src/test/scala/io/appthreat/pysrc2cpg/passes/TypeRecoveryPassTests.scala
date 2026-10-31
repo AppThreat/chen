@@ -1498,6 +1498,32 @@ class TypeRecoveryPassTests extends PySrc2CpgFixture(withOssDataflow = false):
       }
   }
 
+  "plain dotted imports that share a top-level package" should {
+      lazy val cpg = code("""
+        |import os.path
+        |import xml.etree.ElementTree
+        |import xml.dom
+        |
+        |def f(a, b):
+        |    os.getcwd()
+        |    xml.etree.ElementTree.parse(b)
+        |    return os.path.join(a, b)
+        |""".stripMargin).cpg
+
+      "type the binding as the top-level package, not the full path" in {
+          val List(getcwdCall) = cpg.call.nameExact("getcwd").l
+          getcwdCall.methodFullName shouldBe "os.getcwd"
+          cpg.identifier.nameExact("os", "xml").typeFullName.toSet shouldBe Set("os", "xml")
+      }
+
+      "resolve each full path through its own import (good twin)" in {
+          val List(parseCall) = cpg.call.nameExact("parse").l
+          parseCall.methodFullName shouldBe "xml.etree.ElementTree.parse"
+          val List(joinCall) = cpg.call.nameExact("join").l
+          joinCall.methodFullName shouldBe "os.path.join"
+      }
+  }
+
   "an aliased dotted import" should {
       lazy val cpg = code("""
         |import os.path as p

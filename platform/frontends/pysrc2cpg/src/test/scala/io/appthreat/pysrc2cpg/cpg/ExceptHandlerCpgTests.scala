@@ -77,5 +77,26 @@ class ExceptHandlerCpgTests extends PySrc2CpgFixture:
           val List(sinkCall) = cpg.call.nameExact("sink").l
           sinkCall.argument.isIdentifier.name.l shouldBe List("e")
       }
+
+      "evaluate the handler class before the handler body" in {
+          val cpg = code(
+            """import grp
+              |
+              |def f():
+              |    try:
+              |        g()
+              |    except grp.GroupError as e:
+              |        h(e)
+              |        k()""".stripMargin,
+            "test.py"
+          )
+          val List(handlerBlock) = cpg.call.nameExact("k").astParent.isBlock.l
+          handlerBlock.astChildren.isCall.sortBy(_.order).code.l shouldBe List(
+            "grp.GroupError",
+            "h(e)",
+            "k()"
+          )
+          handlerBlock.astChildren.isCall.order.l.distinct.size shouldBe 3
+      }
   }
 end ExceptHandlerCpgTests

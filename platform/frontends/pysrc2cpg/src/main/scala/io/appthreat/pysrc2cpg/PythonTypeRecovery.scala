@@ -158,14 +158,32 @@ private class RecoverForPythonFile(
 
   private def putImportBinding(i: Import, name: String, types: Set[String]): Unit =
       if types.nonEmpty then
-        symbolTable.put(LocalVar(name), types)
-        bindingKeyOf(i).foreach(k => symbolTable.put(k, types))
-        // A plain dotted import binds the top-level package (`import os.path` binds `os`), but
-        // member loads of the full path (`tmp0 = os.path` in the callee lowering) resolve through
-        // the path's own name, so it keeps an entry of its own.
-        types.toList match
-          case List(entity) if entity.startsWith(s"$name.") => symbolTable.put(LocalVar(entity), types)
-          case _                                            =>
+        // A plain dotted import binds the top-level package (`import os.path` binds `os`), so the
+        // binding's type is that package: naming it after the full path would turn `os.getcwd()`
+        // into `os.path.getcwd`, and a second `import os.sys` would overwrite the first. Member
+        // loads of the full path (`tmp0 = os.path` in the callee lowering) resolve through the
+        // path's own entry.
+        val boundTypes =
+            if isPlainDottedImport(i, name) then
+              // `import xml.etree.ElementTree` also makes `xml.etree` reachable as a module
+              val segments = i.importedEntity.get.split('.')
+              (2 until segments.length).foreach { n =>
+                  val prefix = segments.take(n).mkString(".")
+                  if !symbolTable.contains(LocalVar(prefix)) then
+                    symbolTable.put(LocalVar(prefix), Set(prefix))
+              }
+              symbolTable.put(LocalVar(i.importedEntity.get), types)
+              Set(name)
+            else types
+        symbolTable.put(LocalVar(name), boundTypes)
+        bindingKeyOf(i).foreach(k => symbolTable.put(k, boundTypes))
+
+  /** `import a.b` (no alias argument, entity under the bound name), as opposed to
+    * `from a import b as a`, which binds the same name to the same entity.
+    */
+  private def isPlainDottedImport(i: Import, name: String): Boolean =
+      i.importedEntity.exists(_.startsWith(s"$name.")) &&
+          !i.call.argument.exists(_.argumentIndex == 3)
 
   override def visitImport(i: Import): Unit =
       if i.importedAs.isDefined && i.importedEntity.isDefined then
@@ -331,6 +349,11 @@ private class RecoverForPythonFile(
               if directTypes.nonEmpty then directTypes
               else fieldParents.flatMap(memberTypesInHierarchy(_, fi.canonicalName))
           associateTypes(i, globalTypes)
+      // A load through a plain dotted import's binding (`tmp0 = os.path`) takes the module the
+      // full path names, which the import recorded under that path, not a member of `os`.
+      case List(base: Identifier, _: FieldIdentifier)
+          if symbolTable.contains(LocalVar(getFieldName(fa))) && declarationIsNamespaceBound(base) =>
+          associateTypes(i, symbolTable.get(LocalVar(getFieldName(fa))))
       case _ => super.visitIdentifierAssignedToFieldLoad(i, fa)
 
   /** Field loads through a receiver whose member lives on an inherited dependency base resolve
@@ -505,11 +528,11 @@ private class RecoverForPythonFile(
       // expects.
       if i.argumentIndex != 0 then
         persistType(i, symbolTable.get(i))
-        // The base leaves the call unnamed on this path; keep the source-text callee hint it
-        // uses when no argument is in the table (`handler(a)` resolves to `handler`), so both
-        // shapes agree.
+        // The base leaves the call unnamed on this path; name it after the callee, as it does
+        // when no argument is in the table (`handler(a)` resolves to `handler`), so both shapes
+        // agree.
         if symbolTable.get(call).isEmpty && !call.name.startsWith("<operator>") then
-          storeCallTypeInfo(call, Seq(call.code.takeWhile(_ != '(')))
+          storeCallTypeInfo(call, Seq(call.name))
       // `self`/`this` is a file-scoped symbol in the base symbol table, so it accumulates the
       // type of *every* class defined in the file. The base then builds one `<Class>.method`
       // candidate per class, and the call linker — faced with several — refuses to pick,

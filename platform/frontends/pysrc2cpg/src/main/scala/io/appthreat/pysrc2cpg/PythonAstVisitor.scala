@@ -2750,6 +2750,12 @@ class PythonAstVisitor(
 
   def convert(exceptHandler: ast.ExceptHandler | ast.ExceptStarHandler | ast.ExceptionHandler)
     : NewNode =
+    // The handler's class, and each member of a tuple of them, is a value reference at its own
+    // position: without a node there, no consumer can mark the `except requests.ConnectionError`
+    // line as a use of requests. It is evaluated before the handler binds its `as` name, so it is
+    // converted outside the handler's context and runs first in the handler block.
+    val handlerTypeNodes = exceptHandler.typ.toList.map(convert)
+
     contextStack.pushSpecialContext()
     val specialTargetLocals = mutable.ArrayBuffer.empty[nodes.NewLocal]
     if exceptHandler.name.isDefined then
@@ -2757,15 +2763,9 @@ class PythonAstVisitor(
       specialTargetLocals.append(localNode)
       contextStack.addSpecialVariable(localNode)
 
-    // the handler's class, and each member of a tuple of them, is a value reference at its own
-    // position: without a node there, no consumer can mark the `except requests.ConnectionError`
-    // line as a use of requests
-    val handlerTypeNodes =
-        exceptHandler.typ.toList.map(t => convert(t))
-
-    val blockNode = createBlock(exceptHandler.body.map(convert), lineAndColOf(exceptHandler))
+    val blockNode =
+        createBlock(handlerTypeNodes ++ exceptHandler.body.map(convert), lineAndColOf(exceptHandler))
     addAstChildNodes(blockNode, 1, specialTargetLocals)
-    addAstChildNodes(blockNode, specialTargetLocals.size + 1, handlerTypeNodes)
 
     contextStack.pop()
 
