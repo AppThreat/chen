@@ -1,0 +1,26 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsPathAliases.scala
+  s_b37b12b5351861::t_3d9460d37ee9e6 128,130-131
+  s_b37b12b5351861::t_c870bc8644d04a 26-83
+  s_b37b12b5351861::t_3b0fb4f1032e3b 84-87,132-133,135-136,236-237
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsPathAliasesTest.scala
+  s_b37b12b5351861::t_fc8966cd536065 1-66
+  s_b37b12b5351861::t_568d5854474533 67-85
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_b37b12b5351861::t_a5e6cb6f70d523 1156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cde5925abbcee842a8bb1df7b067c93395f94c44",
+  "prompts": {},
+  "sessions": {
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
