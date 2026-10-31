@@ -378,5 +378,21 @@ class TsClassesAstCreationPassTest extends AbstractPassTest:
         cpg.identifier.whereNot(_.refsTo).size shouldBe 0
       }
 
+      "tag each heritage base with its clause and its own line" in TsAstFixture("""
+        |import { OnInit } from "@angular/core";
+        |
+        |@Component({})
+        |class AppComponent extends Base implements OnInit {}
+        |""".stripMargin) { cpg =>
+          val List(t) = cpg.typeDecl.nameExact("AppComponent").l
+          val entries = cpg.typeRef.filter(_.typeFullName == t.fullName)
+              .flatMap(_.tag.nameExact("callsites-heritage"))
+              .value.l
+              .map(v => ujson.read(v))
+          entries.map(_("kind").str) should contain theSameElementsAs List("extends", "implements")
+          entries.map(_("base").str) should contain theSameElementsAs List("Base", "OnInit")
+          // the string opens with an empty line, so the class keyword is on line 5
+          entries.map(_("line").num.toInt).toSet shouldBe Set(5)
+      }
   }
 end TsClassesAstCreationPassTest
