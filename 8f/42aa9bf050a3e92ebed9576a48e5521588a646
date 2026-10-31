@@ -1,0 +1,21 @@
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_b37b12b5351861::t_ce948efddd1392 1590-1610,1619,1627
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Ast.scala
+  s_b37b12b5351861::t_2e1c5e8624bd98 53-55,98-99,122-123,134-135,163-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f42aa9bf050a3e92ebed9576a48e5521588a646",
+  "prompts": {},
+  "sessions": {
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
