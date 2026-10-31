@@ -203,6 +203,37 @@ class LibraryUseResolutionTests extends AnyFreeSpec with Matchers:
       }
   }
 
+  "the catch parameter" - {
+      lazy val cpg = buildCpg("""
+          |import java.io.IOException;
+          |import java.sql.SQLException;
+          |
+          |public class Catcher {
+          |  void run() {
+          |    try {
+          |      throw new IOException("x");
+          |    } catch (IOException e) {
+          |      e.printStackTrace();
+          |    } catch (IOException | SQLException both) {
+          |      both.getMessage();
+          |    }
+          |  }
+          |}
+          |""".stripMargin)
+
+      "lower the caught exception as a typed local at the type's line" in {
+          val local = cpg.local.nameExact("e").head
+          local.typeFullName shouldBe "java.io.IOException"
+          local.lineNumber shouldBe Some(9)
+      }
+
+      "type the uses of the parameter, one local per union alternative" in {
+          cpg.identifier.nameExact("e").typeFullName.l.toSet shouldBe Set("java.io.IOException")
+          val unionLocals = cpg.local.nameExact("both").typeFullName.l.sorted
+          unionLocals shouldBe List("java.io.IOException", "java.sql.SQLException")
+      }
+  }
+
   "a Lombok accessor of another file" - {
       // Two files: the getter is generated in Order.java, the chain is written in Shop.java.
       // JavaParser resolves per compilation unit, so the link after the getter is left to the

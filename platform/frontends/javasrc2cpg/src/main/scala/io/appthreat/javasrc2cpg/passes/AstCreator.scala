@@ -2,6 +2,7 @@ package io.appthreat.javasrc2cpg.passes
 
 import com.github.javaparser.StaticJavaParser
 import com.github.javaparser.ast.Modifier
+import com.github.javaparser.ast.`type`.UnionType
 import com.github.javaparser.ast.`type`.TypeParameter
 import com.github.javaparser.ast.{CompilationUnit, Node, NodeList, PackageDeclaration}
 import com.github.javaparser.ast.body.{
@@ -1716,8 +1717,35 @@ class AstCreator(
 
     callAst(throwNode, args)
 
+  /** The catch parameter, as a local of the catch block: a declaration the compiler attributes
+    * (decision 0001, P1) and a binding the body's uses of `e` resolve against. Without it the
+    * caught exception's type is nowhere in the graph and every use of the parameter is untyped.
+    * A union parameter (`catch (A | B e)`) contributes one local per alternative.
+    */
   private def astForCatchClause(catchClause: CatchClause): Ast =
-      astForBlockStatement(catchClause.getBody)
+    scope.pushBlockScope()
+    val parameter = catchClause.getParameter
+    val typeTrees = parameter.getType match
+        case union: UnionType => union.getElements.asScala.toList
+        case other            => List(other)
+    val localAsts = typeTrees.map { t =>
+        val typeFullName = typeInfoCalc
+            .fullName(t)
+            .orElse(scope.lookupType(t.asString))
+            .getOrElse(guessTypeFullName(t.asString))
+        typeInfoCalc.registerType(typeFullName)
+        val local = NewLocal()
+            .name(parameter.getNameAsString)
+            .code(s"${parameter.toString}")
+            .typeFullName(typeFullName)
+            .lineNumber(line(parameter))
+            .columnNumber(column(parameter))
+        scope.addLocal(local)
+        Ast(local)
+    }
+    val body = astForBlockStatement(catchClause.getBody)
+    scope.popScope()
+    Ast(NewBlock()).withChildren(localAsts).withChild(body)
 
   private def astsForTry(stmt: TryStmt): Seq[Ast] =
     val tryNode = NewControlStructure()
