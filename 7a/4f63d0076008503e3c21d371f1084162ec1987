@@ -1,0 +1,22 @@
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/LibraryUseResolutionTests.scala
+  s_b37b12b5351861::t_ac195789aba642 206-210
+  s_b37b12b5351861::t_9839819687383c 211-236
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_b37b12b5351861::t_c9cd82bd8fe911 5,1720-1724,1726-1748
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a4f63d0076008503e3c21d371f1084162ec1987",
+  "prompts": {},
+  "sessions": {
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
