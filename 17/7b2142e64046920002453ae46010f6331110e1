@@ -1,0 +1,19 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonDependencyStubs.scala
+  s_c130237d85d968::t_131f47cfe8c23c 412-424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "177b2142e64046920002453ae46010f6331110e1",
+  "prompts": {},
+  "sessions": {
+    "s_c130237d85d968": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_22357300-4561-4ca2-a12b-e0a36396896e",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
