@@ -11,3 +11,12 @@ class Logs
     Faraday::Utils::CONFIG[:key]
   end
 end
+
+class Failure < StandardError
+end
+
+class Slots
+  def current
+    ::Thread.current[:slot]
+  end
+end

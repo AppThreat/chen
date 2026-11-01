@@ -135,9 +135,11 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
             constantPath(node).flatMap { case (absolute, segments) =>
                 val first   = segments.head
                 val written = segments.mkString(".")
+                // a bundled core class written plainly has its own reference node; written with a
+                // leading `::` it has none
                 val variable =
                     segments.size == 1 && (scope.lookupVariable(first).isDefined ||
-                        isBundledClass(first))
+                        (isBundledClass(first) && !absolute))
                 val lexical =
                     if absolute then None
                     else lexicalCrefs.view.map(c => s"$c.$first").find(known)

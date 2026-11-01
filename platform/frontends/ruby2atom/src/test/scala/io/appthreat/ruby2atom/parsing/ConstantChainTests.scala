@@ -38,4 +38,18 @@ class ConstantChainTests extends RubyCode2CpgFixture:
       val indexed = cpg.call.nameExact(Operators.indexAccess).lineNumber(11).argument.isTypeRef.l
       indexed.map(_.typeFullName) shouldBe List("Faraday.Utils.CONFIG")
   }
+
+  "a bundled core class as a superclass has its own reference at its position" in {
+      refs("__core.StandardError").map(t =>
+          (t.lineNumber.get: Int, t.columnNumber.get: Int)
+      ) shouldBe
+          List((15, 16))
+  }
+
+  "an absolute core class is a reference of its own, written with the leading ::" in {
+      cpg.typeRef.code("::Thread").map(t =>
+          (t.lineNumber.get: Int, t.columnNumber.get: Int, t.typeFullName)
+      ).l shouldBe
+          List((20, 4, "Thread"))
+  }
 end ConstantChainTests

@@ -160,7 +160,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     // Resolved in the scope around the class: a superclass is looked up before the class exists.
     val baseClassRefs = node.baseClass.toList.flatMap {
         case base @ ExternalConstantRef(constant) => astForExternalConstant(base, constant) :: Nil
-        case _                                    => Nil
+        // a bundled core class (`StandardError`) has its own reference node
+        case base: SimpleIdentifier if isBundledClass(base.text) => astForExpression(base) :: Nil
+        case _                                                   => Nil
     }
     // `class A < Migration[7.2]` or `< Struct.new(:a)`: an expression, which runs where the class is
     // written, with the constant it calls on as the receiver
