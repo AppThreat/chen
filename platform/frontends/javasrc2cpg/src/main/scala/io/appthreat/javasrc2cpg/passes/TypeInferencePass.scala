@@ -49,14 +49,15 @@ class TypeInferencePass(cpg: Cpg) extends ConcurrentWriterCpgPass[Call](cpg):
   /** The type the call's name sits in, spelled as `getNameParts` spells it, with the trailing dot.
     *
     * Usually the prefix of the method full name itself. A chain link whose own base was only
-    * recovered (`cart.getSecurity().login()`, the getter Lombok-generated) carries an unresolved
-    * namespace instead, and the receiver's known type is then the declaring one (chen#245).
+    * resolved by the previous round (`cart.getSecurity().login()`, the getter Lombok-generated)
+    * carries an unresolved namespace instead, and the receiver's known type is then the declaring
+    * one.
     */
   private def typeDeclOf(call: Call, callNameParts: NameParts): Option[String] =
       callNameParts.typeDecl match
         case Some(td) if !td.startsWith(Defines.UnresolvedNamespace) => Some(td)
         case _ =>
-            call.argument.headOption.collect {
+            call.argument.find(_.argumentIndex == 0).collect {
                 case base: Call
                     if base.typeFullName.nonEmpty && base.typeFullName != TypeConstants.Any &&
                         base.typeFullName != TypeConstants.Void =>

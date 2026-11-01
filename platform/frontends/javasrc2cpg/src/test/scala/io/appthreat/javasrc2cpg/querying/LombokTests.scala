@@ -3,7 +3,6 @@ package io.appthreat.javasrc2cpg.querying
 import io.appthreat.javasrc2cpg.Config
 import io.appthreat.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.appthreat.javasrc2cpg.typesolvers.TypeInfoCalculator.TypeConstants
-import io.appthreat.x2cpg.Defines
 import io.shiftleft.semanticcpg.language.*
 
 class LombokTests extends JavaSrcCode2CpgFixture:
@@ -150,10 +149,10 @@ class NoLombokTests extends JavaSrcCode2CpgFixture:
         fileName = "Bar.java"
       )
 
-      // Getter type should be unresolved since it's not available in source processed or in type info source.
-      val unresolvedName = s"Foo.getFirstName:${Defines.UnresolvedSignature}(0)"
-      cpg.call.name("getFirstName").head.methodFullName shouldBe unresolvedName
-      // Log member should not be found since it hasn't been generated in the source we scan.
+      // Without delombok the frontend still adds the getter that the imported @Getter asks for,
+      // so the call resolves to it.
+      cpg.call.name("getFirstName").head.methodFullName shouldBe "Foo.getFirstName:java.lang.String()"
+      // @Log (java.util.logging) is not one of the annotations the frontend generates members for.
       cpg.member.name("log").isEmpty shouldBe true
   }
 end NoLombokTests

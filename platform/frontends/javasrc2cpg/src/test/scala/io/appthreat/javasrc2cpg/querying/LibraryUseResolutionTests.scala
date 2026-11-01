@@ -187,6 +187,28 @@ class LibraryUseResolutionTests extends AnyFreeSpec with Matchers:
           login.methodFullName shouldBe "stub.Security.login:void(java.lang.String)"
       }
 
+      "place each member where javac puts it: a getter at its field, a setter and the log field at the annotation" in {
+          // line 7 is @Slf4j, line 8 @Data, line 10 the owner field
+          cpg.method.nameExact("getOwner").lineNumber.l shouldBe List(10)
+          cpg.method.nameExact("getOwner").methodReturn.lineNumber.l shouldBe List(10)
+          cpg.method.nameExact("setOwner").lineNumber.l shouldBe List(8)
+          cpg.method.nameExact("setOwner").parameter.nameExact("owner").lineNumber.l shouldBe List(
+            8
+          )
+          cpg.member.nameExact("log").lineNumber.l shouldBe List(7)
+      }
+
+      "mark every generated member as Lombok does, at the member's own position" in {
+          val getter = cpg.method.nameExact("getOwner").head
+          getter.annotation.fullName.toSet shouldBe Set(
+            "java.lang.SuppressWarnings",
+            "lombok.Generated"
+          )
+          getter.annotation.lineNumber.toSet shouldBe Set(10)
+          // nothing generated sits at the top of the file, where a standalone parse would put it
+          cpg.annotation.fullNameExact("lombok.Generated").lineNumber.filter(_ < 7).l shouldBe Nil
+      }
+
       "not generate an accessor the type declares itself" in {
           // the good twin: an explicit member wins over the generated one
           val explicit = JavaSrc2CpgTestContext.buildCpg("""
@@ -231,6 +253,38 @@ class LibraryUseResolutionTests extends AnyFreeSpec with Matchers:
           cpg.identifier.nameExact("e").typeFullName.l.toSet shouldBe Set("java.io.IOException")
           val unionLocals = cpg.local.nameExact("both").typeFullName.l.sorted
           unionLocals shouldBe List("java.io.IOException", "java.sql.SQLException")
+      }
+  }
+
+  "Lombok's @Getter and @Setter" - {
+      lazy val cpg = buildCpg("""
+          |import lombok.Getter;
+          |import lombok.Setter;
+          |
+          |@Getter
+          |public class Account {
+          |  private final String id;
+          |  private boolean isActive;
+          |  @Setter private int count;
+          |  private static String shared;
+          |}
+          |""".stripMargin)
+
+      "generate a getter for a final field and a setter only where @Setter asks" in {
+          cpg.method.fullName.l should contain("Account.getId:java.lang.String()")
+          cpg.method.fullName.l should contain("Account.getCount:int()")
+          cpg.method.fullName.l should contain("Account.setCount:void(int)")
+          cpg.method.name("setId").size shouldBe 0
+          cpg.method.name("getShared").size shouldBe 0
+      }
+
+      "name a boolean field already called isX by the field itself" in {
+          cpg.method.fullName.l should contain("Account.isActive:boolean()")
+          cpg.method.name("isIsActive").size shouldBe 0
+      }
+
+      "place a field-level setter at its annotation" in {
+          cpg.method.nameExact("setCount").lineNumber.l shouldBe List(9)
       }
   }
 

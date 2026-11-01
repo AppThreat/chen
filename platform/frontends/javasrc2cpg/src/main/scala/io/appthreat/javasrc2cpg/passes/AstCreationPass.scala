@@ -30,16 +30,13 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
 
   private val sourceFilenames = SourceParser.getSourceFilenames(config, sourcesOverride)
 
-  val (sourceParser, symbolSolver, packagesJarMappings) =
-      initParserAndUtils(config, sourceFilenames)
-
-  /** The dependency jars the classpath was resolved to, in resolution order: the jars the
-    * frontend's types were resolved from, which the callsites slice of the atom reads to map a
-    * class to the Maven artifact that carries it.
+  /** The dependency jars the types were resolved from, sorted. The callsites slice of the atom
+    * reads them to map a class to the Maven artifact that carries it.
     */
-  val dependencyJarPaths: List[String] =
-      if config.fetchDependencies then getDependencyList(config.inputPath).sorted
-      else List.empty
+  val dependencyJarPaths: List[String] = getDependencyList(config.inputPath).sorted
+
+  val (sourceParser, symbolSolver, packagesJarMappings) =
+      initParserAndUtils(config, sourceFilenames, dependencyJarPaths)
 
   override def generateParts(): Array[String] = sourceFilenames
 
@@ -70,9 +67,9 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
 
   private def initParserAndUtils(
     config: Config,
-    sourceFilenames: Array[String]
+    sourceFilenames: Array[String],
+    dependencies: List[String]
   ): (SourceParser, JavaSymbolSolver, mutable.Map[String, mutable.Set[String]]) =
-    val dependencies = getDependencyList(config.inputPath)
     val sourceParser = util.SourceParser(config, dependencies.exists(_.contains("lombok")))
     val (symbolSolver, packagesJarMappings) =
         createSymbolSolver(config, dependencies, sourceParser, sourceFilenames)
