@@ -17,5 +17,17 @@ class ConfigFileCreationPass(cpg: Cpg) extends XConfigFileCreationPass(cpg):
     pathEndFilter("composer.json"),
     pathEndFilter("bom.json"),
     pathEndFilter("cdx.json"),
-    pathEndFilter("chennai.json")
+    pathEndFilter("chennai.json"),
+    // Composer's record of the installed packages and its autoload maps: the only way to say
+    // which package declares a class once `vendor/` itself is not parsed
+    composerFile(ConfigFileCreationPass.ComposerFiles)
   )
+
+  private def composerFile(names: Set[String])(file: File): Boolean =
+      names.contains(file.name) && file.parent.name == "composer"
+end ConfigFileCreationPass
+
+object ConfigFileCreationPass:
+  /** The files of `vendor/composer` the callsites slice reads to map a class to its package. */
+  val ComposerFiles: Set[String] =
+      Set("installed.json", "autoload_classmap.php", "autoload_psr4.php", "autoload_namespaces.php")
