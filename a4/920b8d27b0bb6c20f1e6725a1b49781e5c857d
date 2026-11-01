@@ -1,0 +1,62 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForConstantsCreator.scala
+  s_bf0a61c31b2594::t_48d47db00cbc3a 1-107
+  s_bf0a61c31b2594::t_c60e68067b2128 108-256
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstCreator.scala
+  s_bf0a61c31b2594::t_d378ee8ff1f977 35
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForExpressionsCreator.scala
+  s_bf0a61c31b2594::t_87799832b60b4d 27,30,150-151,195-219,231-237,268-269,281-301,312-316,340-346,353-357,359-360,362,452-454,456-459,510,527-531,597,688,739-746,1030-1036
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForStatementsCreator.scala
+  s_bf0a61c31b2594::t_5fc031c7633d28 19-38,217-219,231,234
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForTypesCreator.scala
+  s_bf0a61c31b2594::t_085c9eecea3e69 160-192,218
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummary.scala
+  s_bf0a61c31b2594::t_8b969aba689f41 27-29,35-47,52-54,56
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummaryBuilder.scala
+  s_bf0a61c31b2594::t_d381d804ea656d 25-26,31-32,46,49-116
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyJsonToNodeCreator.scala
+  s_bf0a61c31b2594::t_53833c49b42836 1314-1320
+platform/frontends/ruby2atom/src/test/resources/ruby/app/models/user_profile.rb
+  s_bf0a61c31b2594::t_3d18505a74a85c 1-2
+platform/frontends/ruby2atom/src/test/resources/ruby/app/models/user_profile.rb.json
+  s_bf0a61c31b2594::t_0c36117e935fc6 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/profile_loader.rb
+  s_bf0a61c31b2594::t_a1f7f79627e46a 1-6
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/profile_loader.rb.json
+  s_bf0a61c31b2594::t_a770b787677058 1
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constant_calls.rb
+  s_bf0a61c31b2594::t_4c51651a3442e5 1-33
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constant_calls.rb.json
+  s_bf0a61c31b2594::t_3c9fa3c4726cad 1
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constants.rb
+  s_bf0a61c31b2594::t_fbe6aa0ff19513 1-55
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constants.rb.json
+  s_bf0a61c31b2594::t_5e89848ddc17bb 1
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/mixins.rb
+  s_bf0a61c31b2594::t_2e570bc6dd5f3a 1-18
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/mixins.rb.json
+  s_bf0a61c31b2594::t_158acd7eb0c282 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantCallNamingTests.scala
+  s_bf0a61c31b2594::t_ce9b948cf0f0d4 1-61
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantReferenceTests.scala
+  s_bf0a61c31b2594::t_d859c26da4d8ec 1-116
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/MixinHeritageTests.scala
+  s_bf0a61c31b2594::t_26d969216eb07d 1-56
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/SinkTagsTests.scala
+  s_bf0a61c31b2594::t_9b23a53922e4c9 23,51,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a4920b8d27b0bb6c20f1e6725a1b49781e5c857d",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
