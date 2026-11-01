@@ -82,5 +82,21 @@ class JsPathAliasesTest extends DataFlowCodeToCpgSuite:
           parsedByTaggingRun shouldBe 4L
           resolved shouldBe 4 * 3
       }
+
+      "resolve through a config file whose stored name carries backslashes, as on Windows" in {
+          val cpg = code("export const v = () => 1;", "pkg/src/lib/mod.js")
+              .moreCode("import { v } from '@lib/mod';\nv();", "pkg/src/use.js")
+              .moreCode(
+                """{ "compilerOptions": { "baseUrl": ".", "paths": { "@lib/*": ["./src/lib/*"] } } }""",
+                "pkg/tsconfig.json"
+              )
+          val diff = new overflowdb.BatchedUpdate.DiffGraphBuilder
+          cpg.configFile.nameExact("pkg/tsconfig.json").foreach { f =>
+              diff.setNodeProperty(f, "NAME", "pkg\\tsconfig.json")
+          }
+          overflowdb.BatchedUpdate.applyDiff(cpg.graph, diff)
+          JsIndexes.clear(cpg.graph)
+          new JsPathAliases(cpg).resolve("pkg/src/use.js", "@lib/mod") should not be empty
+      }
   }
 end JsPathAliasesTest

@@ -48,18 +48,20 @@ object JsPathAliases:
       cpg.graph,
       _ => scala.collection.concurrent.TrieMap.empty[String, Option[(String, io.circe.Json)]]
     )
+    // keyed and matched by the name with forward slashes, read by the name the graph stores,
+    // which carries the platform's separator
     cpg.configFile.name.l
-        .map(_.replace('\\', '/'))
-        .filter(n =>
+        .map(stored => stored.replace('\\', '/') -> stored)
+        .filter((n, _) =>
             kinds.exists(k => n == k || n.endsWith(s"/$k")) && !n.contains("node_modules")
         )
-        .distinct
-        .sorted
-        .flatMap { name =>
+        .distinctBy(_._1)
+        .sortBy(_._1)
+        .flatMap { (name, stored) =>
           val parsed = perGraph.getOrElseUpdate(
             name, {
                 JsStats.computed("pathAliasConfig")
-                cpg.configFile.nameExact(name).headOption.flatMap { f =>
+                cpg.configFile.nameExact(stored).headOption.flatMap { f =>
                     parseJsonc(f.content).map(dirOf(name) -> _)
                 }
             }
