@@ -1,0 +1,31 @@
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/billing/invoice.rb
+  s_bf0a61c31b2594::t_cfffd51a936c4f 1-2
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/billing/invoice.rb.json
+  s_bf0a61c31b2594::t_df856260296589 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/billing/runner.rb
+  s_bf0a61c31b2594::t_edfcc1d53b9805 1-13
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/billing/runner.rb.json
+  s_bf0a61c31b2594::t_ba5848a2716924 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/profile_loader.rb
+  s_bf0a61c31b2594::t_1abd60a26163ed 5
+platform/frontends/ruby2atom/src/test/resources/ruby/app/services/profile_loader.rb.json
+  s_bf0a61c31b2594::t_31b72965cdb844 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantReferenceTests.scala
+  s_bf0a61c31b2594::t_f7898abf55f84e 110-111,115-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b26a4c9a392f965eb7b5d0d4e6d1d3f3b82bae37",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
