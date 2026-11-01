@@ -1,0 +1,37 @@
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/CallSiteShapesTests.scala
+  s_31ec7d13cde4ed::t_5f3d5192fe2095 1-306
+  s_31ec7d13cde4ed::t_48dc073cede42c 307-410
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/utils/VariableTypes.scala
+  s_31ec7d13cde4ed::t_d2db9145ef7e31 1-126
+  s_31ec7d13cde4ed::t_75fbc68467d189 127-148
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/astcreation/AstCreator.scala
+  s_31ec7d13cde4ed::t_9fc952bfb9ce20 7,20-22,30-89,249-250,252-253,284,291,296,311-329,359-360,740,757,765-769,809,839-840,917-918,929-938,942-943,948,957-971,1117,1125-1126,1128,1159,1167-1170,1173,1177-1180,1182-1205,1225-1228,1254-1273,1324-1327,1335-1341,1348-1352,1356,1363-1383,1494,1923-1936,1963-1966,1971-1977,2027-2034,2165,2180-2181,2249,2290-2303,2311-2328
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/Domain.scala
+  s_31ec7d13cde4ed::t_cc2f15f741d8f3 379-382,505-521,1222-1225,1303-1326,1433-1441,1626-1649,1693,1697-1730
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/AstCreationPass.scala
+  s_31ec7d13cde4ed::t_ad1d63b88a289d 154-158
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/ControlStructureTests.scala
+  s_31ec7d13cde4ed::t_62288140bb4419 739-740,811-812
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/FieldAccessTests.scala
+  s_31ec7d13cde4ed::t_853204d36c11d3 5,86-87
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/MemberTests.scala
+  s_31ec7d13cde4ed::t_89bf85d6a65553 7-13,152-153
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/querying/OperatorTests.scala
+  s_31ec7d13cde4ed::t_1f91714a31ef94 454,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b17ea180f3f919e4bc4a1945fec178dc2cdce9d1",
+  "prompts": {},
+  "sessions": {
+    "s_31ec7d13cde4ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d7aa722-72e4-4178-b294-f2ed79df9999",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
