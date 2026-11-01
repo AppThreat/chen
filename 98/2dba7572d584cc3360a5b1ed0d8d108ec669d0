@@ -1,0 +1,39 @@
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_b37b12b5351861::t_9ea150315dd8a8 988-992,994-997,1000-1023,1026-1035,1062-1063,1065-1075
+  s_b37b12b5351861::t_d7b4c965cafa9e 1061
+  s_79a7c562b49300::t_52389b9a18c00c 254-259,1036-1055,1057-1058,1060,1076-1114,1424-1425,1749-1750,1756-1757,1759-1771,1776
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/JavaSrc2Cpg.scala
+  s_79a7c562b49300::t_9f6c0e870c316b 46-49
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreationPass.scala
+  s_79a7c562b49300::t_049db5c53a2918 33-34,36-39,70-71
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/TypeInferencePass.scala
+  s_79a7c562b49300::t_31b773ad2113b1 52-54,60
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/LibraryUseResolutionTests.scala
+  s_79a7c562b49300::t_d91c03fa9890d0 190-211,259-290
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/LombokTests.scala
+  s_79a7c562b49300::t_44aa3c4c323076 152-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "982dba7572d584cc3360a5b1ed0d8d108ec669d0",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
