@@ -1,0 +1,31 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForConstantsCreator.scala
+  s_bf0a61c31b2594::t_dc46d18a29f645 160-162,165-183
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummaryBuilder.scala
+  s_bf0a61c31b2594::t_4022eba6db6330 91-95,144-150
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/reopened.rb
+  s_bf0a61c31b2594::t_6438a0cd1b0f88 32
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/reopened.rb.json
+  s_bf0a61c31b2594::t_6d9ed81ccfdae9 1
+platform/frontends/ruby2atom/src/test/resources/ruby/scoped_const.rb
+  s_bf0a61c31b2594::t_6590c6cb280375 3
+platform/frontends/ruby2atom/src/test/resources/ruby/scoped_const.rb.json
+  s_bf0a61c31b2594::t_617fb75fd9cd02 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ReopenedNamespaceTests.scala
+  s_bf0a61c31b2594::t_e3ca804a4e84c0 32-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b3d8eb233a295e5aecf6cd59ca79d0a6c2f276be",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
