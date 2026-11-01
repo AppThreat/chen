@@ -73,12 +73,13 @@ class JsPathAliasesTest extends DataFlowCodeToCpgSuite:
       "parse exactly once per graph, however many specifiers resolve" in {
           val (configCount, parsedOnce, parsedBySecondHolder, parsedByTaggingRun, resolved) =
               counted(k = 4, files = 3, calls = 20)
-          // one parse per config file, however many specifiers resolved
-          parsedOnce shouldBe configCount
+          // one parse per tsconfig, however many specifiers resolve: the other config files
+          // of the graph (the fixture's scripts) are never read by the tsconfig kind
+          parsedOnce shouldBe 4L
           // a second holder parses nothing: the parse is the graph's, not the holder's
           parsedBySecondHolder shouldBe 0L
           // a tagging run, which clears the per-graph indexes, parses them once for the run
-          parsedByTaggingRun shouldBe configCount
+          parsedByTaggingRun shouldBe 4L
           resolved shouldBe 4 * 3
       }
   }

@@ -25,30 +25,49 @@ import io.shiftleft.semanticcpg.language.*
   */
 object JsPathAliases:
 
-  /** The config files of the graph, parsed once per graph and shared by every holder of a
-    * `JsPathAliases`: the same K files would otherwise be re-parsed by every pass that resolves
-    * specifiers, which made the parse the top allocator of the callsites command on a large JS
-    * project (chen#258). Cleared with the other per-graph JS indexes.
+  /** The parsed config files, one entry per file name, shared by every holder of a `JsPathAliases`:
+    * the same K files would otherwise be re-parsed by every pass that resolves specifiers, which
+    * made the parse the top allocator of the callsites command on a large JS project (chen#258). A
+    * file is parsed the first time a kind asks for it, so the graphs whose config nodes carry whole
+    * scripts and templates (the SFC files the ConfigPass keeps) are not read at all by the kinds
+    * that want a tsconfig. Cleared with the other per-graph JS indexes.
     */
   private val parsedConfigs =
       java.util.Collections.synchronizedMap(
-        new java.util.WeakHashMap[overflowdb.Graph, Vector[(String, String, io.circe.Json)]]()
+        new java.util.WeakHashMap[
+          overflowdb.Graph,
+          scala.collection.concurrent.TrieMap[String, Option[(String, io.circe.Json)]]
+        ]()
       )
 
   private[js] def clearConfigs(graph: overflowdb.Graph): Unit = parsedConfigs.remove(graph)
 
-  private def parseConfigs(cpg: Cpg): Vector[(String, String, io.circe.Json)] =
-      cpg.configFile.l
-          .map { f =>
-            val name = f.name.replace('\\', '/')
-            JsStats.computed("pathAliasConfig")
-            (name, dirOf(name), parseJsonc(f.content))
-          }
-          .collect { case (name, dir, Some(json)) => (name, dir, json) }
-          .toVector
-
-  private[js] def configsOf(cpg: Cpg): Vector[(String, String, io.circe.Json)] =
-      parsedConfigs.computeIfAbsent(cpg.graph, _ => parseConfigs(cpg))
+  /** The parsed config files whose name matches one of `kinds`, parsed once per graph. */
+  private[js] def configsOf(cpg: Cpg, kinds: Seq[String]): Vector[(String, String, io.circe.Json)] =
+    val perGraph = parsedConfigs.computeIfAbsent(
+      cpg.graph,
+      _ => scala.collection.concurrent.TrieMap.empty[String, Option[(String, io.circe.Json)]]
+    )
+    cpg.configFile.name.l
+        .map(_.replace('\\', '/'))
+        .filter(n =>
+            kinds.exists(k => n == k || n.endsWith(s"/$k")) && !n.contains("node_modules")
+        )
+        .distinct
+        .sorted
+        .flatMap { name =>
+          val parsed = perGraph.getOrElseUpdate(
+            name, {
+                JsStats.computed("pathAliasConfig")
+                cpg.configFile.nameExact(name).headOption.flatMap { f =>
+                    parseJsonc(f.content).map(dirOf(name) -> _)
+                }
+            }
+          )
+          parsed.map((dir, json) => (name, dir, json))
+        }
+        .toVector
+  end configsOf
 
   private[js] def dirOf(path: String): String =
     val p = path.replace('\\', '/')
@@ -127,11 +146,7 @@ final class JsPathAliases(cpg: Cpg):
 
   /** Config files by kind: (directory, parsed JSON), read from the per-graph parse. */
   private def configs(names: String*): List[(String, io.circe.Json)] =
-      JsPathAliases.configsOf(cpg)
-          .filter((name, _, _) =>
-              names.exists(k => name == k || name.endsWith(s"/$k")) &&
-                  !name.contains("node_modules")
-          )
+      JsPathAliases.configsOf(cpg, names)
           .map((_, dir, json) => dir -> json)
           .toList
           .sortBy(-_._1.length)
