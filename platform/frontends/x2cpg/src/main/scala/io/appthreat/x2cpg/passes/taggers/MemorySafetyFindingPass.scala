@@ -5518,7 +5518,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               val bufferLocals =
                   (buf match
                     case i: Identifier => i.method.local.nameExact(i.name).headOption.toList
-                    case _             => Nil
+                    case null          => Nil
                   ) ++ OverlayFacts.reachingDefsIn(buf).collect {
                       case d: Identifier if d.name == buf.name => d
                   }.flatMap(d =>

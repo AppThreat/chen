@@ -252,7 +252,7 @@ class CdxPass(
           )
         else segments
     kept.map(_.split("_").map(word =>
-        if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1)
+        if word.isEmpty then word else s"${word.charAt(0).toUpper}${word.drop(1)}"
     ).mkString)
 
   /** The full-name pattern for a constant path: each segment camelized with only its first letter
@@ -592,7 +592,7 @@ class CdxPass(
     rubyModulePattern(
       str.split("::").toList.map(
         _.split("_").map(word =>
-            if word.isEmpty then word else word.charAt(0).toUpper + word.drop(1)
+            if word.isEmpty then word else s"${word.charAt(0).toUpper}${word.drop(1)}"
         ).mkString
       )
     )

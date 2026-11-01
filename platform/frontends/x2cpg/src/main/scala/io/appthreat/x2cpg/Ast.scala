@@ -50,6 +50,9 @@ object Ast:
     ast.captureEdges.foreach { edge =>
         diffGraph.addEdge(edge.src, edge.dst, EdgeTypes.CAPTURE)
     }
+    ast.taggedByEdges.foreach { edge =>
+        diffGraph.addEdge(edge.src, edge.dst, EdgeTypes.TAGGED_BY)
+    }
   end storeInDiffGraph
 
   def neighbourValidation(src: NewNode, dst: NewNode, edge: String)(implicit
@@ -92,7 +95,8 @@ case class Ast(
   bindsEdges: collection.Seq[AstEdge] = Vector.empty,
   receiverEdges: collection.Seq[AstEdge] = Vector.empty,
   argEdges: collection.Seq[AstEdge] = Vector.empty,
-  captureEdges: collection.Seq[AstEdge] = Vector.empty
+  captureEdges: collection.Seq[AstEdge] = Vector.empty,
+  taggedByEdges: collection.Seq[AstEdge] = Vector.empty
 )(implicit withSchemaValidation: ValidationMode = ValidationMode.Disabled):
 
   def root: Option[NewNode] = nodes.headOption
@@ -115,7 +119,8 @@ case class Ast(
         argEdges = argEdges ++ other.argEdges,
         receiverEdges = receiverEdges ++ other.receiverEdges,
         refEdges = refEdges ++ other.refEdges,
-        bindsEdges = bindsEdges ++ other.bindsEdges
+        bindsEdges = bindsEdges ++ other.bindsEdges,
+        taggedByEdges = taggedByEdges ++ other.taggedByEdges
       )
 
   def merge(other: Ast): Ast =
@@ -126,7 +131,8 @@ case class Ast(
         argEdges = argEdges ++ other.argEdges,
         receiverEdges = receiverEdges ++ other.receiverEdges,
         refEdges = refEdges ++ other.refEdges,
-        bindsEdges = bindsEdges ++ other.bindsEdges
+        bindsEdges = bindsEdges ++ other.bindsEdges,
+        taggedByEdges = taggedByEdges ++ other.taggedByEdges
       )
 
   /** AST that results when adding all ASTs in `asts` as children, that is, connecting them to the
@@ -153,6 +159,13 @@ case class Ast(
   def withBindsEdge(src: NewNode, dst: NewNode): Ast =
     Ast.neighbourValidation(src, dst, EdgeTypes.BINDS)
     this.copy(bindsEdges = bindsEdges ++ List(AstEdge(src, dst)))
+
+  /** A TAG node hung off `src`, for facts the schema gives no node or position of their own.
+    * Carried beside the AST edges, so a tag a frontend writes while it builds the tree is stored
+    * with the same diff and cannot re-add a node that is already in it.
+    */
+  def withTaggedByEdge(src: NewNode, dst: NewNode): Ast =
+      this.copy(taggedByEdges = taggedByEdges ++ List(AstEdge(src, dst)))
 
   def withReceiverEdge(src: NewNode, dst: NewNode): Ast =
     Ast.neighbourValidation(src, dst, EdgeTypes.RECEIVER)

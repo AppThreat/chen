@@ -42,9 +42,27 @@ class TypeInferencePass(cpg: Cpg) extends ConcurrentWriterCpgPass[Call](cpg):
     lazy val argTypesMatch =
         doArgumentTypesMatch(method: Method, call: Call, skipCallThis = argSizeMod == 1)
 
-    lazy val typeDeclMatches = (callNameParts.typeDecl == methodNameParts.typeDecl)
+    lazy val typeDeclMatches = typeDeclOf(call, callNameParts) == methodNameParts.typeDecl
 
     parameterSizesMatch && argTypesMatch && typeDeclMatches
+
+  /** The type the call's name sits in, spelled as `getNameParts` spells it, with the trailing dot.
+    *
+    * Usually the prefix of the method full name itself. A chain link whose own base was only
+    * resolved by the previous round (`cart.getSecurity().login()`, the getter Lombok-generated)
+    * carries an unresolved namespace instead, and the receiver's known type is then the declaring
+    * one.
+    */
+  private def typeDeclOf(call: Call, callNameParts: NameParts): Option[String] =
+      callNameParts.typeDecl match
+        case Some(td) if !td.startsWith(Defines.UnresolvedNamespace) => Some(td)
+        case _ =>
+            call.argument.find(_.argumentIndex == 0).collect {
+                case base: Call
+                    if base.typeFullName.nonEmpty && base.typeFullName != TypeConstants.Any &&
+                        base.typeFullName != TypeConstants.Void =>
+                    base.typeFullName + "."
+            }.orElse(callNameParts.typeDecl)
 
   /** Check if argument types match by comparing exact full names. An argument type of `ANY` always
     * matches.
