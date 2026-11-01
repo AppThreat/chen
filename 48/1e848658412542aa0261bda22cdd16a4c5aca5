@@ -1,0 +1,25 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForConstantsCreator.scala
+  s_bf0a61c31b2594::t_92e82ba64ded63 150-153
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constants.rb
+  s_bf0a61c31b2594::t_0475c02e8ba398 56-61
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/constants.rb.json
+  s_bf0a61c31b2594::t_b291b0d4cdebfa 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantReferenceTests.scala
+  s_bf0a61c31b2594::t_1eed097849e0b3 92-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "481e848658412542aa0261bda22cdd16a4c5aca5",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
