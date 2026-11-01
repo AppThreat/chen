@@ -147,6 +147,10 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
         case StatementList(statements) => statements.flatMap(externalConstantsIn)
         case ExternalConstantRef(constant) =>
             astForExternalConstant(exceptionList, constant) :: Nil
+        // a bundled core class (`StandardError`) has its own reference node
+        case x: SimpleIdentifier
+            if isBundledClass(x.text) && scope.lookupVariable(x.text).isEmpty =>
+            astForExpression(x) :: Nil
         case _ => Nil
 
   /** Locals of the `def` being lowered that hold an instance of a dependency class, as `x =

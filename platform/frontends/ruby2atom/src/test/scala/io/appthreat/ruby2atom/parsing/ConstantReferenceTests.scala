@@ -89,6 +89,16 @@ class ConstantReferenceTests extends RubyCode2CpgFixture:
       columns shouldBe List(7, 25)
   }
 
+  "a bundled core class in a rescue list has its own reference at its position" in {
+      val bundled = cpg.typeRef.filter(_.typeFullName.startsWith("__core")).filter(
+        _.lineNumber.exists(_ == 59)
+      ).l
+      bundled.map(t => (t.code, t.typeFullName, t.columnNumber.get: Int)) shouldBe List(
+        ("__core.StandardError", "__core.StandardError", 7),
+        ("__core.ArgumentError", "__core.ArgumentError", 22)
+      )
+  }
+
   "a reopened core class is a project constant, what it refers to is still checked" in {
       val refs = external(cpg, "callsites/constants.rb")
       refs.filter(_._2 == "String") shouldBe empty

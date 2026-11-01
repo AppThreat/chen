@@ -53,3 +53,9 @@ end
 def tail
   Rails.root
 end
+
+def tolerant
+  yield
+rescue StandardError, ArgumentError
+  nil
+end
