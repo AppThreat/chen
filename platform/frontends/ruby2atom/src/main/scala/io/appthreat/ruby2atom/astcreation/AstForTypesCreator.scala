@@ -157,19 +157,39 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             case n => astsForStatement(n)
         }
 
-    val classBodyAsts =
-      val bodyAsts = separateStatementsFromBody(classBody.statements)
-      if scope.shouldGenerateDefaultConstructor && this.parseLevel == AstParseLevel.FULL_AST then
-        val bodyStart = classBody.span.spanStart()
-        val initBody  = StatementList(List())(bodyStart)
-        val methodDecl = astForMethodDeclaration(MethodDeclaration(
-          Defines.Initialize,
-          List(),
-          initBody
-        )(bodyStart))
-        methodDecl ++ bodyAsts
-      else
-        bodyAsts
+    // Resolved in the scope around the class: a superclass is looked up before the class exists.
+    val baseClassRefs = node.baseClass.toList.flatMap {
+        case base @ ExternalConstantRef(constant) => astForExternalConstant(base, constant) :: Nil
+        case _                                    => Nil
+    }
+    val declaredParts = node match
+      case x: NamespaceDeclaration => x.namespaceParts.getOrElse(Nil)
+      case _                       => Nil
+
+    val (classBodyAsts, mixins) = collectingMixins(withLexicalCref(
+      (declaredParts :+ className).mkString("."),
+      false
+    ) {
+        val bodyAsts = separateStatementsFromBody(classBody.statements)
+        if scope.shouldGenerateDefaultConstructor && this.parseLevel == AstParseLevel.FULL_AST then
+          val bodyStart = classBody.span.spanStart()
+          val initBody  = StatementList(List())(bodyStart)
+          val methodDecl = astForMethodDeclaration(MethodDeclaration(
+            Defines.Initialize,
+            List(),
+            initBody
+          )(bodyStart))
+          methodDecl ++ bodyAsts
+        else
+          bodyAsts
+    })
+    // `include` and `prepend` make the module an ancestor of the class, `extend` of its singleton
+    typeDecl.inheritsFromTypeFullName(
+      typeDecl.inheritsFromTypeFullName ++ mixins.collect { case (false, name) => name }
+    )
+    singletonTypeDecl.inheritsFromTypeFullName(
+      singletonTypeDecl.inheritsFromTypeFullName ++ mixins.collect { case (true, name) => name }
+    )
 
     val fields = node match
       case classDecl: ClassDeclaration   => classDecl.fields
@@ -195,6 +215,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val typeDeclAst = Ast(typeDecl)
         .withChildren(classModifiers)
         .withChildren(fieldTypeMemberNodes.map(_._2))
+        .withChildren(baseClassRefs)
         .withChildren(classBodyAsts)
     val singletonTypeDeclAst =
         Ast(singletonTypeDecl)

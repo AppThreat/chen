@@ -24,18 +24,36 @@ type NamespaceToTypeMap = mutable.Map[String, mutable.Set[RubyType]]
 
 class RubyProgramSummary(
   initialNamespaceMap: NamespaceToTypeMap = mutable.Map.empty,
-  initialPathMap: NamespaceToTypeMap = mutable.Map.empty
+  initialPathMap: NamespaceToTypeMap = mutable.Map.empty,
+  initialConstants: collection.Set[String] = Set.empty,
+  initialAncestors: collection.Map[String, List[String]] = Map.empty
 ) extends ProgramSummary[RubyType, RubyMethod, RubyField]:
 
   override val namespaceToType: NamespaceToTypeMap = initialNamespaceMap
   val pathToType: NamespaceToTypeMap               = initialPathMap
 
+  /** The constants the project defines, as dotted paths (`Outer.Inner`): every class and module
+    * with each of its prefixes and also under the name it is written with inside its module, every
+    * constant assignment, and the names Rails autoloading implies for the files under `app/` and
+    * `lib/`. A reference that resolves to one of these is not a use of a dependency.
+    */
+  val definedConstants: collection.Set[String] = initialConstants
+
+  /** The written ancestors (superclass, `include` and `prepend` arguments) of each class or module
+    * the project declares, keyed by its dotted path. Used to look a constant up through the
+    * ancestors of the innermost class, as Ruby does.
+    */
+  val ancestors: collection.Map[String, List[String]] = initialAncestors
+
   @targetName("appendAll")
   def ++=(other: RubyProgramSummary): RubyProgramSummary =
       RubyProgramSummary(
         ProgramSummary.merge(this.namespaceToType, other.namespaceToType),
-        ProgramSummary.merge(this.pathToType, other.pathToType)
+        ProgramSummary.merge(this.pathToType, other.pathToType),
+        this.definedConstants ++ other.definedConstants,
+        this.ancestors ++ other.ancestors
       )
+end RubyProgramSummary
 
 object RubyProgramSummary:
 

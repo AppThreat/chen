@@ -16,23 +16,26 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astsForStatement(node: RubyExpression): Seq[Ast] =
     baseAstCache.clear() // A safe approximation on where to reset the cache
     node match
-      case node: IfExpression               => astForIfStatement(node)
-      case node: OperatorAssignment         => astForOperatorAssignment(node)
-      case node: CaseExpression             => astsForCaseExpression(node)
-      case node: StatementList              => astForStatementList(node) :: Nil
-      case node: ReturnExpression           => astForReturnExpression(node) :: Nil
-      case node: AnonymousTypeDeclaration   => astForAnonymousTypeDeclaration(node) :: Nil
-      case node: TypeDeclaration            => astForClassDeclaration(node)
-      case node: FieldsDeclaration          => astsForFieldDeclarations(node)
-      case node: AccessModifier             => astForAccessModifier(node)
-      case node: MethodDeclaration          => astForMethodDeclaration(node)
-      case node: MethodAccessModifier       => astForMethodAccessModifier(node)
-      case node: SingletonMethodDeclaration => astForSingletonMethodDeclaration(node)
-      case node: MultipleAssignment         => node.assignments.map(astForExpression)
-      case node: BreakExpression            => astForBreakExpression(node) :: Nil
-      case node: SingletonStatementList     => astForSingletonStatementList(node)
-      case node: AliasStatement             => astForAliasStatement(node)
-      case _                                => astForExpression(node) :: Nil
+      case node: IfExpression             => astForIfStatement(node)
+      case node: OperatorAssignment       => astForOperatorAssignment(node)
+      case node: CaseExpression           => astsForCaseExpression(node)
+      case node: StatementList            => astForStatementList(node) :: Nil
+      case node: ReturnExpression         => astForReturnExpression(node) :: Nil
+      case node: AnonymousTypeDeclaration => astForAnonymousTypeDeclaration(node) :: Nil
+      case node: TypeDeclaration          => astForClassDeclaration(node)
+      case node: FieldsDeclaration        => astsForFieldDeclarations(node)
+      case node: AccessModifier           => astForAccessModifier(node)
+      case node: MethodDeclaration =>
+          withTypedLocals(node)(astForMethodDeclaration(node))
+      case node: MethodAccessModifier => astForMethodAccessModifier(node)
+      case node: SingletonMethodDeclaration =>
+          withTypedLocals(node)(astForSingletonMethodDeclaration(node))
+      case node: MultipleAssignment     => node.assignments.map(astForExpression)
+      case node: BreakExpression        => astForBreakExpression(node) :: Nil
+      case node: SingletonStatementList => astForSingletonStatementList(node)
+      case node: AliasStatement         => astForAliasStatement(node)
+      case _                            => astForExpression(node) :: Nil
+    end match
   end astsForStatement
 
   private def astForIfStatement(node: IfExpression): Seq[Ast] =
@@ -211,7 +214,9 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           astForReturnExpression(ReturnExpression(List(node))(node.span)) :: Nil
       case node: SingleAssignment =>
           astForSingleAssignment(node) :: List(
-            astForReturnExpression(ReturnExpression(List(node.lhs))(node.span))
+            asSetterTarget(node.lhs)(
+              astForReturnExpression(ReturnExpression(List(node.lhs))(node.span))
+            )
           )
       case node: DefaultMultipleAssignment =>
           astsForStatement(node) ++ astsForImplicitReturnStatement(
@@ -223,11 +228,10 @@ trait AstForStatementsCreator(implicit withSchemaValidation: ValidationMode):
           val nilReturnLiteral = StaticLiteral(Defines.NilClass)(nilReturnSpan)
           astsForStatement(node) ++ astsForImplicitReturnStatement(nilReturnLiteral)
       case node: AttributeAssignment =>
+          val echoed = MemberAccess(node.target, node.op, node.attributeName)(node.span)
           List(
             astForAttributeAssignment(node),
-            astForReturnFieldAccess(
-              MemberAccess(node.target, node.op, node.attributeName)(node.span)
-            )
+            asSetterTarget(echoed)(astForReturnFieldAccess(echoed))
           )
       case node: MemberAccess    => astForReturnMemberCall(node) :: Nil
       case ret: ReturnExpression => astForReturnExpression(ret) :: Nil

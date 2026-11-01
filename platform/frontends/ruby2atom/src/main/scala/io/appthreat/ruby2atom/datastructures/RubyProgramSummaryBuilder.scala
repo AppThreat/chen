@@ -22,10 +22,14 @@ object RubyProgramSummaryBuilder:
   def build(programs: List[(String, StatementList)]): RubyProgramSummary =
     val namespaceToType: NamespaceToTypeMap = mutable.Map.empty
     val pathToType: NamespaceToTypeMap      = mutable.Map.empty
+    val constants                           = mutable.Set.empty[String]
+    val ancestors                           = mutable.Map.empty[String, List[String]]
 
     programs.foreach { case (relativePath, program) =>
         // Require calls look paths up without the .rb extension (see RubyScope.addRequire).
         val requirePath = relativePath.stripSuffix(".rb").replace('\\', '/')
+        collectConstants(program, constants, ancestors)
+        autoloadConstants(requirePath).foreach(addWithPrefixes(constants, _))
         collectTypes(program).foreach { ty =>
           pathToType.updateWith(requirePath) {
               case Some(existing) => existing += ty; Some(existing)
@@ -39,8 +43,76 @@ object RubyProgramSummaryBuilder:
         }
     }
 
-    RubyProgramSummary(namespaceToType, pathToType)
+    RubyProgramSummary(namespaceToType, pathToType, constants, ancestors)
   end build
+
+  private def addWithPrefixes(into: mutable.Set[String], dotted: String): Unit =
+    val parts = dotted.split('.')
+    (1 to parts.length).foreach(i => into += parts.take(i).mkString("."))
+
+  private def camelize(segment: String): String =
+      segment.split('_').map(p => if p.isEmpty then p else p.head.toUpper +: p.tail).mkString
+
+  /** The constant path Rails autoloading (Zeitwerk) implies for a file, from its location: `app/`
+    * and `lib/` roots, with `concerns` directories and the first directory under `app/` (`models`,
+    * `controllers`, ...) not part of the name. Files elsewhere imply nothing.
+    */
+  private[datastructures] def autoloadConstants(requirePath: String): Option[String] =
+    val parts = requirePath.split('/').toList
+    val rest = parts match
+      case "app" :: tail if tail.size > 1 =>
+          val afterRoot = tail.drop(1)
+          if afterRoot.headOption.contains("concerns") && afterRoot.size > 1 then afterRoot.drop(1)
+          else afterRoot
+      case "lib" :: tail if tail.nonEmpty => tail
+      case _                              => Nil
+    Option.when(rest.nonEmpty)(rest.map(camelize).mkString("."))
+
+  /** Constant assignments (`FOO = ...`, `Foo = Struct.new`) and the ancestors each class or module
+    * declares, with the lexical nesting the declaration sits in.
+    */
+  private def collectConstants(
+    program: StatementList,
+    constants: mutable.Set[String],
+    ancestors: mutable.Map[String, List[String]]
+  ): Unit =
+    def dotted(name: RubyExpression): String = name match
+      case memberAccess: MemberAccess => RubyJsonHelpers.getParts(memberAccess).mkString(".")
+      case other                      => other.text.split("::").mkString(".")
+
+    def isConstantName(name: String): Boolean = name.headOption.exists(_.isUpper)
+
+    def go(prefix: String, expr: RubyExpression): Unit = expr match
+      case stmtList: StatementList => stmtList.statements.foreach(go(prefix, _))
+      case decl: TypeDeclaration =>
+          val name = (if prefix.isEmpty then "" else s"$prefix.") + dotted(decl.name)
+          addWithPrefixes(constants, name)
+          // A declaration nested in a module is also known by the name it is written with: a
+          // bare reference from outside the module may still reach it (an `include` of the module,
+          // `const_missing`), so it is not claimed for a dependency.
+          addWithPrefixes(constants, dotted(decl.name))
+          val body = decl.body match
+            case stmtList: StatementList => stmtList.statements
+            case other                   => List(other)
+          def written(e: RubyExpression): String = e.text.stripPrefix("::").replace("::", ".")
+          val mixedIn = body.flatMap {
+              case IncludeCall(_, argument) => List(written(argument))
+              case SimpleCall(target, arguments)
+                  if target.text == "prepend" || target.text == "include" =>
+                  arguments.map(written)
+              case _ => Nil
+          }
+          val ancestorNames = decl.baseClass.map(written).toList ++ mixedIn
+          if ancestorNames.nonEmpty then
+            ancestors.updateWith(name)(old => Some(old.getOrElse(Nil) ++ ancestorNames))
+          body.foreach(go(name, _))
+      case SingleAssignment(lhs: SimpleIdentifier, _, _) if isConstantName(lhs.text) =>
+          addWithPrefixes(constants, (if prefix.isEmpty then "" else s"$prefix.") + lhs.text)
+          constants += lhs.text
+      case _ =>
+
+    program.statements.foreach(go("", _))
+  end collectConstants
 
   /** Collects the types declared anywhere in the file, with dotted full names (e.g. `Models.User`)
     * so that `ProgramSummary.matchingTypes` can resolve partially qualified references.

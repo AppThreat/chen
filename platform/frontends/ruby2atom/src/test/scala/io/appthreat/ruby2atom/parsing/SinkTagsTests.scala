@@ -20,7 +20,7 @@ class SinkTagsTests extends RubyCode2CpgFixture:
           (tagsOf("system(\"ls #{id}\")") should contain).allOf("code-execution", "shell-exec")
           (tagsOf("`cat #{id}`") should contain).allOf("code-execution", "shell-exec")
           tagsOf("IO.popen(params[:cmd])") should contain("shell-exec")
-          tagsOf("(<tmp-7> = Open3).capture2(\"git\", params[:ref])") should contain("shell-exec")
+          tagsOf("(<tmp-6> = Open3).capture2(\"git\", params[:ref])") should contain("shell-exec")
           tagsOf("eval(params[:code])") should contain("code-execution")
       }
 
@@ -48,14 +48,14 @@ class SinkTagsTests extends RubyCode2CpgFixture:
           ) shouldBe
               List(
                 "(<tmp-4> = current_user).send(params[:m])"               -> true,
-                "(<tmp-6> = ActiveRecord::Base).send(:include, Auditing)" -> false
+                "(<tmp-5> = ActiveRecord::Base).send(:include, Auditing)" -> false
               )
           tagsOf("redirect_to params[:url]") should contain("framework-output")
           tagsOf("redirect_to \"/home\"") should not contain "framework-output"
           tagsOf("redirect_to root_url") should not contain "framework-output"
           tagsOf("render inline: params[:tpl]") should contain("template-injection")
           tagsOf("render \"show\"") should not contain "template-injection"
-          tagsOf("(<tmp-11> = params[:html]).html_safe") should contain("framework-output")
+          tagsOf("(<tmp-10> = params[:html]).html_safe") should contain("framework-output")
       }
   }
 end SinkTagsTests

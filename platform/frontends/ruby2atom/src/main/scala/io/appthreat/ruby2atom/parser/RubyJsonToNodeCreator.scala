@@ -1311,12 +1311,13 @@ class RubyJsonToNodeCreator(
     val callName    = obj(ParserKeys.Name).str
     val hasReceiver = obj.contains(ParserKeys.Receiver)
     callName match
-      case "new"                                           => visitObjectInstantiation(obj)
-      case "Array" | "Hash"                                => visitCollectionAliasSend(obj)
-      case "[]"                                            => visitIndexAccessAsSend(obj)
-      case "[]="                                           => visitBracketAssignmentAsSend(obj)
-      case "raise"                                         => visitRaise(obj)
-      case "include"                                       => visitInclude(obj)
+      case "new"            => visitObjectInstantiation(obj)
+      case "Array" | "Hash" => visitCollectionAliasSend(obj)
+      case "[]"             => visitIndexAccessAsSend(obj)
+      case "[]="            => visitBracketAssignmentAsSend(obj)
+      case "raise"          => visitRaise(obj)
+      case "include" if !hasReceiver && obj.visitArray(ParserKeys.Arguments).size == 1 =>
+          visitInclude(obj)
       case "attr_reader" | "attr_writer" | "attr_accessor" => visitFieldDeclaration(obj)
       case "private" | "public" | "protected"              => visitAccessModifier(obj)
       case "private_class_method" | "public_class_method"  => visitMethodAccessModifier(obj)
