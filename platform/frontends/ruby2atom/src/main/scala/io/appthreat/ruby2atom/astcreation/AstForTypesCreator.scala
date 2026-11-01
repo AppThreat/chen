@@ -162,6 +162,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
         case base @ ExternalConstantRef(constant) => astForExternalConstant(base, constant) :: Nil
         case _                                    => Nil
     }
+    // `class A < Migration[7.2]` or `< Struct.new(:a)`: an expression, which runs where the class is
+    // written, with the constant it calls on as the receiver
+    val baseClassExpressions = node.baseClass.toList.filter(constantPath(_).isEmpty).filterNot {
+        case _: SelfIdentifier => true
+        case _                 => false
+    }.map(astForExpression)
     val declaredParts = node match
       case x: NamespaceDeclaration => x.namespaceParts.getOrElse(Nil)
       case _                       => Nil
@@ -230,7 +236,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
 
     if shouldPopAdditionalScope then scope.popScope()
     popAccessModifier()
-    prefixAst :: bodyMemberCallAst :: statementsToForwardUpTheAst.toList
+    baseClassExpressions.toList ++ (prefixAst :: bodyMemberCallAst :: statementsToForwardUpTheAst.toList)
   end astForSimpleNamedClassDeclaration
 
   private def astForTypeDeclBodyCall(node: TypeDeclBodyCall, typeFullName: String): Ast =

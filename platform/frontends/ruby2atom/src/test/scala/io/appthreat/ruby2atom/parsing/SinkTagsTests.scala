@@ -55,7 +55,7 @@ class SinkTagsTests extends RubyCode2CpgFixture:
           tagsOf("redirect_to root_url") should not contain "framework-output"
           tagsOf("render inline: params[:tpl]") should contain("template-injection")
           tagsOf("render \"show\"") should not contain "template-injection"
-          tagsOf("(<tmp-10> = params[:html]).html_safe") should contain("framework-output")
+          tagsOf("(<tmp-9> = params[:html]).html_safe") should contain("framework-output")
       }
   }
 end SinkTagsTests

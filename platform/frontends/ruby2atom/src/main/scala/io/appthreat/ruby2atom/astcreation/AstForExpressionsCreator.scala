@@ -244,6 +244,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     end createMemberCall
 
     def determineMemberAccessBase(target: RubyExpression): RubyExpression = target match
+      case ExternalConstantRef(_) => target // a constant keeps its own reference, at any depth
       case MemberAccess(SelfIdentifier(), _, _) => target
       case x: SimpleIdentifier =>
           scope.getSurroundingType(x.text).map(_.fullName) match
