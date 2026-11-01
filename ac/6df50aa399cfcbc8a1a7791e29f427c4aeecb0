@@ -1,0 +1,27 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForExpressionsCreator.scala
+  s_bf0a61c31b2594::t_faa17377f9e2e2 247
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForTypesCreator.scala
+  s_bf0a61c31b2594::t_b685148325d180 165-170,239
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/chains.rb
+  s_bf0a61c31b2594::t_844cab3e047a95 1-13
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/chains.rb.json
+  s_bf0a61c31b2594::t_aec89b3a1b19e0 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantChainTests.scala
+  s_bf0a61c31b2594::t_4fad6848ba56fc 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ac6df50aa399cfcbc8a1a7791e29f427c4aeecb0",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
