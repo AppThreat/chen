@@ -1,0 +1,21 @@
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/FrameworkEntrypointTaggingTests.scala
+  s_79a7c562b49300::t_e57c3f8311c76d 87-125
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_79a7c562b49300::t_3519e9d4cc508f 63-64,66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3b70223eb4e72760a0f165cd372af4749db5db32",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
