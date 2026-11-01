@@ -954,7 +954,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     )
     val hasAddressOfLocal = callFacts.values.exists(cf =>
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
-            .exists { case e: Expression => namesFrameObject(e, ctx); case _ => false }
+            .exists { case e: Expression => namesFrameObject(e, ctx); case null => false }
     )
     // a compound literal's address in a return is the frame question with no allocation, no
     // array local and no addressOf anywhere: the literal is an unnamed automatic object

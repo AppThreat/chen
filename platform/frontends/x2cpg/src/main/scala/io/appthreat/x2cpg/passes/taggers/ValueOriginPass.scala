@@ -349,7 +349,7 @@ object ValueOriginPass:
   private def definedMethodsNamed(graph: overflowdb.Graph, name: String): List[Method] =
       definedByName.computeIfAbsent(
         graph,
-        _ => Cpg(graph).method.filterNot(_.isExternal).l.groupBy(_.name)
+        _ => Cpg(using graph).method.filterNot(_.isExternal).l.groupBy(_.name)
       ).getOrElse(name, Nil)
 
   /** set while a callee's returns are being classified: `f` returns `g()` which returns a parameter
