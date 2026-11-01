@@ -1,0 +1,23 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsPathAliases.scala
+  s_b37b12b5351861::t_d71dd06c360ed7 28,37-40,45-58,66-67
+  s_b37b12b5351861::t_7c50d44b04f3a6 59-65
+  s_b37b12b5351861::t_ce00932cfb6f96 29-33,68-70,149
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsPathAliasesTest.scala
+  s_b37b12b5351861::t_8e550a27a2cb6e 76-78,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ed6391c61f504f17c7ca7c1e55db225440588c21",
+  "prompts": {},
+  "sessions": {
+    "s_b37b12b5351861": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_cb0e2603-6d04-484d-ac02-895b1a9284cd",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
