@@ -84,6 +84,45 @@ class FrameworkEntrypointTaggingTests extends PhpCode2CpgFixture:
       }
   }
 
+  "registered routes" should {
+
+      def routeLiterals(source: String) =
+        val cpg = code(source)
+        new ChennaiTagsPass(cpg).createAndApply()
+        cpg.literal.where(_.tag.nameExact(FrameworkRoute)).code.l
+
+      "tag the path of a route registered on a typed Slim app, as on an untyped one" in {
+          // the route file Slim's skeleton writes: `$app` is typed, so the call is `Slim\App->get`
+          routeLiterals("""<?php
+          |use Slim\App;
+          |return function (App $app) {
+          |  $app->get("/hello", function ($request, $response) { return $response; });
+          |};
+          |""".stripMargin) should contain("\"/hello\"")
+          routeLiterals("""<?php
+          |$app->get("/plain", function ($request, $response) { return $response; });
+          |""".stripMargin) should contain("\"/plain\"")
+      }
+
+      "tag the path of a route registered on a typed Laravel router" in {
+          routeLiterals("""<?php
+          |use Illuminate\Routing\Router;
+          |function routes(Router $router) {
+          |  $router->get("/users", "UserController@index");
+          |}
+          |""".stripMargin) should contain("\"/users\"")
+      }
+
+      "not tag the field name a typed form builder adds" in {
+          routeLiterals("""<?php
+          |use Symfony\Component\Form\FormBuilderInterface;
+          |function build(FormBuilderInterface $builder) {
+          |  $builder->add("title");
+          |}
+          |""".stripMargin) shouldBe Nil
+      }
+  }
+
   "WordPress hooks" should {
 
       "tag the callable argument of add_action('init', 'my_handler') as framework-route" in {
