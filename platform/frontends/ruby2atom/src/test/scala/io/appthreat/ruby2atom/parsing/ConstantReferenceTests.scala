@@ -107,8 +107,19 @@ class ConstantReferenceTests extends RubyCode2CpgFixture:
 
   "a constant a file path implies under app/ is a project constant" in {
       val refs = external(cpg, "app/services/profile_loader.rb")
-      // `UserProfile` is defined by Zeitwerk from app/models/user_profile.rb, `Missing` by nobody
+      // `UserProfile` is defined by Zeitwerk from app/models/user_profile.rb, `Missing` by nobody,
+      // and `STATUSES` is assigned there too (a constant of another file)
       refs shouldBe List((4, "Missing", "Missing"))
+  }
+
+  "a file-implied constant is found through the lexical scopes of the module that holds it" in {
+      val billing = fixture("app/services/billing/invoice", "app/services/billing/runner")
+      val refs = billing.typeRef.filter(isConstantReference).map(t =>
+          (t.lineNumber.get: Int, t.code, t.typeFullName)
+      ).l
+      // `Invoice` in `module Billing` is Billing::Invoice (autoloaded from billing/invoice.rb), the
+      // same name outside the module reaches Object
+      refs shouldBe List((11, "Invoice", "Invoice"))
   }
 
   "a reference is created once, also in the last expression of a method" in {
