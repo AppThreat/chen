@@ -60,8 +60,10 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     ".*def\\s(get|post|put)\\(.*"
   )
 
+  // The receiver is `$app` or `$router` when php2atom cannot type it, and its class (`Slim\App`,
+  // `Illuminate\Routing\Router`) when it can, so its name is matched in either case.
   private val PHP_ROUTES_METHODS_REGEXES = Array(
-    ".*(router|routes|r|app|map)->(addRoute|add|before|mount|get|post|put|delete|head|option).*",
+    "(?i).*(router|routes|r|app|map)->(addRoute|add|before|mount|get|post|put|delete|head|option).*",
     ".*(Router)::(scope|connect|get|post|put|delete|head|option).*"
   )
 

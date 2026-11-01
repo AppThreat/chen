@@ -23,7 +23,8 @@ case class BatchParsedFile(sourcePath: String, phpFile: PhpFile)
 class PhpParser private (
   phpParserPath: String,
   phpIniPath: String,
-  batchGeneratorOverride: Option[String] = None
+  batchGeneratorOverride: Option[String] = None,
+  ignoredFilesRegex: String = ""
 ):
 
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -157,7 +158,21 @@ class PhpParser private (
               s"Not batching '$inputDir' through cmd: the path holds characters cmd would interpret."
             )
             None
-          else Some(prefix ++ Seq("-i", inputDir, "-o", outputDir) ++ PhpParser.CompleteTreeArgs)
+          else
+            // Files the frontend ignores (a Composer `vendor/` tree) are never parsed: the
+            // generator takes the same pattern, which it tests against the path relative to the
+            // input. Through `cmd` a pattern holding its metacharacters cannot be passed safely;
+            // the generator then parses everything and the pass skips the ignored files.
+            val exclude =
+                Option.when(
+                  ignoredFilesRegex.nonEmpty &&
+                      !(prefix.headOption.contains("cmd") &&
+                          ignoredFilesRegex.exists(PhpParser.CmdMetaChars.contains))
+                )(ignoredFilesRegex)
+            Some(
+              prefix ++ Seq("-i", inputDir, "-o", outputDir) ++
+                  PhpParser.completeTreeArgs(exclude)
+            )
       }
 
   /** Capability probe.
@@ -391,7 +406,11 @@ object PhpParser:
     * the default. A generator older than `--include-vendor` ignores the flag; the files it skips
     * are then parsed one by one, so the result is the same, only slower.
     */
-  val CompleteTreeArgs: Seq[String] = Seq("--include-vendor", "--exclude", "\\b\\B")
+  val CompleteTreeArgs: Seq[String] = completeTreeArgs(None)
+
+  /** [[CompleteTreeArgs]] with the files the frontend ignores left out. */
+  def completeTreeArgs(excludeRegex: Option[String]): Seq[String] =
+      Seq("--include-vendor", "--exclude", excludeRegex.getOrElse("\\b\\B"))
 
   /** Characters `cmd.exe` interprets on a command line. */
   private[parser] val CmdMetaChars: Set[Char] =
@@ -457,7 +476,12 @@ object PhpParser:
         phpParserPath <- maybePhpParserPath(config);
         phpIniPath    <- maybePhpIniPath(config)
       )
-          yield new PhpParser(phpParserPath, phpIniPath)
+          yield new PhpParser(
+            phpParserPath,
+            phpIniPath,
+            None,
+            Option(config.ignoredFilesRegex).map(_.toString).getOrElse("")
+          )
 
   /** Construct a parser directly from an explicit binary + ini pair.
     *
@@ -469,7 +493,8 @@ object PhpParser:
   def fromPaths(
     phpParserPath: String,
     phpIniPath: String,
-    batchGeneratorOverride: Option[String] = None
+    batchGeneratorOverride: Option[String] = None,
+    ignoredFilesRegex: String = ""
   ): PhpParser =
-      new PhpParser(phpParserPath, phpIniPath, batchGeneratorOverride)
+      new PhpParser(phpParserPath, phpIniPath, batchGeneratorOverride, ignoredFilesRegex)
 end PhpParser

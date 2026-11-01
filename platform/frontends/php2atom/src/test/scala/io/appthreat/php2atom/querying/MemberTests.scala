@@ -4,7 +4,13 @@ import io.appthreat.php2atom.parser.Domain
 import io.appthreat.php2atom.testfixtures.PhpCode2CpgFixture
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.{ModifierTypes, Operators}
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, Literal}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+    Call,
+    FieldIdentifier,
+    Identifier,
+    Literal,
+    TypeRef
+}
 import io.shiftleft.semanticcpg.language.*
 
 class MemberTests extends PhpCode2CpgFixture:
@@ -143,8 +149,8 @@ class MemberTests extends PhpCode2CpgFixture:
           fieldAccess.code shouldBe "Foo::X"
           fieldAccess.lineNumber shouldBe Some(2)
 
-          inside(fieldAccess.argument.l) { case List(fooArg: Identifier, xArg: FieldIdentifier) =>
-              fooArg.name shouldBe "Foo"
+          inside(fieldAccess.argument.l) { case List(fooArg: TypeRef, xArg: FieldIdentifier) =>
+              fooArg.typeFullName shouldBe "Foo"
               fooArg.code shouldBe "Foo"
               fooArg.argumentIndex shouldBe 1
               fooArg.lineNumber shouldBe Some(2)
