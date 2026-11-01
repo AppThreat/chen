@@ -376,7 +376,10 @@ object Domain:
   final case class PhpConstStmt(
     modifiers: List[String],
     consts: List[PhpConstDeclaration],
-    attributes: PhpAttributes
+    attributes: PhpAttributes,
+    // PHP 8.3 typed class constants
+    typeName: Option[PhpNameExpr] = None,
+    attributeGroups: List[PhpAttributeGroup] = Nil
   ) extends PhpStmt
 
   final case class PhpGotoStmt(label: PhpNameExpr, attributes: PhpAttributes)  extends PhpStmt
@@ -499,10 +502,24 @@ object Domain:
     args: Seq[PhpArgument],
     isNullSafe: Boolean,
     isStatic: Boolean,
-    attributes: PhpAttributes
+    attributes: PhpAttributes,
+    // an unqualified function name in a namespace: PHP tries the namespaced function first and
+    // falls back to the global one, which only the whole program can decide
+    globalFallback: Boolean = false,
+    // a function name PHP wrote or resolved to its absolute form (`\Foo\bar()`, `use function`)
+    absolute: Boolean = false
   ) extends PhpExpr
-  final case class PhpVariable(value: PhpExpr, attributes: PhpAttributes)        extends PhpExpr
-  final case class PhpNameExpr(name: String, attributes: PhpAttributes)          extends PhpExpr
+  final case class PhpVariable(value: PhpExpr, attributes: PhpAttributes) extends PhpExpr
+
+  /** A name; for a declared type, `members` holds the class names it writes (each member of a
+    * nullable, union or intersection type, with its own position), never a scalar type, `self`,
+    * `static` or `parent`.
+    */
+  final case class PhpNameExpr(
+    name: String,
+    attributes: PhpAttributes,
+    members: List[PhpNameExpr] = Nil
+  ) extends PhpExpr
   final case class PhpCloneExpr(expr: PhpExpr, attributes: PhpAttributes)        extends PhpExpr
   final case class PhpEmptyExpr(expr: PhpExpr, attributes: PhpAttributes)        extends PhpExpr
   final case class PhpEvalExpr(expr: PhpExpr, attributes: PhpAttributes)         extends PhpExpr
@@ -1202,10 +1219,10 @@ object Domain:
         case "Expr_NullsafePropertyFetch" => readPropertyFetch(json, isNullsafe = true)
         case "Expr_StaticPropertyFetch"   => readPropertyFetch(json, isStatic = true)
 
-        case typ if isUnaryOpType(typ)  => readUnaryOp(json)
-        case typ if isBinaryOpType(typ) => readBinaryOp(json)
-        case typ if isAssignType(typ)   => readAssign(json)
-        case typ if isCastType(typ)     => readCast(json)
+        case typ if isUnaryOpType(typ)                         => readUnaryOp(json)
+        case typ if isBinaryOpType(typ) || typ == PipeNodeType => readBinaryOp(json)
+        case typ if isAssignType(typ)                          => readAssign(json)
+        case typ if isCastType(typ)                            => readCast(json)
 
         // Unmapped/newer expression `nodeType`: degrade gracefully to a name-expr placeholder
         // instead of throwing, so an unknown node never crashes or aborts the file. `PhpNameExpr`
@@ -1283,7 +1300,30 @@ object Domain:
     val isNullSafe = nodeType == "Expr_NullsafeMethodCall"
     val isStatic   = nodeType == "Expr_StaticCall"
 
-    PhpCallExpr(target, methodName, args, isNullSafe, isStatic, PhpAttributes(json))
+    val globalFallback =
+        nodeType == "Expr_FuncCall" && json("name").objOpt.exists { name =>
+            name.get("nodeType").exists(_.strOpt.contains("Name")) &&
+            name.get("attributes").flatMap(_.objOpt).exists(
+              _.get("namespacedName").exists(!_.isNull)
+            )
+        }
+
+    val absolute =
+        nodeType == "Expr_FuncCall" && json("name").objOpt.exists(
+          _.get("nodeType").exists(_.strOpt.contains("Name_FullyQualified"))
+        )
+
+    PhpCallExpr(
+      target,
+      methodName,
+      args,
+      isNullSafe,
+      isStatic,
+      PhpAttributes(json),
+      globalFallback,
+      absolute
+    )
+  end readCall
 
   private def readFunction(json: Value): PhpMethodDecl =
     val returnByRef = json("byRef").bool
@@ -1390,7 +1430,15 @@ object Domain:
 
     val constDeclarations = json("consts").arr.map(readConstDeclaration).toList
 
-    PhpConstStmt(modifiers, constDeclarations, PhpAttributes(json))
+    val typeName = json.obj.get("type").filterNot(_.isNull).map(readType)
+
+    PhpConstStmt(
+      modifiers,
+      constDeclarations,
+      PhpAttributes(json),
+      typeName,
+      readAttributeGroups(json)
+    )
 
   private def readGoto(json: Value): PhpGotoStmt =
     val name = readName(json("name"))
@@ -1575,7 +1623,30 @@ object Domain:
     * than mangled into a single collapsed type.
     */
   private def readType(json: Value): PhpNameExpr =
-      PhpNameExpr(renderTypeName(json, nestedInUnion = false), PhpAttributes(json))
+      PhpNameExpr(
+        renderTypeName(json, nestedInUnion = false),
+        PhpAttributes(json),
+        typeMembers(json)
+      )
+
+  /** The class names a type writes: the leaves of a nullable, union or intersection type that are
+    * names (a scalar type is an `Identifier` node), each with its own position. `self`, `static`
+    * and `parent` name no class of their own.
+    */
+  private def typeMembers(json: Value): List[PhpNameExpr] =
+      json match
+        case Obj(value) =>
+            value.get("nodeType").map(_.str) match
+              case Some("NullableType") => typeMembers(value("type"))
+              case Some("IntersectionType") | Some("UnionType") =>
+                  value("types").arr.toList.flatMap(typeMembers)
+              case Some("Name") | Some("Name_FullyQualified") =>
+                  val member = readName(json)
+                  if SpecialClassNames.contains(member.name.toLowerCase) then Nil else List(member)
+              case _ => Nil
+        case _ => Nil
+
+  private val SpecialClassNames = Set("self", "static", "parent")
 
   /** Render a (possibly complex) type node into a canonical, precedence-preserving name.
     *
@@ -1619,13 +1690,44 @@ object Domain:
 
     PhpUnaryOp(opType, expr, PhpAttributes(json))
 
-  private def readBinaryOp(json: Value): PhpBinaryOp =
-    val opType = BinaryOpTypeMap(json("nodeType").str)
-
+  private def readBinaryOp(json: Value): PhpExpr =
     val leftExpr  = readExpr(json("left"))
     val rightExpr = readExpr(json("right"))
 
-    PhpBinaryOp(opType, leftExpr, rightExpr, PhpAttributes(json))
+    if json("nodeType").str == PipeNodeType then lowerPipe(leftExpr, rightExpr, PhpAttributes(json))
+    else
+      PhpBinaryOp(BinaryOpTypeMap(json("nodeType").str), leftExpr, rightExpr, PhpAttributes(json))
+
+  private val PipeNodeType = "Expr_BinaryOp_Pipe"
+
+  /** PHP 8.5's `a |> f(...)` is the call `f(a)`: the callee of a first-class callable (a function,
+    * method, static method or constructor) takes the left side in place of its `...` placeholder,
+    * so every call on a pipe line exists and carries its own name. Any other right side is a
+    * callable value, called with the left side.
+    */
+  private def lowerPipe(left: PhpExpr, right: PhpExpr, attrs: PhpAttributes): PhpExpr =
+    def withArg(args: List[PhpArgument]): List[PhpArgument] =
+        args.lastOption match
+          case Some(_: PhpVariadicPlaceholder) =>
+              args.init :+ PhpArg(left, None, false, false, left.attributes)
+          case _ => args :+ PhpArg(left, None, false, false, left.attributes)
+    right match
+      case call: PhpCallExpr
+          if call.args.lastOption.exists(_.isInstanceOf[PhpVariadicPlaceholder]) =>
+          call.copy(args = withArg(call.args.toList))
+      case newExpr: PhpNewExpr
+          if newExpr.args.lastOption.exists(_.isInstanceOf[PhpVariadicPlaceholder]) =>
+          newExpr.copy(args = withArg(newExpr.args))
+      case callable =>
+          PhpCallExpr(
+            None,
+            callable,
+            List(PhpArg(left, None, false, false, left.attributes)),
+            false,
+            false,
+            attrs
+          )
+  end lowerPipe
 
   private def readAssign(json: Value): PhpAssignment =
     val nodeType = json("nodeType").str

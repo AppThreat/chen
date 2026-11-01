@@ -2,7 +2,7 @@ package io.appthreat.php2atom.querying
 
 import io.appthreat.php2atom.testfixtures.PhpCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.{FieldIdentifier, Identifier}
+import io.shiftleft.codepropertygraph.generated.nodes.{FieldIdentifier, Identifier, TypeRef}
 import io.shiftleft.semanticcpg.language.*
 
 class FieldAccessTests extends PhpCode2CpgFixture:
@@ -83,8 +83,8 @@ class FieldAccessTests extends PhpCode2CpgFixture:
           fieldAccess.lineNumber shouldBe Some(2)
 
           inside(fieldAccess.argument.l) {
-              case List(classIdentifier: Identifier, fieldIdentifier: Identifier) =>
-                  classIdentifier.name shouldBe "className"
+              case List(classIdentifier: TypeRef, fieldIdentifier: Identifier) =>
+                  classIdentifier.typeFullName shouldBe "className"
                   classIdentifier.code shouldBe "className"
                   classIdentifier.lineNumber shouldBe Some(2)
 

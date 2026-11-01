@@ -4,7 +4,7 @@ import io.appthreat.php2atom.astcreation.AstCreator.{NameConstants, TypeConstant
 import io.appthreat.php2atom.datastructures.ArrayIndexTracker
 import io.appthreat.php2atom.parser.Domain.*
 import io.appthreat.php2atom.parser.Domain.PhpModifiers.containsAccessModifier
-import io.appthreat.php2atom.utils.Scope
+import io.appthreat.php2atom.utils.{Scope, VariableTypes}
 import io.appthreat.x2cpg.Ast.storeInDiffGraph
 import io.appthreat.x2cpg.Defines.{StaticInitMethodName, UnresolvedNamespace, UnresolvedSignature}
 import io.appthreat.x2cpg.utils.AstPropertiesUtil.RootProperties
@@ -17,14 +17,75 @@ import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 import org.slf4j.LoggerFactory
 import overflowdb.BatchedUpdate
 
-class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidation: ValidationMode)
-    extends AstCreatorBase(filename)
+class AstCreator(filename: String, phpAst: PhpFile, lineStarts: Array[Int] = Array.empty)(implicit
+  withSchemaValidation: ValidationMode
+) extends AstCreatorBase(filename)
     with AstNodeBuilder[PhpNode, AstCreator]:
 
   private val logger          = LoggerFactory.getLogger(AstCreator.getClass)
   private val scope           = new Scope()(using () => nextClosureName())
   private val tmpKeyPool      = new IntervalKeyPool(first = 0, last = Long.MaxValue)
   private val globalNamespace = globalNamespaceBlock()
+
+  // The class a variable holds, by declaration alone (see VariableTypes), and the class each
+  // property of the enclosing class declares, for naming `$x->m()` and `$this->p->m()` calls.
+  private var variableTypes: Map[String, String] = Map.empty
+  private var propertyTypes: Map[String, String] = Map.empty
+  // the method that holds the file's top-level code, which tags the file's class heritage
+  private var fileMethod: Option[NewMethod] = None
+
+  /** A class name a type, `new` or `::` writes, as opposed to `self`, `static` and `parent`. */
+  private def writtenClass(name: PhpNameExpr): Option[String] =
+      Option.unless(VariableTypes.special(name.name) || name.name.isEmpty)(name.name)
+
+  /** One tag per class name a declaration writes, with the name's own position: the types of
+    * parameters, returns, properties and class constants (`decltype`), and a class's `extends`,
+    * `implements` and trait `use` names. The slice reads them for the positions a node's single
+    * `typeFullName` cannot carry (each member of a union type, each name of an implements list).
+    */
+  private def tagWrittenNames(node: NewNode, names: List[PhpNameExpr], kind: String): Unit =
+      names.foreach(name => tagWrittenName(node, name, kind, ""))
+
+  private def tagWrittenName(node: NewNode, name: PhpNameExpr, kind: String, member: String): Unit =
+      for
+        cls <- writtenClass(name)
+        ln  <- line(name)
+      do
+        val value = ujson.Obj(
+          "type"   -> cls,
+          "line"   -> ln.intValue,
+          "col"    -> column(name).map(_.intValue).getOrElse(-1),
+          "kind"   -> kind,
+          "member" -> member
+        ).render()
+        val tag = NewTag().name(AstCreator.WrittenNameTag).value(value)
+        diffGraph.addNode(tag)
+        diffGraph.addEdge(node, tag, EdgeTypes.TAGGED_BY)
+
+  /** A parameter's default value has no place in the graph, so the classes it names (`Foo::BAR`,
+    * `Foo::class`, `new Foo`) are tagged on the parameter, each with its own position.
+    */
+  private def tagDefaultValueNames(param: NewNode, default: PhpExpr): Unit =
+      VariableTypes.classReferencesIn(default).foreach { (name, kind, member) =>
+          tagWrittenName(param, name, kind, member)
+      }
+
+  /** Marks a call the frontend makes up while lowering (`$xs[] = v` as `array_push`, the calls of a
+    * `foreach`), which no source text writes and no use of a function can come from.
+    */
+  private def tagSynthetic(call: NewNode): Unit =
+    val tag = NewTag().name(AstCreator.SyntheticCallTag).value("")
+    diffGraph.addNode(tag)
+    diffGraph.addEdge(call, tag, EdgeTypes.TAGGED_BY)
+
+  /** A reference to a class by name (`Foo::C`, `Foo::$p`, `$x instanceof Foo`, `catch (Foo $e)`): a
+    * type reference carrying the resolved class, at the name's own position. `self`, `static` and
+    * `parent` keep the identifier the frontend always made for them.
+    */
+  private def astForClassNameRef(expr: PhpExpr): Ast = expr match
+    case name: PhpNameExpr if writtenClass(name).isDefined =>
+        Ast(typeRefNode(name, name.name, name.name))
+    case other => astForExpr(other)
 
   private def getNewTmpName(prefix: String = "tmp"): String =
       s"$prefix${tmpKeyPool.next.toString}"
@@ -185,8 +246,11 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     decl: PhpMethodDecl,
     bodyPrefixAsts: List[Ast] = Nil,
     fullNameOverride: Option[String] = None,
-    isConstructor: Boolean = false
+    isConstructor: Boolean = false,
+    inheritedTypes: Map[String, String] = Map.empty
   ): Ast =
+    val outerVariableTypes = variableTypes
+    variableTypes = variableTypesOf(decl, inheritedTypes)
     val isStatic = decl.modifiers.contains(ModifierTypes.STATIC)
     val thisParam = if decl.isClassMethod && !isStatic then
       Option(thisParamAstForMethod(decl))
@@ -217,16 +281,19 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
     val method = methodNode(decl, methodName, methodCode, fullName, Some(signature), filename)
 
+    if methodName == NamespaceTraversal.globalNamespaceName then fileMethod = Some(method)
     scope.pushNewScope(method)
 
     val returnType = decl.returnType.map(_.name).getOrElse(TypeConstants.Any)
 
     val methodBodyStmts = bodyPrefixAsts ++ decl.stmts.flatMap(astsForStmt)
     val methodReturn    = newMethodReturnNode(returnType, line = line(decl), column = column(decl))
+    decl.returnType.foreach(t => tagWrittenNames(methodReturn, t.members, "decltype"))
 
     val methodBody = blockAst(blockNode(decl), methodBodyStmts)
 
     scope.popScope()
+    variableTypes = outerVariableTypes
     // PHP 8.0+ attribute groups on the method (e.g. `#[Route("/users")]`) map to CPG annotations
     // so routed controller methods surface as entrypoints downstream. Additive: a method with no
     // attribute groups yields no annotations.
@@ -240,6 +307,25 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       annotationAsts
     )
   end astForMethodDecl
+
+  /** The variables of `decl` whose class is declared: parameters with a single class type and
+    * locals assigned `new Foo` once, none written otherwise, plus the variables a closure or arrow
+    * function inherits from its enclosing function and does not write itself.
+    */
+  private def variableTypesOf(
+    decl: PhpMethodDecl,
+    inherited: Map[String, String]
+  ): Map[String, String] =
+    val writes = VariableTypes.writesOf(decl.stmts)
+    if writes.dynamic then Map.empty
+    else
+      val paramNames = decl.params.map(_.name).toSet
+      val params = decl.params.filterNot(p => p.byRef || p.isVariadic || writes.written(p.name))
+          .flatMap(p => VariableTypes.singleClass(p.paramType).map(p.name -> _))
+      val locals = writes.onlyNew.filterNot((name, _) => paramNames.contains(name))
+      inherited.filterNot((name, _) =>
+          writes.written(name) || paramNames.contains(name)
+      ) ++ params ++ locals
 
   private def stmtBodyBlockAst(stmt: PhpStmtWithBody): Ast =
     val bodyBlock    = blockNode(stmt)
@@ -270,6 +356,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     )
 
     scope.addToScope(param.name, paramNode)
+    param.paramType.foreach(t => tagWrittenNames(paramNode, t.members, "decltype"))
+    param.default.foreach(tagDefaultValueNames(paramNode, _))
 
     val annotationAsts = astsForAttributeGroups(param.attributeGroups)
     Ast(paramNode).withChildren(annotationAsts)
@@ -649,6 +737,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
           line = line(stmt),
           column = column(stmt)
         )
+    tagSynthetic(isNullCall)
     val isNullAst    = callAst(isNullCall, valueAst :: Nil)
     val conditionAst = callAst(notIsNull, isNullAst :: Nil)
 
@@ -665,12 +754,18 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       Some(nextSignature),
       Some(TypeConstants.Any)
     )
+    tagSynthetic(nextCallNode)
     val nextCallAst = callAst(nextCallNode, base = Option(nextIterIdent))
     val itemUpdateAst = itemInitAst.root match
       case Some(initRoot: AstNodeNew) => itemInitAst.subTreeCopy(initRoot)
       case _ =>
           logger.debug(s"Could not copy foreach init ast in $filename")
           Ast()
+
+    // the copy of the item assignment holds a copy of the `current` call
+    itemUpdateAst.nodes.collect {
+        case c: NewCall if c.methodFullName == "Iterator.current" => tagSynthetic(c)
+    }
 
     val bodyAst = stmtBodyBlockAst(stmt)
 
@@ -711,6 +806,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       Some(currentCallSignature),
       Some(TypeConstants.Any)
     );
+    tagSynthetic(currentCallNode)
     val currentCallAst = callAst(currentCallNode, base = Option(iteratorIdentifierAst))
 
     val valueAst = if stmt.assignByRef then
@@ -740,8 +836,9 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         newOperatorCallNode(Operators.assignment, code, line = lineNo, column = colNo)
     callAst(callNode, target :: source :: Nil)
 
+  // A class's trait names are lowered with its heritage (see astForNamedClass); the adaptations
+  // (`insteadof`, `as`) rename methods and create no node of their own.
   private def astforTraitUseStmt(stmt: PhpTraitUseStmt): Ast =
-      // TODO Actually implement this
       Ast()
 
   private def astForUseUse(stmt: PhpUseUse, namePrefix: String = ""): Ast =
@@ -817,7 +914,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     s"${stmt.classLikeType} ${name.name}$extendsString$implementsString"
 
   private def astForNamedClass(stmt: PhpClassLikeStmt, name: PhpNameExpr): Ast =
-    val inheritsFrom = (stmt.extendsNames ++ stmt.implementedInterfaces).map(_.name)
+    val traitNames   = stmt.stmts.collect { case use: PhpTraitUseStmt => use.traits }.flatten
+    val inheritsFrom = (stmt.extendsNames ++ stmt.implementedInterfaces ++ traitNames).map(_.name)
     val code         = codeForClassStmt(stmt, name)
 
     val fullName =
@@ -828,13 +926,26 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
     val typeDecl =
         typeDeclNode(stmt, name.name, fullName, filename, code, inherits = inheritsFrom)
+    // the class sits at its name, not at the first of its attributes the statement starts with
+    if name.attributes.lineNumber.isDefined then
+      typeDecl.lineNumber(name.attributes.lineNumber)
+      typeDecl.columnNumber(column(name))
+    // a type declaration cannot carry tags, so the file's own method does
+    fileMethod.foreach { method =>
+      tagWrittenNames(method, stmt.extendsNames, "extends")
+      tagWrittenNames(method, stmt.implementedInterfaces, "implements")
+      tagWrittenNames(method, traitNames, "use")
+    }
 
     val createDefaultConstructor = stmt.hasConstructor
 
+    val outerPropertyTypes = propertyTypes
+    propertyTypes = propertyTypesOf(stmt)
     scope.pushNewScope(typeDecl)
     val bodyStmts = astsForClassLikeBody(stmt, stmt.stmts, createDefaultConstructor)
     val modifiers = stmt.modifiers.map(newModifierNode).map(Ast(_))
     scope.popScope()
+    propertyTypes = outerPropertyTypes
 
     val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
     Ast(typeDecl)
@@ -842,6 +953,21 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         .withChildren(annotationAsts)
         .withChildren(bodyStmts)
   end astForNamedClass
+
+  /** The class each typed property of `stmt` declares, with the constructor's promoted parameters.
+    */
+  private def propertyTypesOf(stmt: PhpClassLikeStmt): Map[String, String] =
+    val declared = stmt.stmts.collect { case p: PhpPropertyStmt => p }.flatMap { p =>
+        VariableTypes.singleClass(p.typeName).toList.flatMap(cls =>
+            p.variables.map(_.name.name -> cls)
+        )
+    }
+    val promoted = stmt.stmts.collect {
+        case m: PhpMethodDecl if m.name.name == ConstructorMethodName => m.params
+    }.flatten.filter(_.flags != 0).flatMap { param =>
+        VariableTypes.singleClass(param.paramType).map(param.name -> _)
+    }
+    (declared ++ promoted).toMap
 
   private def astForStaticAndConstInits: Option[Ast] =
       scope.getConstAndStaticInits match
@@ -988,7 +1114,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         val name      = constDecl.name.name
         val code      = s"const $name"
         val someValue = Option(constDecl.value)
-        astForConstOrFieldValue(
+        val member = astForConstOrFieldValue(
           stmt,
           name,
           code,
@@ -996,7 +1122,10 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
           scope.addConstOrStaticInitToScope,
           isField = false
         )
+        member.root.foreach(tagWrittenNames(_, stmt.typeName.toList.flatMap(_.members), "decltype"))
+        member
             .withChildren(modifierAsts)
+            .withChildren(astsForAttributeGroups(stmt.attributeGroups))
       }
 
   private def astForEnumCase(stmt: PhpEnumCaseStmt): Ast =
@@ -1021,15 +1150,13 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     // PHP 8.0+ attribute groups map to CPG annotations; PHP 8.4 asymmetric visibility (e.g.
     // `private(set)`) maps to an extra modifier so it is not dropped; PHP 8.4 property hooks
     // (get/set) have their bodies emitted as child ASTs so hook logic survives downstream.
-    val annotationAsts = astsForAttributeGroups(stmt.attributeGroups)
     val asymVisModifier =
         stmt.asymmetricVisibility.map(vis => Ast(newModifierNode(vis))).toList
-    val hookAsts = stmt.hooks.flatMap(astsForPropertyHook)
     stmt.variables.map { varDecl =>
       val modifierAsts = stmt.modifiers.map(newModifierNode).map(Ast(_))
 
       val name = varDecl.name.name
-      astForConstOrFieldValue(
+      val member = astForConstOrFieldValue(
         stmt,
         name,
         s"$$$name",
@@ -1037,25 +1164,45 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         scope.addFieldInitToScope,
         isField = true
       )
+      member.root.foreach(tagWrittenNames(_, stmt.typeName.toList.flatMap(_.members), "decltype"))
+      // each hook is a method of the class, so the calls in its body have an enclosing method
+      stmt.hooks.foreach(hook => astForPropertyHook(name, hook).foreach(scope.addAnonymousMethod))
+      member
           .withChildren(modifierAsts)
           .withChildren(asymVisModifier)
-          .withChildren(annotationAsts)
-          .withChildren(hookAsts)
+          .withChildren(astsForAttributeGroups(stmt.attributeGroups))
     }
   end astsForPropertyStmt
 
-  /** Emit PHP 8.4 property-hook (`get`/`set`) bodies so their statements are not dropped. A hook
-    * with a statement body contributes those statements (wrapped in a block); an abstract/interface
-    * hook (no body) contributes nothing. The hook's own attribute groups map to annotations. Kept
-    * intentionally lightweight.
+  /** A PHP 8.4 property hook (`get`/`set`) is a method of its class, named `$property::get`, so the
+    * statements of its body (a block, or the expression of the arrow form) have an enclosing method
+    * like any other. The arrow form of a `get` returns its expression, and a `set` hook without a
+    * parameter list takes the implicit `$value`. An abstract hook has no body and no method.
     */
-  private def astsForPropertyHook(hook: PhpPropertyHook): List[Ast] =
-    val annotationAsts = astsForAttributeGroups(hook.attributeGroups)
-    val bodyAst = hook.body.map { stmts =>
-      val hookBlock = blockNode(hook)
-      Ast(hookBlock).withChildren(stmts.flatMap(astsForStmt))
-    }
-    annotationAsts ++ bodyAst.toList
+  private def astForPropertyHook(property: String, hook: PhpPropertyHook): Option[Ast] =
+      hook.body.map { stmts =>
+        val body = stmts match
+          case (expr: PhpExpr) :: Nil if hook.name == "get" =>
+              List(PhpReturnStmt(Some(expr), expr.attributes))
+          case other => other
+        val params =
+            if hook.name == "set" && hook.params.isEmpty then
+              List(PhpParam("value", None, false, false, None, 0, Nil, hook.attributes))
+            else hook.params
+        val decl = PhpMethodDecl(
+          PhpNameExpr(s"$$$property::${hook.name}", hook.attributes),
+          params,
+          List(ModifierTypes.PUBLIC),
+          None,
+          body,
+          hook.byRef,
+          hook.attributeGroups,
+          None,
+          isClassMethod = true,
+          hook.attributes
+        )
+        astForMethodDecl(decl)
+      }
 
   private def astForConstOrFieldValue(
     originNode: PhpNode,
@@ -1075,8 +1222,10 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     Ast(member)
 
   private def astForCatchStmt(stmt: PhpCatchStmt): Ast =
-      // TODO Add variable at some point. Current implementation is consistent with C++.
-      stmtBodyBlockAst(stmt)
+    // TODO Add variable at some point. Current implementation is consistent with C++.
+    // The caught classes are references of their own, kept first in the handler's block.
+    val typeRefs = stmt.types.map(astForClassNameRef)
+    Ast(blockNode(stmt)).withChildren(typeRefs ++ stmt.stmts.flatMap(astsForStmt))
 
   private def astsForSwitchCase(caseStmt: PhpCaseStmt): List[Ast] =
     val maybeConditionAst = caseStmt.condition.map(astForExpr)
@@ -1101,6 +1250,26 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             .map(_.rootCode.getOrElse(UnresolvedNamespace))
             .getOrElse(UnresolvedNamespace)
     s"$className::$name"
+
+  /** The class an instance call's receiver is declared to hold: a typed or promoted property of the
+    * enclosing class (`$this->p`), `new Foo` written in place, or a variable whose class
+    * `variableTypesOf` recovered. `$this` itself is the project's own class and stays unnamed.
+    */
+  private def receiverClass(call: PhpCallExpr, receiver: PhpExpr): Option[String] =
+      if !call.methodName.isInstanceOf[PhpNameExpr] then None
+      else
+        receiver match
+          case PhpVariable(PhpNameExpr(name, _, _), _) if name != NameConstants.This =>
+              variableTypes.get(name)
+          case PhpNewExpr(name: PhpNameExpr, _, _) => writtenClass(name)
+          case PhpPropertyFetchExpr(
+                PhpVariable(PhpNameExpr(NameConstants.This, _, _), _),
+                PhpNameExpr(property, _, _),
+                _,
+                false,
+                _
+              ) => propertyTypes.get(property)
+          case _ => None
 
   private def astForCall(call: PhpCallExpr): Ast =
     val arguments = call.args.map(astForCallArg)
@@ -1152,6 +1321,10 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
           if nameExpr.name == "self" then composeMethodFullName(name, call.isStatic)
           else s"${nameExpr.name}${StaticMethodDelimiter}$name"
 
+      // an instance call on a receiver whose class is declared: the class's method
+      case Some(receiver) if !call.isStatic && receiverClass(call, receiver).isDefined =>
+          s"${receiverClass(call, receiver).get}$InstanceMethodDelimiter$name"
+
       case Some(expr) =>
           s"$UnresolvedNamespace\\$codePrefix"
 
@@ -1159,21 +1332,54 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
           // No signature/namespace for MFN for builtin functions to ensure stable names as type info improves.
           name
 
+      // a function the source names absolutely (`\Foo\bar()`, or through `use function`)
+      case None if call.absolute => name
+
+      // A function call is named by its namespace alone: a class that calls `helper()` calls the
+      // function, never one of its own methods.
+      case None if call.methodName.isInstanceOf[PhpNameExpr] => prependNamespacePrefix(name)
+
       // Function call
       case None =>
           composeMethodFullName(name, call.isStatic)
 
     // Use method signature for methods that can be linked to avoid varargs issue.
     val signature = s"$UnresolvedSignature(${call.args.size})"
+    // `use function Foo\bar` makes the call `bar`, with the function's full name `Foo\bar`
+    val callName =
+        if call.absolute && call.methodName.isInstanceOf[PhpNameExpr] then
+          name.substring(name.lastIndexOf('\\') + 1)
+        else name
     val callRoot = callNode(
       call,
       code,
-      name,
+      callName,
       fullName,
       dispatchType,
       Some(signature),
       Some(TypeConstants.Any)
     )
+
+    // A call's own position is where its expression starts, the receiver of a chain; the use of
+    // a call named after its receiver's class is the method's name, which a fluent chain writes
+    // on a line of its own.
+    (call.methodName, call.target) match
+      case (name: PhpNameExpr, Some(receiver))
+          if !call.isStatic && receiverClass(call, receiver).isDefined =>
+          for ln <- name.attributes.lineNumber do
+            val tag = NewTag().name(AstCreator.NamePositionTag).value(
+              ujson.Obj(
+                "line" -> ln.intValue,
+                "col"  -> column(name).map(_.intValue).getOrElse(-1)
+              ).render()
+            )
+            diffGraph.addNode(tag)
+            diffGraph.addEdge(callRoot, tag, EdgeTypes.TAGGED_BY)
+      case _ => ()
+
+    // PHP calls the namespace's function when there is one and the global one otherwise; the
+    // global name rides along for the consumer that knows which functions the program declares
+    if call.globalFallback && fullName != name then callRoot.dynamicTypeHintFullName(Seq(name))
 
     val receiverAst = (targetAst, nameAst) match
       case (Some(target), Some(n)) =>
@@ -1285,6 +1491,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
         else
           val codeOverride = s"${args.head.code}[] = ${args.last.code}"
           astRoot.code(codeOverride)
+        tagSynthetic(astRoot)
     }
     arrayPushAst
   end astForEmptyArrayDimAssign
@@ -1713,7 +1920,20 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       isClassMethod = closureExpr.isStatic,
       attributes = closureExpr.attributes
     )
-    val methodAst = astForMethodDecl(methodDecl, localsForUses.map(Ast(_)), Option(methodName))
+    // a closure sees its by-value captures, an arrow function the whole enclosing scope
+    val inherited =
+        if closureExpr.isArrowFunc then variableTypes
+        else
+          val captured = closureExpr.uses.filterNot(_.byRef).collect {
+              case PhpClosureUse(PhpVariable(PhpNameExpr(name, _, _), _), _, _) => name
+          }.toSet
+          variableTypes.filter((name, _) => captured.contains(name))
+    val methodAst = astForMethodDecl(
+      methodDecl,
+      localsForUses.map(Ast(_)),
+      Option(methodName),
+      inheritedTypes = inherited
+    )
 
     val usesCode = localsForUses match
       case Nil    => ""
@@ -1740,12 +1960,21 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     Ast(yieldNode)
         .withChild(exprAst)
 
+  /** `new class(...) extends B { ... }`: a type declaration of its own, named after its position
+    * (PHP names it `class@anonymous` and the file position), hung under the enclosing class like a
+    * closure's method, and the `new` of that class with the arguments written.
+    */
   private def astForAnonymousClassInstantiation(
     expr: PhpNewExpr,
     classLikeStmt: PhpClassLikeStmt
   ): Ast =
-      // TODO Do this along with other anonymous class support
-      Ast()
+    val position = classLikeStmt.attributes.columnNumber.map(_.intValue).getOrElse(0) // file offset
+    val name     = PhpNameExpr(s"class@anonymous#$position", classLikeStmt.attributes)
+    val pending  = scope.getAndClearAnonymousMethods
+    val typeDeclAst = astForNamedClass(classLikeStmt, name)
+    pending.foreach(scope.addAnonymousMethod)
+    scope.addAnonymousMethod(typeDeclAst)
+    astForSimpleNewExpr(expr, PhpNameExpr(prependNamespacePrefix(name.name), expr.attributes))
 
   private def astForSimpleNewExpr(expr: PhpNewExpr, classNameExpr: PhpExpr): Ast =
     val (maybeNameAst, className) = classNameExpr match
@@ -1795,6 +2024,14 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
       Some(initSignature),
       Some(TypeConstants.Any)
     )
+    classNameExpr match
+      case name: PhpNameExpr =>
+          // the use of the class is its name, not the `new` before it
+          name.attributes.lineNumber.foreach { ln =>
+            initCallNode.lineNumber(ln)
+            initCallNode.columnNumber(column(name))
+          }
+      case _ => ()
     val initReceiver = Ast(tmpIdentifier.copy)
     val initCallAst  = callAst(initCallNode, initArgs, base = Option(initReceiver))
 
@@ -1925,7 +2162,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 
   private def astForInstanceOfExpr(expr: PhpInstanceOfExpr): Ast =
     val exprAst  = astForExpr(expr.expr)
-    val classAst = astForExpr(expr.className)
+    val classAst = astForClassNameRef(expr.className)
 
     val code = s"${exprAst.rootCodeOrEmpty} instanceof ${classAst.rootCodeOrEmpty}"
     val instanceOfNode =
@@ -1940,7 +2177,8 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     callAst(instanceOfNode, exprAst :: classAst :: Nil)
 
   private def astForPropertyFetchExpr(expr: PhpPropertyFetchExpr): Ast =
-    val objExprAst = astForExpr(expr.expr)
+    val objExprAst =
+        if expr.isStatic then astForClassNameRef(expr.expr) else astForExpr(expr.expr)
 
     val fieldAst = expr.name match
       case name: PhpNameExpr =>
@@ -2008,7 +2246,7 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
             astForMagicClassConstant(expr)
 
         case _ =>
-            val targetAst = astForExpr(expr.className)
+            val targetAst = astForClassNameRef(expr.className)
             val fieldIdentifierName =
                 expr.constantName.map(_.name).getOrElse(NameConstants.Unknown)
             val fieldIdentifier =
@@ -2049,8 +2287,20 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
     end if
   end astForConstFetchExpr
 
-  protected def line(phpNode: PhpNode): Option[Integer]      = phpNode.attributes.lineNumber
-  protected def column(phpNode: PhpNode): Option[Integer]    = phpNode.attributes.columnNumber
+  protected def line(phpNode: PhpNode): Option[Integer] = phpNode.attributes.lineNumber
+  protected def column(phpNode: PhpNode): Option[Integer] =
+      phpNode.attributes.columnNumber.map(pos => Integer.valueOf(columnOf(pos.intValue)))
+
+  /** The parser positions a node by its byte offset in the file; the column is the offset from the
+    * start of the node's line. Without the file's line starts the offset stays as it is.
+    */
+  private def columnOf(offset: Int): Int =
+      if lineStarts.isEmpty then offset
+      else
+        val found = java.util.Arrays.binarySearch(lineStarts, offset)
+        val index = if found >= 0 then found else -found - 2
+        offset - lineStarts(math.max(index, 0))
+
   protected def lineEnd(phpNode: PhpNode): Option[Integer]   = None
   protected def columnEnd(phpNode: PhpNode): Option[Integer] = None
   protected def code(phpNode: PhpNode): String =
@@ -2058,6 +2308,24 @@ class AstCreator(filename: String, phpAst: PhpFile)(implicit withSchemaValidatio
 end AstCreator
 
 object AstCreator:
+  /** The byte offsets at which each line of a file starts, the first being 0. */
+  def lineStartsOf(path: String): Array[Int] =
+      scala.util.Try {
+          val bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path))
+          (0 +: bytes.indices.collect { case i if bytes(i) == '\n'.toByte => i + 1 }).toArray
+      }.getOrElse(Array.empty)
+
+  /** The tag that carries a written class name with its position (see `tagWrittenNames`). */
+  val WrittenNameTag: String = "callsites-type"
+
+  /** The tag on an instance call named after its receiver's class, with the method name's own
+    * position.
+    */
+  val NamePositionTag: String = "callsites-name"
+
+  /** The tag on a call the frontend synthesizes (see `tagSynthetic`). */
+  val SyntheticCallTag: String = "callsites-synthetic"
+
   object TypeConstants:
     val String: String              = "string"
     val Int: String                 = "int"

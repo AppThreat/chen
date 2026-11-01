@@ -736,7 +736,8 @@ class ControlStructureTests extends PhpCode2CpgFixture:
       "create the catch blocks correctly" in {
           val catchBlocks = cpg.controlStructure.astChildren.order(2).toSet
 
-          catchBlocks.flatMap(_.astChildren.code.toSet) shouldBe Set("$body2", "$body3")
+          // the caught classes lead the handler's block as type references
+          catchBlocks.flatMap(_.astChildren.code.toSet) shouldBe Set("A", "$body2", "B", "$body3")
           catchBlocks.flatMap(_.lineNumber) shouldBe Set(4, 6)
       }
 
@@ -807,7 +808,8 @@ class ControlStructureTests extends PhpCode2CpgFixture:
       "create the catch blocks correctly" in {
           val catchBlocks = cpg.controlStructure.astChildren.order(2).toSet
 
-          catchBlocks.flatMap(_.astChildren.code.toSet) shouldBe Set("$body2", "$body3")
+          // the caught classes lead the handler's block as type references
+          catchBlocks.flatMap(_.astChildren.code.toSet) shouldBe Set("A", "$body2", "B", "$body3")
           catchBlocks.flatMap(_.lineNumber) shouldBe Set(4, 6)
       }
   }

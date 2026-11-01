@@ -151,7 +151,11 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
   private def createAst(filename: String): Option[ParsedUnit] =
       batchAstFor(filename).orElse(parser.parseFile(filename, config.phpIni)) match
         case Some(parseResult) =>
-            val diff = new AstCreator(relativeFilename(filename), parseResult)(
+            val diff = new AstCreator(
+              relativeFilename(filename),
+              parseResult,
+              AstCreator.lineStartsOf(filename)
+            )(
               using config.schemaValidation
             ).createAst()
             Some(ParsedUnit(diff))

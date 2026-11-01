@@ -451,11 +451,11 @@ class OperatorTests extends PhpCode2CpgFixture:
           instanceOfCall.methodFullName shouldBe Operators.instanceOf
           instanceOfCall.code shouldBe "$foo instanceof Foo"
 
-          inside(instanceOfCall.argument.l) { case List(obj: Identifier, className: Identifier) =>
+          inside(instanceOfCall.argument.l) { case List(obj: Identifier, className: TypeRef) =>
               obj.name shouldBe "foo"
               obj.code shouldBe "$foo"
 
-              className.name shouldBe "Foo"
+              className.typeFullName shouldBe "Foo"
               className.code shouldBe "Foo"
           }
       }
