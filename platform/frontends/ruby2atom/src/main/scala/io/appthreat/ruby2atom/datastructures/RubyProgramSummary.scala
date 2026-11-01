@@ -26,7 +26,8 @@ class RubyProgramSummary(
   initialNamespaceMap: NamespaceToTypeMap = mutable.Map.empty,
   initialPathMap: NamespaceToTypeMap = mutable.Map.empty,
   initialConstants: collection.Set[String] = Set.empty,
-  initialAncestors: collection.Map[String, List[String]] = Map.empty
+  initialAncestors: collection.Map[String, List[String]] = Map.empty,
+  initialSolidConstants: collection.Set[String] = Set.empty
 ) extends ProgramSummary[RubyType, RubyMethod, RubyField]:
 
   override val namespaceToType: NamespaceToTypeMap = initialNamespaceMap
@@ -38,6 +39,14 @@ class RubyProgramSummary(
     * `lib/`. A reference that resolves to one of these is not a use of a dependency.
     */
   val definedConstants: collection.Set[String] = initialConstants
+
+  /** The subset of [[definedConstants]] the project really defines: a class, a module whose body
+    * holds more than nested classes and modules, a constant assignment, or the constant a file's
+    * path names. The rest only nest things in a namespace, which a gem may own: `module Rails;
+    * class Foo` reopens the gem's `Rails`. A namespace of that kind has no methods and no constants
+    * of its own, so `Rails.logger` and `Rails::Missing` reach the gem.
+    */
+  val solidConstants: collection.Set[String] = initialSolidConstants
 
   /** The written ancestors (superclass, `include` and `prepend` arguments) of each class or module
     * the project declares, keyed by its dotted path. Used to look a constant up through the
@@ -51,7 +60,8 @@ class RubyProgramSummary(
         ProgramSummary.merge(this.namespaceToType, other.namespaceToType),
         ProgramSummary.merge(this.pathToType, other.pathToType),
         this.definedConstants ++ other.definedConstants,
-        this.ancestors ++ other.ancestors
+        this.ancestors ++ other.ancestors,
+        this.solidConstants ++ other.solidConstants
       )
 end RubyProgramSummary
 

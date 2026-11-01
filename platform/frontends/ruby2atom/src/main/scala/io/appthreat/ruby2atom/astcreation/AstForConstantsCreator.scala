@@ -74,7 +74,13 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
 
   /** Matches an expression that is a constant reference reaching outside the project. */
   protected object ExternalConstantRef:
-    def unapply(node: RubyExpression): Option[ExternalConstant] = externalConstant(node)
+    def unapply(node: RubyExpression): Option[ExternalConstant] =
+        externalConstant(node, asReceiver = false)
+
+  /** The same, for a constant something is called on (`X.m`, `X.attribute`, `X.new`). */
+  protected object ExternalReceiverRef:
+    def unapply(node: RubyExpression): Option[ExternalConstant] =
+        externalConstant(node, asReceiver = true)
 
   /** Runs `body` with `declared` (a class or module path as written in the declaration) pushed as
     * the innermost lexical scope.
@@ -115,7 +121,15 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
           resolved.exists(a => known(s"$a.$name") || ancestorDefines(a, name, seen + owner))
         }
 
-  private def externalConstant(node: RubyExpression): Option[ExternalConstant] =
+  private def solid(constant: String): Boolean = programSummary.solidConstants.contains(constant)
+
+  /** Resolves a constant reference. `asReceiver` says that something is called on it (a method, an
+    * attribute, `new`), which a namespace that the project only nests things in cannot answer.
+    */
+  private def externalConstant(
+    node: RubyExpression,
+    asReceiver: Boolean
+  ): Option[ExternalConstant] =
       node match
         case _: MemberAccess | _: SimpleIdentifier =>
             constantPath(node).flatMap { case (absolute, segments) =>
@@ -131,12 +145,39 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
                     !absolute && lexical.isEmpty && lexicalCrefs.headOption.exists(
                       ancestorDefines(_, first)
                     )
-                val project = lexical.isDefined || viaAncestors || known(first)
-                if variable || project then None
-                else
+                val root = lexical.orElse(Option.when(known(first))(first))
+                def external(name: String) =
                   val candidates =
                       if absolute then Nil else lexicalCrefs.map(c => s"$c.$written")
-                  Some(ExternalConstant(written, candidates))
+                  Some(ExternalConstant(name, candidates))
+                if variable || viaAncestors then None
+                else
+                  root match
+                    case None      => external(written)
+                    case Some(hit) =>
+                        // Walk the path down the project's definitions: a class or a module with
+                        // content is the project's whole, a namespace it only nests in may be a
+                        // gem's, and what the project does not define under it is the gem's.
+                        @scala.annotation.tailrec
+                        def walk(current: String, rest: List[String]): Option[ExternalConstant] =
+                            if solid(current) then None
+                            else
+                              rest match
+                                case Nil =>
+                                    if asReceiver then
+                                      external(
+                                        (hit.split('.').toList ++ segments.tail).mkString(".")
+                                      )
+                                    else None
+                                case next :: more =>
+                                    val nested = s"$current.$next"
+                                    if known(nested) then walk(nested, more)
+                                    else
+                                      external(
+                                        (hit.split('.').toList ++ segments.tail).mkString(".")
+                                      )
+                        walk(hit, segments.tail)
+                end if
             }
         case _ => None
 
@@ -197,8 +238,8 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
           (name.last.isLetterOrDigit || name.last == '_' || name.last == '?' || name.last == '!')
 
   private def instantiatedConstant(rhs: RubyExpression): Option[ExternalConstant] = rhs match
-    case SimpleObjectInstantiation(ExternalConstantRef(c), _)       => Some(c)
-    case ObjectInstantiationWithBlock(ExternalConstantRef(c), _, _) => Some(c)
+    case SimpleObjectInstantiation(ExternalReceiverRef(c), _)       => Some(c)
+    case ObjectInstantiationWithBlock(ExternalReceiverRef(c), _, _) => Some(c)
     case _                                                          => None
 
   private def singleNewBindingsOf(decl: ProcedureDeclaration): Map[String, ExternalConstant] =

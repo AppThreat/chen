@@ -195,7 +195,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       // `Faraday::Utils.escape(i)` is `Faraday.Utils.escape`, spelled as project calls are. A local
       // that holds an instance of such a class carries the class to its calls.
       val externalReceiver = n.target match
-        case ExternalConstantRef(constant) => Some(constant)
+        case ExternalReceiverRef(constant) => Some(constant)
         case _                             => None
       val typedReceiver =
           typedLocalOf(n.target).filter(_ => isPlainMethodName(n.methodName))
@@ -244,7 +244,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     end createMemberCall
 
     def determineMemberAccessBase(target: RubyExpression): RubyExpression = target match
-      case ExternalConstantRef(_) => target // a constant keeps its own reference, at any depth
+      case ExternalReceiverRef(_) => target // a constant keeps its own reference, at any depth
       case MemberAccess(SelfIdentifier(), _, _) => target
       case x: SimpleIdentifier =>
           scope.getSurroundingType(x.text).map(_.fullName) match
@@ -266,7 +266,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     node.target match
       case _: LiteralExpr =>
           createMemberCall(node)
-      case ExternalConstantRef(_) =>
+      case ExternalReceiverRef(_) =>
           createMemberCall(node)
       case x: SimpleIdentifier if isBundledClass(x.text) =>
           createMemberCall(
@@ -309,7 +309,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case _ => node.memberName -> node.memberName
 
     val fieldIdentifierAst = Ast(fieldIdentifierNode(node, memberName, memberCode))
-    val (targetAst, _code) = astForMemberAccessTarget(node.target)
+    // in `Outer::Inner` the target is a namespace the lookup goes through, not something called on
+    val isNamespace        = node.op == "::" && node.memberName.headOption.exists(_.isUpper)
+    val (targetAst, _code) = astForMemberAccessTarget(node.target, isNamespace)
     if carriesType && !isSetterTarget && isPlainMethodName(node.memberName.stripPrefix("@")) then
       typedLocalOf(node.target).foreach { constant =>
           targetAst.root.collect { case i: NewIdentifier => i.typeFullName(constant.fullName) }
@@ -336,10 +338,19 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     callAst(fieldAccess, Seq(targetAst, fieldIdentifierAst))
   end astForFieldAccess
 
-  private def astForMemberAccessTarget(target: RubyExpression): (Ast, String) =
+  private def astForMemberAccessTarget(
+    target: RubyExpression,
+    isNamespace: Boolean = false
+  ): (Ast, String) =
       target match
-        case ExternalConstantRef(constant) =>
+        case ExternalReceiverRef(constant) if !isNamespace =>
             // keyed by position: every written reference is a use, even a repeat in one statement
+            handleTmpGen(
+              target,
+              astForExternalConstant(target, constant),
+              (target.line, target.column, target.text)
+            )
+        case ExternalConstantRef(constant) if isNamespace =>
             handleTmpGen(
               target,
               astForExternalConstant(target, constant),
@@ -451,12 +462,12 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       as referring to the singleton class.
      */
     val externalClass = node.target match
-      case ExternalConstantRef(constant) => Some(constant)
+      case ExternalReceiverRef(constant) => Some(constant)
       case _                             => None
     val (receiverTypeFullName, fullName) = node.target match
       // The class is carried by the constructor call, not by hints on the tmp local, so that a
       // local bound more than once is not typed by its first binding.
-      case ExternalConstantRef(constant) =>
+      case ExternalReceiverRef(constant) =>
           XDefines.Any -> s"${constant.fullName}.${Defines.Initialize}"
       case x: (SimpleIdentifier | MemberAccess) =>
           scope.tryResolveTypeReference(x.text) match

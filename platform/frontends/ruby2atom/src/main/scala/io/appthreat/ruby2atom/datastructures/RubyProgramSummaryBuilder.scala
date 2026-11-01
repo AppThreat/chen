@@ -23,13 +23,18 @@ object RubyProgramSummaryBuilder:
     val namespaceToType: NamespaceToTypeMap = mutable.Map.empty
     val pathToType: NamespaceToTypeMap      = mutable.Map.empty
     val constants                           = mutable.Set.empty[String]
+    val solid                               = mutable.Set.empty[String]
     val ancestors                           = mutable.Map.empty[String, List[String]]
 
     programs.foreach { case (relativePath, program) =>
         // Require calls look paths up without the .rb extension (see RubyScope.addRequire).
         val requirePath = relativePath.stripSuffix(".rb").replace('\\', '/')
-        collectConstants(program, constants, ancestors)
-        autoloadConstants(requirePath).foreach(addWithPrefixes(constants, _))
+        collectConstants(program, constants, solid, ancestors)
+        autoloadConstants(requirePath).foreach { implied =>
+          // the file defines the constant its path spells; the directories above it are no claim
+          constants += implied
+          solid += implied
+        }
         collectTypes(program).foreach { ty =>
           pathToType.updateWith(requirePath) {
               case Some(existing) => existing += ty; Some(existing)
@@ -43,7 +48,7 @@ object RubyProgramSummaryBuilder:
         }
     }
 
-    RubyProgramSummary(namespaceToType, pathToType, constants, ancestors)
+    RubyProgramSummary(namespaceToType, pathToType, constants, ancestors, solid)
   end build
 
   private def addWithPrefixes(into: mutable.Set[String], dotted: String): Unit =
@@ -74,6 +79,7 @@ object RubyProgramSummaryBuilder:
   private def collectConstants(
     program: StatementList,
     constants: mutable.Set[String],
+    solid: mutable.Set[String],
     ancestors: mutable.Map[String, List[String]]
   ): Unit =
     def dotted(name: RubyExpression): String = name match
@@ -91,9 +97,18 @@ object RubyProgramSummaryBuilder:
           // bare reference from outside the module may still reach it (an `include` of the module,
           // `const_missing`), so it is not claimed for a dependency.
           addWithPrefixes(constants, dotted(decl.name))
-          val body = decl.body match
+          // the parser puts a class body's statements in a `<body>` method beside its declarations
+          def flattened(stmts: List[RubyExpression]): List[RubyExpression] = stmts.flatMap {
+              case m: MethodDeclaration if m.methodName == Defines.TypeDeclBody =>
+                  m.body match
+                    case inner: StatementList => flattened(inner.statements)
+                    case other                => List(other)
+              case other => List(other)
+          }
+          val body = flattened(decl.body match
             case stmtList: StatementList => stmtList.statements
             case other                   => List(other)
+          )
           def written(e: RubyExpression): String = e.text.stripPrefix("::").replace("::", ".")
           val mixedIn = body.flatMap {
               case IncludeCall(_, argument) => List(written(argument))
@@ -105,10 +120,27 @@ object RubyProgramSummaryBuilder:
           val ancestorNames = decl.baseClass.map(written).toList ++ mixedIn
           if ancestorNames.nonEmpty then
             ancestors.updateWith(name)(old => Some(old.getOrElse(Nil) ++ ancestorNames))
+          // a class can be instantiated and a module with more than nested declarations has
+          // content: both are the project's. A module that only nests others may be a gem's.
+          val onlyNests = decl match
+            case _: ClassDeclaration => false
+            case _ =>
+                body.forall {
+                    case _: TypeDeclaration => true
+                    case SimpleCall(target, _)
+                        if target.text == "autoload" || target.text == "private_constant" =>
+                        true
+                    case _ => false
+                }
+          if !onlyNests then
+            solid += name
+            solid += dotted(decl.name)
           body.foreach(go(name, _))
       case SingleAssignment(lhs: SimpleIdentifier, _, _) if isConstantName(lhs.text) =>
           addWithPrefixes(constants, (if prefix.isEmpty then "" else s"$prefix.") + lhs.text)
           constants += lhs.text
+          solid += (if prefix.isEmpty then "" else s"$prefix.") + lhs.text
+          solid += lhs.text
       case _ =>
 
     program.statements.foreach(go("", _))
