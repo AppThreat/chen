@@ -157,27 +157,30 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
                   root match
                     case None      => external(written)
                     case Some(hit) =>
-                        // Walk the path down the project's definitions: a class or a module with
-                        // content is the project's whole, a namespace it only nests in may be a
-                        // gem's, and what the project does not define under it is the gem's.
+                        // Walk the path down the project's definitions. What the project does not
+                        // define under a namespace it reopens is the gem's: `Foo::Missing` is a
+                        // NameError in a project that defines Foo alone.
                         @scala.annotation.tailrec
                         def walk(current: String, rest: List[String]): Option[ExternalConstant] =
-                            if solid(current) then None
-                            else
-                              rest match
-                                case Nil =>
-                                    if asReceiver then
-                                      external(
-                                        (hit.split('.').toList ++ segments.tail).mkString(".")
-                                      )
-                                    else None
-                                case next :: more =>
-                                    val nested = s"$current.$next"
-                                    if known(nested) then walk(nested, more)
-                                    else
-                                      external(
-                                        (hit.split('.').toList ++ segments.tail).mkString(".")
-                                      )
+                            rest match
+                              case Nil =>
+                                  // a class or a module with content answers for itself; a
+                                  // namespace that is only nested in cannot be called on
+                                  if solid(current) || !asReceiver then None
+                                  else
+                                    external(
+                                      (hit.split('.').toList ++ segments.tail).mkString(".")
+                                    )
+                              case next :: more =>
+                                  val nested = s"$current.$next"
+                                  if known(nested) then walk(nested, more)
+                                  else if ancestorDefines(current, next) then None
+                                  else
+                                    // the project defines nothing of that name there, so the gem
+                                    // that owns the namespace does
+                                    external(
+                                      (hit.split('.').toList ++ segments.tail).mkString(".")
+                                    )
                         walk(hit, segments.tail)
                 end if
             }

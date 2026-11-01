@@ -29,5 +29,6 @@ class Probe
     Paperclip::Transcoder.new
     include Marker
     [Paperclip, Marker]
+    Solid::Missing.run
   end
 end

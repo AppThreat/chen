@@ -88,6 +88,11 @@ object RubyProgramSummaryBuilder:
 
     def isConstantName(name: String): Boolean = name.headOption.exists(_.isUpper)
 
+    def isConstantTarget(text: String): Boolean =
+        text.stripPrefix("::").split("::").forall(isConstantName) && !text.exists(c =>
+            c == '.' || c == '@' || c == '[' || c == ' '
+        )
+
     def go(prefix: String, expr: RubyExpression): Unit = expr match
       case stmtList: StatementList => stmtList.statements.foreach(go(prefix, _))
       case decl: TypeDeclaration =>
@@ -136,11 +141,13 @@ object RubyProgramSummaryBuilder:
             solid += name
             solid += dotted(decl.name)
           body.foreach(go(name, _))
-      case SingleAssignment(lhs: SimpleIdentifier, _, _) if isConstantName(lhs.text) =>
-          addWithPrefixes(constants, (if prefix.isEmpty then "" else s"$prefix.") + lhs.text)
-          constants += lhs.text
-          solid += (if prefix.isEmpty then "" else s"$prefix.") + lhs.text
-          solid += lhs.text
+      case SingleAssignment(lhs, _, _) if isConstantTarget(lhs.text) =>
+          // a constant is assigned through a plain name, a field of the class body or a path
+          val name = lhs.text.stripPrefix("::").replace("::", ".")
+          addWithPrefixes(constants, (if prefix.isEmpty then "" else s"$prefix.") + name)
+          constants += name
+          solid += (if prefix.isEmpty then "" else s"$prefix.") + name
+          solid += name
       case _ =>
 
     program.statements.foreach(go("", _))

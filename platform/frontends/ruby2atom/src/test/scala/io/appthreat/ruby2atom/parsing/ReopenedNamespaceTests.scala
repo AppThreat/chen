@@ -29,6 +29,12 @@ class ReopenedNamespaceTests extends RubyCode2CpgFixture:
       lines should not contain 29 // Paperclip::Transcoder
   }
 
+  "what the project does not define under a module or class of its own is a dependency's" in {
+      // `Solid` is the project's, but nothing under it named Missing: a project that defines Solid
+      // alone could not run this, so something else, a gem that reopens it, defines it
+      refs should contain((32, "Solid::Missing", "Solid.Missing"))
+  }
+
   "an empty module is a namespace too, so calling on it reaches outside" in {
       refs should contain((28, "Marker", "Marker"))
   }
