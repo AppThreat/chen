@@ -24,7 +24,7 @@ final case class Config(downloadDependencies: Boolean = false, useTypeStubs: Boo
   override val multiArchitectureBuilds: Boolean = true
 
   this.defaultIgnoredFilesRegex =
-      List("spec", "tests?", "vendor", "db(\\\\|/)([\\w_]*)migrate([_\\w]*)").flatMap {
+      List("spec", "tests?", "vendor").flatMap {
           directory =>
               List(
                 s"(^|\\\\)$directory($$|\\\\)".r.unanchored,
