@@ -269,8 +269,13 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       case ExternalReceiverRef(_) =>
           createMemberCall(node)
       case x: SimpleIdentifier if isBundledClass(x.text) =>
+          // a constant the parser made up (`Array` for `Array(value)`) was not written: no position
+          val span =
+              if x.typeFullName.isDefined then
+                x.span.copy(line = None, column = None, lineEnd = None, columnEnd = None)
+              else x.span
           createMemberCall(
-            node.copy(target = TypeIdentifier(prefixAsBundledType(x.text))(x.span))(node.span)
+            node.copy(target = TypeIdentifier(prefixAsBundledType(x.text))(span))(node.span)
           )
       case x: SimpleIdentifier =>
           createMemberCall(node.copy(target = determineMemberAccessBase(x))(node.span))
@@ -706,7 +711,12 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     val name = code(node)
     if isBundledClass(name) then
       val typeFullName = prefixAsBundledType(name)
-      Ast(typeRefNode(node, typeFullName, typeFullName))
+      node match
+        // the parser made this one up (`StandardError` for `raise "text"`, `Array` for `Array(x)`):
+        // nobody wrote it, so it has no position
+        case x: SimpleIdentifier if x.typeFullName.isDefined =>
+            Ast(NewTypeRef().code(typeFullName).typeFullName(typeFullName))
+        case _ => Ast(typeRefNode(node, typeFullName, typeFullName))
     else
       scope.lookupVariable(name) match
         case Some(_) => handleVariableOccurrence(node)
@@ -718,6 +728,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                 node.span
               )
             )
+  end astForSimpleIdentifier
 
   protected def astForArrayPattern(node: ArrayPattern): Ast =
     val callNode_ =

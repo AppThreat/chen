@@ -102,7 +102,9 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
         Option.when(node.span.text.startsWith("::"))((true, List(name)))
     case MemberAccess(target, "::", name) if isConstantName(name) =>
         constantPath(target).map { case (absolute, segments) => (absolute, segments :+ name) }
-    case x: SimpleIdentifier if isConstantName(x.text) && !x.text.contains("::") =>
+    // the parser gives the identifiers it makes up (the Float of an endless range) a type
+    case x: SimpleIdentifier
+        if x.typeFullName.isEmpty && isConstantName(x.text) && !x.text.contains("::") =>
         Option((false, List(x.text)))
     case _ => None
 
