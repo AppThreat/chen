@@ -159,9 +159,16 @@ class CompileDatabaseTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
           .moreCode(database(entry("unit.c", "cc -c unit.c")), "compile_commands.json")
           .withConfig(Config().withCompileCommands(".").withCompileCommandsOnly(true))
 
-      "parse no header on its own" in {
+      "parse the project's headers on their own, with their bodies (atom#331)" in {
           cpg.method.nameExact("unit").l should have size 1
-          cpg.method.nameExact("inHeader").l shouldBe empty
+          // a project header is where a project defines many of its functions (leveldb's
+          // port/port_stdcxx.h); its own parse is what makes those bodies visible
+          val inHeader = cpg.method.nameExact("inHeader").l
+          inHeader should have size 1
+          inHeader.head.filename shouldBe "api.h"
+          // a declaration with no body keeps its METHOD, as it always has when a header is
+          // parsed as its own unit
+          cpg.method.nameExact("declaredOnly").l should have size 1
       }
   }
 end CompileDatabaseTests

@@ -67,7 +67,9 @@ object AstCreationPass:
   // 13: identifiers that read a header's global or enumerator, member calls, constructors and
   //     field accesses carry their declaring header; macro invocations name the macros nested in
   //     them
-  private val AstFormatVersion = "c2cpg-ast-13"
+  // 14: a macro invocation's call carries its definition whatever the macro is named (NULL
+  //     kept a bare name before)
+  private val AstFormatVersion = "c2cpg-ast-14"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial
