@@ -244,15 +244,34 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
     * refers to for `p->f`, typedefs unwrapped.
     */
   private def fieldOwnerType(typeId: Long): Option[Value] =
-      types.resolved(typeId).flatMap { t =>
-          t.string("kind") match
-            case Some("pointer") =>
-                t.long("to").flatMap(types.resolved(_)).filter(owner =>
-                    owner.string("kind").exists(k => k == "class" || k == "struct" || k == "union")
-                )
-            case Some("class" | "struct" | "union") => Some(t)
-            case _                                  => None
-      }
+    def ownerOf(t: Value): Boolean =
+        t.string("kind").exists(k => k == "class" || k == "struct" || k == "union")
+    types.resolved(typeId).flatMap {
+        case t if t.string("kind").contains("pointer") =>
+            t.long("to").flatMap(types.resolved(_)).filter(ownerOf)
+        case t if ownerOf(t) => Some(t)
+        case _               => None
+    }
+
+  /** The header that declares `field` for a class: its own when it declares the member, else the
+    * nearest base's (a project subclass reading a library member names the library's header). The
+    * class's own header when nobody in the hierarchy says.
+    */
+  private def fieldDeclaringFile(owner: Value, field: String): Option[String] =
+    def declares(t: Value): Boolean = t.list("fields").exists(_.string("name").contains(field))
+    def walk(current: Value, seen: Set[Long]): Option[Value] =
+        current.long("id") match
+          case Some(id) if seen.contains(id) => None
+          case maybeId =>
+              val now = seen ++ maybeId
+              if declares(current) then Some(current)
+              else
+                current.list("bases").view
+                    .flatMap(_.long("type").flatMap(types.resolved(_)))
+                    .flatMap(walk(_, now)).headOption
+    walk(owner, Set.empty)
+        .flatMap(t => declaredElsewhere(t.position))
+        .orElse(declaredElsewhere(owner.position))
 
   private def identifierAst(e: Value): Ast =
       // `this`, spelled as the CDT frontend types it (`geo.Point *`)
@@ -431,12 +450,16 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       case "dot_field" | "points_to_field" =>
           val access = operatorAst(e, Simple(op), operands)
           // a `p->f` or `o.f` through a struct or class a header declares is a use of that header,
-          // and nothing else on the access names it; the base of `p->f` is a pointer to it
+          // and nothing else on the access names it; the base of `p->f` is a pointer to it, and a
+          // member a base class declares names the base's header, not the derived one's
+          val field = operands.drop(1).headOption.flatMap(visible(_).string("name"))
           (for
-            base   <- operands.headOption.map(visible)
-            t      <- base.long("t")
-            owner  <- fieldOwnerType(t)
-            header <- declaredElsewhere(owner.position)
+            base  <- operands.headOption.map(visible)
+            t     <- base.long("t")
+            owner <- fieldOwnerType(t)
+            header <- field.flatMap(fieldDeclaringFile(owner, _)).orElse(
+              declaredElsewhere(owner.position)
+            )
           yield header).foreach(header =>
               access.root.foreach(tagNode(_, C2CpgDefines.TypeDeclaredInTag, header))
           )
@@ -587,7 +610,9 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
                         registerType(s"${element.getOrElse("char")}*")
                   Ast(literalNode(e, text, tpe))
               case _ =>
-                  val text = sourceText(e).getOrElse(literalText(e))
+                  // the name the source gave the constant first (a folded enumerator whose range
+                  // the front end kept nowhere else), else the text at its range
+                  val text = e.string("name").orElse(sourceText(e)).getOrElse(literalText(e))
                   namedConstantAst(e, text).getOrElse(Ast(literalNode(e, text, typeOf(e))))
 
   /** A constant written as a name (an enumerator, `kLock`, or `Shade::Dark`), as the CDT frontend

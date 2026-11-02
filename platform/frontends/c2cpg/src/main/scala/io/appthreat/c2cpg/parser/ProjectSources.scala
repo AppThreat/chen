@@ -143,13 +143,18 @@ final class ProjectSources(val config: Config):
           )
           .toArray
 
-  /** The files to parse, in the order the AST pass takes them. */
+  /** The files to parse, in the order the AST pass takes them. With a compilation database the
+    * units it compiles, plus the project's headers with `--compile-commands-only` too: a header the
+    * project defines functions in is where those bodies live (leveldb's `port/port_stdcxx.h`), and
+    * parsing it as its own unit is the only way the CDT frontend slices them. System headers are
+    * never candidates - they are not under the input path.
+    */
   lazy val files: Array[String] =
     val selected = database match
       case None => candidates
       case Some(db) =>
           candidates.filter { f =>
-              if FileDefaults.isHeaderFile(f) then !config.compileCommandsOnly
+              if FileDefaults.isHeaderFile(f) then true
               else db.commandFor(Paths.get(f)).isDefined
           }
     selected.sortWith(_.compareToIgnoreCase(_) > 0)
