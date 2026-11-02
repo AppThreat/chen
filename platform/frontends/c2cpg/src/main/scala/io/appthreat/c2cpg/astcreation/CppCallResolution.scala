@@ -293,16 +293,23 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
           .collectFirst { case f: ICPPFunction => f }
           .flatMap(f => graphFunction(f).map(f -> _))
 
-  /** The constructor a declarator, a `new` expression or a functional cast calls, and the graph's
-    * METHOD for it.
+  /** The constructor a declarator, a `new` expression or a functional cast calls, whether or not
+    * the graph holds its METHOD: a class a header declares has none, and its constructor call still
+    * tells which header the code relies on.
     */
-  protected def linkedConstructor(owner: IASTNode): Option[(ICPPFunction, ICPPFunction)] =
+  protected def constructorBindingOf(owner: IASTNode): Option[ICPPConstructor] =
     val names = owner match
       case o: IASTImplicitNameOwner => CdtQuery(o.getImplicitNames.toList).getOrElse(Nil)
       case _                        => Nil
     names.filterNot(_.isOperator).flatMap(n => CdtQuery(n.resolveBinding()).toOption).collectFirst {
         case c: ICPPConstructor => c
-    }.flatMap(c => graphFunction(c).map(c -> _))
+    }
+
+  /** The constructor a declarator, a `new` expression or a functional cast calls, and the graph's
+    * METHOD for it.
+    */
+  protected def linkedConstructor(owner: IASTNode): Option[(ICPPFunction, ICPPFunction)] =
+      constructorBindingOf(owner).flatMap(c => graphFunction(c).map(c -> _))
 
   /** A call to the destructor `destructor` (resolved by CDT) when the graph holds its METHOD. The
     * destroyed object is the call's argument 0: the destructor's body reads it through `this`, and

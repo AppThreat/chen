@@ -52,7 +52,14 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
             for
               fullName     <- mayBeFullName
               typeFullName <- mayBeTypeFullName
-            yield methodRefNode(ident, code(ident), fullName, registerType(cleanType(typeFullName)))
+            yield
+              // a function used as a value reads the header that declares it, as a variable read
+              // does; the call site alone never shows which package's API it takes
+              val ref =
+                  methodRefNode(ident, code(ident), fullName, registerType(cleanType(typeFullName)))
+              if !isIncludedNode(id) then
+                refDeclaredInOf(binding).foreach(tagNode(ref, Defines.RefDeclaredInTag, _))
+              ref
         case _ => None
 
   protected def astForIdentifier(ident: IASTNode): Ast =
@@ -101,6 +108,25 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
               code(ident),
               registerType(cleanType(identifierTypeName))
             )
+            // a global variable or an enumerator the file only reads: the header that declares it,
+            // the way a call carries `callee-declared-in`. Not for a name of an included node: a
+            // macro definition's own identifiers belong to the macro's use, not this file's.
+            if variableOption.isEmpty && !isIncludedNode(ident) then
+              ident match
+                case id: IASTIdExpression =>
+                    val binding = id.getName.resolveBinding()
+                    if binding != null then
+                      binding match
+                        case v: IVariable if !v.isInstanceOf[IParameter] =>
+                            refDeclaredInOf(binding).foreach(
+                              tagNode(node, Defines.RefDeclaredInTag, _)
+                            )
+                        case e: IEnumerator =>
+                            refDeclaredInOf(binding).foreach(
+                              tagNode(node, Defines.RefDeclaredInTag, _)
+                            )
+                        case _ =>
+                case _ =>
             variableOption match
               case Some((variable, _)) =>
                   Ast(node).withRefEdge(node, variable)
@@ -120,9 +146,15 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
       Some(expressionType(fieldRef))
     )
     val owner = fieldOwnerAst(fieldRef)
-    CdtQuery(fieldRef.getFieldName.resolveBinding()).toOption.collect { case f: IField => f }
+    val ownerType = CdtQuery(fieldRef.getFieldName.resolveBinding()).toOption
+        .collect { case f: IField => f }
         .flatMap(f => Option(f.getCompositeTypeOwner))
-        .foreach(registerMembersOf)
+    ownerType.foreach(registerMembersOf)
+    // the header that defines the struct or class the field belongs to: a `p->f` on a header's
+    // struct is a use of that header, and nothing else on the node names it
+    ownerType.flatMap(definingFileOf).filter(_ != filename).foreach { header =>
+        tagNode(ma, Defines.TypeDeclaredInTag, header)
+    }
     val member = fieldIdentifierNode(
       fieldRef,
       fieldRef.getFieldName.toString,

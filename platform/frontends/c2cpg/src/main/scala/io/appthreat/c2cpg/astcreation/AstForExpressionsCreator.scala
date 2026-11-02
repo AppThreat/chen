@@ -354,6 +354,11 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                         Some(signature),
                         Some(cleanType(safeGetType(call.getExpressionType)))
                       )
+                      // a method this file does not declare: the header that declares it, as any
+                      // other call's callee carries
+                      binding match
+                        case function: IFunction => tagCallAttributes(callCpgNode, function)
+                        case _                   => ()
 
                       createCallAst(callCpgNode, args, base = Some(instanceAst), receiver)
                 end match
@@ -888,6 +893,16 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
     val cpgTypeId   = astForIdentifier(typeId.getDeclSpecifier)
     val constructor = linkedConstructor(newExpression)
+    // a class a header declares has no METHOD for its constructor: the `new` itself carries which
+    // header's class it constructs, as a call carries the header that declares its function
+    if constructor.isEmpty then
+      constructorBindingOf(newExpression).foreach { ctor =>
+        tagCallAttributes(cpgNewExpression, ctor)
+        val constructed = cleanType(safeGetType(ctor.getClassOwner))
+        val simple      = lastNameOfQualifiedName(constructed)
+        if simple.nonEmpty && simple != Defines.anyTypeName then
+          tagNode(cpgNewExpression, Defines.ConstructsTypeTag, simple)
+      }
     def constructorCall(args: List[Ast]): Option[Ast] = constructor.map { (ctor, linked) =>
       val constructed = ctor match
         case c: ICPPConstructor => registerType(cleanType(safeGetType(c.getClassOwner)))

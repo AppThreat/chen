@@ -1,6 +1,7 @@
 package io.appthreat.edg2atom.astcreation
 
-import io.appthreat.edg2atom.parser.{EdgaUnit, Pos}
+import io.appthreat.c2cpg.astcreation.Defines as C2CpgDefines
+import io.appthreat.edg2atom.parser.{EdgaUnit, FileEntry, Pos}
 import io.appthreat.edg2atom.parser.EdgaUnit.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.Defines as X2CpgDefines
@@ -27,6 +28,11 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
   /** The top-level invocation whose expansion is being built, 0 outside any. */
   private var macroContext: Long = 0L
 
+  /** The top-level invocations an INLINED call was built for: the ones a later sweep must not
+    * duplicate.
+    */
+  private val representedInvocations = scala.collection.mutable.HashSet.empty[Long]
+
   private def topLevelOf(v: Value): Long =
       v.long("mi").filter(_ > 0).map(unit.topLevelInvocation).getOrElse(0L)
 
@@ -42,8 +48,10 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
       try
         val expansion = build
         unit.invocations.get(top) match
-          case Some(invocation) => macroCallAst(node, top, invocation, expansion)
-          case None             => expansion
+          case Some(invocation) =>
+              representedInvocations.add(top)
+              macroCallAst(node, top, invocation, expansion)
+          case None => expansion
       finally macroContext = saved
 
   private def macroCallAst(node: Value, index: Long, invocation: Value, expansion: Ast): Ast =
@@ -279,4 +287,62 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     val root = AstCreator.realPath(Paths.get(config.inputPath))
     val p    = AstCreator.realPath(Paths.get(path))
     if p.startsWith(root) then root.relativize(p).toString else path
+
+  /** A thin INLINED call for each macro invocation of `file` no expression carries: one the front
+    * end folded to a constant (an object-like macro in a `case` label or an initialiser), and each
+    * invocation nested in another's arguments or definition - the front end knows both, the
+    * expression tree keeps neither. A nested invocation is a use of its own macro at the outermost
+    * invocation's site, where a reader looks for it; one call per (site, macro), in invocation
+    * order.
+    */
+  protected def thinMacroCallAsts(file: FileEntry): Seq[Ast] =
+      unit.invocations.values.toSeq.sortBy(_("id").num).flatMap { invocation =>
+        val index = invocation.long("id").getOrElse(0L)
+        val top   = unit.topLevelInvocation(index)
+        // the site a reader attributes the expansion to: the invocation itself when top-level, else
+        // the outermost invocation it appears in
+        val site =
+            (if index == top then Some(invocation) else unit.invocations.get(top))
+                .flatMap(_.field("start")).flatMap(EdgaUnit.pos)
+        val inThisFile = site.exists(_.file == file.id)
+        // the top-level invocation's own call exists; only its nested ones (and folded top-level
+        // ones) need one
+        val represented = index == top && representedInvocations.contains(top)
+        if !inThisFile || represented then Nil
+        else
+          for
+            name       <- invocation.string("name").filter(_.nonEmpty)
+            macroId    <- invocation.long("macro")
+            definition <- unit.macros.get(macroId)
+            definedAt  <- definition.position
+            defFile    <- unit.files.get(definedAt.file)
+            // the runner's own preinclude file is not a header anyone includes
+            if !preincludePaths.contains(defFile.path)
+            start <- site
+          yield
+            val params = definition.string("text").map(parameterCount).getOrElse(0)
+            val lastLine =
+                definedAt.line + definition.string("text").map(_.count(_ == '\n')).getOrElse(0)
+            val definitionFile = relativeTo(defFile.path)
+            val invocationText = invocationSpan(invocation)
+                .flatMap((s, e) => textOf(s, e)).getOrElse(name)
+            val call = NewCall()
+                .name(name)
+                .methodFullName(s"$definitionFile:${definedAt.line}:$lastLine:$name:$params")
+                .code(invocationText)
+                .dispatchType(DispatchTypes.INLINED)
+                .typeFullName(registerType(X2CpgDefines.Any))
+                .lineNumber(Integer.valueOf(math.max(0, start.line)))
+                .columnNumber(Integer.valueOf(math.max(0, start.column)))
+            tagNode(call, X2CpgDefines.MacroInvocationTag, index.toString)
+            Ast(call)
+        end if
+      }.distinctBy(ast =>
+          // two invocations of one macro inside another's expansion are one use of it there
+          ast.root match
+            case Some(c: NewCall) =>
+                (c.lineNumber, c.columnNumber, c.methodFullName)
+            case other => other
+      )
+  end thinMacroCallAsts
 end MacroCalls

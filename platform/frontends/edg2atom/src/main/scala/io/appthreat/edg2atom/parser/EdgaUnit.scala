@@ -8,6 +8,7 @@ import scala.collection.mutable
   * the nodes of its routine bodies.
   */
 final class EdgaUnit(val root: Value):
+  import EdgaUnit.{flag, string}
 
   val path: String     = root("tu").obj.get("path").map(_.str).getOrElse("")
   val status: String   = root("tu").obj.get("status").map(_.str).getOrElse("failed")
@@ -24,7 +25,9 @@ final class EdgaUnit(val root: Value):
       f("path").str,
       f.obj.get("system").exists(_.bool),
       f.obj.get("inRoot").exists(_.bool),
-      f.obj.get("includedFrom").map(v => (v(0).num.toLong, v(1).num.toInt))
+      f.obj.get("includedFrom").map(v => (v(0).num.toLong, v(1).num.toInt)),
+      f.string("written"),
+      f.flag("systemInclude")
     )
   }.toMap
 
@@ -42,6 +45,9 @@ final class EdgaUnit(val root: Value):
   val diagnostics: Seq[Value] = table("diagnostics")
 
   val routinesById: Map[Long, Value] = routines.map(r => r("id").num.toLong -> r).toMap
+
+  /** The unit's global variables by id: an expression reads one through its `var` reference. */
+  val globalsById: Map[Long, Value] = globals.map(g => g("id").num.toLong -> g).toMap
 
   /** The file a translation unit is: file 0, the primary source file. */
   def primaryFile: Option[FileEntry] = files.get(0L)
@@ -61,7 +67,9 @@ final case class FileEntry(
   path: String,
   system: Boolean,
   inRoot: Boolean,
-  includedFrom: Option[(Long, Int)]
+  includedFrom: Option[(Long, Int)],
+  written: Option[String] = None,
+  systemInclude: Boolean = false
 )
 
 /** A position: `[file, line, column]`. */

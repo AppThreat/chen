@@ -64,7 +64,10 @@ object AstCreationPass:
   //     image locations on by default; a local declared outside a macro keeps its place
   // 12: a pointer-to-function parameter is named after its nested declarator; a function the
   //     file only declares is a METHOD_REF where its name is a value
-  private val AstFormatVersion = "c2cpg-ast-12"
+  // 13: identifiers that read a header's global or enumerator, member calls, constructors and
+  //     field accesses carry their declaring header; macro invocations name the macros nested in
+  //     them
+  private val AstFormatVersion = "c2cpg-ast-13"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial

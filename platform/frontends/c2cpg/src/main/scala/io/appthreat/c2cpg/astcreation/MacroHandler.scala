@@ -77,6 +77,12 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           }
           tagExpansion(node, ast, index, nested)
           val callAst = createMacroCallAst(ast, node, mac, args, roots.map(_.map(_._2)))
+          // a macro this invocation's expansion names - in an argument or in its definition - is a
+          // use of that macro's own header at this invocation's site, and no node of the expansion
+          // names it: the invocation's call carries it
+          nestedMacroDefinitions(node, args).foreach { (name, header) =>
+              callAst.root.foreach(tagNode(_, Defines.NestedMacroTag, s"$name@$header"))
+          }
           // a local of the expansion's AST that is not under its root would be lost by the copy;
           // a local declared outside the macro keeps its own place
           val underRoot = java.util.Collections.newSetFromMap(
@@ -126,6 +132,38 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
           .map(_.toString)
           .toSet
+
+  /** Each macro the invocation's expansion names besides its own, with the file that defines it:
+    * `LIB_MAX(a, LIMIT)` names LIMIT (an argument that is a macro's name names it too, object-like
+    * ones included), and a definition that invokes another macro names that one. Only ones another
+    * file defines (the invocation's own file keeps its macros to itself). A name the unit saw
+    * defined in several files names none of them: which one applied here cannot be told from the
+    * definition list.
+    */
+  private def nestedMacroDefinitions(node: IASTNode, args: List[String]): List[(String, String)] =
+    val ownFile = Option(node.getFileLocation).map(_.getFileName).getOrElse("")
+    val fromExpansion = expandedFromMacro(node).headOption.toList
+        .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
+        .map(_.toString)
+    // an argument that is one identifier names a macro when a definition the unit saw spells it
+    val fromArguments = args.map(_.trim).filter(_.matches("[A-Za-z_][A-Za-z0-9_]*"))
+    (fromExpansion ++ fromArguments).distinct.flatMap { name =>
+        macroDefinitionFiles.get(name) match
+          case Some(single :: rest) if rest.isEmpty && single != ownFile && single.nonEmpty =>
+              Some(name -> single)
+          case _ => None
+    }
+
+  /** The file that defines each macro name, when every definition the unit saw names one file. */
+  private lazy val macroDefinitionFiles: Map[String, List[String]] =
+      cdtAst.getMacroDefinitions.toList
+          .flatMap(d =>
+              Option(d.getFileLocation).flatMap(l => Option(l.getFileName)).map(
+                ASTStringUtil.getSimpleName(d.getName) -> _
+              )
+          )
+          .groupMap(_._1)(_._2)
+          .view.mapValues(_.distinct).toMap
 
   /** The identifier an argument's text starts with: `MAX` for `MAX(b, c)`, `LIMIT` for `LIMIT`. */
   private def leadingName(text: String): String =

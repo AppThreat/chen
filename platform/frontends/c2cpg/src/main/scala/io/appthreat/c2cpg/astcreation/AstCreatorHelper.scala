@@ -21,7 +21,11 @@ import org.eclipse.cdt.core.dom.ast.c.{
 }
 import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.core.dom.ast.gnu.c.ICASTKnRFunctionDeclarator
-import org.eclipse.cdt.internal.core.dom.parser.c.{CASTArrayRangeDesignator, CASTFunctionDeclarator}
+import org.eclipse.cdt.internal.core.dom.parser.c.{
+    CASTArrayRangeDesignator,
+    CASTFunctionDeclarator,
+    ICInternalBinding
+}
 import org.eclipse.cdt.internal.core.dom.parser.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.{
     EvalBinding,
@@ -73,13 +77,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             .distinct
         val fields = CdtQuery(ct.getFields.toList).getOrElse(Nil)
         // the header that defines the composite: same-named structs differ by it
-        val definedIn = (ct match
-          case b: org.eclipse.cdt.internal.core.dom.parser.c.ICInternalBinding =>
-              Option(b.getDefinition)
-          case b: org.eclipse.cdt.internal.core.dom.parser.cpp.ICPPInternalBinding =>
-              Option(b.getDefinition)
-          case _ => None
-        ).flatMap(d => Option(d.getFileLocation)).flatMap(l => Option(l.getFileName)).getOrElse("")
+        val definedIn = definingFileOf(ct).getOrElse("")
         names.filter(localMemberOwners.add).foreach { ownerName =>
             fields.zipWithIndex.foreach { (f, i) =>
               val tpe = fieldDeclarationType(f)
@@ -160,6 +158,49 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
         }
     }
   end registerConstantRead
+
+  /** The header that declares what `binding` names - a variable, an enumerator - when every
+    * declaration the translation unit has seen sits in an included file: the counterpart of the
+    * `callee-declared-in` tag for things the code reads rather than calls. A name this file also
+    * declares gets none (its own declaration wins).
+    */
+  protected def refDeclaredInOf(binding: IBinding): Option[String] =
+      // C's enumerator keeps its one declaration as its physical node, in the header that enumerates
+      // it; C++'s has declarations like any other internal binding
+      binding match
+        case e: org.eclipse.cdt.internal.core.dom.parser.c.CEnumerator =>
+            Option(e.getPhysicalNode).filter(isIncludedNode).flatMap(n =>
+                Option(n.getFileLocation).flatMap(l => Option(l.getFileName))
+            )
+        case _ =>
+            val owners: Seq[IASTNode] = binding match
+              case c: ICInternalBinding =>
+                  Option(c.getDeclarations).toSeq.flatten ++ Option(c.getDefinition)
+              case c: ICPPInternalBinding =>
+                  Option(c.getDeclarations).toSeq.flatten ++ Option(c.getDefinition)
+              case _ => Nil
+            val declarators = owners.flatMap(n =>
+                Option(n match
+                  case name: IASTName => name.getParent
+                  case other          => other
+                )
+            )
+            if declarators.nonEmpty && declarators.forall(isIncludedNode) then
+              declarators
+                  .flatMap(d => Option(d.getFileLocation).flatMap(l => Option(l.getFileName)))
+                  .headOption
+            else None
+  end refDeclaredInOf
+
+  /** The file a composite type's definition sits in, when the translation unit saw it: the header
+    * that owns every field access through the type.
+    */
+  protected def definingFileOf(ct: ICompositeType): Option[String] =
+      (ct match
+        case b: ICInternalBinding   => Option(b.getDefinition)
+        case b: ICPPInternalBinding => Option(b.getDefinition)
+        case _                      => None
+      ).flatMap(d => Option(d.getFileLocation)).flatMap(l => Option(l.getFileName))
 
   /** An implicit-this member read (`space_` inside a method): record its class's layout. */
   protected def registerImplicitMemberOwner(ident: IASTNode): Unit = ident match
@@ -320,7 +361,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
     val path = nullSafeFileLocation(node).map(_.getFileName).getOrElse(filename)
     SourceFiles.toRelativePath(path, config.inputPath)
 
-  private def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
+  protected def nullSafeFileLocation(node: IASTNode): Option[IASTFileLocation] =
     val locations = node.getNodeLocations
     if locations == null then
       None
