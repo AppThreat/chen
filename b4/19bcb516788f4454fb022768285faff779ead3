@@ -1,0 +1,21 @@
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ConstantReferenceTests.scala
+  s_79a7c562b49300::t_59e1c2866726d6 19
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ProjectNamespaceTests.scala
+  s_79a7c562b49300::t_d3fb94a11f90fe 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b419bcb516788f4454fb022768285faff779ead3",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
