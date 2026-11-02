@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/DialectRewrites.scala
+  s_0dbbcb5914c2c5::t_c417d6d1eb783e 1-176
+  s_0dbbcb5914c2c5::t_3d369807ad99a9 177-198
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_0dbbcb5914c2c5::t_450bc993554608 271-273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8514aae08367038b72c9a62a8406a57871c6a63b",
+  "prompts": {},
+  "sessions": {
+    "s_0dbbcb5914c2c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dd7541fb-2df2-4da7-a16f-14967800872a",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
