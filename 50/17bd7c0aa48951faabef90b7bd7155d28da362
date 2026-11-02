@@ -1,0 +1,29 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForConstantsCreator.scala
+  s_bf0a61c31b2594::t_84256cc4bac778 105-107
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForExpressionsCreator.scala
+  s_bf0a61c31b2594::t_189fa4de94e2eb 272-276,278,714-719,731
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyJsonToNodeCreator.scala
+  s_bf0a61c31b2594::t_5692f1f9b42a60 647-652
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/synthetic.rb
+  s_bf0a61c31b2594::t_c43a1c51304660 1-7
+platform/frontends/ruby2atom/src/test/resources/ruby/callsites/synthetic.rb.json
+  s_bf0a61c31b2594::t_d7cc7b9cb3ea32 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/SyntheticConstantTests.scala
+  s_bf0a61c31b2594::t_6ff784714870fe 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5017bd7c0aa48951faabef90b7bd7155d28da362",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
