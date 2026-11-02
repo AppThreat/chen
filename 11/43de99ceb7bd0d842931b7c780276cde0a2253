@@ -1,0 +1,45 @@
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ProjectNamespaceTests.scala
+  s_79a7c562b49300::t_950af64aca738c 1-48
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/astcreation/AstForConstantsCreator.scala
+  s_79a7c562b49300::t_2e3ce41d08a65c 113,126
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummary.scala
+  s_79a7c562b49300::t_343264261734d8 30-32,59-78,86-88,94-98
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/datastructures/RubyProgramSummaryBuilder.scala
+  s_79a7c562b49300::t_d0e12502f6e6b9 28-29,36-40,55-63,110-116,121,159
+platform/frontends/ruby2atom/src/test/resources/ruby/app/controllers/api/base_controller.rb
+  s_79a7c562b49300::t_c6ef2bde1cd740 1-10
+platform/frontends/ruby2atom/src/test/resources/ruby/app/controllers/api/base_controller.rb.json
+  s_79a7c562b49300::t_638eb991a18080 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/controllers/concerns/api/rate_limit_headers.rb
+  s_79a7c562b49300::t_94d12639e152e8 1-3
+platform/frontends/ruby2atom/src/test/resources/ruby/app/controllers/concerns/api/rate_limit_headers.rb.json
+  s_79a7c562b49300::t_49f5ea7c030d78 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/lib/activitypub/tag_manager.rb
+  s_79a7c562b49300::t_5bd3868ff4d0fd 1-3
+platform/frontends/ruby2atom/src/test/resources/ruby/app/lib/activitypub/tag_manager.rb.json
+  s_79a7c562b49300::t_d4d91e63839cb4 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/models/form/account_batch.rb
+  s_79a7c562b49300::t_b05bd52e63ad1c 1-3
+platform/frontends/ruby2atom/src/test/resources/ruby/app/models/form/account_batch.rb.json
+  s_79a7c562b49300::t_91664449ce0e56 1
+platform/frontends/ruby2atom/src/test/resources/ruby/app/serializers/rest/account_serializer.rb
+  s_79a7c562b49300::t_e32e2b2d7d56f8 1-2
+platform/frontends/ruby2atom/src/test/resources/ruby/app/serializers/rest/account_serializer.rb.json
+  s_79a7c562b49300::t_6af9847fe4db02 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1143de99ceb7bd0d842931b7c780276cde0a2253",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
