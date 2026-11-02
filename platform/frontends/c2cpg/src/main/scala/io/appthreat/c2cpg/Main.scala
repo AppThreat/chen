@@ -37,7 +37,10 @@ final case class Config(
   // a JSON compilation database, or a directory holding compile_commands.json; empty = none
   compileCommands: String = "",
   // with a compilation database, parse only its translation units (no other headers)
-  compileCommandsOnly: Boolean = false
+  compileCommandsOnly: Boolean = false,
+  // paths under the input that a project carries from someone else (vendored code): their files
+  // are parsed as always, but their methods and types are external (decision 0001, P5)
+  externalPaths: String = ""
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -83,6 +86,8 @@ final case class Config(
       this.copy(macroCensusOnly = value).withInheritedFields(this)
   def withCompileCommands(value: String): Config =
       this.copy(compileCommands = value).withInheritedFields(this)
+  def withExternalPaths(value: String): Config =
+      this.copy(externalPaths = value).withInheritedFields(this)
   def withCompileCommandsOnly(value: Boolean): Config =
       this.copy(compileCommandsOnly = value).withInheritedFields(this)
 end Config

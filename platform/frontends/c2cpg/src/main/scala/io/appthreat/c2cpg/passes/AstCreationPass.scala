@@ -94,6 +94,7 @@ object AstCreationPass:
       s"trivial=${config.includeTrivialExpressions}",
       s"std=${config.cppStandard}",
       s"discovery=${config.includePathsAutoDiscovery}",
+      s"externalPaths=${config.externalPaths}",
       s"index=${config.useProjectIndex}"
     )
     (AstFormatVersion +: (parserOptions ++ config.includePaths.toList.sorted ++
