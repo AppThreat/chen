@@ -16,7 +16,7 @@ class ConstantReferenceTests extends RubyCode2CpgFixture:
   private def external(cpg: Cpg, file: String): List[(Int, String, String)] =
       cpg.typeRef
           .filter(isConstantReference)
-          .filter(_.file.name.exists(_.endsWith(file)))
+          .filter(_.file.name.exists(_.replace('\\', '/').endsWith(file)))
           .l
           .sortBy(t => (t.lineNumber.get: Int, t.columnNumber.get: Int))
           .map(t => (t.lineNumber.get, t.code, t.typeFullName))

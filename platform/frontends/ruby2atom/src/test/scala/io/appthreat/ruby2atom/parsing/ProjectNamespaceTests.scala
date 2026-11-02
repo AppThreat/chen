@@ -20,7 +20,7 @@ class ProjectNamespaceTests extends RubyCode2CpgFixture:
 
   private def refs =
       cpg.typeRef
-          .filter(_.file.name.exists(_.endsWith("api/base_controller.rb")))
+          .filter(_.file.name.exists(_.replace('\\', '/').endsWith("api/base_controller.rb")))
           .filterNot(t =>
               t.typeFullName.endsWith("<class>") || t.typeFullName.startsWith("__core") ||
                   t.typeFullName.contains("<lambda>")
