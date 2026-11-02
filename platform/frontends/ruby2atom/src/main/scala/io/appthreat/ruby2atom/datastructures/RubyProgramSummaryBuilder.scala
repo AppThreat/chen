@@ -25,15 +25,19 @@ object RubyProgramSummaryBuilder:
     val constants                           = mutable.Set.empty[String]
     val solid                               = mutable.Set.empty[String]
     val ancestors                           = mutable.Map.empty[String, List[String]]
+    val autoloaded                          = mutable.Set.empty[String]
+    val autoloadedFiles                     = mutable.Set.empty[String]
 
     programs.foreach { case (relativePath, program) =>
         // Require calls look paths up without the .rb extension (see RubyScope.addRequire).
         val requirePath = relativePath.stripSuffix(".rb").replace('\\', '/')
         collectConstants(program, constants, solid, ancestors)
         autoloadConstants(requirePath).foreach { implied =>
-          // the file defines the constant its path spells; the directories above it are no claim
-          constants += implied
-          solid += implied
+          // the file defines the constant its path spells, and Zeitwerk makes a module of each
+          // directory above it, which only nests
+          val key = RubyProgramSummary.inflectionKey(implied)
+          addWithPrefixes(autoloaded, key)
+          autoloadedFiles += key
         }
         collectTypes(program).foreach { ty =>
           pathToType.updateWith(requirePath) {
@@ -48,7 +52,15 @@ object RubyProgramSummaryBuilder:
         }
     }
 
-    RubyProgramSummary(namespaceToType, pathToType, constants, ancestors, solid)
+    RubyProgramSummary(
+      namespaceToType,
+      pathToType,
+      constants,
+      ancestors,
+      solid,
+      autoloaded,
+      autoloadedFiles
+    )
   end build
 
   private def addWithPrefixes(into: mutable.Set[String], dotted: String): Unit =
@@ -95,13 +107,18 @@ object RubyProgramSummaryBuilder:
 
     def go(prefix: String, expr: RubyExpression): Unit = expr match
       case stmtList: StatementList => stmtList.statements.foreach(go(prefix, _))
-      case decl: TypeDeclaration =>
-          val name = (if prefix.isEmpty then "" else s"$prefix.") + dotted(decl.name)
+      case decl: TypeDeclaration   =>
+          // `class Api::BaseController` names its namespace beside the class name
+          val namespace = decl match
+            case x: NamespaceDeclaration => x.namespaceParts.getOrElse(Nil)
+            case _                       => Nil
+          val writtenName = (namespace :+ dotted(decl.name)).mkString(".")
+          val name        = (if prefix.isEmpty then "" else s"$prefix.") + writtenName
           addWithPrefixes(constants, name)
           // A declaration nested in a module is also known by the name it is written with: a
           // bare reference from outside the module may still reach it (an `include` of the module,
           // `const_missing`), so it is not claimed for a dependency.
-          addWithPrefixes(constants, dotted(decl.name))
+          addWithPrefixes(constants, writtenName)
           // the parser puts a class body's statements in a `<body>` method beside its declarations
           def flattened(stmts: List[RubyExpression]): List[RubyExpression] = stmts.flatMap {
               case m: MethodDeclaration if m.methodName == Defines.TypeDeclBody =>
@@ -139,7 +156,7 @@ object RubyProgramSummaryBuilder:
                 }
           if !onlyNests then
             solid += name
-            solid += dotted(decl.name)
+            solid += writtenName
           body.foreach(go(name, _))
       case SingleAssignment(lhs, _, _) if isConstantTarget(lhs.text) =>
           // a constant is assigned through a plain name, a field of the class body or a path

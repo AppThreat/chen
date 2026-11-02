@@ -110,7 +110,7 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
 
   private def isConstantName(name: String): Boolean = name.headOption.exists(_.isUpper)
 
-  private def known(constant: String): Boolean = programSummary.definedConstants.contains(constant)
+  private def known(constant: String): Boolean = programSummary.defines(constant)
 
   /** Whether a project ancestor of `owner` (a class or module path) defines `name`. */
   private def ancestorDefines(owner: String, name: String, seen: Set[String] = Set.empty): Boolean =
@@ -123,7 +123,7 @@ trait AstForConstantsCreator(implicit withSchemaValidation: ValidationMode):
           resolved.exists(a => known(s"$a.$name") || ancestorDefines(a, name, seen + owner))
         }
 
-  private def solid(constant: String): Boolean = programSummary.solidConstants.contains(constant)
+  private def solid(constant: String): Boolean = programSummary.definesWithContent(constant)
 
   /** Resolves a constant reference. `asReceiver` says that something is called on it (a method, an
     * attribute, `new`), which a namespace that the project only nests things in cannot answer.

@@ -27,7 +27,9 @@ class RubyProgramSummary(
   initialPathMap: NamespaceToTypeMap = mutable.Map.empty,
   initialConstants: collection.Set[String] = Set.empty,
   initialAncestors: collection.Map[String, List[String]] = Map.empty,
-  initialSolidConstants: collection.Set[String] = Set.empty
+  initialSolidConstants: collection.Set[String] = Set.empty,
+  initialAutoloaded: collection.Set[String] = Set.empty,
+  initialAutoloadedFiles: collection.Set[String] = Set.empty
 ) extends ProgramSummary[RubyType, RubyMethod, RubyField]:
 
   override val namespaceToType: NamespaceToTypeMap = initialNamespaceMap
@@ -54,6 +56,26 @@ class RubyProgramSummary(
     */
   val ancestors: collection.Map[String, List[String]] = initialAncestors
 
+  /** The constants Rails autoloading (Zeitwerk) implies for the files under `app/` and `lib/`, with
+    * the namespaces their directories make, as [[RubyProgramSummary.inflectionKey]]s: the project's
+    * inflector may spell a directory as an acronym (`activitypub` is `ActivityPub`, `rest` is
+    * `REST`), which the file name does not tell.
+    */
+  val autoloaded: collection.Set[String] = initialAutoloaded
+
+  /** The subset of [[autoloaded]] that a file defines, rather than a directory only nests. */
+  val autoloadedFiles: collection.Set[String] = initialAutoloadedFiles
+
+  /** Whether the project defines `constant` (a dotted path), or nests something in it. */
+  def defines(constant: String): Boolean =
+      definedConstants.contains(constant) ||
+          autoloaded.contains(RubyProgramSummary.inflectionKey(constant))
+
+  /** Whether the project really defines `constant` (see [[solidConstants]]). */
+  def definesWithContent(constant: String): Boolean =
+      solidConstants.contains(constant) ||
+          autoloadedFiles.contains(RubyProgramSummary.inflectionKey(constant))
+
   @targetName("appendAll")
   def ++=(other: RubyProgramSummary): RubyProgramSummary =
       RubyProgramSummary(
@@ -61,11 +83,18 @@ class RubyProgramSummary(
         ProgramSummary.merge(this.pathToType, other.pathToType),
         this.definedConstants ++ other.definedConstants,
         this.ancestors ++ other.ancestors,
-        this.solidConstants ++ other.solidConstants
+        this.solidConstants ++ other.solidConstants,
+        this.autoloaded ++ other.autoloaded,
+        this.autoloadedFiles ++ other.autoloadedFiles
       )
 end RubyProgramSummary
 
 object RubyProgramSummary:
+
+  /** A constant path as an inflector-independent key: `ActivityPub.TagManager` and the
+    * `activitypub/tag_manager` file both give `activitypub.tagmanager`.
+    */
+  def inflectionKey(dotted: String): String = dotted.toLowerCase.replace("_", "")
 
   def BuiltinTypes(implicit typeStubMetaData: TypeStubMetaData): NamespaceToTypeMap =
     val typeStubDir = File(typeStubMetaData.packagePath)
