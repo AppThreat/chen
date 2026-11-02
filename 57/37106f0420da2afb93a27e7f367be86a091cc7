@@ -1,0 +1,34 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/DialectGapRewriteTests.scala
+  s_0dbbcb5914c2c5::t_e4068308c757b6 1-96
+  s_0dbbcb5914c2c5::t_34e57385b825bb 97-98
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  s_0dbbcb5914c2c5::t_14e240a2a87fa0 13,56-57
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_0dbbcb5914c2c5::t_0e47c0fc54f9b8 40-43,89-90
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/DialectRewrites.scala
+  s_0dbbcb5914c2c5::t_7ede0db58c0f60 3-6,10-12,18-59,62-64,67-77,83,90-135,140-186,191-192,195-197,200-202
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_0dbbcb5914c2c5::t_35fd1bc900e76e 97
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/ExternalPathsPass.scala
+  s_0dbbcb5914c2c5::t_b746d99c0ae3b9 1-33
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ExternalPathsTests.scala
+  s_0dbbcb5914c2c5::t_858044fcc48d0b 1-69
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  s_0dbbcb5914c2c5::t_d812f8b64874a4 4,73-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5737106f0420da2afb93a27e7f367be86a091cc7",
+  "prompts": {},
+  "sessions": {
+    "s_0dbbcb5914c2c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dd7541fb-2df2-4da7-a16f-14967800872a",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
