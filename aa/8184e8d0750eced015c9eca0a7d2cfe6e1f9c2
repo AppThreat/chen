@@ -1,0 +1,21 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/frontendspecific/ruby2atom/ImplicitRequirePass.scala
+  s_79a7c562b49300::t_0183e3ad58e419 41-48,50-51,94,100,203-227,243
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/frontendspecific/ruby2atom/ImplicitRequirePrefixIndexTests.scala
+  s_79a7c562b49300::t_e963edc61dbb21 1-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "aa8184e8d0750eced015c9eca0a7d2cfe6e1f9c2",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
