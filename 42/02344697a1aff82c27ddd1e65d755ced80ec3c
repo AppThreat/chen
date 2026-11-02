@@ -1,0 +1,21 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/Main.scala
+  s_bf0a61c31b2594::t_6fe9e4d15b560a 27
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/DefaultIgnoreTests.scala
+  s_bf0a61c31b2594::t_c38b632aa9e458 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4202344697a1aff82c27ddd1e65d755ced80ec3c",
+  "prompts": {},
+  "sessions": {
+    "s_bf0a61c31b2594": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0488d121-8c29-4478-a666-9e40427c2fac",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
