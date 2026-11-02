@@ -24,20 +24,77 @@ type NamespaceToTypeMap = mutable.Map[String, mutable.Set[RubyType]]
 
 class RubyProgramSummary(
   initialNamespaceMap: NamespaceToTypeMap = mutable.Map.empty,
-  initialPathMap: NamespaceToTypeMap = mutable.Map.empty
+  initialPathMap: NamespaceToTypeMap = mutable.Map.empty,
+  initialConstants: collection.Set[String] = Set.empty,
+  initialAncestors: collection.Map[String, List[String]] = Map.empty,
+  initialSolidConstants: collection.Set[String] = Set.empty,
+  initialAutoloaded: collection.Set[String] = Set.empty,
+  initialAutoloadedFiles: collection.Set[String] = Set.empty
 ) extends ProgramSummary[RubyType, RubyMethod, RubyField]:
 
   override val namespaceToType: NamespaceToTypeMap = initialNamespaceMap
   val pathToType: NamespaceToTypeMap               = initialPathMap
 
+  /** The constants the project defines, as dotted paths (`Outer.Inner`): every class and module
+    * with each of its prefixes and also under the name it is written with inside its module, every
+    * constant assignment, and the names Rails autoloading implies for the files under `app/` and
+    * `lib/`. A reference that resolves to one of these is not a use of a dependency.
+    */
+  val definedConstants: collection.Set[String] = initialConstants
+
+  /** The subset of [[definedConstants]] the project really defines: a class, a module whose body
+    * holds more than nested classes and modules, a constant assignment, or the constant a file's
+    * path names. The rest only nest things in a namespace, which a gem may own: `module Rails;
+    * class Foo` reopens the gem's `Rails`. A namespace of that kind has no methods and no constants
+    * of its own, so `Rails.logger` and `Rails::Missing` reach the gem.
+    */
+  val solidConstants: collection.Set[String] = initialSolidConstants
+
+  /** The written ancestors (superclass, `include` and `prepend` arguments) of each class or module
+    * the project declares, keyed by its dotted path. Used to look a constant up through the
+    * ancestors of the innermost class, as Ruby does.
+    */
+  val ancestors: collection.Map[String, List[String]] = initialAncestors
+
+  /** The constants Rails autoloading (Zeitwerk) implies for the files under `app/` and `lib/`, with
+    * the namespaces their directories make, as [[RubyProgramSummary.inflectionKey]]s: the project's
+    * inflector may spell a directory as an acronym (`activitypub` is `ActivityPub`, `rest` is
+    * `REST`), which the file name does not tell.
+    */
+  val autoloaded: collection.Set[String] = initialAutoloaded
+
+  /** The subset of [[autoloaded]] that a file defines, rather than a directory only nests. */
+  val autoloadedFiles: collection.Set[String] = initialAutoloadedFiles
+
+  /** Whether the project defines `constant` (a dotted path), or nests something in it. */
+  def defines(constant: String): Boolean =
+      definedConstants.contains(constant) ||
+          autoloaded.contains(RubyProgramSummary.inflectionKey(constant))
+
+  /** Whether the project really defines `constant` (see [[solidConstants]]). */
+  def definesWithContent(constant: String): Boolean =
+      solidConstants.contains(constant) ||
+          autoloadedFiles.contains(RubyProgramSummary.inflectionKey(constant))
+
   @targetName("appendAll")
   def ++=(other: RubyProgramSummary): RubyProgramSummary =
       RubyProgramSummary(
         ProgramSummary.merge(this.namespaceToType, other.namespaceToType),
-        ProgramSummary.merge(this.pathToType, other.pathToType)
+        ProgramSummary.merge(this.pathToType, other.pathToType),
+        this.definedConstants ++ other.definedConstants,
+        this.ancestors ++ other.ancestors,
+        this.solidConstants ++ other.solidConstants,
+        this.autoloaded ++ other.autoloaded,
+        this.autoloadedFiles ++ other.autoloadedFiles
       )
+end RubyProgramSummary
 
 object RubyProgramSummary:
+
+  /** A constant path as an inflector-independent key: `ActivityPub.TagManager` and the
+    * `activitypub/tag_manager` file both give `activitypub.tagmanager`.
+    */
+  def inflectionKey(dotted: String): String = dotted.toLowerCase.replace("_", "")
 
   def BuiltinTypes(implicit typeStubMetaData: TypeStubMetaData): NamespaceToTypeMap =
     val typeStubDir = File(typeStubMetaData.packagePath)

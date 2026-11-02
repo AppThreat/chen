@@ -625,12 +625,6 @@ class RubyJsonToNodeCreator(
     val collectionName = obj(ParserKeys.Name).str
     val metaData       = obj(ParserKeys.MetaData)
     metaData.obj.put(ParserKeys.Code, collectionName)
-    val receiver = ujson.Obj(
-      ParserKeys.Type     -> ujson.Str(AstType.ScopedConstant.name),
-      ParserKeys.MetaData -> metaData,
-      ParserKeys.Base     -> ujson.Null,
-      ParserKeys.Name     -> ujson.Str(collectionName)
-    )
     val arguments = obj(ParserKeys.Arguments).arr.headOption
         .flatMap {
             case x: ujson.Obj => AstType.fromString(x(ParserKeys.Type).str).map(t => t -> x)
@@ -650,7 +644,12 @@ class RubyJsonToNodeCreator(
     val textSpan =
         obj.toTextSpan.spanStart(s"$collectionName [${arguments.map(_.span.text).mkString(", ")}]")
 
-    IndexAccess(visit(receiver), arguments)(textSpan)
+    // `Array(x)` calls a Kernel function: the constant the lowering borrows was not written, and it
+    // carries a type for that reason
+    val constant = SimpleIdentifier(Option(getBuiltInType(collectionName)))(
+      obj.toTextSpan.spanStart(collectionName)
+    )
+    IndexAccess(constant, arguments)(textSpan)
   end visitCollectionAliasSend
 
   private def visitDefined(obj: Obj): RubyExpression =
@@ -1311,12 +1310,13 @@ class RubyJsonToNodeCreator(
     val callName    = obj(ParserKeys.Name).str
     val hasReceiver = obj.contains(ParserKeys.Receiver)
     callName match
-      case "new"                                           => visitObjectInstantiation(obj)
-      case "Array" | "Hash"                                => visitCollectionAliasSend(obj)
-      case "[]"                                            => visitIndexAccessAsSend(obj)
-      case "[]="                                           => visitBracketAssignmentAsSend(obj)
-      case "raise"                                         => visitRaise(obj)
-      case "include"                                       => visitInclude(obj)
+      case "new"            => visitObjectInstantiation(obj)
+      case "Array" | "Hash" => visitCollectionAliasSend(obj)
+      case "[]"             => visitIndexAccessAsSend(obj)
+      case "[]="            => visitBracketAssignmentAsSend(obj)
+      case "raise"          => visitRaise(obj)
+      case "include" if !hasReceiver && obj.visitArray(ParserKeys.Arguments).size == 1 =>
+          visitInclude(obj)
       case "attr_reader" | "attr_writer" | "attr_accessor" => visitFieldDeclaration(obj)
       case "private" | "public" | "protected"              => visitAccessModifier(obj)
       case "private_class_method" | "public_class_method"  => visitMethodAccessModifier(obj)

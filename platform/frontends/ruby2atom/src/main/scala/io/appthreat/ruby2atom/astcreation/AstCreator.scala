@@ -32,6 +32,7 @@ class AstCreator(
     with AstForControlStructuresCreator
     with AstForFunctionsCreator
     with AstForTypesCreator
+    with AstForConstantsCreator
     with AstNodeBuilder[RubyExpression, AstCreator]:
 
   val tmpGen: FreshNameGenerator[String] = FreshNameGenerator(i => s"<tmp-$i>")

@@ -157,19 +157,47 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
             case n => astsForStatement(n)
         }
 
-    val classBodyAsts =
-      val bodyAsts = separateStatementsFromBody(classBody.statements)
-      if scope.shouldGenerateDefaultConstructor && this.parseLevel == AstParseLevel.FULL_AST then
-        val bodyStart = classBody.span.spanStart()
-        val initBody  = StatementList(List())(bodyStart)
-        val methodDecl = astForMethodDeclaration(MethodDeclaration(
-          Defines.Initialize,
-          List(),
-          initBody
-        )(bodyStart))
-        methodDecl ++ bodyAsts
-      else
-        bodyAsts
+    // Resolved in the scope around the class: a superclass is looked up before the class exists.
+    val baseClassRefs = node.baseClass.toList.flatMap {
+        case base @ ExternalConstantRef(constant) => astForExternalConstant(base, constant) :: Nil
+        // a bundled core class (`StandardError`) has its own reference node
+        case base: SimpleIdentifier if isBundledClass(base.text) => astForExpression(base) :: Nil
+        case _                                                   => Nil
+    }
+    // `class A < Migration[7.2]` or `< Struct.new(:a)`: an expression, which runs where the class is
+    // written, with the constant it calls on as the receiver
+    val baseClassExpressions = node.baseClass.toList.filter(constantPath(_).isEmpty).filterNot {
+        case _: SelfIdentifier => true
+        case _                 => false
+    }.map(astForExpression)
+    val declaredParts = node match
+      case x: NamespaceDeclaration => x.namespaceParts.getOrElse(Nil)
+      case _                       => Nil
+
+    val (classBodyAsts, mixins) = collectingMixins(withLexicalCref(
+      (declaredParts :+ className).mkString("."),
+      false
+    ) {
+        val bodyAsts = separateStatementsFromBody(classBody.statements)
+        if scope.shouldGenerateDefaultConstructor && this.parseLevel == AstParseLevel.FULL_AST then
+          val bodyStart = classBody.span.spanStart()
+          val initBody  = StatementList(List())(bodyStart)
+          val methodDecl = astForMethodDeclaration(MethodDeclaration(
+            Defines.Initialize,
+            List(),
+            initBody
+          )(bodyStart))
+          methodDecl ++ bodyAsts
+        else
+          bodyAsts
+    })
+    // `include` and `prepend` make the module an ancestor of the class, `extend` of its singleton
+    typeDecl.inheritsFromTypeFullName(
+      typeDecl.inheritsFromTypeFullName ++ mixins.collect { case (false, name) => name }
+    )
+    singletonTypeDecl.inheritsFromTypeFullName(
+      singletonTypeDecl.inheritsFromTypeFullName ++ mixins.collect { case (true, name) => name }
+    )
 
     val fields = node match
       case classDecl: ClassDeclaration   => classDecl.fields
@@ -195,6 +223,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     val typeDeclAst = Ast(typeDecl)
         .withChildren(classModifiers)
         .withChildren(fieldTypeMemberNodes.map(_._2))
+        .withChildren(baseClassRefs)
         .withChildren(classBodyAsts)
     val singletonTypeDeclAst =
         Ast(singletonTypeDecl)
@@ -209,7 +238,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
 
     if shouldPopAdditionalScope then scope.popScope()
     popAccessModifier()
-    prefixAst :: bodyMemberCallAst :: statementsToForwardUpTheAst.toList
+    baseClassExpressions.toList ++ (prefixAst :: bodyMemberCallAst :: statementsToForwardUpTheAst.toList)
   end astForSimpleNamedClassDeclaration
 
   private def astForTypeDeclBodyCall(node: TypeDeclBodyCall, typeFullName: String): Ast =

@@ -9,7 +9,6 @@ import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.operatorextension.OpNodes
 import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.{Assignment, FieldAccess}
 
-import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.collection.mutable
 
@@ -39,7 +38,17 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
   private val Initialize: String = "initialize"
   private val Clazz: String      = "<class>"
 
+  /** Methods and type declarations sorted by full name, so that the ones under a module are one
+    * range found by binary search instead of a regex scan of the whole graph for every module.
+    */
+  private var methodsByName: ImplicitRequirePass.PrefixIndex[Method] =
+      scala.compiletime.uninitialized
+  private var typeDeclsByName: ImplicitRequirePass.PrefixIndex[TypeDecl] =
+      scala.compiletime.uninitialized
+
   override def init(): Unit =
+    methodsByName = ImplicitRequirePass.PrefixIndex(cpg.method.l)(_.fullName)
+    typeDeclsByName = ImplicitRequirePass.PrefixIndex(cpg.typeDecl.l)(_.fullName)
     val importableTypeInfo = cpg.typeDecl
         .isExternal(false)
         .filter { typeDecl =>
@@ -82,13 +91,13 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
       //  case x: Method   => Iterator(x) ++ x.astChildren.collectAll[Method].flatMap(findMethodsViaAstChildren)
       //  case _           => Iterator.empty
       // }
-      cpg.method.fullName(Pattern.quote(module.fullName) + ".*")
+      methodsByName.withPrefix(module.fullName)
 
   override def runOnPart(builder: DiffGraphBuilder, moduleMethod: Method): Unit =
     val possiblyImportedSymbols = mutable.ArrayBuffer.empty[String]
     val currPath                = ImplicitRequirePass.normalizePath(moduleMethod.filename)
 
-    val typeDecl = cpg.typeDecl.fullName(Pattern.quote(moduleMethod.fullName) + ".*").l
+    val typeDecl = typeDeclsByName.withPrefix(moduleMethod.fullName).toList
     typeDecl.inheritsFromTypeFullName
         .filterNot(_.endsWith(Clazz))
         .map(getFieldBaseFromString)
@@ -191,6 +200,31 @@ end ImplicitRequirePass
 
 object ImplicitRequirePass:
 
+  /** Nodes sorted by a name: the nodes whose name starts with a prefix are one contiguous range.
+    * They come back in graph order, as a scan of the graph would give them.
+    */
+  final class PrefixIndex[T <: StoredNode](nodes: Seq[T])(name: T => String):
+    private val sorted = nodes.map(n => (name(n), n)).sortBy(_._1).toArray
+    private val names  = sorted.map(_._1)
+
+    /** The first position whose name is not below `prefix`. */
+    private def lowerBound(prefix: String): Int =
+      var (low, high) = (0, names.length)
+      while low < high do
+        val middle = (low + high) >>> 1
+        if names(middle) < prefix then low = middle + 1 else high = middle
+      low
+
+    def withPrefix(prefix: String): Iterator[T] =
+        Iterator
+            .from(lowerBound(prefix))
+            .takeWhile(i => i < names.length && names(i).startsWith(prefix))
+            .map(sorted(_)._2)
+            .toList
+            .sortBy(_.id())
+            .iterator
+  end PrefixIndex
+
   /** Determines if the given type name and its corresponding parent file name allow for the type to
     * be autoloaded by zeitwerk.
     * @return
@@ -206,3 +240,4 @@ object ImplicitRequirePass:
     ).toLowerCase
 
   private def normalizePath(path: String): String = path.replace("\\", "/").stripSuffix(".rb")
+end ImplicitRequirePass
