@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/MacroHandler.scala
+  s_0dbbcb5914c2c5::t_0d3128690714ed 571-573
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_0dbbcb5914c2c5::t_8c60036e53a3d6 70-72
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/CompileDatabaseTests.scala
+  s_0dbbcb5914c2c5::t_9bb9e9457c36d6 162,164-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b1f3d719bc15b6287b424b346bbe63253319dcf0",
+  "prompts": {},
+  "sessions": {
+    "s_0dbbcb5914c2c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dd7541fb-2df2-4da7-a16f-14967800872a",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
