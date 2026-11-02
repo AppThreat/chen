@@ -145,18 +145,18 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
 
   // Member accesses are checked in RubyNodeCreator, i.e. `x.y` is the call of `y` of `x` without any arguments.
   //  where x.Y is considered a constant access as Y is capitalized.
-  protected def astForMemberAccess(node: MemberAccess): Ast =
-      node.target match
-        case _ if ExternalConstantRef.unapply(node).isDefined =>
-            astForExternalConstant(node, ExternalConstantRef.unapply(node).get)
-        case x: SimpleIdentifier =>
-            val newTarget = scope.getSurroundingType(x.text).map(_.fullName) match
-              case Some(surroundingType) =>
-                  val typeName = surroundingType.split('.').last
-                  TypeIdentifier(s"$surroundingType<class>")(x.span.spanStart(typeName))
-              case None => x
-            astForFieldAccess(node.copy(target = newTarget)(node.span))
-        case _ => astForFieldAccess(node)
+  protected def astForMemberAccess(node: MemberAccess): Ast = node match
+    case ExternalConstantRef(constant) => astForExternalConstant(node, constant)
+    case _ =>
+        node.target match
+          case x: SimpleIdentifier =>
+              val newTarget = scope.getSurroundingType(x.text).map(_.fullName) match
+                case Some(surroundingType) =>
+                    val typeName = surroundingType.split('.').last
+                    TypeIdentifier(s"$surroundingType<class>")(x.span.spanStart(typeName))
+                case None => x
+              astForFieldAccess(node.copy(target = newTarget)(node.span))
+          case _ => astForFieldAccess(node)
 
   /** Attempts to extract a type from the base of a member call.
     */
@@ -353,13 +353,13 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             handleTmpGen(
               target,
               astForExternalConstant(target, constant),
-              (target.line, target.column, target.text)
+              Some((target.line, target.column, target.text))
             )
         case ExternalConstantRef(constant) if isNamespace =>
             handleTmpGen(
               target,
               astForExternalConstant(target, constant),
-              (target.line, target.column, target.text)
+              Some((target.line, target.column, target.text))
             )
         case simpleLhs: (LiteralExpr | SimpleIdentifier | SelfIdentifier | TypeIdentifier) =>
             astForExpression(simpleLhs) -> code(target)
@@ -370,10 +370,10 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
   private def handleTmpGen(
     target: RubyExpression,
     rhs: Ast,
-    cacheKey: Any = null
+    cacheKey: Option[Any] = None
   ): (Ast, String) =
     // Check cache
-    val key                   = if cacheKey == null then target else cacheKey
+    val key                   = cacheKey.getOrElse(target)
     val createAssignmentToTmp = !baseAstCache.contains(key)
     val tmpName = baseAstCache
         .updateWith(key) {
