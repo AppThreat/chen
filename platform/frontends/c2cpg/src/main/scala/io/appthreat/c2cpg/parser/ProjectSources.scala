@@ -268,7 +268,9 @@ final class ProjectSources(val config: Config):
     */
   def textOf(file: Path, language: SourceLanguage): Array[Char] =
     val chars = CdtParser.readFileChars(file)
-    if language == SourceLanguage.Cpp then modules.rewrite(file, chars) else chars
+    if language == SourceLanguage.Cpp then
+      modules.rewrite(file, DialectRewrites.forCpp(chars))
+    else DialectRewrites.forC(chars)
 end ProjectSources
 
 object ProjectSources:
