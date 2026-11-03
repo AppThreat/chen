@@ -1,0 +1,25 @@
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/JavaSrc2Cpg.scala
+  s_59ee2bc55d0554::t_18374e1022debf 55
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/JsSrc2Cpg.scala
+  s_59ee2bc55d0554::t_464ece3db0fff6 24,55
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/Php2Atom.scala
+  s_59ee2bc55d0554::t_90a26f3d710c6f 52
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2CpgOnFileSystem.scala
+  s_59ee2bc55d0554::t_4e64958b55cd48 252-255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "51ee4e08b35dad7eaef9a77765b57cf130f5a499",
+  "prompts": {},
+  "sessions": {
+    "s_59ee2bc55d0554": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_722fbd2f-5d0e-47a2-b7c6-77f759f80b8a",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
