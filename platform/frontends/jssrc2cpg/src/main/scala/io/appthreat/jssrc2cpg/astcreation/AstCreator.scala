@@ -63,6 +63,8 @@ class AstCreator(
   protected val functionNodeToNameAndFullName =
       mutable.HashMap.empty[BabelNodeInfo, (String, String)]
   protected val usedVariableNames = mutable.HashMap.empty[String, Int]
+  // the type of the value each destructuring temporary holds, for the references to it
+  protected val tmpVariableTypes  = mutable.HashMap.empty[String, String]
   protected val seenAliasTypes    = mutable.HashSet.empty[NewTypeDecl]
   protected val functionFullNames = mutable.HashSet.empty[String]
 

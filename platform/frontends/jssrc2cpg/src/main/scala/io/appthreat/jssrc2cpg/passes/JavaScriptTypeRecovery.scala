@@ -69,6 +69,62 @@ private class RecoverForJavaScriptFile(
       .toSet
   override protected val pathSep = ':'
 
+  /** The methods of the file that declare a parameter of each name. */
+  private lazy val parameterMethods: Map[String, Set[String]] =
+      cu.ast.isParameter.flatMap(p => enclosingMethod(p).map(p.name -> _)).toSeq
+          .groupBy(_._1).map { case (name, ps) => name -> ps.map(_._2).toSet }
+
+  private def enclosingMethod(node: AstNode): Option[String] =
+      Iterator.single(node).inAst.isMethod.headOption.map(_.fullName)
+
+  /** The method that declares the parameter `node` is, or refers to, when the file has a parameter
+    * of that name in more than one method.
+    *
+    * The symbol table is keyed by name for the whole file, so the parameter `doc: Node` of one
+    * method and the variable `doc` of another were one entry, and a call on the variable was
+    * resolved by the parameter type (`doc.querySelectorAll` on a DOM document became a call of
+    * `prosemirror-model:Node`). A parameter and the identifiers that refer to it are keyed with
+    * their method. The names the frontend invents (`this`, `_tmp_0`, `param1_0`) are the same in
+    * every method on purpose, and are not scoped.
+    */
+  private def parameterScope(node: AstNode): Option[String] =
+    val name = node match
+      case p: MethodParameterIn => p.name
+      case i: Identifier        => i.name
+      case _                    => ""
+    val synthetic = name == "this" || name.startsWith("_") || name.matches("param\\d+_\\d+")
+    if name.isEmpty || synthetic || !parameterMethods.get(name).exists(_.sizeIs > 1) then None
+    else
+      node match
+        case p: MethodParameterIn => enclosingMethod(p)
+        case i: Identifier =>
+            i.refsTo.headOption.collect { case p: MethodParameterIn => p }.flatMap(enclosingMethod)
+        case _ => None
+
+  override protected def localKeyOf(node: AstNode): Option[LocalKey] = node match
+    case i: Identifier =>
+        parameterScope(i).fold(super.localKeyOf(node))(m => Some(LocalVar(s"${i.name}@$m")))
+    case p: MethodParameterIn =>
+        parameterScope(p).fold(super.localKeyOf(node))(m => Some(LocalVar(s"${p.name}@$m")))
+    case _ => super.localKeyOf(node)
+
+  /** The frontend gives the access of a field the checker's type string (`Box<User>`), which is no
+    * type declaration of the graph: a call on it is resolved through the field, as when the access
+    * has no type, unless the type is one the graph declares.
+    */
+  override protected def callTypeIsReceiverType(receiver: Call): Boolean =
+      !receiver.name.startsWith("<operator>.") ||
+          cpg.typeDecl.fullNameExact(receiver.typeFullName).nonEmpty
+
+  /** The frontend types an operator call (`await x`, `a.b`, `a + b`) with the checker's type, which
+    * is the type of its value and no entry for the symbol table: it would store the operator's name
+    * as a type hint of the call.
+    */
+  override protected def hasTypes(node: AstNode): Boolean = node match
+    case c: Call if c.name.startsWith("<operator>.") && c.methodFullName.startsWith("<operator>") =>
+        false
+    case _ => super.hasTypes(node)
+
   /** A heuristic method to determine if a call is a constructor or not.
     */
   override protected def isConstructor(c: Call): Boolean =
@@ -81,11 +137,10 @@ private class RecoverForJavaScriptFile(
     case x @ (_: Identifier | _: Local | _: MethodParameterIn)
         if x.property(PropertyNames.TYPE_FULL_NAME, Defines.Any) != Defines.Any =>
         val typeFullName = x.property(PropertyNames.TYPE_FULL_NAME, Defines.Any)
-        val typeHints = symbolTable.get(LocalVar(x.property(
-          PropertyNames.TYPE_FULL_NAME,
-          Defines.Any
-        ))) - typeFullName
-        lazy val cpgTypeFullName = typeDeclFullNamesByName.getOrElse(typeFullName, Set.empty)
+        // `Box<User>`, a type the checker named, is the class `Box`: imported, or declared here
+        val baseName             = typeFullName.takeWhile(_ != '<')
+        val typeHints            = symbolTable.get(LocalVar(baseName)) - typeFullName
+        lazy val cpgTypeFullName = typeDeclFullNamesByName.getOrElse(baseName, Set.empty)
         val resolvedTypeHints =
             if typeHints.nonEmpty then symbolTable.put(x, typeHints)
             else if cpgTypeFullName.nonEmpty then symbolTable.put(x, cpgTypeFullName)

@@ -143,6 +143,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
 
   protected def pos(node: Value): Option[Int] = start(node)
 
+  protected def endPos(node: Value): Option[Int] = end(node)
+
   protected def line(node: Value): Option[Integer] = start(node).map(getLineOfSource)
 
   protected def lineEnd(node: Value): Option[Integer] = end(node).map(getLineOfSource)

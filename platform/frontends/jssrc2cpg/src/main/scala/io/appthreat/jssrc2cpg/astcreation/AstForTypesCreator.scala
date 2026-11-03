@@ -244,7 +244,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     isPatternMember: Boolean = false
   ): Ast =
     val nodeInfo     = createBabelNodeInfo(classElement)
-    val typeFullName = typeFor(nodeInfo)
+    val typeFullName = typeForMember(nodeInfo)
     val memberNode_ = nodeInfo.node match
       case TSDeclareMethod | TSDeclareFunction =>
           val function    = createMethodDefinitionNode(nodeInfo)
@@ -814,7 +814,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
 
     interfaceBodyElements.foreach { classElement =>
       val nodeInfo     = createBabelNodeInfo(classElement)
-      val typeFullName = typeFor(nodeInfo)
+      val typeFullName = typeForMember(nodeInfo)
       val memberNodes = nodeInfo.node match
         case TSCallSignatureDeclaration | TSMethodSignature =>
             val functionNode = createMethodDefinitionNode(nodeInfo)

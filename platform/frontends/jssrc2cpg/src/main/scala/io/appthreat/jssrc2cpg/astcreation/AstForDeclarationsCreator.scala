@@ -94,7 +94,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     name: String,
     exportCallAst: Ast,
     declaration: BabelNodeInfo,
-    from: Option[String]
+    from: Option[String],
+    exportedType: String = Defines.Any
   ): Ast =
       from match
         case Some(value) =>
@@ -112,13 +113,19 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
               declaration.columnNumber
             )
         case None =>
-            createAssignmentCallAst(
+            val assignment = createAssignmentCallAst(
               exportCallAst,
-              Ast(identifierNode(declaration, name)),
+              Ast(identifierNode(declaration, name).typeFullName(exportedType)),
               s"${codeOf(exportCallAst.nodes.head)} = $name",
               declaration.lineNumber,
               declaration.columnNumber
             )
+            if exportedType != Defines.Any then
+              (assignment.root.toList ++ exportCallAst.root.toList).foreach {
+                  case c: NewCall if c.typeFullName == Defines.Any => c.typeFullName(exportedType)
+                  case _                                           =>
+              }
+            assignment
 
   private def extractDeclarationsFromExportDecl(
     declaration: BabelNodeInfo,
@@ -299,10 +306,14 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForExportDefaultDeclaration(declaration: BabelNodeInfo): Ast =
     val exportName      = extractExportFromNameFromExportDecl(declaration)
     val declAstAndNames = extractDeclarationsFromExportDecl(declaration, "declaration")
+    // `export default value`: the exports hold what the checker typed the value with (a function
+    // or class declaration is typed by its return or construct signature, not as a value)
+    val exportedType = safeObj(declaration.json, "declaration").map(d => createBabelNodeInfo(d))
+        .filter(isExpressionNode).map(spanTypeOrAny).getOrElse(Defines.Any)
     val declAsts = declAstAndNames.toList.flatMap { case (ast, names) =>
         ast +: names.map { name =>
           val exportCallAst = createExportCallAst(DefaultsKey, exportName, declaration)
-          createExportAssignmentCallAst(name, exportCallAst, declaration, None)
+          createExportAssignmentCallAst(name, exportCallAst, declaration, None, exportedType)
         }
     }
     setArgumentIndices(declAsts)
@@ -432,7 +443,14 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                   line = line(declarator),
                   column = column(declarator)
                 )
+            if hasTypeSpans && actualTypeFullName != Defines.Any then
+              assignmentCallAst.root.foreach {
+                  case c: NewCall if c.typeFullName == Defines.Any =>
+                      c.typeFullName(actualTypeFullName)
+                  case _ =>
+              }
             assignmentCallAst
+      end match
     end if
   end astForVariableDeclarator
 
@@ -457,11 +475,12 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     alias: Option[String],
     from: String,
     isImportN: Boolean,
-    nodeInfo: BabelNodeInfo
+    nodeInfo: BabelNodeInfo,
+    importedType: String = Defines.Any
   ): Ast =
     val destName  = alias.getOrElse(name)
-    val destNode  = identifierNode(nodeInfo, destName)
-    val localNode = newLocalNode(destName, Defines.Any).order(0)
+    val destNode  = identifierNode(nodeInfo, destName).typeFullName(importedType)
+    val localNode = newLocalNode(destName, importedType).order(0)
     scope.addVariable(destName, localNode, BlockScope)
     scope.addVariableReference(destName, destNode)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
@@ -542,7 +561,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
           alias,
           source,
           isImportN = isImportN,
-          impDecl
+          impDecl,
+          spanTypeOrAny(createBabelNodeInfo(importSpecifier))
         )
         val importedName = importSpecifier("local")("name").str
         val call =
@@ -608,7 +628,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   ): Ast =
     val valueAst = astForNode(element.json)
 
-    val localNode = newLocalNode(element.code, Defines.Any).order(0)
+    val localNode = newLocalNode(element.code, spanTypeOrAny(element)).order(0)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
@@ -636,7 +656,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   ): Ast =
     val valueAst = astForNode(element.json)
 
-    val localNode = newLocalNode(element.code, Defines.Any).order(0)
+    val localNode = newLocalNode(element.code, spanTypeOrAny(element)).order(0)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
@@ -837,8 +857,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     scope.pushNewBlockScope(blockNode)
     localAstParentStack.push(blockNode)
 
-    val localNode = newLocalNode(localTmpName, Defines.Any).order(0)
-    val tmpNode   = identifierNode(pattern, localTmpName)
+    val localNode = newTmpLocal(localTmpName, pattern).order(0)
+    val tmpNode   = tmpIdentifierNode(pattern, localTmpName)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(localTmpName, localNode, BlockScope)
     scope.addVariableReference(localTmpName, tmpNode)

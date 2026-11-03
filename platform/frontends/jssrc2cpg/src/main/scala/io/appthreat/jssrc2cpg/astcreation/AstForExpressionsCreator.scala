@@ -6,7 +6,7 @@ import io.appthreat.jssrc2cpg.parser.BabelAst.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.datastructures.Stack.*
 import io.appthreat.x2cpg.utils.NodeBuilders.newLocalNode
-import io.shiftleft.codepropertygraph.generated.nodes.NewNode
+import io.shiftleft.codepropertygraph.generated.nodes.{NewCall, NewNode}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, EdgeTypes, Operators}
 
 import scala.util.Try
@@ -121,7 +121,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   (receiverAst, baseNode, memberCode)
               case _ =>
                   val tmpVarName  = generateUnusedVariableName(usedVariableNames, "_tmp")
-                  val baseTmpNode = identifierNode(base, tmpVarName)
+                  val baseTmpNode = tmpIdentifierNode(base, tmpVarName)
                   scope.addVariableReference(tmpVarName, baseTmpNode)
                   val baseAst = astForNodeWithFunctionReference(base.json)
                   val code    = s"(${codeOf(baseTmpNode)} = ${base.code})"
@@ -175,8 +175,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     localAstParentStack.push(blockNode)
 
     val tmpAllocName      = generateUnusedVariableName(usedVariableNames, "_tmp")
-    val localTmpAllocNode = newLocalNode(tmpAllocName, Defines.Any).order(0)
-    val tmpAllocNode1     = identifierNode(newExpr, tmpAllocName)
+    val localTmpAllocNode = newTmpLocal(tmpAllocName, newExpr).order(0)
+    val tmpAllocNode1     = tmpIdentifierNode(newExpr, tmpAllocName)
     diffGraph.addEdge(localAstParentStack.head, localTmpAllocNode, EdgeTypes.AST)
     scope.addVariableReference(tmpAllocName, tmpAllocNode1)
 
@@ -192,14 +192,14 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
           newExpr.columnNumber
         )
 
-    val tmpAllocNode2 = identifierNode(newExpr, tmpAllocName)
+    val tmpAllocNode2 = tmpIdentifierNode(newExpr, tmpAllocName)
 
     val receiverNode = astForNodeWithFunctionReference(callee)
 
     // TODO: place "<operator>.new" into the schema
     val callAst = handleCallNodeArgs(newExpr, receiverNode, tmpAllocNode2, "<operator>.new")
 
-    val tmpAllocReturnNode = Ast(identifierNode(newExpr, tmpAllocName))
+    val tmpAllocReturnNode = Ast(tmpIdentifierNode(newExpr, tmpAllocName))
 
     scope.popScope()
     localAstParentStack.pop()
@@ -226,11 +226,19 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       metaProperty.columnNumber
     )
 
+  /** The access call of a member expression has the type the checker gave the expression. */
+  private def withCallType(ast: Ast, node: BabelNodeInfo): Ast =
+    ast.root.foreach {
+        case c: NewCall if c.typeFullName == Defines.Any => c.typeFullName(spanTypeOrAny(node))
+        case _                                           =>
+    }
+    ast
+
   protected def astForMemberExpression(memberExpr: BabelNodeInfo): Ast =
     val baseAst          = astForNodeWithFunctionReference(memberExpr.json("object"))
     val memberIsComputed = memberExpr.json("computed").bool
     val memberNodeInfo   = createBabelNodeInfo(memberExpr.json("property"))
-    if memberIsComputed then
+    val accessAst = if memberIsComputed then
       val memberAst = astForNode(memberNodeInfo.json)
       createIndexAccessCallAst(
         baseAst,
@@ -253,7 +261,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
         memberExpr.lineNumber,
         memberExpr.columnNumber
       )
-    end if
+    withCallType(accessAst, memberExpr)
   end astForMemberExpression
 
   protected def astForAssignmentExpression(assignment: BabelNodeInfo): Ast =
@@ -452,8 +460,8 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       localAstParentStack.push(blockNode)
 
       val tmpName      = generateUnusedVariableName(usedVariableNames, "_tmp")
-      val localTmpNode = newLocalNode(tmpName, Defines.Any).order(0)
-      val tmpArrayNode = identifierNode(arrExpr, tmpName)
+      val localTmpNode = newTmpLocal(tmpName, arrExpr).order(0)
+      val tmpArrayNode = tmpIdentifierNode(arrExpr, tmpName)
       diffGraph.addEdge(localAstParentStack.head, localTmpNode, EdgeTypes.AST)
       scope.addVariableReference(tmpName, tmpArrayNode)
 
@@ -485,7 +493,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
               val elementCode         = elementNodeInfo.code
               val elementNode = elementNodeInfo.node match
                 case RestElement =>
-                    val arg1Ast = Ast(identifierNode(arrExpr, tmpName))
+                    val arg1Ast = Ast(tmpIdentifierNode(arrExpr, tmpName))
                     astForSpreadOrRestElement(elementNodeInfo, Option(arg1Ast))
                 case _ =>
                     astForNodeWithFunctionReference(element)
@@ -520,7 +528,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
           case _ => None // skip
       }
 
-      val tmpArrayReturnNode = identifierNode(arrExpr, tmpName)
+      val tmpArrayReturnNode = tmpIdentifierNode(arrExpr, tmpName)
 
       scope.popScope()
       localAstParentStack.pop()
@@ -548,7 +556,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
     localAstParentStack.push(blockNode)
 
     val tmpName   = generateUnusedVariableName(usedVariableNames, "_tmp")
-    val localNode = newLocalNode(tmpName, Defines.Any).order(0)
+    val localNode = newTmpLocal(tmpName, objExpr).order(0)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
 
     val propertiesAsts = objExpr.json("properties").arr.toList.map { property =>
@@ -618,7 +626,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
       end match
     }
 
-    val tmpNode = identifierNode(objExpr, tmpName)
+    val tmpNode = tmpIdentifierNode(objExpr, tmpName)
 
     scope.popScope()
     localAstParentStack.pop()

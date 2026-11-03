@@ -50,13 +50,15 @@ class TSTypesTest extends AbstractPassTest:
     args.name shouldBe "args"
     args.code shouldBe "...args"
     args.isVariadic shouldBe true
-    args.typeFullName shouldBe "Array<any>"
+    // an array type is the built-in array, whatever its element type
+    args.typeFullName shouldBe "__ecma.Array"
   }
 
   "have return types for arrow functions" in AstFixture("const foo = () => 42;", tsTypes = true) {
       cpg =>
         val List(foo) = cpg.identifier("foo").l
-        foo.typeFullName shouldBe s"() => ${Defines.Number}"
+        // a function is no value of a class, whatever it returns
+        foo.typeFullName shouldBe Defines.Any
         val List(ret) = cpg.method("anonymous").methodReturn.l
         ret.typeFullName shouldBe Defines.Number
   }

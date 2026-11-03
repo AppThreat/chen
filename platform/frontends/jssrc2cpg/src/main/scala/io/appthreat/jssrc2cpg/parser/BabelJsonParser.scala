@@ -12,8 +12,11 @@ object BabelJsonParser:
     fullPath: String,
     json: Value,
     fileContent: String,
-    typeMap: Map[Int, String]
+    typeMap: Map[Int, String],
+    typeSpans: Map[Long, String] = Map.empty
   )
+
+  def spanKey(start: Int, end: Int): Long = (start.toLong << 32) | (end.toLong & 0xffffffffL)
 
   def readFile(rootPath: Path, file: Path): ParseResult =
     val typeMapPath = Paths.get(file.toString.replace(".json", ".typemap"))
@@ -26,6 +29,20 @@ object BabelJsonParser:
     else
       Map.empty[Int, String]
 
+    // The native binary also writes the type of each node by its extent (start and end offset),
+    // which tells apart `a`, `a.b` and `a.b()`: the type map keeps one type for all three.
+    val typeSpansPath = Paths.get(file.toString.replace(".json", ".typespans"))
+    val typeSpans = if typeSpansPath.toFile.exists() then
+      Try {
+          val spansJson = ujson.read(IOUtils.readEntireFile(typeSpansPath))
+          spansJson.obj.map { case (k, v) =>
+              val Array(s, e) = k.split(':')
+              spanKey(s.toInt, e.toInt) -> v.str
+          }.toMap
+      }.getOrElse(Map.empty)
+    else
+      Map.empty[Long, String]
+
     val jsonContent = IOUtils.readEntireFile(file)
     val json        = ujson.read(jsonContent)
     val relative    = json("relativeName").str
@@ -36,7 +53,7 @@ object BabelJsonParser:
     // a file astgen rewrote before parsing (an Ember template) comes with the text its offsets index
     val content =
         json.obj.get("source").flatMap(_.strOpt).getOrElse(sourceAsAstgenReadsIt(fullPath))
-    ParseResult(filename, fullPath.toString, json, content, typeMap)
+    ParseResult(filename, fullPath.toString, json, content, typeMap, typeSpans)
   end readFile
 
   /** astgen's offsets index the file as Node's `readFileSync(file, "utf-8")` returns it: a UTF-8

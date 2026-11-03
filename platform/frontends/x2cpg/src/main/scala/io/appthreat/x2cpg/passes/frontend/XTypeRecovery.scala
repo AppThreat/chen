@@ -255,7 +255,12 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
   /** Stores type information for local structures that live within this compilation unit, e.g.
     * local variables.
     */
-  protected val symbolTable = new SymbolTable[LocalKey](SBKey.fromNodeToLocalKey)
+  protected val symbolTable = new SymbolTable[LocalKey](localKeyOf)
+
+  /** The symbol table key of a node. A frontend whose names are not unique within a compilation
+    * unit (a name declared in two functions) can give them a scope.
+    */
+  protected def localKeyOf(node: AstNode): Option[LocalKey] = SBKey.fromNodeToLocalKey(node)
 
   /** The root of the target codebase.
     */
@@ -472,7 +477,8 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
   protected def setCallMethodFullNameFromBase(c: Call): Set[String] =
     val recTypes = c.argument.headOption
         .map {
-            case x: Call if x.typeFullName != "ANY" => Set(x.typeFullName)
+            case x: Call if x.typeFullName != "ANY" && callTypeIsReceiverType(x) =>
+                Set(x.typeFullName)
             case x: Call =>
                 cpg.method.fullNameExact(c.methodFullName).methodReturn.typeFullNameNot(
                   "ANY"
@@ -486,6 +492,13 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
         .getOrElse(Set.empty[String])
     val callTypes = recTypes.map(_.concat(s"$pathSep${c.name}"))
     symbolTable.append(c, callTypes)
+
+  /** Whether the `typeFullName` of a call that is the receiver of another call names the type the
+    * method is looked up on. A frontend that fills it with a type string that is not a name the
+    * recovery knows (the checker's `Box<User>`) returns false, and the receiver is resolved as if
+    * it had no type.
+    */
+  protected def callTypeIsReceiverType(receiver: Call): Boolean = true
 
   /** A heuristic method to determine if a call is a constructor or not.
     */
@@ -613,8 +626,8 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
         associateTypes(i, callReturns)
       else if c.argument.exists(_.argumentIndex == 0) then
         val callFullNames = (c.argument(0) match
-          case i: Identifier if symbolTable.contains(LocalVar(i.name)) =>
-              symbolTable.get(LocalVar(i.name))
+          case i: Identifier if symbolTable.contains(i) =>
+              symbolTable.get(i)
           case i: Identifier if symbolTable.contains(CallAlias(i.name)) =>
               symbolTable.get(CallAlias(i.name))
           case _ => Set.empty
@@ -849,9 +862,9 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
     val fieldName = getFieldName(fa)
     fa.argumentOut.l match
       case ::(base: Identifier, ::(fi: FieldIdentifier, _))
-          if symbolTable.contains(LocalVar(base.name)) =>
+          if symbolTable.contains(base) =>
           // Get field from global table if referenced as a variable
-          val localTypes = symbolTable.get(LocalVar(base.name))
+          val localTypes = symbolTable.get(base)
           associateInterproceduralTypes(i, base, fi, fieldName, localTypes)
       case ::(base: Identifier, ::(fi: FieldIdentifier, _))
           if symbolTable.contains(LocalVar(fieldName)) =>
