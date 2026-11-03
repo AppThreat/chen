@@ -1,4 +1,4 @@
-import { makeUser, defaultUser, User } from "./kinds-lib";
+import { makeUser, defaultUser, User, Box } from "./kinds-lib";
 
 declare function fetchUser(): Promise<User>;
 declare function fetchAll(): Promise<User[]>;
@@ -26,3 +26,8 @@ declare const anyVal: any;
 export const forced = anyVal as User;
 const base = makeUser();
 export const trimmed = base.name.trim();
+
+export class Holder {
+  private box = new Box<User>(defaultUser);
+  get() { return this.box.value(); }
+}

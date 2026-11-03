@@ -472,7 +472,8 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
   protected def setCallMethodFullNameFromBase(c: Call): Set[String] =
     val recTypes = c.argument.headOption
         .map {
-            case x: Call if x.typeFullName != "ANY" => Set(x.typeFullName)
+            case x: Call if x.typeFullName != "ANY" && callTypeIsReceiverType(x) =>
+                Set(x.typeFullName)
             case x: Call =>
                 cpg.method.fullNameExact(c.methodFullName).methodReturn.typeFullNameNot(
                   "ANY"
@@ -486,6 +487,13 @@ abstract class RecoverForXCompilationUnit[CompilationUnitType <: AstNode](
         .getOrElse(Set.empty[String])
     val callTypes = recTypes.map(_.concat(s"$pathSep${c.name}"))
     symbolTable.append(c, callTypes)
+
+  /** Whether the `typeFullName` of a call that is the receiver of another call names the type the
+    * method is looked up on. A frontend that fills it with a type string that is not a name the
+    * recovery knows (the checker's `Box<User>`) returns false, and the receiver is resolved as if
+    * it had no type.
+    */
+  protected def callTypeIsReceiverType(receiver: Call): Boolean = true
 
   /** A heuristic method to determine if a call is a constructor or not.
     */

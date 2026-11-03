@@ -12,6 +12,7 @@ trait TypeHelper:
 
   private val TypeAnnotationKey = "typeAnnotation"
   private val ReturnTypeKey     = "returnType"
+  private val ArrayType         = "__ecma.Array"
   private val ImportMatcher     = Pattern.compile("(typeof )?import\\([\"'](.*)[\"']\\)")
 
   private val ArrayReplacements = Map(
@@ -164,6 +165,30 @@ trait TypeHelper:
   /** The type the span map has for exactly this node, when it is a concrete one (not `any`). The
     * type of every other node is a lookup of the type map, see [[typeFor]].
     */
+  /** An array type of the checker (`Array<User>`, `User[]`) is the built-in array to type recovery,
+    * as the factory call of a literal is: the element type stays out of the name, so that the two
+    * do not become two candidate types of one value.
+    */
+  private def spanTypeName(tpe: String): String =
+    val generic = tpe.startsWith("Array<") && matchingClose(tpe, 5).contains(tpe.length - 1)
+    val postfix = tpe.endsWith("[]") && !tpe.exists(c => c == ' ' || c == '|' || c == '&')
+    if generic || postfix then ArrayType else tpe
+
+  private def matchingClose(s: String, open: Int): Option[Int] =
+    var depth = 0
+    var i     = open
+    while i < s.length do
+      if s(i) == '<' then depth += 1
+      else if s(i) == '>' then
+        depth -= 1
+        if depth == 0 then return Some(i)
+      i += 1
+    None
+
+  /** `never`, or an array of it (what `[]` is to the checker): no information. */
+  private def isNeverType(tpe: String): Boolean =
+      tpe == Defines.Never || tpe == "Array<never>" || tpe == "never[]"
+
   protected def spanType(node: BabelNodeInfo): Option[String] =
       if !hasTypeSpans then None
       else
@@ -171,8 +196,8 @@ trait TypeHelper:
           s   <- pos(node.json)
           e   <- endPos(node.json)
           raw <- parserResult.typeSpans.get(BabelJsonParser.spanKey(s, e))
-          tpe = nameOfMapped(normalizeNative(raw))
-          if tpe != Defines.Any
+          tpe = spanTypeName(nameOfMapped(normalizeNative(raw)))
+          if tpe != Defines.Any && !isNeverType(tpe)
         yield
           registerType(tpe, tpe)
           tpe

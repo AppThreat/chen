@@ -46,7 +46,7 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
 
   "with the type of each node by its extent" should {
       "type an await expression with the awaited type" in withFixture(true) { cpg =>
-          inFile(cpg).name("<operator>.await").typeFullName.l shouldBe List("User", "Array<User>")
+          inFile(cpg).name("<operator>.await").typeFullName.l shouldBe List("User", "__ecma.Array")
       }
 
       "type a call with its return type and its callee with the function type" in withFixture(
@@ -88,7 +88,7 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
 
       "type a member access with the type of the member" in withFixture(true) { cpg =>
         inFile(cpg).name("<operator>.fieldAccess").code("svc.items").typeFullName.l shouldBe List(
-          "Array<User>"
+          "__ecma.Array"
         )
         inFile(cpg).name("<operator>.fieldAccess").code("cfg.owner").typeFullName.l shouldBe List(
           "User"
@@ -106,8 +106,8 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
         cpg.local("first").typeFullName.l shouldBe List("User")
         cpg.local("renamed").typeFullName.l shouldBe List(Defines.String)
         // the temporaries hold the destructured value, and so do the references to them
-        cpg.local("_tmp_0").typeFullName.l should contain("Array<User>")
-        cpg.identifier("_tmp_0").lineNumber(14).typeFullName.toSet shouldBe Set("Array<User>")
+        cpg.local("_tmp_0").typeFullName.l should contain("__ecma.Array")
+        cpg.identifier("_tmp_0").lineNumber(14).typeFullName.toSet shouldBe Set("__ecma.Array")
         cpg.identifier("_tmp_1").lineNumber(15).typeFullName.toSet shouldBe Set("User")
       }
 
@@ -116,8 +116,8 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
         cpg.identifier("_tmp_2").typeFullName.toSet shouldBe Set(
           "{ owner: User; list: Array<User>; }"
         )
-        cpg.local("_tmp_3").typeFullName.l should contain("Array<User>")
-        cpg.identifier("_tmp_3").typeFullName.toSet shouldBe Set("Array<User>")
+        cpg.local("_tmp_3").typeFullName.l should contain("__ecma.Array")
+        cpg.identifier("_tmp_3").typeFullName.toSet shouldBe Set("__ecma.Array")
       }
 
       "type the locals of an import specifier" in withFixture(true) { cpg =>
@@ -127,10 +127,18 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       }
 
       "type a new expression and its allocation" in withFixture(true) { cpg =>
-        inFile(cpg).name("<operator>.new").typeFullName.l shouldBe List("Svc")
-        inFile(cpg).name("<operator>.alloc").typeFullName.l shouldBe List("Svc")
+        inFile(cpg).name("<operator>.new").lineNumber(22).typeFullName.l shouldBe List("Svc")
+        inFile(cpg).name("<operator>.alloc").lineNumber(22).typeFullName.l shouldBe List("Svc")
         cpg.local("_tmp_4").typeFullName.l should contain("Svc")
         cpg.identifier("_tmp_4").typeFullName.toSet shouldBe Set("Svc")
+      }
+
+      "type the value of a default export" in withFixture(true) { cpg =>
+        inFile(cpg).name("<operator>.assignment").code("exports\\[\"default\"\\] = instance")
+            .typeFullName.l shouldBe List("Svc")
+        inFile(cpg).name("<operator>.indexAccess").code("exports\\[\"default\"\\]")
+            .typeFullName.l shouldBe List("Svc")
+        cpg.identifier("instance").lineNumber(23).typeFullName.toSet shouldBe Set("Svc")
       }
 
       "type the assignment of a declaration with the declared type" in withFixture(true) { cpg =>
@@ -156,7 +164,9 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       "leave the calls as they were, with the type map alone" in withFixture(false) { cpg =>
         inFile(cpg).name("<operator>.await").typeFullName.toSet shouldBe Set(Defines.Any)
         inFile(cpg).nameExact("load").typeFullName.l shouldBe List(Defines.Any)
-        inFile(cpg).name("<operator>.new").typeFullName.l shouldBe List(Defines.Any)
+        inFile(cpg).name("<operator>.new").lineNumber(22).typeFullName.l shouldBe List(
+          Defines.Any
+        )
         inFile(cpg).name("<operator>.fieldAccess").code("svc.items").typeFullName.l shouldBe List(
           Defines.Any
         )

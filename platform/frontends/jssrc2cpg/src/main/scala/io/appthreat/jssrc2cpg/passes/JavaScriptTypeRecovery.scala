@@ -71,6 +71,23 @@ private class RecoverForJavaScriptFile(
 
   /** A heuristic method to determine if a call is a constructor or not.
     */
+  /** The frontend gives the access of a field the checker's type string (`Box<User>`), which is no
+    * type declaration of the graph: a call on it is resolved through the field, as when the access
+    * has no type, unless the type is one the graph declares.
+    */
+  override protected def callTypeIsReceiverType(receiver: Call): Boolean =
+      !receiver.name.startsWith("<operator>.") ||
+          cpg.typeDecl.fullNameExact(receiver.typeFullName).nonEmpty
+
+  /** The frontend types an operator call (`await x`, `a.b`, `a + b`) with the checker's type, which
+    * is the type of its value and no entry for the symbol table: it would store the operator's name
+    * as a type hint of the call.
+    */
+  override protected def hasTypes(node: AstNode): Boolean = node match
+    case c: Call if c.name.startsWith("<operator>.") && c.methodFullName.startsWith("<operator>") =>
+        false
+    case _ => super.hasTypes(node)
+
   override protected def isConstructor(c: Call): Boolean =
       c.name.endsWith("factory") && c.inCall.astParent.headOption.exists(_.isInstanceOf[Block])
 
@@ -85,7 +102,9 @@ private class RecoverForJavaScriptFile(
           PropertyNames.TYPE_FULL_NAME,
           Defines.Any
         ))) - typeFullName
-        lazy val cpgTypeFullName = typeDeclFullNamesByName.getOrElse(typeFullName, Set.empty)
+        // `Box<User>`, a type the checker named, is the type declaration `Box`
+        lazy val cpgTypeFullName =
+            typeDeclFullNamesByName.getOrElse(typeFullName.takeWhile(_ != '<'), Set.empty)
         val resolvedTypeHints =
             if typeHints.nonEmpty then symbolTable.put(x, typeHints)
             else if cpgTypeFullName.nonEmpty then symbolTable.put(x, cpgTypeFullName)

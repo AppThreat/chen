@@ -94,7 +94,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     name: String,
     exportCallAst: Ast,
     declaration: BabelNodeInfo,
-    from: Option[String]
+    from: Option[String],
+    exportedType: String = Defines.Any
   ): Ast =
       from match
         case Some(value) =>
@@ -112,13 +113,19 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
               declaration.columnNumber
             )
         case None =>
-            createAssignmentCallAst(
+            val assignment = createAssignmentCallAst(
               exportCallAst,
-              Ast(identifierNode(declaration, name)),
+              Ast(identifierNode(declaration, name).typeFullName(exportedType)),
               s"${codeOf(exportCallAst.nodes.head)} = $name",
               declaration.lineNumber,
               declaration.columnNumber
             )
+            if exportedType != Defines.Any then
+              (assignment.root.toList ++ exportCallAst.root.toList).foreach {
+                  case c: NewCall if c.typeFullName == Defines.Any => c.typeFullName(exportedType)
+                  case _                                           =>
+              }
+            assignment
 
   private def extractDeclarationsFromExportDecl(
     declaration: BabelNodeInfo,
@@ -299,10 +306,14 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   protected def astForExportDefaultDeclaration(declaration: BabelNodeInfo): Ast =
     val exportName      = extractExportFromNameFromExportDecl(declaration)
     val declAstAndNames = extractDeclarationsFromExportDecl(declaration, "declaration")
+    // `export default value`: the exports hold what the checker typed the value with (a function
+    // or class declaration is typed by its return or construct signature, not as a value)
+    val exportedType = safeObj(declaration.json, "declaration").map(d => createBabelNodeInfo(d))
+        .filter(isExpressionNode).map(spanTypeOrAny).getOrElse(Defines.Any)
     val declAsts = declAstAndNames.toList.flatMap { case (ast, names) =>
         ast +: names.map { name =>
           val exportCallAst = createExportCallAst(DefaultsKey, exportName, declaration)
-          createExportAssignmentCallAst(name, exportCallAst, declaration, None)
+          createExportAssignmentCallAst(name, exportCallAst, declaration, None, exportedType)
         }
     }
     setArgumentIndices(declAsts)
