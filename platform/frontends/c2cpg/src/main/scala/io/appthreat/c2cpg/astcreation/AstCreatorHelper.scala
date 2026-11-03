@@ -192,15 +192,16 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
             else None
   end refDeclaredInOf
 
-  /** The file a composite type's definition sits in, when the translation unit saw it: the header
-    * that owns every field access through the type.
+  /** The header a composite type's definition sits in, when the translation unit saw it there and
+    * not in the file itself: the header that owns every field access through the type.
     */
   protected def definingFileOf(ct: ICompositeType): Option[String] =
       (ct match
         case b: ICInternalBinding   => Option(b.getDefinition)
         case b: ICPPInternalBinding => Option(b.getDefinition)
         case _                      => None
-      ).flatMap(d => Option(d.getFileLocation)).flatMap(l => Option(l.getFileName))
+      ).filter(isIncludedNode).flatMap(d => Option(d.getFileLocation))
+          .flatMap(l => Option(l.getFileName))
 
   /** An implicit-this member read (`space_` inside a method): record its class's layout. */
   protected def registerImplicitMemberOwner(ident: IASTNode): Unit = ident match

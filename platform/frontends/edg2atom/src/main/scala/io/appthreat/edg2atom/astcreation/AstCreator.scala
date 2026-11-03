@@ -86,17 +86,16 @@ class AstCreator(
     * value, and the enum alone says which header it is.
     */
   protected lazy val enumeratorFiles: Map[String, (Long, String)] =
-      unit.types.values.toSeq
+      (unit.types.values.toSeq
           .filter(_.flag("enum"))
           .sortBy(_("id").num)
-          .flatMap(t =>
-              t.list("enumerators").flatMap(e =>
-                  for
-                    name   <- e.string("name")
-                    fileId <- e.position.map(_.file)
-                    file   <- unit.files.get(fileId)
-                  yield name -> (fileId, file.path)
-              )
+          .flatMap(_.list("enumerators")) ++ unit.enumerators)
+          .flatMap(e =>
+              for
+                name   <- e.string("name")
+                fileId <- e.position.map(_.file)
+                file   <- unit.files.get(fileId)
+              yield name -> (fileId, file.path)
           )
           .groupMap(_._1)(_._2)
           .collect {
@@ -223,10 +222,9 @@ class AstCreator(
     val lambdas   = lambdaAsts.toSeq
     lambdaAsts.clear()
     // the macro invocations no expression of the file carries (a constant the front end folded,
-    // a macro nested in another's expansion): calls of the file's own block, as any expression's
-    // macro call is
-    val foldedMacros = thinMacroCallAsts(file)
-    val children     = typeDecls ++ globals ++ routines ++ instances ++ lambdas ++ foldedMacros
+    // a macro nested in another's expansion), as tags
+    tagUnrepresentedMacroUses(file, globalMethod)
+    val children = typeDecls ++ globals ++ routines ++ instances ++ lambdas
     setArgumentIndices(children)
     scope.popScope()
     val methodReturn = NewMethodReturn().code("RET").typeFullName(registerType(X2CpgDefines.Any))
@@ -880,6 +878,16 @@ class AstCreator(
   /** A statement in a block: a declaration is a LOCAL per variable and an assignment per
     * initialiser, flattened into the block as the CDT frontend does.
     */
+  /** The enumerator a `case` label names, as the label is written (`case LIB_BAD:`): the front end
+    * keeps only the value, and the name is what says which declaration the label reads.
+    */
+  private def caseLabelName(s: Value): Option[String] =
+      sourceText(s).flatMap(CaseLabel.findFirstMatchIn(_)).map(_.group(1))
+          .filter(name => enumeratorFiles.contains(name.split("::").last))
+
+  private val CaseLabel =
+      "^\\s*case\\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)\\s*:".r
+
   private def statementAsts(s: Value): Seq[Ast] =
       s.kind match
         // a block the front end made (around a loop or switch, for its labels) is not one
@@ -888,7 +896,10 @@ class AstCreator(
         case "init"                        => initStatementAsts(s)
         case "switch_case" if !s.flag("default") =>
             val label = statementAst(s)
-            val value = s.string("value").map(v => Ast(literalNode(s, v, registerType("int"))))
+            // `case LIB_BAD:` names an enumerator the front end folded: the name, as in an
+            // expression, else the value
+            val value = caseLabelName(s).flatMap(n => namedConstantAst(s, n))
+                .orElse(s.string("value").map(v => Ast(literalNode(s, v, registerType("int")))))
             label +: value.toSeq
         case "label" => Seq(statementAst(s)).filter(_.root.isDefined)
         // a variable length array: its number of elements, on its LOCAL

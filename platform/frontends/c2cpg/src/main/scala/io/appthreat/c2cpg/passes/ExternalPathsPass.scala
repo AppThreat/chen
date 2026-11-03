@@ -16,7 +16,16 @@ import scala.util.Try
   */
 class ExternalPathsPass(cpg: Cpg, pattern: String) extends CpgPass(cpg):
 
-  private val regex = Try(pattern.r).toOption
+  private val regex = Try(pattern.r).fold(
+    e =>
+      // a pattern that does not compile marks nothing, and says so rather than looking like one
+      // that matched nothing
+      org.slf4j.LoggerFactory.getLogger(getClass)
+          .warn(s"--external-paths '$pattern' is not a regular expression: ${e.getMessage}")
+      None
+    ,
+    Some(_)
+  )
 
   override def run(dstGraph: overflowdb.BatchedUpdate.DiffGraphBuilder): Unit =
       regex.foreach { re =>
@@ -31,3 +40,4 @@ class ExternalPathsPass(cpg: Cpg, pattern: String) extends CpgPass(cpg):
               dstGraph.setNodeProperty(t.asInstanceOf[TypeDecl], PropertyNames.IS_EXTERNAL, true)
         }
       }
+end ExternalPathsPass

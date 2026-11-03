@@ -34,7 +34,7 @@ object DialectRewrites:
                   // a digit separator sits between hex digits of a number; a char literal's
                   // quotes do not (the closing one is followed by an operator, the opening
                   // preceded by one)
-                  if isDigitIsh(out, i - 1) && isDigitIsh(out, i + 1) then
+                  if isDigitIsh(out, i - 1) && isDigitIsh(out, i + 1) && inNumber(out, i) then
                     i = blankSeparators(out, i)
                   else state = 4
               case '[' if i + 1 < out.length && out(i + 1) == '[' =>
@@ -48,11 +48,13 @@ object DialectRewrites:
         case 3 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '"' then state = 0
+            else if c == '"' || c == '\n' then state = 0
         case 4 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '\'' then state = 0
+            // a literal never spans a line: a lone apostrophe in `#error don't` or in `#if 0`
+            // prose must not swallow the code after it
+            else if c == '\'' || c == '\n' then state = 0
       end match
       i += 1
     end while
@@ -75,6 +77,16 @@ object DialectRewrites:
     val digits = (start to end).map(out).filterNot(_ == '\'')
     (start to end).zipAll(digits, -1, ' ').foreach((at2, d) => out(at2) = d)
     end
+
+  /** Whether the quote at `at` sits inside a token that starts with a digit: a number, not a
+    * prefixed character constant such as `u8'a'` or `L'a'`.
+    */
+  private def inNumber(chars: Array[Char], at: Int): Boolean =
+    var start = at - 1
+    while start > 0 && (chars(start - 1).isLetterOrDigit || chars(start - 1) == '_' ||
+          chars(start - 1) == '\'' || chars(start - 1) == '.')
+    do start -= 1
+    start >= 0 && chars(start).isDigit
 
   private def isDigitIsh(chars: Array[Char], at: Int): Boolean =
       // a hexadecimal digit on both sides: decimal separators sit between digits, hex ones
@@ -124,11 +136,13 @@ object DialectRewrites:
         case 3 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '"' then state = 0
+            else if c == '"' || c == '\n' then state = 0
         case 4 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '\'' then state = 0
+            // a literal never spans a line: a lone apostrophe in `#error don't` or in `#if 0`
+            // prose must not swallow the code after it
+            else if c == '\'' || c == '\n' then state = 0
       end match
       i += 1
     end while
@@ -162,12 +176,9 @@ object DialectRewrites:
                         ch.isLetter || ch == '_' || ch == '&'
                     )
                   then
-                    var j = i
-                    while j < out.length && (out(j) == 't' || out(j) == 'h' || out(j) == 'i' ||
-                          out(j) == 's' || out(j).isWhitespace) && j < i + 8
-                    do
-                      out(j) = ' '; j += 1
-                    i = j - 1
+                    // exactly the keyword: what follows is the parameter's type
+                    (i until i + 4).foreach(j => out(j) = ' ')
+                    i += 3
         case 1 => if c == '\n' then state = 0
         case 2 =>
             if c == '*' && i + 1 < out.length && out(i + 1) == '/' then
@@ -175,11 +186,13 @@ object DialectRewrites:
         case 3 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '"' then state = 0
+            else if c == '"' || c == '\n' then state = 0
         case 4 =>
             if escaped then escaped = false
             else if c == '\\' then escaped = true
-            else if c == '\'' then state = 0
+            // a literal never spans a line: a lone apostrophe in `#error don't` or in `#if 0`
+            // prose must not swallow the code after it
+            else if c == '\'' || c == '\n' then state = 0
       end match
       i += 1
     end while

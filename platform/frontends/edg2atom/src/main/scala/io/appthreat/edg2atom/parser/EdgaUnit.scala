@@ -31,7 +31,12 @@ final class EdgaUnit(val root: Value):
     )
   }.toMap
 
-  val types: Map[Long, Value]  = table("types").map(t => t("id").num.toLong -> t).toMap
+  val types: Map[Long, Value] = table("types").map(t => t("id").num.toLong -> t).toMap
+
+  /** The unit's file- and namespace-scope enumerators, each with where it is declared (edga 0.2's
+    * `enumerators`; empty from an older export).
+    */
+  val enumerators: Seq[Value]  = table("enumerators")
   val macros: Map[Long, Value] = table("macros").map(m => m("id").num.toLong -> m).toMap
   val invocations: Map[Long, Value] =
       table("macroInvocations").map(m => m("id").num.toLong -> m).toMap

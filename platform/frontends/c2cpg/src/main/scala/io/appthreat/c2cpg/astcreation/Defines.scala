@@ -53,6 +53,12 @@ object Defines:
     */
   val NestedMacroTag = "nested-macro"
 
+  /** A macro invocation the expression tree does not carry (a constant the EDG front end folded,
+    * such as an object-like macro in a `case` label), tagged on its file's own method:
+    * `<name>@<line>:<column>@<definition file>`.
+    */
+  val MacroUseTag = "macro-use"
+
   /** On a call that constructs an object of a class declared elsewhere (a declaration's constructor
     * initializer, a `new`): the constructed type's simple name. With `callee-declared-in` it names
     * the class's header.

@@ -66,6 +66,12 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
         |  return h + n + q + r + s;
         |}
         |int main(void) { return use_all(1, 2); }
+        |int classify(int e) {
+        |  switch (e) {
+        |    case LIB_BAD: return 1;
+        |    default: return 0;
+        |  }
+        |}
         |""".stripMargin
 
   private val libCppHeader =
@@ -173,6 +179,14 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
       }
   }
 
+  "an enumerator as a case label" should {
+      "carry the library header that enumerates it" in withScopedRun(cpp = false) { cpg =>
+          // `case LIB_BAD:` in classify: the label's value reads the enumerator by name
+          cpg.identifier.nameExact("LIB_BAD").lineNumber(26).tag
+              .nameExact(Defines.RefDeclaredInTag).value.l should contain only libHeaderPath
+      }
+  }
+
   "a function named as a value" should {
       "carry the library header that declares it" in withScopedRun(cpp = false) { cpg =>
           cpg.methodRef.methodFullName("lib_func").tag
@@ -181,27 +195,31 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
   }
 
   "a macro invocation the expression tree does not carry" should {
-      "still be a call at its site, named after the macro and its defining header" in
+      "be a macro-use tag of its file, with its site and defining header, and no call" in
           withScopedRun(cpp = false) { cpg =>
-            // line 4: `int v = LIB_VERSION;` folds to the constant 3
-            val folded = cpg.call.nameExact("LIB_VERSION").lineNumber(4).l
-            folded should have size 1
-            folded.head.methodFullName should startWith(s"$libHeaderPath:3:")
+            // line 4: `int v = LIB_VERSION;` folds to the constant 3: nothing was called there
+            cpg.call.nameExact("LIB_VERSION").lineNumber(4).l shouldBe empty
+            val uses = cpg.method.filename("main.c").tag
+                .nameExact(Defines.MacroUseTag).value.l
+            uses.filter(_.startsWith("LIB_VERSION@4:")) should have size 1
+            uses.filter(_.startsWith("LIB_VERSION@4:")).head should endWith(s"@$libHeaderPath")
           }
-      "place a macro nested in another's definition at the outer invocation's site" in
+      "name a macro nested in another's definition on the outer invocation's call" in
           withScopedRun(cpp = false) { cpg =>
             // line 17: `int n = LIB_OUTER(a);` whose definition invokes LIB_INNER
-            val inner = cpg.call.nameExact("LIB_INNER").l
-            inner should have size 1
-            inner.head.lineNumber.map(_.intValue) shouldBe Some(17)
-            val outer = cpg.call.nameExact("LIB_OUTER").lineNumber(17).l
-            outer should have size 1
-            inner.head.columnNumber shouldBe outer.head.columnNumber
+            cpg.call.nameExact("LIB_INNER").l shouldBe empty
+            cpg.call.nameExact("LIB_OUTER").lineNumber(17).tag
+                .nameExact(Defines.NestedMacroTag).value.l should contain(
+              s"LIB_INNER@$libHeaderPath"
+            )
           }
-      "place an object-like macro in an argument at the outer invocation's site" in
+      "name an object-like macro in an argument on the outer invocation's call" in
           withScopedRun(cpp = false) { cpg =>
               // line 18: `int q = LIB_MAX(a, LIB_VERSION);`
-              cpg.call.nameExact("LIB_VERSION").lineNumber(18).l should have size 1
+              cpg.call.nameExact("LIB_MAX").lineNumber(18).tag
+                  .nameExact(Defines.NestedMacroTag).value.l should contain(
+                s"LIB_VERSION@$libHeaderPath"
+              )
           }
   }
 

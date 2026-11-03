@@ -18,7 +18,9 @@ import org.eclipse.cdt.core.dom.ast.{
     IASTMacroExpansionLocation,
     IASTName,
     IASTNode,
-    IASTPreprocessorMacroDefinition
+    IASTPreprocessorFunctionStyleMacroDefinition,
+    IASTPreprocessorMacroDefinition,
+    IMacroBinding
 }
 import org.eclipse.cdt.core.dom.ast.IASTBinaryExpression
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
@@ -134,35 +136,56 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           .toSet
 
   /** Each macro the invocation's expansion names besides its own, with the file that defines it:
-    * `LIB_MAX(a, LIMIT)` names LIMIT (an argument that is a macro's name names it too, object-like
-    * ones included), and a definition that invokes another macro names that one. Only ones another
-    * file defines (the invocation's own file keeps its macros to itself). A name the unit saw
-    * defined in several files names none of them: which one applied here cannot be told from the
-    * definition list.
+    * `LIB_MAX(a, LIMIT)` names LIMIT, and a definition that invokes another macro names that one. A
+    * nested reference resolves to the definition that applied there, so a name defined in two
+    * headers (`NULL` in `__stddef_null.h` and `_null.h`) names the one in effect. An argument that
+    * is one object-like macro's bare name names it too. Only ones another file defines (the
+    * invocation's own file keeps its macros to itself).
     */
   private def nestedMacroDefinitions(node: IASTNode, args: List[String]): List[(String, String)] =
     val ownFile = Option(node.getFileLocation).map(_.getFileName).getOrElse("")
     val fromExpansion = expandedFromMacro(node).headOption.toList
         .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
-        .map(_.toString)
-    // an argument that is one identifier names a macro when a definition the unit saw spells it
+        .flatMap(ref => definitionFileOf(ref).map(ASTStringUtil.getSimpleName(ref) -> _))
+    // an argument that is one identifier names a macro when the unit saw exactly one object-like
+    // definition of it: a function-like macro's bare name is not expanded
     val fromArguments = args.map(_.trim).filter(_.matches("[A-Za-z_][A-Za-z0-9_]*"))
-    (fromExpansion ++ fromArguments).distinct.flatMap { name =>
-        macroDefinitionFiles.get(name) match
-          case Some(single :: rest) if rest.isEmpty && single != ownFile && single.nonEmpty =>
-              Some(name -> single)
-          case _ => None
-    }
+        .filterNot(name => fromExpansion.exists(_._1 == name))
+        .flatMap(name =>
+            objectLikeDefinitionFiles.get(name).collect { case single :: Nil => name -> single }
+        )
+    (fromExpansion ++ fromArguments).distinct.filter((_, file) =>
+        file.nonEmpty && file != ownFile
+    )
 
-  /** The file that defines each macro name, when every definition the unit saw names one file. */
-  private lazy val macroDefinitionFiles: Map[String, List[String]] =
+  /** The file of the definition a macro reference resolved to: the definition whose name binds to
+    * the same macro binding (each `#define` has its own).
+    */
+  private def definitionFileOf(ref: IASTName): Option[String] =
+      Option(ref.resolveBinding()).collect { case m: IMacroBinding => m }
+          .flatMap(m => Option(definitionFileByBinding.get(m)))
+
+  private lazy val definitionFileByBinding: java.util.IdentityHashMap[IMacroBinding, String] =
+    val byBinding = new java.util.IdentityHashMap[IMacroBinding, String]()
+    cdtAst.getMacroDefinitions.foreach { d =>
+        for
+          binding <- Option(d.getName.resolveBinding()).collect { case m: IMacroBinding => m }
+          file    <- Option(d.getFileLocation).flatMap(l => Option(l.getFileName))
+        do byBinding.put(binding, file)
+    }
+    byBinding
+
+  /** The files of every object-like macro definition the unit saw, by name. */
+  private lazy val objectLikeDefinitionFiles: Map[String, List[String]] =
       cdtAst.getMacroDefinitions.toList
+          .filterNot(_.isInstanceOf[IASTPreprocessorFunctionStyleMacroDefinition])
           .flatMap(d =>
               Option(d.getFileLocation).flatMap(l => Option(l.getFileName)).map(
                 ASTStringUtil.getSimpleName(d.getName) -> _
               )
           )
           .groupMap(_._1)(_._2)
+          .view.mapValues(_.distinct).toMap
           .view.mapValues(_.distinct).toMap
 
   /** The identifier an argument's text starts with: `MAX` for `MAX(b, c)`, `LIMIT` for `LIMIT`. */

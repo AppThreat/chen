@@ -159,6 +159,38 @@ class DeclaringHeaderTagTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "a macro defined in two headers" should {
+      "name the definition in effect where it is nested" in {
+          val root = File.newTemporaryDirectory("hdrtwice")
+          try
+            (root / "externlib").createDirectories()
+            (root / "proj").createDirectories()
+            (root / "externlib" / "first.h").write("#define VAL 1\n")
+            (root / "externlib" / "second.h").write(
+              "#undef VAL\n#define VAL 2\n#define ADD(x) ((x) + VAL)\n"
+            )
+            (root / "proj" / "main.c").write(
+              "#include \"first.h\"\n#include \"second.h\"\nint r(void) { return ADD(1); }\n"
+            )
+            val second = java.nio.file.Paths.get((root / "externlib" / "second.h").pathAsString)
+                .toRealPath().toString
+            val out = File.newTemporaryFile("hdrtwice", ".atom")
+            out.deleteOnExit()
+            val cpg = new C2Cpg().createCpg(
+              Config()
+                  .withInputPath((root / "proj").pathAsString)
+                  .withOutputPath(out.pathAsString)
+                  .withIncludePaths(Set((root / "externlib").pathAsString))
+                  .withAstCache(false)
+                  .withFunctionBodies(true)
+            ).get
+            try callTags(cpg, "ADD", Defines.NestedMacroTag) shouldBe List(s"VAL@$second")
+            finally cpg.close()
+          finally root.delete(swallowIOExceptions = true)
+          end try
+      }
+  }
+
   "a macro invocation" should {
       "name the macros nested in its arguments and its definition" in withScopedRun { cpg =>
         // PROJ_DOUBLE(LIB_MAX(a, 1)): an argument that is a macro's name names that macro

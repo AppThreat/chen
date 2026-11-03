@@ -619,7 +619,7 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
     * writes it: the name, with the value the front end gave it. The enum that declares the name
     * names the header it came from, when one enum of the unit does.
     */
-  private def namedConstantAst(e: Value, text: String): Option[Ast] =
+  protected def namedConstantAst(e: Value, text: String): Option[Ast] =
     val name = text.trim
     val ast =
         if NamedConstantKeywords.contains(name) then None

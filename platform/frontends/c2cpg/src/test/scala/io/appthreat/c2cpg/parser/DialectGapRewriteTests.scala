@@ -77,7 +77,7 @@ class DialectGapRewriteTests extends CCodeToCpgSuite:
       }
   }
 
-  "`this` as an argument, not a parameter" should {
+  "`this` in member function bodies, not as a parameter" should {
       val cpg = code(
         """struct S {
         |  int helper(int x) { return x; }
@@ -93,6 +93,37 @@ class DialectGapRewriteTests extends CCodeToCpgSuite:
           cpg.call.name("helper").l should have size 1
           cpg.call.name("call_this").l should have size 1
           cpg.local.name("a").l should have size 1
+      }
+  }
+  "the rewrite itself" should {
+      def c(text: String): String   = new String(DialectRewrites.forC(text.toCharArray))
+      def cpp(text: String): String = new String(DialectRewrites.forCpp(text.toCharArray))
+
+      "leave a prefixed character constant alone" in {
+          c("char c = u8'a'; wchar_t w = L'b';") shouldBe "char c = u8'a'; wchar_t w = L'b';"
+      }
+
+      "end a stray apostrophe at the line, so later code and strings are untouched" in {
+          val text = "#error don't\nchar *s = \"a'1'2\";\nint x = 1'0;"
+          c(text) shouldBe "#error don't\nchar *s = \"a'1'2\";\nint x = 10 ;"
+      }
+
+      "blank only the keyword of an explicit object parameter" in {
+          cpp("int f(this struct S& s);") shouldBe "int f(     struct S& s);"
+          cpp("int g(this self_t s);") shouldBe "int g(     self_t s);"
+      }
+  }
+
+  "a C23 attribute in an included header" should {
+      val cpg = code(
+        """#include "attr.h"
+        |int use(void) { return h_attr(); }
+        |""".stripMargin,
+        "use_attr.c"
+      ).moreCode("[[nodiscard]] int h_attr(void);\n", "attr.h")
+      "parse the unit that includes it" in {
+          cpg.method.name("use").l should have size 1
+          cpg.call.name("h_attr").l should have size 1
       }
   }
 end DialectGapRewriteTests

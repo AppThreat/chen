@@ -33,6 +33,10 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     */
   private val representedInvocations = scala.collection.mutable.HashSet.empty[Long]
 
+  /** The INLINED call built for each top-level invocation, which carries the macros nested in it.
+    */
+  private val invocationCalls = scala.collection.mutable.HashMap.empty[Long, NewCall]
+
   private def topLevelOf(v: Value): Long =
       v.long("mi").filter(_ > 0).map(unit.topLevelInvocation).getOrElse(0L)
 
@@ -105,6 +109,7 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
         }
     }
     val result = callAst(call, args).withChild(expansionBlock)
+    invocationCalls.put(index, call)
     tagNode(call, X2CpgDefines.MacroInvocationTag, index.toString)
     // an integer constant expansion is the invocation's value, as the CDT frontend tags
     // `#define FIRST 0` and `#define N (4 * 8)`
@@ -288,28 +293,23 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     val p    = AstCreator.realPath(Paths.get(path))
     if p.startsWith(root) then root.relativize(p).toString else path
 
-  /** A thin INLINED call for each macro invocation of `file` no expression carries: one the front
-    * end folded to a constant (an object-like macro in a `case` label or an initialiser), and each
-    * invocation nested in another's arguments or definition - the front end knows both, the
-    * expression tree keeps neither. A nested invocation is a use of its own macro at the outermost
-    * invocation's site, where a reader looks for it; one call per (site, macro), in invocation
-    * order.
+  /** The macro invocations of `file` no expression carries, as tags rather than calls: nothing was
+    * called there, so no other pass may see a call. A macro nested in another's arguments or
+    * definition is a use at the outermost invocation, tagged on that invocation's call as the CDT
+    * frontend tags it (`nested-macro`, `<name>@<definition file>`). A top-level invocation the
+    * front end folded to a constant (an object-like macro in a `case` label or an initialiser) has
+    * no call to carry it, so the file's own method carries it (`macro-use`,
+    * `<name>@<line>:<column>@<definition file>`). Definition files are real absolute paths.
     */
-  protected def thinMacroCallAsts(file: FileEntry): Seq[Ast] =
-      unit.invocations.values.toSeq.sortBy(_("id").num).flatMap { invocation =>
+  protected def tagUnrepresentedMacroUses(file: FileEntry, globalMethod: NewMethod): Unit =
+      unit.invocations.values.toSeq.sortBy(_("id").num).foreach { invocation =>
         val index = invocation.long("id").getOrElse(0L)
         val top   = unit.topLevelInvocation(index)
-        // the site a reader attributes the expansion to: the invocation itself when top-level, else
-        // the outermost invocation it appears in
         val site =
             (if index == top then Some(invocation) else unit.invocations.get(top))
                 .flatMap(_.field("start")).flatMap(EdgaUnit.pos)
-        val inThisFile = site.exists(_.file == file.id)
-        // the top-level invocation's own call exists; only its nested ones (and folded top-level
-        // ones) need one
         val represented = index == top && representedInvocations.contains(top)
-        if !inThisFile || represented then Nil
-        else
+        if site.exists(_.file == file.id) && !represented then
           for
             name       <- invocation.string("name").filter(_.nonEmpty)
             macroId    <- invocation.long("macro")
@@ -319,30 +319,18 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
             // the runner's own preinclude file is not a header anyone includes
             if !preincludePaths.contains(defFile.path)
             start <- site
-          yield
-            val params = definition.string("text").map(parameterCount).getOrElse(0)
-            val lastLine =
-                definedAt.line + definition.string("text").map(_.count(_ == '\n')).getOrElse(0)
-            val definitionFile = relativeTo(defFile.path)
-            val invocationText = invocationSpan(invocation)
-                .flatMap((s, e) => textOf(s, e)).getOrElse(name)
-            val call = NewCall()
-                .name(name)
-                .methodFullName(s"$definitionFile:${definedAt.line}:$lastLine:$name:$params")
-                .code(invocationText)
-                .dispatchType(DispatchTypes.INLINED)
-                .typeFullName(registerType(X2CpgDefines.Any))
-                .lineNumber(Integer.valueOf(math.max(0, start.line)))
-                .columnNumber(Integer.valueOf(math.max(0, start.column)))
-            tagNode(call, X2CpgDefines.MacroInvocationTag, index.toString)
-            Ast(call)
+          do
+            val definitionFile = AstCreator.realPath(Paths.get(defFile.path)).toString
+            invocationCalls.get(top) match
+              case Some(outer) if index != top =>
+                  tagNode(outer, C2CpgDefines.NestedMacroTag, s"$name@$definitionFile")
+              case _ =>
+                  tagNode(
+                    globalMethod,
+                    C2CpgDefines.MacroUseTag,
+                    s"$name@${start.line}:${start.column}@$definitionFile"
+                  )
         end if
-      }.distinctBy(ast =>
-          // two invocations of one macro inside another's expansion are one use of it there
-          ast.root match
-            case Some(c: NewCall) =>
-                (c.lineNumber, c.columnNumber, c.methodFullName)
-            case other => other
-      )
-  end thinMacroCallAsts
+      }
+  end tagUnrepresentedMacroUses
 end MacroCalls

@@ -152,7 +152,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode):
     ownerType.foreach(registerMembersOf)
     // the header that defines the struct or class the field belongs to: a `p->f` on a header's
     // struct is a use of that header, and nothing else on the node names it
-    ownerType.flatMap(definingFileOf).filter(_ != filename).foreach { header =>
+    ownerType.flatMap(definingFileOf).foreach { header =>
         tagNode(ma, Defines.TypeDeclaredInTag, header)
     }
     val member = fieldIdentifierNode(
