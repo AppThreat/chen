@@ -80,6 +80,7 @@ class Ruby2Atom extends X2CpgFrontend[Config]:
         ImplicitRequirePass(cpg).createAndApply()
         RubyCallLinker(cpg).createAndApply()
         TypeNodePass.withTypesFromCpg(cpg).createAndApply()
+        io.appthreat.x2cpg.passes.ExternalPathsPass.applyTo(cpg, config.externalPaths)
       }
 end Ruby2Atom
 

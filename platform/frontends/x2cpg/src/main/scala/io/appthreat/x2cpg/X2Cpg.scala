@@ -52,6 +52,17 @@ trait X2CpgConfig[R <: X2CpgConfig[R]]:
     if path.isAbsolute then path.toString
     else Paths.get(inputPath, ignore).toAbsolutePath.normalize().toString
 
+  /** A regular expression of input paths a project carries from someone else (`third_party/`, a
+    * copied single-header library): `--external-paths`, one meaning for every source frontend (see
+    * [[io.appthreat.x2cpg.passes.ExternalPathMatcher]]). Matched files are parsed as always and
+    * their methods and types marked external after the AST is built; empty marks nothing.
+    */
+  var externalPaths: String = ""
+
+  def withExternalPaths(x: String): R =
+    this.externalPaths = x
+    this.asInstanceOf[R]
+
   var schemaValidation: ValidationMode = ValidationMode.Disabled
 
   def withSchemaValidation(value: ValidationMode): R =
@@ -64,6 +75,7 @@ trait X2CpgConfig[R <: X2CpgConfig[R]]:
     this.defaultIgnoredFilesRegex = config.defaultIgnoredFilesRegex
     this.ignoredFilesRegex = config.ignoredFilesRegex
     this.ignoredFiles = config.ignoredFiles
+    this.externalPaths = config.externalPaths
     this.asInstanceOf[R]
 end X2CpgConfig
 
@@ -219,6 +231,12 @@ object X2Cpg:
           }
           .text(
             "a regex specifying files to exclude during CPG generation (paths relative to <input-dir> are matched)"
+          ),
+      opt[String]("external-paths")
+          .valueName("<regex>")
+          .action((x, c) => c.withExternalPaths(x))
+          .text(
+            "regular expression of vendored input paths (third_party/, a copied single-header library), relative to <input-dir>: matched files are parsed as always, but their methods and types are marked external"
           ),
       opt[Unit]("enable-early-schema-checking")
           .action((_, c) => c.withSchemaValidation(ValidationMode.Enabled))

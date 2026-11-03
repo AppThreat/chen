@@ -1,7 +1,7 @@
 package io.appthreat.edg2atom
 
 import io.appthreat.c2cpg.Config
-import io.appthreat.c2cpg.passes.ExternalPathsPass
+import io.appthreat.x2cpg.passes.ExternalPathsPass
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.parser.{FileDefaults, ProjectSources}
 import io.appthreat.c2cpg.passes.{

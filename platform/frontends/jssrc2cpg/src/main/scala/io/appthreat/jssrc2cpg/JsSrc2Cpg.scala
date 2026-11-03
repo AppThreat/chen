@@ -21,6 +21,7 @@ import io.appthreat.jssrc2cpg.passes.{
 import io.appthreat.jssrc2cpg.passes.*
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
+import io.appthreat.x2cpg.passes.ExternalPathsPass
 import io.appthreat.x2cpg.passes.frontend.{XTypeRecovery, XTypeRecoveryConfig}
 import io.appthreat.x2cpg.utils.{HashUtil, Report}
 import io.shiftleft.codepropertygraph.Cpg
@@ -51,6 +52,7 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
           new ConfigPass(cpg, config, report).createAndApply()
           new PrivateKeyFilePass(cpg, config, report).createAndApply()
           new ImportsPass(cpg).createAndApply()
+          ExternalPathsPass.applyTo(cpg, config.externalPaths)
 
           report.print()
         config.astGenOutDir match
