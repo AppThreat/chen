@@ -151,17 +151,30 @@ class CompileDatabaseTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP
   }
 
   "--compile-commands-only" should {
-      val cpg = code("int unit(void) { return 0; }", "unit.c")
+      val cpg = code("#include \"api.h\"\nint unit(void) { return inHeader(); }", "unit.c")
           .moreCode(
             "int declaredOnly(void);\nstatic inline int inHeader(void) { return 1; }",
             "api.h"
           )
+          .moreCode("int otherPlatform(void) { return 2; }", "port_other.h")
           .moreCode(database(entry("unit.c", "cc -c unit.c")), "compile_commands.json")
           .withConfig(Config().withCompileCommands(".").withCompileCommandsOnly(true))
 
-      "parse no header on its own" in {
+      "parse no header that no compiled unit includes" in {
+          // another platform's port header: nothing the database compiles reaches it
+          cpg.method.nameExact("otherPlatform").l shouldBe empty
+      }
+
+      "parse the headers its units include on their own, with their bodies (atom#331)" in {
           cpg.method.nameExact("unit").l should have size 1
-          cpg.method.nameExact("inHeader").l shouldBe empty
+          // a project header is where a project defines many of its functions (leveldb's
+          // port/port_stdcxx.h); its own parse is what makes those bodies visible
+          val inHeader = cpg.method.nameExact("inHeader").l
+          inHeader should have size 1
+          inHeader.head.filename shouldBe "api.h"
+          // a declaration with no body keeps its METHOD, as it always has when a header is
+          // parsed as its own unit
+          cpg.method.nameExact("declaredOnly").l should have size 1
       }
   }
 end CompileDatabaseTests

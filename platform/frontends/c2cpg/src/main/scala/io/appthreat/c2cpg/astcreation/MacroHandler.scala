@@ -18,7 +18,9 @@ import org.eclipse.cdt.core.dom.ast.{
     IASTMacroExpansionLocation,
     IASTName,
     IASTNode,
-    IASTPreprocessorMacroDefinition
+    IASTPreprocessorFunctionStyleMacroDefinition,
+    IASTPreprocessorMacroDefinition,
+    IMacroBinding
 }
 import org.eclipse.cdt.core.dom.ast.IASTBinaryExpression
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
@@ -77,6 +79,12 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           }
           tagExpansion(node, ast, index, nested)
           val callAst = createMacroCallAst(ast, node, mac, args, roots.map(_.map(_._2)))
+          // a macro this invocation's expansion names - in an argument or in its definition - is a
+          // use of that macro's own header at this invocation's site, and no node of the expansion
+          // names it: the invocation's call carries it
+          nestedMacroDefinitions(node, args).foreach { (name, header) =>
+              callAst.root.foreach(tagNode(_, Defines.NestedMacroTag, s"$name@$header"))
+          }
           // a local of the expansion's AST that is not under its root would be lost by the copy;
           // a local declared outside the macro keeps its own place
           val underRoot = java.util.Collections.newSetFromMap(
@@ -126,6 +134,59 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
           .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
           .map(_.toString)
           .toSet
+
+  /** Each macro the invocation's expansion names besides its own, with the file that defines it:
+    * `LIB_MAX(a, LIMIT)` names LIMIT, and a definition that invokes another macro names that one. A
+    * nested reference resolves to the definition that applied there, so a name defined in two
+    * headers (`NULL` in `__stddef_null.h` and `_null.h`) names the one in effect. An argument that
+    * is one object-like macro's bare name names it too. Only ones another file defines (the
+    * invocation's own file keeps its macros to itself).
+    */
+  private def nestedMacroDefinitions(node: IASTNode, args: List[String]): List[(String, String)] =
+    val ownFile = Option(node.getFileLocation).map(_.getFileName).getOrElse("")
+    val fromExpansion = expandedFromMacro(node).headOption.toList
+        .flatMap(loc => Option(loc.getExpansion.getNestedMacroReferences).toList.flatten)
+        .flatMap(ref => definitionFileOf(ref).map(ASTStringUtil.getSimpleName(ref) -> _))
+    // an argument that is one identifier names a macro when the unit saw exactly one object-like
+    // definition of it: a function-like macro's bare name is not expanded
+    val fromArguments = args.map(_.trim).filter(_.matches("[A-Za-z_][A-Za-z0-9_]*"))
+        .filterNot(name => fromExpansion.exists(_._1 == name))
+        .flatMap(name =>
+            objectLikeDefinitionFiles.get(name).collect { case single :: Nil => name -> single }
+        )
+    (fromExpansion ++ fromArguments).distinct.filter((_, file) =>
+        file.nonEmpty && file != ownFile
+    )
+
+  /** The file of the definition a macro reference resolved to: the definition whose name binds to
+    * the same macro binding (each `#define` has its own).
+    */
+  private def definitionFileOf(ref: IASTName): Option[String] =
+      Option(ref.resolveBinding()).collect { case m: IMacroBinding => m }
+          .flatMap(m => Option(definitionFileByBinding.get(m)))
+
+  private lazy val definitionFileByBinding: java.util.IdentityHashMap[IMacroBinding, String] =
+    val byBinding = new java.util.IdentityHashMap[IMacroBinding, String]()
+    cdtAst.getMacroDefinitions.foreach { d =>
+        for
+          binding <- Option(d.getName.resolveBinding()).collect { case m: IMacroBinding => m }
+          file    <- Option(d.getFileLocation).flatMap(l => Option(l.getFileName))
+        do byBinding.put(binding, file)
+    }
+    byBinding
+
+  /** The files of every object-like macro definition the unit saw, by name. */
+  private lazy val objectLikeDefinitionFiles: Map[String, List[String]] =
+      cdtAst.getMacroDefinitions.toList
+          .filterNot(_.isInstanceOf[IASTPreprocessorFunctionStyleMacroDefinition])
+          .flatMap(d =>
+              Option(d.getFileLocation).flatMap(l => Option(l.getFileName)).map(
+                ASTStringUtil.getSimpleName(d.getName) -> _
+              )
+          )
+          .groupMap(_._1)(_._2)
+          .view.mapValues(_.distinct).toMap
+          .view.mapValues(_.distinct).toMap
 
   /** The identifier an argument's text starts with: `MAX` for `MAX(b, c)`, `LIMIT` for `LIMIT`. */
   private def leadingName(text: String): String =
@@ -530,7 +591,9 @@ trait MacroHandler(implicit withSchemaValidation: ValidationMode):
     val filename           = fileName(macroDef)
     val lineNo: Integer    = line(macroDef).getOrElse(-1)
     val lineNoEnd: Integer = lineEnd(macroDef).getOrElse(-1)
-    if name != "NULL" then s"$filename:$lineNo:$lineNoEnd:$name:${argAsts.size}" else name
+    // every macro's call carries its definition, NULL included: the header that defines it is
+    // what a use of it depends on
+    s"$filename:$lineNo:$lineNoEnd:$name:${argAsts.size}"
 
   /** The CDT utility method is unfortunately in a class that is marked as deprecated, however, this
     * is because the CDT team would like to discourage its use but at the same time does not plan to

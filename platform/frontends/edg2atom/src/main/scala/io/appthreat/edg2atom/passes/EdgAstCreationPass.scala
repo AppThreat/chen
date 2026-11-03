@@ -80,9 +80,13 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
               exported = true
               val relative = SourceFiles.toRelativePath(path.toString, config.inputPath)
               val creator =
-                  new AstCreator(relative, unit, config, writes(path))(using
-                    config.schemaValidation
-                  )
+                  new AstCreator(
+                    relative,
+                    unit,
+                    config,
+                    writes(path),
+                    runner.macroFilePaths
+                  )(using config.schemaValidation)
               val diff = creator.createAst()
               Some(ParsedUnit(diff, creator.usedTypeNames))
           case _ => None
@@ -121,4 +125,4 @@ object EdgAstCreationPass:
   val TimeoutSeconds: Long = 600
 
   /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. */
-  val AstFormatVersion = "edg2atom-ast-1"
+  val AstFormatVersion = "edg2atom-ast-2"

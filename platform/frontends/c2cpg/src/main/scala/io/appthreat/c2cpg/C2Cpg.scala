@@ -10,6 +10,7 @@ import io.appthreat.c2cpg.passes.{
     ReferenceKindPass,
     TypeDeclNodePass
 }
+import io.appthreat.c2cpg.passes.ExternalPathsPass
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -54,6 +55,9 @@ class C2Cpg extends X2CpgFrontend[Config]:
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)
               .createAndApply()
+          // after every type declaration exists, the ones TypeDeclNodePass adds included
+          if config.externalPaths.nonEmpty then
+            new ExternalPathsPass(cpg, config.externalPaths).createAndApply()
           new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
           new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
           new DeclarationAttributesPass(cpg).createAndApply()

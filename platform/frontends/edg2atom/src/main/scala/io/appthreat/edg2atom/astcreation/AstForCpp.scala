@@ -1,5 +1,6 @@
 package io.appthreat.edg2atom.astcreation
 
+import io.appthreat.c2cpg.astcreation.Defines as C2CpgDefines
 import io.appthreat.edg2atom.parser.{EdgaUnit, Pos}
 import io.appthreat.edg2atom.parser.EdgaUnit.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
@@ -439,9 +440,14 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
     val typeName    = simpleTypeName(elementType)
     val typeId      = Ast(identifierNode(e, typeName, typeName, elementType))
     val init        = e.field("init")
-    val constructor =
+    val constructorRoutine =
         init.filter(_.kind == "constructor").flatMap(i => routineOf(i.long("routine")))
-            .filter(inProject)
+    val constructor = constructorRoutine.filter(inProject)
+    // a class a header declares: the `new` itself carries which header's class it constructs
+    constructorRoutine.filterNot(inProject).foreach { r =>
+      tagCallee(call, r)
+      if !isArray then tagNode(call, C2CpgDefines.ConstructsTypeTag, typeName)
+    }
     def constructorCall(args: Seq[Ast]): Option[Ast] = constructor.map { r =>
       val written =
           if isArray then s"$typeName()" else s"$typeName(${args.map(codeOfAst).mkString(", ")})"
@@ -792,12 +798,10 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
         Option.when(ReturnsTwice.contains(r.string("name").getOrElse("")))("returns_twice")
     attributes.distinct.foreach(tagNode(call, X2CpgDefines.FunctionAttributeTag, _))
     r.position.filter(_.file != 0L).flatMap(p => unit.files.get(p.file)).foreach { f =>
-        tagNode(call, CalleeDeclaredInTag, f.path)
+        tagNode(call, C2CpgDefines.CalleeDeclaredInTag, f.path)
     }
     // the symbol the call links to, when an asm label renames it
     r.string("asmName").foreach(tagNode(call, X2CpgDefines.AsmNameTag, _))
-
-  private val CalleeDeclaredInTag = "callee-declared-in"
 
   // ---- objects a declaration constructs -----------------------------------------------------
 
@@ -844,6 +848,12 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
                   None,
                   Some(tpe)
                 )
+                // a class a header declares: the constructor's header names the package the code
+                // relies on, and the tag says the call constructs that class
+                routineOf(init.long("routine")).filterNot(inProject).foreach { r =>
+                  tagCallee(call, r)
+                  if typeName.nonEmpty then tagNode(call, C2CpgDefines.ConstructsTypeTag, typeName)
+                }
                 Some(callAst(call, args))
             case '=' if args.size == 1 => Some(assignment(args.head))
             case '{' | '=' =>

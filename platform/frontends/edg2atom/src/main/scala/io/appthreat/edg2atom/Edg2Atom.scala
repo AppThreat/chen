@@ -1,6 +1,7 @@
 package io.appthreat.edg2atom
 
 import io.appthreat.c2cpg.Config
+import io.appthreat.c2cpg.passes.ExternalPathsPass
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.parser.{FileDefaults, ProjectSources}
 import io.appthreat.c2cpg.passes.{
@@ -72,6 +73,9 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
         new TypeDeclNodePass(cpg, CGlobal.lastMembers, CGlobal.lastTypedefs)(using
           config.schemaValidation
         ).createAndApply()
+        // after every type declaration exists, the ones TypeDeclNodePass adds included
+        if config.externalPaths.nonEmpty then
+          new ExternalPathsPass(cpg, config.externalPaths).createAndApply()
         new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
         new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
         new DeclarationAttributesPass(cpg).createAndApply()

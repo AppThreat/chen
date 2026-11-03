@@ -119,9 +119,10 @@ class CdtParser(
     val realPath = File(file)
     if realPath.isRegularFile then // handling potentially broken symlinks
       val settings = sources.settingsFor(realPath.path)
-      // a header included into a C++ unit reads as C++, module syntax included
-      val transform: (Path, Array[Char]) => Array[Char] =
-          if settings.language == SourceLanguage.Cpp then sources.modules.rewrite else (_, c) => c
+      // a header reads in its including unit's dialect, with the same rewrites as the unit's own
+      // text (a C23 attribute in a header breaks the unit that includes it)
+      val transform: (Path, Array[Char]) => Array[Char] = (path, chars) =>
+          sources.rewrite(path, chars, settings.language)
       val fileContentProvider =
           new CustomFileContentProvider(headerFileFinder, realPath.path, transform)
       try

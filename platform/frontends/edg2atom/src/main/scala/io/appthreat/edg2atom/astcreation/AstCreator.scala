@@ -1,5 +1,6 @@
 package io.appthreat.edg2atom.astcreation
 
+import io.appthreat.c2cpg.astcreation.Defines as C2CpgDefines
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.edg2atom.parser.{EdgaUnit, FileEntry, Pos}
@@ -11,6 +12,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{
     ControlStructureTypes,
     DispatchTypes,
+    EdgeTypes,
     EvaluationStrategies,
     ModifierTypes,
     NodeTypes,
@@ -37,7 +39,11 @@ class AstCreator(
   val filename: String,
   val unit: EdgaUnit,
   val config: Config,
-  val claim: String => Boolean
+  val claim: String => Boolean,
+  /** Real paths of the runner's preinclude macro files: artifacts of this tool, which no include
+    * graph or header attribution should name.
+    */
+  val preincludePaths: Set[String] = Set.empty
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(filename)
     with AstNodeBuilder[Value, AstCreator]
@@ -61,6 +67,41 @@ class AstCreator(
   private var methodStack: List[String] = Nil
 
   private var currentPath = filename
+
+  /** The file whose AST is being built, by the front end's id: what tells a declaration in another
+    * file from one here.
+    */
+  protected var currentFileId: Long = 0L
+
+  /** The file a position names, when it is not the one being written and not one of this tool's own
+    * artifacts: the header that declares what the code reads there (the counterpart of the CDT
+    * frontend's `callee-declared-in` for calls).
+    */
+  protected def declaredElsewhere(pos: Option[Pos]): Option[String] =
+      pos.filter(_.file != currentFileId).flatMap(p => unit.files.get(p.file))
+          .filter(f => !preincludePaths.contains(f.path)).map(_.path)
+
+  /** The file that declares each enumerator name, when every enum of the unit that declares it
+    * names one file, as (front-end file id, path): a folded enumerator keeps only its name and
+    * value, and the enum alone says which header it is.
+    */
+  protected lazy val enumeratorFiles: Map[String, (Long, String)] =
+      (unit.types.values.toSeq
+          .filter(_.flag("enum"))
+          .sortBy(_("id").num)
+          .flatMap(_.list("enumerators")) ++ unit.enumerators)
+          .flatMap(e =>
+              for
+                name   <- e.string("name")
+                fileId <- e.position.map(_.file)
+                file   <- unit.files.get(fileId)
+              yield name -> (fileId, file.path)
+          )
+          .groupMap(_._1)(_._2)
+          .collect {
+              case (name, files) if files.map(_._2).distinct.size == 1 => name -> files.head
+          }
+          .toMap
 
   protected def globalTypeDeclFullName: String =
       s"$currentPath:${NamespaceTraversal.globalNamespaceName}"
@@ -133,6 +174,7 @@ class AstCreator(
   private def fileAst(file: FileEntry, written: Set[Long]): Ast =
     val path = relativePath(file)
     currentPath = path
+    currentFileId = file.id
     val fullName = s"$path:${NamespaceTraversal.globalNamespaceName}"
     val namespace = NewNamespaceBlock()
         .name(NamespaceTraversal.globalNamespaceName)
@@ -179,18 +221,59 @@ class AstCreator(
     val instances = if file.id == 0L then foreignInstanceAsts(written) else Seq.empty
     val lambdas   = lambdaAsts.toSeq
     lambdaAsts.clear()
+    // the macro invocations no expression of the file carries (a constant the front end folded,
+    // a macro nested in another's expansion), as tags
+    tagUnrepresentedMacroUses(file, globalMethod)
     val children = typeDecls ++ globals ++ routines ++ instances ++ lambdas
     setArgumentIndices(children)
     scope.popScope()
     val methodReturn = NewMethodReturn().code("RET").typeFullName(registerType(X2CpgDefines.Any))
         .evaluationStrategy(EvaluationStrategies.BY_VALUE)
         .lineNumber(Integer.valueOf(1)).columnNumber(Integer.valueOf(1))
-    Ast(namespace).withChild(
+    // the primary file's own `#include` directives (a header's belong to the header's own AST)
+    val imports = if file.id == 0L then importAsts(file) else Seq.empty
+    Ast(namespace).withChildren(imports).withChild(
       Ast(globalTypeDecl).withChild(
         methodAst(globalMethod, Seq.empty, blockAst(block, children.toList), methodReturn)
       )
     )
   end fileAst
+
+  /** The `#include` directives of the primary file, as the CDT frontend writes them: an IMPORT of
+    * the name as written, tagged with the file it resolved to and whether it names a system header
+    * (edga reports each file the unit loaded once, with the directive that first brought it in).
+    */
+  private def importAsts(file: FileEntry): Seq[Ast] =
+      unit.files.values.toSeq.sortBy(_.id).filterNot(f => preincludePaths.contains(f.path))
+          .flatMap { included =>
+              included.includedFrom.toList.collect {
+                  case (parentId, line) if parentId == 0L =>
+                      val written = included.written.getOrElse(included.path)
+                      val code =
+                          if included.systemInclude then s"#include <$written>"
+                          else s"#include \"$written\""
+                      val importNode = NewImport()
+                          .code(code)
+                          .importedEntity(written)
+                          .importedAs(written)
+                          .lineNumber(Integer.valueOf(math.max(1, line)))
+                          .columnNumber(Integer.valueOf(1))
+                      val dependency = io.appthreat.x2cpg.utils.NodeBuilders.newDependencyNode(
+                        written,
+                        written,
+                        "include"
+                      )
+                      diffGraph.addNode(dependency)
+                      diffGraph.addEdge(importNode, dependency, EdgeTypes.IMPORTS)
+                      // the real path the include resolved to, and its system spelling, as the CDT frontend's
+                      // imports carry them
+                      tagNode(importNode, C2CpgDefines.IncludeResolvedPathTag, included.path)
+                      if included.systemInclude then
+                        tagNode(importNode, C2CpgDefines.IncludeSystemTag, "true")
+                      Ast(importNode)
+              }
+          }
+  end importAsts
 
   /** The template instances this unit uses from project headers another unit writes. Which
     * instances a unit has depends on what it uses, so each unit writes its own and
@@ -795,6 +878,16 @@ class AstCreator(
   /** A statement in a block: a declaration is a LOCAL per variable and an assignment per
     * initialiser, flattened into the block as the CDT frontend does.
     */
+  /** The enumerator a `case` label names, as the label is written (`case LIB_BAD:`): the front end
+    * keeps only the value, and the name is what says which declaration the label reads.
+    */
+  private def caseLabelName(s: Value): Option[String] =
+      sourceText(s).flatMap(CaseLabel.findFirstMatchIn(_)).map(_.group(1))
+          .filter(name => enumeratorFiles.contains(name.split("::").last))
+
+  private val CaseLabel =
+      "^\\s*case\\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)\\s*:".r
+
   private def statementAsts(s: Value): Seq[Ast] =
       s.kind match
         // a block the front end made (around a loop or switch, for its labels) is not one
@@ -803,7 +896,10 @@ class AstCreator(
         case "init"                        => initStatementAsts(s)
         case "switch_case" if !s.flag("default") =>
             val label = statementAst(s)
-            val value = s.string("value").map(v => Ast(literalNode(s, v, registerType("int"))))
+            // `case LIB_BAD:` names an enumerator the front end folded: the name, as in an
+            // expression, else the value
+            val value = caseLabelName(s).flatMap(n => namedConstantAst(s, n))
+                .orElse(s.string("value").map(v => Ast(literalNode(s, v, registerType("int")))))
             label +: value.toSeq
         case "label" => Seq(statementAst(s)).filter(_.root.isDefined)
         // a variable length array: its number of elements, on its LOCAL

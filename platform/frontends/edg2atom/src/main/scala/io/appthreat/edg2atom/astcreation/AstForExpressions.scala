@@ -1,5 +1,6 @@
 package io.appthreat.edg2atom.astcreation
 
+import io.appthreat.c2cpg.astcreation.Defines as C2CpgDefines
 import io.appthreat.edg2atom.parser.EdgaUnit
 import io.appthreat.edg2atom.parser.EdgaUnit.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
@@ -170,7 +171,11 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
           val name     = e.string("name").getOrElse("")
           val target   = e.long("routine").flatMap(unit.routinesById.get)
           val fullName = target.map(methodFullNameOf).getOrElse(name)
-          Ast(methodRefNode(e, name, fullName, registerType(types(e.long("t")))))
+          val ref      = methodRefNode(e, name, fullName, registerType(types(e.long("t"))))
+          // a function named as a value reads the header that declares it
+          declaredElsewhere(target.flatMap(_.position))
+              .foreach(tagNode(ref, C2CpgDefines.RefDeclaredInTag, _))
+          Ast(ref)
       case "field" =>
           val name = e.string("name").getOrElse("")
           Ast(fieldIdentifierNode(e, name, name))
@@ -235,6 +240,39 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
 
   private def typeOf(e: Value): String = registerType(types(e.long("t")))
 
+  /** The class or struct a field access's base names: the type itself for `o.f`, what a pointer
+    * refers to for `p->f`, typedefs unwrapped.
+    */
+  private def fieldOwnerType(typeId: Long): Option[Value] =
+    def ownerOf(t: Value): Boolean =
+        t.string("kind").exists(k => k == "class" || k == "struct" || k == "union")
+    types.resolved(typeId).flatMap {
+        case t if t.string("kind").contains("pointer") =>
+            t.long("to").flatMap(types.resolved(_)).filter(ownerOf)
+        case t if ownerOf(t) => Some(t)
+        case _               => None
+    }
+
+  /** The header that declares `field` for a class: its own when it declares the member, else the
+    * nearest base's (a project subclass reading a library member names the library's header). The
+    * class's own header when nobody in the hierarchy says.
+    */
+  private def fieldDeclaringFile(owner: Value, field: String): Option[String] =
+    def declares(t: Value): Boolean = t.list("fields").exists(_.string("name").contains(field))
+    def walk(current: Value, seen: Set[Long]): Option[Value] =
+        current.long("id") match
+          case Some(id) if seen.contains(id) => None
+          case maybeId =>
+              val now = seen ++ maybeId
+              if declares(current) then Some(current)
+              else
+                current.list("bases").view
+                    .flatMap(_.long("type").flatMap(types.resolved(_)))
+                    .flatMap(walk(_, now)).headOption
+    walk(owner, Set.empty)
+        .flatMap(t => declaredElsewhere(t.position))
+        .orElse(declaredElsewhere(owner.position))
+
   private def identifierAst(e: Value): Ast =
       // `this`, spelled as the CDT frontend types it (`geo.Point *`)
       if e.long("var").exists(thisVariables.contains) then
@@ -248,17 +286,26 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
             .orElse(declared.collect { case l: NewLocal => l.name })
             .orElse(sourceText(e).map(_.trim).filter(_.matches("[A-Za-z_][A-Za-z0-9_]*")))
             .getOrElse("__func__")
-        sourceText(e).filter(_.contains("::")).flatMap(qualifiedVariableAst(e, _, name)).getOrElse {
-            val id  = identifierNode(e, name, name, typeOf(e))
-            val ast = Ast(id)
-            // a variable the front end names but this graph does not declare (a library's)
-            // is not a same-named local
-            declared.orElse(
-              Option.when(e.long("var").isEmpty)(scope.lookupVariable(name).map(_._1)).flatten
-            ) match
-              case Some(target) => ast.withRefEdge(id, target)
-              case None         => ast
-        }
+        val ast = sourceText(e).filter(_.contains("::"))
+            .flatMap(qualifiedVariableAst(e, _, name)).getOrElse {
+                val id  = identifierNode(e, name, name, typeOf(e))
+                val ast = Ast(id)
+                // a variable the front end names but this graph does not declare (a library's)
+                // is not a same-named local
+                declared.orElse(
+                  Option.when(e.long("var").isEmpty)(scope.lookupVariable(name).map(_._1)).flatten
+                ) match
+                  case Some(target) => ast.withRefEdge(id, target)
+                  case None         => ast
+            }
+        // a global declared in another file: the header that declares it, as a call carries the
+        // header that declares its function
+        for
+          varId  <- e.long("var")
+          global <- unit.globalsById.get(varId)
+          header <- declaredElsewhere(global.position)
+        do ast.root.foreach(tagNode(_, C2CpgDefines.RefDeclaredInTag, header))
+        ast
 
   /** A variable named with its scope, as the CDT frontend writes it: `ns::v` the access of member
     * `v` of `ns`, `a::b::v` of `a::b` (the inner qualifier an identifier), `::v` of `<global>`,
@@ -400,6 +447,23 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
           )
           val typeRef = Ast(typeRefNode(e, types(e.long("t")), typeOf(e)))
           callAst(call, Seq(typeRef) ++ operands.headOption.map(expressionAst).toSeq)
+      case "dot_field" | "points_to_field" =>
+          val access = operatorAst(e, Simple(op), operands)
+          // a `p->f` or `o.f` through a struct or class a header declares is a use of that header,
+          // and nothing else on the access names it; the base of `p->f` is a pointer to it, and a
+          // member a base class declares names the base's header, not the derived one's
+          val field = operands.drop(1).headOption.flatMap(visible(_).string("name"))
+          (for
+            base  <- operands.headOption.map(visible)
+            t     <- base.long("t")
+            owner <- fieldOwnerType(t)
+            header <- field.flatMap(fieldDeclaringFile(owner, _)).orElse(
+              declaredElsewhere(owner.position)
+            )
+          yield header).foreach(header =>
+              access.root.foreach(tagNode(_, C2CpgDefines.TypeDeclaredInTag, header))
+          )
+          access
       case other =>
           Simple.get(other) match
             case Some(name) => operatorAst(e, name, operands)
@@ -522,12 +586,16 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
               case Some("address") =>
                   e.long("routine").flatMap(unit.routinesById.get) match
                     case Some(r) =>
-                        Ast(methodRefNode(
+                        val ref = methodRefNode(
                           e,
                           r.string("name").getOrElse(""),
                           methodFullNameOf(r),
                           typeOf(e)
-                        ))
+                        )
+                        // a function named as a value reads the header that declares it
+                        declaredElsewhere(r.position)
+                            .foreach(tagNode(ref, C2CpgDefines.RefDeclaredInTag, _))
+                        Ast(ref)
                     case None =>
                         e.field("of") match
                           case Some(target) => constantAst(target)
@@ -542,13 +610,16 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
                         registerType(s"${element.getOrElse("char")}*")
                   Ast(literalNode(e, text, tpe))
               case _ =>
-                  val text = sourceText(e).getOrElse(literalText(e))
+                  // the name the source gave the constant first (a folded enumerator whose range
+                  // the front end kept nowhere else), else the text at its range
+                  val text = e.string("name").orElse(sourceText(e)).getOrElse(literalText(e))
                   namedConstantAst(e, text).getOrElse(Ast(literalNode(e, text, typeOf(e))))
 
   /** A constant written as a name (an enumerator, `kLock`, or `Shade::Dark`), as the CDT frontend
-    * writes it: the name, with the value the front end gave it.
+    * writes it: the name, with the value the front end gave it. The enum that declares the name
+    * names the header it came from, when one enum of the unit does.
     */
-  private def namedConstantAst(e: Value, text: String): Option[Ast] =
+  protected def namedConstantAst(e: Value, text: String): Option[Ast] =
     val name = text.trim
     val ast =
         if NamedConstantKeywords.contains(name) then None
@@ -561,7 +632,21 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
     ast.foreach(a =>
         e.string("value").foreach(v => a.root.foreach(tagNode(_, X2CpgDefines.ConstValueTag, v)))
     )
+    // an enumerator the front end folded to its value: its enum's header declared it
+    ast.foreach(a =>
+      // the front end says where the named constant was declared (edga's `declared`); an older
+      // export leaves it to the enum the name belongs to
+      val declared = e.field("declared").flatMap(EdgaUnit.pos)
+          .filter(_.file != currentFileId)
+          .flatMap(p => unit.files.get(p.file)).map(_.path)
+          .orElse(enumeratorFiles.get(name.split("::").lastOption.getOrElse(name))
+              .filter((fileId, _) => fileId != currentFileId).map(_._2))
+      declared.foreach(header =>
+          a.root.foreach(tagNode(_, C2CpgDefines.RefDeclaredInTag, header))
+      )
+    )
     ast
+  end namedConstantAst
 
   private val NamedConstantKeywords = Set("true", "false", "nullptr", "NULL", "__null")
 

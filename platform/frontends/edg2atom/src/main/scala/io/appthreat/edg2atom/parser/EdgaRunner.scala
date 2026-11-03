@@ -35,6 +35,14 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
 
   private val macroFiles = new ConcurrentHashMap[String, Path]()
 
+  /** The real paths of the preinclude macro files this runner wrote: the front end sees them as
+    * headers, but they are this tool's own artifacts, not the project's or a library's.
+    */
+  def macroFilePaths: Set[String] =
+      macroFiles.values().asScala.map(p =>
+          io.appthreat.edg2atom.astcreation.AstCreator.realPath(p).toString
+      ).toSet
+
   val executable: Option[String] = EdgaRunner.locate()
 
   /** What identifies the edga build: its version, the EDG commit and its configuration. An AST

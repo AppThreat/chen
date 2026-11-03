@@ -261,10 +261,22 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
     withNoReturn(gccAttributes(owners), function).foreach(attr =>
         tagNode(call, X2CpgDefines.FunctionAttributeTag, attr)
     )
-    // the header a function is declared in, when this file does not declare it: what tells an
-    // SBOM which package's API the call uses
-    if owners.nonEmpty && owners.forall(isIncludedNode) then
-      owners.flatMap(o => Option(o.getFileLocation).flatMap(l => Option(l.getFileName)))
+    tagCalleeHeader(call, function, owners)
+
+  /** The header a function is declared in, when this file does not declare it: what tells an SBOM
+    * which package's API the call uses. A synthetic owner with no location of its own (a
+    * constructor's implicit return type) declares nothing anywhere: only owners the parser located
+    * decide.
+    */
+  protected def tagCalleeHeader(
+    call: NewCall,
+    function: IBinding,
+    owners: Seq[IASTNode] = Nil
+  ): Unit =
+    val located = (if owners.isEmpty then declarationOwners(function) else owners)
+        .filter(o => nullSafeFileLocation(o).isDefined)
+    if located.nonEmpty && located.forall(isIncludedNode) then
+      located.flatMap(o => Option(o.getFileLocation).flatMap(l => Option(l.getFileName)))
           .headOption.foreach(header => tagNode(call, Defines.CalleeDeclaredInTag, header))
 
   protected def astForFunctionDeclarator(funcDecl: IASTFunctionDeclarator): Ast =

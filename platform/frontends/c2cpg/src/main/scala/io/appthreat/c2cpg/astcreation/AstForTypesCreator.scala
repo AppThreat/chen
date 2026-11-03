@@ -342,6 +342,14 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
                     signature = None,
                     typeFullName = Some(typeFullName)
                   )
+                  // a class a header declares: the constructor's own header names the package the
+                  // code relies on, and the tag says the call constructs rather than calls a
+                  // function of that name
+                  constructorBindingOf(declarator).foreach { constructor =>
+                    tagCallAttributes(callNode_, constructor)
+                    if name.nonEmpty then
+                      tagNode(callNode_, Defines.ConstructsTypeTag, name)
+                  }
                   callAst(callNode_, args)
             end match
         case i: IASTInitializerList if linkedConstructor(declarator).isDefined =>
