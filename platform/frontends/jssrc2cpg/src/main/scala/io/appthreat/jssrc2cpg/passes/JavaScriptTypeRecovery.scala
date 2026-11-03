@@ -69,8 +69,6 @@ private class RecoverForJavaScriptFile(
       .toSet
   override protected val pathSep = ':'
 
-  /** A heuristic method to determine if a call is a constructor or not.
-    */
   /** The methods of the file that declare a parameter of each name. */
   private lazy val parameterMethods: Map[String, Set[String]] =
       cu.ast.isParameter.flatMap(p => enclosingMethod(p).map(p.name -> _)).toSeq
@@ -127,6 +125,8 @@ private class RecoverForJavaScriptFile(
         false
     case _ => super.hasTypes(node)
 
+  /** A heuristic method to determine if a call is a constructor or not.
+    */
   override protected def isConstructor(c: Call): Boolean =
       c.name.endsWith("factory") && c.inCall.astParent.headOption.exists(_.isInstanceOf[Block])
 

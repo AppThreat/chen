@@ -12,8 +12,9 @@ import io.appthreat.jssrc2cpg.passes.Defines
   *     imported classes) and `Class` for a file of the project,
   *   - `typeof import("x")` and `import("x")` are the module (`moduleOf`),
   *   - an array or tuple type is the built-in array, and an object literal type is `object`,
-  *   - a function or constructor type, a signature, `keyof`, `typeof x`, an indexed access, a
-  *     conditional or a template literal type is `ANY`: none of them is the type of a class,
+  *   - `typeof Foo` is `Foo`, the name of the value, which recovery resolves like any name,
+  *   - a function or constructor type, a signature, `keyof`, `typeof` of anything but a name, an
+  *     indexed access, a conditional or a template literal type is `ANY`,
   *   - an intersection is `ANY`, and a union without its `null` and `undefined` members is its
   *     member when it has only one, and `ANY` when it has more (a fixed rule: no member is
   *     preferred).
@@ -25,6 +26,7 @@ object TypeNames:
       "^import\\([\"']([^\"']+)[\"']\\)\\.([A-Za-z_$][\\w$.]*)(<.*>)?$".r
   private val Generic       = "^([A-Za-z_$][\\w$.]*)<.*>$".r
   private val NumberLiteral = "^-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?$".r
+  private val TypeofName    = "^typeof ([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)$".r
 
   def isName(t: String): Boolean = NameChars.matches(t)
 
@@ -152,6 +154,9 @@ object TypeNames:
       case _ if splitTop(t, '&').sizeIs > 1 => Defines.Any
       case _ if hasTopArrow(t) || t.startsWith("new ") || t.startsWith("abstract new ") =>
           Defines.Any
+      // `typeof Foo` is the type of the value `Foo`: as chen did before, the name, which recovery
+      // looks up like any other (an imported class, or the variable's own types)
+      case TypeofName(name) => name
       case _ if t.startsWith("keyof ") || t.startsWith("typeof ") || t.startsWith("unique ") =>
           Defines.Any
       case _ if t.startsWith("[") => "__ecma.Array"

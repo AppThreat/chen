@@ -50,8 +50,8 @@ class TSTypesTest extends AbstractPassTest:
     args.name shouldBe "args"
     args.code shouldBe "...args"
     args.isVariadic shouldBe true
-    // the native binary also writes the span of the rest element, which names an array the built-in one
-    Set("Array<any>", "__ecma.Array") should contain(args.typeFullName)
+    // an array type is the built-in array, whatever its element type
+    args.typeFullName shouldBe "__ecma.Array"
   }
 
   "have return types for arrow functions" in AstFixture("const foo = () => 42;", tsTypes = true) {

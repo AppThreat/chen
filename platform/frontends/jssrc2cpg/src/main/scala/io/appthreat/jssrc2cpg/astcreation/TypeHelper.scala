@@ -145,13 +145,13 @@ trait TypeHelper:
             val name = other.toString
             name.endsWith("Expression") || name.endsWith("Literal")
 
-  /** The type the span map has for exactly this node, when it is a concrete one (not `any`). The
-    * type of every other node is a lookup of the type map, see [[typeFor]].
-    */
   /** `never`, or an array of it (what `[]` is to the checker): no information. */
   private def isNeverType(tpe: String): Boolean =
       tpe == Defines.Never || tpe == "Array<never>" || tpe == "never[]"
 
+  /** The type the span map has for exactly this node, when it is a concrete one (not `any`). The
+    * type of every other node is a lookup of the type map, see [[typeFor]].
+    */
   private def spanTypeRaw(node: BabelNodeInfo): Option[String] =
       if !hasTypeSpans then None
       else

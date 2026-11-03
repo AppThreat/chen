@@ -74,7 +74,9 @@ class TypeNamesTests extends AbstractPassTest:
       "be ANY for an intersection and for the types that are no class" in {
           name("A & B") shouldBe Defines.Any
           name("keyof User") shouldBe Defines.Any
-          name("typeof user") shouldBe Defines.Any
+          name("typeof user") shouldBe "user"
+          name("typeof models.User") shouldBe "models.User"
+          name("typeof user[0]") shouldBe Defines.Any
           name("User[\"id\"]") shouldBe Defines.Any
           name("T extends string ? A : B") shouldBe Defines.Any
           name("`a${string}`") shouldBe Defines.String
