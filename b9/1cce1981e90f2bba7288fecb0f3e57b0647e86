@@ -1,0 +1,23 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeRecovery.scala
+  s_74398300cc48c7::t_4bdfb008fc9327 74-112
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ParameterScopeRecoveryTests.scala
+  s_74398300cc48c7::t_68cf45c033f412 1-45
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XTypeRecovery.scala
+  s_74398300cc48c7::t_cbc5ee9a16be47 258-263,629-630,865,867
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b91cce1981e90f2bba7288fecb0f3e57b0647e86",
+  "prompts": {},
+  "sessions": {
+    "s_74398300cc48c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0904532-37d4-48a7-8f6e-50bec4d75023",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
