@@ -1,0 +1,31 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/Main.scala
+  s_79a7c562b49300::t_71e3de66a677f1 34-42
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_79a7c562b49300::t_de4debaea09800 118-122
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  s_79a7c562b49300::t_ea1756e53450aa 149
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/TypeStringNormalizer.scala
+  s_79a7c562b49300::t_51853cb6a39016 13-17,172-175,187-189,200-250,266-271,289-308
+platform/frontends/jssrc2cpg/src/test/resources/typemap-normalization.json
+  s_79a7c562b49300::t_34358f4ce6f438 2,28-39,58-75,100-105,141-146,233-256
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/AstGenRunnerEnvTests.scala
+  s_79a7c562b49300::t_18b354cd7b8246 16,36-44
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/TypeStringNormalizerTests.scala
+  s_79a7c562b49300::t_a468a0195d12fd 60-68,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b4e93a75e9fc636e7b48b88b69e91802b163116e",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
