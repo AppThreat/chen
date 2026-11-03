@@ -143,15 +143,28 @@ final class ProjectSources(val config: Config):
           )
           .toArray
 
-  /** The files to parse, in the order the AST pass takes them. */
+  /** The files to parse, in the order the AST pass takes them. With a compilation database the
+    * units it compiles and the project headers those units include, directly or through other
+    * headers: a header the project defines functions in is where those bodies live (leveldb's
+    * `port/port_stdcxx.h`), and parsing it as its own unit is the only way the CDT frontend slices
+    * them. A header no compiled unit includes (another platform's port, a test helper) is not
+    * parsed, and system headers are never candidates - they are not under the input path.
+    */
   lazy val files: Array[String] =
     val selected = database match
       case None => candidates
       case Some(db) =>
-          candidates.filter { f =>
-              if FileDefaults.isHeaderFile(f) then !config.compileCommandsOnly
-              else db.commandFor(Paths.get(f)).isDefined
-          }
+          val compiled = candidates.filter(f =>
+              !FileDefaults.isHeaderFile(f) && db.commandFor(Paths.get(f)).isDefined
+          )
+          val candidateHeaders = candidates.filter(FileDefaults.isHeaderFile)
+          val graph = new IncludeGraph(
+            (candidateHeaders ++ compiled).map(normalized).toSet,
+            unit => includePathsFor(unit),
+            headerFileFinder
+          )
+          val included = compiled.flatMap(u => graph.reachableFrom(normalized(u))).toSet
+          compiled ++ candidateHeaders.filter(h => included.contains(normalized(h)))
     selected.sortWith(_.compareToIgnoreCase(_) > 0)
 
   private lazy val units: Seq[Path] =
@@ -262,8 +275,12 @@ final class ProjectSources(val config: Config):
   /** The content of `file` as a unit of `language` reads it: a C++ file's module syntax rewritten.
     */
   def textOf(file: Path, language: SourceLanguage): Array[Char] =
-    val chars = CdtParser.readFileChars(file)
-    if language == SourceLanguage.Cpp then modules.rewrite(file, chars) else chars
+      rewrite(file, CdtParser.readFileChars(file), language)
+
+  /** `chars` of `file` with the dialect rewrites of `language`, module syntax included for C++. */
+  def rewrite(file: Path, chars: Array[Char], language: SourceLanguage): Array[Char] =
+      if language == SourceLanguage.Cpp then modules.rewrite(file, DialectRewrites.forCpp(chars))
+      else DialectRewrites.forC(chars)
 end ProjectSources
 
 object ProjectSources:

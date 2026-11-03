@@ -1,6 +1,7 @@
 package io.appthreat.edg2atom.astcreation
 
-import io.appthreat.edg2atom.parser.{EdgaUnit, Pos}
+import io.appthreat.c2cpg.astcreation.Defines as C2CpgDefines
+import io.appthreat.edg2atom.parser.{EdgaUnit, FileEntry, Pos}
 import io.appthreat.edg2atom.parser.EdgaUnit.*
 import io.appthreat.x2cpg.{Ast, ValidationMode}
 import io.appthreat.x2cpg.Defines as X2CpgDefines
@@ -27,6 +28,15 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
   /** The top-level invocation whose expansion is being built, 0 outside any. */
   private var macroContext: Long = 0L
 
+  /** The top-level invocations an INLINED call was built for: the ones a later sweep must not
+    * duplicate.
+    */
+  private val representedInvocations = scala.collection.mutable.HashSet.empty[Long]
+
+  /** The INLINED call built for each top-level invocation, which carries the macros nested in it.
+    */
+  private val invocationCalls = scala.collection.mutable.HashMap.empty[Long, NewCall]
+
   private def topLevelOf(v: Value): Long =
       v.long("mi").filter(_ > 0).map(unit.topLevelInvocation).getOrElse(0L)
 
@@ -42,8 +52,10 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
       try
         val expansion = build
         unit.invocations.get(top) match
-          case Some(invocation) => macroCallAst(node, top, invocation, expansion)
-          case None             => expansion
+          case Some(invocation) =>
+              representedInvocations.add(top)
+              macroCallAst(node, top, invocation, expansion)
+          case None => expansion
       finally macroContext = saved
 
   private def macroCallAst(node: Value, index: Long, invocation: Value, expansion: Ast): Ast =
@@ -97,6 +109,7 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
         }
     }
     val result = callAst(call, args).withChild(expansionBlock)
+    invocationCalls.put(index, call)
     tagNode(call, X2CpgDefines.MacroInvocationTag, index.toString)
     // an integer constant expansion is the invocation's value, as the CDT frontend tags
     // `#define FIRST 0` and `#define N (4 * 8)`
@@ -279,4 +292,45 @@ trait MacroCalls(implicit withSchemaValidation: ValidationMode):
     val root = AstCreator.realPath(Paths.get(config.inputPath))
     val p    = AstCreator.realPath(Paths.get(path))
     if p.startsWith(root) then root.relativize(p).toString else path
+
+  /** The macro invocations of `file` no expression carries, as tags rather than calls: nothing was
+    * called there, so no other pass may see a call. A macro nested in another's arguments or
+    * definition is a use at the outermost invocation, tagged on that invocation's call as the CDT
+    * frontend tags it (`nested-macro`, `<name>@<definition file>`). A top-level invocation the
+    * front end folded to a constant (an object-like macro in a `case` label or an initialiser) has
+    * no call to carry it, so the file's own method carries it (`macro-use`,
+    * `<name>@<line>:<column>@<definition file>`). Definition files are real absolute paths.
+    */
+  protected def tagUnrepresentedMacroUses(file: FileEntry, globalMethod: NewMethod): Unit =
+      unit.invocations.values.toSeq.sortBy(_("id").num).foreach { invocation =>
+        val index = invocation.long("id").getOrElse(0L)
+        val top   = unit.topLevelInvocation(index)
+        val site =
+            (if index == top then Some(invocation) else unit.invocations.get(top))
+                .flatMap(_.field("start")).flatMap(EdgaUnit.pos)
+        val represented = index == top && representedInvocations.contains(top)
+        if site.exists(_.file == file.id) && !represented then
+          for
+            name       <- invocation.string("name").filter(_.nonEmpty)
+            macroId    <- invocation.long("macro")
+            definition <- unit.macros.get(macroId)
+            definedAt  <- definition.position
+            defFile    <- unit.files.get(definedAt.file)
+            // the runner's own preinclude file is not a header anyone includes
+            if !preincludePaths.contains(defFile.path)
+            start <- site
+          do
+            val definitionFile = AstCreator.realPath(Paths.get(defFile.path)).toString
+            invocationCalls.get(top) match
+              case Some(outer) if index != top =>
+                  tagNode(outer, C2CpgDefines.NestedMacroTag, s"$name@$definitionFile")
+              case _ =>
+                  tagNode(
+                    globalMethod,
+                    C2CpgDefines.MacroUseTag,
+                    s"$name@${start.line}:${start.column}@$definitionFile"
+                  )
+        end if
+      }
+  end tagUnrepresentedMacroUses
 end MacroCalls
