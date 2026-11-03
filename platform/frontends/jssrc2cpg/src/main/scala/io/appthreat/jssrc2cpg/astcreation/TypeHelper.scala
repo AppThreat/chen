@@ -115,8 +115,11 @@ trait TypeHelper:
       (tpe.startsWith("\"") && tpe.endsWith("\"")) ||
           (nativeTypeMap && tpe.startsWith("'") && tpe.endsWith("'"))
 
-  /** Whether the type map was written by the native binary (TypeScript 7's checker). */
-  private def nativeTypeMap: Boolean = config.astGenTypes.contains("native")
+  /** Whether astgen was asked for the native binary's type map (TypeScript 7's checker), by the
+    * configuration or by an inherited ASTGEN_TYPES. When astgen fell back to TypeScript 6, its
+    * strings are brought to the same canonical spelling, which only reorders them.
+    */
+  private lazy val nativeTypeMap: Boolean = config.effectiveAstGenTypes() == "native"
 
   private def isNumberType(tpe: String): Boolean =
       tpe.toDoubleOption.isDefined

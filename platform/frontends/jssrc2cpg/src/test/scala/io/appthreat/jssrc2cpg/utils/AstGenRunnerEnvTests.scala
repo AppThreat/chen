@@ -13,7 +13,7 @@ class AstGenRunnerEnvTests extends AnyWordSpec with Matchers:
           def inputs(c: Config) =
               new AstGenRunner(c.withInputPath(dir)).astGenFingerprintInputs
                   .filter(_.startsWith("astgen-types="))
-          inputs(Config()) shouldBe Seq("astgen-types=default")
+          inputs(Config()) shouldBe Seq(s"astgen-types=${Config().effectiveAstGenTypes()}")
           inputs(Config().withAstGenTypes("native")) shouldBe Seq("astgen-types=native")
           inputs(Config().withAstGenTypes("ts6")) shouldBe Seq("astgen-types=ts6")
       }
@@ -31,6 +31,15 @@ class AstGenRunnerEnvTests extends AnyWordSpec with Matchers:
 
       "leave the environment alone when it is not set" in {
           new AstGenRunner(Config()).astGenEnv shouldBe Map.empty
+      }
+
+      "fall back to an inherited ASTGEN_TYPES, read as astgen reads it" in {
+          Config().effectiveAstGenTypes(Map.empty) shouldBe "ts6"
+          Config().effectiveAstGenTypes(Map("ASTGEN_TYPES" -> " Native ")) shouldBe "native"
+          Config().effectiveAstGenTypes(Map("ASTGEN_TYPES" -> "fast")) shouldBe "ts6"
+          Config().withAstGenTypes("ts6").effectiveAstGenTypes(
+            Map("ASTGEN_TYPES" -> "native")
+          ) shouldBe "ts6"
       }
 
       "be normalized to lower case and ignored when blank" in {

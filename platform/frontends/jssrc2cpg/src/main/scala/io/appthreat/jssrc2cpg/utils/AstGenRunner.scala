@@ -146,7 +146,7 @@ class AstGenRunner(config: Config):
         s"astgen-version=$astGenVersion",
         s"tsTypes=${config.tsTypes}",
         s"flow=${config.flow}",
-        s"astgen-types=${config.astGenTypes.getOrElse("default")}"
+        s"astgen-types=${config.effectiveAstGenTypes()}"
       )
 
   /** Identity of everything (besides the sources) that affects astgen's output. */

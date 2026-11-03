@@ -10,8 +10,11 @@ package io.appthreat.jssrc2cpg.utils
   *
   *   - string literal types use double quotes,
   *   - the members of a union are sorted, at any depth, and
-  *   - the property members of an object type are sorted, while call, construct and index
-  *     signatures keep their order (overload order is meaningful).
+  *   - the property members of an object type are sorted by name, while call and construct
+  *     signatures and the overloads of one method keep their order (overload order is meaningful).
+  *
+  * The top level of a conditional type and the type after a type predicate's `is` are not sorted as
+  * unions, and white space inside string literals is kept.
   *
   * The string is edited in place: it is split into spans at its own brackets, only the spans that
   * are reordered move and only the quote characters of string literals change, and every other
@@ -166,8 +169,10 @@ object TypeStringNormalizer:
       if open == '{' then rewriteObjectBody(inner, o)
       else
         val Split(parts, between) = splitTop(inner, Set(','))
-        // a parameter is `name: type`; type arguments and tuple elements are plain types
-        val pieces = parts.map(p => if open == '(' then rewriteMember(p, o) else rewriteType(p, o))
+        // parameters and labelled tuple elements are `name: type`; type arguments are plain types
+        val pieces = parts.map(p =>
+            if open == '(' || open == '[' then rewriteMember(p, o) else rewriteType(p, o)
+        )
         join(pieces, between)
 
   private def isSignature(member: String): Boolean =
@@ -179,10 +184,9 @@ object TypeStringNormalizer:
     if !o.objectOrder then join(members, between)
     else
       val present = members.filter(m => trimParts(m)._2.nonEmpty)
-      val ordered = present.filter(isSignature) ++ present.filterNot(isSignature).sortBy(m =>
-          trimParts(m)._2
-      )
-      var k = 0
+      // by name, with a stable sort: the overloads of one method keep their order
+      val ordered = present.filter(isSignature) ++ present.filterNot(isSignature).sortBy(memberName)
+      var k       = 0
       val moved = members.map { m =>
           if trimParts(m)._2.isEmpty then m
           else
@@ -192,6 +196,57 @@ object TypeStringNormalizer:
             lead + core + trail
       }
       join(moved, between)
+
+  /** The name of a property or method member: `readonly a?: T` is `a`, `foo(x): T` is `foo`, `[k:
+    * K]: T` and `"q": T` are the bracketed or quoted name as written.
+    */
+  private def memberName(m: String): String =
+    val core = trimParts(m)._2.replaceFirst("^(readonly|get|set)\\s+", "")
+    if core.isEmpty then core
+    else
+      core.head match
+        case '"' | '\'' | '`' => core.substring(0, literalEnd(core, 0) + 1)
+        case '['              => splitTop(core, Set('?', ':')).parts.head
+        case _                => core.takeWhile(ch => !"?:(<".contains(ch) && !ch.isWhitespace)
+
+  /** s with every character inside brackets or string literals replaced by a space, so that a
+    * regular expression only sees the top level.
+    */
+  private def topLevelOnly(s: String): String =
+    val out   = new StringBuilder
+    var depth = 0
+    var i     = 0
+    while i < s.length do
+      val c = s(i)
+      if c == '"' || c == '\'' || c == '`' then
+        val e = literalEnd(s, i)
+        out.append(" " * (e - i + 1))
+        i = e + 1
+      else if c == '=' && i + 1 < s.length && s(i + 1) == '>' then
+        out.append(if depth == 0 then "=>" else "  ")
+        i += 2
+      else
+        if Openers.contains(c) then
+          out.append(if depth == 0 then c else ' ')
+          depth += 1
+        else if Closers.contains(c) then
+          depth = math.max(0, depth - 1)
+          out.append(if depth == 0 then c else ' ')
+        else out.append(if depth == 0 then c else ' ')
+        i += 1
+    out.toString
+  end topLevelOnly
+
+  private val TopExtends = "(^|\\s)extends\\s".r
+
+  /** A conditional type at the top level (`A extends B ? X : Y`). Its `?` and `:` bind more loosely
+    * than `|`, so its top level is never sorted as a union.
+    */
+  private def isTopConditional(s: String): Boolean =
+      TopExtends.findFirstIn(topLevelOnly(s)).isDefined
+
+  /** The `x is` or `asserts x is` that starts a type predicate. */
+  private val Predicate = "^\\s*(?:asserts\\s+)?(?:this|[A-Za-z_$][\\w$]*)\\s+is\\s".r
 
   private def isConditional(head: String): Boolean = "\\s\\?(\\s|$)".r.findFirstIn(head).isDefined
 
@@ -208,7 +263,12 @@ object TypeStringNormalizer:
 
   private def rewriteType(t: String, o: Opts): String =
     val arrow = topArrow(t)
-    if arrow >= 0 then
+    val pred  = Predicate.findPrefixOf(t)
+    if pred.isDefined then pred.get + rewriteType(t.substring(pred.get.length), o)
+    // a conditional type's branches may hold a function type, so `extends` is looked for first
+    else if isTopConditional(if arrow >= 0 then t.substring(0, arrow) else t) then
+      rewriteInner(t, o)
+    else if arrow >= 0 then
       rewriteType(t.substring(0, arrow), o) + "=>" + rewriteType(t.substring(arrow + 2), o)
     else
       val Split(parts, between) = splitTop(t, Set('|'))
@@ -226,5 +286,24 @@ object TypeStringNormalizer:
   /** The form of `s` with the chosen normalizations; all off leaves the string as written. */
   def normalize(s: String, unionOrder: Boolean, objectOrder: Boolean, quotes: Boolean): String =
       if s.isEmpty then s
-      else rewriteType(s, Opts(unionOrder, objectOrder, quotes)).replaceAll("\\s+", " ").trim
+      else collapseSpaces(rewriteType(s, Opts(unionOrder, objectOrder, quotes)))
+
+  /** Runs of white space become one space, except inside string literals, where they are part of
+    * the value.
+    */
+  private def collapseSpaces(s: String): String =
+    val out = new StringBuilder
+    var i   = 0
+    while i < s.length do
+      val c = s(i)
+      if c == '"' || c == '\'' || c == '`' then
+        val e = literalEnd(s, i)
+        out.append(s.substring(i, e + 1))
+        i = e + 1
+      else
+        if c.isWhitespace then
+          if out.isEmpty || out.last != ' ' then out.append(' ')
+        else out.append(c)
+        i += 1
+    out.toString.trim
 end TypeStringNormalizer

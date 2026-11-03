@@ -1,5 +1,5 @@
 {
- "description": "Generated from atom-parsetools lib/typemap/canon.mjs (NORMALIZATIONS and CANONICAL_FORMS). rows: pairs that name the same type (same=true) and pairs that do not (same=false); forms: a string and the exact canonical spelling it must have.",
+ "description": "Generated from atom-parsetools lib/typemap/canon.mjs by lib/typemap/export-for-chen.mjs (NORMALIZATIONS and CANONICAL_FORMS). rows: pairs that name the same type (same=true) and pairs that do not (same=false); forms: a string and the exact canonical spelling it must have.",
  "rows": [
   {
    "normalization": "union-order",
@@ -27,6 +27,18 @@
   },
   {
    "normalization": "union-order",
+   "a": "(x: unknown) => x is B | A",
+   "b": "(x: unknown) => x is A | B",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
+   "a": "[a: string, b?: B | A]",
+   "b": "[a: string, b?: A | B]",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
    "a": "\"ADMIN\" | \"USER\"",
    "b": "\"ADMIN\" | \"OTHER\"",
    "same": false
@@ -41,6 +53,24 @@
    "normalization": "union-order",
    "a": "(a: string) => number",
    "b": "(a: number) => string",
+   "same": false
+  },
+  {
+   "normalization": "union-order",
+   "a": "T extends P ? A : B | C",
+   "b": "C | T extends P ? A : B",
+   "same": false
+  },
+  {
+   "normalization": "union-order",
+   "a": "(x: unknown) => x is A | B",
+   "b": "(x: unknown) => B | x is A",
+   "same": false
+  },
+  {
+   "normalization": "union-order",
+   "a": "[a: string, b?: B | A]",
+   "b": "[a: string, A | b?: B]",
    "same": false
   },
   {
@@ -65,6 +95,12 @@
    "normalization": "object-member-order",
    "a": "{ (a: string): void; (a: number): void; }",
    "b": "{ (a: number): void; (a: string): void; }",
+   "same": false
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "{ foo(a: string): void; foo(a: number): void; }",
+   "b": "{ foo(a: number): void; foo(a: string): void; }",
    "same": false
   },
   {
@@ -101,6 +137,12 @@
    "normalization": "quote-style",
    "a": "'a'",
    "b": "string",
+   "same": false
+  },
+  {
+   "normalization": "quote-style",
+   "a": "\"a  b\"",
+   "b": "\"a b\"",
    "same": false
   }
  ],
@@ -188,6 +230,30 @@
   {
    "input": "(x: B | A) => D | C",
    "canonical": "(x: A | B) => C | D"
+  },
+  {
+   "input": "T extends string ? \"b\" | \"a\" : number",
+   "canonical": "T extends string ? \"b\" | \"a\" : number"
+  },
+  {
+   "input": "(x: unknown) => x is B | A",
+   "canonical": "(x: unknown) => x is A | B"
+  },
+  {
+   "input": "(x: unknown) => asserts x is B | A",
+   "canonical": "(x: unknown) => asserts x is A | B"
+  },
+  {
+   "input": "[a: string, b?: B | A]",
+   "canonical": "[a: string, b?: A | B]"
+  },
+  {
+   "input": "{ z(): void; foo(a: string): void; foo(a: number): void; }",
+   "canonical": "{ foo(a: string): void; foo(a: number): void; z(): void; }"
+  },
+  {
+   "input": "\"a  b\" | \"c\"",
+   "canonical": "\"a  b\" | \"c\""
   }
  ]
 }

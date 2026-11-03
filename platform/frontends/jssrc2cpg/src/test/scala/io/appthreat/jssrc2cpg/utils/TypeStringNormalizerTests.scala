@@ -57,6 +57,15 @@ class TypeStringNormalizerTests extends AnyWordSpec with Matchers:
           }
       }
 
+      // the only change with every normalization off: runs of white space outside string literals
+      def collapsedOutsideLiterals(t: String): String =
+          "(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`)|\\s+".r
+              .replaceAllIn(
+                t,
+                m => java.util.regex.Matcher.quoteReplacement(Option(m.group(1)).getOrElse(" "))
+              )
+              .trim
+
       "leave every real type string as written when no normalization is switched on" in {
           realStrings.size should be > 1000
           val respelled = realStrings.filter { t =>
@@ -65,7 +74,7 @@ class TypeStringNormalizerTests extends AnyWordSpec with Matchers:
                 unionOrder = false,
                 objectOrder = false,
                 quotes = false
-              ) != t.replaceAll("\\s+", " ").trim
+              ) != collapsedOutsideLiterals(t)
           }
           respelled.take(5) shouldBe Nil
       }

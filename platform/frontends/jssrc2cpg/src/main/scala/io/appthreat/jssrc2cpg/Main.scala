@@ -31,6 +31,15 @@ final case class Config(
   def withAstGenTypes(value: String): Config =
       copy(astGenTypes = Option(value).map(_.trim.toLowerCase).filter(_.nonEmpty))
           .withInheritedFields(this)
+
+  /** The engine astgen is asked to use: the configured one, else ASTGEN_TYPES from the environment
+    * astgen inherits (read the way astgen reads it, an unknown value means ts6), else ts6.
+    */
+  def effectiveAstGenTypes(env: Map[String, String] = sys.env): String =
+      astGenTypes
+          .orElse(env.get("ASTGEN_TYPES").map(_.trim.toLowerCase))
+          .filter(Config.AstGenTypesValues.contains)
+          .getOrElse("ts6")
 end Config
 
 object Config:
