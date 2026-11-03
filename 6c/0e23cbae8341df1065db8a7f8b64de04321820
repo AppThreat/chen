@@ -1,0 +1,44 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/Main.scala
+  h_0926447d100ad2 14-15,28-38,53-59,65-66
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  h_0926447d100ad2 6,111-113,115-119,125,141-147
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  h_0926447d100ad2 49-55,113,117-121,140-151,154
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/TypeStringNormalizer.scala
+  h_0926447d100ad2 1-230
+platform/frontends/jssrc2cpg/src/test/resources/native-typemap/README.md
+  h_0926447d100ad2 1-14
+platform/frontends/jssrc2cpg/src/test/resources/native-typemap/native-types.ts
+  h_0926447d100ad2 1-4
+platform/frontends/jssrc2cpg/src/test/resources/native-typemap/native-types.ts.json
+  h_0926447d100ad2 1
+platform/frontends/jssrc2cpg/src/test/resources/native-typemap/native-types.ts.typemap
+  h_0926447d100ad2 1
+platform/frontends/jssrc2cpg/src/test/resources/native-typemap/ts6-reference.typemap.txt
+  h_0926447d100ad2 1
+platform/frontends/jssrc2cpg/src/test/resources/typemap-normalization.json
+  h_0926447d100ad2 1-193
+platform/frontends/jssrc2cpg/src/test/resources/typemap-real-strings.json
+  h_0926447d100ad2 1
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/config/AstGenTypesOptionTests.scala
+  h_0926447d100ad2 1-32
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/AbstractPassTest.scala
+  h_0926447d100ad2 15-31,47,66,108,134
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypeMapTests.scala
+  h_0926447d100ad2 1-81
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/AstGenRunnerEnvTests.scala
+  h_0926447d100ad2 1-41
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/TypeStringNormalizerTests.scala
+  h_0926447d100ad2 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c0e23cbae8341df1065db8a7f8b64de04321820",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
