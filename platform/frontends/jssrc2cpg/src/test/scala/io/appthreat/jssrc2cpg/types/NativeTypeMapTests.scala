@@ -49,32 +49,30 @@ class NativeTypeMapTests extends AbstractPassTest:
       )
 
   "a native type map" should {
-      "give a quote kept from the source in double quotes" in withFixture(Some("native")) { cpg =>
-        // the map says  mode: 'strict'  (TypeScript 7 keeps the quote of `'strict' as const`)
-        typeOf(cpg, "config") should include("mode: \"strict\"")
-        (typeOf(cpg, "config") should not).include("'")
-      }
-
-      "order the members of an object type, so that the name does not depend on the checker" in withFixture(
+      "name an object type `object`, whatever quote the checker kept for its members" in withFixture(
         Some("native")
       ) { cpg =>
-        // the map says  { mode; level; flags: { b; a } }; the name has the members sorted
-        val t = typeOf(cpg, "config")
-        t.indexOf("flags") should be < t.indexOf("level")
-        t.indexOf("level") should be < t.indexOf("mode")
-        typeOf(cpg, "holder").indexOf("items") should be < typeOf(cpg, "holder").indexOf("nested")
+          // the map says  { mode: 'strict'; ... }  (TypeScript 7 keeps the quote of `'strict' as const`)
+          typeOf(cpg, "config") shouldBe Defines.Object
       }
 
-      "order a union of string literals, so that the name does not depend on the checker" in withFixture(
+      "name the object types alike whatever the order TypeScript 7 gives their members" in withFixture(
         Some("native")
       ) { cpg =>
-          // the map says  (flag: boolean) => 'left' | "right"; the union has its members sorted
-          typeOf(cpg, "pick") shouldBe "(flag: __ecma.Boolean) => \"left\" | \"right\""
+          typeOf(cpg, "holder") shouldBe Defines.Object
       }
 
-      "leave the strings alone when the setting does not say native" in withFixture(None) { cpg =>
-          // the same committed map, read as a TypeScript 6 map: no rewriting, so the single quote stays
-          typeOf(cpg, "config") should include("mode: 'strict'")
+      "name a union of string literals by their type, so that the name does not depend on the checker" in withFixture(
+        Some("native")
+      ) { cpg =>
+          // the map says  (flag: boolean) => 'left' | "right"; the arrow returns a string either way
+          cpg.method.methodReturn.typeFullName.toSet should contain(Defines.String)
+      }
+
+      "give the same names when the setting does not say native" in withFixture(None) { cpg =>
+        typeOf(cpg, "config") shouldBe Defines.Object
+        typeOf(cpg, "holder") shouldBe Defines.Object
+        cpg.method.methodReturn.typeFullName.toSet should contain(Defines.String)
       }
   }
 

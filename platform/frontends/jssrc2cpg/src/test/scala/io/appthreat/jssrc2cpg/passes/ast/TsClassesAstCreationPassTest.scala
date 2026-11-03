@@ -339,7 +339,7 @@ class TsClassesAstCreationPassTest extends AbstractPassTest:
           "name",
           "gender"
         )
-        userType.member.typeFullName.toSet shouldBe Set("__ecma.String", "string[]")
+        userType.member.typeFullName.toSet shouldBe Set("__ecma.String", "__ecma.Array")
       }
 
       "AST generation for dynamically defined type in a parameter" in TsAstFixture("""

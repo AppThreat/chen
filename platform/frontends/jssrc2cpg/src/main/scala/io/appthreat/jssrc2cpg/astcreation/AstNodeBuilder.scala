@@ -13,7 +13,7 @@ import io.shiftleft.codepropertygraph.generated.Operators
 trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
   this: AstCreator =>
   protected def createMethodReturnNode(func: BabelNodeInfo): NewMethodReturn =
-      newMethodReturnNode(typeFor(func), line = func.lineNumber, column = func.columnNumber)
+      newMethodReturnNode(typeForReturn(func), line = func.lineNumber, column = func.columnNumber)
 
   protected def setOrderExplicitly(ast: Ast, order: Int): Unit =
       ast.root.foreach { case expr: ExpressionNew => expr.order = order }

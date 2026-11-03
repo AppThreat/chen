@@ -68,7 +68,7 @@ class NativeTypeRecoveryTests extends AbstractPassTest:
       "keep the field access typed by the checker" in recovered(spans = true) { cpg =>
           cpg.call.name("<operator>.fieldAccess").code("this.box").lineNumber(32).typeFullName
               .l shouldBe List(
-            "Box<User>"
+            "Box"
           )
       }
   }

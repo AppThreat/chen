@@ -57,7 +57,8 @@ class TSTypesTest extends AbstractPassTest:
   "have return types for arrow functions" in AstFixture("const foo = () => 42;", tsTypes = true) {
       cpg =>
         val List(foo) = cpg.identifier("foo").l
-        foo.typeFullName shouldBe s"() => ${Defines.Number}"
+        // a function is no value of a class, whatever it returns
+        foo.typeFullName shouldBe Defines.Any
         val List(ret) = cpg.method("anonymous").methodReturn.l
         ret.typeFullName shouldBe Defines.Number
   }

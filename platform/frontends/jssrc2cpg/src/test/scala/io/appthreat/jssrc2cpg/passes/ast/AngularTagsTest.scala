@@ -203,7 +203,8 @@ class AngularTagsTest extends DataFlowCodeToCpgSuite:
             "node_modules/@angular/core/index.d.ts"
           ).withConfig(Config(tsTypes = true)))
 
-          cpg.identifier.typeFullName.filter(_.contains("InputSignal")).l should not be empty
+          // the member has the class of the type the checker named, `import("@angular/core").InputSignal<string>`
+          cpg.member.typeFullName.l should contain("@angular/core:InputSignal")
           cpg.tag.name("framework-input").member.name.l shouldBe List("name")
           cpg.tag.name("framework-input").call.code.l shouldBe List("this.name")
       }

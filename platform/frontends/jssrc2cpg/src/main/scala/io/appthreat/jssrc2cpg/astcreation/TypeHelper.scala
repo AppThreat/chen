@@ -3,7 +3,7 @@ package io.appthreat.jssrc2cpg.astcreation
 import io.appthreat.jssrc2cpg.parser.{BabelJsonParser, BabelNodeInfo}
 import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
-import io.appthreat.jssrc2cpg.utils.TypeStringNormalizer
+import io.appthreat.jssrc2cpg.utils.{TypeNames, TypeStringNormalizer}
 
 import java.util.regex.Pattern
 
@@ -12,28 +12,7 @@ trait TypeHelper:
 
   private val TypeAnnotationKey = "typeAnnotation"
   private val ReturnTypeKey     = "returnType"
-  private val ArrayType         = "__ecma.Array"
   private val ImportMatcher     = Pattern.compile("(typeof )?import\\([\"'](.*)[\"']\\)")
-
-  private val ArrayReplacements = Map(
-    "any[]"     -> s"${Defines.Any}[]",
-    "unknown[]" -> s"${Defines.Unknown}[]",
-    "number[]"  -> s"${Defines.Number}[]",
-    "string[]"  -> s"${Defines.String}[]",
-    "boolean[]" -> s"${Defines.Boolean}[]"
-  )
-
-  private val TypeReplacements = Map(
-    " any"     -> s" ${Defines.Any}",
-    " unknown" -> s" ${Defines.Unknown}",
-    " number"  -> s" ${Defines.Number}",
-    " null"    -> s" ${Defines.Null}",
-    " string"  -> s" ${Defines.String}",
-    " boolean" -> s" ${Defines.Boolean}",
-    " bigint"  -> s" ${Defines.BigInt}",
-    "{}"       -> Defines.Object,
-    "typeof "  -> ""
-  )
 
   protected def isPlainTypeAlias(alias: BabelNodeInfo): Boolean =
       if hasKey(alias.json, "right") then
@@ -126,7 +105,11 @@ trait TypeHelper:
       tpe.toDoubleOption.isDefined
 
   /** The type string of the type map or the span map, as chen names it. */
-  private def nameOfMapped(value: String): String = value match
+  private def nameOfMapped(value: String): String =
+      TypeNames.clean(rawOfMapped(value), moduleOfImportType)
+
+  /** The string with the primitive and module types named, any other type expression as written. */
+  private def rawOfMapped(value: String): String = value match
     case v if v.isEmpty                          => Defines.String
     case "string"                                => Defines.String
     case v if isStringType(v)                    => Defines.String
@@ -136,15 +119,15 @@ trait TypeHelper:
     case "boolean"                               => Defines.Boolean
     case "any"                                   => Defines.Any
     case v if ImportMatcher.matcher(v).matches() => importToModule(v)
-    case other =>
-        (TypeReplacements ++ ArrayReplacements).foldLeft(other) { case (typeStr, (m, r)) =>
-            typeStr.replace(m, r)
-        }
+    case other                                   => other
+
+  private def typeFromTypeMapRaw(node: BabelNodeInfo): String =
+      pos(node.json).flatMap(parserResult.typeMap.get).map(normalizeNative) match
+        case Some(value) => rawOfMapped(value)
+        case None        => Defines.Any
 
   private def typeFromTypeMap(node: BabelNodeInfo): String =
-      pos(node.json).flatMap(parserResult.typeMap.get).map(normalizeNative) match
-        case Some(value) => nameOfMapped(value)
-        case None        => Defines.Any
+      TypeNames.clean(typeFromTypeMapRaw(node), moduleOfImportType)
 
   /** Whether the file came with a span map: the native binary writes one next to its type map. */
   protected lazy val hasTypeSpans: Boolean = parserResult.typeSpans.nonEmpty
@@ -165,42 +148,26 @@ trait TypeHelper:
   /** The type the span map has for exactly this node, when it is a concrete one (not `any`). The
     * type of every other node is a lookup of the type map, see [[typeFor]].
     */
-  /** An array type of the checker (`Array<User>`, `User[]`) is the built-in array to type recovery,
-    * as the factory call of a literal is: the element type stays out of the name, so that the two
-    * do not become two candidate types of one value.
-    */
-  private def spanTypeName(tpe: String): String =
-    val generic = tpe.startsWith("Array<") && matchingClose(tpe, 5).contains(tpe.length - 1)
-    val postfix = tpe.endsWith("[]") && !tpe.exists(c => c == ' ' || c == '|' || c == '&')
-    if generic || postfix then ArrayType else tpe
-
-  private def matchingClose(s: String, open: Int): Option[Int] =
-    var depth = 0
-    var i     = open
-    while i < s.length do
-      if s(i) == '<' then depth += 1
-      else if s(i) == '>' then
-        depth -= 1
-        if depth == 0 then return Some(i)
-      i += 1
-    None
-
   /** `never`, or an array of it (what `[]` is to the checker): no information. */
   private def isNeverType(tpe: String): Boolean =
       tpe == Defines.Never || tpe == "Array<never>" || tpe == "never[]"
 
-  protected def spanType(node: BabelNodeInfo): Option[String] =
+  private def spanTypeRaw(node: BabelNodeInfo): Option[String] =
       if !hasTypeSpans then None
       else
         for
           s   <- pos(node.json)
           e   <- endPos(node.json)
-          raw <- parserResult.typeSpans.get(BabelJsonParser.spanKey(s, e))
-          tpe = spanTypeName(nameOfMapped(normalizeNative(raw)))
-          if tpe != Defines.Any && !isNeverType(tpe)
-        yield
-          registerType(tpe, tpe)
-          tpe
+          raw <- parserResult.typeSpans.get(BabelJsonParser.spanKey(s, e)).map(normalizeNative)
+          if !isNeverType(raw)
+        yield rawOfMapped(raw)
+
+  protected def spanType(node: BabelNodeInfo): Option[String] =
+      spanTypeRaw(node).map(TypeNames.clean(_, moduleOfImportType)).filter(_ != Defines.Any).map {
+          tpe =>
+            registerType(tpe, tpe)
+            tpe
+      }
 
   protected def spanTypeOrAny(node: BabelNodeInfo): String =
       spanType(node).getOrElse(Defines.Any)
@@ -234,6 +201,9 @@ trait TypeHelper:
   private def normalizeNative(value: String): String =
       if nativeTypeMap then TypeStringNormalizer.normalize(value) else value
 
+  private def moduleOfImportType(value: String): String =
+      if ImportMatcher.matcher(value).matches() then importToModule(value) else Defines.Any
+
   private def importToModule(value: String): String =
     val matcher = ImportMatcher.matcher(value)
     this.rootTypeDecl.headOption match
@@ -256,6 +226,17 @@ trait TypeHelper:
     case _ => typeFor(node)
 
   protected def typeFor(node: BabelNodeInfo): String =
+    val tpe = TypeNames.clean(rawTypeFor(node), moduleOfImportType)
+    registerType(tpe, tpe)
+    tpe
+
+  /** The type of a function node as its return, the way a method return is typed. */
+  protected def typeForReturn(node: BabelNodeInfo): String =
+    val tpe = TypeNames.cleanReturn(rawTypeFor(node), moduleOfImportType)
+    registerType(tpe, tpe)
+    tpe
+
+  private def rawTypeFor(node: BabelNodeInfo): String =
     val json = node.json
     val typeNodeOpt = if hasKey(json, TypeAnnotationKey) then
       Some(createBabelNodeInfo(json(TypeAnnotationKey)))
@@ -267,15 +248,14 @@ trait TypeHelper:
       Some(node)
     else
       None
-    val tpe = typeNodeOpt match
+    typeNodeOpt match
       case Some(typeNode) => typeForTypeAnnotation(typeNode)
       case None =>
-          spanType(node).getOrElse {
-              if hasTypeSpans && isExpressionNode(node) then Defines.Any else typeFromTypeMap(node)
+          spanTypeRaw(node).getOrElse {
+              if hasTypeSpans && isExpressionNode(node) then Defines.Any
+              else typeFromTypeMapRaw(node)
           }
-    registerType(tpe, tpe)
-    tpe
-  end typeFor
+  end rawTypeFor
 
   protected def typeHintForThisExpression(node: Option[BabelNodeInfo] = None): Seq[String] =
       dynamicInstanceTypeStack.headOption match

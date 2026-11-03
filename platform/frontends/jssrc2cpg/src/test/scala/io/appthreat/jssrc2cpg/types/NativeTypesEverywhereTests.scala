@@ -54,10 +54,9 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       ) { cpg =>
         inFile(cpg).nameExact("makeUser").lineNumber(18).typeFullName.l shouldBe List("User")
         inFile(cpg).nameExact("load").typeFullName.l shouldBe List("User")
-        inFile(cpg).nameExact("fetchUser").typeFullName.l shouldBe List("Promise<User>")
-        // the callee is not given the type of the call it starts
-        cpg.identifier("fetchUser").typeFullName.toSet should contain("() => Promise<User>")
-        (cpg.identifier("fetchUser").typeFullName.toSet should not).contain("Promise<User>")
+        inFile(cpg).nameExact("fetchUser").typeFullName.l shouldBe List("Promise")
+        // the callee is a function, which no class names, and has not the type of the call it starts
+        cpg.identifier("fetchUser").typeFullName.toSet shouldBe Set(Defines.Any)
       }
 
       "not give an identifier the type of the longer expression that starts where it does" in withFixture(
@@ -112,16 +111,16 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       }
 
       "type the temporaries of object and array literals" in withFixture(true) { cpg =>
-        cpg.local("_tmp_2").typeFullName.l shouldBe List("{ owner: User; list: Array<User>; }")
+        cpg.local("_tmp_2").typeFullName.l shouldBe List(Defines.Object)
         cpg.identifier("_tmp_2").typeFullName.toSet shouldBe Set(
-          "{ owner: User; list: Array<User>; }"
+          Defines.Object
         )
         cpg.local("_tmp_3").typeFullName.l should contain("__ecma.Array")
         cpg.identifier("_tmp_3").typeFullName.toSet shouldBe Set("__ecma.Array")
       }
 
       "type the locals of an import specifier" in withFixture(true) { cpg =>
-        cpg.local("makeUser").typeFullName.toSet should contain("() => User")
+        (cpg.local("makeUser").typeFullName.toSet should not).contain("() => User")
         cpg.local("defaultUser").typeFullName.toSet should contain("User")
         cpg.identifier("defaultUser").lineNumber(1).typeFullName.toSet shouldBe Set("User")
       }
@@ -149,14 +148,14 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       }
 
       "type the return of a function without an annotation" in withFixture(true) { cpg =>
-          cpg.method.fullName(".*:run").methodReturn.typeFullName.l shouldBe List("Promise<string>")
+          cpg.method.fullName(".*:run").methodReturn.typeFullName.l shouldBe List("Promise")
       }
 
       "give a method the return type as its return and keep the signature for its member" in withFixture(
         true
       ) { cpg =>
         cpg.method.fullName(".*:Svc:load").methodReturn.typeFullName.l shouldBe List("User")
-        cpg.member("load").typeFullName.l shouldBe List("(u: User) => User")
+        cpg.member("load").typeFullName.l shouldBe List(Defines.Any)
       }
   }
 
@@ -171,9 +170,7 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
           Defines.Any
         )
         cpg.local("first").typeFullName.l shouldBe List(Defines.Any)
-        cpg.method.fullName(".*:Svc:load").methodReturn.typeFullName.l shouldBe List(
-          "(u: User) => User"
-        )
+        cpg.method.fullName(".*:Svc:load").methodReturn.typeFullName.l shouldBe List("User")
       }
   }
 end NativeTypesEverywhereTests
