@@ -129,7 +129,7 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
     val fullName =
         if dispatchType == DispatchTypes.STATIC_DISPATCH then name
         else x2cpg.Defines.DynamicCallUnknownFullName
-    callNode(node, code, name, fullName, dispatchType, None, Some(Defines.Any))
+    callNode(node, code, name, fullName, dispatchType, None, Some(callTypeFor(node, name)))
 
   private def createCallNode(
     code: String,
@@ -218,7 +218,10 @@ trait AstNodeBuilder(implicit withSchemaValidation: ValidationMode):
       case "console" => Option(Defines.Console)
       case "Math"    => Option(Defines.Math)
       case _         => None
-    identifierNode(node, name, spelling(node, name), Defines.Any, dynamicInstanceTypeOption.toList)
+    val typeFullName =
+        if node.node == BabelAst.Identifier && nameOrCode(node) == name then spanTypeOrAny(node)
+        else tmpVariableTypes.getOrElse(name, Defines.Any)
+    identifierNode(node, name, spelling(node, name), typeFullName, dynamicInstanceTypeOption.toList)
 
   protected def identifierNode(
     node: BabelNodeInfo,

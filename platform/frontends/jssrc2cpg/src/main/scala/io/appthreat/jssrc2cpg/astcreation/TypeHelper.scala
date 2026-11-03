@@ -1,6 +1,6 @@
 package io.appthreat.jssrc2cpg.astcreation
 
-import io.appthreat.jssrc2cpg.parser.BabelNodeInfo
+import io.appthreat.jssrc2cpg.parser.{BabelJsonParser, BabelNodeInfo}
 import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
 import io.appthreat.jssrc2cpg.utils.TypeStringNormalizer
@@ -124,22 +124,83 @@ trait TypeHelper:
   private def isNumberType(tpe: String): Boolean =
       tpe.toDoubleOption.isDefined
 
+  /** The type string of the type map or the span map, as chen names it. */
+  private def nameOfMapped(value: String): String = value match
+    case v if v.isEmpty                          => Defines.String
+    case "string"                                => Defines.String
+    case v if isStringType(v)                    => Defines.String
+    case "number"                                => Defines.Number
+    case v if isNumberType(v)                    => Defines.Number
+    case "null"                                  => Defines.Null
+    case "boolean"                               => Defines.Boolean
+    case "any"                                   => Defines.Any
+    case v if ImportMatcher.matcher(v).matches() => importToModule(v)
+    case other =>
+        (TypeReplacements ++ ArrayReplacements).foldLeft(other) { case (typeStr, (m, r)) =>
+            typeStr.replace(m, r)
+        }
+
   private def typeFromTypeMap(node: BabelNodeInfo): String =
       pos(node.json).flatMap(parserResult.typeMap.get).map(normalizeNative) match
-        case Some(value) if value.isEmpty                          => Defines.String
-        case Some(value) if value == "string"                      => Defines.String
-        case Some(value) if isStringType(value)                    => Defines.String
-        case Some(value) if value == "number"                      => Defines.Number
-        case Some(value) if isNumberType(value)                    => Defines.Number
-        case Some(value) if value == "null"                        => Defines.Null
-        case Some(value) if value == "boolean"                     => Defines.Boolean
-        case Some(value) if value == "any"                         => Defines.Any
-        case Some(value) if ImportMatcher.matcher(value).matches() => importToModule(value)
-        case Some(other) =>
-            (TypeReplacements ++ ArrayReplacements).foldLeft(other) { case (typeStr, (m, r)) =>
-                typeStr.replace(m, r)
-            }
-        case None => Defines.Any
+        case Some(value) => nameOfMapped(value)
+        case None        => Defines.Any
+
+  /** Whether the file came with a span map: the native binary writes one next to its type map. */
+  protected lazy val hasTypeSpans: Boolean = parserResult.typeSpans.nonEmpty
+
+  /** Babel nodes of the kinds the type map has no usable key for: it keeps one type for every node
+    * that starts at an offset, so the type at the start of `a` is the one of `a.b()` when that is
+    * what the checker gave the longest or most specific text. With a span map such a node is looked
+    * up by its own extent, and without a type there it has none.
+    */
+  protected def isExpressionNode(node: BabelNodeInfo): Boolean =
+      node.node match
+        case Identifier | PrivateName | Super => true
+        case _: Expression                    => true
+        case other =>
+            val name = other.toString
+            name.endsWith("Expression") || name.endsWith("Literal")
+
+  /** The type the span map has for exactly this node, when it is a concrete one (not `any`). The
+    * type of every other node is a lookup of the type map, see [[typeFor]].
+    */
+  protected def spanType(node: BabelNodeInfo): Option[String] =
+      if !hasTypeSpans then None
+      else
+        for
+          s   <- pos(node.json)
+          e   <- endPos(node.json)
+          raw <- parserResult.typeSpans.get(BabelJsonParser.spanKey(s, e))
+          tpe = nameOfMapped(normalizeNative(raw))
+          if tpe != Defines.Any
+        yield
+          registerType(tpe, tpe)
+          tpe
+
+  protected def spanTypeOrAny(node: BabelNodeInfo): String =
+      spanType(node).getOrElse(Defines.Any)
+
+  /** The local of a temporary variable that holds the value of `node`. The references to it that
+    * are made later (see `identifierNode`) have its type.
+    */
+  protected def newTmpLocal(name: String, node: BabelNodeInfo) =
+    val tpe = spanTypeOrAny(node)
+    tmpVariableTypes.update(name, tpe)
+    io.appthreat.x2cpg.utils.NodeBuilders.newLocalNode(name, tpe)
+
+  /** A reference to a temporary variable that holds the value of `node`. */
+  protected def tmpIdentifierNode(node: BabelNodeInfo, name: String) =
+    tmpVariableTypes.update(name, spanTypeOrAny(node))
+    identifierNode(node, name)
+
+  /** The type of a call node built for `node`, when the call is the operation `node` stands for
+    * (the call, the `await`, the sum), and not one of the helper operations a lowering adds with
+    * the node of the expression it belongs to (`void 0` in a default value).
+    */
+  protected def callTypeFor(node: BabelNodeInfo, name: String): String =
+      if isExpressionNode(node) && node.node != Identifier && name != "<operator>.void" then
+        spanTypeOrAny(node)
+      else Defines.Any
 
   /** Native type maps are brought to one canonical spelling first (see [[TypeStringNormalizer]]),
     * so the member order and quote style of TypeScript 7 do not change the type name chen derives.
@@ -156,6 +217,19 @@ trait TypeHelper:
           matcher.group(2).stripSuffix(".js").concat(".js::program")
       case None => value
 
+  /** The type of a class or interface member. A method's member keeps the signature the type map
+    * has at its name (`(u: User) => User`), where [[typeFor]] of the same node, as the method's
+    * return, gives what the span map has for it (`User`).
+    */
+  protected def typeForMember(node: BabelNodeInfo): String = node.node match
+    case ClassMethod | ClassPrivateMethod | ObjectMethod | TSDeclareMethod | TSDeclareFunction |
+        TSMethodSignature | TSCallSignatureDeclaration
+        if hasTypeSpans && !hasKey(node.json, ReturnTypeKey) =>
+        val tpe = typeFromTypeMap(node)
+        registerType(tpe, tpe)
+        tpe
+    case _ => typeFor(node)
+
   protected def typeFor(node: BabelNodeInfo): String =
     val json = node.json
     val typeNodeOpt = if hasKey(json, TypeAnnotationKey) then
@@ -170,9 +244,13 @@ trait TypeHelper:
       None
     val tpe = typeNodeOpt match
       case Some(typeNode) => typeForTypeAnnotation(typeNode)
-      case None           => typeFromTypeMap(node)
+      case None =>
+          spanType(node).getOrElse {
+              if hasTypeSpans && isExpressionNode(node) then Defines.Any else typeFromTypeMap(node)
+          }
     registerType(tpe, tpe)
     tpe
+  end typeFor
 
   protected def typeHintForThisExpression(node: Option[BabelNodeInfo] = None): Seq[String] =
       dynamicInstanceTypeStack.headOption match

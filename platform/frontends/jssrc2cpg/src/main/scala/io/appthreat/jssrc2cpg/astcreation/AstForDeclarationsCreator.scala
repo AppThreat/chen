@@ -432,7 +432,14 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
                   line = line(declarator),
                   column = column(declarator)
                 )
+            if hasTypeSpans && actualTypeFullName != Defines.Any then
+              assignmentCallAst.root.foreach {
+                  case c: NewCall if c.typeFullName == Defines.Any =>
+                      c.typeFullName(actualTypeFullName)
+                  case _ =>
+              }
             assignmentCallAst
+      end match
     end if
   end astForVariableDeclarator
 
@@ -457,11 +464,12 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     alias: Option[String],
     from: String,
     isImportN: Boolean,
-    nodeInfo: BabelNodeInfo
+    nodeInfo: BabelNodeInfo,
+    importedType: String = Defines.Any
   ): Ast =
     val destName  = alias.getOrElse(name)
-    val destNode  = identifierNode(nodeInfo, destName)
-    val localNode = newLocalNode(destName, Defines.Any).order(0)
+    val destNode  = identifierNode(nodeInfo, destName).typeFullName(importedType)
+    val localNode = newLocalNode(destName, importedType).order(0)
     scope.addVariable(destName, localNode, BlockScope)
     scope.addVariableReference(destName, destNode)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
@@ -542,7 +550,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
           alias,
           source,
           isImportN = isImportN,
-          impDecl
+          impDecl,
+          spanTypeOrAny(createBabelNodeInfo(importSpecifier))
         )
         val importedName = importSpecifier("local")("name").str
         val call =
@@ -608,7 +617,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   ): Ast =
     val valueAst = astForNode(element.json)
 
-    val localNode = newLocalNode(element.code, Defines.Any).order(0)
+    val localNode = newLocalNode(element.code, spanTypeOrAny(element)).order(0)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
@@ -636,7 +645,7 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
   ): Ast =
     val valueAst = astForNode(element.json)
 
-    val localNode = newLocalNode(element.code, Defines.Any).order(0)
+    val localNode = newLocalNode(element.code, spanTypeOrAny(element)).order(0)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(element.code, localNode, MethodScope)
 
@@ -837,8 +846,8 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
     scope.pushNewBlockScope(blockNode)
     localAstParentStack.push(blockNode)
 
-    val localNode = newLocalNode(localTmpName, Defines.Any).order(0)
-    val tmpNode   = identifierNode(pattern, localTmpName)
+    val localNode = newTmpLocal(localTmpName, pattern).order(0)
+    val tmpNode   = tmpIdentifierNode(pattern, localTmpName)
     diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
     scope.addVariable(localTmpName, localNode, BlockScope)
     scope.addVariableReference(localTmpName, tmpNode)
