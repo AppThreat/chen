@@ -1,0 +1,61 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_2f442f86163bcc::t_cd5f980400a45d 66-67
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreatorHelper.scala
+  s_74398300cc48c7::t_0d0400b6e9a6e2 146-147
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForDeclarationsCreator.scala
+  s_2f442f86163bcc::t_935a63e1529eb9 435-440,442,467-468,471-472,553-554,620,648,849-850
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForExpressionsCreator.scala
+  s_2f442f86163bcc::t_cc989c230b0cbe 9,124,178-179,195,202,229-236,241,264,463-464,496,531,559,629
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForTypesCreator.scala
+  s_74398300cc48c7::t_ef19cd3f98d573 247,817
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstNodeBuilder.scala
+  s_74398300cc48c7::t_d79f6ee23e1b35 132,221-224
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_2f442f86163bcc::t_8e97a39b98717e 3,127-142,145-203,220-232,247-250,253
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/parser/BabelJsonParser.scala
+  s_74398300cc48c7::t_65aeb708a6491e 15-16,19-20,32-45,56
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/README.md
+  s_74398300cc48c7::t_128f84e8afe735 1-12
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts
+  s_74398300cc48c7::t_e58cffa2608718 1-3
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.json
+  s_74398300cc48c7::t_b5dd05384c779a 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.typemap
+  s_74398300cc48c7::t_f620f6134024f4 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.typespans
+  s_74398300cc48c7::t_0a35684cb9bc36 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts
+  s_74398300cc48c7::t_eb35ea33371ecf 1-23
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.json
+  s_74398300cc48c7::t_0a75391a3001e6 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.typemap
+  s_74398300cc48c7::t_e5bf65c1c747b7 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.typespans
+  s_74398300cc48c7::t_8eabe0c28b3ac9 1
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypesEverywhereTests.scala
+  s_74398300cc48c7::t_eea5408a055930 1-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3d5cf13368f639133a32ffdd10b2bfe3693cd477",
+  "prompts": {},
+  "sessions": {
+    "s_2f442f86163bcc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_20685cd3-bdfb-465d-9339-4d7205546756",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_74398300cc48c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0904532-37d4-48a7-8f6e-50bec4d75023",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
