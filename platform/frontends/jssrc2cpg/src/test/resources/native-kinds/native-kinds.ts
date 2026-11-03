@@ -21,3 +21,8 @@ export async function run(svc: Svc, { id, name }: User, ...rest: User[]) {
 
 const instance = new Svc();
 export default instance;
+
+declare const anyVal: any;
+export const forced = anyVal as User;
+const base = makeUser();
+export const trimmed = base.name.trim();

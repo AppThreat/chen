@@ -52,7 +52,7 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
       "type a call with its return type and its callee with the function type" in withFixture(
         true
       ) { cpg =>
-        inFile(cpg).nameExact("makeUser").typeFullName.l shouldBe List("User")
+        inFile(cpg).nameExact("makeUser").lineNumber(18).typeFullName.l shouldBe List("User")
         inFile(cpg).nameExact("load").typeFullName.l shouldBe List("User")
         inFile(cpg).nameExact("fetchUser").typeFullName.l shouldBe List("Promise<User>")
         // the callee is not given the type of the call it starts
@@ -67,6 +67,23 @@ class NativeTypesEverywhereTests extends AbstractPassTest:
         cpg.identifier("svc").lineNumber(13).typeFullName.toSet shouldBe Set("Svc")
         cpg.identifier("loaded").lineNumber(19).typeFullName.toSet shouldBe Set("User")
         cpg.identifier("first").lineNumber(19).typeFullName.toSet shouldBe Set("User")
+      }
+
+      "leave an identifier without a type of its own untyped, whatever starts at its offset" in withFixture(
+        true
+      ) { cpg =>
+          // `anyVal as User`: the type map has User at the offset of `anyVal`, the span map has nothing
+          // for the identifier, which is `any`
+          cpg.identifier("anyVal").lineNumber(26).typeFullName.toSet shouldBe Set(Defines.Any)
+      }
+
+      "type the temporary of a call on an expression with the type of that expression" in withFixture(
+        true
+      ) { cpg =>
+          // `base.name.trim()`: the receiver `base.name` is held in a temporary
+          cpg.identifier.name("_tmp_.*").lineNumber(28).typeFullName.toSet shouldBe Set(
+            Defines.String
+          )
       }
 
       "type a member access with the type of the member" in withFixture(true) { cpg =>
