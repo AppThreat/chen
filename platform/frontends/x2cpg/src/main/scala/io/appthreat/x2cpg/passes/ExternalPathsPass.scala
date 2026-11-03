@@ -1,8 +1,8 @@
 package io.appthreat.x2cpg.passes
 
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.PropertyNames
-import io.shiftleft.codepropertygraph.generated.nodes.{Method, TypeDecl}
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewTag, StoredNode}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -113,17 +113,31 @@ class ExternalPathsPass(cpg: Cpg, isVendored: String => Boolean) extends CpgPass
     val decided = mutable.HashMap.empty[String, Boolean]
     def vendored(path: String): Boolean =
         path.nonEmpty && decided.getOrElseUpdate(path, isVendored(path))
+    // The marked methods carry a tag, so a reader tells vendored code this pass made external from
+    // code a frontend already knew was a dependency (Composer's vendor/, a venv, node_modules)
+    val tag = NewTag().name(ExternalPathsPass.TagName).value("")
+    var any = false
+    def mark(node: StoredNode, tagged: Boolean): Unit =
+      if !any then
+        dstGraph.addNode(tag)
+        any = true
+      dstGraph.setNodeProperty(node, PropertyNames.IS_EXTERNAL, true)
+      if tagged then dstGraph.addEdge(node, tag, EdgeTypes.TAGGED_BY)
     cpg.method.isExternal(false).l.foreach { m =>
-        if vendored(m.filename) then
-          dstGraph.setNodeProperty(m.asInstanceOf[Method], PropertyNames.IS_EXTERNAL, true)
+        if vendored(m.filename) then mark(m, tagged = true)
     }
     cpg.typeDecl.isExternal(false).l.foreach { t =>
-        if vendored(t.filename) then
-          dstGraph.setNodeProperty(t.asInstanceOf[TypeDecl], PropertyNames.IS_EXTERNAL, true)
+        if vendored(t.filename) then mark(t, tagged = false)
     }
+  end run
 end ExternalPathsPass
 
 object ExternalPathsPass:
+
+  /** The tag on every method this pass marked external (a type declaration cannot carry a tag; its
+    * file holds tagged methods).
+    */
+  val TagName = "external-path"
 
   /** What every frontend calls after its AST is built: marks the config's `--external-paths`
     * vendored code external; no pattern, no change.

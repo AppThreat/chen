@@ -79,6 +79,11 @@ class ExternalPathsPassTests extends AnyWordSpec with Matchers:
             "main.c"                  -> false
           )
       }
+      "tag what it marked, so already-external code is told apart" in {
+          val cpg = graph("third_party")
+          cpg.method.where(_.tag.nameExact(ExternalPathsPass.TagName)).filename.l shouldBe
+              List("third_party/zlib/z.c")
+      }
       "mark nothing without a pattern" in {
           graph("").method.isExternal.l should contain only false
       }

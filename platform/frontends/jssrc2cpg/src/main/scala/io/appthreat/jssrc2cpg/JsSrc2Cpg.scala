@@ -52,7 +52,6 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
           new ConfigPass(cpg, config, report).createAndApply()
           new PrivateKeyFilePass(cpg, config, report).createAndApply()
           new ImportsPass(cpg).createAndApply()
-          ExternalPathsPass.applyTo(cpg, config.externalPaths)
 
           report.print()
         config.astGenOutDir match
@@ -72,6 +71,10 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
     maybeCpg.map { cpg =>
       new OssDataFlow(new OssDataFlowOptions()).run(new LayerCreatorContext(cpg))
       postProcessingPasses(cpg, Option(config)).foreach(_.createAndApply())
+      // Vendored code is marked external after the post-processing, not in `createCpg`: the
+      // inheritance-name and type-recovery passes resolve names to project types only, and a
+      // vendored class marked earlier is left as an unresolved name (`lib.Base`).
+      ExternalPathsPass.applyTo(cpg, config.externalPaths)
       cpg
     }
 end JsSrc2Cpg
