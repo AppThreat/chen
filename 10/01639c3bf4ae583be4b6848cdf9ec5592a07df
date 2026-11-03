@@ -1,0 +1,47 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForDeclarationsCreator.scala
+  s_74398300cc48c7::t_19c1292377dfb3 97-98,116,118,123-128,309-312,316
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_74398300cc48c7::t_74d786f1234f48 15,168-191,199-200
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeRecovery.scala
+  s_74398300cc48c7::t_6ea850b4f2a409 74-90,105-107
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts
+  s_74398300cc48c7::t_e7c000a51375d3 4-7
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.json
+  s_74398300cc48c7::t_1840844881eb8b 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.typemap
+  s_74398300cc48c7::t_aed9bf576c6f39 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/kinds-lib.ts.typespans
+  s_74398300cc48c7::t_74ea4fab7e4e96 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts
+  s_74398300cc48c7::t_4d9b72d9b11b6f 1,29-33
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.json
+  s_74398300cc48c7::t_62cf5586c99667 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.typemap
+  s_74398300cc48c7::t_c28b6fea291e49 1
+platform/frontends/jssrc2cpg/src/test/resources/native-kinds/native-kinds.ts.typespans
+  s_74398300cc48c7::t_d7de3beb7e066e 1
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypeRecoveryTests.scala
+  s_74398300cc48c7::t_808d1a56eea3f8 1-73
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypesEverywhereTests.scala
+  s_74398300cc48c7::t_54ed41696fdc85 49,91,109-110,119-120,130-131,136-143,167-169
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TSTypesTest.scala
+  s_74398300cc48c7::t_83e50a8ac1918f 53-54
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/XTypeRecovery.scala
+  s_74398300cc48c7::t_b9be72d3282687 475-476,491-497
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1001639c3bf4ae583be4b6848cdf9ec5592a07df",
+  "prompts": {},
+  "sessions": {
+    "s_74398300cc48c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0904532-37d4-48a7-8f6e-50bec4d75023",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
