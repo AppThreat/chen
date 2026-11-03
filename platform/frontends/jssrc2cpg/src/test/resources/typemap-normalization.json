@@ -1,0 +1,193 @@
+{
+ "description": "Generated from atom-parsetools lib/typemap/canon.mjs (NORMALIZATIONS and CANONICAL_FORMS). rows: pairs that name the same type (same=true) and pairs that do not (same=false); forms: a string and the exact canonical spelling it must have.",
+ "rows": [
+  {
+   "normalization": "union-order",
+   "a": "\"ADMIN\" | \"USER\"",
+   "b": "\"USER\" | \"ADMIN\"",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
+   "a": "Promise<string | number>",
+   "b": "Promise<number | string>",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
+   "a": "(z: boolean) => 1 | \"no\"",
+   "b": "(z: boolean) => \"no\" | 1",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
+   "a": "Array<A | B>",
+   "b": "Array<B | A>",
+   "same": true
+  },
+  {
+   "normalization": "union-order",
+   "a": "\"ADMIN\" | \"USER\"",
+   "b": "\"ADMIN\" | \"OTHER\"",
+   "same": false
+  },
+  {
+   "normalization": "union-order",
+   "a": "string | number",
+   "b": "string | number | boolean",
+   "same": false
+  },
+  {
+   "normalization": "union-order",
+   "a": "(a: string) => number",
+   "b": "(a: number) => string",
+   "same": false
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "{ b: number; a: string; }",
+   "b": "{ a: string; b: number; }",
+   "same": true
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "Promise<{ y: 1; x: 2; }>",
+   "b": "Promise<{ x: 2; y: 1; }>",
+   "same": true
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "{ a: string; }",
+   "b": "{ a: number; }",
+   "same": false
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "{ (a: string): void; (a: number): void; }",
+   "b": "{ (a: number): void; (a: string): void; }",
+   "same": false
+  },
+  {
+   "normalization": "object-member-order",
+   "a": "{ a: string; }",
+   "b": "{ a: string; b: number; }",
+   "same": false
+  },
+  {
+   "normalization": "quote-style",
+   "a": "'a' | 'b'",
+   "b": "\"a\" | \"b\"",
+   "same": true
+  },
+  {
+   "normalization": "quote-style",
+   "a": "{ k: 'v'; }",
+   "b": "{ k: \"v\"; }",
+   "same": true
+  },
+  {
+   "normalization": "quote-style",
+   "a": "'it\\'s'",
+   "b": "\"it's\"",
+   "same": true
+  },
+  {
+   "normalization": "quote-style",
+   "a": "'a'",
+   "b": "\"b\"",
+   "same": false
+  },
+  {
+   "normalization": "quote-style",
+   "a": "'a'",
+   "b": "string",
+   "same": false
+  }
+ ],
+ "forms": [
+  {
+   "input": "Array<string>",
+   "canonical": "Array<string>"
+  },
+  {
+   "input": "Map<string, number>",
+   "canonical": "Map<string, number>"
+  },
+  {
+   "input": "A<B<C>>",
+   "canonical": "A<B<C>>"
+  },
+  {
+   "input": "Foo[]",
+   "canonical": "Foo[]"
+  },
+  {
+   "input": "[a, b]",
+   "canonical": "[a, b]"
+  },
+  {
+   "input": "(a: string, b: number) => void",
+   "canonical": "(a: string, b: number) => void"
+  },
+  {
+   "input": "new (x: string) => Foo",
+   "canonical": "new (x: string) => Foo"
+  },
+  {
+   "input": "{ (a: string): void; b: string; }",
+   "canonical": "{ (a: string): void; b: string; }"
+  },
+  {
+   "input": "{ z: number; (a: string): void; (a: number): void; b: string; }",
+   "canonical": "{ (a: string): void; (a: number): void; b: string; z: number; }"
+  },
+  {
+   "input": "Promise<'b' | 'a'>",
+   "canonical": "Promise<\"a\" | \"b\">"
+  },
+  {
+   "input": "import(\"x\").Foo",
+   "canonical": "import(\"x\").Foo"
+  },
+  {
+   "input": "typeof f",
+   "canonical": "typeof f"
+  },
+  {
+   "input": "T extends U ? X : Y",
+   "canonical": "T extends U ? X : Y"
+  },
+  {
+   "input": "T extends (infer R)[] ? R : never",
+   "canonical": "T extends (infer R)[] ? R : never"
+  },
+  {
+   "input": "a & b | c",
+   "canonical": "a & b | c"
+  },
+  {
+   "input": "{}",
+   "canonical": "{}"
+  },
+  {
+   "input": "{ a: 'x' | 'y'; }",
+   "canonical": "{ a: \"x\" | \"y\"; }"
+  },
+  {
+   "input": "{ [k: string]: B | A; }",
+   "canonical": "{ [k: string]: A | B; }"
+  },
+  {
+   "input": "{ readonly a: 2 | 1; }",
+   "canonical": "{ readonly a: 1 | 2; }"
+  },
+  {
+   "input": "({ feature }: { feature: any; }) => boolean",
+   "canonical": "({ feature }: { feature: any; }) => boolean"
+  },
+  {
+   "input": "(x: B | A) => D | C",
+   "canonical": "(x: A | B) => C | D"
+  }
+ ]
+}

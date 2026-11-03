@@ -3,6 +3,7 @@ package io.appthreat.jssrc2cpg.astcreation
 import io.appthreat.jssrc2cpg.parser.BabelNodeInfo
 import io.appthreat.jssrc2cpg.passes.Defines
 import io.appthreat.jssrc2cpg.parser.BabelAst.*
+import io.appthreat.jssrc2cpg.utils.TypeStringNormalizer
 
 import java.util.regex.Pattern
 
@@ -107,14 +108,21 @@ trait TypeHelper:
         case _: TSType   => typeForTsType(typeAnnotation)
         case _           => Defines.Any
 
+  /** A string literal type, or a union of them. TypeScript 7 keeps the quote style of the source,
+    * so a single quoted literal is one too (only the native type map has them).
+    */
   private def isStringType(tpe: String): Boolean =
-      tpe.startsWith("\"") && tpe.endsWith("\"")
+      (tpe.startsWith("\"") && tpe.endsWith("\"")) ||
+          (nativeTypeMap && tpe.startsWith("'") && tpe.endsWith("'"))
+
+  /** Whether the type map was written by the native binary (TypeScript 7's checker). */
+  private def nativeTypeMap: Boolean = config.astGenTypes.contains("native")
 
   private def isNumberType(tpe: String): Boolean =
       tpe.toDoubleOption.isDefined
 
   private def typeFromTypeMap(node: BabelNodeInfo): String =
-      pos(node.json).flatMap(parserResult.typeMap.get) match
+      pos(node.json).flatMap(parserResult.typeMap.get).map(normalizeNative) match
         case Some(value) if value.isEmpty                          => Defines.String
         case Some(value) if value == "string"                      => Defines.String
         case Some(value) if isStringType(value)                    => Defines.String
@@ -129,6 +137,13 @@ trait TypeHelper:
                 typeStr.replace(m, r)
             }
         case None => Defines.Any
+
+  /** Native type maps are brought to one canonical spelling first (see [[TypeStringNormalizer]]),
+    * so the member order and quote style of TypeScript 7 do not change the type name chen derives.
+    * TypeScript 6 strings are used as they are.
+    */
+  private def normalizeNative(value: String): String =
+      if nativeTypeMap then TypeStringNormalizer.normalize(value) else value
 
   private def importToModule(value: String): String =
     val matcher = ImportMatcher.matcher(value)
