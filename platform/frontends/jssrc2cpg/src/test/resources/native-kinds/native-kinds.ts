@@ -31,3 +31,9 @@ export class Holder {
   private box = new Box<User>(defaultUser);
   get() { return this.box.value(); }
 }
+
+import { Ext } from "ext-lib";
+export class Holder2 {
+  private ext = new Ext<User>();
+  use() { return this.ext.value(); }
+}

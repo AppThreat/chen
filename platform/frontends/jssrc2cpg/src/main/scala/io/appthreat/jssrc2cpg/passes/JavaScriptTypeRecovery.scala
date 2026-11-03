@@ -98,13 +98,10 @@ private class RecoverForJavaScriptFile(
     case x @ (_: Identifier | _: Local | _: MethodParameterIn)
         if x.property(PropertyNames.TYPE_FULL_NAME, Defines.Any) != Defines.Any =>
         val typeFullName = x.property(PropertyNames.TYPE_FULL_NAME, Defines.Any)
-        val typeHints = symbolTable.get(LocalVar(x.property(
-          PropertyNames.TYPE_FULL_NAME,
-          Defines.Any
-        ))) - typeFullName
-        // `Box<User>`, a type the checker named, is the type declaration `Box`
-        lazy val cpgTypeFullName =
-            typeDeclFullNamesByName.getOrElse(typeFullName.takeWhile(_ != '<'), Set.empty)
+        // `Box<User>`, a type the checker named, is the class `Box`: imported, or declared here
+        val baseName             = typeFullName.takeWhile(_ != '<')
+        val typeHints            = symbolTable.get(LocalVar(baseName)) - typeFullName
+        lazy val cpgTypeFullName = typeDeclFullNamesByName.getOrElse(baseName, Set.empty)
         val resolvedTypeHints =
             if typeHints.nonEmpty then symbolTable.put(x, typeHints)
             else if cpgTypeFullName.nonEmpty then symbolTable.put(x, cpgTypeFullName)

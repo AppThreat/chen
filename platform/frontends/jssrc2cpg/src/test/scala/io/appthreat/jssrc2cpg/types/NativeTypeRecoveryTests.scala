@@ -60,6 +60,8 @@ class NativeTypeRecoveryTests extends AbstractPassTest:
           var withSpans = List.empty[String]
           recovered(spans = true)(cpg => withSpans = valueCall(cpg).map(_.methodFullName))
           without should not be empty
+          // a class of the project and one of a package that is not in the graph
+          without.exists(_.contains("ext-lib")) shouldBe true
           withSpans shouldBe without
       }
 
