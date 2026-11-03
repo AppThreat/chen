@@ -1,0 +1,45 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstNodeBuilder.scala
+  s_c0804e5357f0c5::t_273af04193c952 16
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_74398300cc48c7::t_6cfd1d2eb4cf7d 6,108-112,122,124,126,129-131,155,161-170,204-206,229-239,251,254-256,258
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/TypeNames.scala
+  s_74398300cc48c7::t_770e88224151bc 1-172
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/AngularTagsTest.scala
+  s_74398300cc48c7::t_a317c89a021e89 206-207
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/TsClassesAstCreationPassTest.scala
+  s_74398300cc48c7::t_60c002307370c7 342
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypeMapTests.scala
+  s_74398300cc48c7::t_aec1efb9b14abd 52-56,59,62,65,68-69,72-75
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypeRecoveryTests.scala
+  s_74398300cc48c7::t_15b9cdce66b7c6 71
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/NativeTypesEverywhereTests.scala
+  s_74398300cc48c7::t_b29f788af888c3 57-59,114,116,123,151,158,173
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TSTypesTest.scala
+  s_74398300cc48c7::t_be0aff26de3144 60-61
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TypeNamesTests.scala
+  s_74398300cc48c7::t_47b113e4295802 1-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c272ff47d1e794891ada226481143624c3fcbe17",
+  "prompts": {},
+  "sessions": {
+    "s_74398300cc48c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0904532-37d4-48a7-8f6e-50bec4d75023",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_c0804e5357f0c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75227701-fd30-4fc7-8eae-71a8df8f3a1c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
