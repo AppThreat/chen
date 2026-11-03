@@ -1,0 +1,18 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/JsSrc2Cpg.scala
+  h_0926447d100ad2 74-77
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/ExternalPathsPass.scala
+  h_0926447d100ad2 4-5,116-125,127,130,132,137-141
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/ExternalPathsPassTests.scala
+  h_0926447d100ad2 82-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b44a369afea5c40e64d8d8d21016301de594d2c5",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
