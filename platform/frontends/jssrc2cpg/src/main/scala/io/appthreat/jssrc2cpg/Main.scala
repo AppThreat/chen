@@ -11,7 +11,8 @@ import java.nio.file.Paths
 final case class Config(
   tsTypes: Boolean = true,
   flow: Boolean = false,
-  astGenOutDir: Option[String] = None
+  astGenOutDir: Option[String] = None,
+  astGenTypes: Option[String] = None
 ) extends X2CpgConfig[Config]
     with TypeRecoveryParserConfig[Config]:
 
@@ -23,6 +24,26 @@ final case class Config(
 
   def withAstGenOutDir(value: String): Config =
       copy(astGenOutDir = Option(value)).withInheritedFields(this)
+
+  /** Which engine astgen uses for type maps: `native` or `ts6`. Passed to astgen as ASTGEN_TYPES.
+    * Unset leaves astgen's own default.
+    */
+  def withAstGenTypes(value: String): Config =
+      copy(astGenTypes = Option(value).map(_.trim.toLowerCase).filter(_.nonEmpty))
+          .withInheritedFields(this)
+
+  /** The engine astgen is asked to use: the configured one, else ASTGEN_TYPES from the environment
+    * astgen inherits (read the way astgen reads it, an unknown value means ts6), else ts6.
+    */
+  def effectiveAstGenTypes(env: Map[String, String] = sys.env): String =
+      astGenTypes
+          .orElse(env.get("ASTGEN_TYPES").map(_.trim.toLowerCase))
+          .filter(Config.AstGenTypesValues.contains)
+          .getOrElse("ts6")
+end Config
+
+object Config:
+  val AstGenTypesValues: Seq[String] = Seq("native", "ts6")
 
 object Frontend:
   implicit val defaultConfig: Config = Config()
@@ -38,11 +59,20 @@ object Frontend:
       opt[Unit]("flow")
           .action((_, c) => c.withFlow(true))
           .text("enable flow mode (astgen -t flow)"),
+      opt[String]("astgen-types")
+          .validate(v =>
+              if Config.AstGenTypesValues.contains(v.trim.toLowerCase) then Right(())
+              else Left(s"astgen-types must be one of ${Config.AstGenTypesValues.mkString(", ")}")
+          )
+          .action((x, c) => c.withAstGenTypes(x))
+          .text("type map engine for astgen: native or ts6 (sets ASTGEN_TYPES)"),
       opt[String]("astgen-out")
           .action((x, c) => c.withAstGenOutDir(x))
           .text("Configure a permanent directory for astgen output"),
       XTypeRecovery.parserOptions
     )
+  end cmdLineParser
+end Frontend
 
 object Main extends X2CpgMain(cmdLineParser, new JsSrc2Cpg()):
 

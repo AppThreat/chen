@@ -46,6 +46,13 @@ class AstGenRunner(config: Config):
 
   private val executableArgs = if !config.tsTypes then " --no-tsTypes" else ""
   private val typeArgs       = if config.flow then "flow" else "ts"
+
+  /** The environment astgen is started with, beyond the JVM's own: ASTGEN_TYPES when the
+    * configuration names a type map engine. Without it astgen keeps whatever the environment says,
+    * so a default run is unchanged.
+    */
+  private[utils] def astGenEnv: Map[String, String] =
+      config.astGenTypes.map(t => Map("ASTGEN_TYPES" -> t)).getOrElse(Map.empty)
   private def isIgnoredByUserConfig(filePath: String): Boolean =
     lazy val isInIgnoredFiles = config.ignoredFiles.exists {
         case ignorePath if File(ignorePath).isDirectory => filePath.startsWith(ignorePath)
@@ -103,11 +110,15 @@ class AstGenRunner(config: Config):
   private def vueFiles(in: File, out: File): Try[Seq[String]] =
     val files = SourceFiles.determine(in.pathAsString, Set(".vue"))
     if files.nonEmpty then
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t vue -o $out", in.toString())
+      ExternalCommand.run(s"$astGenCommand$executableArgs -t vue -o $out", in.toString(), astGenEnv)
     else Success(Seq.empty)
 
   private def jsFiles(in: File, out: File): Try[Seq[String]] =
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t $typeArgs -o $out", in.toString())
+      ExternalCommand.run(
+        s"$astGenCommand$executableArgs -t $typeArgs -o $out",
+        in.toString(),
+        astGenEnv
+      )
 
   private def runAstGenNative(in: File, out: File): Try[Seq[String]] =
       for
@@ -126,16 +137,21 @@ class AstGenRunner(config: Config):
           .map(_.trim)
           .getOrElse("unknown")
 
+  /** What, besides the sources, decides astgen's output: a change in any of these must not restore
+    * a cached parse. A type map written by the native binary differs from one written by TypeScript
+    * 6.
+    */
+  private[utils] def astGenFingerprintInputs: Seq[String] =
+      Seq(
+        s"astgen-version=$astGenVersion",
+        s"tsTypes=${config.tsTypes}",
+        s"flow=${config.flow}",
+        s"astgen-types=${config.effectiveAstGenTypes()}"
+      )
+
   /** Identity of everything (besides the sources) that affects astgen's output. */
   private def astGenFingerprint: String =
-      CpgCacheStore.projectFingerprint(
-        config.inputPath,
-        Seq(
-          s"astgen-version=$astGenVersion",
-          s"tsTypes=${config.tsTypes}",
-          s"flow=${config.flow}"
-        )
-      )
+      CpgCacheStore.projectFingerprint(config.inputPath, astGenFingerprintInputs)
 
   def execute(out: File): AstGenRunnerResult =
     val in = File(config.inputPath)

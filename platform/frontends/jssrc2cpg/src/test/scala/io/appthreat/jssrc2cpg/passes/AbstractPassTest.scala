@@ -12,6 +12,23 @@ import org.scalatest.Inside
 
 abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
 
+  /** The type map engine the fixtures that run astgen use. Set JSSRC2CPG_TEST_ASTGEN_TYPES=native
+    * (or the system property jssrc2cpg.test.astgenTypes) to run every test that runs astgen against
+    * type maps written by the native binary, with astgen finding it through ASTGEN_NATIVE_BIN or
+    * PATH. Unset, astgen keeps its own default (TypeScript 6). It is a setting, not a second copy
+    * of the tests.
+    */
+  protected lazy val testAstGenTypes: Option[String] =
+      sys.props.get("jssrc2cpg.test.astgenTypes")
+          .orElse(sys.env.get("JSSRC2CPG_TEST_ASTGEN_TYPES"))
+          .map(_.trim.toLowerCase).filter(_.nonEmpty)
+
+  /** A fixture configuration: the setting above is applied to it. */
+  protected def fixtureConfig(tsTypes: Boolean): Config =
+      testAstGenTypes.fold(Config(tsTypes = tsTypes))(t =>
+          Config(tsTypes = tsTypes).withAstGenTypes(t)
+      )
+
   protected abstract class Fixture
 
   private implicit val schemaValidationMode: ValidationMode = ValidationMode.Enabled
@@ -27,7 +44,7 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
           val file = dir / filename
           file.write(code)
           val config =
-              Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
+              fixtureConfig(tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
           if code.contains("@flow") then config.withFlow(true)
           val astGenResult = new AstGenRunner(config).execute(dir)
           new AstCreationPass(cpg, astGenResult, config).createAndApply()
@@ -46,7 +63,7 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
           val file = dir / filename
           file.write(code)
           val config =
-              Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
+              fixtureConfig(tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
                   .withFlow(true)
           val astGenResult = new AstGenRunner(config).execute(dir)
           new AstCreationPass(cpg, astGenResult, config).createAndApply()
@@ -88,7 +105,7 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
           val file = dir / filename
           file.write(code)
           val config =
-              Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
+              fixtureConfig(tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
           val astGenResult    = new AstGenRunner(config).execute(dir)
           val astCreationPass = new AstCreationPass(cpg, astGenResult, config)
           astCreationPass.createAndApply()
@@ -114,7 +131,7 @@ abstract class AbstractPassTest extends AnyWordSpec with Matchers with Inside:
           val file2 = dir / filename2
           file2.write(code2)
           val config =
-              Config(tsTypes = tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
+              fixtureConfig(tsTypes).withInputPath(dir.toString).withOutputPath(dir.toString)
           val astGenResult    = new AstGenRunner(config).execute(dir)
           val astCreationPass = new AstCreationPass(cpg, astGenResult, config)
           astCreationPass.createAndApply()
