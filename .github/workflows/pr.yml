@@ -123,7 +123,7 @@ jobs:
         if: env.REUSED != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: '25.x'
+          node-version: '26.x'
       - name: Delete `.rustup` and `.cargo` directories # to save disk space
         run: rm -rf /home/runner/.rustup /home/runner/.cargo
         if: env.REUSED != 'true' && runner.os == 'Linux'
