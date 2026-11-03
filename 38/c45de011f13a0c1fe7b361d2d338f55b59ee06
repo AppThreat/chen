@@ -1,0 +1,27 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_79a7c562b49300::t_a8bb226e5839ff 152-154
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeRecovery.scala
+  s_79a7c562b49300::t_34280aa97064ba 128-129
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/TypeNames.scala
+  s_79a7c562b49300::t_f81ca08754380b 15-17,29,157-159
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TSTypesTest.scala
+  s_79a7c562b49300::t_e6546df3d4ddee 53-54
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TypeNamesTests.scala
+  s_79a7c562b49300::t_80c0d1c444e702 77-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "38c45de011f13a0c1fe7b361d2d338f55b59ee06",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
