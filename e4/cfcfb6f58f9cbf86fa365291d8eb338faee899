@@ -1,0 +1,25 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/ExternalPathsPass.scala
+  s_c0804e5357f0c5::t_f8b5ca86061689 18-24,48-53,55-69
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/BomComponentLocations.scala
+  s_c0804e5357f0c5::t_d716f3dd6c64ce 104-106
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/ExternalPathsPassTests.scala
+  s_c0804e5357f0c5::t_563bf9370bcbf8 51-58,95-105
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/taggers/BomComponentLocationsTests.scala
+  s_c0804e5357f0c5::t_813f542d2d42c0 124-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4cfcfb6f58f9cbf86fa365291d8eb338faee899",
+  "prompts": {},
+  "sessions": {
+    "s_c0804e5357f0c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75227701-fd30-4fc7-8eae-71a8df8f3a1c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
