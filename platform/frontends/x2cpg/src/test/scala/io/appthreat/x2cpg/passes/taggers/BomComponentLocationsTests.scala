@@ -121,6 +121,9 @@ class BomComponentLocationsTests extends AnyWordSpec with Matchers:
           ) shouldBe
               "org.apache.commons:commons-lang3"
           BomComponentLocations.moduleOf("pkg:pypi/pyyaml@6.0.1", "PyYAML", "") shouldBe "pyyaml"
+          // a purl's `+` is percent-decoded as itself, not as a space
+          BomComponentLocations.moduleOf("pkg:generic/libc++abi@17", "libc++abi", "") shouldBe
+              "libc++abi"
           BomComponentLocations.moduleOf(
             "pkg:generic/brotli@1.2.0#third_party/brotli",
             "brotli",

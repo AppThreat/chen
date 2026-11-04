@@ -48,6 +48,14 @@ class ExternalPathsPassTests extends AnyWordSpec with Matchers:
             "third_party/zlib/src/a.c"
           ) shouldBe Some("third_party/zlib")
       }
+      "accept a pattern written with the slash before the directory, at the root and below it" in {
+          // such patterns named these paths when the pattern was searched anywhere in the path
+          val m = ExternalPathMatcher("/third_party/")
+          m.vendoredPathOf("src/third_party/zlib/a.c") shouldBe Some("src/third_party")
+          m.vendoredPathOf("third_party/zlib/a.c") shouldBe Some("third_party")
+          m.vendoredPathOf("src/not_third_party/a.c") shouldBe None
+          ExternalPathMatcher("^third_party").vendoredPathOf("src/third_party/a.c") shouldBe None
+      }
       "mark nothing for an empty or invalid pattern" in {
           ExternalPathMatcher("").isEmpty shouldBe true
           ExternalPathMatcher("(").vendoredPathOf("(/a.c") shouldBe None
@@ -83,6 +91,17 @@ class ExternalPathsPassTests extends AnyWordSpec with Matchers:
           val cpg = graph("third_party")
           cpg.method.where(_.tag.nameExact(ExternalPathsPass.TagName)).filename.l shouldBe
               List("third_party/zlib/z.c")
+      }
+      "leave code a frontend already made external untagged, so its own source keeps it" in {
+          // a package-manager directory the pattern happens to name (Composer's vendor/, a venv)
+          val cpg     = Cpg.emptyCpg
+          val builder = overflowdb.BatchedUpdate.DiffGraphBuilder()
+          builder.addNode(NewMethod().name("dep").filename("vendor/pkg/a.php").isExternal(true))
+          builder.addNode(NewMethod().name("own").filename("vendor/copied/b.php").isExternal(false))
+          overflowdb.BatchedUpdate.applyDiff(cpg.graph, builder)
+          ExternalPathsPass.applyTo(cpg, "vendor/")
+          cpg.method.where(_.tag.nameExact(ExternalPathsPass.TagName)).name.l shouldBe List("own")
+          cpg.method.isExternal.l should contain only true
       }
       "mark nothing without a pattern" in {
           graph("").method.isExternal.l should contain only false

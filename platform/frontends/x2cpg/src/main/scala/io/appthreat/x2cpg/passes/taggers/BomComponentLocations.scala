@@ -101,8 +101,9 @@ object BomComponentLocations:
 
   /** (namespace, name) of a purl's path, without version, qualifiers and subpath, decoded. */
   private def splitNamespace(path: String): (Option[String], String) =
-    val noSub     = path.takeWhile(c => c != '?' && c != '#')
-    val decoded   = java.net.URLDecoder.decode(noSub, "UTF-8")
+    val noSub = path.takeWhile(c => c != '?' && c != '#')
+    // percent-decoding only: a purl's `+` is a plus, not the space a form encodes it as
+    val decoded   = java.net.URLDecoder.decode(noSub.replace("+", "%2B"), "UTF-8")
     val versionAt = decoded.lastIndexOf('@')
     val bare      = if versionAt > 0 then decoded.substring(0, versionAt) else decoded
     bare.lastIndexOf('/') match

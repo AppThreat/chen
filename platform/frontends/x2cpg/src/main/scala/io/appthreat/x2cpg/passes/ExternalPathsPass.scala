@@ -15,12 +15,13 @@ import scala.util.matching.Regex
   * relative to the input root, with `/` as separator whatever the platform.
   *
   * A match must begin at the start of a path segment: at the beginning of the relative path or
-  * right after a `/`. `third_party` therefore names `third_party/zlib/a.c` and
-  * `src/third_party/zlib/a.c`, never `src/not_third_party/a.c`. The match may end anywhere; the
-  * vendored directory (or file) is the path up to the end of the segment the match ends in, so
-  * `third_party/` and `third_party/[^/]+` give `third_party` and `third_party/zlib`. When the
-  * pattern has a capture group the group's end decides instead, so `(third_party/[^/]+)/src` names
-  * `third_party/zlib`.
+  * right after a `/`, or at that `/` itself, so `/third_party/` names `third_party/zlib/a.c` and
+  * `src/third_party/zlib/a.c` as it did when the pattern was searched anywhere in the path.
+  * `third_party` therefore names `third_party/zlib/a.c` and `src/third_party/zlib/a.c`, never
+  * `src/not_third_party/a.c`. The match may end anywhere; the vendored directory (or file) is the
+  * path up to the end of the segment the match ends in, so `third_party/` and `third_party/[^/]+`
+  * give `third_party` and `third_party/zlib`. When the pattern has a capture group the group's end
+  * decides instead, so `(third_party/[^/]+)/src` names `third_party/zlib`.
   */
 final class ExternalPathMatcher private (private val regex: Option[Regex]):
 
@@ -44,20 +45,28 @@ final class ExternalPathMatcher private (private val regex: Option[Regex]):
         val path = ExternalPathMatcher.normalize(raw)
         if path.isEmpty || path.startsWith("<") then None
         else
-          val matcher = re.pattern.matcher(path)
-          // lookbehinds in the pattern may see the text before a segment start
-          matcher.useTransparentBounds(true).useAnchoringBounds(false)
-          val starts = 0 +: path.indices.filter(path.charAt(_) == '/').map(_ + 1)
-          starts.iterator.filter(_ < path.length).flatMap { start =>
-            matcher.region(start, path.length)
-            if matcher.lookingAt() then
-              val end =
-                  if matcher.groupCount > 0 && matcher.start(1) >= 0 then matcher.end(1)
-                  else matcher.end()
-              Option.when(end > start)(ExternalPathMatcher.upToSegmentEnd(path, end))
-            else None
-          }.nextOption()
+          // a match begins a segment, or the `/` before one, for a pattern written `/third_party/`
+          val starts = 0 +: path.indices.filter(path.charAt(_) == '/').flatMap(i => Seq(i, i + 1))
+          firstMatch(re, path, starts).orElse(
+            // such a pattern names a directory at the root too: the root is a segment boundary
+            firstMatch(re, "/" + path, Seq(0)).map(_.drop(1)).filter(_.nonEmpty)
+          )
       }
+
+  /** The vendored path of the first match that begins at one of `starts`. */
+  private def firstMatch(re: Regex, path: String, starts: Seq[Int]): Option[String] =
+    val matcher = re.pattern.matcher(path)
+    // lookbehinds in the pattern may see the text before a segment start
+    matcher.useTransparentBounds(true).useAnchoringBounds(false)
+    starts.iterator.filter(_ < path.length).flatMap { start =>
+      matcher.region(start, path.length)
+      if matcher.lookingAt() then
+        val end =
+            if matcher.groupCount > 0 && matcher.start(1) >= 0 then matcher.end(1)
+            else matcher.end()
+        Option.when(end > start)(ExternalPathMatcher.upToSegmentEnd(path, end))
+      else None
+    }.nextOption()
 end ExternalPathMatcher
 
 object ExternalPathMatcher:
