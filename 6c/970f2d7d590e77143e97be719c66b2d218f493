@@ -1,0 +1,41 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_3f5c428a173daa::t_35989adbd5fc4f 98-104,106-107
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_3f5c428a173daa::t_6e2ba7ede6e537 35-37
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  s_3f5c428a173daa::t_18a50e2232da24 37-42,45-77,79-84
+  s_3f5c428a173daa::t_2ce92ade76af6c 78
+  s_3f5c428a173daa::t_94d7529cc94e2e 228
+  s_3f5c428a173daa::t_d8355da9fd7d01 227,229-230,232,244
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/AstCreationPass.scala
+  s_3f5c428a173daa::t_44f3ce6a762d79 95-96
+  s_3f5c428a173daa::t_ae3699ba0dd0cd 97
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/AstGenRunnerEnvTests.scala
+  s_3f5c428a173daa::t_8f0df95bfacbe1 50-62
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TypeMapEngineManifestTests.scala
+  s_3f5c428a173daa::t_6b690e59634178 4,6,8,25-26,31-41,45-46,51,53,57-58,95-96
+  s_3f5c428a173daa::t_a429612948dece 5,9-21,23,43-44,49,56,79-88,92-94,97-104
+  s_3f5c428a173daa::t_195b77ef24169f 89-91
+  s_3f5c428a173daa::t_50e00bc737886e 1-3,7,22,24,27-30,42,47-48,50,52,54-55,59-78,105-108
+  s_3f5c428a173daa::t_cddad4381ff1eb 109
+.github/workflows/master.yml
+  s_3f5c428a173daa::t_5ce478668ee6d3 103-143
+.github/workflows/pr.yml
+  s_3f5c428a173daa::t_d305e1c8fba119 169-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c970f2d7d590e77143e97be719c66b2d218f493",
+  "prompts": {},
+  "sessions": {
+    "s_3f5c428a173daa": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_ad4eb6a9-5992-45ab-9fb8-5cb4fd12fb71",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
