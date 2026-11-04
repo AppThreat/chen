@@ -52,6 +52,7 @@ class JavaSrc2Cpg extends X2CpgFrontend[Config]:
         // After type inference, so the reflective call sites it rewrites carry their final
         // methodFullNames, and before the overlays, so the call linkers see ordinary calls.
         new ReflectionLoweringPass(cpg).createAndApply()
+        io.appthreat.x2cpg.passes.ExternalPathsPass.applyTo(cpg, config.externalPaths)
       }
 end JavaSrc2Cpg
 

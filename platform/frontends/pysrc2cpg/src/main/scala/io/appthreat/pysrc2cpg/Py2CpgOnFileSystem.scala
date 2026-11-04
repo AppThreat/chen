@@ -249,6 +249,10 @@ class Py2CpgOnFileSystem extends X2CpgFrontend[Py2CpgOnFileSystemConfig]:
                     archiveDependencyRels
                   ).createAndApply()
 
+                // Vendored code the user named (`--external-paths`) is external like a venv's,
+                // and by path, before anything reads the externality
+                io.appthreat.x2cpg.passes.ExternalPathsPass.applyTo(cpg, config.externalPaths)
+
                 // Package identity: anything unpacked from an archive states its own
                 // distribution name, version and top-level import names (RECORD / top_level.txt /
                 // PKG-INFO) - no SBOM required. Tagging the mapped modules' methods with the purl is

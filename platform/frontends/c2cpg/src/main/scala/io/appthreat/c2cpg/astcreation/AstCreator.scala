@@ -67,12 +67,10 @@ class AstCreator(
   def generateAst(iASTTranslationUnit: IASTTranslationUnit): Ast =
     val namespaceBlock = globalNamespaceBlock()
     methodAstParentStack.push(namespaceBlock)
+    // The unit's own file, as its type declaration names it: the unit node's location flattens to
+    // the first file it spans, which is the first header the unit includes.
     val translationUnitAst =
-        astInFakeMethod(
-          namespaceBlock.fullName,
-          fileName(iASTTranslationUnit),
-          iASTTranslationUnit
-        )
+        astInFakeMethod(namespaceBlock.fullName, filename, iASTTranslationUnit)
     val depsAndImportsAsts = astsForDependenciesAndImports(iASTTranslationUnit)
     val commentsAsts       = astsForComments(iASTTranslationUnit)
     val childrenAsts       = depsAndImportsAsts ++ Seq(translationUnitAst) ++ commentsAsts

@@ -10,7 +10,7 @@ import io.appthreat.c2cpg.passes.{
     ReferenceKindPass,
     TypeDeclNodePass
 }
-import io.appthreat.c2cpg.passes.ExternalPathsPass
+import io.appthreat.x2cpg.passes.ExternalPathsPass
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend

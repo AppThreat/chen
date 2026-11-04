@@ -49,6 +49,7 @@ class Php2Atom extends X2CpgFrontend[Config]:
         new AnyTypePass(cpg).createAndApply()
         TypeNodePass.withTypesFromCpg(cpg).createAndApply()
         LocalCreationPass.allLocalCreationPasses(cpg).foreach(_.createAndApply())
+        io.appthreat.x2cpg.passes.ExternalPathsPass.applyTo(cpg, config.externalPaths)
         new ClosureRefPass(cpg).createAndApply()
         // Framework taint SOURCE/SINK tagging (Laravel/Symfony/WordPress). Registered here - in the
         // frontend pass chain - rather than in `postProcessingPasses` on purpose: `createCpg` is the
