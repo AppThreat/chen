@@ -34,10 +34,54 @@ object AstGenRunner:
   )
 
   case class AstGenRunnerResult(
-    parsedFiles: List[(String, String)] = List.empty
+    parsedFiles: List[(String, String)] = List.empty,
+    /** Which engine wrote the type maps, from the types record of astgen_manifest.jsonl in the
+      * astgen output; None when astgen wrote no record (atom-parsetools 1.x, or a user-supplied
+      * output directory without one).
+      */
+    typeMapEngine: Option[String] = None
   )
 
-  private lazy val astGenCommand = "astgen"
+  /** The manifest astgen appends its types record to. The name ends in .jsonl because every *.json
+    * under the astgen output is read as an AST.
+    */
+  private val ManifestName = "astgen_manifest.jsonl"
+
+  private val KnownEngines = Set("native", "ts6")
+
+  /** The engine of the last types record in the manifest, or None. The file is one JSON object per
+    * line; lines that do not parse are skipped, and a record without a known engine is not ours.
+    */
+  private[jssrc2cpg] def typeMapEngineOf(manifest: File): Option[String] =
+      if manifest.isRegularFile then
+        manifest.contentAsString.linesIterator
+            .map(_.trim)
+            .filter(_.nonEmpty)
+            .flatMap(line =>
+                Try(ujson.read(line).obj)
+                    .toOption
+                    .flatMap(obj =>
+                        for
+                          kind   <- obj.get("kind") if kind.str == "types"
+                          engine <- obj.get("engine") if KnownEngines.contains(engine.str)
+                        yield engine.str
+                    )
+            )
+            .toVector
+            .lastOption
+      else None
+
+  /** The astgen command to run. "astgen" unless a test setting names another one, which is how the
+    * suite runs against a chosen astgen (the 1.x release from npm, or a worktree build) instead of
+    * whatever is on PATH.
+    */
+  private[utils] def astGenCommand: String =
+      sys.props
+          .get("jssrc2cpg.test.astgenCmd")
+          .orElse(sys.env.get("JSSRC2CPG_TEST_ASTGEN_CMD"))
+          .map(_.trim)
+          .filter(_.nonEmpty)
+          .getOrElse("astgen")
 end AstGenRunner
 
 class AstGenRunner(config: Config):
@@ -180,8 +224,12 @@ class AstGenRunner(config: Config):
           in.toString(),
           _
         ))
+    // Which engine really ran, read once per astgen run from the manifest astgen wrote (also when
+    // the output was restored from the parse cache or reused from a user directory): the
+    // configuration only says what was asked for, and astgen may have fallen back.
+    val engine = typeMapEngineOf(out / ManifestName)
     runResult match
-      case Success(_)   => AstGenRunnerResult(written)
+      case Success(_)   => AstGenRunnerResult(written, engine)
       case Failure(err) =>
           // astgen writes each file's AST as it finishes it, so when it dies part way (out of
           // memory, a crash) the files before are sound. The run is reported, never passed off as
@@ -193,6 +241,6 @@ class AstGenRunner(config: Config):
           System.err.println(
             s"astgen failed on $in, so the atom holds only the ${parsed.size} files it finished: ${reason.mkString(" | ")}"
           )
-          AstGenRunnerResult(parsed)
+          AstGenRunnerResult(parsed, engine)
   end execute
 end AstGenRunner

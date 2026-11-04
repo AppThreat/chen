@@ -166,3 +166,44 @@ jobs:
           name: ${{ steps.tree.outputs.name }}
           path: tested-tree.txt
           retention-days: 14
+
+  # chen#295: jssrc2cpg has to keep working with the atom-parsetools 1.x line as well as with 2.x.
+  # pr-tests installs @appthreat/atom-parsetools unpinned (1.x until 2.0.0 is published, 2.x
+  # after); this job runs the suite against the newest published 1.x, named through
+  # JSSRC2CPG_TEST_ASTGEN_CMD so the choice does not depend on PATH. Against an unpublished 2.x
+  # branch there is nothing in CI to install yet: run the same suite locally with
+  # JSSRC2CPG_TEST_ASTGEN_CMD=node <worktree>/astgen.js and ASTGEN_NATIVE_BIN=<worktree>/parsa
+  # (after `go build -o parsa/_deps/bin/parsa ./cmd/parsa`), until 2.0.0 is published and the
+  # unpinned install in pr-tests becomes the 2.x side.
+  jssrc2cpg-astgen-1x:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up JDK
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: "sbt"
+      - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729  # v1.5.8
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '26.x'
+          package-manager-cache: false
+      - name: Install the 1.x astgen from npm
+        run: |
+          mkdir -p "$RUNNER_TEMP/astgen1x" && cd "$RUNNER_TEMP/astgen1x"
+          echo '{"name":"astgen1x","private":true}' > package.json
+          npm install @appthreat/atom-parsetools@^1 --no-audit --no-fund
+          node node_modules/@appthreat/atom-parsetools/astgen.js --version
+      - name: Run the jssrc2cpg suite against it
+        run: sbt --server "project jssrc2cpg; testFull"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          JSSRC2CPG_TEST_ASTGEN_CMD: node ${{ runner.temp }}/astgen1x/node_modules/@appthreat/atom-parsetools/astgen.js

@@ -32,7 +32,9 @@ import scala.collection.mutable
 class AstCreator(
   val config: Config,
   val parserResult: ParseResult,
-  val usedTypes: ConcurrentHashMap[(String, String), Boolean]
+  val usedTypes: ConcurrentHashMap[(String, String), Boolean],
+  /** Which engine astgen's manifest says wrote the type map, when it says; see [[TypeHelper]]. */
+  val astGenEngine: Option[String] = None
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(parserResult.filename)
     with AstForExpressionsCreator

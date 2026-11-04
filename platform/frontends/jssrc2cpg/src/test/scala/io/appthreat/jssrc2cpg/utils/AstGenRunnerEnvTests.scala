@@ -47,4 +47,17 @@ class AstGenRunnerEnvTests extends AnyWordSpec with Matchers:
           Config().withAstGenTypes("  ").astGenTypes shouldBe None
       }
   }
+
+  "the astgen command" should {
+      "be plain astgen unless a test setting names another one" in {
+          val fromEnv = sys.env.get("JSSRC2CPG_TEST_ASTGEN_CMD").map(_.trim).filter(_.nonEmpty)
+          if fromEnv.isEmpty then AstGenRunner.astGenCommand shouldBe "astgen"
+          System.setProperty("jssrc2cpg.test.astgenCmd", "node /somewhere/astgen.js")
+          try AstGenRunner.astGenCommand shouldBe "node /somewhere/astgen.js"
+          finally System.clearProperty("jssrc2cpg.test.astgenCmd")
+          System.setProperty("jssrc2cpg.test.astgenCmd", "   ")
+          try AstGenRunner.astGenCommand shouldBe fromEnv.getOrElse("astgen")
+          finally System.clearProperty("jssrc2cpg.test.astgenCmd")
+      }
+  }
 end AstGenRunnerEnvTests
