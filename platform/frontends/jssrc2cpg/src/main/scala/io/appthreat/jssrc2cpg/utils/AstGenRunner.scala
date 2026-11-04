@@ -76,11 +76,12 @@ object AstGenRunner:
     * whatever is on PATH.
     */
   private[utils] def astGenCommand: String =
+      // a blank setting counts as unset, so a blank property does not hide the environment variable
       sys.props
           .get("jssrc2cpg.test.astgenCmd")
-          .orElse(sys.env.get("JSSRC2CPG_TEST_ASTGEN_CMD"))
           .map(_.trim)
           .filter(_.nonEmpty)
+          .orElse(sys.env.get("JSSRC2CPG_TEST_ASTGEN_CMD").map(_.trim).filter(_.nonEmpty))
           .getOrElse("astgen")
 end AstGenRunner
 
