@@ -1,0 +1,33 @@
+.github/workflows/master.yml
+  s_79a7c562b49300::t_754766ede36239 103-143
+.github/workflows/pr.yml
+  s_79a7c562b49300::t_08f6e797e888fb 4-6,202-241
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_79a7c562b49300::t_9914053398725b 35-37
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_79a7c562b49300::t_f38bfe3f63d260 98-104,106-107
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/AstCreationPass.scala
+  s_79a7c562b49300::t_41321b83621401 95-97
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  s_79a7c562b49300::t_2f63265a122f04 37-42,45-85,228-231,233,245
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/TypeMapEngineManifestTests.scala
+  s_79a7c562b49300::t_0bf96f79ab4c4b 1-109
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/utils/AstGenRunnerEnvTests.scala
+  s_79a7c562b49300::t_2ea646397f64bf 50-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c493ab0f9e456e03db8dfce28e98c8da3a05b30",
+  "prompts": {},
+  "sessions": {
+    "s_79a7c562b49300": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e06ad8c2-0767-47dd-913e-35689e5f05ba",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
