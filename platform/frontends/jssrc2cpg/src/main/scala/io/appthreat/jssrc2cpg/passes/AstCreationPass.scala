@@ -92,7 +92,9 @@ class AstCreationPass(
             report.addReportInfo(parseResult.filename, fileLOC, parsed = true)
             // Collect this file's types in a private map so they can be cached and replayed.
             val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
-            val localDiff    = new AstCreator(config, parseResult, perFileTypes).createAst()
+            val localDiff =
+                new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
+                    .createAst()
             perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
             val encoded =
                 perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq

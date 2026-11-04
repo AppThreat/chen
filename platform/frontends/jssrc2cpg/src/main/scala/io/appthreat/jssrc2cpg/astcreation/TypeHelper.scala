@@ -95,11 +95,16 @@ trait TypeHelper:
       (tpe.startsWith("\"") && tpe.endsWith("\"")) ||
           (nativeTypeMap && tpe.startsWith("'") && tpe.endsWith("'"))
 
-  /** Whether astgen was asked for the native binary's type map (TypeScript 7's checker), by the
-    * configuration or by an inherited ASTGEN_TYPES. When astgen fell back to TypeScript 6, its
-    * strings are brought to the same canonical spelling, which only reorders them.
+  /** Whether the type map was written by the native binary (TypeScript 7's checker). The manifest
+    * of the astgen run says which engine really ran, and that is authoritative: astgen may have
+    * been asked for native and fallen back to TypeScript 6 (a missing binary under the 2.x
+    * default). Only when astgen wrote no record (atom-parsetools 1.x, or a user-supplied output
+    * directory without one) does the request decide, from the configuration or an inherited
+    * ASTGEN_TYPES. TypeScript 6 strings are brought to the same canonical spelling, which only
+    * reorders them.
     */
-  private lazy val nativeTypeMap: Boolean = config.effectiveAstGenTypes() == "native"
+  private[jssrc2cpg] lazy val nativeTypeMap: Boolean =
+      astGenEngine.getOrElse(config.effectiveAstGenTypes()) == "native"
 
   private def isNumberType(tpe: String): Boolean =
       tpe.toDoubleOption.isDefined
