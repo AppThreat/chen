@@ -1,6 +1,7 @@
 name: pr
-# pr-tests (<os>, 25) are the required status checks on main, so this workflow must trigger on
-# merge-group builds too. Pull requests also run jvms 23 and 26 on Ubuntu. The queue runs only the
+# pr-tests (<os>, 25) and jssrc2cpg-parsetools-main are the required status checks on main, so this
+# workflow must trigger on merge-group builds too. jssrc2cpg-parsetools-main runs on pull requests
+# only; in the merge queue it is skipped, which counts as passed. Pull requests also run jvms 23 and 26 on Ubuntu. The queue runs only the
 # three required checks, and only when the pull request's own run has not already passed them on
 # the very tree the queue built (see `reuse`).
 on:
@@ -169,7 +170,8 @@ jobs:
 
   # The jssrc2cpg suite against atom-parsetools main with parsa, so what the next atom-parsetools
   # release ships (native type maps by default, the manifest's types record) is tested here before
-  # it reaches npm. pr-tests above uses the release on npm. Not a required check.
+  # it reaches npm. pr-tests above uses the release on npm. A required check, run on pull requests
+  # only (a merge-group build skips it, and a skipped check counts as passed).
   jssrc2cpg-parsetools-main:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
