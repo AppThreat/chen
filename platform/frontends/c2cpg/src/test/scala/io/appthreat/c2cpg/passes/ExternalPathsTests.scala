@@ -53,6 +53,13 @@ class ExternalPathsTests extends AnyWordSpec with Matchers:
       "leave the project's own code internal" in withProject("third_party/") { cpg =>
           cpg.method.name("main").isExternal.l shouldBe List(false)
       }
+      "leave the file-scope code of a unit that includes a vendored header first internal" in
+          withProject("third_party/") { cpg =>
+            // the unit's <global> method is named after the unit, not its first header
+            val global = cpg.method.fullNameExact("main.c:<global>").l
+            global.map(_.filename) shouldBe List("main.c")
+            global.map(_.isExternal) shouldBe List(false)
+          }
   }
 
   "a run without the option" should {
