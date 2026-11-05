@@ -284,8 +284,9 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           memberNode(nodeInfo, name, nodeInfo.code, typeFullName)
       case _ =>
           val name = nodeInfo.node match
-            // a string or number key names the member by its value (`"chunk" = v` is `chunk`)
-            case ClassProperty =>
+            // a string or number key names the member by its value (`"chunk" = v` is `chunk`);
+            // an auto-accessor (`accessor x = v`) is a property of the same shapes
+            case ClassProperty | ClassAccessorProperty =>
                 safeStr(nodeInfo.json("key"), "value")
                     .orElse(Try(nodeInfo.json("key")("value").num).toOption.map(n =>
                         if n.isWhole then n.toLong.toString else n.toString
