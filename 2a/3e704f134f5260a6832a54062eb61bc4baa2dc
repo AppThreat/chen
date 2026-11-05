@@ -1,0 +1,23 @@
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/MethodReferenceTests.scala
+  s_c4b0b47db2bc80::t_3aa94ffdf8085c 1-83
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_c4b0b47db2bc80::t_dece40ebbfcafd 61
+  s_c4b0b47db2bc80::t_188b1c538194fb 2657-2660,2677-2678
+  s_c4b0b47db2bc80::t_baea54b3445c52 2696-2710
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a3e704f134f5260a6832a54062eb61bc4baa2dc",
+  "prompts": {},
+  "sessions": {
+    "s_c4b0b47db2bc80": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_b18a03ea-27c6-410e-9850-2e20127a6d41",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
