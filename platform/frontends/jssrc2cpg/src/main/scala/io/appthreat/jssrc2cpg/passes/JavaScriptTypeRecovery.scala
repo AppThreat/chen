@@ -172,7 +172,10 @@ private class RecoverForJavaScriptFile(
           }
           .flatMap {
               case (t, ts) if Set(t) == ts => Set(t)
-              case (_, ts) => ts.map(_.replaceAll("\\.(?!js::program)", pathSep.toString))
+              // the dots of a member path become separators; a file's extension before
+              // `::program` stays (`src/model.ts::program:User`, not `src/model:ts::program:User`)
+              case (_, ts) =>
+                  ts.map(_.replaceAll("\\.(?![A-Za-z]+::program)", pathSep.toString))
           }
       p match
         case _: MethodParameterIn => symbolTable.put(p, resolvedHints)
@@ -283,6 +286,12 @@ private class RecoverForJavaScriptFile(
     */
   override protected def visitAssignments(a: Assignment): Set[String] =
       a.argumentOut.l match
+        // the temporary that holds the receiver of a member call (`(_tmp = this.f).g()`), when the
+        // frontend typed it from the checker (see `TypeHelper.receiverType`), keeps that type: the
+        // field's name is no key of its own, and what the symbol table has under it may be a local
+        // of the same name or another class's field (`this.userService.currentUser` beside
+        // `this.currentUser`)
+        case List(i: Identifier, _) if isTypedReceiverTemporary(a, i) => symbolTable.get(i)
         case List(c: Call, t: TypeRef) if c.name == Operators.fieldAccess =>
             assignTypesToCall(c, Set(t.typeFullName))
         case List(c: Call, v: Call)
@@ -294,6 +303,13 @@ private class RecoverForJavaScriptFile(
               returnTypesOf(v).filterNot(_.endsWith(XTypeRecovery.DummyReturnType))
             )
         case _ => super.visitAssignments(a)
+
+  private def isTypedReceiverTemporary(a: Assignment, i: Identifier): Boolean =
+      i.name.startsWith("_tmp") && i.typeFullName != Defines.Any && symbolTable.contains(i) &&
+          (a.astParent match
+            case fa: Call => fa.name == Operators.fieldAccess && a.argumentIndex == 1
+            case _        => false
+          )
 
   /** The classes whose member a field access names. `this.f` is a field of the class the method
     * belongs to (or of an ancestor that declares it), not of every class with a member called `f`:
