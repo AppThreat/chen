@@ -121,7 +121,7 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
                   (receiverAst, baseNode, memberCode)
               case _ =>
                   val tmpVarName  = generateUnusedVariableName(usedVariableNames, "_tmp")
-                  val baseTmpNode = tmpIdentifierNode(base, tmpVarName)
+                  val baseTmpNode = receiverTmpIdentifierNode(base, tmpVarName)
                   scope.addVariableReference(tmpVarName, baseTmpNode)
                   val baseAst = astForNodeWithFunctionReference(base.json)
                   val code    = s"(${codeOf(baseTmpNode)} = ${base.code})"

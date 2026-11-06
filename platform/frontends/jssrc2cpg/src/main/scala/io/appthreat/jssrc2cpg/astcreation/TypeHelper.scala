@@ -190,6 +190,53 @@ trait TypeHelper:
     tmpVariableTypes.update(name, spanTypeOrAny(node))
     identifierNode(node, name)
 
+  /** A reference to the temporary that holds the receiver of a member call (`a.b` in `a.b.c()`),
+    * typed by [[receiverType]] so that the call can be resolved through it.
+    */
+  protected def receiverTmpIdentifierNode(node: BabelNodeInfo, name: String) =
+    tmpVariableTypes.update(name, receiverType(node).getOrElse(Defines.Any))
+    identifierNode(node, name)
+
+  /** The type of the receiver of a member call. A span map types the receiver's own extent. A
+    * TypeScript 6 type map keys types by start offset only, and the start of `this.f` or `a.f` is
+    * shared by every longer expression that starts there, so the receiver's type is read where only
+    * its last name starts: the property of a member read (`this.isSubmitting` in
+    * `this.isSubmitting.set(v)`), or the callee's property of a call, as the call's return
+    * (`this.http.get(u)` in `this.http.get(u).pipe(...)`). Non-null assertions and parentheses are
+    * looked through. A type that names nothing (`any`, `unknown`, a primitive) is none.
+    */
+  protected def receiverType(node: BabelNodeInfo): Option[String] =
+    def unwrapped(n: BabelNodeInfo): BabelNodeInfo = n.node match
+      case TSNonNullExpression | ParenthesizedExpression =>
+          unwrapped(createBabelNodeInfo(n.json("expression")))
+      case _ => n
+    def propertyOf(member: BabelNodeInfo): Option[BabelNodeInfo] =
+        if safeBool(member.json, "computed").contains(true) then None
+        else Option(createBabelNodeInfo(member.json("property")))
+    def mapped(n: BabelNodeInfo, asReturn: Boolean): Option[String] =
+        pos(n.json).flatMap(parserResult.typeMap.get).map(normalizeNative).map(rawOfMapped).map {
+            raw =>
+                if asReturn then TypeNames.cleanReturn(raw, moduleOfImportType)
+                else TypeNames.clean(raw, moduleOfImportType)
+        }.filterNot(Defines.JsTypes.contains)
+    val fromSpans = spanType(node)
+    if fromSpans.isDefined then fromSpans
+    else
+      val base = unwrapped(node)
+      val tpe = base.node match
+        case MemberExpression | OptionalMemberExpression =>
+            propertyOf(base).flatMap(mapped(_, asReturn = false))
+        case CallExpression | OptionalCallExpression =>
+            val callee = unwrapped(createBabelNodeInfo(base.json("callee")))
+            callee.node match
+              case MemberExpression | OptionalMemberExpression =>
+                  propertyOf(callee).flatMap(mapped(_, asReturn = true))
+              case _ => None
+        case _ => None
+      tpe.foreach(t => registerType(t, t))
+      tpe
+  end receiverType
+
   /** The type of a call node built for `node`, when the call is the operation `node` stands for
     * (the call, the `await`, the sum), and not one of the helper operations a lowering adds with
     * the node of the expression it belongs to (`void 0` in a default value).

@@ -14,11 +14,12 @@ import io.appthreat.x2cpg.{
     ValidationMode,
     AstNodeBuilder as X2CpgAstNodeBuilder
 }
-import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, NodeTypes}
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, NodeTypes}
 import io.shiftleft.codepropertygraph.generated.nodes.NewBlock
 import io.shiftleft.codepropertygraph.generated.nodes.NewFile
 import io.shiftleft.codepropertygraph.generated.nodes.NewMethod
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
+import io.shiftleft.codepropertygraph.generated.nodes.NewTag
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeRef
 import org.slf4j.{Logger, LoggerFactory}
@@ -120,6 +121,7 @@ class AstCreator(
     rootTypeDecl.push(functionTypeAndTypeDeclAst.nodes.head.asInstanceOf[NewTypeDecl])
 
     methodAstParentStack.push(programMethod)
+    tagTypeReferences(programMethod, astNodeInfo)
 
     val blockNode = NewBlock().typeFullName(Defines.Any)
 
@@ -149,6 +151,49 @@ class AstCreator(
       )
     )
   end createProgramMethod
+
+  /** Every type reference in the file (`x: Router`, `Observable<Profile>`, `ng.Input`), as a
+    * `callsites-typeref` tag on the file's `:program` method holding the referenced name and where
+    * it is written. No node of the graph stands for a type position: a parameter, member, local or
+    * return keeps only the type name, without the position of the reference or the binding it
+    * names, so a consumer resolves the name through the file's imports itself. The name of a
+    * qualified reference is dotted (`ng.Input`); generic arguments, unions and arrays are walked.
+    */
+  private def tagTypeReferences(programMethod: NewMethod, file: BabelNodeInfo): Unit =
+    def nameOf(typeName: Value): Option[String] =
+        Try(typeName("type").str).toOption match
+          case Some("Identifier") => Try(typeName("name").str).toOption
+          case Some("TSQualifiedName") =>
+              for
+                left  <- nameOf(typeName("left"))
+                right <- Try(typeName("right")("name").str).toOption
+              yield s"$left.$right"
+          case _ => None
+    def walk(json: Value): Unit =
+        json match
+          case ujson.Arr(items) => items.foreach(walk)
+          case ujson.Obj(fields) =>
+              if fields.get("type").exists(_.strOpt.contains("TSTypeReference")) then
+                fields.get("typeName").foreach { typeName =>
+                    nameOf(typeName).foreach { name =>
+                      val info = createBabelNodeInfo(typeName)
+                      diffGraph.addEdge(
+                        programMethod,
+                        NewTag()
+                            .name("callsites-typeref")
+                            .value(ujson.write(ujson.Obj(
+                              "name"   -> name,
+                              "line"   -> info.lineNumber.map(_.intValue).getOrElse(-1),
+                              "column" -> info.columnNumber.map(_.intValue).getOrElse(-1)
+                            ))),
+                        EdgeTypes.TAGGED_BY
+                      )
+                    }
+                }
+              fields.foreach((key, value) => if key != "loc" then walk(value))
+          case _ =>
+    walk(file.json)
+  end tagTypeReferences
 
   protected def astForNode(json: Value): Ast =
     val nodeInfo = createBabelNodeInfo(json)
