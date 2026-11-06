@@ -58,6 +58,7 @@ import com.github.javaparser.ast.expr.{
     SwitchExpr,
     TextBlockLiteralExpr,
     ThisExpr,
+    TypeExpr,
     TypePatternExpr,
     UnaryExpr,
     VariableDeclarationExpr
@@ -2653,6 +2654,10 @@ class AstCreator(
     * exposes the referenced method for call-graph and route resolution. Resolution is best effort:
     * without the declaring type on the classpath the symbol solver cannot qualify the method, and
     * the node then carries the source form as its code with the identifier as the name hint.
+    *
+    * A constructor reference (`Foo::new`) the solver cannot bind still names its declaring type,
+    * which the scope expression states outright, so the full name is qualified by that type with
+    * the usual `<init>` member (atom#334); only the signature stays unresolved.
     */
   private def astForMethodReferenceExpr(expr: MethodReferenceExpr): Ast =
     val maybeResolved = tryWithSafeStackOverflow(expr.resolve()).toOption
@@ -2669,6 +2674,7 @@ class AstCreator(
             signature
           )
         }
+        .orElse(constructorScopeFullName(expr))
         .getOrElse(code)
     val typeFullName = maybeResolved
         .flatMap(resolved =>
@@ -2685,6 +2691,21 @@ class AstCreator(
           .columnNumber(column(expr))
     )
   end astForMethodReferenceExpr
+
+  /** The full name of a constructor reference's declaring type, when the reference is `Foo::new`
+    * and `Foo` resolves as a type: `pkg.Foo.<init>:<unresolvedSignature>(n)`. None for a plain
+    * method reference (the member would be a guess) and when the scope is not a type name.
+    */
+  private def constructorScopeFullName(expr: MethodReferenceExpr): Option[String] =
+      if expr.getIdentifier != "new" then None
+      else
+        expr.getScope match
+          case scopeExpr: TypeExpr =>
+              Try(typeInfoCalc.fullName(scopeExpr.getType)).toOption.flatten.map(qualified =>
+                  composeMethodFullName(qualified, "<init>", composeUnresolvedSignature(0))
+              )
+          case _ => None
+  end constructorScopeFullName
 
   /** A class or record declared inside a method body (Java 16 local classes/records).
     *
