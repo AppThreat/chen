@@ -284,8 +284,12 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           memberNode(nodeInfo, name, nodeInfo.code, typeFullName)
       case _ =>
           val name = nodeInfo.node match
-            // a string or number key names the member by its value (`"chunk" = v` is `chunk`)
-            case ClassProperty =>
+            // a string or number key names the member by its value (`"chunk" = v` is `chunk`);
+            // an auto-accessor (`accessor x = v`) is a property of the same shapes
+            // a private auto-accessor (`accessor #x = v`) is named like a private property
+            case ClassAccessorProperty if isPrivateNameKey(nodeInfo.json) =>
+                code(nodeInfo.json("key")("id"))
+            case ClassProperty | ClassAccessorProperty =>
                 safeStr(nodeInfo.json("key"), "value")
                     .orElse(Try(nodeInfo.json("key")("value").num).toOption.map(n =>
                         if n.isWhole then n.toLong.toString else n.toString
@@ -607,8 +611,24 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
     end if
   end astForClass
 
+  /** Whether a class member's key is a `#name` (`accessor #x = v`). */
+  private def isPrivateNameKey(json: Value): Boolean =
+      safeStr(json("key"), "type").contains("PrivateName")
+
   protected def addModifier(node: NewNode, json: Value): Unit =
       createBabelNodeInfo(json).node match
+        case ClassAccessorProperty if isPrivateNameKey(json) =>
+            diffGraph.addEdge(
+              node,
+              NewModifier().modifierType(ModifierTypes.PRIVATE),
+              EdgeTypes.AST
+            )
+            if safeBool(json, "static").contains(true) then
+              diffGraph.addEdge(
+                node,
+                NewModifier().modifierType(ModifierTypes.STATIC),
+                EdgeTypes.AST
+              )
         case ClassPrivateProperty =>
             diffGraph.addEdge(
               node,
