@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/SentinelIndexRuleTests.scala
+  s_9a6babc391f0fd::t_242d2936257ec9 1-148
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_9a6babc391f0fd::t_fc1e3f66495200 6870
+  s_9a6babc391f0fd::t_740b0bcbb65dac 5,80,2206-2347,6448-6453,6860-6869
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "74bfeaecb7ade1d0361c20e94f0f939434f75b28",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
