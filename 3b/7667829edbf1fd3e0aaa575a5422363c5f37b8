@@ -1,0 +1,21 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/AiLlmRecognizers.scala
+  s_9a6babc391f0fd::t_3b1c526de98dc8 151-152,156-170,174-178,183
+  s_9a6babc391f0fd::t_688492013f8f31 193,203,219
+  s_9a6babc391f0fd::t_c6bd90f745b17c 317-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3b7667829edbf1fd3e0aaa575a5422363c5f37b8",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
