@@ -1,0 +1,30 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_9a6babc391f0fd::t_216d2496bfcc0f 132-137,204-205,2288-2289,6523-6528,6828-6837
+  s_9a6babc391f0fd::t_9581ada42f6215 6838
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ReentrantApiRules.scala
+  s_9a6babc391f0fd::t_d226f3792d439b 121
+  s_9a6babc391f0fd::t_5e9084c566b976 141-143,150,155,178
+  s_9a6babc391f0fd::t_b85ce8e7b61641 1-5,7-120,122-140,144-149,151-154,156-177,179-279,283-289,291-300
+  s_9a6babc391f0fd::t_11f25b18ab4376 280-282,290
+  s_9a6babc391f0fd::t_74d33d433473c7 6
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReentrantApiRuleTests.scala
+  s_9a6babc391f0fd::t_209339862b1b20 1-14,16-124,131-133
+  s_9a6babc391f0fd::t_b3498e33164517 15
+  s_9a6babc391f0fd::t_918db274fcedaa 125-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1bc0efd23d9ba61fe57db95e5d73be358f3cf1e7",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
