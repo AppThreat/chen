@@ -1,0 +1,39 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstCreator.scala
+  s_c0804e5357f0c5::t_d7be0a1db2fb4a 17,22,124,155-197
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/AstForExpressionsCreator.scala
+  s_c0804e5357f0c5::t_a2063014996608 124
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/JavaScriptTypeRecovery.scala
+  s_c0804e5357f0c5::t_95ea7da23e748e 175-178,289-294,307-313
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular.golden
+  s_c0804e5357f0c5::t_262652f0054569 239-260
+platform/frontends/jssrc2cpg/src/test/resources/receiver-types/README.md
+  s_c0804e5357f0c5::t_8006c6ed34c6d5 1-13
+platform/frontends/jssrc2cpg/src/test/resources/receiver-types/receiver-types.ts
+  s_c0804e5357f0c5::t_7688d0ef13866d 1-32
+platform/frontends/jssrc2cpg/src/test/resources/receiver-types/receiver-types.ts.json
+  s_c0804e5357f0c5::t_4608058a8dc1d3 1-2241
+platform/frontends/jssrc2cpg/src/test/resources/receiver-types/receiver-types.ts.typemap
+  s_c0804e5357f0c5::t_34e1c88d126047 1
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/ReceiverTypeAstCreationPassTest.scala
+  s_c0804e5357f0c5::t_d7b51271f7b5f5 1-62
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/types/ReceiverTypeRecoveryTests.scala
+  s_c0804e5357f0c5::t_e9adacdcc38b3d 1-70
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/astcreation/TypeHelper.scala
+  s_c0804e5357f0c5::t_b7ba22d3a463cb 193-239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd4140962e5730be0bd63d5dbb6cd3c6defc2d1b",
+  "prompts": {},
+  "sessions": {
+    "s_c0804e5357f0c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75227701-fd30-4fc7-8eae-71a8df8f3a1c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
