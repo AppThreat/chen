@@ -1,0 +1,35 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 2215-2221,2223-2230,2246-2248,2272-2274,2286-2288,2299-2302,2312-2314,2325-2326,2334-2336,2358-2360,6437-6439,6483-6484,6523-6525
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 2951-2954
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ReentrantApiRules.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 10-11,13-21,24-29,31-34,68-70,83-84,88-89,103-104,111-113,128-130,138-140,172-173,176-187,190-191,198-200,203-204,207-212,221-222,225-226,235-236,242-244,251-260,276-279
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/AiLlmRecognizers.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 11-13,23-31,33-36,155-156,197-199,229-230,238-243,250-253,262-263,294-295
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/SentinelIndexRuleTests.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 17-22,27,117,120,123,126,129-130,133,136,139-145,148-155,162-167,170,173,176,179-187,194-199,202,205,208
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 946-949,954-960,984-990,994-997,1000,1005,1022,1241-1245,1247-1248,1250,1257,1272-1273,1277
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReentrantApiRuleTests.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 18-21,92-93,103-104,110,113,116,119,122,125-132
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/GuardPass.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 88-93,152,155,158,165-166,379-381,387-389
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonRecognizerUtil.scala
+  s_9a6babc391f0fd::t_6fc33dc7b66146 39-40,44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e05ff504bab4b4eea897c4693828c52763d7bfd7",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
