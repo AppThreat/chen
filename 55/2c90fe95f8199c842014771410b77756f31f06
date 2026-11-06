@@ -1,0 +1,30 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_9a6babc391f0fd::t_26b2c1dcc2eae5 1238-1243
+  s_9a6babc391f0fd::t_c9e8a013d607a5 930-931
+  s_9a6babc391f0fd::t_0918e96b821d9d 968-980,982-984,991-1023
+  s_9a6babc391f0fd::t_027b5c695cfe55 1230-1237,1244-1277
+  s_9a6babc391f0fd::t_27b4aa1e0d06b8 898-901,903-908,918-919,921,935,937-939,944,946-951,958
+  s_9a6babc391f0fd::t_0efc7031c0707d 843-858,862
+  s_9a6babc391f0fd::t_94a87c18898323 981,985-990
+  s_9a6babc391f0fd::t_ef5e63f9d2275f 896-897,902,909-917,920,922-929,940-943,945,952,962-967
+  s_9a6babc391f0fd::t_bacfbf60c1fe95 859-861
+  s_9a6babc391f0fd::t_ae114bdb874476 932-934,936,953-957,959-961
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/SandboxRenderTagTests.scala
+  s_9a6babc391f0fd::t_020a82d0350376 1-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "552c90fe95f8199c842014771410b77756f31f06",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
