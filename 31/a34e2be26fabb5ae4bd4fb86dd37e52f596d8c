@@ -1,0 +1,20 @@
+.github/workflows/containers.yml
+  h_0926447d100ad2 43
+.github/workflows/master.yml
+  h_0926447d100ad2 24
+.github/workflows/pr.yml
+  h_0926447d100ad2 26
+.github/workflows/release.yml
+  h_0926447d100ad2 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31a34e2be26fabb5ae4bd4fb86dd37e52f596d8c",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
