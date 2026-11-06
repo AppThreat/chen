@@ -1,0 +1,30 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonRecognizerUtil.scala
+  s_9a6babc391f0fd::t_ec3e39f77875a8 39-49
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/AiModelArtifactTests.scala
+  s_9a6babc391f0fd::t_fa392563854dc5 94
+  s_9a6babc391f0fd::t_98cf1d3763d2db 78-84
+  s_9a6babc391f0fd::t_71e558400ec10c 1-77,85-93,95-159
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/AiLlmRecognizers.scala
+  s_9a6babc391f0fd::t_55be5d95bfac2f 5,224
+  s_9a6babc391f0fd::t_164ec82a3e58e3 11-13,22-32,34-37,57-66,70-77,103-110,150-153,155-189,193,197-198,201-203,205-206,208-210,219,221-222,229-232,236,245,247-248,250,255,257,261,265-266,268-276,278-280,282-301,303-306
+  s_9a6babc391f0fd::t_4c004041135f04 192
+  s_9a6babc391f0fd::t_0cbdc8f5e35c0a 258-260,262-264,267,277,281
+  s_9a6babc391f0fd::t_dd737296ccc9fa 69,190-191,194-196,199-200,204,207,211-218,220,223,225-228,233-235,237-244,246,249,251-254,256,302
+  s_9a6babc391f0fd::t_5992c08ef7578c 67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09c4ed15f0c297a8c8a152fb5beae0ad5509d06b",
+  "prompts": {},
+  "sessions": {
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
