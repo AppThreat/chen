@@ -54,6 +54,10 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     def add(node: StoredNode, tag: String, value: String): Unit =
         bounds.getOrElseUpdate(node, mutable.LinkedHashSet.empty) += ((tag, value))
 
+    // the comparisons whose only consequence is an assert call, tagged before the bounds are
+    // read so the bounds reader can skip them (their ids also decide the skip inline)
+    val debugOnlyIds = tagDebugOnlyComparisons(add)
+
     val sites = OverlayFacts.memoryArgumentSites(atom)
     val argsByCall = sites.groupBy { case (call, _, _) => call }
         .map { case (call, rows) => call -> rows.map { case (_, arg, _) => arg }.distinct }
@@ -67,8 +71,8 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
         .l
         .flatMap(c => c.argumentOption(2).map(arg => (c, List(arg))))
 
-    guardBounds(argsByCall.toList, add)
-    guardBounds(indexEntries, add, controllerOf = statementRootOf)
+    guardBounds(argsByCall.toList, add, debugOnlyIds)
+    guardBounds(indexEntries, add, debugOnlyIds, controllerOf = statementRootOf)
     clampBounds(argNodeIds, add)
 
     OverlayFacts.emitTags(
@@ -79,13 +83,96 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
     )
   end run
 
+  /** The comparisons whose only consequence is an assert, tagged `guard-debug-only`.
+    *
+    * Three spellings: the bare unresolved call (`assert(i >= 0)` keeps the comparison as the call's
+    * argument), the macro expanded into a ternary (`(i >= 0) ? (void)0 : __assert_fail(...)`), and
+    * the macro expanded into an `if` (`if (!(i >= 0)) __assert_fail(...)`). An expansion counts
+    * only when the assert call is the whole of its branch and the other branch does nothing: `if (i
+    * < 0) { assert(0); return 0; }` is a real guard that also asserts, and an assert nested inside
+    * a guard says nothing about the guard.
+    */
+  private def tagDebugOnlyComparisons(
+    add: (StoredNode, String, String) => Unit
+  ): Set[Long] =
+    val tagged = mutable.LinkedHashSet.empty[Long]
+    def tagComparison(cmp: Call): Unit =
+        if comparisonOps.contains(cmp.name) && tagged.add(cmp.id()) then
+          add(cmp, TagDebugOnly, "")
+    def tagCondition(condition: Option[Expression]): Unit =
+        condition.collect { case cond: Call => cond }.foreach { cond =>
+            conjuncts(cond, true).getOrElse(Nil).foreach { case (cmp, _) => tagComparison(cmp) }
+        }
+    atom.call
+        .filter(isAssertFamilyCall)
+        .l
+        .foreach { assertCall =>
+          assertCall.argumentOption(1).collect { case cmp: Call => cmp }.foreach(tagComparison)
+          enclosingExpansion(assertCall).foreach(c => tagCondition(Some(c)))
+        }
+    tagged.toSet
+  end tagDebugOnlyComparisons
+
+  /** The condition of the ternary or `if` an assert macro expanded into: the nearest enclosing
+    * conditional whose one branch is nothing but the assert call and whose other branch is empty or
+    * `(void)0`.
+    */
+  private def enclosingExpansion(assertCall: Call): Option[Expression] =
+    def onlyAssert(node: AstNode): Boolean = node match
+      case c: Call if c.id == assertCall.id => true
+      case c: Call if c.name == "<operator>.cast" =>
+          c.argument.l.filterNot(_.isInstanceOf[TypeRef]).lastOption.exists(onlyAssert)
+      case b: Block =>
+          b.astChildren.filterNot(_.isInstanceOf[Local]).l match
+            case List(only) => onlyAssert(only)
+            case _          => false
+      case _ => false
+    def doesNothing(node: Option[AstNode]): Boolean = node match
+      case None => true
+      case Some(c: Call) if c.name == "<operator>.cast" =>
+          c.argument.l.filterNot(_.isInstanceOf[TypeRef]).lastOption
+              .forall(a => IndexRange.literal(a).isDefined)
+      case Some(b: Block)   => b.astChildren.filterNot(_.isInstanceOf[Local]).isEmpty
+      case Some(l: Literal) => true
+      case _                => false
+    val ancestors = Iterator
+        .iterate(assertCall._astIn.nextOption())(_.flatMap(_._astIn.nextOption()))
+        .take(4)
+        .flatten
+    val enclosing = ancestors
+        .collectFirst {
+            case c: Call if c.name == "<operator>.conditional"           => c
+            case cs: ControlStructure if cs.controlStructureType == "IF" => cs
+        }
+    enclosing match
+      case Some(c: Call) =>
+          val branches = (c.argumentOption(2), c.argumentOption(3))
+          val aborting = branches match
+            case (Some(t), e) if onlyAssert(t) && doesNothing(e) => true
+            case (t, Some(e)) if onlyAssert(e) && doesNothing(t) => true
+            case _                                               => false
+          Option.when(aborting)(c.argumentOption(1)).flatten
+      case Some(cs: ControlStructure) =>
+          val thenBranch = cs.astChildren.order(2).headOption
+          val elseBranch = cs.astChildren.order(3).headOption.map {
+              case e: ControlStructure => e.astChildren.headOption.getOrElse(e)
+              case other               => other
+          }
+          Option.when(thenBranch.exists(onlyAssert) && doesNothing(elseBranch))(
+            cs.condition.headOption
+          ).flatten
+      case _ => None
+  end enclosingExpansion
+
   /** Facts from comparisons that control memory operations. `controllerOf` decides which node
     * carries the control relationship - the memory call itself, or (for index accesses) the
-    * statement the access is nested in.
+    * statement the access is nested in. Comparisons tagged `guard-debug-only` (an assert's check)
+    * establish nothing here: a release build compiles them out.
     */
   private def guardBounds(
     entries: List[(Call, List[Expression])],
     add: (StoredNode, String, String) => Unit,
+    debugOnlyIds: Set[Long],
     controllerOf: Call => CfgNode = identity
   ): Unit =
       entries.foreach { case (call, args) =>
@@ -98,7 +185,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
           }.toMap
           guardingControllers(controllerOf(call)).foreach { controller =>
               conjunctsAt(controller, call).foreach {
-                  case (cmp, cmpHolds) =>
+                  case (cmp, cmpHolds) if !debugOnlyIds.contains(cmp.id()) =>
                       directionalFacts(cmp, cmpHolds).foreach { case (bounded, above, bound) =>
                           // the value tested must be the value used: `while (n < 4) { n =
                           // read(); a[n]; }` tests an older n
@@ -114,6 +201,7 @@ class GuardPass(atom: Cpg, externalConfig: Option[String] = None) extends CpgPas
                                 extentValueOf(bound).foreach(ev => add(arg, TagByExtent, ev))
                               }
                       }
+                  case _ => () // a debug-only assert's check establishes nothing here
               }
           }
       }
@@ -291,6 +379,34 @@ object GuardPass:
   final val TagAbove    = "bounded-above"
   final val TagBelow    = "bounded-below"
   final val TagByExtent = "bounded-by-extent"
+
+  /** The comparison an assert spells, tagged on the comparison node: `assert` is not a guard in a
+    * release build (NDEBUG compiles the check out), so the bounds reader skips it and the finding
+    * rules can say an index's only lower bound was one of these.
+    */
+  final val TagDebugOnly = "guard-debug-only"
+
+  /** The assert macros and functions, spelled across platforms: the C library's
+    * `assert`/`__assert_fail`/`__assert_rtn`/`__assert2`, the Windows `_assert`/`_wassert`,
+    * CPython's `_PyObject_ASSERT*` family, and the Chromium/GTK `DCHECK*`/`g_assert*` families. A
+    * call whose name is one of these (or starts with one of the prefix families) aborts on a failed
+    * check and is the only consequence its comparison has.
+    */
+  private[taggers] val AssertFamilyNames = Set(
+    "assert",
+    "__assert_fail",
+    "__assert_rtn",
+    "__assert2",
+    "_assert",
+    "_wassert",
+    "_PyObject_ASSERT",
+    "_PyObject_ASSERT_WITH_MSG",
+    "_PyObject_ASSERT_FAILED_MSG"
+  )
+
+  private[taggers] def isAssertFamilyCall(c: Call): Boolean =
+      AssertFamilyNames.contains(c.name) || c.name.startsWith("DCHECK") ||
+          c.name.startsWith("g_assert")
 
   /** The pure comparison semantics, shared with the rules: what a boolean expression establishes,
     * which side of a comparison it bounds, and whether a condition holds at a point. They read
