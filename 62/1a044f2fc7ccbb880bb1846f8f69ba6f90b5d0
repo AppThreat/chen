@@ -1,0 +1,42 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonRecognizerUtil.scala
+  s_4a22fa2e453d92::t_8bdc91f2eade9f 121,125-147
+  s_4a22fa2e453d92::t_a0e964f6b6861f 122-124
+  s_9a6babc391f0fd::t_6fc33dc7b66146 40-41,45-47
+  s_9a6babc391f0fd::t_ec3e39f77875a8 42-44,48-50
+  s_4a22fa2e453d92::t_388e7ee1f27e7e 7
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/SandboxRenderTagger.scala
+  s_4a22fa2e453d92::t_33fa982284225e 4,12,14-28,31-40,42-49,53-104,106-109,111-143
+  s_4a22fa2e453d92::t_c11e10db9f5050 5-11,29-30,50-52,105,110
+  s_4a22fa2e453d92::t_a97fb45d28a960 1-3,13,41
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_4a22fa2e453d92::t_73e94e8afa9311 1186
+  s_4a22fa2e453d92::t_a0d31eb00d73a2 1028-1033,1185
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/SandboxRenderTagTests.scala
+  s_9a6babc391f0fd::t_641b9f53aaf9ce 134-142
+  s_9a6babc391f0fd::t_020a82d0350376 1-133,143-154,156-164,166-192,195,198-214
+  s_4a22fa2e453d92::t_88a7b12168ef8d 155,165,193-194,196-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "621a044f2fc7ccbb880bb1846f8f69ba6f90b5d0",
+  "prompts": {},
+  "sessions": {
+    "s_4a22fa2e453d92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36064b4e-783b-41b1-ac9c-e4c7b722d407",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
