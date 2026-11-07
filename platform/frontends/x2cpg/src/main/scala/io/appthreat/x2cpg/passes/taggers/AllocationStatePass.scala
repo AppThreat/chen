@@ -2948,15 +2948,17 @@ object AllocationStatePass:
             m.argument.l.exists(_.tag.name("mem-.*").nonEmpty)
     )
 
-  /** The C library's functions that do not return, for code whose headers are not available. */
+  /** The C library's functions that do not return, for code whose headers are not available. The
+    * assert family's abort calls are deliberately absent: a release build compiles the assert's
+    * check out and falls through it, so a path that reaches `__assert_fail` in the sources
+    * continues in the binary the analysis is describing.
+    */
   private val NoReturnFunctions = Set(
     "abort",
     "exit",
     "_exit",
     "_Exit",
     "quick_exit",
-    "__assert_fail",
-    "__assert_rtn",
     "__builtin_trap",
     "__builtin_unreachable",
     "longjmp",

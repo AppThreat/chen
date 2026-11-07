@@ -2,7 +2,7 @@ package io.appthreat.x2cpg.passes.taggers
 
 import io.appthreat.x2cpg.Defines
 import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.DispatchTypes
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.passes.CpgPass
@@ -77,6 +77,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     ruleUnboundedCopy(argsByCall, record)
     ruleSizeParameterContract(argsByCall, record)
     ruleIndexBounds(record)
+    val debugGuarded = ruleSentinelIndex(record)
     counterIndexedArray(record)
     sourceOverread(record)
     pairedAdvanceWalk(record)
@@ -128,6 +129,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     lowConfidence ++= ContainerInvalidationRules
         .containerInvalidation(atom, record)
         .map(n => (n, "low", RuleContainerInvalidation))
+    // MS-INVAL-002 reports at low when only a reference decrement sits between the read and the
+    // use, and at medium when a call into Python code does
+    val reentrantSites    = ReentrantApiRules.reentrantSites(atom)
+    val reentrantFindings = ReentrantApiRules.reentrantInvalidation(atom, reentrantSites, record)
+    mediumConfidence ++= reentrantFindings.filter(_.medium)
+        .map(f => (f.use, "medium", RuleReentrantInvalidation))
 
     // MS-ALLOC-009 (CWE-680) and MS-INT-001 (CWE-190) ask one question of an allocation size
     // computed by attacker arithmetic; most ALLOC-009 findings would otherwise share an INT-001
@@ -193,7 +200,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           } ++
           heuristicFindings(findings).map { case (node, rule) =>
               (node, TagConfidence, s"$rule=low")
-          }
+          } ++
+          debugGuarded.map(node => (node: StoredNode, TagDebugGuard, "1")) ++
+          reentrantSites.map(c => (c: StoredNode, ReentrantApiRules.TagReentrant, "1")) ++
+          reentrantFindings.map(f =>
+              (
+                f.use: StoredNode,
+                TagReentrantCall,
+                s"${f.between.code}@${f.between.lineNumber.map(_.toString).getOrElse("")}"
+              )
+          )
     )
   end run
 
@@ -2201,6 +2217,172 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     }
     pointerWalkWraparound(record)
   end ruleIndexBounds
+
+  /** MS-BOUND-011 (CWE-129; the missing return-value check behind the shape is CWE-253): a
+    * subscript whose index is a lookup's not-found sentinel - a defined function whose return set
+    * contains a negative constant (`tuple_index`-style helpers report -1 when the element is
+    * absent), or an expression that takes a negative constant on one of its paths (`c ? k : -1`) -
+    * with no dominating guard bounding the index below. A negative index from a lookup is wrong
+    * regardless of the array's size, so the arm needs no extent fact: `unknown` qualifies. A PLAIN
+    * negative constant is not this shape: whether it lands out of bounds is the definite arms'
+    * question, and a base pointing into its object with room to spare makes `p[-1]` legal.
+    *
+    * The stand-downs are the checks that DO bound the index below: `bounded-below` from GuardPass
+    * (an early-exit `if (i < 0) return ...;` or a `if (i >= 0) { use }` guard), a short-circuit
+    * bound in the access's own expression, a by-construction non-negative range, an equality that
+    * rules the sentinel value out (`if (i == -1) ...` failing at the use, or `if (i != -1) { use }`
+    * holding), and a cast to an unsigned type that a guard bounds above (the cast sends every
+    * negative past the bound, so the bound rejects it). The rule reports once per (method, index
+    * variable) at the first use: the missing check is one fix however many accesses share the
+    * index.
+    */
+  private def ruleSentinelIndex(record: (StoredNode, String) => Unit): Set[StoredNode] =
+    val sentinelFirst = mutable.LinkedHashMap.empty[(Long, String), Expression]
+    atom.call
+        .name("<operator>.indexAccess|<operator>.indirectIndexAccess")
+        .l
+        .foreach { access =>
+          for
+            idx  <- access.argumentOption(2)
+            base <- access.argumentOption(1)
+          do
+            // `&a[i]` names an address before the object only through the same subscript the
+            // definite arms stand down for; the index's own value decides here either way
+            val addressedOnly = access._astIn.collectFirst { case c: Call => c }
+                .exists(_.name == "<operator>.addressOf")
+            val range        = ranges.of(idx)
+            val inExpression = shortCircuitBounds(access, idx)
+            val boundedBelow = idx.tag.name.l.contains(GuardPass.TagBelow) ||
+                inExpression._2 || range.exists(_.nonNegative)
+            if !addressedOnly && !constantlyDead(access) && !boundedBelow &&
+              !sentinelRuledOutByEquality(access, idx) &&
+              !sentinelRuledOutByUnsignedCast(access, idx)
+            then
+              if sentinelOrigin(idx) then
+                val key =
+                    (idx.method.id, castUnwrappingKey(idx).getOrElse(s"n:${idx.id}"))
+                val line = idx.lineNumber.map(_.toInt).getOrElse(Int.MaxValue)
+                sentinelFirst.get(key) match
+                  case Some(prev) if prev.lineNumber.map(_.toInt).getOrElse(Int.MaxValue) <= line =>
+                  case _ => sentinelFirst(key) = idx
+          end for
+        }
+    val debugGuarded = mutable.LinkedHashSet.empty[StoredNode]
+    sentinelFirst.values.foreach { idx =>
+      record(idx, RuleSentinelIndex)
+      if indexBoundedOnlyByDebugGuard(idx.method, idx) then debugGuarded += idx
+    }
+    debugGuarded.toSet
+  end ruleSentinelIndex
+
+  /** The finding's index was checked only by a debug-only assert: a comparison tagged
+    * `guard-debug-only` that would have bounded it below had the comparison been a release-build
+    * guard. The renderer names this in the finding's message, because the assert the author wrote
+    * looks like the missing check.
+    */
+  private def indexBoundedOnlyByDebugGuard(method: Method, idx: Expression): Boolean =
+      castUnwrappingKey(idx).exists { key =>
+          method.ast.collectAll[Call].exists { cmp =>
+              cmp.tag.name(GuardPass.TagDebugOnly).nonEmpty &&
+              GuardPass.directionalFacts(cmp, true).exists { case (bounded, isAbove, _) =>
+                  !isAbove && castUnwrappingKey(bounded).contains(key)
+              }
+          }
+      }
+
+  /** Can the index expression hold a lookup's negative sentinel? Its own value (a conditional with
+    * a negative-constant branch, a negative constant), or a definition of it whose right side calls
+    * a defined function with a `return -1;` path or evaluates the same way.
+    */
+  private def sentinelOrigin(idx: Expression): Boolean =
+      negativeConstantOf(idx) || reachingDefsIn(idx).exists { d =>
+          assignmentRhsOf(d).exists {
+              case rhs: Call if !rhs.name.startsWith("<operator") =>
+                  definedCalleeOf(rhs).exists(returnsNegativeConstant) || negativeConstantOf(rhs)
+              case rhs => negativeConstantOf(rhs)
+          }
+      }
+
+  /** A negative constant the expression can take on one of its paths: the conditional's branches.
+    * `c ? k : -1` can; `c ? k : j` (two variables) cannot. A PLAIN negative constant is not this
+    * shape - whether it lands out of bounds is the definite arms' question, and a base pointing
+    * into its object with room to spare makes `p[-1]` legal.
+    */
+  private def negativeConstantOf(e: Expression): Boolean = e match
+    case c: Call if c.name == "<operator>.conditional" =>
+        Seq(2, 3).flatMap(i => c.argumentOption(i).flatMap(IndexRange.literal)).exists(_ < 0)
+    case _ => false
+
+  /** The right side of the assignment the definition site `d` is the target of. */
+  private def assignmentRhsOf(d: StoredNode): Option[Expression] = d match
+    case i: Identifier =>
+        i._astIn.collectFirst {
+            case a: Call if a.name == Operators.assignment =>
+                a
+        }.filter(_.argumentOption(1).exists(_.id == i.id))
+            .flatMap(_.argumentOption(2).collect { case e: Expression => e })
+    case _ => None
+
+  /** The defined function a resolved call links to, when the graph names exactly one. */
+  private def definedCalleeOf(c: Call): Option[Method] =
+      c._callOut.collectAll[Method].l.distinct match
+        case List(m) if !m.isExternal => Some(m)
+        case _                        => None
+
+  /** Does some return of the method spell a negative constant - the `return -1;` path a lookup
+    * reports its not-found answer on.
+    */
+  private def returnsNegativeConstant(m: Method): Boolean =
+      negativeReturnCache.getOrElseUpdate(
+        m.id(),
+        m.ast.isReturn.l.exists { r =>
+            r.astChildren.collectAll[Expression].exists(e => IndexRange.literal(e).exists(_ < 0))
+        }
+      )
+  private val negativeReturnCache = mutable.HashMap.empty[Long, Boolean]
+
+  /** An equality that rules the sentinel value out at the use: `i == -1` failing there (the
+    * early-exit `if (i == -1) ...;`), or `i != -1` holding there (the guarding `if (i != -1) { use
+    * }`). A directional bound cannot express this, so the arm asks the dominating comparisons
+    * itself.
+    */
+  private def sentinelRuledOutByEquality(access: Call, idx: Expression): Boolean =
+      castUnwrappingKey(idx).exists { key =>
+          GuardPass.guardingControllers(GuardPass.statementRootOf(access)).exists(controller =>
+              GuardPass.conjunctsAt(controller, access).exists { case (cmp, holds) =>
+                  (cmp.argumentOption(1), cmp.argumentOption(2)) match
+                    case (Some(l), Some(r)) =>
+                        val indexSide = Seq(l, r).find(e => castUnwrappingKey(e).contains(key))
+                        val otherSide = Seq(l, r).find(e => !castUnwrappingKey(e).contains(key))
+                        val isEquality =
+                            cmp.name == Operators.equals || cmp.name == Operators.notEquals
+                        isEquality && indexSide.isDefined && otherSide
+                            .exists(e => IndexRange.literal(e).exists(_ < 0)) && {
+                            (cmp.name == Operators.equals && !holds) ||
+                            (cmp.name == Operators.notEquals && holds)
+                        }
+                    case _ => false
+              }
+          )
+      }
+
+  /** A guard that bounds a cast of the index to an unsigned type from above: the cast sends every
+    * negative value past any real count, so `(unsigned)i < n` holding (or its early-exit mirror) is
+    * a complete check for the sentinel.
+    */
+  private def sentinelRuledOutByUnsignedCast(access: Call, idx: Expression): Boolean =
+      castUnwrappingKey(idx).exists { key =>
+          GuardPass.guardingControllers(GuardPass.statementRootOf(access)).exists(controller =>
+              GuardPass.conjunctsAt(controller, access).exists { case (cmp, holds) =>
+                  GuardPass.directionalFacts(cmp, holds).exists { case (bounded, isAbove, _) =>
+                      isAbove && bounded.isInstanceOf[Call] &&
+                      bounded.asInstanceOf[Call].name == "<operator>.cast" &&
+                      signednessOf(bounded).contains(false) &&
+                      castUnwrappingKey(bounded).contains(key)
+                  }
+              }
+          )
+      }
 
   /** The pointer facts of a defined callee's returns, per return-expression call: which value
     * returns spell `base - k` against an allocation or a parameter the callee received - the shape
@@ -6263,6 +6445,17 @@ object MemorySafetyFindingPass:
     */
   final val TagConfidence = "ms-confidence"
 
+  /** Emitted on a finding whose index's only lower bound was a comparison tagged `guard-debug-only`
+    * (an assert's check): the renderer names it in the message, because the assert the author wrote
+    * looks like the check the finding says is missing.
+    */
+  final val TagDebugGuard = "ms-debug-guard"
+
+  /** Emitted on an MS-INVAL-002 finding: the call that can run Python code between the read and the
+    * use, as `code@line`, so the message can name it.
+    */
+  final val TagReentrantCall = "ms-reentrant-call"
+
   /** The confidence a finding of `ruleId` on `node` reports: its scoped override, else the rule's.
     */
   def confidenceOf(node: StoredNode, rule: MemorySafetyRule): String =
@@ -6302,6 +6495,12 @@ object MemorySafetyFindingPass:
   final val RuleBufferUnderwrite = "MS-BOUND-009"
   final val RuleBufferUnderread  = "MS-BOUND-010"
 
+  /** A subscript indexed by a lookup's not-found sentinel: a negative index is out of bounds
+    * whatever the array's size, so the arm needs no extent fact (CWE-129; the unchecked return
+    * value behind the shape is CWE-253).
+    */
+  final val RuleSentinelIndex = "MS-BOUND-011"
+
   /** The deallocation of the wrong thing, and the uncontrolled allocation size.
     */
   final val RuleNonHeapFree              = "MS-ALLOC-005"
@@ -6336,6 +6535,11 @@ object MemorySafetyFindingPass:
 
   /** A view into a container used after the container may have reallocated it (CWE-416). */
   final val RuleContainerInvalidation = "MS-INVAL-001"
+
+  /** A borrowed item or a size read from a mutable Python container, used after a call that can run
+    * Python code (CWE-416).
+    */
+  final val RuleReentrantInvalidation = "MS-INVAL-002"
 
   /** Time-of-check to time-of-use (CWE-367): a path checked then used by name, and the
     * shared-global check-then-act.
@@ -6637,6 +6841,16 @@ object MemorySafetyFindingPass:
           "kin invalidate every view into the container"
     ),
     MemorySafetyRule(
+      id = RuleReentrantInvalidation,
+      cwe = "CWE-416",
+      kind = "re-entrant-container-use",
+      severity = "medium",
+      confidence = "low",
+      message = "a borrowed item or a size read from a mutable Python container is used after a " +
+          "call that can run Python code, which can mutate the container and free the item or " +
+          "shrink it below the size; take a strong reference or re-read after the call"
+    ),
+    MemorySafetyRule(
       id = RuleToctou,
       cwe = "CWE-367",
       kind = "time-of-check-time-of-use",
@@ -6707,6 +6921,17 @@ object MemorySafetyFindingPass:
       confidence = "high",
       message = "a read at a known index below the start of the object the pointer views - the " +
           "pointer is an object and an offset, and the bytes before the object are not its"
+    ),
+    MemorySafetyRule(
+      id = RuleSentinelIndex,
+      cwe = "CWE-129",
+      kind = "sentinel-index",
+      severity = "medium",
+      confidence = "medium",
+      message = "the index is a lookup's not-found sentinel or an expression that can evaluate " +
+          "to one (a defined function with a `return -1;` path, `c ? k : -1`), and no guard " +
+          "dominating the access bounds it below - a negative index is wrong whatever the " +
+          "array's size, and the unchecked return value that produced it is CWE-253"
     ),
     MemorySafetyRule(
       id = RuleDivideByZero,
