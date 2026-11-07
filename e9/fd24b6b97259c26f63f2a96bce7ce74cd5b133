@@ -1,0 +1,47 @@
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/SandboxRenderPrecisionTests.scala
+  s_4a22fa2e453d92::t_7b22382a030e3e 64-66,74
+  s_4a22fa2e453d92::t_a8cd7a15ae3ef2 1-63,67-73,75,88-100
+  s_4a22fa2e453d92::t_6e7290f40844ac 76-87
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/AiLlmRecognizers.scala
+  s_9a6babc391f0fd::t_dd737296ccc9fa 68,194-195,198,201,209,212,216-223,225,228,230-233,238-240,242-243,251,254,261
+  s_9a6babc391f0fd::t_3b1c526de98dc8 151-152,159-163,168
+  s_9a6babc391f0fd::t_164ec82a3e58e3 22,56-65,69-76,102-109,149-150,153,155,158,164-167,169-177,179-181,183-187,189-192,197,202,206-208,210-211,213-215,224,226-227,234,237,241,250,252-253,255,260,262,266,270-271,273-281,287,291,293-294,304-306,308
+  s_4a22fa2e453d92::t_3778510ea03874 182,193,199-200,295-303,307,313
+  s_4a22fa2e453d92::t_9442701ef19d5b 283-286,288-290
+  s_9a6babc391f0fd::t_55be5d95bfac2f 5,229
+  s_9a6babc391f0fd::t_0cbdc8f5e35c0a 263-265,267,272,282,292
+  s_9a6babc391f0fd::t_c6bd90f745b17c 309-312
+  s_9a6babc391f0fd::t_4c004041135f04 196
+  s_9a6babc391f0fd::t_688492013f8f31 178,188,205
+  s_9a6babc391f0fd::t_6fc33dc7b66146 11-13,23-29,33-36,156-157,203-204,235-236,244-249,256-259,268-269
+  s_4a22fa2e453d92::t_6e7290f40844ac 30-31
+  s_4a22fa2e453d92::t_90d5472993c2ba 66-67
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/AiModelArtifactTests.scala
+  s_9a6babc391f0fd::t_71e558400ec10c 1-77,85-93,95-159
+  s_9a6babc391f0fd::t_98cf1d3763d2db 78-84
+  s_9a6babc391f0fd::t_fa392563854dc5 94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e9fd24b6b97259c26f63f2a96bce7ce74cd5b133",
+  "prompts": {},
+  "sessions": {
+    "s_4a22fa2e453d92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "36064b4e-783b-41b1-ac9c-e4c7b722d407",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_9a6babc391f0fd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c0203311-ee3e-42c1-9dfe-cb1e0bdf1f94",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
