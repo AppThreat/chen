@@ -4,6 +4,7 @@ import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{
     Annotation,
     AnnotationParameterAssign,
+    Literal,
     Method,
     StoredNode
 }
@@ -35,6 +36,17 @@ object PythonRecognizerUtil:
   val AI_PROMPT_TAG: String  = "ai-prompt"
   val AI_INVOKE_TAG: String  = "ai-invoke"
   val AI_COMPOSE_TAG: String = "ai-compose"
+
+  /** Source: a model repository artefact entering the process - a hub download, a `from_pretrained`
+    * load, a read of a model's chat-template file.
+    */
+  val AI_MODEL_ARTIFACT_TAG: String = "ai-model-artifact"
+
+  /** Sink: template or expression source rendered inside the process. Written by EasyTagsPass for
+    * the Jinja and evaluator calls; the AI recognizers add the inference libraries that render a
+    * chat template internally, where no jinja2 call is visible.
+    */
+  val SANDBOX_RENDER_TAG: String = "sandbox-render"
 
   /** Cloud/object-storage semantics (boto3 et al.). */
   val SERVICE_INGRESS_TAG: String = "service-ingress"
@@ -105,6 +117,33 @@ object PythonRecognizerUtil:
   /** True when any of `roots` is imported. */
   def importsAnyOf(cpg: Cpg, roots: Set[String]): Boolean =
       importedRoots(cpg).exists(roots.contains)
+
+  /** The imported module and entity names per file. The frontend lowers each import to an `import`
+    * call in the file's module method, with the module and the imported names as literal arguments,
+    * so the file of the method holding the call is the file the import belongs to (the IMPORT nodes
+    * have no path back to their file).
+    */
+  def importedEntitiesByFile(cpg: Cpg): Map[String, Set[String]] =
+      cpg.call
+          .nameExact("import")
+          .l
+          .groupMapReduce(_.method.filename)(
+            _.argument.l.collect { case l: Literal => unquote(l.code) }.filter(_.nonEmpty).toSet
+          )(_ ++ _)
+
+  /** Whether the file imports one of `roots` or a module under one. */
+  def fileImports(
+    importsByFile: Map[String, Set[String]],
+    filename: String,
+    roots: Set[String]
+  ): Boolean =
+      importsByFile.getOrElse(filename, Set.empty).exists(e =>
+          roots.exists(r => e == r || e.startsWith(r + "."))
+      )
+
+  /** A Python string literal's text without its quotes. */
+  def unquote(s: String): String =
+      s.stripPrefix("\"").stripSuffix("\"").stripPrefix("'").stripSuffix("'")
 
   /** The positional (non-keyword) parameter assigns of a decorator, ordered, with the source text
     * of the value they carry. For route decorators the first of these is the route path.

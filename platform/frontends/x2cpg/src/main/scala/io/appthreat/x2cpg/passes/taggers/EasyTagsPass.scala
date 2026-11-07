@@ -1025,8 +1025,12 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       if sqlRegex.matches(methodFullName) then
         addTag("sql", call)
 
-      // The code-execution sink family.
-      if name == "eval" || name == "exec" ||
+      // The code-execution sink family. `eval`/`exec` are the builtins only: a method of the
+      // same name on an object (`model.eval()`, a cursor's `exec`) has a receiver and runs no
+      // source text.
+      val builtinEvalOrExec = (name == "eval" || name == "exec") &&
+          (methodFullName.startsWith("__builtin.") || call.argumentOption(0).isEmpty)
+      if builtinEvalOrExec ||
         codeExecutionFullNameRegex.matches(methodFullName) ||
         codeExecutionCodeRegex.matches(code)
       then
@@ -1177,6 +1181,8 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
       addTag("cli-source", c)
       c.callee(using NoResolve).foreach(m => addTag("cli-source", m))
     }
+
+    python.SandboxRenderTagger.tagCalls(atom, addTag)
 
     // Emit tags to dstGraph
     methodTags.foreach { case (tag, nodes) =>
