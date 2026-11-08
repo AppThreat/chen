@@ -26,6 +26,8 @@ object PythonRecognizers:
     ModelTaintRecognizer,
     // Request objects
     RequestObjectRecognizer,
+    // Forwarded-header values (client IP, host, scheme) and trusted-proxy configuration
+    ProxyHeaderRecognizer,
     // RPC and MCP
     GrpcRecognizer,
     McpRecognizer,

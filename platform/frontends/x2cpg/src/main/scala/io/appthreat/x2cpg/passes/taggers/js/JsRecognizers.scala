@@ -98,6 +98,9 @@ object JsRecognizers:
     NodeRecognizer,
     // NestJS controllers: endpoints declared by decorators
     NestRecognizer,
+    // Forwarded-header values (client IP, host, scheme) and trusted-proxy configuration of the
+    // Node server frameworks
+    ProxyHeaderRecognizer,
     AngularRecognizer,
     ReactRecognizer,
     VueRecognizer,
