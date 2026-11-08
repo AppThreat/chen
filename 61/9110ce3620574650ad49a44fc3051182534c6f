@@ -1,0 +1,35 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/ProxyHeaderRecognizerTest.scala
+  s_438dd722fb38b0::t_411ec9680b8d24 187-189,196,199,202
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPass.scala
+  s_438dd722fb38b0::t_7d968068a62457 167-172,189-193,195-196,198,201-205,211-214,216-219,234,241-249
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPassTests.scala
+  s_438dd722fb38b0::t_d5f3fbb120a047 320-322,331-333,335-336,372-387
+platform/frontends/ruby2atom/src/test/resources/ruby/forwarded_headers.rb
+  s_438dd722fb38b0::t_d9f6163164a7de 11
+platform/frontends/ruby2atom/src/test/resources/ruby/forwarded_headers.rb.json
+  s_438dd722fb38b0::t_30bd8e6d4524a4 1
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ForwardedHeaderTagsTests.scala
+  s_438dd722fb38b0::t_775fdc3dcc464a 37
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_438dd722fb38b0::t_a1558e3494ffbe 895-901,971-974,978,1505
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ForwardedHeaders.scala
+  s_438dd722fb38b0::t_444c4a3e535916 40-41
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ProxyHeaderRecognizer.scala
+  s_438dd722fb38b0::t_23b96c19383070 137-139,141-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "619110ce3620574650ad49a44fc3051182534c6f",
+  "prompts": {},
+  "sessions": {
+    "s_438dd722fb38b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bc495311-c8fa-4520-9bf5-f98438c84fff",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
