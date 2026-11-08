@@ -1,0 +1,81 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/ProxyHeaderRecognizers.scala
+  s_13ae8561aa2fb4::t_f8433f5d17a7d7 201,203-204,217-222
+  s_13ae8561aa2fb4::t_113109f896e08c 96,109,115,125,131,137-138,149-150,159
+  s_13ae8561aa2fb4::t_350790ca9a51a7 141-142,148
+  s_13ae8561aa2fb4::t_1d7f9f1f6fab6a 1-2,4-95,97-102,110-114,116-124,126-130,132-136,139-140,143-147,151-158,160-200,202,205-216,223
+  s_13ae8561aa2fb4::t_bf40140d6b928f 3
+  s_13ae8561aa2fb4::t_67ebba3a1689b5 103-108
+  s_13ae8561aa2fb4::t_8282071d2e6ed8 224
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_13ae8561aa2fb4::t_7295fe2ef84e4e 938-939,941
+  s_13ae8561aa2fb4::t_b29acdad4ade60 203-206
+  s_13ae8561aa2fb4::t_e02485ec30ffac 1506-1507
+  s_13ae8561aa2fb4::t_783455a9cc0f21 967-971,974-996
+  s_13ae8561aa2fb4::t_bc72da8b7a8bce 1480-1481,1484-1505,1508-1555
+  s_13ae8561aa2fb4::t_f6bed74be9b5eb 966,998-1000,1002,1004-1005
+  s_13ae8561aa2fb4::t_053163be2a2024 896-897,899-905,907-914,918-935,940,942-944
+  s_13ae8561aa2fb4::t_79e791f9c5492f 858-895,898,906,915-917,936-937,945-965,972-973,997,1001,1003,1006-1008,1576,1580
+  s_13ae8561aa2fb4::t_0165f77e25bc9f 207-212,853-855,1009-1010,1556-1575,1577-1579,1581-1582
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_13ae8561aa2fb4::t_5b7fb09c6edff4 101-103
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPass.scala
+  s_13ae8561aa2fb4::t_485e0219ef37fb 83-84
+  s_13ae8561aa2fb4::t_8f7b1c96ff37c6 160-179,184-187,189-249
+  s_13ae8561aa2fb4::t_145adccff5f7b4 180-183,188
+  s_13ae8561aa2fb4::t_c3c017ac3cc624 5
+  s_13ae8561aa2fb4::t_d452b9f884dbaf 250-252
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ForwardedHeaders.scala
+  s_13ae8561aa2fb4::t_2c57331ad305d4 1-91
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/python/PythonRecognizers.scala
+  s_13ae8561aa2fb4::t_2cd0ada1e2fb38 29-30
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/ProxyHeaderRecognizer.scala
+  s_13ae8561aa2fb4::t_acaccec2149f5a 112-113,115-118,120,126-127,129
+  s_13ae8561aa2fb4::t_630e0918507d9d 54-59,105-106,114,128,139-140,142,146
+  s_13ae8561aa2fb4::t_62761b9c483d41 172,174-181
+  s_13ae8561aa2fb4::t_641c5bbfe0a349 1-53,60-104,107-111,119,121-125,130-138,141,143-145,147-155,160-162,166-171,173,182
+  s_13ae8561aa2fb4::t_ff0e1b398dcc70 156-159,163-165
+  s_13ae8561aa2fb4::t_b5002d2c96aa9e 183-189
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/ProxyHeaderRecognizerTest.scala
+  s_13ae8561aa2fb4::t_56e24f60b51d10 112-118
+  s_13ae8561aa2fb4::t_67183f4a35a281 1-111,119-180
+  s_13ae8561aa2fb4::t_664692577d0721 181-186
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/PhpFrameworkTagsPassTests.scala
+  s_13ae8561aa2fb4::t_5151229a9d0b10 238-292,295-315,318,324,327,329,332,337-338,343
+  s_13ae8561aa2fb4::t_59e424d2be808e 293-294
+  s_13ae8561aa2fb4::t_c315ee357fab97 316-317,319-323,325-326,328,330-331,333-336,339-342,344-348
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/ProxyHeaderRecognizerTests.scala
+  s_13ae8561aa2fb4::t_d4c070dfc4d85e 172
+  s_13ae8561aa2fb4::t_c67c689ee1402e 1-171,173-175
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/ForwardedHeaderTagsTests.scala
+  s_13ae8561aa2fb4::t_c672a6a5f1ee28 1-73
+  s_13ae8561aa2fb4::t_e2d99ede5a956d 74-77
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/ForwardedHeaderTagsTest.scala
+  s_13ae8561aa2fb4::t_82b8f1ec683120 169,171,180-181,184-186,200-202
+  s_13ae8561aa2fb4::t_6bff9164dd328d 187-190
+  s_13ae8561aa2fb4::t_86d26b28364fd7 142-143
+  s_13ae8561aa2fb4::t_0435606b712734 1-139,145-164,167,170,172-179,182-183,191-195,199,205-206,208-210
+  s_13ae8561aa2fb4::t_24a8e1b0d0c71e 144
+  s_13ae8561aa2fb4::t_2986eb3b281aef 140-141,165-166,168,196-198,203-204,207,211
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/passes/PythonFrameworkRecognizerTests.scala
+  s_13ae8561aa2fb4::t_de9c5591924ca2 41
+platform/frontends/ruby2atom/src/test/resources/ruby/forwarded_headers.rb
+  s_13ae8561aa2fb4::t_fcb63e62c473ad 1-37
+platform/frontends/ruby2atom/src/test/resources/ruby/forwarded_headers.rb.json
+  s_13ae8561aa2fb4::t_1a92f83083482e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb9f8215b5ddb1b97658bab1ffeb1bd310b216cf",
+  "prompts": {},
+  "sessions": {
+    "s_13ae8561aa2fb4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_760b7916-e78c-4e1d-80f3-19f6ca82237d",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
