@@ -37,8 +37,8 @@ object ForwardedHeaders:
     */
   val TRUSTED_PROXY_HEADERS: String = "trusted-proxy-headers"
 
-  /** A direct read of a forwarded header by name. Value: the header, lower-cased as written
-    * (`x-forwarded-for`, or the CGI spelling `http_x_forwarded_for`).
+  /** A direct read of a forwarded header by name. Value: the header name, lower-cased, with the CGI
+    * spelling decoded (`HTTP_X_FORWARDED_FOR` gives `x-forwarded-for`).
     */
   val FORWARDED_HEADER_READ: String = "forwarded-header-read"
 
@@ -67,11 +67,6 @@ object ForwardedHeaders:
       val decoded = lower.stripPrefix("http_").replace('_', '-')
       Option.when(FORWARDED_HEADERS.contains(decoded))(decoded)
     else None
-
-  /** The CGI (WSGI/Rack/PHP `$_SERVER`) spelling of a canonical header name, e.g. `x-forwarded-for`
-    * -> `HTTP_X_FORWARDED_FOR`.
-    */
-  def cgiSpelling(header: String): String = "HTTP_" + header.toUpperCase.replace('-', '_')
 
   /** The header-family value for a bit-flag expression over Symfony/Laravel `HEADER_*` constants,
     * read from the expression's source text: `HEADER_FORWARDED` alone means the RFC 7239 header,

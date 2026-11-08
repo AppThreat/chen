@@ -184,16 +184,22 @@ class ProxyHeaderRecognizerTest extends DataFlowCodeToCpgSuite:
             |const app = fastify({ trustProxy: true });
             |const other = fastify({ logger: true });
             |const off = fastify({ trustProxy: false });
+            |const inline = require('fastify')({ trustProxy: '10.0.0.1' });
+            |const rateLimit = require('express-rate-limit');
+            |const limiter = rateLimit({ trustProxy: true });
             |""".stripMargin,
             "fastify.js"
           ))
 
           val configs = cpg.call.where(_.tag.nameExact("trusted-proxy-config")).l
           configs.map(c => c.tag.nameExact("trusted-proxy-config").value.head) shouldBe List(
+            "fastify",
             "fastify"
           )
+          configs.map(_.lineNumber.map(_.intValue).getOrElse(-1)).sorted shouldBe List(3, 6)
           val headers = cpg.call.where(_.tag.nameExact("trusted-proxy-headers")).l
           headers.map(c => c.tag.nameExact("trusted-proxy-headers").value.head) shouldBe List(
+            "x-forwarded",
             "x-forwarded"
           )
       }

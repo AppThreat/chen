@@ -96,15 +96,19 @@ class ForwardedHeaderTagsTest extends JavaSrcCode2CpgFixture:
 
   "ServletUriComponentsBuilder" should {
 
-      "tag fromCurrentRequest and fromCurrentContextPath as host-derived" in {
+      "tag the fromCurrent* factories as host-derived" in {
           val cpg = tagged(code(
             """
             |package com.example;
             |
+            |import org.springframework.web.util.ServletUriComponentsBuilder;
+            |
             |public class UriBuilder {
             |    public String build() {
-            |        return org.springframework.web.util.ServletUriComponentsBuilder
-            |            .fromCurrentRequest().toUriString();
+            |        return ServletUriComponentsBuilder.fromCurrentRequest().toUriString()
+            |            + ServletUriComponentsBuilder.fromCurrentRequestUri().toUriString()
+            |            + ServletUriComponentsBuilder.fromCurrentContextPath().toUriString()
+            |            + ServletUriComponentsBuilder.fromCurrentServletMapping().toUriString();
             |    }
             |}
             |""".stripMargin,
@@ -112,6 +116,9 @@ class ForwardedHeaderTagsTest extends JavaSrcCode2CpgFixture:
           ))
 
           proxyDerived(cpg, "fromCurrentRequest") shouldBe List("host")
+          proxyDerived(cpg, "fromCurrentRequestUri") shouldBe List("host")
+          proxyDerived(cpg, "fromCurrentContextPath") shouldBe List("host")
+          proxyDerived(cpg, "fromCurrentServletMapping") shouldBe List("host")
       }
   }
 
@@ -173,6 +180,32 @@ class ForwardedHeaderTagsTest extends JavaSrcCode2CpgFixture:
           // the unrelated constructor carries nothing
           cpg.call.nameExact("<init>").codeExact("new Object()")
               .tag.nameExact("trusted-proxy-config").l shouldBe empty
+      }
+
+      "tag an imported ForwardedHeaderFilter bean, and not one in remove-only mode" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import org.springframework.web.filter.ForwardedHeaderFilter;
+            |
+            |public class WebConfig {
+            |    public ForwardedHeaderFilter trusting() {
+            |        return new ForwardedHeaderFilter();
+            |    }
+            |    public ForwardedHeaderFilter stripping() {
+            |        ForwardedHeaderFilter filter = new ForwardedHeaderFilter();
+            |        filter.setRemoveOnly(true);
+            |        return filter;
+            |    }
+            |}
+            |""".stripMargin,
+            "WebConfig.java"
+          ))
+
+          val tagged_ =
+              cpg.call.nameExact("<init>").where(_.tag.nameExact("trusted-proxy-config")).l
+          tagged_.map(_.method.name) shouldBe List("trusting")
       }
 
       "tag Jetty's ForwardedRequestCustomizer and Reactor Netty's forwarded(true)" in {

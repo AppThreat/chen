@@ -34,6 +34,7 @@ class ForwardedHeaderTagsTests extends RubyCode2CpgFixture:
           proxyDerivedValues(cpg, "request.base_url") shouldBe List("host")
           proxyDerivedValues(cpg, "request.url") shouldBe List("host")
           proxyDerivedValues(cpg, "request.protocol") shouldBe List("scheme")
+          proxyDerivedValues(cpg, "request.scheme") shouldBe List("scheme")
           proxyDerivedValues(cpg, "request.ssl?") shouldBe List("scheme")
           // the method-call form lowers to a call whose receiver resolves, through the
           // frontend's temporary, to the same `self.request`

@@ -892,11 +892,13 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     * name, when it is the request parameter of the enclosing method - says so.
     */
   private val JAVA_PROXY_BARE_NAMES: Map[String, String] = Map(
-    "getRemoteAddr"          -> ForwardedHeaders.CLIENT_IP,
-    "getRemoteHost"          -> ForwardedHeaders.CLIENT_IP,
-    "getRequestURL"          -> ForwardedHeaders.HOST,
-    "fromCurrentRequest"     -> ForwardedHeaders.HOST,
-    "fromCurrentContextPath" -> ForwardedHeaders.HOST
+    "getRemoteAddr"             -> ForwardedHeaders.CLIENT_IP,
+    "getRemoteHost"             -> ForwardedHeaders.CLIENT_IP,
+    "getRequestURL"             -> ForwardedHeaders.HOST,
+    "fromCurrentRequest"        -> ForwardedHeaders.HOST,
+    "fromCurrentRequestUri"     -> ForwardedHeaders.HOST,
+    "fromCurrentContextPath"    -> ForwardedHeaders.HOST,
+    "fromCurrentServletMapping" -> ForwardedHeaders.HOST
   )
 
   private val JAVA_PROXY_RECEIVER_GATED_NAMES: Map[String, String] = Map(
@@ -966,9 +968,14 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // Forwarded first.
     val truthy: String => Boolean = code => code == "true" || code == "TRUE"
     val falsy: String => Boolean  = code => code == "false" || code == "FALSE"
+    // A filter put in remove-only mode (`filter.setRemoveOnly(true)` in the same method) strips
+    // the headers and ignores them, so its construction turns nothing on.
+    def removeOnlyIn(m: Method): Boolean =
+        m.call.nameExact("setRemoveOnly").argument.isLiteral.code.exists(truthy)
     atom.call
         .name("<init>")
         .where(_.code("(?s).*new\\s+([\\w.$]+\\.)*ForwardedHeaderFilter\\s*\\(.*"))
+        .filterNot(call => removeOnlyIn(call.method))
         .foreach { call =>
           storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_CONFIG, "spring", dstGraph)
           val argCode = call.argument.isLiteral.code.headOption.map(l =>
@@ -1495,8 +1502,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     "url"                -> ForwardedHeaders.HOST,
     "protocol"           -> ForwardedHeaders.SCHEME,
     "scheme"             -> ForwardedHeaders.SCHEME,
-    "ssl?"               -> ForwardedHeaders.SCHEME,
-    "ssl"                -> ForwardedHeaders.SCHEME
+    "ssl?"               -> ForwardedHeaders.SCHEME
   )
 
   private def isRubyRequestReceiver(code: String): Boolean =

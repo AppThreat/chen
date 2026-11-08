@@ -317,6 +317,9 @@ class PhpFrameworkTagsPassTests extends PhpCode2CpgFixture:
           |  $c = $_SERVER['HTTP_FORWARDED'];
           |  $d = $request->headers->get('Accept');
           |  $e = $request->headers->get($name);
+          |  $f = $request->header('X-Forwarded-Host');
+          |  $g = $request->server('HTTP_X_REAL_IP');
+          |  $h = $response->header('X-Forwarded-For');
           |  return $a;
           |}
           |""".stripMargin)
@@ -325,8 +328,12 @@ class PhpFrameworkTagsPassTests extends PhpCode2CpgFixture:
           reads.map(_.value).sorted shouldBe List(
             "forwarded",
             "x-forwarded-for",
-            "x-forwarded-proto"
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip"
           )
+          cpg.call.codeExact("$response->header('X-Forwarded-For')")
+              .tag.nameExact("forwarded-header-read").size shouldBe 0
       }
 
       "tag setTrustedProxies with the flag family it names" in {
@@ -361,6 +368,22 @@ class PhpFrameworkTagsPassTests extends PhpCode2CpgFixture:
           val configs = cpg.call.tag.nameExact("trusted-proxy-config").l
           configs.map(_.value).sorted shouldBe List("laravel", "laravel")
           cpg.call.tag.nameExact("trusted-proxy-headers").value.l shouldBe List("x-forwarded")
+      }
+
+      "tag Laravel 11's trustProxies() middleware configuration" in {
+          val cpg = code("""<?php
+          |use Illuminate\Foundation\Configuration\Middleware;
+          |use Illuminate\Http\Request;
+          |
+          |function configure(Middleware $middleware) {
+          |  $middleware->trustProxies(at: '*', headers: Request::HEADER_FORWARDED);
+          |}
+          |""".stripMargin)
+
+          cpg.call.nameExact("trustProxies").tag.nameExact("trusted-proxy-config").value.l shouldBe
+              List("laravel")
+          cpg.call.nameExact("trustProxies").tag.nameExact("trusted-proxy-headers").value.l shouldBe
+              List("forwarded")
       }
   }
 end PhpFrameworkTagsPassTests

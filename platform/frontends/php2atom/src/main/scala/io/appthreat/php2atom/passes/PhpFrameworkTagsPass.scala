@@ -164,10 +164,12 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
   // `io.appthreat.x2cpg.passes.taggers.ForwardedHeaders`.
   // --------------------------------------------------------------------------------------------
 
-  private val ProxyDerived        = "proxy-derived"
-  private val TrustedProxyConfig  = "trusted-proxy-config"
-  private val TrustedProxyHeaders = "trusted-proxy-headers"
-  private val ForwardedHeaderRead = "forwarded-header-read"
+  import ForwardedHeaders.{
+      FORWARDED_HEADER_READ as ForwardedHeaderRead,
+      PROXY_DERIVED as ProxyDerived,
+      TRUSTED_PROXY_CONFIG as TrustedProxyConfig,
+      TRUSTED_PROXY_HEADERS as TrustedProxyHeaders
+  }
 
   /** Accessors of the client IP, host and scheme as Symfony/Laravel resolve them. Laravel's Request
     * extends Symfony's, so `getClientIp`/`getHost`/`getScheme` cover both; `ip()`, `secure()` and
@@ -184,36 +186,37 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
 
   private def tagForwardedHeaders(dstGraph: DiffGraphBuilder): Unit =
     // (a) request accessors, gated on the request receiver (or Laravel's receiver-less `url()`).
-    val clientIps = Set("getClientIp", "getClientIps", "ip")
-    val hosts     = Set("getHost", "getSchemeAndHttpHost", "getUri", "url")
-    val schemes   = Set("getScheme", "isSecure", "secure")
+    val kinds: Map[String, String] =
+        Seq("getClientIp", "getClientIps", "ip").map(_ -> ForwardedHeaders.CLIENT_IP).toMap ++
+            Seq("getHost", "getSchemeAndHttpHost", "getUri", "url")
+                .map(_ -> ForwardedHeaders.HOST) ++
+            Seq("getScheme", "isSecure", "secure").map(_ -> ForwardedHeaders.SCHEME)
     atom.call
-        .filterNot(_.name.startsWith("<operator"))
-        .filter { call =>
-            (clientIps.contains(call.name) || hosts.contains(call.name) || schemes.contains(
-              call.name
-            )) &&
-            proxyDerivedKind(call)
-        }
+        .nameExact(kinds.keys.toSeq*)
+        .filter(proxyDerivedKind)
         .foreach { call =>
-          val kind =
-              if clientIps.contains(call.name) then "client-ip"
-              else if schemes.contains(call.name) then "scheme"
-              else "host"
-          Iterator(call).newTagNodePair(ProxyDerived, kind).store()(using dstGraph)
+            Iterator(call).newTagNodePair(ProxyDerived, kinds(call.name)).store()(using dstGraph)
         }
 
-    // (b) direct header reads. `$request->headers->get('X-Forwarded-For')` (and the `server`
-    // bag, which carries the CGI-spelled keys); only a literal name counts.
-    atom.call.name("get").foreach { call =>
-      val receiverCode = call.receiver.code.headOption.getOrElse("")
-      if receiverCode.endsWith("->headers") || receiverCode.endsWith("->server") then
+    // (b) direct header reads; only a literal name counts. Symfony's bags,
+    // `$request->headers->get('X-Forwarded-For')` and the `server` bag with the CGI-spelled keys,
+    // and Laravel's getters on the request itself, `$request->header('X-Forwarded-For')` and
+    // `$request->server('HTTP_X_FORWARDED_FOR')`.
+    def tagHeaderRead(call: Call): Unit =
         call.argument.isLiteral.headOption
             .flatMap(l => ForwardedHeaders.canonicalHeader(l.code))
             .foreach(header =>
                 Iterator(call).newTagNodePair(ForwardedHeaderRead, header).store()(using dstGraph)
             )
+    atom.call.nameExact("get").foreach { call =>
+      val receiverCode = call.receiver.code.headOption.getOrElse("")
+      if receiverCode.endsWith("->headers") || receiverCode.endsWith("->server") then
+        tagHeaderRead(call)
     }
+    atom.call
+        .nameExact("header", "server")
+        .filter(matchesReceiver(_, RequestReceiverPattern))
+        .foreach(tagHeaderRead)
     // `$_SERVER['HTTP_X_FORWARDED_FOR']`: an index access on the superglobal with a literal key.
     atom.call.name(Operators.indexAccess).foreach { access =>
       val base = access.argument.argumentIndex(1).isIdentifier.name.headOption
@@ -228,14 +231,22 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
     // (c) configuration. Symfony: Request::setTrustedProxies($proxies, $trustedHeaderSet). The
     // bit flags name the trusted family: HEADER_FORWARDED is RFC 7239, HEADER_X_FORWARDED_* the
     // X-Forwarded family, and both together all of them.
-    atom.call.name("setTrustedProxies").foreach { call =>
+    atom.call.nameExact("setTrustedProxies").foreach { call =>
       Iterator(call).newTagNodePair(TrustedProxyConfig, "symfony").store()(using dstGraph)
       val flags = call.argument.code.mkString(" ")
       ForwardedHeaders.headerFamilyFromFlags(flags).foreach { family =>
           Iterator(call).newTagNodePair(TrustedProxyHeaders, family).store()(using dstGraph)
       }
     }
-    // Laravel: the TrustProxies middleware's $proxies/$headers fields. The class-body property
+    // Laravel 11 and later: `$middleware->trustProxies(at: ..., headers: ...)` in
+    // bootstrap/app.php replaces the middleware class below.
+    atom.call.nameExact("trustProxies").foreach { call =>
+      Iterator(call).newTagNodePair(TrustedProxyConfig, "laravel").store()(using dstGraph)
+      ForwardedHeaders.headerFamilyFromFlags(call.argument.code.mkString(" ")).foreach { family =>
+          Iterator(call).newTagNodePair(TrustedProxyHeaders, family).store()(using dstGraph)
+      }
+    }
+    // Laravel 10 and earlier: the TrustProxies middleware's $proxies/$headers fields. The class-body property
     // initializers lower to `$this->proxies = ...` / `$this->headers = ...` assignment calls.
     atom.call.name(Operators.assignment).foreach { assign =>
       val target = assign.argument.argumentIndex(1).code.headOption.getOrElse("")

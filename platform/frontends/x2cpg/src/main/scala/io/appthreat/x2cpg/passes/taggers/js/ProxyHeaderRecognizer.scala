@@ -134,9 +134,15 @@ object ProxyHeaderRecognizer extends JsFrameworkRecognizer:
         case _ =>
     }
     // Fastify: the factory call given a `trustProxy` option - `fastify({ trustProxy: true })` or
-    // `require('fastify')({ trustProxy: ... })`. The object literal lowers to a block of property
+    // `require('fastify')({ trustProxy: ... })`. The callee must be the fastify module itself:
+    // other libraries take a `trustProxy` option too (express-rate-limit's `validate`), and that
+    // option configures them, not the server. The object literal lowers to a block of property
     // writes; a false literal turns it off.
-    ctx.cpg.call.filter(c => c.argument.isBlock.nonEmpty && serverFile(c)).foreach { call =>
+    def isFastifyFactory(c: Call): Boolean =
+        ctx.modules.moduleBindingsOf(c.method.filename, "fastify").contains(callName(c)) ||
+            c.receiver.isCall.nameExact("require").argument.isLiteral
+                .exists(lit => literalValue(lit).contains("fastify"))
+    ctx.cpg.call.filter(c => c.argument.isBlock.nonEmpty && isFastifyFactory(c)).foreach { call =>
         call.argument.isBlock.flatMap(b => objectProperties(b)).foreach { props =>
             props.get("trustProxy").foreach { value =>
               val literalCode = value match

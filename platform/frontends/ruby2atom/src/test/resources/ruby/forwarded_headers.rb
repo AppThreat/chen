@@ -8,6 +8,7 @@ class WidgetsController < ApplicationController
     base = request.base_url
     url = request.url
     proto = request.protocol
+    scheme = request.scheme
     secure = request.ssl?
     fwd = request.headers['X-Forwarded-For']
     raw_host = request.raw_host_with_port()
