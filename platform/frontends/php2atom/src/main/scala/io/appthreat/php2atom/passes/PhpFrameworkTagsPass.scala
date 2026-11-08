@@ -2,6 +2,7 @@ package io.appthreat.php2atom.passes
 
 import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics
 import io.appthreat.dataflowengineoss.semantics.PhpFrameworkSemantics.{Sinks, Sources, WordPress}
+import io.appthreat.x2cpg.passes.taggers.ForwardedHeaders
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{Languages, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.Call
@@ -79,6 +80,8 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
     sinks.iterator.newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
     sqlSinks.iterator.newTagNode(SQL).store()(using dstGraph)
 
+    tagForwardedHeaders(dstGraph)
+
   // --------------------------------------------------------------------------------------------
   // Sources
   // --------------------------------------------------------------------------------------------
@@ -154,4 +157,108 @@ class PhpFrameworkTagsPass(atom: Cpg) extends CpgPass(atom):
           (trimmed.startsWith("\"") && trimmed.endsWith("\"")))
     then trimmed.substring(1, trimmed.length - 1)
     else trimmed
+
+  // --------------------------------------------------------------------------------------------
+  // Forwarded-header values (client IP, host, scheme), trusted-proxy configuration and direct
+  // header reads. Vocabulary and header matching are shared with the other languages through
+  // `io.appthreat.x2cpg.passes.taggers.ForwardedHeaders`.
+  // --------------------------------------------------------------------------------------------
+
+  import ForwardedHeaders.{
+      FORWARDED_HEADER_READ as ForwardedHeaderRead,
+      PROXY_DERIVED as ProxyDerived,
+      TRUSTED_PROXY_CONFIG as TrustedProxyConfig,
+      TRUSTED_PROXY_HEADERS as TrustedProxyHeaders
+  }
+
+  /** Accessors of the client IP, host and scheme as Symfony/Laravel resolve them. Laravel's Request
+    * extends Symfony's, so `getClientIp`/`getHost`/`getScheme` cover both; `ip()`, `secure()` and
+    * `url()` are Laravel's own. The receiver gate is the request-shaped receiver of the source
+    * half: `$request` by naming convention (the `$request->ip()` of a controller), or the resolved
+    * `Request` class from the `use` statement. `url()` with no receiver and no arguments is
+    * Laravel's global helper.
+    */
+  private def proxyDerivedKind(call: Call): Boolean =
+      // Laravel's global helper `url()`: receiver-less and argument-less, it returns the current
+      // request's URL. With an argument it builds a URL for that path instead, from configuration.
+      (call.name == "url" && call.receiver.code.isEmpty && call.argument.l.isEmpty) ||
+          matchesReceiver(call, RequestReceiverPattern)
+
+  private def tagForwardedHeaders(dstGraph: DiffGraphBuilder): Unit =
+    // (a) request accessors, gated on the request receiver (or Laravel's receiver-less `url()`).
+    val kinds: Map[String, String] =
+        Seq("getClientIp", "getClientIps", "ip").map(_ -> ForwardedHeaders.CLIENT_IP).toMap ++
+            Seq("getHost", "getSchemeAndHttpHost", "getUri", "url")
+                .map(_ -> ForwardedHeaders.HOST) ++
+            Seq("getScheme", "isSecure", "secure").map(_ -> ForwardedHeaders.SCHEME)
+    atom.call
+        .nameExact(kinds.keys.toSeq*)
+        .filter(proxyDerivedKind)
+        .foreach { call =>
+            Iterator(call).newTagNodePair(ProxyDerived, kinds(call.name)).store()(using dstGraph)
+        }
+
+    // (b) direct header reads; only a literal name counts. Symfony's bags,
+    // `$request->headers->get('X-Forwarded-For')` and the `server` bag with the CGI-spelled keys,
+    // and Laravel's getters on the request itself, `$request->header('X-Forwarded-For')` and
+    // `$request->server('HTTP_X_FORWARDED_FOR')`.
+    def tagHeaderRead(call: Call): Unit =
+        call.argument.isLiteral.headOption
+            .flatMap(l => ForwardedHeaders.canonicalHeader(l.code))
+            .foreach(header =>
+                Iterator(call).newTagNodePair(ForwardedHeaderRead, header).store()(using dstGraph)
+            )
+    atom.call.nameExact("get").foreach { call =>
+      val receiverCode = call.receiver.code.headOption.getOrElse("")
+      if receiverCode.endsWith("->headers") || receiverCode.endsWith("->server") then
+        tagHeaderRead(call)
+    }
+    atom.call
+        .nameExact("header", "server")
+        .filter(matchesReceiver(_, RequestReceiverPattern))
+        .foreach(tagHeaderRead)
+    // `$_SERVER['HTTP_X_FORWARDED_FOR']`: an index access on the superglobal with a literal key.
+    atom.call.name(Operators.indexAccess).foreach { access =>
+      val base = access.argument.argumentIndex(1).isIdentifier.name.headOption
+      if base.contains("_SERVER") then
+        access.argument.isLiteral.headOption
+            .flatMap(l => ForwardedHeaders.canonicalHeader(l.code))
+            .foreach(header =>
+                Iterator(access).newTagNodePair(ForwardedHeaderRead, header).store()(using dstGraph)
+            )
+    }
+
+    // (c) configuration. Symfony: Request::setTrustedProxies($proxies, $trustedHeaderSet). The
+    // bit flags name the trusted family: HEADER_FORWARDED is RFC 7239, HEADER_X_FORWARDED_* the
+    // X-Forwarded family, and both together all of them.
+    atom.call.nameExact("setTrustedProxies").foreach { call =>
+      Iterator(call).newTagNodePair(TrustedProxyConfig, "symfony").store()(using dstGraph)
+      val flags = call.argument.code.mkString(" ")
+      ForwardedHeaders.headerFamilyFromFlags(flags).foreach { family =>
+          Iterator(call).newTagNodePair(TrustedProxyHeaders, family).store()(using dstGraph)
+      }
+    }
+    // Laravel 11 and later: `$middleware->trustProxies(at: ..., headers: ...)` in
+    // bootstrap/app.php replaces the middleware class below.
+    atom.call.nameExact("trustProxies").foreach { call =>
+      Iterator(call).newTagNodePair(TrustedProxyConfig, "laravel").store()(using dstGraph)
+      ForwardedHeaders.headerFamilyFromFlags(call.argument.code.mkString(" ")).foreach { family =>
+          Iterator(call).newTagNodePair(TrustedProxyHeaders, family).store()(using dstGraph)
+      }
+    }
+    // Laravel 10 and earlier: the TrustProxies middleware's $proxies/$headers fields. The class-body property
+    // initializers lower to `$this->proxies = ...` / `$this->headers = ...` assignment calls.
+    atom.call.name(Operators.assignment).foreach { assign =>
+      val target = assign.argument.argumentIndex(1).code.headOption.getOrElse("")
+      val value  = assign.argument.argumentIndex(2).code.headOption.getOrElse("")
+      // Some synthetic assignment nodes carry no method; those are never a class body.
+      val inTrustProxies = Option(assign.method).exists(_.fullName.contains("TrustProxies"))
+      if inTrustProxies && (target == "$this->proxies" || target == "$this->headers") then
+        Iterator(assign).newTagNodePair(TrustedProxyConfig, "laravel").store()(using dstGraph)
+        if target == "$this->headers" then
+          ForwardedHeaders.headerFamilyFromFlags(value).foreach { family =>
+              Iterator(assign).newTagNodePair(TrustedProxyHeaders, family).store()(using dstGraph)
+          }
+    }
+  end tagForwardedHeaders
 end PhpFrameworkTagsPass

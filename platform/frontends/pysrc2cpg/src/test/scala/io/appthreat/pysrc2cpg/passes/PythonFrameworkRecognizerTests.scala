@@ -38,7 +38,7 @@ class PythonFrameworkRecognizerTests extends PySrc2CpgFixture(withOssDataflow = 
             |""".stripMargin)
 
       PythonRecognizers.all.filter(_.applies(cpg)).map(_.name).sorted shouldBe
-          List("boto3", "flask", "grpc", "request-object")
+          List("boto3", "flask", "grpc", "proxy-headers", "request-object")
   }
 
   "flask route decorator yields an entrypoint, route metadata and parameter sources" in {

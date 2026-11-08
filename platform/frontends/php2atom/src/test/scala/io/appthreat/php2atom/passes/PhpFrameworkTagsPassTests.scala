@@ -235,4 +235,155 @@ class PhpFrameworkTagsPassTests extends PhpCode2CpgFixture:
           cpg.tag.name(FrameworkOutput).size shouldBe 0
       }
   }
+
+  // The pass runs as part of Php2Atom.createCpg, so the tags asserted here are the tags a real
+  // run produces.
+  private val accessors = """<?php
+        |use Symfony\Component\HttpFoundation\Request;
+        |
+        |function ip_action(Request $request) {
+        |  $ip = $request->getClientIp();
+        |  $ips = $request->getClientIps();
+        |  $laravelIp = $request->ip();
+        |  return $ip;
+        |}
+        |
+        |function host_action(Request $request) {
+        |  $host = $request->getHost();
+        |  $schemeHost = $request->getSchemeAndHttpHost();
+        |  $uri = $request->getUri();
+        |  $scheme = $request->getScheme();
+        |  $secure = $request->isSecure();
+        |  $laravelSecure = $request->secure();
+        |  return $host;
+        |}
+        |
+        |function twins($collection, $image) {
+        |  $all = $collection->all();
+        |  $ip = $collection->ip();
+        |  $host = $image->getHost();
+        |  return $all;
+        |}
+        |""".stripMargin
+
+  "forwarded header tags" should {
+
+      "tag the request's client-ip, host and scheme accessors" in {
+          val cpg = code(accessors)
+
+          def kind(callCode: String): List[String] =
+              cpg.call.codeExact(callCode).tag.nameExact("proxy-derived").value.l
+
+          kind("$request->getClientIp()") shouldBe List("client-ip")
+          kind("$request->getClientIps()") shouldBe List("client-ip")
+          kind("$request->ip()") shouldBe List("client-ip")
+          kind("$request->getHost()") shouldBe List("host")
+          kind("$request->getSchemeAndHttpHost()") shouldBe List("host")
+          kind("$request->getUri()") shouldBe List("host")
+          kind("$request->getScheme()") shouldBe List("scheme")
+          kind("$request->isSecure()") shouldBe List("scheme")
+          kind("$request->secure()") shouldBe List("scheme")
+      }
+
+      "tag Laravel's receiver-less url() helper, and not the argumented form" in {
+          val cpg = code("""<?php
+          |function current() {
+          |  return url();
+          |}
+          |
+          |function fixed() {
+          |  return url('/assets/app.css');
+          |}
+          |""".stripMargin)
+
+          cpg.call.codeExact("url()").tag.nameExact("proxy-derived").value.l shouldBe List("host")
+          cpg.call.codeExact("url('/assets/app.css')").tag.nameExact("proxy-derived").size shouldBe 0
+      }
+
+      "NOT tag the same calls on receivers that are not the request" in {
+          val cpg = code(accessors)
+
+          cpg.call.codeExact("$collection->ip()").tag.nameExact("proxy-derived").size shouldBe 0
+          cpg.call.codeExact("$image->getHost()").tag.nameExact("proxy-derived").size shouldBe 0
+      }
+
+      "tag header reads from the headers/server bags and the $_SERVER superglobal" in {
+          val cpg = code("""<?php
+          |use Symfony\Component\HttpFoundation\Request;
+          |
+          |function read(Request $request) {
+          |  $a = $request->headers->get('X-Forwarded-For');
+          |  $b = $request->server->get('HTTP_X_FORWARDED_PROTO');
+          |  $c = $_SERVER['HTTP_FORWARDED'];
+          |  $d = $request->headers->get('Accept');
+          |  $e = $request->headers->get($name);
+          |  $f = $request->header('X-Forwarded-Host');
+          |  $g = $request->server('HTTP_X_REAL_IP');
+          |  $h = $response->header('X-Forwarded-For');
+          |  return $a;
+          |}
+          |""".stripMargin)
+
+          val reads = cpg.call.tag.nameExact("forwarded-header-read").l
+          reads.map(_.value).sorted shouldBe List(
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip"
+          )
+          cpg.call.codeExact("$response->header('X-Forwarded-For')")
+              .tag.nameExact("forwarded-header-read").size shouldBe 0
+      }
+
+      "tag setTrustedProxies with the flag family it names" in {
+          val cpg = code("""<?php
+          |use Symfony\Component\HttpFoundation\Request;
+          |
+          |Request::setTrustedProxies(['10.0.0.1'], Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_HOST);
+          |Request::setTrustedProxies(['10.0.0.2'], Request::HEADER_FORWARDED);
+          |Request::setTrustedProxies(['10.0.0.3']);
+          |""".stripMargin)
+
+          cpg.call.name("setTrustedProxies").tag.nameExact("trusted-proxy-config").value.l shouldBe
+              List("symfony", "symfony", "symfony")
+          cpg.call.name("setTrustedProxies").tag.nameExact("trusted-proxy-headers").value.l.sorted shouldBe
+              List("forwarded", "x-forwarded")
+      }
+
+      "tag the TrustProxies middleware's proxies and headers fields" in {
+          val cpg = code("""<?php
+          |namespace App\Http\Middleware;
+          |
+          |use Illuminate\Http\Middleware\TrustProxies as Middleware;
+          |use Illuminate\Http\Request;
+          |
+          |class TrustProxies extends Middleware
+          |{
+          |    protected $proxies = '*';
+          |    protected $headers = Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_HOST;
+          |}
+          |""".stripMargin)
+
+          val configs = cpg.call.tag.nameExact("trusted-proxy-config").l
+          configs.map(_.value).sorted shouldBe List("laravel", "laravel")
+          cpg.call.tag.nameExact("trusted-proxy-headers").value.l shouldBe List("x-forwarded")
+      }
+
+      "tag Laravel 11's trustProxies() middleware configuration" in {
+          val cpg = code("""<?php
+          |use Illuminate\Foundation\Configuration\Middleware;
+          |use Illuminate\Http\Request;
+          |
+          |function configure(Middleware $middleware) {
+          |  $middleware->trustProxies(at: '*', headers: Request::HEADER_FORWARDED);
+          |}
+          |""".stripMargin)
+
+          cpg.call.nameExact("trustProxies").tag.nameExact("trusted-proxy-config").value.l shouldBe
+              List("laravel")
+          cpg.call.nameExact("trustProxies").tag.nameExact("trusted-proxy-headers").value.l shouldBe
+              List("forwarded")
+      }
+  }
 end PhpFrameworkTagsPassTests

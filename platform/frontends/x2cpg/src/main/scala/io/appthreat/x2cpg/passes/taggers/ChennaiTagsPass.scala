@@ -200,6 +200,16 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .newTagNode(tag)
           .store()(using dstGraph)
 
+  /** A key/value tag on one node, deduplicated through this pass's memo like [[storeTag]]. */
+  private def storeTagPair[T <: io.shiftleft.codepropertygraph.generated.nodes.StoredNode](
+    node: T,
+    tag: String,
+    value: String,
+    dstGraph: DiffGraphBuilder
+  ): Unit =
+      if emittedTags.add((node.id, s"$tag=$value")) then
+        Iterator(node).newTagNodePair(tag, value).store()(using dstGraph)
+
   private def language: String = atom.metaData.language.headOption.getOrElse("")
 
   /** The graph's import entities, materialised once. The Java recognisers consult imports ~10 times
@@ -840,7 +850,170 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
     // ---- Messaging listeners and SDK clients -----------------------------------------------
     tagJavaSdkBoundaries(dstGraph)
+
+    // ---- Forwarded-header values (client IP, host, scheme) --------------------------------
+    tagJavaForwardedHeaders(dstGraph)
   end tagJavaRoutes
+
+  // =============================================================================================
+  // Forwarded-header tagging (Java). The request values a client can choose through the Forwarded
+  // and X-Forwarded-* headers behind a passing proxy, the configuration that turns on that
+  // handling, and direct reads of the headers by name. Vocabulary and header matching are shared
+  // with the other languages through [[ForwardedHeaders]].
+  // =============================================================================================
+
+  /** Servlet and Spring request types, by type-name suffix: the receivers whose accessors return
+    * the request's client IP, host or scheme.
+    */
+  private val JAVA_REQUEST_TYPE_SUFFIXES =
+      Seq("HttpServletRequest", "ServletRequest", "ServerHttpRequest")
+
+  private def isRequestType(typeFullName: String): Boolean =
+      JAVA_REQUEST_TYPE_SUFFIXES.exists(typeFullName.endsWith)
+
+  /** The receiver type of a resolved call (`jakarta.servlet.http.HttpServletRequest.getRemoteAddr:
+    * ...` -> `jakarta.servlet.http.HttpServletRequest`).
+    */
+  private def receiverTypeOfResolvedCall(call: Call): Option[String] =
+    val decl = call.methodFullName.takeWhile(_ != ':')
+    val idx  = decl.lastIndexOf('.')
+    if idx > 0 then Some(decl.substring(0, idx)) else None
+
+  /** Accessors that return request data, split by how they are admitted.
+    *
+    * `bareNames` are servlet-only vocabulary (`getRemoteAddr` appears on no everyday class), so
+    * they match by call name alone the way `DefaultSemantics.flowsForLanguage` gates bare names on
+    * the JVM languages; `ServletUriComponentsBuilder.fromCurrentRequest` resolves through the
+    * Spring type when the import is known and falls back to its own distinctive name.
+    *
+    * `receiverGatedNames` (`getScheme`, `isSecure`, `getURI`, ...) also name methods of unrelated
+    * types (`URI.getScheme`), so they additionally require the receiver to be a request: a resolved
+    * methodFullName on a request type, or a receiver identifier whose recovered type - or whose
+    * name, when it is the request parameter of the enclosing method - says so.
+    */
+  private val JAVA_PROXY_BARE_NAMES: Map[String, String] = Map(
+    "getRemoteAddr"             -> ForwardedHeaders.CLIENT_IP,
+    "getRemoteHost"             -> ForwardedHeaders.CLIENT_IP,
+    "getRequestURL"             -> ForwardedHeaders.HOST,
+    "fromCurrentRequest"        -> ForwardedHeaders.HOST,
+    "fromCurrentRequestUri"     -> ForwardedHeaders.HOST,
+    "fromCurrentContextPath"    -> ForwardedHeaders.HOST,
+    "fromCurrentServletMapping" -> ForwardedHeaders.HOST
+  )
+
+  private val JAVA_PROXY_RECEIVER_GATED_NAMES: Map[String, String] = Map(
+    "getServerName"    -> ForwardedHeaders.HOST,
+    "getServerPort"    -> ForwardedHeaders.HOST,
+    "getRemoteAddress" -> ForwardedHeaders.CLIENT_IP,
+    "getURI"           -> ForwardedHeaders.HOST,
+    "getScheme"        -> ForwardedHeaders.SCHEME,
+    "isSecure"         -> ForwardedHeaders.SCHEME
+  )
+
+  private def tagJavaForwardedHeaders(dstGraph: DiffGraphBuilder): Unit =
+    // (a) request accessors: the client IP, host and scheme as the framework resolves them.
+    // The request-typed parameter names of each method, for the unresolved-receiver arm; one
+    // traversal, consulted per call by id lookup.
+    val requestParamNames: Map[Long, Set[String]] =
+        atom.method.parameter
+            .filter(p => p.typeFullName != null && isRequestType(p.typeFullName))
+            .l
+            .groupMap(_.method.id)(_.name)
+            .view.mapValues(_.toSet).toMap
+
+    val accessorNames =
+        (JAVA_PROXY_BARE_NAMES.keySet ++ JAVA_PROXY_RECEIVER_GATED_NAMES.keySet).mkString("|")
+    atom.call.name(accessorNames).foreach { call =>
+      def receiverIsRequest: Boolean =
+          receiverTypeOfResolvedCall(call).exists(isRequestType) || {
+              val receiver = call.receiver.isIdentifier.l
+              receiver.exists(r =>
+                  r.typeFullName != null && isRequestType(r.typeFullName) ||
+                      requestParamNames.getOrElse(call.method.id, Set.empty).contains(r.name)
+              )
+          }
+      val kind: Option[String] =
+          if JAVA_PROXY_BARE_NAMES.contains(call.name) then Some(JAVA_PROXY_BARE_NAMES(call.name))
+          else if JAVA_PROXY_RECEIVER_GATED_NAMES.contains(call.name) && receiverIsRequest then
+            Some(JAVA_PROXY_RECEIVER_GATED_NAMES(call.name))
+          else None
+      kind.foreach(k => storeTagPair(call, ForwardedHeaders.PROXY_DERIVED, k, dstGraph))
+    }
+
+    // (b) direct header reads: getHeader("X-Forwarded-For") and friends. Only a literal name is
+    // evidence; getHeader(name) with a variable reads anything and gets nothing.
+    atom.call
+        .name("getHeader|getHeaders")
+        .foreach { call =>
+            call.argument
+                .isLiteral
+                .headOption
+                .flatMap(lit => ForwardedHeaders.canonicalHeader(lit.code))
+                .foreach(header =>
+                    storeTagPair(
+                      call,
+                      ForwardedHeaders.FORWARDED_HEADER_READ,
+                      header,
+                      dstGraph
+                    )
+                )
+        }
+
+    // (c) configuration that turns on forwarded-header handling.
+    // Spring's ForwardedHeaderFilter and Jetty's ForwardedRequestCustomizer: `new X()` lowers to
+    // an `<init>` call (plus an alloc) whose code carries the type even where type inference
+    // leaves the methodFullName at java.lang.Object. Both process the Forwarded and the
+    // X-Forwarded-* family; Spring's since-6.1.29 constructor argument selects one family (true =
+    // Forwarded, false = X-Forwarded-*), and the historic no-argument form checks both with
+    // Forwarded first.
+    val truthy: String => Boolean = code => code == "true" || code == "TRUE"
+    val falsy: String => Boolean  = code => code == "false" || code == "FALSE"
+    // A filter put in remove-only mode (`filter.setRemoveOnly(true)` in the same method) strips
+    // the headers and ignores them, so its construction turns nothing on.
+    def removeOnlyIn(m: Method): Boolean =
+        m.call.nameExact("setRemoveOnly").argument.isLiteral.code.exists(truthy)
+    atom.call
+        .name("<init>")
+        .where(_.code("(?s).*new\\s+([\\w.$]+\\.)*ForwardedHeaderFilter\\s*\\(.*"))
+        .filterNot(call => removeOnlyIn(call.method))
+        .foreach { call =>
+          storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_CONFIG, "spring", dstGraph)
+          val argCode = call.argument.isLiteral.code.headOption.map(l =>
+              l.stripPrefix("\"").stripSuffix("\"")
+          )
+          val family = argCode match
+            case Some(a) if truthy(a) => Some(ForwardedHeaders.FORWARDED)
+            case Some(a) if falsy(a)  => Some(ForwardedHeaders.X_FORWARDED)
+            case _                    => Some(ForwardedHeaders.ALL)
+          family.foreach(f =>
+              storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_HEADERS, f, dstGraph)
+          )
+        }
+    atom.call
+        .name("<init>")
+        .where(_.code("(?s).*new\\s+([\\w.$]+\\.)*ForwardedRequestCustomizer\\s*\\(.*"))
+        .foreach { call =>
+          storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_CONFIG, "jetty", dstGraph)
+          storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_HEADERS, ForwardedHeaders.ALL, dstGraph)
+        }
+    // Reactor Netty's HttpServer.forwarded(true): both families, Forwarded first. The literal
+    // matters - forwarded(false) turns the handling off - and so does resolution: a call the
+    // linker resolved to a project method of the same name is that method, not the builder.
+    val internalFullNames = atom.method.internal.fullName.l.toSet
+    atom.call.name("forwarded").foreach { call =>
+      val isProjectMethod = internalFullNames.contains(call.methodFullName)
+      call.argument.isLiteral.filter(l => truthy(l.code)).headOption.foreach { _ =>
+          if !isProjectMethod then
+            storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_CONFIG, "reactor-netty", dstGraph)
+            storeTagPair(
+              call,
+              ForwardedHeaders.TRUSTED_PROXY_HEADERS,
+              ForwardedHeaders.ALL,
+              dstGraph
+            )
+      }
+    }
+  end tagJavaForwardedHeaders
 
   /** Resolve a lowered method reference (`this::handleItems`, `Handler::handle`) to the method it
     * names. javasrc2cpg lowers a resolvable reference to its qualified name and an unresolvable one
@@ -1311,7 +1484,114 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     sinatraRoutes.newTagNode(FRAMEWORK_ROUTE).store()(using dstGraph)
     sinatraRoutes.parameter.newTagNode(FRAMEWORK_INPUT).store()(using dstGraph)
     sinatraRoutes.methodReturn.newTagNode(FRAMEWORK_OUTPUT).store()(using dstGraph)
+
+    tagRubyForwardedHeaders(dstGraph)
   end tagRubyRoutes
+
+  // Ruby's `request` is the framework's own request object - a Rails controller's `request`
+  // method (lowered with its `self.request` receiver) or a Rack request local. rubysrc lowers a
+  // paren-less `request.remote_ip` to a fieldAccess and `request.get_header(...)` to a call whose
+  // receiver is that same `self.request`, so both shapes are matched on the receiver text.
+  private val RUBY_PROXY_ACCESSORS: Map[String, String] = Map(
+    "remote_ip"          -> ForwardedHeaders.CLIENT_IP,
+    "ip"                 -> ForwardedHeaders.CLIENT_IP,
+    "host"               -> ForwardedHeaders.HOST,
+    "host_with_port"     -> ForwardedHeaders.HOST,
+    "raw_host_with_port" -> ForwardedHeaders.HOST,
+    "base_url"           -> ForwardedHeaders.HOST,
+    "url"                -> ForwardedHeaders.HOST,
+    "protocol"           -> ForwardedHeaders.SCHEME,
+    "scheme"             -> ForwardedHeaders.SCHEME,
+    "ssl?"               -> ForwardedHeaders.SCHEME
+  )
+
+  private def isRubyRequestReceiver(code: String): Boolean =
+      code == "request" || code == "self.request"
+
+  /** The accessed field and the receiver text of a `request.<field>` access. The receiver is
+    * `request` (a Rails controller's request method, lowered as `self.request`) or a temporary the
+    * frontend introduced for the parenthesised form (`(<tmp> = request).remote_ip()`), which is
+    * resolved through its assignment.
+    */
+  private def rubyFieldAndReceiver(access: Call): Option[(String, String)] =
+    val args = access.argument.l.sortBy(a =>
+        if a.argumentIndex < 0 then Int.MaxValue else a.argumentIndex
+    )
+    for
+      receiver <- args.headOption
+      fieldArg <- args.lift(1)
+    yield (
+      fieldArg.code,
+      receiver match
+        // `(<tmp> = request).remote_ip()`: the frontend assigns the request to a temporary
+        // first; the temporary's value is the request.
+        case a: Call if a.code.contains("=") =>
+            a.argument.l.lastOption.map(_.code).getOrElse(a.code)
+        case other => other.code
+    )
+
+  private def tagRubyForwardedHeaders(dstGraph: DiffGraphBuilder): Unit =
+    // (a) request accessors: `request.remote_ip`, `request.host`, ... in both lowered shapes -
+    // a paren-less read lowers to a fieldAccess, a call with parentheses to a call whose receiver
+    // is that fieldAccess. `Pattern.quote` because Ruby names can carry regex metacharacters
+    // (`ssl?`).
+    val accessorPattern = RUBY_PROXY_ACCESSORS.keys.map(Pattern.quote).mkString("|")
+    atom.call
+        .name(s"(<operator>\\.fieldAccess|$accessorPattern)")
+        .foreach { call =>
+          val access =
+              if call.name == Operators.fieldAccess then Some(call)
+              else
+                call.receiver.collect { case c: Call if c.name == Operators.fieldAccess => c }.headOption
+          access.foreach { fa =>
+              rubyFieldAndReceiver(fa).foreach { (field, receiverCode) =>
+                  if RUBY_PROXY_ACCESSORS.contains(field) && isRubyRequestReceiver(receiverCode)
+                  then
+                    storeTagPair(
+                      call,
+                      ForwardedHeaders.PROXY_DERIVED,
+                      RUBY_PROXY_ACCESSORS(field),
+                      dstGraph
+                    )
+              }
+          }
+        }
+
+    // (b) direct header reads: `request.headers['X-Forwarded-For']` (ActionDispatch::Headers) and
+    // `request.env['HTTP_X_FORWARDED_FOR']` (the Rack env), plus Rack's get_header.
+    atom.call.name("<operator>.indexAccess").foreach { call =>
+      val base = call.argument.argumentIndex(1).code.headOption.getOrElse("")
+      val header = call.argument.isLiteral.headOption.flatMap(l =>
+          ForwardedHeaders.canonicalHeader(l.code)
+      )
+      if header.isDefined && base.matches("(?i)(self\\.)?request\\.(headers|env)") then
+        storeTagPair(call, ForwardedHeaders.FORWARDED_HEADER_READ, header.get, dstGraph)
+    }
+    atom.call.name("get_header").foreach { call =>
+      // The receiver resolves to `request` the same way as the accessors above (the paren-less
+      // form's receiver is the `self.request` fieldAccess, the parenthesised form's a temporary).
+      val receiverCode = call.receiver
+          .collect { case c: Call if c.name == Operators.fieldAccess => c }
+          .headOption
+          .flatMap(rubyFieldAndReceiver)
+          .map(_._2)
+          .getOrElse("")
+      val header = call.argument.isLiteral.headOption.flatMap(l =>
+          ForwardedHeaders.canonicalHeader(l.code)
+      )
+      if header.isDefined && isRubyRequestReceiver(receiverCode) then
+        storeTagPair(call, ForwardedHeaders.FORWARDED_HEADER_READ, header.get, dstGraph)
+    }
+
+    // (c) Rails' trusted-proxies list: the ActionDispatch::RemoteIp middleware consults it when it
+    // walks X-Forwarded-For. The assignment call carries the whole statement in its code.
+    atom.call
+        .name(Operators.assignment)
+        .where(_.code(".*config\\.action_dispatch\\.trusted_proxies\\s*=.*"))
+        .foreach { call =>
+            storeTagPair(call, ForwardedHeaders.TRUSTED_PROXY_CONFIG, "rails", dstGraph)
+        }
+  end tagRubyForwardedHeaders
 
   private def processChennaiConfig(dstGraph: DiffGraphBuilder): Unit =
       configSources.foreach { configData =>
