@@ -1,0 +1,21 @@
+.github/actions/edga/action.yml
+  s_97dc7936d49ed3::t_c18ca01ae00d61 1-46
+.github/workflows/pr.yml
+  s_97dc7936d49ed3::t_3c76f19e54d0a8 144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2fc3438fd7b597d58c6436308ca3af93eb6655e3",
+  "prompts": {},
+  "sessions": {
+    "s_97dc7936d49ed3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02f970fc-c39f-46eb-b8fc-2055b0fe55b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
