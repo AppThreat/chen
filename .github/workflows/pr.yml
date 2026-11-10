@@ -141,7 +141,7 @@ jobs:
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom-parsetools
       # Before the tests: the edg2atom tests cancel themselves without edga
-      - uses: ./.github/actions/edga-from-main  # temporary: remove once edga 0.2.0 is released
+      - uses: ./.github/actions/edga
         if: env.REUSED != 'true'
       - name: Compile and run tests
         if: env.REUSED != 'true'
