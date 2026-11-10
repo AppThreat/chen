@@ -1,0 +1,35 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/passes/reachingdef/FluxReachingDefPass.scala
+  s_97dc7936d49ed3::t_26089cdd192eb8 15
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/layers/dataflows/OssDataFlow.scala
+  s_97dc7936d49ed3::t_26089cdd192eb8 24-25,32
+docs/lessons/lesson-13-dataflow-engine.md
+  s_97dc7936d49ed3::t_6d05b5878d3427 62-63,185
+docs/v4/overflowdb2.md
+  s_97dc7936d49ed3::t_06d80411a65cfc 1-108
+docs/v4/cpg2.md
+  s_97dc7936d49ed3::t_514395d987db61 1-80
+docs/v4/frontends.md
+  s_97dc7936d49ed3::t_bf454e6f5cba48 151,188
+  s_97dc7936d49ed3::t_5890373ef9ceb5 1-150,152-187,189-296
+docs/v4/api.md
+  s_97dc7936d49ed3::t_58bc163966c021 1-214
+docs/v4/README.md
+  s_97dc7936d49ed3::t_09c0cc47d52f32 17-20
+  s_97dc7936d49ed3::t_dd4e00bf6d6196 1-16,21-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "399d0085d7f78d535cbfc47ef1dd78f658cbd6a4",
+  "prompts": {},
+  "sessions": {
+    "s_97dc7936d49ed3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02f970fc-c39f-46eb-b8fc-2055b0fe55b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
