@@ -1,0 +1,23 @@
+.github/workflows/pr.yml
+  s_97dc7936d49ed3::t_4af2f720e3c0c9 93,104,125,164,186,192,220,226
+.github/workflows/release.yml
+  s_97dc7936d49ed3::t_4af2f720e3c0c9 30,36,42,46,83
+.github/workflows/master.yml
+  s_97dc7936d49ed3::t_d584537e59411e 45,54,60,64,68,122,128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd2d289d5d5e5eb4e9894475d716d518fad37741",
+  "prompts": {},
+  "sessions": {
+    "s_97dc7936d49ed3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02f970fc-c39f-46eb-b8fc-2055b0fe55b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
