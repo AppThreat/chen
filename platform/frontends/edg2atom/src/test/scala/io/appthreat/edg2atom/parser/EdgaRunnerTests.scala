@@ -110,6 +110,8 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
       "see the POSIX declarations the C library hides from ISO C" in {
           val edga = EdgaRunner.locate()
           assume(edga.isDefined, "edga is not installed")
+          // the Windows C libraries name POSIX's popen _popen, whatever the dialect
+          assume(!scala.util.Properties.isWin, "the host's C library is not a POSIX one")
           File.usingTemporaryDirectory("edga-gnu") { dir =>
             (dir / "p.c").writeText(
               """#include <math.h>

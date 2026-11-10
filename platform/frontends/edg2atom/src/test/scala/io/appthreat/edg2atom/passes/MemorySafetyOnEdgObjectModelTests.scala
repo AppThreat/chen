@@ -28,7 +28,11 @@ class MemorySafetyOnEdgObjectModelTests extends Code2CpgFixture(() =>
       |#include <stdio.h>
       |#include <stdlib.h>
       |#include <string.h>
+      |#ifdef _WIN32
+      |#include <malloc.h>
+      |#else
       |#include <alloca.h>
+      |#endif
       |unsigned long good_small_anonymous_union(const unsigned long *a)
       |{
       |    union { unsigned long bn[3]; unsigned int ui[6]; } buf;
