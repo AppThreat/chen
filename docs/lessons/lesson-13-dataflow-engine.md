@@ -59,7 +59,8 @@ object OssDataFlow:
 class OssDataFlowOptions(
   var maxNumberOfDefinitions: Int = 4000,
   var extraFlows: List[FlowSemantic] = List.empty[FlowSemantic],
-  var useFluxEngine: Boolean = false
+  var useFluxEngine: Boolean = true,   // the Flux solver; false selects the classic one
+  var maxNumberOfCfgNodes: Int = 50000
 ) extends LayerCreatorOptions
 
 class OssDataFlow(opts: OssDataFlowOptions)(implicit
@@ -181,7 +182,7 @@ val extraSem = FlowSemantic.from("com.example.Taint.wrap", List((1, -1)))
 val opts = OssDataFlowOptions(
   maxNumberOfDefinitions = 8000,
   extraFlows = List(extraSem),
-  useFluxEngine = true              // opt-in to the low-allocation Flux solver
+  useFluxEngine = true              // the default: the low-allocation Flux solver
 )
 new OssDataFlow(opts).run(new LayerCreatorContext(cpg))
 

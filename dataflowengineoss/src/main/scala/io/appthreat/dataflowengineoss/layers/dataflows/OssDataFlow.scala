@@ -21,14 +21,15 @@ object OssDataFlow:
   def defaultOpts = new OssDataFlowOptions()
 
 /** @param useFluxEngine
-  *   opt into the "Flux" reaching-definitions engine ([[FluxReachingDefPass]]) - a low-allocation
-  *   drop-in for the classic [[ReachingDefPass]] that produces identical `REACHING_DEF` edges.
-  *   Defaults to `false`, so the classic engine remains the default.
+  *   which reaching-definitions solver computes the `REACHING_DEF` edges. `true`, the default, uses
+  *   the low-allocation "Flux" engine ([[FluxReachingDefPass]]); `false` uses the classic
+  *   [[ReachingDefPass]]. Both produce identical edges; Flux uses less memory and garbage
+  *   collection time on large methods.
   */
 class OssDataFlowOptions(
   var maxNumberOfDefinitions: Int = 4000,
   var extraFlows: List[FlowSemantic] = List.empty[FlowSemantic],
-  var useFluxEngine: Boolean = false,
+  var useFluxEngine: Boolean = true,
   var maxNumberOfCfgNodes: Int = 50000
 ) extends LayerCreatorOptions {}
 
