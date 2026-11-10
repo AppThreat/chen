@@ -1,0 +1,29 @@
+docs/v4/overflowdb2.md
+  s_97dc7936d49ed3::t_06d80411a65cfc 1-108
+docs/v4/cpg2.md
+  s_97dc7936d49ed3::t_514395d987db61 1-80
+docs/v4/frontends.md
+  s_97dc7936d49ed3::t_bf454e6f5cba48 151,188
+  s_97dc7936d49ed3::t_5890373ef9ceb5 1-150,152-187,189-296
+docs/v4/api.md
+  s_97dc7936d49ed3::t_58bc163966c021 1-214
+docs/v4/README.md
+  s_97dc7936d49ed3::t_09c0cc47d52f32 17-20
+  s_97dc7936d49ed3::t_dd4e00bf6d6196 1-16,21-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "150c9b6b4988cd6b04e449fe2c74ae69a2ceed4c",
+  "prompts": {},
+  "sessions": {
+    "s_97dc7936d49ed3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02f970fc-c39f-46eb-b8fc-2055b0fe55b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
