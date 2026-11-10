@@ -88,20 +88,16 @@ object EdgaUnit:
   /** A file's path as the rest of the frontend spells it. On Windows edga writes the path the front
     * end opened, with `/` separators and the 8.3 short names a temporary directory such as
     * `C:/Users/RUNNER~1/...` can carry, while the project's own paths, the preinclude files and the
-    * CDT frontend's tags use the real path, `C:\Users\runneradmin\...`; there the path is resolved
-    * to its real form. Elsewhere edga's path is already the real one and is kept as written.
+    * CDT frontend's tags use the real path, `C:\\Users\\runneradmin\\...`; there a path that names
+    * an existing file is resolved to its real form. Any other path, and every path elsewhere, where
+    * edga's path is already the real one, is kept as edga wrote it.
     */
   def hostPath(path: String): String =
       if !scala.util.Properties.isWin || path.isEmpty then path
       else
         hostPaths.computeIfAbsent(
           path,
-          p =>
-              // a name the file system cannot hold (`<built-in>`) stays as edga wrote it
-              scala.util.Try(java.nio.file.Paths.get(p)).map { file =>
-                  scala.util.Try(file.toRealPath()).getOrElse(file.toAbsolutePath.normalize)
-                      .toString
-              }.getOrElse(p)
+          p => scala.util.Try(java.nio.file.Paths.get(p).toRealPath().toString).getOrElse(p)
         )
 
   /** The document straight from the bytes edga wrote: no intermediate string of the whole unit */
