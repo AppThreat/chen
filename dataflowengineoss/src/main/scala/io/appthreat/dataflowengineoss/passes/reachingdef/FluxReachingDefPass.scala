@@ -12,7 +12,7 @@ import scala.collection.mutable
   *
   * A drop-in alternative to [[ReachingDefPass]]: same problem construction, same bail-out, same
   * [[DdgGenerator]], hence identical `REACHING_DEF` edges - only the fixpoint solver differs. It is
-  * opt-in (see `OssDataFlowOptions.useFluxEngine`) so the classic engine remains the default.
+  * the default; `OssDataFlowOptions.useFluxEngine = false` selects the classic engine.
   */
 class FluxReachingDefPass(
   cpg: Cpg,

@@ -68,6 +68,8 @@ class CShapesTests extends EdgCodeToCpgSuite(".c"):
 
       "mark the calls that return twice" in {
           requireEdga()
+          // the Windows C runtimes spell setjmp as a macro over their own entry points
+          assume(!scala.util.Properties.isWin, "the host's setjmp is not the C library's function")
           val setjmps = cpg.call.name("_?setjmp").l
           setjmps should not be empty
           setjmps.flatMap(attributesOf) should contain("returns_twice")

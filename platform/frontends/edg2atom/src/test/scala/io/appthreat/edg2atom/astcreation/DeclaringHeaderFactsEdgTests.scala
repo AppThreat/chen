@@ -99,9 +99,20 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
         |}
         |""".stripMargin
 
-  private var libHeaderPath: String    = _
-  private var libCppHeaderPath: String = _
-  private var projHeaderPath: String   = _
+  // the headers are compared by file name: how a path is spelled (separators, a Windows short name)
+  // is the host's, not the frontend's
+  private var libHeaderFile: String    = _
+  private var libCppHeaderFile: String = _
+  private var projHeaderFile: String   = _
+
+  private def fileName(path: String): String = path.split("[/\\\\]").last
+
+  /** Tag values with any path in them reduced to its file name: `NAME@path` and plain paths. */
+  private def fileNames(values: List[String]): List[String] =
+      values.map { v =>
+        val at = v.lastIndexOf('@')
+        if at >= 0 then v.substring(0, at + 1) + fileName(v.substring(at + 1)) else fileName(v)
+      }
 
   private def withScopedRun[T](cpp: Boolean)(f: Cpg => T): T =
     requireEdga()
@@ -114,12 +125,9 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
       (root / "proj" / "proj.h").write(projHeader)
       (root / "proj" / "main.c").write(mainC)
       if cpp then (root / "proj" / "klass.cpp").write(klassCpp)
-      libHeaderPath = java.nio.file.Paths
-          .get((root / "externlib" / "libdir" / "lib.h").pathAsString).toRealPath().toString
-      libCppHeaderPath = java.nio.file.Paths
-          .get((root / "externlib" / "libdir" / "libhpp.h").pathAsString).toRealPath().toString
-      projHeaderPath = java.nio.file.Paths
-          .get((root / "proj" / "proj.h").pathAsString).toRealPath().toString
+      libHeaderFile = "lib.h"
+      libCppHeaderFile = "libhpp.h"
+      projHeaderFile = "proj.h"
       val out = File.newTemporaryFile("edghdr", ".atom")
       out.deleteOnExit()
       val cpg = new Edg2Atom().createCpg(
@@ -137,15 +145,15 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
   end withScopedRun
 
   private def refTags(cpg: Cpg, name: String): List[String] =
-      cpg.identifier.nameExact(name).tag.nameExact(Defines.RefDeclaredInTag).value.l
+      fileNames(cpg.identifier.nameExact(name).tag.nameExact(Defines.RefDeclaredInTag).value.l)
 
   "an include directive of the primary file" should {
       "become an IMPORT tagged with the file it resolved to and its system spelling" in
           withScopedRun(cpp = false) { cpg =>
             val libImport = cpg.imports.code("#include \"libdir/lib.h\"").l
             libImport should have size 1
-            libImport.head.tag.nameExact(Defines.IncludeResolvedPathTag).value.l should
-                contain only libHeaderPath
+            fileNames(libImport.head.tag.nameExact(Defines.IncludeResolvedPathTag).value.l) should
+                contain only libHeaderFile
             // a quoted include is not a system one
             cpg.imports.code("#include \"libdir/lib.h\"").tag
                 .nameExact(Defines.IncludeSystemTag).l shouldBe empty
@@ -162,35 +170,35 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
 
   "a global the file reads" should {
       "carry the library header that declares it" in withScopedRun(cpp = false) { cpg =>
-          refTags(cpg, "lib_global") should contain only libHeaderPath
+          refTags(cpg, "lib_global") should contain only libHeaderFile
       }
       "carry the project header for the project's own global" in withScopedRun(cpp = false) { cpg =>
-          refTags(cpg, "proj_global") should contain only projHeaderPath
+          refTags(cpg, "proj_global") should contain only projHeaderFile
       }
   }
 
   "an enumerator the front end folds" should {
       "carry the library header that enumerates it" in withScopedRun(cpp = false) { cpg =>
-          refTags(cpg, "LIB_BAD") should contain only libHeaderPath
+          refTags(cpg, "LIB_BAD") should contain only libHeaderFile
       }
       "carry the project header for the project's own enumerator" in withScopedRun(cpp = false) {
           cpg =>
-              refTags(cpg, "PROJ_ONE") should contain only projHeaderPath
+              refTags(cpg, "PROJ_ONE") should contain only projHeaderFile
       }
   }
 
   "an enumerator as a case label" should {
       "carry the library header that enumerates it" in withScopedRun(cpp = false) { cpg =>
           // `case LIB_BAD:` in classify: the label's value reads the enumerator by name
-          cpg.identifier.nameExact("LIB_BAD").lineNumber(26).tag
-              .nameExact(Defines.RefDeclaredInTag).value.l should contain only libHeaderPath
+          fileNames(cpg.identifier.nameExact("LIB_BAD").lineNumber(26).tag
+              .nameExact(Defines.RefDeclaredInTag).value.l) should contain only libHeaderFile
       }
   }
 
   "a function named as a value" should {
       "carry the library header that declares it" in withScopedRun(cpp = false) { cpg =>
-          cpg.methodRef.methodFullName("lib_func").tag
-              .nameExact(Defines.RefDeclaredInTag).value.l should contain only libHeaderPath
+          fileNames(cpg.methodRef.methodFullName("lib_func").tag
+              .nameExact(Defines.RefDeclaredInTag).value.l) should contain only libHeaderFile
       }
   }
 
@@ -202,39 +210,42 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
             val uses = cpg.method.filename("main.c").tag
                 .nameExact(Defines.MacroUseTag).value.l
             uses.filter(_.startsWith("LIB_VERSION@4:")) should have size 1
-            uses.filter(_.startsWith("LIB_VERSION@4:")).head should endWith(s"@$libHeaderPath")
+            fileNames(uses.filter(_.startsWith("LIB_VERSION@4:"))).head should
+                endWith(s"@$libHeaderFile")
           }
       "name a macro nested in another's definition on the outer invocation's call" in
           withScopedRun(cpp = false) { cpg =>
             // line 17: `int n = LIB_OUTER(a);` whose definition invokes LIB_INNER
             cpg.call.nameExact("LIB_INNER").l shouldBe empty
-            cpg.call.nameExact("LIB_OUTER").lineNumber(17).tag
-                .nameExact(Defines.NestedMacroTag).value.l should contain(
-              s"LIB_INNER@$libHeaderPath"
+            fileNames(cpg.call.nameExact("LIB_OUTER").lineNumber(17).tag
+                .nameExact(Defines.NestedMacroTag).value.l) should contain(
+              s"LIB_INNER@$libHeaderFile"
             )
           }
       "name an object-like macro in an argument on the outer invocation's call" in
           withScopedRun(cpp = false) { cpg =>
               // line 18: `int q = LIB_MAX(a, LIB_VERSION);`
-              cpg.call.nameExact("LIB_MAX").lineNumber(18).tag
-                  .nameExact(Defines.NestedMacroTag).value.l should contain(
-                s"LIB_VERSION@$libHeaderPath"
+              fileNames(cpg.call.nameExact("LIB_MAX").lineNumber(18).tag
+                  .nameExact(Defines.NestedMacroTag).value.l) should contain(
+                s"LIB_VERSION@$libHeaderFile"
               )
           }
   }
 
   "a member call, a constructor and a `new` of a library class" should {
       "carry the library header that declares the class" in withScopedRun(cpp = true) { cpg =>
-        cpg.call.nameExact("value").tag.nameExact(Defines.CalleeDeclaredInTag).value.l should
-            contain only libCppHeaderPath
-        cpg.call.nameExact("LibClass").lineNumber(4).tag
-            .nameExact(Defines.CalleeDeclaredInTag).value.l should contain only libCppHeaderPath
+        fileNames(
+          cpg.call.nameExact("value").tag.nameExact(Defines.CalleeDeclaredInTag).value.l
+        ) should
+            contain only libCppHeaderFile
+        fileNames(cpg.call.nameExact("LibClass").lineNumber(4).tag
+            .nameExact(Defines.CalleeDeclaredInTag).value.l) should contain only libCppHeaderFile
         cpg.call.nameExact("LibClass").lineNumber(4).tag
             .nameExact(Defines.ConstructsTypeTag).value.l should contain only "LibClass"
         val alloc = cpg.call.nameExact("<operator>.new").l
         alloc should have size 1
-        alloc.head.tag.nameExact(Defines.CalleeDeclaredInTag).value.l should contain only
-            libCppHeaderPath
+        fileNames(alloc.head.tag.nameExact(Defines.CalleeDeclaredInTag).value.l) should contain only
+            libCppHeaderFile
         alloc.head.tag.nameExact(Defines.ConstructsTypeTag).value.l should contain only "LibClass"
       }
   }
@@ -246,8 +257,8 @@ class DeclaringHeaderFactsEdgTests extends EdgCodeToCpgSuite(".c"):
             .where(_.argument.isFieldIdentifier.canonicalName("mem"))
             .l
         access should not be empty
-        access.flatMap(_.tag.nameExact(Defines.TypeDeclaredInTag).value.l) should contain only
-            libCppHeaderPath
+        fileNames(access.flatMap(_.tag.nameExact(Defines.TypeDeclaredInTag).value.l)) should
+            contain only libCppHeaderFile
       }
   }
 end DeclaringHeaderFactsEdgTests

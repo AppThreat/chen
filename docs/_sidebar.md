@@ -1,4 +1,10 @@
 - [Home](/)
+- chen 4.0
+  - [What is new](v4/README.md)
+  - [Frontends](v4/frontends.md)
+  - [API and migration](v4/api.md)
+  - [cpg2](v4/cpg2.md)
+  - [overflowdb2](v4/overflowdb2.md)
 - [CLI Usage](CLI.md)
 - [Traversal](TRAVERSAL.md)
 - [DSL Operations](DSL_OPERATIONS.md)

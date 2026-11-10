@@ -22,7 +22,7 @@ final class EdgaUnit(val root: Value):
     val id = f("id").num.toLong
     id -> FileEntry(
       id,
-      f("path").str,
+      EdgaUnit.hostPath(f("path").str),
       f.obj.get("system").exists(_.bool),
       f.obj.get("inRoot").exists(_.bool),
       f.obj.get("includedFrom").map(v => (v(0).num.toLong, v(1).num.toInt)),
@@ -82,6 +82,23 @@ final case class Pos(file: Long, line: Int, column: Int)
 
 object EdgaUnit:
   def parse(text: String): EdgaUnit = new EdgaUnit(ujson.read(text))
+
+  private val hostPaths = new java.util.concurrent.ConcurrentHashMap[String, String]()
+
+  /** A file's path as the rest of the frontend spells it. On Windows edga writes the path the front
+    * end opened, with `/` separators and the 8.3 short names a temporary directory such as
+    * `C:/Users/RUNNER~1/...` can carry, while the project's own paths, the preinclude files and the
+    * CDT frontend's tags use the real path, `C:\\Users\\runneradmin\\...`; there a path that names
+    * an existing file is resolved to its real form. Any other path, and every path elsewhere, where
+    * edga's path is already the real one, is kept as edga wrote it.
+    */
+  def hostPath(path: String): String =
+      if !scala.util.Properties.isWin || path.isEmpty then path
+      else
+        hostPaths.computeIfAbsent(
+          path,
+          p => scala.util.Try(java.nio.file.Paths.get(p).toRealPath().toString).getOrElse(p)
+        )
 
   /** The document straight from the bytes edga wrote: no intermediate string of the whole unit */
   def parseBytes(bytes: Array[Byte]): EdgaUnit = new EdgaUnit(ujson.read(bytes))
