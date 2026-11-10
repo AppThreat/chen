@@ -1,0 +1,24 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/parser/EdgaUnit.scala
+  s_97dc7936d49ed3::t_d9e7bc531e831f 91-93,100
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/DeclaringHeaderFactsEdgTests.scala
+  s_97dc7936d49ed3::t_5657849c08b6b4 104-106,128-130,156,173,176,182,186,194,201,214,222,230,240,242,248,261
+  s_97dc7936d49ed3::t_6ff9655d1decf5 237-239
+  s_97dc7936d49ed3::t_245bd0650f6229 102-103,108-115,148,155,193,200,213,220-221,228-229,241,247,260
+  s_97dc7936d49ed3::t_4641e95b6a1ea0 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d677dc3c711e25dd68e03e3fe17d93eca7782524",
+  "prompts": {},
+  "sessions": {
+    "s_97dc7936d49ed3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02f970fc-c39f-46eb-b8fc-2055b0fe55b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
