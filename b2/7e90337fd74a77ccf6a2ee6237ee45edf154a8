@@ -1,0 +1,19 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/io/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_2bf092a39e3f00 22-28,70,85,97,115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b27e90337fd74a77ccf6a2ee6237ee45edf154a8",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
