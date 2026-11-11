@@ -1,0 +1,33 @@
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/PhpParser.scala
+  s_2a14b3831b5ada::t_9680844b95eb5e 310-311
+  s_2a14b3831b5ada::t_4e682961225aec 327,334
+  s_2a14b3831b5ada::t_9756f2fde23314 33-47
+  s_2a14b3831b5ada::t_7a678b33a4b272 6
+  s_2a14b3831b5ada::t_440553ad9d7892 267-270
+  s_2a14b3831b5ada::t_d57cc00d295b10 408-410
+  s_2a14b3831b5ada::t_6ce03d88288a56 342,411-415
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/AstCreationPass.scala
+  s_2a14b3831b5ada::t_e9df2dfc34eeb6 165-173
+  s_2a14b3831b5ada::t_515144149b17c1 10
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_ac6a08fab0efec 114
+  s_2a14b3831b5ada::t_6951022a05b80b 173
+  s_2a14b3831b5ada::t_c4917f522939f7 102-110
+  s_2a14b3831b5ada::t_4df07de11a8a26 1-101,111-113,115-172,174-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9fe39c74f3e7dfac89b4259dbd139fdf53285d28",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
