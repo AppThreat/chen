@@ -1,0 +1,37 @@
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_9778028e8d16c9 3-7,9-10,16-17
+  s_2a14b3831b5ada::t_b2f5f2a900bd22 12
+  s_2a14b3831b5ada::t_0ae823e747cc03 1-2,11,13-15,18-46,51-70,74-90,152-153
+  s_2a14b3831b5ada::t_fa8e8be575a4bd 71-73
+  s_2a14b3831b5ada::t_a55f2ef3daaadf 92-124
+  s_2a14b3831b5ada::t_d63cf21ff865b7 8
+  s_2a14b3831b5ada::t_ba23d947048c08 91,125-151
+  s_2a14b3831b5ada::t_68d6540f9caad4 47-50
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/passes/AstCreator.scala
+  s_2a14b3831b5ada::t_567f0e9b7f0679 364-370
+  s_2a14b3831b5ada::t_a5e957ac7ec3c1 182
+platform/frontends/javasrc2cpg/src/main/scala/io/appthreat/javasrc2cpg/util/SourceParser.scala
+  s_2a14b3831b5ada::t_d80922528de526 91-99,114-116,118-121,123-131,133,138-142,144-145
+  s_2a14b3831b5ada::t_316b1a3ffaa61e 41-44,48-55
+  s_2a14b3831b5ada::t_0304f4049d9ae9 7
+  s_2a14b3831b5ada::t_1f24541caffaf1 45-47
+  s_2a14b3831b5ada::t_95f05667cebd68 122,134-137,143
+  s_2a14b3831b5ada::t_4eae3f3e359fda 26,30
+  s_2a14b3831b5ada::t_15828150dc6b7b 31,147-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae781b8c9e85a08fc8440ffbb14f1bc4ece0e696",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
