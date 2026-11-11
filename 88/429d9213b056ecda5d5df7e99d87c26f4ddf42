@@ -1,0 +1,23 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/CodeToCpg.scala
+  s_2a14b3831b5ada::t_3c24d458b59f80 9
+  s_2a14b3831b5ada::t_ad3a810de5a863 77-79,84,101-116,140-146
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_8eac07d2a69500 1-99
+  s_2a14b3831b5ada::t_90a4d2d620e107 100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "88429d9213b056ecda5d5df7e99d87c26f4ddf42",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
