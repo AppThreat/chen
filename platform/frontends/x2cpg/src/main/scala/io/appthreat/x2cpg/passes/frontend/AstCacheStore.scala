@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.passes.frontend
 
 import io.appthreat.x2cpg.{AstCache, AstFragment}
 import io.appthreat.x2cpg.AstCache.AstBitcode
+import io.appthreat.x2cpg.parse.ParseReporter
 import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import upickle.default.*
@@ -215,8 +216,16 @@ class AstCacheStore(
           }.toOption
       }
 
+  /** A run that collects the parse report reads no cache entry: a file the parser only partly read
+    * is cached like any other, and a hit would skip the parser that reports it, so a warm run would
+    * report less than a cold one. Entries are still written, and a run without the report is
+    * unaffected.
+    */
+  private def readable(partHash: Option[String]): Option[String] =
+      if ParseReporter.isEnabled then None else partHash
+
   private def loadFromCache(partHash: Option[String]): Option[AstBitcode] =
-      partHash.flatMap { hash =>
+      readable(partHash).flatMap { hash =>
         val cacheFile = Paths.get(cacheDir, s"$hash.ast")
         if !Files.exists(cacheFile) then None
         else
@@ -261,7 +270,7 @@ class AstCacheStore(
       else loadFragmentBytes(computeEntryHash(cacheKey, fingerprint, fragment = true))
 
   private def loadFragmentBytes(partHash: Option[String]): Option[Array[Byte]] =
-      partHash.flatMap { hash =>
+      readable(partHash).flatMap { hash =>
         val cacheFile = Paths.get(cacheDir, s"$hash.frag")
         if !Files.exists(cacheFile) then None
         else Try(Files.readAllBytes(cacheFile)).toOption

@@ -39,10 +39,11 @@ final case class ParseFailureRecord(
   * whole files, not statements, so the count is the size of the project, not of its AST, and the
   * parallel AST passes call [[record]] from their worker threads.
   *
-  * A file that failed is never cached (only ASTs that were built are), so it fails again on every
-  * cached run and is recorded again; a cache hit never evaluates the code that could record
-  * anything, so a healthy file is never reported. The AST cache therefore needs no changes for this
-  * reporter to be truthful on warm runs.
+  * While the reporter is enabled, neither [[io.appthreat.x2cpg.passes.frontend.AstCacheStore]] nor
+  * [[io.appthreat.x2cpg.passes.frontend.ExternalParseCache]] reads a cache entry; both still write
+  * them. A file the parser only partly read has an AST and is cached, and astgen's messages about
+  * the files it failed are not all in the output it caches, so a cache hit would skip what records
+  * the file and a warm run would report less than a cold one.
   */
 object ParseReporter:
 

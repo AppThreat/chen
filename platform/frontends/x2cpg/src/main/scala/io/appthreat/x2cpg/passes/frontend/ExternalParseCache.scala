@@ -1,5 +1,6 @@
 package io.appthreat.x2cpg.passes.frontend
 
+import io.appthreat.x2cpg.parse.ParseReporter
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
@@ -40,9 +41,12 @@ class ExternalParseCache(cacheDir: String, kind: String):
 
   private def entryDir(fingerprint: String): Path = entriesDir.resolve(fingerprint)
 
-  /** Restore cached artifacts for `fingerprint` into `outDir`, returning true on a hit. */
+  /** Restore cached artifacts for `fingerprint` into `outDir`, returning true on a hit. A run that
+    * collects the parse report never restores: the parser's messages about the files it could not
+    * read are not all part of its output directory, so only a fresh run can report them.
+    */
   def restore(fingerprint: String, outDir: Path): Boolean =
-      if !enabled then false
+      if !enabled || ParseReporter.isEnabled then false
       else
         val entry = entryDir(fingerprint)
         if !Files.isDirectory(entry) then false

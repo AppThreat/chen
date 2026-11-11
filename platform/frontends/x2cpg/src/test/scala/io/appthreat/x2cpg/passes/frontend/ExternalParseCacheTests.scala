@@ -46,5 +46,18 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
             cache.restore("fp", Files.createTempDirectory("parse-restored-3")) shouldBe false
           finally CacheControl.enable(CacheControl.Astgen)
       }
+
+      "store but not restore while the parse report is collected" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-report").toString
+          CacheControl.enable(CacheControl.Astgen)
+          val cache = new ExternalParseCache(cacheDir, CacheControl.Astgen)
+          System.setProperty("chen.parse.report", "unused")
+          try
+            cache.store("fp", outDirWith("a.json" -> "AAA"))
+            cache.restore("fp", Files.createTempDirectory("parse-restored-4")) shouldBe false
+          finally System.clearProperty("chen.parse.report")
+          // the entry the report run stored serves the next run without the report
+          cache.restore("fp", Files.createTempDirectory("parse-restored-5")) shouldBe true
+      }
   }
 end ExternalParseCacheTests

@@ -119,6 +119,28 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
           }
       }
 
+      "record the partly read file again on a warm cache run" in withReporterEnabled {
+          val dir      = buildProject()
+          val cacheDir = File.newTemporaryDirectory("c2cpg-parse-report-cache")
+          def run(): List[io.appthreat.x2cpg.parse.ParseFailureRecord] =
+            ParseReporter.reset()
+            val cpg = newEmptyCpg()
+            val config = Config().withInputPath(dir.toString).withOutputPath(dir.toString)
+                .withFunctionBodies(true).withAstCache(true).withCacheDir(cacheDir.toString)
+            new AstCreationPass(cpg, config).createAndApply()
+            try
+              // the good twin is in the graph on both runs
+              cpg.method.name("add").l should have size 1
+              ParseReporter.records
+            finally cpg.close()
+          val cold = run()
+          // the cold run cached both units, the partly read one included
+          cacheDir.list.count(_.extension.contains(".ast")) shouldBe 2
+          val warm = run()
+          cold.map(r => (r.file, r.outcome)) shouldBe List(("problem.c", "partial"))
+          warm shouldBe cold
+      }
+
       "record nothing when the reporter is disabled" in {
           System.clearProperty("chen.parse.report")
           ParseReporter.reset()
