@@ -1,0 +1,19 @@
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/passes/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_46f475bd36a559 150-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9dc44a183709bed52cc2a0f294495f546b8c896a",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
