@@ -7,7 +7,6 @@ import io.appthreat.c2cpg.passes.AstCreationPass
 import io.appthreat.edg2atom.astcreation.AstCreator
 import io.appthreat.edg2atom.parser.EdgaRunner
 import io.appthreat.x2cpg.SourceFiles
-import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.ParsedUnit
 import io.shiftleft.codepropertygraph.Cpg
@@ -95,15 +94,9 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
     if !attempted || exported then written.add(file)
     else
       failed.add(file)
-      // At debug, like every lost-file message; the record carries the front end's own diagnostic
+      // At debug, like every lost-file message. Edg2Atom records the unit in the parse report once
+      // it knows whether the CDT fallback read it.
       logger.debug(s"edga could not export $file")
-      ParseReporter.record(
-        ParseReporter.Frontend.Edg,
-        SourceFiles.toRelativePath(file, config.inputPath),
-        ParseReporter.Outcome.Unparsed,
-        ParseReporter.Stage.Parse,
-        Option(failures.get(file)).getOrElse("edga exported no unit and reported no diagnostic")
-      )
   end runOnPart
 
   /** What else a unit's AST depends on: how the CDT frontend would parse it, the edga build, and

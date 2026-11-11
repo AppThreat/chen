@@ -9,9 +9,9 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /** chen#255: a translation unit edga cannot export is lost with one warn line, and when the CDT
-  * fallback rescues it nothing says which frontend finally read it. The failures are forced with a
-  * stub edga that exports nothing, because the real front end is not installed here; the CDT
-  * fallback that rescues the files is the real one.
+  * fallback reads it nothing says which frontend finally did. The failures are forced with a stub
+  * edga that exports nothing, because the real front end is not installed here; the CDT fallback
+  * that rescues the files is the real one.
   */
 class ParseFailureReportingTests extends AnyWordSpec with Matchers:
 
@@ -52,30 +52,20 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
       ) {
           val cpg = buildCpg(buildProject(), fallback = true)
           try
-            val edgRecord = ParseReporter.records.filter(record =>
-                record.file == "good.c" && record.frontend == "edg"
+            // one record: edga failed on the unit, and the CDT fallback read it into the graph
+            ParseReporter.records shouldBe List(
+              io.appthreat.x2cpg.parse.ParseFailureRecord(
+                "edg",
+                "good.c",
+                "partial",
+                "parse",
+                "edga exported no unit and reported no diagnostic; the c frontend read it instead"
+              )
             )
-            edgRecord should have size 1
-            edgRecord.head.outcome shouldBe "unparsed"
-            edgRecord.head.stage shouldBe "parse"
-            edgRecord.head.message shouldBe "edga exported no unit and reported no diagnostic"
-
-            // the CDT fallback rescued the file: the report says the c frontend read it
-            val cRecord = ParseReporter.records.filter(record =>
-                record.file == "good.c" && record.frontend == "c"
-            )
-            cRecord should have size 1
-            cRecord.head.outcome shouldBe "partial"
-            cRecord.head.stage shouldBe "parse"
-            cRecord.head.message should
-                include("edga could not export this file: no diagnostic")
-            cRecord.head.message should include("the cdt frontend read it instead")
-            ParseReporter.records.filter(_.outcome == "dropped") shouldBe empty
 
             // the fallback really wrote the graph
             cpg.method.name("add").l should have size 1
           finally cpg.close()
-          end try
       }
 
       "record the unit as lost when there is no fallback" in withReporterEnabled(
