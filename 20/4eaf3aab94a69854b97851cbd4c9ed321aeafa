@@ -1,0 +1,25 @@
+project/Projects.scala
+  s_2a14b3831b5ada::t_e4db451080444a 7-12,19-21,29-37
+  s_2a14b3831b5ada::t_d973d4fa2af7c1 13-18
+  s_2a14b3831b5ada::t_5f47fdfdf9b590 2
+project/Versions.scala
+  s_2a14b3831b5ada::t_b173bef3500e14 20
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/testfixtures/LogCapture.scala
+  s_2a14b3831b5ada::t_e000e4f43381d3 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "204eaf3aab94a69854b97851cbd4c9ed321aeafa",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
