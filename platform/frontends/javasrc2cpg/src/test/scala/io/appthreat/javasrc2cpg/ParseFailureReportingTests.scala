@@ -10,7 +10,7 @@ import io.appthreat.x2cpg.ValidationMode
 import io.appthreat.x2cpg.datastructures.Global
 import io.appthreat.x2cpg.parse.{ParseFailureRecord, ParseReporter}
 import io.appthreat.x2cpg.testfixtures.LogCapture
-import org.apache.logging.log4j.Level
+import ch.qos.logback.classic.Level
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -123,7 +123,7 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
       }
 
       "log nothing for the lost file at the default level and the reason at debug" in withReporterEnabled {
-          // The logger SourceParser uses; log4j2's default root level is what a default run gets.
+          // The logger SourceParser uses; WARN is what a default run logs at.
           val defaultOut = LogCapture.withCapture(
             classOf[io.appthreat.javasrc2cpg.util.SourceParser].getName,
             Level.WARN
@@ -131,7 +131,7 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
             val out = Files.createTempDirectory("javasrc-parse-report-quiet")
             val cpg = buildCpg(buildProject(), out.resolve("cpg.bin"))
             cpg.close()
-            appender.messagesAtOrAbove(Level.WARN)
+            LogCapture.messagesAtOrAbove(appender, Level.WARN)
           }
           defaultOut.exists(message => message.contains("Broken.java")) shouldBe false
 
@@ -142,7 +142,7 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
             val out = Files.createTempDirectory("javasrc-parse-report-debug")
             val cpg = buildCpg(buildProject(), out.resolve("cpg.bin"))
             cpg.close()
-            appender.messagesAt(Level.DEBUG)
+            LogCapture.messagesAt(appender, Level.DEBUG)
           }
           debugOut.exists(message =>
               message.contains("Broken.java") && message.contains("Unable to parse")

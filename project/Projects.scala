@@ -7,8 +7,8 @@ object Projects {
     // The chen#255 suites capture what a logger prints for a file the frontend lost: nothing at
     // the default level, the file and the reason at debug. slf4j-nop discards every event, and
     // being a direct dependency of the root build no exclusion rule can remove it, so the Test
-    // classpath alone drops it and gets log4j2 instead. Compile, Runtime and every published
-    // artifact keep shipping nop exactly as before.
+    // classpath alone drops it and gets logback instead, whose loggers take appenders directly.
+    // Compile, Runtime and every published artifact keep shipping nop exactly as before.
     val testLogging = Seq(
       Test / fullClasspath := Def.uncached(
         (Test / fullClasspath).value.filterNot(_.data.name.startsWith("slf4j-nop"))
@@ -16,7 +16,7 @@ object Projects {
       Test / dependencyClasspath := Def.uncached(
         (Test / dependencyClasspath).value.filterNot(_.data.name.startsWith("slf4j-nop"))
       ),
-      libraryDependencies += "org.apache.logging.log4j" % "log4j-slf4j2-impl" % Versions.log4j % Test
+      libraryDependencies += "ch.qos.logback" % "logback-classic" % Versions.logback % Test
     )
 
     // explicit id: the root build.sbt alias for this project cannot be named
