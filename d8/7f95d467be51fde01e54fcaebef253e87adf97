@@ -1,0 +1,27 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ParseFailureReportingTests.scala
+  s_f10eefff00361f::t_4e062e226ab30e 122-143
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/parse/ParseReporter.scala
+  s_f10eefff00361f::t_5879c53fa5dbb1 42-46
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  s_f10eefff00361f::t_9c14a58ee37a0d 5,219-226,228,273
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCache.scala
+  s_f10eefff00361f::t_746e53fd3ee429 3,44-47,49
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCacheTests.scala
+  s_f10eefff00361f::t_d01154a53a0c6f 49-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d87f95d467be51fde01e54fcaebef253e87adf97",
+  "prompts": {},
+  "sessions": {
+    "s_f10eefff00361f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2900ce21-cc07-43d7-9602-deaffad1f75a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
