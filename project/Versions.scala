@@ -17,6 +17,7 @@ object Versions {
     val scalaParallel         = "1.2.0"
     val ZeroturnaroundVersion = "1.17"
     val osLib                 = "0.11.8"
+    val log4j                 = "2.26.1"
 
     private def parseVersion(key: String): String = {
         val versionRegexp = s""".*val $key[ ]+=[ ]?"(.*?)"""".r
