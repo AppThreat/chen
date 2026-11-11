@@ -147,6 +147,62 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers with BeforeAn
           }
       }
 
+      "report the failed file again on a warm cache run, and not the cached good file" in {
+          if !phpAvailable then cancel("No PHP runtime available on this platform")
+          withReporterEnabled {
+              val inputDir = (workRoot / "cached").createDirectoryIfNotExists()
+              (inputDir / "good.php").writeText("<?php ;")
+              (inputDir / "broken.php").writeText("<?php ;")
+
+              val gen = (workRoot / "gen-cached").createDirectoryIfNotExists() / "stubgen.php"
+              gen.writeText(
+                s"""<?php
+                |${phpArgHelpers}
+                |if (hasArg("--parser-info")) {
+                |    echo "Generator version: 2.0.0\\n";
+                |    exit(0);
+                |}
+                |if (hasArg("-i")) {
+                |    $$out = argAfter("-o");
+                |    @mkdir($$out, 0777, true);
+                |    file_put_contents($$out . "/good.json", <<<'JSON'
+                |$goodWrapper
+                |JSON);
+                |    exit(0);
+                |}
+                |if (hasArg("--json-dump")) {
+                |    global $$argv;
+                |    if (end($$argv) && strpos(end($$argv), "broken.php") !== false) {
+                |        fwrite(STDERR, "syntax error, unexpected end of file\\n");
+                |        exit(1);
+                |    }
+                |    echo '[{"nodeType":"Stmt_Nop","attributes":{"startLine":1,"startFilePos":0,"kind":1}}]';
+                |    exit(0);
+                |}
+                |exit(1);
+                |""".stripMargin
+              )
+              val parser = PhpParser.fromPaths(gen.canonicalPath, iniPath)
+              val config = Config().withInputPath(inputDir.toString)
+
+              // cold run: the good file is parsed and cached, the broken one fails
+              val cold = newEmptyCpg()
+              new AstCreationPass(config, cold, parser)(using ValidationMode.Disabled)
+                  .createAndApply()
+              cold.close()
+              ParseReporter.records.map(_.file).toSet shouldBe Set("broken.php")
+
+              // warm run: the good file is served from the AST cache and records nothing, the
+              // failed one is a permanent cache miss and is reported again
+              ParseReporter.reset()
+              val warm = newEmptyCpg()
+              new AstCreationPass(config, warm, parser)(using ValidationMode.Disabled)
+                  .createAndApply()
+              warm.close()
+              ParseReporter.records.map(_.file).toSet shouldBe Set("broken.php")
+          }
+      }
+
       "record nothing when the reporter is disabled" in {
           if !phpAvailable then cancel("No PHP runtime available on this platform")
           System.clearProperty("chen.parse.report")
