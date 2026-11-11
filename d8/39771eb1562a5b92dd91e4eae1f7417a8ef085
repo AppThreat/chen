@@ -1,0 +1,24 @@
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/parse/ParseReporterTests.scala
+  s_2a14b3831b5ada::t_87757e86b9ff4b 1-72,75-124
+  s_2a14b3831b5ada::t_1309e29143f346 73-74
+  s_2a14b3831b5ada::t_c5a668ce4ef962 125-126
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/parse/ParseReporter.scala
+  s_2a14b3831b5ada::t_47967cf5c98821 1-133
+  s_2a14b3831b5ada::t_dabb018c02184c 134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d839771eb1562a5b92dd91e4eae1f7417a8ef085",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
