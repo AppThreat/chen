@@ -22,8 +22,18 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
   */
 class ParseFailureReportingTests extends AnyWordSpec with Matchers:
 
+  /** True when rbastgen really parses: it answers `--version` even without the Ruby 3.4+ it runs
+    * on, and then exits 0 having written nothing, so the check parses a one-line file.
+    */
   private val rbastgenAvailable: Boolean =
-      io.appthreat.x2cpg.utils.ExternalCommand.run("rbastgen --version", ".", true).isSuccess
+    val probe = File.newTemporaryDirectory("ruby-parse-report-probe")
+    try
+      ((probe / "src").createDirectoryIfNotExists() / "a.rb").writeText("x = 1\n")
+      val out = probe / "out"
+      io.appthreat.x2cpg.utils.ExternalCommand
+          .run(s"rbastgen -i ${probe / "src"} -o $out", probe.toString, true)
+          .isSuccess && out.exists && out.list.exists(_.name.endsWith(".json"))
+    finally probe.delete(swallowIOExceptions = true)
 
   // the object's logger: LoggerFactory.getLogger(getClass) inside `object Ruby2Atom`
   private val FrontendLoggerName = "io.appthreat.ruby2atom.Ruby2Atom$"
@@ -52,7 +62,8 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
   "ruby2atom parse failure reporting" should {
 
       "record the file the generator failed, with the generator's own message" in {
-          if !rbastgenAvailable then cancel("rbastgen 2.x is not on PATH")
+          if !rbastgenAvailable then
+            cancel("rbastgen 2.x is not on PATH or cannot run (it needs Ruby 3.4+)")
           withReporterEnabled {
               val project = buildProject()
               val cpg     = buildCpg(project)
@@ -125,7 +136,8 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
       }
 
       "log nothing for the lost files at the default level" in {
-          if !rbastgenAvailable then cancel("rbastgen 2.x is not on PATH")
+          if !rbastgenAvailable then
+            cancel("rbastgen 2.x is not on PATH or cannot run (it needs Ruby 3.4+)")
           withReporterEnabled {
               val warnLines = LogCapture.withCapture(FrontendLoggerName, Level.WARN) { appender =>
                 val cpg = buildCpg(buildProject())
@@ -137,7 +149,8 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
       }
 
       "record nothing when the reporter is disabled" in {
-          if !rbastgenAvailable then cancel("rbastgen 2.x is not on PATH")
+          if !rbastgenAvailable then
+            cancel("rbastgen 2.x is not on PATH or cannot run (it needs Ruby 3.4+)")
           System.clearProperty("chen.parse.report")
           ParseReporter.reset()
           val cpg = buildCpg(buildProject())
