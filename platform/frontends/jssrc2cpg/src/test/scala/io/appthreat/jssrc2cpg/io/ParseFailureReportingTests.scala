@@ -14,6 +14,9 @@ import org.scalatest.BeforeAndAfterAll
 
 /** chen#255: a file astgen cannot parse never reaches the AST pass at all, and a file whose astgen
   * JSON cannot be turned into the graph is dropped in AstCreationPass. Both must be recorded.
+  *
+  * The collector is global to the JVM and other suites of this project run alongside, so the
+  * fixture names carry a prefix no other suite uses and the assertions look only at those.
   */
 class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
 
@@ -28,12 +31,14 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
 
   private val projectWithBrokenFile: File =
     val dir      = File.newTemporaryDirectory("jssrcParseReport")
-    val goodFile = dir / "good.js"
+    val goodFile = dir / "pr255-good.js"
     goodFile.createIfNotExists(createParents = true)
     goodFile.write(s"""console.log("good");""")
-    val brokenFile = dir / "broken.js"
+    val brokenFile = dir / "pr255-broken.js"
     brokenFile.createIfNotExists(createParents = true)
     brokenFile.write(s"""console.log("broken""")
+    // a page with no Alpine directives or Angular bindings: astgen writes its JSON with a null AST
+    (dir / "pr255-page.html").write("<div></div>\n")
     dir
 
   override def afterAll(): Unit =
@@ -69,14 +74,14 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
       "record the file astgen could not parse, with astgen's own reason" in withReporterEnabled {
           cancelUnlessAstgen()
           runAstGeneration(tsTypes = false)() { cpg =>
-            val broken = ParseReporter.records.filter(_.file.endsWith("broken.js"))
+            val broken = ParseReporter.records.filter(_.file.endsWith("pr255-broken.js"))
             broken should have size 1
             broken.head.frontend shouldBe "jssrc"
             broken.head.outcome shouldBe "unparsed"
             broken.head.stage shouldBe "parse"
-            broken.head.file shouldBe "broken.js"
-            ParseReporter.records.exists(_.file.endsWith("good.js")) shouldBe false
-            cpg.file.name.l should (contain("good.js").and(not) contain "broken.js")
+            broken.head.file shouldBe "pr255-broken.js"
+            ParseReporter.records.exists(_.file.endsWith("pr255-good.js")) shouldBe false
+            cpg.file.name.l should (contain("pr255-good.js").and(not) contain "pr255-broken.js")
           }
       }
 
@@ -84,30 +89,44 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
           withReporterEnabled {
               cancelUnlessAstgen()
               runAstGeneration(tsTypes = true)() { cpg =>
-                val broken = ParseReporter.records.filter(_.file.endsWith("broken.js"))
+                val broken = ParseReporter.records.filter(_.file.endsWith("pr255-broken.js"))
                 broken should have size 1
                 broken.head.outcome shouldBe "unparsed"
                 broken.head.stage shouldBe "parse"
-                broken.head.file shouldBe "broken.js"
-                ParseReporter.records.exists(_.file.endsWith("good.js")) shouldBe false
+                broken.head.file shouldBe "pr255-broken.js"
+                ParseReporter.records.exists(_.file.endsWith("pr255-good.js")) shouldBe false
               }
           }
 
       "record a file whose astgen JSON cannot be read, at the ast stage" in withReporterEnabled {
           cancelUnlessAstgen()
-          // astgen parses broken.js? No: the file that reaches the pass is good.js, and its JSON
+          // astgen parses pr255-broken.js? No: the file that reaches the pass is pr255-good.js, and its JSON
           // is corrupted here so the failure happens where the pass drops a file.
           val corruptor = (out: File) =>
-              out.listRecursively.filter(f => f.name == "good.js.json").foreach(f =>
+              out.listRecursively.filter(f => f.name == "pr255-good.js.json").foreach(f =>
                   f.write("""{"not": "an astgen file"}""")
               )
           runAstGeneration(tsTypes = false)(corruptor) { cpg =>
-            val good = ParseReporter.records.filter(_.file.endsWith("good.js"))
+            val good = ParseReporter.records.filter(_.file.endsWith("pr255-good.js"))
             good should have size 1
             good.head.frontend shouldBe "jssrc"
             good.head.outcome shouldBe "dropped"
             good.head.stage shouldBe "ast"
-            good.head.file shouldBe "good.js"
+            good.head.file shouldBe "pr255-good.js"
+          }
+      }
+
+      "not record a page astgen found no code in" in withReporterEnabled {
+          cancelUnlessAstgen()
+          val nullAst = (out: File) =>
+            out.listRecursively.find(_.name == "pr255-page.html.json") match
+              case Some(json) => ujson.read(json.contentAsString)("ast").isNull shouldBe true
+              case None       => fail("astgen wrote no JSON for pr255-page.html")
+            ()
+          runAstGeneration(tsTypes = false)(nullAst) { cpg =>
+              // other suites in this JVM may record their own files meanwhile
+              ParseReporter.records.map(_.file).filter(_.startsWith("pr255-")) shouldBe
+                  List("pr255-broken.js")
           }
       }
 

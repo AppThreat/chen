@@ -282,20 +282,33 @@ class AstGenRunner(config: Config):
     */
   private def recordGeneratorFailures(out: File, astGenOutput: Seq[String]): Unit =
     if !ParseReporter.isEnabled then return
-    val reasons = mutable.LinkedHashMap[String, String]()
-    fileErrorsOf(out / ManifestName).foreach((file, reason) => reasons(file) = reason)
+    // keyed by the name the report gives the file: the manifest and the output lines may spell
+    // the same path differently (a symlinked temporary directory, a relative input path)
+    val reasons  = mutable.LinkedHashMap[String, String]()
+    val inputDir = File(config.inputPath)
+    def nameOf(file: String): String =
+      // astgen names a file relative to the input directory it ran in, or absolutely
+      val resolved = if Paths.get(file).isAbsolute then File(file) else inputDir / file
+      val path     = Try(resolved.canonicalPath).getOrElse(file)
+      ParseReporter.relativeTo(Try(inputDir.canonicalPath).getOrElse(config.inputPath), path)
+    fileErrorsOf(out / ManifestName).foreach((file, reason) =>
+        reasons.getOrElseUpdate(nameOf(file), reason)
+    )
     astGenOutput.foreach { line =>
         if line.startsWith("Failure: ") then
           val rest    = line.stripPrefix("Failure: ").trim
           val file    = rest.takeWhile(ch => !ch.isWhitespace)
           val message = rest.drop(file.length).trim
-          if file.nonEmpty && !reasons.contains(file) then
-            reasons(file) = if message.nonEmpty then message else "astgen reported no reason"
+          if file.nonEmpty then
+            reasons.getOrElseUpdate(
+              nameOf(file),
+              if message.nonEmpty then message else "astgen reported no reason"
+            )
     }
     reasons.foreach((file, reason) =>
         ParseReporter.record(
           ParseReporter.Frontend.JsSrc,
-          ParseReporter.relativeTo(config.inputPath, file),
+          file,
           ParseReporter.Outcome.Unparsed,
           ParseReporter.Stage.Parse,
           reason

@@ -92,15 +92,21 @@ class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: 
         // Read the source even though only its line count used to be consumed: a vanished source
         // file must keep failing here, where the file is dropped and reported, exactly as before.
         IOUtils.readLinesInFile(Paths.get(parseResult.fullPath)).size
-        // Collect this file's types in a private map so they can be cached and replayed.
-        val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
-        val localDiff =
-            new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
-                .createAst()
-        perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
-        val encoded =
-            perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
-        Some(ParsedUnit(localDiff, encoded))
+        if parseResult.json.obj.get("ast").forall(_.isNull) then
+          // astgen found nothing to parse: an HTML page with no Alpine directives or Angular
+          // bindings. Nothing of the file is lost, so this is not a failure to report.
+          logger.debug(s"astgen wrote no AST for '${parseResult.filename}', so it has no code")
+          None
+        else
+          // Collect this file's types in a private map so they can be cached and replayed.
+          val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
+          val localDiff =
+              new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
+                  .createAst()
+          perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
+          val encoded =
+              perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
+          Some(ParsedUnit(localDiff, encoded))
     } match
       case Failure(t) =>
           // The whole file is left out of the graph: say which one and why
