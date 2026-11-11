@@ -1,9 +1,11 @@
 package io.appthreat.c2cpg.passes
 
 import better.files.File
+import ch.qos.logback.classic.Level
 import io.appthreat.c2cpg.Config
 import io.appthreat.x2cpg.X2Cpg.newEmptyCpg
 import io.appthreat.x2cpg.parse.ParseReporter
+import io.appthreat.x2cpg.testfixtures.LogCapture
 import io.shiftleft.semanticcpg.language.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -81,15 +83,40 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
           val dir = buildProject()
           // a timeout so small the parse cannot finish: the rethrown TimeoutException lands in
           // the catch that used to println, the real path a wedged parse takes
-          val cpg = runPass(dir, timeout = 0.nanoseconds)
-          try
-            val dropped = ParseReporter.records.filter(_.file == "good.c")
-            dropped should have size 1
-            dropped.head.frontend shouldBe "c"
-            dropped.head.outcome shouldBe "dropped"
-            dropped.head.stage shouldBe "ast"
-            dropped.head.message should startWith("TimeoutException:")
-          finally cpg.close()
+          val warnLines = LogCapture.withCapture(
+            classOf[AstCreationPass].getName,
+            Level.WARN
+          ) { appender =>
+            val cpg = runPass(dir, timeout = 0.nanoseconds)
+            cpg.close()
+            LogCapture.messagesAtOrAbove(appender, Level.WARN)
+          }
+          // the message the catch used to println to stdout is not even a warning now
+          warnLines.exists(message => message.contains("Exception processing file")) shouldBe false
+
+          val debugLines = LogCapture.withCapture(
+            classOf[AstCreationPass].getName,
+            Level.DEBUG
+          ) { appender =>
+            val cpg = runPass(dir, timeout = 0.nanoseconds)
+            cpg.close()
+            LogCapture.messagesAt(appender, Level.DEBUG)
+          }
+          debugLines.exists(message =>
+              message.contains("Exception processing file") && message.contains("good.c")
+          ) shouldBe true
+          // A 0ns deadline lands wherever the race puts it: past the parse (dropped at the ast
+          // stage) or inside it (unparsed at the parse stage). Either way the file is recorded
+          // once per run, by the c frontend, with the timeout's own text.
+          val dropped = ParseReporter.records.filter(_.file == "good.c")
+          dropped should not be empty
+          dropped.foreach { record =>
+            record.frontend shouldBe "c"
+            (record.outcome, record.stage) should (
+              equal(("dropped", "ast")).or(equal(("unparsed", "parse")))
+            )
+            record.message should (startWith("TimeoutException:").or(startWith("ParseError")))
+          }
       }
 
       "record nothing when the reporter is disabled" in {
