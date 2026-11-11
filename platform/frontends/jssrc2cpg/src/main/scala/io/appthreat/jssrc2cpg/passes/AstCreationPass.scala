@@ -5,9 +5,9 @@ import io.appthreat.jssrc2cpg.astcreation.AstCreator
 import io.appthreat.jssrc2cpg.parser.BabelJsonParser
 import io.appthreat.jssrc2cpg.utils.AstGenRunner.AstGenRunnerResult
 import io.appthreat.x2cpg.ValidationMode
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{AstCacheStore, CacheControl}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
-import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import io.shiftleft.utils.IOUtils
@@ -24,12 +24,7 @@ object AstCreationPass:
   // Separator for the (typeName, typeFullName) usedTypes pairs in the cache sidecar.
   private val TypeSep = '\u0000'
 
-class AstCreationPass(
-  cpg: Cpg,
-  astGenRunnerResult: AstGenRunnerResult,
-  config: Config,
-  report: Report = new Report()
-)(
+class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: Config)(
   implicit withSchemaValidation: ValidationMode
 ) extends ConcurrentWriterCpgPass[(String, String)](cpg):
 
@@ -87,29 +82,51 @@ class AstCreationPass(
       }
 
   private def createAst(rootPath: String, jsonFilename: String): Option[ParsedUnit] =
-    val ((result, filename), duration) = TimeUtils.time {
-        Try {
-            val parseResult =
-                BabelJsonParser.readFile(Paths.get(rootPath), Paths.get(jsonFilename))
-            val fileLOC = IOUtils.readLinesInFile(Paths.get(parseResult.fullPath)).size
-            report.addReportInfo(parseResult.filename, fileLOC, parsed = true)
-            // Collect this file's types in a private map so they can be cached and replayed.
-            val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
-            val localDiff =
-                new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
-                    .createAst()
-            perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
-            val encoded =
-                perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
-            (Some(ParsedUnit(localDiff, encoded)), parseResult.filename)
-        } match
-          case Failure(t) =>
-              // The whole file is left out of the graph: say which one and why
-              logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
-              (None, jsonFilename)
-          case Success(value) => value
-    }
-    report.updateReport(filename, cpg = result.isDefined, duration)
-    result
+    // The name the graph would know the file by, kept for the failure record: without it the
+    // record could only name the astgen JSON, which says nothing to a reader of the report.
+    var relativeName: Option[String] = None
+    Try {
+        val parseResult =
+            BabelJsonParser.readFile(Paths.get(rootPath), Paths.get(jsonFilename))
+        relativeName = Some(parseResult.filename)
+        // Read the source even though only its line count used to be consumed: a vanished source
+        // file must keep failing here, where the file is dropped and reported, exactly as before.
+        IOUtils.readLinesInFile(Paths.get(parseResult.fullPath)).size
+        if parseResult.json.obj.get("ast").forall(_.isNull) then
+          // astgen found nothing to parse: an HTML page with no Alpine directives or Angular
+          // bindings. Nothing of the file is lost, so this is not a failure to report.
+          logger.debug(s"astgen wrote no AST for '${parseResult.filename}', so it has no code")
+          None
+        else
+          // Collect this file's types in a private map so they can be cached and replayed.
+          val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
+          val localDiff =
+              new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
+                  .createAst()
+          perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
+          val encoded =
+              perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
+          Some(ParsedUnit(localDiff, encoded))
+    } match
+      case Failure(t) =>
+          // The whole file is left out of the graph: say which one and why
+          logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
+          // A failure before the JSON is read knows no relative name; the JSON path under the
+          // astgen output mirrors the source tree, so strip the output directory and the suffix.
+          val fallbackName =
+              if astGenRunnerResult.astGenOutDir.nonEmpty then
+                jsonFilename.stripSuffix(".json").replace(astGenRunnerResult.astGenOutDir, "")
+                    .dropWhile(ch => ch == '/' || ch == '\\')
+              else jsonFilename
+          ParseReporter.record(
+            ParseReporter.Frontend.JsSrc,
+            relativeName.getOrElse(fallbackName),
+            ParseReporter.Outcome.Dropped,
+            ParseReporter.Stage.Ast,
+            ParseReporter.describe(t)
+          )
+          None
+      case Success(value) => value
+    end match
   end createAst
 end AstCreationPass

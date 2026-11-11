@@ -1,0 +1,13 @@
+<!-- The tests run on logback so the chen#255 suites can capture what a logger prints; a default
+     run of the frontends logs at WARN, so this matches it. The inert log4j2-test.xml this file
+     replaces said the same. -->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>[%-5level] %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="WARN">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

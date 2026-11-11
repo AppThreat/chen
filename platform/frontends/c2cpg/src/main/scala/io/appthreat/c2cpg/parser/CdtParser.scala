@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.parser
 
 import better.files.File
 import io.appthreat.c2cpg.Config
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.utils.SourceDecoding
 import org.eclipse.cdt.core.CCorePlugin
 import org.eclipse.cdt.core.dom.ast.gnu.c.GCCLanguage
@@ -147,9 +148,22 @@ class CdtParser(
         val problems = CPPVisitor.getProblems(translationUnit)
         if config.logProblems then logProblems(problems.toList)
         if config.logPreprocessor then logPreprocessorStatements(translationUnit)
+        val preprocessorProblems = translationUnit.getPreprocessorProblemsCount
+        if problems.nonEmpty || preprocessorProblems > 0 then
+          // The unit is in the graph with problem nodes where CDT gave up: partial, not lost
+          ParseReporter.record(
+            ParseReporter.Frontend.C,
+            ParseReporter.relativeTo(config.inputPath, file.toString),
+            ParseReporter.Outcome.Partial,
+            ParseReporter.Stage.Parse,
+            s"${problems.length} problem nodes, $preprocessorProblems preprocessor problems: " +
+                problems.headOption.map(problem =>
+                    s"${problem.getMessage} (line ${problem.getFileLocation.getStartingLineNumber})"
+                ).getOrElse("no problem node text")
+          )
         ParseResult(
           Option(translationUnit),
-          preprocessorErrorCount = translationUnit.getPreprocessorProblemsCount,
+          preprocessorErrorCount = preprocessorProblems,
           problems = problems.length
         )
       catch
@@ -189,8 +203,30 @@ class CdtParser(
       case ParseResult(Some(t), c, p, _) =>
           Option(t)
       case ParseResult(_, _, _, maybeThrowable) =>
-          logger.warn(
+          // At debug, like every lost-file message; the record carries the same reason
+          logger.debug(
             s"Failed to parse '$file': ${maybeThrowable.map(extractParseException).getOrElse("Unknown parse error!")}"
           )
+          ParseReporter.record(
+            ParseReporter.Frontend.C,
+            ParseReporter.relativeTo(config.inputPath, file.toString),
+            ParseReporter.Outcome.Unparsed,
+            ParseReporter.Stage.Parse,
+            maybeThrowable.map(parseFailureMessage).getOrElse("Unknown parse error!")
+          )
           None
+
+  /** The record's version of [[extractParseException]] without its stack-trace fallback: a report
+    * holds the parser's error text or the exception's class and message, never a stack trace.
+    */
+  private def parseFailureMessage(exception: Throwable): String =
+      Option(exception.getMessage).getOrElse(
+        exception.getStackTrace
+            .collectFirst {
+                case element: StackTraceElement
+                    if element.getClassName.endsWith("ASTAmbiguousNode") =>
+                    "Could not resolve ambiguous node!"
+            }
+            .getOrElse(exception.getClass.getSimpleName)
+      )
 end CdtParser

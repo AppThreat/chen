@@ -4,6 +4,7 @@ import better.files.File
 import Delombok.DelombokMode
 import Delombok.DelombokMode.*
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.utils.SourceDecoding
 import com.github.javaparser.{JavaParser, ParserConfiguration}
 import com.github.javaparser.ParserConfiguration.LanguageLevel
@@ -22,8 +23,11 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 import scala.util.Success
+import org.slf4j.LoggerFactory
 
 class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRoot: Path):
+
+  private val logger = LoggerFactory.getLogger(this.getClass)
 
   /** Parse the given file into a JavaParser CompliationUnit that will be used for creating the CPG
     * AST.
@@ -34,7 +38,21 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
   def parseAnalysisFile(relativeFilename: String): Option[CompilationUnit] =
     val analysisFilename = analysisRoot.resolve(relativeFilename).toString
     // Need to store tokens for position information.
-    fileIfExists(analysisFilename).flatMap(parse(_, storeTokens = true))
+    fileIfExists(analysisFilename) match
+      case Some(file) => parse(file, storeTokens = true, Some(relativeFilename))
+      case None       =>
+          // The file was there when the sources were enumerated; without this the loss is silent
+          logger.debug(
+            s"File '$relativeFilename' was enumerated as a source but is gone, so it is left out"
+          )
+          ParseReporter.record(
+            ParseReporter.Frontend.JavaSrc,
+            relativeFilename,
+            ParseReporter.Outcome.Unparsed,
+            ParseReporter.Stage.Parse,
+            "file was gone when the parser reached it"
+          )
+          None
 
   /** Parse the given file into a JavaParser CompliationUnit that will be used for reading type
     * information. These should not be used for determining the structure of the AST.
@@ -70,7 +88,15 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
         .getOrElse(file.path)
     SourceDecoding.read(file.path, encodings.forFile(original)).text
 
-  private def parse(file: File, storeTokens: Boolean): Option[CompilationUnit] =
+  /** Parse `file`. `analysisFile`, set only on the analysis path, names the file relative to the
+    * project root so a file JavaParser cannot read can be recorded; types files are auxiliary and
+    * their failures are not losses from the graph.
+    */
+  private def parse(
+    file: File,
+    storeTokens: Boolean,
+    analysisFile: Option[String] = None
+  ): Option[CompilationUnit] =
     val text = textOf(file)
     // Unicode escapes are translated before lexing, as javac does (JLS 3.3): `// \u000a code()`
     // compiles code() and `int \u0061b` declares ab. Node positions stay those of the file.
@@ -85,10 +111,41 @@ class SourceParser private (originalInputPath: Path, analysisRoot: Path, typesRo
             .setPreprocessUnicodeEscapes(hasEscapes)
     val parseResult = new JavaParser(javaParserConfig).parse(text)
 
+    def problemsText: String =
+        parseResult.getProblems.asScala.map(problem => problem.getMessage).mkString("; ")
+
     parseResult.getResult.toScala match
-      case Some(result) if result.getParsed == Parsedness.PARSED => Some(result)
+      case Some(result) if result.getParsed == Parsedness.PARSED =>
+          analysisFile.foreach(file =>
+              if !parseResult.getProblems.isEmpty then
+                // Recovered enough to be in the graph, but the parser still reported problems
+                logger.debug(s"Parsed '$file' with problems: $problemsText")
+                ParseReporter.record(
+                  ParseReporter.Frontend.JavaSrc,
+                  file,
+                  ParseReporter.Outcome.Partial,
+                  ParseReporter.Stage.Parse,
+                  problemsText
+                )
+          )
+          Some(result)
       case _ =>
+          analysisFile.foreach(file =>
+            val reason =
+                if parseResult.getProblems.isEmpty then "JavaParser produced no AST"
+                else problemsText
+            logger.debug(s"Unable to parse '$file', so it is left out: $reason")
+            ParseReporter.record(
+              ParseReporter.Frontend.JavaSrc,
+              file,
+              ParseReporter.Outcome.Unparsed,
+              ParseReporter.Stage.Parse,
+              reason
+            )
+          )
           None
+    end match
+  end parse
 end SourceParser
 
 object SourceParser:

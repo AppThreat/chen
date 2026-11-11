@@ -5,11 +5,13 @@ import io.appthreat.c2cpg.astcreation.AstCreator
 import io.appthreat.c2cpg.parser.{CdtLogging, CdtParser, ProjectSources}
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.StreamingCpgPass
 import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
+import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.*
@@ -131,6 +133,8 @@ class AstCreationPass(
 
   import AstCreationPass.*
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   private val cacheStore = new AstCacheStore(
     config.enableAstCache,
     resolveCacheDir(config.inputPath, config.cacheDir),
@@ -138,6 +142,12 @@ class AstCreationPass(
   )
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)
+
+  /** The files this pass turned into ASTs, freshly or from the AST cache, by absolute path: read by
+    * edg2atom after the CDT fallback, to tell a file the fallback rescued from one it lost too.
+    * Observability only.
+    */
+  val succeeded: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
 
   private val sources = Option(projectSources).getOrElse(new ProjectSources(config))
 
@@ -152,14 +162,16 @@ class AstCreationPass(
   override def generateParts(): Array[String] = sources.files
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
-      cacheStore.process(
-        diffGraph,
-        filename,
-        cacheKey = AstCreationPass.fileCacheKey(filename),
-        fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
-        registerUsedTypes = registerUsedTypes,
-        createAst = createAst(filename)
-      )
+    val produced =
+        cacheStore.process(
+          diffGraph,
+          filename,
+          cacheKey = AstCreationPass.fileCacheKey(filename),
+          fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
+          registerUsedTypes = registerUsedTypes,
+          createAst = createAst(filename)
+        )
+    if produced then succeeded.add(Paths.get(filename).toAbsolutePath.toString)
 
   private def createAst(filename: String): Option[ParsedUnit] =
     val path             = Paths.get(filename).toAbsolutePath
@@ -197,7 +209,18 @@ class AstCreationPass(
         case _ => None
     catch
       case e: Throwable =>
-          println(s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}")
+          // The whole file is left out of the graph; at debug, like every lost-file message, and
+          // never on stdout: this catch also carries the parse-timeout path.
+          logger.debug(
+            s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}"
+          )
+          ParseReporter.record(
+            ParseReporter.Frontend.C,
+            relPath,
+            ParseReporter.Outcome.Dropped,
+            ParseReporter.Stage.Ast,
+            ParseReporter.describe(e)
+          )
           None
     end try
   end createAst

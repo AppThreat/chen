@@ -6,6 +6,7 @@ import Py2Cpg.InputProvider
 import io.appthreat.pythonparser.PyParser
 import io.appthreat.pythonparser.ast
 import io.appthreat.x2cpg.ValidationMode
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import org.slf4j.LoggerFactory
@@ -73,10 +74,14 @@ class CodeToCpg(
 
   private def createAst(provider: InputProvider): Option[ParsedUnit] =
     val inputPair = provider()
+    // Set once the parser produced an AST: a failure after that is a conversion failure, not a
+    // parse failure, and the record says which of the two it was.
+    var parsedOk = false
     try
       val parser                 = new PyParser()
       val lineBreakCorrectedCode = inputPair.content.replace("\r\n", "\n").replace("\r", "\n")
       val parsedRoot             = parser.parse(lineBreakCorrectedCode)
+      parsedOk = true
       // Optional AST-level transform (dependency signature ingestion truncates function
       // bodies here, so bodies never reach the visitor). Identity for every plain build.
       val astRoot = parsedRoot match
@@ -93,6 +98,22 @@ class CodeToCpg(
             )
           )
       }
+      if parser.errors.nonEmpty then
+        // The file is in the graph with ErrorStatement nodes where statements failed: partial.
+        ParseReporter.record(
+          ParseReporter.Frontend.Python,
+          inputPair.relFileName,
+          ParseReporter.Outcome.Partial,
+          ParseReporter.Stage.Parse,
+          s"${parser.errors.size} statements failed to parse: " + parser.errors
+              .map(err =>
+                  s"line ${err.attributeProvider.lineno}: " +
+                      Option(err.exception.getMessage).getOrElse(
+                        err.exception.getClass.getName
+                      )
+              )
+              .mkString("; ")
+        )
       val nodeToCode = new NodeToCode(lineBreakCorrectedCode)
       val astVisitor = new PythonAstVisitor(
         inputPair.relFileName,
@@ -115,6 +136,13 @@ class CodeToCpg(
                 exception.getClass.getName
               )
             )
+          )
+          ParseReporter.record(
+            ParseReporter.Frontend.Python,
+            inputPair.relFileName,
+            if parsedOk then ParseReporter.Outcome.Dropped else ParseReporter.Outcome.Unparsed,
+            if parsedOk then ParseReporter.Stage.Ast else ParseReporter.Stage.Parse,
+            ParseReporter.describe(exception)
           )
           None
     end try

@@ -16,11 +16,13 @@ import io.appthreat.edg2atom.passes.{DuplicateDefinitionPass, EdgAstCreationPass
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import org.slf4j.LoggerFactory
 
+import java.nio.file.Paths
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -60,12 +62,13 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
                       case (header, unit) if pass.written.contains(unit.toString) =>
                           relative(header.toString)
                   }
-              val cdt =
+              val (cdt, rescued) =
                   if fallbackToCdt && !pass.failed.isEmpty then
-                    val files = pass.failed.asScala.toSeq.sorted ++ pass.unwrittenHeaders
-                    parseWithCdt(cpg, config, sources, files)
-                    files.map(relative)
-                  else Nil
+                    val files   = pass.failed.asScala.toSeq.sorted ++ pass.unwrittenHeaders
+                    val cdtPass = parseWithCdt(cpg, config, sources, files)
+                    (files.map(relative), cdtPass.succeeded.asScala.toSet)
+                  else (Nil, Set.empty[String])
+              recordFailures(pass, rescued, relative)
               edg.map(_ -> FrontendTagPass.Edg).toMap ++ cdt.map(_ -> FrontendTagPass.Cdt)
         new DuplicateDefinitionPass(cpg).createAndApply()
         new FrontendTagPass(cpg, frontendOf).createAndApply()
@@ -79,6 +82,36 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
         new ConstantTagPass(cpg, CGlobal.lastConstants).createAndApply()
         new ReferenceKindPass(cpg, CGlobal.lastArrayTypedefs).createAndApply()
         new DeclarationAttributesPass(cpg).createAndApply()
+      }
+
+  /** One parse report record per unit edga could not export (chen#255). A unit the CDT fallback
+    * then read is in the graph, so it is `partial` rather than lost, and the message names the
+    * frontend that read it; a unit the fallback lost as well also has the c frontend's own record.
+    */
+  private def recordFailures(
+    pass: EdgAstCreationPass,
+    rescued: Set[String],
+    relative: String => String
+  ): Unit =
+      pass.failed.asScala.foreach { file =>
+        val diagnostic = Option(pass.failures.get(file))
+            .getOrElse("edga exported no unit and reported no diagnostic")
+        if rescued.contains(Paths.get(file).toAbsolutePath.toString) then
+          ParseReporter.record(
+            ParseReporter.Frontend.Edg,
+            relative(file),
+            ParseReporter.Outcome.Partial,
+            ParseReporter.Stage.Parse,
+            s"$diagnostic; the c frontend read it instead"
+          )
+        else
+          ParseReporter.record(
+            ParseReporter.Frontend.Edg,
+            relative(file),
+            ParseReporter.Outcome.Unparsed,
+            ParseReporter.Stage.Parse,
+            diagnostic
+          )
       }
 
   /** Says which units edga could not export, and why the first did: what a run without them leaves
@@ -95,14 +128,17 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
           s"edga could not export ${failed.size} of $total translation units$also (${relative(first)}$reason)"
         )
 
-  /** The CDT frontend's ASTs for `files`. */
+  /** The CDT frontend's ASTs for `files`, as the pass that built them: its `succeeded` set says
+    * which of the files it rescued.
+    */
   private def parseWithCdt(
     cpg: Cpg,
     config: Config,
     sources: ProjectSources,
     files: Seq[String]
-  ): Unit =
-      new AstCreationPass(cpg, config, projectSources = sources):
-        override def generateParts(): Array[String] = files.toArray
-      .createAndApply()
+  ): AstCreationPass =
+    val cdtPass = new AstCreationPass(cpg, config, projectSources = sources):
+      override def generateParts(): Array[String] = files.toArray
+    cdtPass.createAndApply()
+    cdtPass
 end Edg2Atom

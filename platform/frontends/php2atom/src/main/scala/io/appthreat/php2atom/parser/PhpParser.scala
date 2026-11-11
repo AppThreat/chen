@@ -3,6 +3,7 @@ package io.appthreat.php2atom.parser
 import better.files.File
 import io.appthreat.php2atom.Config
 import io.appthreat.php2atom.parser.Domain.PhpFile
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.utils.ExternalCommand
 import org.slf4j.LoggerFactory
 
@@ -28,6 +29,21 @@ class PhpParser private (
 ):
 
   private val logger = LoggerFactory.getLogger(this.getClass)
+
+  /** Why the per-file generator last failed for a file, by canonical path, so the parse-failure
+    * report can name a reason instead of a bare None. The per-file generator prints its errors to
+    * stderr or prints nothing at all; before this map existed every one of those failures looked
+    * identical from outside.
+    */
+  private val perFileFailureReasons = new java.util.concurrent.ConcurrentHashMap[String, String]()
+
+  /** The recorded reason the per-file generator last failed for `canonicalPath`, if it did. */
+  def failureReasonFor(canonicalPath: String): Option[String] =
+      Option(perFileFailureReasons.get(canonicalPath))
+
+  private def rememberFailure(filename: String, reason: => String): Unit =
+      if ParseReporter.isEnabled then
+        perFileFailureReasons.put(filename, reason)
 
   private def phpParseCommand(filename: String): String =
     val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
@@ -248,8 +264,10 @@ class PhpParser private (
               case Right(parsed) =>
                   Some(parsed)
               case Left(reason) =>
-                  // Per-file isolation: skip only this file's contribution and keep going.
-                  logger.warn(s"Skipping AST file '${astFile.canonicalPath}': $reason")
+                  // Per-file isolation: skip only this file's contribution and keep going. At
+                  // debug like every lost-file message: the per-file fallback may still parse the
+                  // file, so this is not something a default run should be told about loudly.
+                  logger.debug(s"Skipping AST file '${astFile.canonicalPath}': $reason")
                   None
         }
   end collectBatchAsts
@@ -289,6 +307,8 @@ class PhpParser private (
           processParserOutput(output, inputFilePath)
 
       case Failure(exception) =>
+          // the message is the generator's stderr
+          rememberFailure(inputFilePath, s"generator run failed: ${exception.getMessage}")
           None
 
   private def processParserOutput(output: Seq[String], filename: String): Option[PhpFile] =
@@ -304,12 +324,14 @@ class PhpParser private (
     val jsonLines = lines.dropWhile(line => !line.startsWith("[") && !line.startsWith("{"))
 
     if jsonLines.isEmpty then
+      rememberFailure(filename, "the generator printed no JSON")
       None
     else
       val jsonString = jsonLines.mkString("\n")
       Try(ujson.read(jsonString)) match
         case Success(value) => Some(value)
         case Failure(e) =>
+            rememberFailure(filename, s"invalid JSON from the generator: ${e.getMessage}")
             None
 
   private def jsonValueToPhpFile(json: ujson.Value, filename: String): Option[PhpFile] =
@@ -317,6 +339,7 @@ class PhpParser private (
         case Success(phpFile) => Some(phpFile)
 
         case Failure(e) =>
+            rememberFailure(filename, s"AST decode failed: ${e.getMessage}")
             None
 
   /** Top-level ingestion entry that chooses batch vs. legacy per-file based on the capability
@@ -365,14 +388,15 @@ class PhpParser private (
             s"Batch mode is supported by the generator but produced no decodable AST documents " +
                 s"for input '$inputDir' (output '$outputDir'); falling back to per-file parsing."
           )
-          parseFilesIndividually(files, phpIniOverride)
+          parseFilesIndividually(inputDir, files, phpIniOverride)
       else
         logger.debug("Batch mode unsupported by generator; using per-file parsing.")
-        parseFilesIndividually(files, phpIniOverride)
+        parseFilesIndividually(inputDir, files, phpIniOverride)
   end parseInput
 
   /** Legacy per-file fallback: parse each file via [[parseFile]], isolating per-file failures. */
   private def parseFilesIndividually(
+    inputDir: String,
     files: Seq[String],
     phpIniOverride: Option[String]
   ): Seq[BatchParsedFile] =
@@ -382,6 +406,14 @@ class PhpParser private (
                 Some(BatchParsedFile(File(file).canonicalPath, phpFile))
             case None =>
                 logger.debug(s"Could not parse file $file. Results will be missing!")
+                ParseReporter.record(
+                  ParseReporter.Frontend.Php,
+                  ParseReporter.relativeTo(File(inputDir).canonicalPath, File(file).canonicalPath),
+                  ParseReporter.Outcome.Unparsed,
+                  ParseReporter.Stage.Parse,
+                  failureReasonFor(File(file).canonicalPath)
+                      .getOrElse("the generator produced no AST for this file")
+                )
                 None
       }
 end PhpParser

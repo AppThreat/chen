@@ -1,6 +1,7 @@
 package io.appthreat.ruby2atom.passes
 
 import io.appthreat.ruby2atom.astcreation.AstCreator
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.NodeTypes
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
@@ -9,7 +10,10 @@ import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 import org.slf4j.LoggerFactory
 import overflowdb.BatchedUpdate
 
-class AstCreationPass(cpg: Cpg, astCreators: List[AstCreator])
+/** `inputPath` is only for the parse-failure report, to name a lost file relative to the project
+  * root rather than by its absolute path.
+  */
+class AstCreationPass(cpg: Cpg, astCreators: List[AstCreator], inputPath: String = "")
     extends ForkJoinParallelCpgPass[AstCreator](cpg):
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -41,5 +45,17 @@ class AstCreationPass(cpg: Cpg, astCreators: List[AstCreator])
         diffGraph.absorb(ast)
       catch
         case ex: Exception =>
-            logger.error(s"Failed to create AST for file '${astCreator.fileName}'", ex)
+            // The whole file is left out of the graph; at debug, like every lost-file message
+            logger.debug(s"Failed to create AST for file '${astCreator.fileName}'", ex)
+            val name =
+                if inputPath.nonEmpty then
+                  ParseReporter.relativeTo(inputPath, astCreator.fileName)
+                else astCreator.fileName
+            ParseReporter.record(
+              ParseReporter.Frontend.Ruby,
+              name,
+              ParseReporter.Outcome.Dropped,
+              ParseReporter.Stage.Ast,
+              ParseReporter.describe(ex)
+            )
 end AstCreationPass

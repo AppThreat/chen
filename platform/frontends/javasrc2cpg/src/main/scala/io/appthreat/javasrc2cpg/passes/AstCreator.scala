@@ -179,6 +179,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
 }
 import io.appthreat.x2cpg.{Ast, AstCreatorBase, Defines, ValidationMode}
 import io.appthreat.x2cpg.datastructures.Global
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.TypeNodePass
 import io.appthreat.x2cpg.utils.AstPropertiesUtil.*
 import io.appthreat.x2cpg.utils.NodeBuilders
@@ -360,6 +361,13 @@ class AstCreator(
         case t: Throwable =>
             // The whole file is left out of the graph: say which one and why
             logger.debug(s"Unable to create the AST for '$filename', so it is left out", t)
+            ParseReporter.record(
+              ParseReporter.Frontend.JavaSrc,
+              filename,
+              ParseReporter.Outcome.Dropped,
+              ParseReporter.Stage.Ast,
+              ParseReporter.describe(t)
+            )
             Ast()
 
   /** Translate package declaration into AST consisting of a corresponding namespace block.

@@ -94,7 +94,9 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
     if !attempted || exported then written.add(file)
     else
       failed.add(file)
-      logger.warn(s"edga could not export $file")
+      // At debug, like every lost-file message. Edg2Atom records the unit in the parse report once
+      // it knows whether the CDT fallback read it.
+      logger.debug(s"edga could not export $file")
   end runOnPart
 
   /** What else a unit's AST depends on: how the CDT frontend would parse it, the edga build, and
