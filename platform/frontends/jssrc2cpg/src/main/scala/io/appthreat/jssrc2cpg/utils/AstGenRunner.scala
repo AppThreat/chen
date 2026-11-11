@@ -2,6 +2,7 @@ package io.appthreat.jssrc2cpg.utils
 
 import better.files.File
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{CacheControl, CpgCacheStore, ExternalParseCache}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory
 import versionsort.VersionHelper
 
 import java.nio.file.Paths
+import scala.collection.mutable
 import scala.util.Failure
 import scala.util.Success
 import scala.util.matching.Regex
@@ -39,7 +41,11 @@ object AstGenRunner:
       * astgen output; None when astgen wrote no record (atom-parsetools 1.x, or a user-supplied
       * output directory without one).
       */
-    typeMapEngine: Option[String] = None
+    typeMapEngine: Option[String] = None,
+    /** The directory astgen wrote to, so a file whose JSON cannot even be read can still be named
+      * by its source path rather than by a temporary JSON path.
+      */
+    astGenOutDir: String = ""
   )
 
   /** The manifest astgen appends its types record to. The name ends in .jsonl because every *.json
@@ -70,6 +76,26 @@ object AstGenRunner:
             .toVector
             .lastOption
       else None
+
+  /** The `file_error` records of the manifest, one per file astgen could not parse, each with
+    * astgen's own reason. Written only on runs with types on (the default).
+    */
+  private[jssrc2cpg] def fileErrorsOf(manifest: File): List[(String, String)] =
+      if manifest.isRegularFile then
+        manifest.contentAsString.linesIterator
+            .map(_.trim)
+            .filter(_.nonEmpty)
+            .flatMap(line =>
+                Try(ujson.read(line).obj).toOption.flatMap(obj =>
+                    for
+                      kind <- obj.get("kind") if kind.str == "file_error"
+                      file <- obj.get("file")
+                      why  <- obj.get("reason")
+                    yield (file.str, why.str)
+                )
+            )
+            .toList
+      else Nil
 
   /** The astgen command to run. "astgen" unless a test setting names another one, which is how the
     * suite runs against a chosen astgen (the 1.x release from npm, or a worktree build) instead of
@@ -230,7 +256,9 @@ class AstGenRunner(config: Config):
     // configuration only says what was asked for, and astgen may have fallen back.
     val engine = typeMapEngineOf(out / ManifestName)
     runResult match
-      case Success(_)   => AstGenRunnerResult(written, engine)
+      case Success(output) =>
+          recordGeneratorFailures(out, output)
+          AstGenRunnerResult(written, engine, out.toString)
       case Failure(err) =>
           // astgen writes each file's AST as it finishes it, so when it dies part way (out of
           // memory, a crash) the files before are sound. The run is reported, never passed off as
@@ -242,6 +270,36 @@ class AstGenRunner(config: Config):
           System.err.println(
             s"astgen failed on $in, so the atom holds only the ${parsed.size} files it finished: ${reason.mkString(" | ")}"
           )
-          AstGenRunnerResult(parsed, engine)
+          AstGenRunnerResult(parsed, engine, out.toString)
   end execute
+
+  /** Record every file astgen could not parse (chen#255): a file with no JSON under the output
+    * never reaches the AST pass, so its loss is otherwise invisible. Two sources, by preference:
+    * the manifest's `file_error` records, which also survive the parse cache and a reused output
+    * directory while the printed lines do not, and astgen's own `Failure: <file> <reason>` output
+    * lines (stderr is merged into what this runner sees), which is all a run without types on
+    * leaves. A vue file astgen fails prints no such line; that gap is on astgen, not hidden here.
+    */
+  private def recordGeneratorFailures(out: File, astGenOutput: Seq[String]): Unit =
+    if !ParseReporter.isEnabled then return
+    val reasons = mutable.LinkedHashMap[String, String]()
+    fileErrorsOf(out / ManifestName).foreach((file, reason) => reasons(file) = reason)
+    astGenOutput.foreach { line =>
+        if line.startsWith("Failure: ") then
+          val rest    = line.stripPrefix("Failure: ").trim
+          val file    = rest.takeWhile(ch => !ch.isWhitespace)
+          val message = rest.drop(file.length).trim
+          if file.nonEmpty && !reasons.contains(file) then
+            reasons(file) = if message.nonEmpty then message else "astgen reported no reason"
+    }
+    reasons.foreach((file, reason) =>
+        ParseReporter.record(
+          ParseReporter.Frontend.JsSrc,
+          ParseReporter.relativeTo(config.inputPath, file),
+          ParseReporter.Outcome.Unparsed,
+          ParseReporter.Stage.Parse,
+          reason
+        )
+    )
+  end recordGeneratorFailures
 end AstGenRunner
