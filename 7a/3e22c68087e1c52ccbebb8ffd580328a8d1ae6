@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_16f2a3554aa293 4,8
+  s_2a14b3831b5ada::t_57374a8f708366 109-110,115
+  s_2a14b3831b5ada::t_702f9540e0fcae 104-108,111-114,119
+  s_2a14b3831b5ada::t_25d533d64ee9b5 86-103
+  s_2a14b3831b5ada::t_eeeea0bbfb8452 116-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a3e22c68087e1c52ccbebb8ffd580328a8d1ae6",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
