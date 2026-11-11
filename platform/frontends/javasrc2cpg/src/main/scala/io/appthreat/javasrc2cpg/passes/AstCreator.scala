@@ -357,9 +357,10 @@ class AstCreator(
         scope.popScope()
         Ast(namespaceBlock).withChildren(typeDeclAsts).withChildren(importNodes)
       catch
-        case t: UnsolvedSymbolException =>
-            Ast()
         case t: Throwable =>
+            // The whole file is left out of the graph: say which one and why
+            logger.warn(s"Unable to create the AST for '$filename', so it is left out: $t")
+            logger.debug(s"Unable to create the AST for '$filename'", t)
             Ast()
 
   /** Translate package declaration into AST consisting of a corresponding namespace block.
