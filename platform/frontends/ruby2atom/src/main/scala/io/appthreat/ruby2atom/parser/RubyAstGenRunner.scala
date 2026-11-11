@@ -9,6 +9,7 @@ import io.appthreat.x2cpg.astgen.AstGenRunner.{
     DefaultAstGenRunnerResult
 }
 import io.appthreat.x2cpg.astgen.AstGenRunnerBase
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{CacheControl, CpgCacheStore, ExternalParseCache}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
@@ -199,13 +200,45 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
     val cache =
         new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
     val fp = astGenFingerprint(combineIgnoreRegex)
-    if cache.restore(fp, out.path) then
-      collectResult(out)
-    else
-      val res = runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
-      if res.parsedFiles.nonEmpty then cache.store(fp, out.path)
-      res
+    val result =
+        if cache.restore(fp, out.path) then
+          collectResult(out)
+        else
+          val res = runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
+          if res.parsedFiles.nonEmpty then cache.store(fp, out.path)
+          res
+    recordGeneratorFailures(out)
+    result
   end execute
+
+  /** Records, in the parse reporter, every file the generator itself failed to parse, from its
+    * diagnostics side-record (chen#255). Read on cached runs too, since the side-record is stored
+    * with the rest of the output: a file the generator fails produces no JSON at all, so no other
+    * hook can ever see it.
+    */
+  private def recordGeneratorFailures(out: File): Unit =
+    if !ParseReporter.isEnabled then return
+    Try {
+        val diagnostics = out.path.resolve(RubyAstGenRunner.DiagnosticsFilename)
+        if Files.exists(diagnostics) then
+          Files.readAllLines(diagnostics).asScala.foreach { line =>
+              Try(ujson.read(line).obj).toOption.foreach { record =>
+                  for
+                    rel <- record.get("rel_file_path").flatMap(_.strOpt)
+                    err <- record.get("parse_error")
+                    msg <- err.obj.get("message").flatMap(_.strOpt)
+                  do
+                    ParseReporter.record(
+                      ParseReporter.Frontend.Ruby,
+                      rel,
+                      ParseReporter.Outcome.Unparsed,
+                      ParseReporter.Stage.Parse,
+                      msg
+                    )
+              }
+          }
+    }
+  end recordGeneratorFailures
 
   private sealed trait ExecutionEnvironment extends AutoCloseable:
     def path: Path

@@ -11,6 +11,7 @@ import io.appthreat.x2cpg.frontendspecific.ruby2atom.*
 import io.appthreat.x2cpg.passes.base.AstLinkerPass
 import io.appthreat.x2cpg.passes.callgraph.NaiveCallLinker
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass, XTypeRecoveryConfig}
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.utils.{ConcurrentTaskUtil, ExternalCommand}
 import io.appthreat.x2cpg.{SourceFiles, X2CpgFrontend}
 import io.shiftleft.codepropertygraph.generated.{Cpg, Languages}
@@ -44,7 +45,8 @@ class Ruby2Atom extends X2CpgFrontend[Config]:
         val parsedFiles = ConcurrentTaskUtil
             .runUsingThreadPool(Ruby2Atom.parseAstGenResults(
               astGenResult.parsedFiles,
-              unknownTypes
+              unknownTypes,
+              Some(tmpDir)
             ))
             .flatMap {
                 case Failure(exception) => None
@@ -75,7 +77,7 @@ class Ruby2Atom extends X2CpgFrontend[Config]:
               rootNode = parsed.program
             )(using config.schemaValidation)
         }
-        AstCreationPass(cpg, astCreators).createAndApply()
+        AstCreationPass(cpg, astCreators, config.inputPath).createAndApply()
         ImportsPass(cpg).createAndApply()
         ImplicitRequirePass(cpg).createAndApply()
         RubyCallLinker(cpg).createAndApply()
@@ -100,10 +102,15 @@ object Ruby2Atom:
   /** Parses the generated AST Gen files in parallel. Node types that could not be lowered are
     * aggregated into `unknownTypeSink` (one count per type) instead of logging per node. AST
     * creation happens later, once every file is parsed and the program summary is available.
+    *
+    * `outDir`, the generator output directory, only serves the parse-failure report: the JSON path
+    * under it mirrors the source tree, so a file whose JSON cannot be read is still named by its
+    * source path.
     */
   def parseAstGenResults(
     astFiles: List[String],
-    unknownTypeSink: mutable.Map[String, Int] = mutable.Map.empty
+    unknownTypeSink: mutable.Map[String, Int] = mutable.Map.empty,
+    outDir: Option[File] = None
   ): Iterator[() => ParsedFile] =
       astFiles.map { fileName => () =>
           try
@@ -119,7 +126,20 @@ object Ruby2Atom:
             Ruby2Atom.ParsedFile(parserResult.filename, parserResult.fullPath, rubyProgram)
           catch
             case NonFatal(exception) =>
-                logger.error(s"Failed to parse AST file '$fileName'", exception)
+                // The whole file is left out of the graph; at debug, like every lost-file message
+                logger.debug(s"Failed to parse AST file '$fileName'", exception)
+                val sourceName = outDir
+                    .map(dir =>
+                        ParseReporter.relativeTo(dir.toString, fileName.stripSuffix(".json"))
+                    )
+                    .getOrElse(File(fileName).name.stripSuffix(".json"))
+                ParseReporter.record(
+                  ParseReporter.Frontend.Ruby,
+                  sourceName,
+                  ParseReporter.Outcome.Unparsed,
+                  ParseReporter.Stage.Parse,
+                  s"${exception.getClass.getSimpleName}: ${exception.getMessage}"
+                )
                 throw exception
       }.iterator
 end Ruby2Atom
