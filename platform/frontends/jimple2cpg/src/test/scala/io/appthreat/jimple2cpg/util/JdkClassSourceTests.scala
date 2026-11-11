@@ -1,6 +1,7 @@
 package io.appthreat.jimple2cpg.util
 
 import io.appthreat.jimple2cpg.util.JdkClasses.*
+import io.appthreat.x2cpg.utils.JImage
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec

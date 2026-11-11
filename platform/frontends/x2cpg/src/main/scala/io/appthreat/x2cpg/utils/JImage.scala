@@ -1,4 +1,4 @@
-package io.appthreat.jimple2cpg.util
+package io.appthreat.x2cpg.utils
 
 import java.io.IOException
 import java.nio.channels.FileChannel
@@ -10,11 +10,12 @@ import scala.util.{Try, Using}
 
 /** A read-only reader for the jimage container (`lib/modules`) of a JDK 9 or later.
   *
-  * Soot reads JDK classes through the `jrt:/` file system, which a GraalVM native image does not
-  * provide for an arbitrary JDK. This reader opens the image file directly, so the JDK classes of
-  * any installed JDK can be served to Soot from inside a native image. It is a port of the read
-  * path of `jdk.internal.jimage.BasicImageReader` and depends on no JDK-internal API, so it works
-  * the same on the JVM, where it can be tested against `jrt:/`.
+  * Soot (jimple2cpg) and JavaParser (javasrc2cpg) would read JDK classes through the `jrt:/` file
+  * system or the JDK's jmods, but a GraalVM native image provides no `jrt:/` file system for an
+  * arbitrary JDK, and JDKs built without jmods (JEP 493) are common. This reader opens the image
+  * file directly, so the JDK classes of any installed JDK can be served from inside a native image.
+  * It is a port of the read path of `jdk.internal.jimage.BasicImageReader` and depends on no
+  * JDK-internal API, so it works the same on the JVM, where it can be tested against `jrt:/`.
   *
   * The image format (major version 1, minor version 0) has not changed since JDK 9:
   *
@@ -72,7 +73,7 @@ final class JImage private (val path: Path, buffer: ByteBuffer, order: ByteOrder
   lazy val classCount: Int = entries.count(_.endsWith(".class"))
 
   /** The number of resources stored compressed. */
-  private[util] def compressedEntries: Int =
+  private[utils] def compressedEntries: Int =
       (0 until tableLength).iterator
           .map(i => redirectInt(offsetsOffset, i))
           .filter(_ != 0)
@@ -251,6 +252,22 @@ object JImage:
   /** The image file of a JDK home, whether or not it exists. */
   def imageFile(javaHome: Path): Path = javaHome.resolve("lib").resolve("modules")
 
+  /** Images opened through [[openShared]], by real path. */
+  private val shared = new java.util.concurrent.ConcurrentHashMap[Path, JImage]()
+
+  /** Open a jimage file once per process: the mapping is read-only, so the jimple and javasrc
+    * frontends, and every run of them, share one. A failed open is not remembered.
+    */
+  def openShared(path: Path): Try[JImage] =
+    val key = Try(path.toRealPath()).getOrElse(path.toAbsolutePath)
+    Option(shared.get(key)) match
+      case Some(image) => scala.util.Success(image)
+      case None =>
+          open(key).map { image =>
+            val previous = shared.putIfAbsent(key, image)
+            if previous == null then image else previous
+          }
+
   /** Open a jimage file. Fails when the file is missing, is not a jimage or has an unknown version.
     */
   def open(path: Path): Try[JImage] = Try {
@@ -285,7 +302,7 @@ object JImage:
   /** The jimage perfect-hash function (`ImageStringsReader.hashCode`): FNV-1a style over the
     * modified UTF-8 bytes of the string.
     */
-  private[util] def nameHash(s: String, seed: Int): Int =
+  private[utils] def nameHash(s: String, seed: Int): Int =
     var hash = seed
     var i    = 0
     while i < s.length do
@@ -305,7 +322,7 @@ object JImage:
     hash & PositiveMask
 
   /** Decode a modified UTF-8 byte sequence (no NUL terminator). */
-  private[util] def decodeModifiedUtf8(bytes: Array[Byte]): String =
+  private[utils] def decodeModifiedUtf8(bytes: Array[Byte]): String =
     val builder = new java.lang.StringBuilder(bytes.length)
     var i       = 0
     while i < bytes.length do

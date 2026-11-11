@@ -4,7 +4,7 @@ import better.files.File
 import io.appthreat.dataflowengineoss.layers.dataflows.{OssDataFlow, OssDataFlowOptions}
 import io.appthreat.dataflowengineoss.queryengine.summaries.FlowSummaryComputer
 import io.appthreat.jimple2cpg.testfixtures.JimpleCodeToCpgFixture
-import io.appthreat.jimple2cpg.util.JImage
+import io.appthreat.x2cpg.utils.JImage
 import io.appthreat.jimple2cpg.{Config, Jimple2Cpg}
 import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
