@@ -219,7 +219,7 @@ class AstCreationPass(
             relPath,
             ParseReporter.Outcome.Dropped,
             ParseReporter.Stage.Ast,
-            s"${e.getClass.getSimpleName}: ${e.getMessage}"
+            ParseReporter.describe(e)
           )
           None
     end try

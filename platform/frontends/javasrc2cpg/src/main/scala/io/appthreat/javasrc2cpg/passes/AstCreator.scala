@@ -366,7 +366,7 @@ class AstCreator(
               filename,
               ParseReporter.Outcome.Dropped,
               ParseReporter.Stage.Ast,
-              s"${t.getClass.getSimpleName}: ${t.getMessage}"
+              ParseReporter.describe(t)
             )
             Ast()
 

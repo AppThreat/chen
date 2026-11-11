@@ -117,7 +117,7 @@ class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: 
             relativeName.getOrElse(fallbackName),
             ParseReporter.Outcome.Dropped,
             ParseReporter.Stage.Ast,
-            s"${t.getClass.getSimpleName}: ${t.getMessage}"
+            ParseReporter.describe(t)
           )
           None
       case Success(value) => value

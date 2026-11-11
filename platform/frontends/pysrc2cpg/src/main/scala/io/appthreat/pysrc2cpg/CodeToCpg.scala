@@ -142,7 +142,7 @@ class CodeToCpg(
             inputPair.relFileName,
             if parsedOk then ParseReporter.Outcome.Dropped else ParseReporter.Outcome.Unparsed,
             if parsedOk then ParseReporter.Stage.Ast else ParseReporter.Stage.Parse,
-            s"${exception.getClass.getSimpleName}: ${exception.getMessage}"
+            ParseReporter.describe(exception)
           )
           None
     end try

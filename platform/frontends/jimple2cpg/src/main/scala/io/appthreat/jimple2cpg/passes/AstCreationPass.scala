@@ -45,7 +45,7 @@ class AstCreationPass(classFiles: List[ClassFile], cpg: Cpg, config: Config)
               classFileLossName(classFile),
               ParseReporter.Outcome.Dropped,
               ParseReporter.Stage.Ast,
-              s"${e.getClass.getSimpleName}: ${e.getMessage}"
+              ParseReporter.describe(e)
             )
             Iterator()
 

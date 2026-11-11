@@ -138,7 +138,7 @@ object Ruby2Atom:
                   sourceName,
                   ParseReporter.Outcome.Unparsed,
                   ParseReporter.Stage.Parse,
-                  s"${exception.getClass.getSimpleName}: ${exception.getMessage}"
+                  ParseReporter.describe(exception)
                 )
                 throw exception
       }.iterator

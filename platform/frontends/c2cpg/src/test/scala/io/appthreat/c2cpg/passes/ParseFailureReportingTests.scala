@@ -115,7 +115,7 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
             (record.outcome, record.stage) should (
               equal(("dropped", "ast")).or(equal(("unparsed", "parse")))
             )
-            record.message should (startWith("TimeoutException:").or(startWith("ParseError")))
+            record.message should (startWith("TimeoutException").or(startWith("ParseError")))
           }
       }
 

@@ -124,6 +124,12 @@ object ParseReporter:
           store = Nil
       }
 
+  /** The message a record gives an exception: its class and message, never its stack trace. */
+  def describe(t: Throwable): String =
+      Option(t.getMessage).filter(_.nonEmpty) match
+        case Some(message) => s"${t.getClass.getSimpleName}: $message"
+        case None          => t.getClass.getSimpleName
+
   /** `path` relative to `rootPath`, with `/` as the separator on every platform:
     * `java.nio.file.Path.relativize` renders `\` on Windows, and a report is read by tools, not by
     * the platform it was written on. A path outside the root is returned as it came, with

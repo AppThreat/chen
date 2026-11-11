@@ -35,6 +35,6 @@ class SootAstCreationPass(cpg: Cpg, config: Config) extends ConcurrentWriterCpgP
             className,
             ParseReporter.Outcome.Dropped,
             ParseReporter.Stage.Ast,
-            s"${e.getClass.getSimpleName}: ${e.getMessage}"
+            ParseReporter.describe(e)
           )
 end SootAstCreationPass

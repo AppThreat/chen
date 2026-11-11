@@ -56,6 +56,6 @@ class AstCreationPass(cpg: Cpg, astCreators: List[AstCreator], inputPath: String
               name,
               ParseReporter.Outcome.Dropped,
               ParseReporter.Stage.Ast,
-              s"${ex.getClass.getSimpleName}: ${ex.getMessage}"
+              ParseReporter.describe(ex)
             )
 end AstCreationPass
