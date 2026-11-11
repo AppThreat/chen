@@ -73,9 +73,11 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
             broken.head.file shouldBe "src/main/java/pkg/Broken.java"
             ParseReporter.records.exists(_.file.endsWith("Good.java")) shouldBe false
 
-            // the good twin is in the graph, unchanged, and the broken one is not
-            cpg.file.name.l.exists(_.endsWith("pkg/Good.java")) shouldBe true
-            cpg.file.name.l.exists(_.endsWith("pkg/Broken.java")) shouldBe false
+            // the good twin is in the graph, unchanged, and the broken one is not; the graph
+            // names files with the platform's separator, unlike the report
+            val graphFiles = cpg.file.name.l.map(_.replace('\\', '/'))
+            graphFiles.exists(_.endsWith("pkg/Good.java")) shouldBe true
+            graphFiles.exists(_.endsWith("pkg/Broken.java")) shouldBe false
             cpg.method.name("add").l should have size 1
           finally cpg.close()
       }
