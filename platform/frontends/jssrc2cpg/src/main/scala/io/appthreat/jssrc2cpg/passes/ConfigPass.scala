@@ -3,15 +3,13 @@ package io.appthreat.jssrc2cpg.passes
 import better.files.File
 import io.appthreat.jssrc2cpg.Config
 import io.appthreat.x2cpg.SourceFiles
-import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.NewConfigFile
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import io.shiftleft.utils.IOUtils
 import org.slf4j.{Logger, LoggerFactory}
 
-class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
-    extends ConcurrentWriterCpgPass[File](cpg):
+class ConfigPass(cpg: Cpg, config: Config) extends ConcurrentWriterCpgPass[File](cpg):
 
   private val logger: Logger = LoggerFactory.getLogger(getClass)
 
@@ -39,15 +37,9 @@ class ConfigPass(cpg: Cpg, config: Config, report: Report = new Report())
   override def runOnPart(diffGraph: DiffGraphBuilder, file: File): Unit =
     val path = File(config.inputPath).path.toAbsolutePath.relativize(file.path).toString
     logger.debug(s"Adding file '$path' as config.")
-    val (gotCpg, duration) = TimeUtils.time {
-        val localDiff  = new DiffGraphBuilder
-        val content    = fileContent(file)
-        val loc        = content.size
-        val configNode = NewConfigFile().name(path).content(content.mkString("\n"))
-        report.addReportInfo(path, loc, parsed = true)
-        localDiff.addNode(configNode)
-        localDiff
-    }
-    diffGraph.absorb(gotCpg)
-    report.updateReport(path, cpg = true, duration)
+    val localDiff  = new DiffGraphBuilder
+    val content    = fileContent(file)
+    val configNode = NewConfigFile().name(path).content(content.mkString("\n"))
+    localDiff.addNode(configNode)
+    diffGraph.absorb(localDiff)
 end ConfigPass

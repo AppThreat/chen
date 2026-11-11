@@ -7,7 +7,6 @@ import io.appthreat.jssrc2cpg.utils.AstGenRunner.AstGenRunnerResult
 import io.appthreat.x2cpg.ValidationMode
 import io.appthreat.x2cpg.passes.frontend.{AstCacheStore, CacheControl}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
-import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import io.shiftleft.utils.IOUtils
@@ -24,12 +23,7 @@ object AstCreationPass:
   // Separator for the (typeName, typeFullName) usedTypes pairs in the cache sidecar.
   private val TypeSep = '\u0000'
 
-class AstCreationPass(
-  cpg: Cpg,
-  astGenRunnerResult: AstGenRunnerResult,
-  config: Config,
-  report: Report = new Report()
-)(
+class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: Config)(
   implicit withSchemaValidation: ValidationMode
 ) extends ConcurrentWriterCpgPass[(String, String)](cpg):
 
@@ -87,29 +81,26 @@ class AstCreationPass(
       }
 
   private def createAst(rootPath: String, jsonFilename: String): Option[ParsedUnit] =
-    val ((result, filename), duration) = TimeUtils.time {
-        Try {
-            val parseResult =
-                BabelJsonParser.readFile(Paths.get(rootPath), Paths.get(jsonFilename))
-            val fileLOC = IOUtils.readLinesInFile(Paths.get(parseResult.fullPath)).size
-            report.addReportInfo(parseResult.filename, fileLOC, parsed = true)
-            // Collect this file's types in a private map so they can be cached and replayed.
-            val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
-            val localDiff =
-                new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
-                    .createAst()
-            perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
-            val encoded =
-                perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
-            (Some(ParsedUnit(localDiff, encoded)), parseResult.filename)
-        } match
-          case Failure(t) =>
-              // The whole file is left out of the graph: say which one and why
-              logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
-              (None, jsonFilename)
-          case Success(value) => value
-    }
-    report.updateReport(filename, cpg = result.isDefined, duration)
-    result
+      Try {
+          val parseResult =
+              BabelJsonParser.readFile(Paths.get(rootPath), Paths.get(jsonFilename))
+          // Read the source even though only its line count used to be consumed: a vanished source
+          // file must keep failing here, where the file is dropped and reported, exactly as before.
+          IOUtils.readLinesInFile(Paths.get(parseResult.fullPath)).size
+          // Collect this file's types in a private map so they can be cached and replayed.
+          val perFileTypes = new ConcurrentHashMap[(String, String), Boolean]()
+          val localDiff =
+              new AstCreator(config, parseResult, perFileTypes, astGenRunnerResult.typeMapEngine)
+                  .createAst()
+          perFileTypes.keys().asScala.foreach(k => usedTypes.put(k, true))
+          val encoded =
+              perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
+          Some(ParsedUnit(localDiff, encoded))
+      } match
+        case Failure(t) =>
+            // The whole file is left out of the graph: say which one and why
+            logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
+            None
+        case Success(value) => value
   end createAst
 end AstCreationPass

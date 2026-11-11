@@ -2,14 +2,12 @@ package io.appthreat.jssrc2cpg.passes
 
 import better.files.File
 import io.appthreat.jssrc2cpg.Config
-import io.appthreat.x2cpg.utils.Report
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.utils.IOUtils
 
 import scala.util.matching.Regex
 
-class PrivateKeyFilePass(cpg: Cpg, config: Config, report: Report = new Report())
-    extends ConfigPass(cpg, config, report):
+class PrivateKeyFilePass(cpg: Cpg, config: Config) extends ConfigPass(cpg, config):
 
   private val PrivateKeyRegex: Regex = """.*RSA\sPRIVATE\sKEY.*""".r
 

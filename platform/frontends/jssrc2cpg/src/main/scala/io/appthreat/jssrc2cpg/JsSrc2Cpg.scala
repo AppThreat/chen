@@ -23,7 +23,7 @@ import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
 import io.appthreat.x2cpg.passes.ExternalPathsPass
 import io.appthreat.x2cpg.passes.frontend.{XTypeRecovery, XTypeRecoveryConfig}
-import io.appthreat.x2cpg.utils.{HashUtil, Report}
+import io.appthreat.x2cpg.utils.HashUtil
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.CpgPassBase
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
@@ -31,8 +31,6 @@ import io.shiftleft.semanticcpg.layers.LayerCreatorContext
 import scala.util.Try
 
 class JsSrc2Cpg extends X2CpgFrontend[Config]:
-
-  private val report: Report = new Report()
 
   def createCpg(config: Config): Try[Cpg] =
       withNewEmptyCpg(config.outputPath, config) { (cpg, config) =>
@@ -43,17 +41,15 @@ class JsSrc2Cpg extends X2CpgFrontend[Config]:
           })
 
           val astCreationPass =
-              new AstCreationPass(cpg, astGenResult, config, report)(using config.schemaValidation)
+              new AstCreationPass(cpg, astGenResult, config)(using config.schemaValidation)
           astCreationPass.createAndApply()
 
           new TypeNodePass(astCreationPass.allUsedTypes(), cpg).createAndApply()
           new JsMetaDataPass(cpg, hash, config.inputPath).createAndApply()
           new BuiltinTypesPass(cpg).createAndApply()
-          new ConfigPass(cpg, config, report).createAndApply()
-          new PrivateKeyFilePass(cpg, config, report).createAndApply()
+          new ConfigPass(cpg, config).createAndApply()
+          new PrivateKeyFilePass(cpg, config).createAndApply()
           new ImportsPass(cpg).createAndApply()
-
-          report.print()
         config.astGenOutDir match
           case Some(dirPath) =>
               val outDir = File(dirPath)
