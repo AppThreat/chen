@@ -5,11 +5,13 @@ import io.appthreat.c2cpg.astcreation.AstCreator
 import io.appthreat.c2cpg.parser.{CdtLogging, CdtParser, ProjectSources}
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.StreamingCpgPass
 import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
+import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.*
@@ -131,6 +133,8 @@ class AstCreationPass(
 
   import AstCreationPass.*
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   private val cacheStore = new AstCacheStore(
     config.enableAstCache,
     resolveCacheDir(config.inputPath, config.cacheDir),
@@ -138,6 +142,11 @@ class AstCreationPass(
   )
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)
+
+  /** The files this pass turned into ASTs, by absolute path: read by edg2atom after the CDT
+    * fallback, to tell a file the fallback rescued from one it lost too. Observability only.
+    */
+  val succeeded: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
 
   private val sources = Option(projectSources).getOrElse(new ProjectSources(config))
 
@@ -193,11 +202,23 @@ class AstCreationPass(
             // resolving bindings and types while walking the AST runs CDT code that logs too
             val localDiff =
                 runWithTimeout(() => CdtLogging.captured(astCreator.createAst()), timeoutDuration)
+            succeeded.add(path.toString)
             Some(ParsedUnit(localDiff, astCreator.usedTypes))
         case _ => None
     catch
       case e: Throwable =>
-          println(s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}")
+          // The whole file is left out of the graph; at debug, like every lost-file message, and
+          // never on stdout: this catch also carries the parse-timeout path.
+          logger.debug(
+            s"Exception processing file $path: ${e.getClass.getSimpleName} - ${e.getMessage}"
+          )
+          ParseReporter.record(
+            ParseReporter.Frontend.C,
+            relPath,
+            ParseReporter.Outcome.Dropped,
+            ParseReporter.Stage.Ast,
+            s"${e.getClass.getSimpleName}: ${e.getMessage}"
+          )
           None
     end try
   end createAst
