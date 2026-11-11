@@ -16,11 +16,13 @@ import io.appthreat.edg2atom.passes.{DuplicateDefinitionPass, EdgAstCreationPass
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import org.slf4j.LoggerFactory
 
+import java.nio.file.Paths
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -62,8 +64,21 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
                   }
               val cdt =
                   if fallbackToCdt && !pass.failed.isEmpty then
-                    val files = pass.failed.asScala.toSeq.sorted ++ pass.unwrittenHeaders
-                    parseWithCdt(cpg, config, sources, files)
+                    val files   = pass.failed.asScala.toSeq.sorted ++ pass.unwrittenHeaders
+                    val cdtPass = parseWithCdt(cpg, config, sources, files)
+                    // A file the CDT frontend read is not lost, whatever edga did with it; the
+                    // report says the c frontend finally read it (chen#255).
+                    files.foreach { file =>
+                        if cdtPass.succeeded.contains(Paths.get(file).toAbsolutePath.toString) then
+                          ParseReporter.record(
+                            ParseReporter.Frontend.C,
+                            relative(file),
+                            ParseReporter.Outcome.Partial,
+                            ParseReporter.Stage.Parse,
+                            s"edga could not export this file: ${Option(pass.failures.get(file))
+                                    .getOrElse("no diagnostic")}; the cdt frontend read it instead"
+                          )
+                    }
                     files.map(relative)
                   else Nil
               edg.map(_ -> FrontendTagPass.Edg).toMap ++ cdt.map(_ -> FrontendTagPass.Cdt)
@@ -95,14 +110,17 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
           s"edga could not export ${failed.size} of $total translation units$also (${relative(first)}$reason)"
         )
 
-  /** The CDT frontend's ASTs for `files`. */
+  /** The CDT frontend's ASTs for `files`, as the pass that built them: its `succeeded` set says
+    * which of the files it rescued.
+    */
   private def parseWithCdt(
     cpg: Cpg,
     config: Config,
     sources: ProjectSources,
     files: Seq[String]
-  ): Unit =
-      new AstCreationPass(cpg, config, projectSources = sources):
-        override def generateParts(): Array[String] = files.toArray
-      .createAndApply()
+  ): AstCreationPass =
+    val cdtPass = new AstCreationPass(cpg, config, projectSources = sources):
+      override def generateParts(): Array[String] = files.toArray
+    cdtPass.createAndApply()
+    cdtPass
 end Edg2Atom

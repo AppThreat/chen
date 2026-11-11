@@ -143,8 +143,9 @@ class AstCreationPass(
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)
 
-  /** The files this pass turned into ASTs, by absolute path: read by edg2atom after the CDT
-    * fallback, to tell a file the fallback rescued from one it lost too. Observability only.
+  /** The files this pass turned into ASTs, freshly or from the AST cache, by absolute path: read by
+    * edg2atom after the CDT fallback, to tell a file the fallback rescued from one it lost too.
+    * Observability only.
     */
   val succeeded: java.util.Set[String] = ConcurrentHashMap.newKeySet[String]()
 
@@ -161,14 +162,16 @@ class AstCreationPass(
   override def generateParts(): Array[String] = sources.files
 
   override def runOnPart(diffGraph: DiffGraphBuilder, filename: String): Unit =
-      cacheStore.process(
-        diffGraph,
-        filename,
-        cacheKey = AstCreationPass.fileCacheKey(filename),
-        fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
-        registerUsedTypes = registerUsedTypes,
-        createAst = createAst(filename)
-      )
+    val produced =
+        cacheStore.process(
+          diffGraph,
+          filename,
+          cacheKey = AstCreationPass.fileCacheKey(filename),
+          fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
+          registerUsedTypes = registerUsedTypes,
+          createAst = createAst(filename)
+        )
+    if produced then succeeded.add(Paths.get(filename).toAbsolutePath.toString)
 
   private def createAst(filename: String): Option[ParsedUnit] =
     val path             = Paths.get(filename).toAbsolutePath
@@ -202,7 +205,6 @@ class AstCreationPass(
             // resolving bindings and types while walking the AST runs CDT code that logs too
             val localDiff =
                 runWithTimeout(() => CdtLogging.captured(astCreator.createAst()), timeoutDuration)
-            succeeded.add(path.toString)
             Some(ParsedUnit(localDiff, astCreator.usedTypes))
         case _ => None
     catch

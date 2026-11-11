@@ -105,6 +105,10 @@ class AstCacheStore(
     *   a cached run produces the same TYPE nodes as a fresh parse
     * @param createAst
     *   parse the part into a [[AstCacheStore.ParsedUnit]] (only called on a cache miss)
+    * @return
+    *   whether the part produced an AST, freshly or from the cache. A part whose `createAst`
+    *   returns `None` (the parse failed) returns false; that is how a caller tells a file it lost
+    *   from one a cache hit served (chen#255).
     */
   def process[T](
     diffGraph: DiffGraphBuilder,
@@ -113,7 +117,7 @@ class AstCacheStore(
     fingerprint: String,
     registerUsedTypes: Seq[String] => Unit,
     createAst: => Option[ParsedUnit]
-  ): Unit =
+  ): Boolean =
     val fragments = fragmentsActive
     val partHash =
         if enableAstCache then computeEntryHash(cacheKey, fingerprint, fragments) else None
@@ -132,15 +136,17 @@ class AstCacheStore(
     partHash: Option[String],
     registerUsedTypes: Seq[String] => Unit,
     createAst: => Option[ParsedUnit]
-  ): Unit =
+  ): Boolean =
     loadFromCache(partHash) match
       case Some(bitcode) =>
           // Re-register types regardless of onlyAstCache so the global type table matches a
           // fresh parse; only the graph population is skipped in cache-warming mode.
           registerUsedTypes(bitcode.usedTypes)
           if !onlyAstCache then AstCache.storeInDiffGraph(bitcode, diffGraph)
+          true
       case None =>
-          createAst.foreach { unit =>
+          val parsed = createAst
+          parsed.foreach { unit =>
             // On a miss the frontend already registered its types while parsing; re-registering is
             // idempotent and keeps the miss and hit paths uniform.
             registerUsedTypes(unit.usedTypes)
@@ -153,6 +159,7 @@ class AstCacheStore(
             }
             if !onlyAstCache then diffGraph.absorb(unit.diffGraph)
           }
+          parsed.isDefined
     end match
   end processClassic
 
@@ -167,7 +174,7 @@ class AstCacheStore(
     partHash: Option[String],
     registerUsedTypes: Seq[String] => Unit,
     createAst: => Option[ParsedUnit]
-  ): Unit =
+  ): Boolean =
     val hit =
         loadFragmentBytes(partHash).exists { bytes =>
           val staging = new DiffGraphBuilder
@@ -178,14 +185,17 @@ class AstCacheStore(
                 true
             case None => false // corrupt / incompatible -> fall through to reparse
         }
-    if !hit then
-      createAst.foreach { unit =>
+    if hit then true
+    else
+      val parsed = createAst
+      parsed.foreach { unit =>
         registerUsedTypes(unit.usedTypes)
         partHash.foreach { hash =>
             AstFragment.encode(unit.diffGraph, unit.usedTypes).foreach(saveFragmentBytes(_, hash))
         }
         if !onlyAstCache then diffGraph.absorb(unit.diffGraph)
       }
+      parsed.isDefined
   end processFragment
 
   /** A fragment's key also covers [[AstFragment.CacheRevision]]; classic `.ast` keys do not. */
