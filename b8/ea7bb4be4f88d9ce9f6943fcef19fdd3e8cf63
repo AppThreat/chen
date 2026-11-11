@@ -1,0 +1,32 @@
+project/Projects.scala
+  s_2a14b3831b5ada::t_1295a660de13d9 10-11
+  s_2a14b3831b5ada::t_e00ad151aab347 19
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_d9a3733f6d35ed 13
+  s_2a14b3831b5ada::t_60e94c722fca89 126
+  s_2a14b3831b5ada::t_9f8806137e35cb 134,145
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/testfixtures/LogCapture.scala
+  s_2a14b3831b5ada::t_b7ce41aab6dab1 3-7,15-16,20-21,23-26,29-30,34-35,43-52
+  s_2a14b3831b5ada::t_92e621a9a0f97e 27,31,36
+  s_2a14b3831b5ada::t_e606cfbff84c61 41,53
+project/Versions.scala
+  s_2a14b3831b5ada::t_930e1b2d0df98d 20
+platform/frontends/x2cpg/src/test/resources/logback-test.xml
+  s_2a14b3831b5ada::t_b8edd2c460108a 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8ea7bb4be4f88d9ce9f6943fcef19fdd3e8cf63",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
