@@ -28,6 +28,12 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers with BeforeAn
         case Success(Success(_)) => true
         case _                   => false
 
+  /** True when the real batch generator is runnable; the stub-generator tests need only php. */
+  private val phpAstgenAvailable: Boolean =
+      Try(ExternalCommand.run("phpastgen --help", ".", true)) match
+        case Success(Success(_)) => true
+        case _                   => false
+
   private var iniPath: String = uninitialized
   private var workRoot: File  = uninitialized
 
@@ -128,6 +134,7 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers with BeforeAn
 
       "record nothing for a project the real generator recovers completely" in {
           if !phpAvailable then cancel("No PHP runtime available on this platform")
+          if !phpAstgenAvailable then cancel("phpastgen is not on PATH")
           withReporterEnabled {
               val inputDir = (workRoot / "real").createDirectoryIfNotExists()
               (inputDir / "good.php")

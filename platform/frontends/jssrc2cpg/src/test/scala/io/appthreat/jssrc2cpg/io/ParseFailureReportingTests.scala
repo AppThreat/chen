@@ -19,6 +19,13 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
 
   private implicit val schemaValidationMode: ValidationMode = ValidationMode.Enabled
 
+  /** True when the astgen binary this suite drives is runnable. */
+  private val astgenAvailable: Boolean =
+      io.appthreat.x2cpg.utils.ExternalCommand.run("astgen --version", ".", true).isSuccess
+
+  private def cancelUnlessAstgen(): Unit =
+      if !astgenAvailable then cancel("astgen is not on PATH")
+
   private val projectWithBrokenFile: File =
     val dir      = File.newTemporaryDirectory("jssrcParseReport")
     val goodFile = dir / "good.js"
@@ -60,6 +67,7 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
   "jssrc2cpg parse failure reporting" should {
 
       "record the file astgen could not parse, with astgen's own reason" in withReporterEnabled {
+          cancelUnlessAstgen()
           runAstGeneration(tsTypes = false)() { cpg =>
             val broken = ParseReporter.records.filter(_.file.endsWith("broken.js"))
             broken should have size 1
@@ -74,6 +82,7 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
 
       "record the same file from the manifest's file_error records when types are on" in
           withReporterEnabled {
+              cancelUnlessAstgen()
               runAstGeneration(tsTypes = true)() { cpg =>
                 val broken = ParseReporter.records.filter(_.file.endsWith("broken.js"))
                 broken should have size 1
@@ -85,6 +94,7 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
           }
 
       "record a file whose astgen JSON cannot be read, at the ast stage" in withReporterEnabled {
+          cancelUnlessAstgen()
           // astgen parses broken.js? No: the file that reaches the pass is good.js, and its JSON
           // is corrupted here so the failure happens where the pass drops a file.
           val corruptor = (out: File) =>
@@ -102,6 +112,7 @@ class ParseFailureReportingTests extends JsSrc2CpgSuite with BeforeAndAfterAll:
       }
 
       "record nothing when the reporter is disabled" in {
+          cancelUnlessAstgen()
           System.clearProperty("chen.parse.report")
           ParseReporter.reset()
           runAstGeneration(tsTypes = false)() { cpg =>
