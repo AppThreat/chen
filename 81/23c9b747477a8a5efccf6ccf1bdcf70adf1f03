@@ -1,0 +1,41 @@
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_859e21a82799ec 88
+  s_2a14b3831b5ada::t_c07e0bd41fd38f 5,27
+  s_2a14b3831b5ada::t_6fee454664066f 1-4,6-12,14-16,19-26,31-74,100-102,105-110,112,114-127,129-130,132-133,135,137-148
+  s_2a14b3831b5ada::t_5781b9cb6eea56 80-87
+  s_2a14b3831b5ada::t_4aba64487aa07a 28-30,75-79,89-99,103-104,111,128,131,136
+  s_2a14b3831b5ada::t_0709f06d44af6c 17-18
+  s_2a14b3831b5ada::t_5e33e2a64c7caa 13
+  s_2a14b3831b5ada::t_82b5f894074f6c 113
+  s_2a14b3831b5ada::t_7933144a1698a9 134
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyAstGenRunner.scala
+  s_2a14b3831b5ada::t_27db923baef65b 203-211,214-239
+  s_2a14b3831b5ada::t_b7f522e2b8a9f1 12
+  s_2a14b3831b5ada::t_77cfba309f9db1 240-242
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/Ruby2Atom.scala
+  s_2a14b3831b5ada::t_b63c8fea5ddae4 80
+  s_2a14b3831b5ada::t_a108b5cc3cf403 48-49
+  s_2a14b3831b5ada::t_4fb4ed15551ae1 14
+  s_2a14b3831b5ada::t_42c28e8ee07b5e 105-108,112-113,129-135
+  s_2a14b3831b5ada::t_3d68ad016aef2a 136-142
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/passes/AstCreationPass.scala
+  s_2a14b3831b5ada::t_f72b9ff75ebb48 4
+  s_2a14b3831b5ada::t_1ad201a99ee071 48-60
+  s_2a14b3831b5ada::t_c57cff7192ac03 13-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8123c9b747477a8a5efccf6ccf1bdcf70adf1f03",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
