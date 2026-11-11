@@ -105,8 +105,7 @@ class AstCreationPass(
         } match
           case Failure(t) =>
               // The whole file is left out of the graph: say which one and why
-              logger.warn(s"Unable to create the AST for '$jsonFilename', so it is left out: $t")
-              logger.debug(s"Unable to create the AST for '$jsonFilename'", t)
+              logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
               (None, jsonFilename)
           case Success(value) => value
     }
