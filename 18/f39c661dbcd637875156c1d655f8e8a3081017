@@ -1,0 +1,38 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  s_2a14b3831b5ada::t_e2d2ced66b20e9 139,146,148-149,162
+  s_2a14b3831b5ada::t_c93a63eabc01fc 108-111,120
+  s_2a14b3831b5ada::t_6e393cd6abde31 177,188-191
+  s_2a14b3831b5ada::t_202ed740f5e713 198
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/ParseFailureReportingTests.scala
+  s_2a14b3831b5ada::t_c85ffcc7955045 94
+  s_2a14b3831b5ada::t_ab886f342d0c15 1-38,40-93,95-109
+  s_2a14b3831b5ada::t_a3a3a91ed4c661 39
+  s_2a14b3831b5ada::t_b92830a936ab3e 110
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  s_2a14b3831b5ada::t_7d3cfedefda0b1 98-106
+  s_2a14b3831b5ada::t_007616c87712d5 10
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  s_2a14b3831b5ada::t_c4bab5911482f3 19,25
+  s_2a14b3831b5ada::t_6a7572f2a4372d 67-80
+  s_2a14b3831b5ada::t_8c0ba15ca7ef80 121-122
+  s_2a14b3831b5ada::t_160616e6a039c5 81,113-115,123-125
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_2a14b3831b5ada::t_a0d55b26cdd585 165-174
+  s_2a14b3831b5ada::t_337ec41072752e 146-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "18f39c661dbcd637875156c1d655f8e8a3081017",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
