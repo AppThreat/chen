@@ -1,6 +1,7 @@
 package io.appthreat.jimple2cpg.util
 
 import better.files.*
+import io.appthreat.x2cpg.parse.ParseReporter
 import org.objectweb.asm.ClassReader.SKIP_CODE
 import org.objectweb.asm.{ClassReader, ClassVisitor, Opcodes}
 
@@ -147,6 +148,16 @@ object ProgramHandlingUtil:
     private def getPackagePathFromByteCode(file: File): Option[String] =
         Try(file.fileInputStream.apply(readPackagePathFromStream))
             .recover { case e: Throwable =>
+                // The class file never reaches the AST pass: without its package path it is
+                // dropped here, which used to be silent (chen#255)
+                ParseReporter.record(
+                  ParseReporter.Frontend.Jimple,
+                  file.name,
+                  ParseReporter.Outcome.Unparsed,
+                  ParseReporter.Stage.Parse,
+                  s"the package path could not be read from the bytecode: ${e.getClass
+                          .getSimpleName}: ${e.getMessage}"
+                )
                 None
             }
             .getOrElse(None)
