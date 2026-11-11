@@ -1,0 +1,21 @@
+build.sbt
+  s_f10eefff00361f::t_c34e85cf4952c0 3
+codemeta.json
+  s_f10eefff00361f::t_d3c67a388826ea 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d5991dcba1fe4ee36144473e7646d0b1e8c2847",
+  "prompts": {},
+  "sessions": {
+    "s_f10eefff00361f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2900ce21-cc07-43d7-9602-deaffad1f75a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
