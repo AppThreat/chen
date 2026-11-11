@@ -1,0 +1,23 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  s_f10eefff00361f::t_ae71c08073ad0a 65,69-71,87-116
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  s_f10eefff00361f::t_2c2688a546e93a 97-98
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/ParseFailureReportingTests.scala
+  s_f10eefff00361f::t_a502619119fbc9 12-14,55-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5533fda6641d09a797a11939f3a2e6fe96ce5b86",
+  "prompts": {},
+  "sessions": {
+    "s_f10eefff00361f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2900ce21-cc07-43d7-9602-deaffad1f75a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
