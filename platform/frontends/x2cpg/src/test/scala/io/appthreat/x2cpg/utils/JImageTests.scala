@@ -1,4 +1,4 @@
-package io.appthreat.jimple2cpg.util
+package io.appthreat.x2cpg.utils
 
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -11,15 +11,18 @@ import scala.jdk.CollectionConverters.*
 import scala.sys.process.*
 import scala.util.{Try, Using}
 
-/** The jimage reader must return exactly what the running JVM's jrt:/ file system returns, as Soot
-  * reads through jrt:/ on the JVM and through this reader in a native image.
+/** The jimage reader must return exactly what the running JVM's jrt:/ file system returns: Soot and
+  * JavaParser read the JDK classes through it in a native image.
   */
 class JImageTests extends AnyWordSpec with Matchers:
 
-  private val javaHome              = Paths.get(System.getProperty("java.home"))
-  private val imageFile             = JImage.imageFile(javaHome)
-  private lazy val image            = JImage.open(imageFile).get
-  private lazy val jrtModules: Path = JdkClassSource.jrtModulesRoot
+  private val javaHome   = Paths.get(System.getProperty("java.home"))
+  private val imageFile  = JImage.imageFile(javaHome)
+  private lazy val image = JImage.open(imageFile).get
+  // `Paths.get("jrt:/")` is `/modules` on some JDKs and `/` on others (JDK-8227076)
+  private lazy val jrtModules: Path =
+    val root = Paths.get(URI.create("jrt:/"))
+    if root.endsWith("modules") then root else root.resolve("modules")
 
   private def jrtBytes(module: String, internalName: String): Array[Byte] =
       Files.readAllBytes(jrtModules.resolve(module).resolve(s"$internalName.class"))

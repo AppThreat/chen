@@ -1,5 +1,6 @@
 package io.appthreat.jimple2cpg.util
 
+import io.appthreat.x2cpg.utils.JImage
 import org.slf4j.LoggerFactory
 import soot.asm.{AsmClassProvider, AsmClassSource}
 import soot.{ClassProvider, ClassSource, IFoundFile, JimpleClassProvider, Scene, SourceLocator}
@@ -8,7 +9,6 @@ import java.io.{ByteArrayInputStream, File as JFile, InputStream}
 import java.net.URI
 import java.nio.file.{Files, Path, Paths}
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 import scala.jdk.CollectionConverters.*
 import scala.util.{Try, Using}
@@ -66,9 +66,6 @@ object JdkClassSource:
   import JdkClasses.*
 
   private val logger = LoggerFactory.getLogger(getClass)
-
-  /** Opened images, by real path: the mapping is read-only and reused across frontend runs. */
-  private val images = new ConcurrentHashMap[Path, JImage]()
 
   /** Whether this runtime can read its own classes through `jrt:/`, as Soot does. False in a
     * GraalVM native image, where the provider is missing or does not serve the JDK modules.
@@ -213,19 +210,14 @@ object JdkClassSource:
       }
 
   private def openImage(file: Path): Option[JImage] =
-    val key = Try(file.toRealPath()).getOrElse(file.toAbsolutePath)
-    Option(images.get(key)).orElse {
-        JImage.open(key) match
-          case scala.util.Success(image) if image.containsClass("java/lang/Object") =>
-              images.putIfAbsent(key, image)
-              Some(images.get(key))
-          case scala.util.Success(_) =>
-              logger.warn(s"'$file' holds no java.lang.Object; not using it as the JDK.")
-              None
-          case scala.util.Failure(err) =>
-              logger.warn(s"Unable to read the JDK image '$file': ${err.getMessage}")
-              None
-    }
+      JImage.openShared(file) match
+        case scala.util.Success(image) if image.containsClass("java/lang/Object") => Some(image)
+        case scala.util.Success(_) =>
+            logger.warn(s"'$file' holds no java.lang.Object; not using it as the JDK.")
+            None
+        case scala.util.Failure(err) =>
+            logger.warn(s"Unable to read the JDK image '$file': ${err.getMessage}")
+            None
 
   private def isWindows: Boolean =
       sys.props.getOrElse("os.name", "").toLowerCase(Locale.ROOT).contains("win")

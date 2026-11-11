@@ -5,12 +5,14 @@ import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclar
 import com.github.javaparser.resolution.model.SymbolReference
 import com.github.javaparser.symbolsolver.javassistmodel.JavassistFactory
 import JdkJarTypeSolver.*
-import io.appthreat.javasrc2cpg.typesolvers.{JmodClassPath, NonCachingClassPool}
+import io.appthreat.javasrc2cpg.typesolvers.{JImageClassPath, JmodClassPath, NonCachingClassPool}
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.utils.JImage
 import javassist.{ClassPath, CtClass}
 import org.slf4j.LoggerFactory
 
 import java.io.IOException
+import java.nio.file.Paths
 import java.util.jar.JarFile
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -91,6 +93,15 @@ class JdkJarTypeSolver extends TypeSolver:
     addArchives(archivePaths)
     this
 
+  /** Serve the classes of a JDK's `lib/modules` image. */
+  def withImage(image: JImage): JdkJarTypeSolver =
+    classPool.appendClassPath(new JImageClassPath(image))
+    // entries are /module/foo/bar/Baz.class
+    knownPackagePrefixes ++= image.entries
+        .filter(name => name.endsWith(ClassExtension) && !name.endsWith("/module-info.class"))
+        .map(name => packagePrefixForJarEntry(name.stripPrefix("/").dropWhile(_ != '/').drop(1)))
+    this
+
   def addArchives(archivePaths: Seq[String]): Unit =
       archivePaths.foreach { archivePath =>
           addPathToClassPool(archivePath) match
@@ -133,10 +144,17 @@ object JdkJarTypeSolver:
     def isJarPath: Boolean  = path.endsWith(JarExtension)
     def isJmodPath: Boolean = path.endsWith(JmodExtension)
 
+  /** The classes of the JDK at `jdkPath`: its `lib/modules` image when it has one (every JDK 9 or
+    * later, also one built without jmods), else its jars and jmods (the rt.jar of a JDK 8).
+    */
   def fromJdkPath(jdkPath: String): JdkJarTypeSolver =
-    val jarPaths = SourceFiles.determine(jdkPath, Set(JarExtension, JmodExtension))
-    if jarPaths.nonEmpty then new JdkJarTypeSolver().withJars(jarPaths)
-    else new JdkJarTypeSolver()
+      JImage.openShared(JImage.imageFile(Paths.get(jdkPath))) match
+        case Success(image) if image.containsClass("java/lang/Object") =>
+            new JdkJarTypeSolver().withImage(image)
+        case _ =>
+            val jarPaths = SourceFiles.determine(jdkPath, Set(JarExtension, JmodExtension))
+            if jarPaths.nonEmpty then new JdkJarTypeSolver().withJars(jarPaths)
+            else new JdkJarTypeSolver()
 
   /** Convert JavaParser class name foo.bar.qux.Baz to package prefix foo.bar Only use first 2 parts
     * since this is sufficient to deterimine whether a class has been registered in most cases and,
@@ -182,7 +200,7 @@ object JdkJarTypeSolver:
     * of capitalising the first letter in class names but not package names.
     */
   def convertJavaParserNameToStandard(className: String): String =
-      className.split(".") match
+      className.split('.') match
         case nameParts if namePartsContainSubclass(nameParts) =>
             val (packagePrefix, classNames) = nameParts.partition(_.head.isLower)
             s"${packagePrefix.mkString(".")}.${classNames.mkString("$")}"

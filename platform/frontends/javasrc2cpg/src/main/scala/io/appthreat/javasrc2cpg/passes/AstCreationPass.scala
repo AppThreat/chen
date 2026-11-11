@@ -2,6 +2,7 @@ package io.appthreat.javasrc2cpg.passes
 
 import better.files.File
 import com.github.javaparser.ast.CompilationUnit
+import com.github.javaparser.resolution.TypeSolver
 import com.github.javaparser.symbolsolver.JavaSymbolSolver
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade
 import com.github.javaparser.symbolsolver.resolution.typesolvers.{
@@ -14,6 +15,7 @@ import io.appthreat.javasrc2cpg.typesolvers.{EagerSourceTypeSolver, SimpleCombin
 import io.appthreat.javasrc2cpg.util.SourceParser
 import io.appthreat.javasrc2cpg.{Config, JavaSrc2Cpg, util}
 import io.appthreat.x2cpg.datastructures.Global
+import io.appthreat.x2cpg.utils.NativeImage
 import io.appthreat.x2cpg.utils.dependency.DependencyResolver
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
@@ -23,8 +25,24 @@ import java.nio.file.{Path, Paths}
 import scala.collection.mutable
 import scala.util.{Success, Try}
 
+object AstCreationPass:
+
+  /** The solvers for JDK types, in the order they are asked: the JDK's own classes, then reflection
+    * on the running JVM's. In a native image reflection finds a JDK class but none of its members,
+    * so a call through that class stays unresolved; there reflection is only asked when no JDK
+    * classes were found.
+    */
+  private[javasrc2cpg] def jdkSolvers(
+    jdk: Option[JdkJarTypeSolver],
+    inNativeImage: Boolean
+  ): List[TypeSolver] =
+    val jdkFound = jdk.exists(_.knownPackagePrefixes.nonEmpty)
+    jdk.toList ++ Option.when(!inNativeImage || !jdkFound)(new ReflectionTypeSolver()).toList
+
 class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[String]] = None)
     extends ConcurrentWriterCpgPass[String](cpg):
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   val global: Global = new Global()
 
@@ -104,11 +122,19 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
 
       case (Some(jdkPath), _) =>
           jdkPath
-    var jdkJarTypeSolver: JdkJarTypeSolver = null
-    // native-image could have empty JAVA_HOME
-    if jdkPath != null && jdkPath.nonEmpty then
-      jdkJarTypeSolver = JdkJarTypeSolver.fromJdkPath(jdkPath)
-      combinedTypeSolver.addNonCachingTypeSolver(jdkJarTypeSolver)
+    // A native image has no java.home and may have no JAVA_HOME
+    val jdkJarTypeSolver =
+        Option(jdkPath).filter(_.nonEmpty).map(JdkJarTypeSolver.fromJdkPath)
+    if NativeImage.inImage && !jdkJarTypeSolver.exists(_.knownPackagePrefixes.nonEmpty) then
+      logger.warn(
+        s"No JDK classes found${Option(jdkPath).filter(_.nonEmpty).fold("")(p => s" at '$p'")}: " +
+            "JDK types resolve only partly. Set JAVA_HOME or pass the JDK path."
+      )
+    // Non-caching solvers are asked in the reverse order of their addition, so the dependency jars
+    // added below come first
+    AstCreationPass.jdkSolvers(jdkJarTypeSolver, NativeImage.inImage).reverse.foreach(
+      combinedTypeSolver.addNonCachingTypeSolver
+    )
     val relativeSourceFilenames =
         sourceFilenames.map(filename =>
             Path.of(config.inputPath).relativize(Path.of(filename)).toString
@@ -122,7 +148,6 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
           symbolSolver
         )
     combinedTypeSolver.addCachingTypeSolver(sourceTypeSolver)
-    combinedTypeSolver.addNonCachingTypeSolver(new ReflectionTypeSolver())
     // Add solvers for inference jars
     val jarsList = config.inferenceJarPaths.flatMap(recursiveJarsFromPath).toList
     (jarsList ++ dependencies)
@@ -130,8 +155,7 @@ class AstCreationPass(config: Config, cpg: Cpg, sourcesOverride: Option[List[Str
             Try(new JarTypeSolver(path)).toOption
         }
         .foreach { combinedTypeSolver.addNonCachingTypeSolver(_) }
-    if jdkJarTypeSolver != null then (symbolSolver, jdkJarTypeSolver.packagesJarMappings)
-    else (symbolSolver, null)
+    (symbolSolver, jdkJarTypeSolver.map(_.packagesJarMappings).orNull)
   end createSymbolSolver
 
   private def recursiveJarsFromPath(path: String): List[String] =

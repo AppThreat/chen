@@ -11,6 +11,7 @@ import io.appthreat.x2cpg.utils.{Report, TimeUtils}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.ConcurrentWriterCpgPass
 import io.shiftleft.utils.IOUtils
+import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.ConcurrentHashMap
@@ -33,6 +34,8 @@ class AstCreationPass(
 ) extends ConcurrentWriterCpgPass[(String, String)](cpg):
 
   import AstCreationPass.*
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   private val usedTypes: ConcurrentHashMap[(String, String), Boolean] = new ConcurrentHashMap()
 
@@ -100,7 +103,10 @@ class AstCreationPass(
                 perFileTypes.keys().asScala.map { case (a, b) => s"$a$TypeSep$b" }.toSeq
             (Some(ParsedUnit(localDiff, encoded)), parseResult.filename)
         } match
-          case Failure(_)     => (None, jsonFilename)
+          case Failure(t) =>
+              // The whole file is left out of the graph: say which one and why
+              logger.debug(s"Unable to create the AST for '$jsonFilename', so it is left out", t)
+              (None, jsonFilename)
           case Success(value) => value
     }
     report.updateReport(filename, cpg = result.isDefined, duration)
