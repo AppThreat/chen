@@ -1,0 +1,29 @@
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/PrivateKeyFilePass.scala
+  s_2a14b3831b5ada::t_75b6d1d1f9221a 10
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/AstCreationPass.scala
+  s_2a14b3831b5ada::t_59845b4232e228 84-86,90-104
+  s_2a14b3831b5ada::t_b13f632bf11d17 26
+  s_2a14b3831b5ada::t_68ffbb91805fc3 87-89
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/ConfigPass.scala
+  s_2a14b3831b5ada::t_7596e288f60ce3 12
+  s_2a14b3831b5ada::t_dda1d92950cdf5 40-44
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/JsSrc2Cpg.scala
+  s_2a14b3831b5ada::t_7306f9c488edde 44,50-51
+  s_2a14b3831b5ada::t_a96d39ae39b3c2 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bd7a603ce87edf2499109e547cf146a8e2c65656",
+  "prompts": {},
+  "sessions": {
+    "s_2a14b3831b5ada": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_4fe00c92-df07-4ae1-b01a-b41b2a537c94",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
