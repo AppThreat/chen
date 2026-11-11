@@ -91,6 +91,23 @@ class ParseFailureReportingTests extends AnyWordSpec with Matchers:
               finally cpg.close()
           }
 
+      "name an unreadable class by its path under the input, or inside the archive" in
+          withReporterEnabled {
+              val classes = buildProject()
+              val nested  = (classes / "demo").createDirectoryIfNotExists()
+              (classes / "Scrambled.class").moveTo(nested / "Scrambled.class")
+              buildCpg(classes).close()
+              ParseReporter.records.filter(_.file.endsWith("Scrambled.class")).map(_.file) shouldBe
+                  List("demo/Scrambled.class")
+
+              ParseReporter.reset()
+              val jar = File.newTemporaryDirectory("jimple-parse-report-jar") / "app.jar"
+              Seq("jar", "cf", jar.toString, "-C", classes.toString, ".").!!
+              buildCpg(jar).close()
+              ParseReporter.records.filter(_.file.endsWith("Scrambled.class")).map(_.file) shouldBe
+                  List("app.jar!demo/Scrambled.class")
+          }
+
       "record a class the AST pass cannot load, at the ast stage" in withReporterEnabled {
           // soot rescues a missing superclass with a phantom class, so the pass-level catch is
           // driven with a class file whose name resolves to nothing on the classpath.

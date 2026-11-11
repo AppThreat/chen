@@ -388,14 +388,15 @@ class PhpParser private (
             s"Batch mode is supported by the generator but produced no decodable AST documents " +
                 s"for input '$inputDir' (output '$outputDir'); falling back to per-file parsing."
           )
-          parseFilesIndividually(files, phpIniOverride)
+          parseFilesIndividually(inputDir, files, phpIniOverride)
       else
         logger.debug("Batch mode unsupported by generator; using per-file parsing.")
-        parseFilesIndividually(files, phpIniOverride)
+        parseFilesIndividually(inputDir, files, phpIniOverride)
   end parseInput
 
   /** Legacy per-file fallback: parse each file via [[parseFile]], isolating per-file failures. */
   private def parseFilesIndividually(
+    inputDir: String,
     files: Seq[String],
     phpIniOverride: Option[String]
   ): Seq[BatchParsedFile] =
@@ -407,7 +408,7 @@ class PhpParser private (
                 logger.debug(s"Could not parse file $file. Results will be missing!")
                 ParseReporter.record(
                   ParseReporter.Frontend.Php,
-                  File(file).canonicalPath,
+                  ParseReporter.relativeTo(File(inputDir).canonicalPath, File(file).canonicalPath),
                   ParseReporter.Outcome.Unparsed,
                   ParseReporter.Stage.Parse,
                   failureReasonFor(File(file).canonicalPath)

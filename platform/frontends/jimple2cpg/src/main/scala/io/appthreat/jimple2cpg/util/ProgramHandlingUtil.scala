@@ -143,33 +143,30 @@ object ProgramHandlingUtil:
       * @param file
       *   The class file
       * @return
-      *   The package path if successfully retrieved
+      *   The package path, or why it could not be read
       */
-    private def getPackagePathFromByteCode(file: File): Option[String] =
-        Try(file.fileInputStream.apply(readPackagePathFromStream))
-            .recover { case e: Throwable =>
-                // The class file never reaches the AST pass: without its package path it is
-                // dropped here, which used to be silent (chen#255)
-                ParseReporter.record(
-                  ParseReporter.Frontend.Jimple,
-                  file.name,
-                  ParseReporter.Outcome.Unparsed,
-                  ParseReporter.Stage.Parse,
-                  s"the package path could not be read from the bytecode: ${e.getClass
-                          .getSimpleName}: ${e.getMessage}"
-                )
-                None
-            }
-            .getOrElse(None)
+    private def getPackagePathFromByteCode(file: File): Either[String, String] =
+        Try(file.fileInputStream.apply(readPackagePathFromStream)) match
+          case Success(Some(path)) => Right(path)
+          case Success(None)       => Left("the bytecode names no class")
+          case Failure(e)          => Left(ParseReporter.describe(e))
   end ClassFile
 
+  /** @param unreadable
+    *   why the package path could not be read from the bytecode, when it could not: such a class
+    *   file is left out, and the reason goes into the parse report
+    */
   sealed class ClassFile(
     val file: File,
     val packagePath: Option[String],
-    val sourceArchivePath: Option[String]
+    val sourceArchivePath: Option[String],
+    val unreadable: Option[String] = None
   ):
+    def this(file: File, sourceArchivePath: Option[String], read: Either[String, String]) =
+        this(file, read.toOption, sourceArchivePath, read.left.toOption)
+
     def this(file: File, sourceArchivePath: Option[String]) =
-        this(file, ClassFile.getPackagePathFromByteCode(file), sourceArchivePath)
+        this(file, sourceArchivePath, ClassFile.getPackagePathFromByteCode(file))
 
     private val components: Option[Array[String]] = packagePath.map(_.split("/"))
 
@@ -239,10 +236,39 @@ object ProgramHandlingUtil:
             onlyClasses: Boolean,
             rootArchivePath
           ).iterator
-              .flatMap(_.copyToPackageLayoutIn(destDir))
+              .flatMap(classFile =>
+                val copied = classFile.copyToPackageLayoutIn(destDir)
+                if copied.isEmpty then recordUnreadable(classFile, src, tmpDir)
+                copied
+              )
               .toList
 
           (result, rootArchivePath)
         }
   end extractClassesInPackageLayout
+
+  /** A class file whose package path cannot be read never reaches the AST pass (chen#255). It is
+    * named by its path under `src`, or, when it came out of an archive, as `archive!entry`.
+    */
+  private def recordUnreadable(classFile: ClassFile, src: File, tmpDir: File): Unit =
+      if ParseReporter.isEnabled then
+        val path = classFile.file.pathAsString
+        val name =
+            if src.isDirectory && path.startsWith(src.pathAsString) then
+              ParseReporter.relativeTo(src.pathAsString, path)
+            else
+              // <tmpDir>/extract-archive-<n>/<entry>
+              val entry =
+                  ParseReporter.relativeTo(tmpDir.pathAsString, path).split('/').drop(1).mkString(
+                    "/"
+                  )
+              s"${src.name}!$entry"
+        ParseReporter.record(
+          ParseReporter.Frontend.Jimple,
+          name,
+          ParseReporter.Outcome.Unparsed,
+          ParseReporter.Stage.Parse,
+          s"the package path could not be read from the bytecode: ${classFile.unreadable
+                  .getOrElse("no reason given")}"
+        )
 end ProgramHandlingUtil
