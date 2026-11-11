@@ -7,6 +7,7 @@ import io.appthreat.php2atom.parser.Domain.PhpFile
 import io.appthreat.php2atom.parser.PhpParser
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.ValidationMode
+import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import io.shiftleft.codepropertygraph.Cpg
@@ -161,5 +162,14 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
             Some(ParsedUnit(diff))
         case None =>
             logger.debug(s"Could not parse file $filename. Results will be missing!")
+            ParseReporter.record(
+              ParseReporter.Frontend.Php,
+              relativeFilename(filename),
+              ParseReporter.Outcome.Unparsed,
+              ParseReporter.Stage.Parse,
+              parser
+                  .failureReasonFor(Try(File(filename).canonicalPath).getOrElse(filename))
+                  .getOrElse("the generator produced no AST for this file")
+            )
             None
 end AstCreationPass
