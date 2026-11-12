@@ -123,12 +123,14 @@ class AstCreator(
     * header's path with the root byte by byte, and comes out false when one side spells the
     * directory differently from the other (the 8.3 short name a temporary directory carries on
     * Windows, `RUNNER~1`, against its long one), which drops a header the project owns. The real
-    * paths of an existing file are the same whichever way it was named; a path that names no
-    * existing file belongs to no project, as edga's own check resolves nothing, which also keeps a
-    * front-end pseudo file out when the run happens to be inside the project. `!f.system` and `f.id
-    * != 0L` stay with the callers that had them: a header under the root handed over as a system
-    * include directory is still the project's own (its typedefs are not foreign), while a system
-    * header is not written as a project file.
+    * paths of an existing file are the same whichever way it was named. A path that names no
+    * existing file belongs to no project, even one edga spells under the root, where its textual
+    * flag reads in-root: the typedefs of such a file are recorded as foreign, which is what a file
+    * no FILE node in the graph declares them from needs. The same check keeps a front-end pseudo
+    * file out when the run happens to be inside the project. `!f.system` and `f.id != 0L` stay with
+    * the callers that had them: a header under the root handed over as a system include directory
+    * is still the project's own (its typedefs are not foreign), while a system header is not
+    * written as a project file.
     */
   private val projectFiles = mutable.HashMap.empty[Long, Boolean]
 
