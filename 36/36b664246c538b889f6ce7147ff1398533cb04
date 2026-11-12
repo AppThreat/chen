@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/EdgaRunnerTests.scala
+  s_1846f821068a7f::t_de52c1734b2753 322-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3636b664246c538b889f6ce7147ff1398533cb04",
+  "prompts": {},
+  "sessions": {
+    "s_1846f821068a7f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_30c45490-22f6-4ee2-98ab-7dcf58d25deb",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
