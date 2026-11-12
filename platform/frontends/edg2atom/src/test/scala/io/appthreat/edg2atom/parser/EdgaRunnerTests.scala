@@ -319,7 +319,10 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
             c.sliding(2).toSeq should contain(Seq("--define_macro", "FEATURE=2"))
             c.sliding(2).toSeq should contain(Seq(
               "-I",
-              (dir / "inc").path.toAbsolutePath.normalize.toString
+              // the runner hands edga every path in the spelling the file system resolves, and
+              // macOS resolves its temporary directories through /var's symlink to /private/var
+              io.appthreat.edg2atom.astcreation.AstCreator
+                  .realPath((dir / "inc").path).toString
             ))
             runner.arguments((dir / "b.cpp").path) should contain("--c++20")
           }
