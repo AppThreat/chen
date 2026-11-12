@@ -118,6 +118,28 @@ class AstCreator(
   /** The project root as the file system resolves it: edga names files by their real paths. */
   private val root = AstCreator.realPath(Paths.get(config.inputPath))
 
+  /** Whether edga's file belongs to the project: the check behind edga's `inRoot` flag, made over
+    * real paths so both spellings of the same directory agree. The flag itself compares the
+    * header's path with the root byte by byte, and comes out false when one side spells the
+    * directory differently from the other (the 8.3 short name a temporary directory carries on
+    * Windows, `RUNNER~1`, against its long one), which drops a header the project owns. The real
+    * paths of an existing file are the same whichever way it was named; a path that names no
+    * existing file belongs to no project, as edga's own check resolves nothing, which also keeps a
+    * front-end pseudo file out when the run happens to be inside the project. `!f.system` and `f.id
+    * != 0L` stay with the callers that had them: a header under the root handed over as a system
+    * include directory is still the project's own (its typedefs are not foreign), while a system
+    * header is not written as a project file.
+    */
+  private val projectFiles = mutable.HashMap.empty[Long, Boolean]
+
+  protected def inProjectRoot(f: FileEntry): Boolean =
+      projectFiles.getOrElseUpdate(
+        f.id, {
+            val path = Paths.get(f.path)
+            Files.exists(path) && AstCreator.realPath(path).startsWith(root)
+        }
+      )
+
   private val sourceLines = mutable.HashMap.empty[Long, Option[Array[String]]]
 
   def createAst(): DiffGraphBuilder =
@@ -138,9 +160,7 @@ class AstCreator(
     */
   private def recordForeignTypedefs(written: Set[Long]): Unit =
     val foreign = unit.files.values.collect {
-        case f
-            if f.id != 0L && !f.inRoot && !written.contains(f.id) &&
-                !AstCreator.realPath(Paths.get(f.path)).startsWith(root) => f.id
+        case f if f.id != 0L && !inProjectRoot(f) && !written.contains(f.id) => f.id
     }.toSet
     unit.types.values.toSeq.sortBy(_("id").num).foreach { t =>
         if t.string("kind").contains("typeref") then
@@ -159,7 +179,7 @@ class AstCreator(
   private def filesToWrite: Seq[FileEntry] =
     val primary = unit.primaryFile.toSeq
     val headers = unit.files.values.toSeq.sortBy(_.id).filter { f =>
-        f.id != 0L && f.inRoot && !f.system && claim(f.path)
+        f.id != 0L && inProjectRoot(f) && !f.system && claim(f.path)
     }
     primary ++ headers
 
@@ -283,7 +303,7 @@ class AstCreator(
   private def foreignInstanceAsts(written: Set[Long]): Seq[Ast] =
     def foreignFile(v: Value): Option[FileEntry] =
         v.position.flatMap(p => unit.files.get(p.file)).filter(f =>
-            f.id != 0L && f.inRoot && !f.system && !written.contains(f.id)
+            f.id != 0L && inProjectRoot(f) && !f.system && !written.contains(f.id)
         )
     val types = unit.types.values.toSeq.sortBy(_("id").num).filter { t =>
         t.flag("templateInstance") && isDefinedRecordOrTypedef(t) && !isClosure(t)
@@ -455,8 +475,9 @@ class AstCreator(
     fullName: String,
     captures: Map[String, Long]
   ): Option[Ast] =
-    val path = r.position.flatMap(p => unit.files.get(p.file)).filter(f => f.id != 0L && f.inRoot)
-        .map(relativePath).getOrElse(currentPath)
+    val path = r.position.flatMap(p => unit.files.get(p.file)).filter(f =>
+        f.id != 0L && inProjectRoot(f)
+    ).map(relativePath).getOrElse(currentPath)
     routineAst(r, path, names = Some((name, fullName)), captures = captures)
 
   /** A constructor's member initialisers, `data(new int[16])`, before its body: each the store of
