@@ -47,12 +47,25 @@ final case class CompileCommand(directory: Path, file: Path, arguments: Seq[Stri
 
 object CompileCommand:
 
-  /** Splits a command string the way the shell its driver runs under would: POSIX quoting, or the
-    * Windows rules of `cl.exe` and `clang-cl`.
+  /** Splits a command string the way the shell its driver runs under would: the Windows rules of
+    * `CommandLineToArgvW` when the command names Windows paths, POSIX quoting otherwise. A compile
+    * database recorded on Windows names them whatever driver the entry runs, `cc` as much as
+    * `cl.exe`, and there the backslash of a path is the separator no shell ate, where the POSIX
+    * reading loses it and the option's value with it (`-IC:\lib` read as `-IC:lib`).
     */
   def tokenize(command: String): Seq[String] =
     val first = posixWords(command).headOption.getOrElse("")
-    if familyOf(first) == CompilerFamily.Msvc then windowsWords(command) else posixWords(command)
+    if windowsPaths(command) || familyOf(first) == CompilerFamily.Msvc then windowsWords(command)
+    else posixWords(command)
+
+  /** Whether the command names a path in the Windows spelling: a drive letter, then a single
+    * backslash (`-IC:\Users\...`, or a driver under `C:\msys64`). One backslash it is in such a
+    * database, for the recorder wrote the command line as the build ran it; a doubled one stays a
+    * POSIX entry, where the shell that ran it doubled every literal backslash (`-DX=a\\b`), and the
+    * escape reading is the faithful one.
+    */
+  private def windowsPaths(command: String): Boolean =
+      command.matches("""(?s).*[A-Za-z]:\\(?!\\).*""")
 
   /** POSIX shell word splitting: whitespace separates words, single quotes keep everything, double
     * quotes keep everything but `\"`, `\\`, `\$` and `` \` ``, and a backslash outside quotes

@@ -23,6 +23,54 @@ class CompileCommandTests extends AnyWordSpec with Matchers:
             "src/a.cpp"
           )
       }
+
+      "read the doubled backslash of an escaped one as the escape it is" in {
+          CompileCommand.tokenize("""cc -DX=a\\b -c a.c""") shouldBe Seq(
+            "cc",
+            "-DX=a\\b",
+            "-c",
+            "a.c"
+          )
+      }
+  }
+
+  "a Windows compile database command string" should {
+      "keep the backslashes of its paths under a gcc-family driver, quoted or not" in {
+          // the shape of a database recorded on Windows: a backslash separates the segments of
+          // every path, and no shell ate one, so the POSIX reading loses it and the option's
+          // value with it (-IC:\lib read as -IC:lib)
+          CompileCommand.tokenize(
+            """cc -c -IC:\Users\appthreat\work\390\clirun\externlib -I"C:\Program Files\lib" main.c"""
+          ) shouldBe Seq(
+            "cc",
+            "-c",
+            "-IC:\\Users\\appthreat\\work\\390\\clirun\\externlib",
+            "-IC:\\Program Files\\lib",
+            "main.c"
+          )
+      }
+
+      "keep the escaped quote of a value in double quotes" in {
+          CompileCommand.tokenize("""cc -DX="\"a b\"" -IC:\lib -c a.c""") shouldBe Seq(
+            "cc",
+            "-DX=\"a b\"",
+            "-IC:\\lib",
+            "-c",
+            "a.c"
+          )
+      }
+
+      "read the family from a driver named by its Windows path" in {
+          val command =
+              """C:\msys64\usr\bin\cc.exe -c -IC:\Users\appthreat\work\390\clirun\externlib main.c"""
+          CompileCommand.tokenize(command).head shouldBe "C:\\msys64\\usr\\bin\\cc.exe"
+          val flags = CompileCommand.parseArguments(
+            CompileCommand.tokenize(command),
+            Paths.get("C:/Users/appthreat/work/390/clirun/proj")
+          )
+          flags.compiler shouldBe Some("C:\\msys64\\usr\\bin\\cc.exe")
+          flags.family shouldBe CompilerFamily.Gcc
+      }
   }
 
   "an MSVC command string" should {

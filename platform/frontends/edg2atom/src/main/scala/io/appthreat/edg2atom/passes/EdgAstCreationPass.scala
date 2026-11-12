@@ -127,4 +127,4 @@ object EdgAstCreationPass:
   val TimeoutSeconds: Long = 600
 
   /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. */
-  val AstFormatVersion = "edg2atom-ast-2"
+  val AstFormatVersion = "edg2atom-ast-3"

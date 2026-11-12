@@ -34,7 +34,7 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
 
   /** Whether the graph holds a METHOD for `r`. */
   protected def inProject(r: Value): Boolean =
-      !r.flag("implicit") && r.position.flatMap(p => unit.files.get(p.file)).exists(_.inRoot)
+      !r.flag("implicit") && r.position.flatMap(p => unit.files.get(p.file)).exists(inProjectRoot)
 
   protected def routineOf(id: Option[Long]): Option[Value] = id.flatMap(unit.routinesById.get)
 

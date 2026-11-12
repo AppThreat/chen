@@ -1,6 +1,7 @@
 package io.appthreat.edg2atom.parser
 
 import io.appthreat.c2cpg.Config
+import io.appthreat.edg2atom.astcreation.AstCreator
 import io.appthreat.c2cpg.parser.{
     CompilerFamily,
     CompilerIdentity,
@@ -25,13 +26,19 @@ import scala.util.Try
   * The binary is the `edga.path` system property, else `EDGA_PATH`, else `edga` on the `PATH`. Each
   * unit is parsed as the project's compiler would: the compiler's own predefined macros (as the CDT
   * frontend collects them) instead of the front end's tables, its system include directories as
-  * system directories, and the project's includes and defines.
+  * system directories, and the project's includes and defines. Every path it hands over, the root,
+  * the unit, the include directories and the preincludes, goes in the spelling the file system
+  * resolves: the exporter judges project membership by comparing those paths byte by byte, so they
+  * must be named the same way, whichever spelling the compilation database carries.
   */
 final class EdgaRunner(config: Config, sources: ProjectSources):
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  private val root = Paths.get(config.inputPath).toAbsolutePath.normalize
+  /** The project root as the file system resolves it: the exporter compares each file's
+    * canonicalised path with this one byte by byte, and reports the match as its `inRoot` flag.
+    */
+  private val root = AstCreator.realPath(Paths.get(config.inputPath))
 
   private val macroFiles = new ConcurrentHashMap[String, Path]()
 
@@ -39,9 +46,7 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     * headers, but they are this tool's own artifacts, not the project's or a library's.
     */
   def macroFilePaths: Set[String] =
-      macroFiles.values().asScala.map(p =>
-          io.appthreat.edg2atom.astcreation.AstCreator.realPath(p).toString
-      ).toSet
+      macroFiles.values().asScala.map(p => AstCreator.realPath(p).toString).toSet
 
   val executable: Option[String] = EdgaRunner.locate()
 
@@ -64,12 +69,17 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
       executable.flatMap { exe =>
         val out = Files.createTempFile("edga-", ".json")
         try
+          // the unit in the same resolved spelling as the root: the exporter's in-root check
+          // compares the two byte by byte, so a directory the two sides name differently (the 8.3
+          // short name a Windows temporary directory carries, which the exporter's own
+          // canonicalisation keeps) reads the unit as someone else's, and its bodies are not
+          // exported. The file to write keeps its own name: the exporter only writes there.
           val command = (Seq(exe) ++ arguments(file) ++ Seq(
             "--edga-root",
             root.toString,
             "--edga-out",
             out.toString,
-            file.toString
+            AstCreator.realPath(file).toString
           )).asJava
           val process = new ProcessBuilder(command)
               .redirectErrorStream(true)
@@ -120,14 +130,20 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
         if cpp then settings.standard.orElse(Option(config.cppStandard).filter(_.trim.nonEmpty))
         else settings.standard
     val strictness = EdgaRunner.strictnessOptions(written, dialect)
+    // every directory in the spelling the file system resolves, so the split between the project's
+    // include directories and the system's, and the root check it turns on, names each side the
+    // same way: a project `-I` the database spells by its 8.3 short name against a root in its
+    // long form would land in `--sys_include`, where the exporter marks every file it holds a
+    // system file, whatever its directory
     val systemDirs =
-        facts.map(_.systemIncludePaths).getOrElse(Seq.empty).map(_.toAbsolutePath.normalize)
+        facts.map(_.systemIncludePaths).getOrElse(Seq.empty).map(AstCreator.realPath)
     val (projectIncludes, otherIncludes) =
-        settings.includePaths.map(_.toAbsolutePath.normalize).filterNot(systemDirs.contains)
+        settings.includePaths.map(AstCreator.realPath).filterNot(systemDirs.contains)
             .partition(_.startsWith(root))
     // then the roots the CDT frontend would find the project's headers from by their trailing
     // path segments, which a build passes but an analysis may not be told
-    val inferred = sources.inferredIncludeRoots.filterNot(projectIncludes.contains)
+    val inferred = sources.inferredIncludeRoots.map(AstCreator.realPath)
+        .filterNot(projectIncludes.contains)
         .filterNot(EdgaRunner.shadowsSystemHeaders(_, systemDirs))
     val includes = (projectIncludes ++ inferred).flatMap(p => Seq("-I", p.toString)) ++
         (otherIncludes ++ systemDirs).distinct.flatMap(p => Seq("--sys_include", p.toString))
@@ -143,12 +159,19 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
         if cpp && (otherIncludes ++ systemDirs).exists(_.endsWith(Paths.get("c++", "v1"))) then
           Seq("--define_macro", "__OPTIMIZE_SIZE__")
         else Seq.empty
-    val forced = settings.includeFiles.flatMap(f => Seq("--preinclude", f.toString)) ++
-        settings.macroFiles.flatMap(f => Seq("--preinclude_macros", f.toString))
+    // a file the build force-includes is the project's own as its spelling says: resolved like
+    // every other path, a header under the root keeps its bodies when the database names it by
+    // another spelling than the root's
+    val forced =
+        settings.includeFiles.flatMap(f => Seq("--preinclude", AstCreator.realPath(f).toString)) ++
+            settings.macroFiles.flatMap(f =>
+                Seq("--preinclude_macros", AstCreator.realPath(f).toString)
+            )
     // a compiler macro the front end also defines keeps the front end's value, which describes what
     // it implements, without an error for the attempted redefinition
     Seq("--clear_flag=use_predefined_macro_file", "--diag_suppress=46") ++ dialect ++
-        strictness ++ standard ++ Seq("--preinclude_macros", predefinedFile.toString) ++
+        strictness ++ standard ++
+        Seq("--preinclude_macros", AstCreator.realPath(predefinedFile).toString) ++
         includes ++ userDefines ++ libcxx ++ EdgaRunner.float128Shim(this.identity, macros, cpp) ++
         EdgaRunner.c23VaStartShim(standard) ++ forced
   end arguments
