@@ -1,0 +1,21 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgShortNameAttributionTests.scala
+  s_421a4baee0d364::t_4ffaf25dc9c0fb 227-229,239-241,258,271
+  s_421a4baee0d364::t_e5dd73f2a78bca 11-13,102-112,114-120,122-125,128,131-163,165-191,195,203,208-226,230-238,242-257,259-270,272-318
+  s_421a4baee0d364::t_1b691299036579 164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af2ab98146215200b8d38fa41c09b0dd205d23e1",
+  "prompts": {},
+  "sessions": {
+    "s_421a4baee0d364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-d0c963c4-9447-40eb-8061-0692c24dca07-actor_3_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
