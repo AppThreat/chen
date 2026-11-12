@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/CompileCommandTests.scala
+  s_421a4baee0d364::t_274ce93d8e52bd 26-73
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CompileCommands.scala
+  s_421a4baee0d364::t_43ebd08ce2bdf8 50-54,58-63,66-68
+  s_421a4baee0d364::t_ebc744123b6e7a 64-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6ebec0fdcb7011a378de0e1d69cbe8f755d60d58",
+  "prompts": {},
+  "sessions": {
+    "s_421a4baee0d364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-d0c963c4-9447-40eb-8061-0692c24dca07-actor_3_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
