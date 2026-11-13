@@ -218,6 +218,27 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "the host compiler" should {
+      "be found by its absolute path, never through a relative PATH entry" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("tools") { tools =>
+            fakeCompiler(tools, "gcc")
+            val relative = Paths.get("").toAbsolutePath.relativize(tools.path).toString
+            IncludeAutoDiscovery.hostCompilerPath("gcc", tools.pathAsString) shouldBe
+                Some(tools.path.normalize.resolve("gcc"))
+            IncludeAutoDiscovery.hostCompilerPath("gcc", relative) shouldBe None
+            IncludeAutoDiscovery.hostCompilerPath("gcc", ".") shouldBe None
+          }
+      }
+
+      "be named by its absolute path when one is run for its macros" in {
+          val config = Config().withIncludePathsAutoDiscovery(true)
+          ProjectSources.settings(config, SourceLanguage.C, None, None).compiler.foreach {
+              identity => Paths.get(identity.executable).isAbsolute shouldBe true
+          }
+      }
+  }
+
   "a database command that does not name GCC or Clang" should {
       "never be run, even from outside the project" in {
           assume(!scala.util.Properties.isWin)

@@ -9,20 +9,24 @@ object ExternalCommand:
   private val IS_WIN: Boolean =
       scala.util.Properties.isWin
 
-  private val shellPrefix: Seq[String] =
-      if IS_WIN then "cmd" :: "/c" :: Nil else "sh" :: "-c" :: Nil
-
-  def run(command: String): Try[Seq[String]] =
+  /** Runs `command` (the program, then its arguments) without a shell, with `extraEnv` added to the
+    * environment: its standard output and error lines. On Windows an exit code of 1 also counts as
+    * success when `acceptWindowsExitOne` is set, as a compiler asked for its search path with `.`
+    * as its input exits with 1 after printing it.
+    */
+  def run(
+    command: Seq[String],
+    extraEnv: Map[String, String] = Map.empty,
+    acceptWindowsExitOne: Boolean = false
+  ): Try[Seq[String]] =
     val result                      = mutable.ArrayBuffer.empty[String]
-    val lineHandler: String => Unit = result.addOne
-    Process(shellPrefix :+ command).!(ProcessLogger(lineHandler, lineHandler)) match
-      case 0 =>
+    val lineHandler: String => Unit = line => result.synchronized(result.addOne(line))
+    Try(Process(command, None, extraEnv.toSeq*).!(ProcessLogger(lineHandler, lineHandler))) match
+      case Success(0) =>
           Success(result.toSeq)
-      case 1
-          if IS_WIN &&
-              command != IncludeAutoDiscovery.GCC_VERSION_COMMAND &&
-              IncludeAutoDiscovery.gccAvailable() =>
+      case Success(1) if IS_WIN && acceptWindowsExitOne =>
           Success(result.toSeq)
-      case _ =>
+      case Success(_) =>
           Failure(new RuntimeException(result.mkString(System.lineSeparator())))
+      case Failure(e) => Failure(e)
 end ExternalCommand

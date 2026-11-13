@@ -3,6 +3,7 @@ package io.appthreat.c2cpg.parser
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.utils.ExecutableLookup
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 
 import java.nio.file.{Files, Path, Paths}
@@ -304,7 +305,7 @@ object ProjectSources:
     language: SourceLanguage,
     flags: Option[CompileFlags],
     cacheDir: Option[Path],
-    pathEnvironment: String = currentPath()
+    pathEnvironment: String = ExecutableLookup.currentPath()
   ): UnitSettings =
     val cpp = language == SourceLanguage.Cpp
     val identity: Option[CompilerIdentity] = flags match
@@ -393,12 +394,12 @@ object ProjectSources:
   private[parser] def trustedExecutable(
     compiler: String,
     config: Config,
-    pathEnvironment: String = currentPath()
+    pathEnvironment: String = ExecutableLookup.currentPath()
   ): Option[String] =
     val inputPath = Paths.get(config.inputPath).toAbsolutePath.normalize
     // real paths are compared: the project may be reached through a symbolic link
     val root     = Try(inputPath.toRealPath()).getOrElse(inputPath)
-    val pathDirs = absolutePathDirectories(pathEnvironment)
+    val pathDirs = ExecutableLookup.absolutePathDirectories(pathEnvironment)
     val named    = Try(Paths.get(compiler)).toOption
     val candidates: Seq[Path] = named match
       case Some(p) if p.isAbsolute =>
@@ -417,17 +418,6 @@ object ProjectSources:
         .find((p, real) => !real.startsWith(root) && !p.startsWith(inputPath))
         .map(_._2.toString)
   end trustedExecutable
-
-  /** The host's `PATH`, or the variable spelled in another case (`Path` on Windows). */
-  private def currentPath(): String =
-      sys.env.get("PATH").orElse(sys.env.collectFirst {
-          case (k, v) if k.equalsIgnoreCase("PATH") => v
-      }).getOrElse("")
-
-  /** The absolute directories a `PATH` value lists, `..` segments folded. */
-  private def absolutePathDirectories(pathEnvironment: String): Seq[Path] =
-      pathEnvironment.split(java.io.File.pathSeparator).toSeq.filter(_.nonEmpty)
-          .flatMap(d => Try(Paths.get(d)).toOption).filter(_.isAbsolute).map(_.normalize)
 
   /** Whether `dir` is one of the `PATH` directories `pathDirs`: the same path, or the same
     * directory reached through a symbolic link (the same device and inode).
@@ -459,8 +449,15 @@ object ProjectSources:
               .filter(s => s.startsWith("c++") || s.startsWith("gnu++"))
           Seq(s"-std=${configured.getOrElse(DefaultCppStandard)}")
     if IncludeAutoDiscovery.gccAvailable() then
-      Some(CompilerIdentity("gcc", CompilerFamily.Gcc, language, std))
+      IncludeAutoDiscovery.gccExecutable().map(CompilerIdentity(
+        _,
+        CompilerFamily.Gcc,
+        language,
+        std
+      ))
     else if IncludeAutoDiscovery.clangAvailable() then
-      Some(CompilerIdentity("clang", CompilerFamily.Clang, language, std))
+      IncludeAutoDiscovery.clangExecutable().map(
+        CompilerIdentity(_, CompilerFamily.Clang, language, std)
+      )
     else None
 end ProjectSources

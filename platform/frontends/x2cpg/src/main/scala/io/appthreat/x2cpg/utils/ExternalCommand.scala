@@ -18,6 +18,13 @@ object ExternalCommand:
   private val shellPrefix: Seq[String] =
       if IS_WIN then "cmd" :: "/c" :: Nil else "sh" :: "-c" :: Nil
 
+  /** Added to the environment of every process started here: on Windows it stops `cmd` from looking
+    * in the working directory, often the project being scanned, for a program named without a path.
+    * A variable of the same name in a caller's `extraEnv` wins.
+    */
+  private def withHostEnv(extraEnv: Map[String, String]): Map[String, String] =
+      ExecutableLookup.environment(IS_WIN) ++ extraEnv
+
   case class ExternalCommandResult(
     exitCode: Int,
     stdOut: Seq[String],
@@ -52,7 +59,9 @@ object ExternalCommand:
         if separateStdErr then new ConcurrentLinkedQueue[String] else stdOutOutput
     val processLogger = ProcessLogger(stdOutOutput.add, stdErrOutput.add)
 
-    Process(shellPrefix :+ command, new java.io.File(cwd), extraEnv.toList*).!(processLogger) match
+    Process(shellPrefix :+ command, new java.io.File(cwd), withHostEnv(extraEnv).toList*).!(
+      processLogger
+    ) match
       case 0 =>
           Success(stdOutOutput.asScala.toSeq)
       case _ =>
@@ -74,7 +83,7 @@ object ExternalCommand:
     val commands      = command.split(COMMAND_AND).toSeq
     commands.map { cmd =>
       val cmdWithQuotesAroundDir = cmd.replace(inDir, s"'$inDir'")
-      Try(Process(cmdWithQuotesAroundDir, dir, extraEnv.toList*).!(processLogger)).getOrElse(
+      Try(Process(cmdWithQuotesAroundDir, dir, withHostEnv(extraEnv).toList*).!(processLogger)).getOrElse(
         1
       )
     }.sum match
@@ -101,7 +110,7 @@ object ExternalCommand:
         .command(command.toArray*)
         .directory(new File(cwd))
         .redirectErrorStream(mergeStdErrInStdOut)
-    builder.environment().putAll(extraEnv.asJava)
+    builder.environment().putAll(withHostEnv(extraEnv).asJava)
 
     val stdOutFile = File.createTempFile("x2cpg", "stdout")
     val stdErrFile = Option.when(!mergeStdErrInStdOut)(File.createTempFile("x2cpg", "stderr"))
