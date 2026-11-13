@@ -1,0 +1,21 @@
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/parser/PhpParser.scala
+  s_8376465eb88a0d::t_d52c5169aa7e02 48-54,57-62,109,140-141,310-319,321,329
+platform/frontends/php2atom/src/test/scala/io/appthreat/php2atom/parser/ParseCommandTests.scala
+  s_8376465eb88a0d::t_39d7d5485a0547 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d058b27b2d68238a2cee85b44ac62291e7a2760f",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
