@@ -45,16 +45,21 @@ class PhpParser private (
       if ParseReporter.isEnabled then
         perFileFailureReasons.put(filename, reason)
 
-  private def phpParseCommand(filename: String): String =
-    val phpParserCommands = "--with-recovery --resolve-names -P --json-dump"
-    phpParserPath match
+  /** The argument vector that parses `filename` on its own, with no shell: the file name reaches
+    * the parser as it is. A parser reached through `cmd /c` is not given a file name holding a
+    * character `cmd` interprets.
+    */
+  private[parser] def phpParseCommand(filename: String): Option[Seq[String]] =
+    val phpParserCommands = Seq("--with-recovery", "--resolve-names", "-P", "--json-dump")
+    val prefix = phpParserPath match
       case path if PhpParser.isNodeScript(path) =>
           // A Node script (phpastgen.js) cannot run under the php interpreter.
-          s"node $path $phpParserCommands $filename"
-      case "phpastgen" =>
-          s"$phpParserPath $phpParserCommands $filename"
-      case _ =>
-          s"php --php-ini $phpIniPath $phpParserPath $phpParserCommands $filename"
+          Seq("node", path)
+      case "phpastgen" => barePhpastgen
+      case _           => Seq("php", "--php-ini", phpIniPath, phpParserPath)
+    if prefix.headOption.contains("cmd") && filename.exists(PhpParser.CmdMetaChars.contains) then
+      None
+    else Some(prefix ++ phpParserCommands :+ filename)
 
   /** Milliseconds a capability probe may run before it is killed.
     *
@@ -101,7 +106,7 @@ class PhpParser private (
           .orElse(phpParserPath match
             case path if PhpParser.isNodeScript(path) =>
                 Option.when(File(path).exists())(Seq("node", path))
-            case "phpastgen" => Some(resolveBarePhpastgen())
+            case "phpastgen" => Some(barePhpastgen)
             case path        => Some(Seq("php", "--php-ini", phpIniPath, path))
           )
 
@@ -131,6 +136,8 @@ class PhpParser private (
       shimDir / "node_modules" / "@appthreat" / "atom-parsetools" / "phpastgen.js"
     )
     candidates.find(_.exists()).map(_.canonicalPath)
+
+  private lazy val barePhpastgen: Seq[String] = resolveBarePhpastgen()
 
   /** Argument-vector head for the bare `phpastgen` name (see [[batchCommandPrefix]]). */
   private def resolveBarePhpastgen(): Seq[String] =
@@ -300,9 +307,18 @@ class PhpParser private (
     val inputFilePath  = inputFile.canonicalPath
     val inputDirectory = inputFile.parent.canonicalPath
 
-    val command = phpParseCommand(inputFilePath)
+    val result = phpParseCommand(inputFilePath) match
+      case Some(command) =>
+          ExternalCommand.runProgram(
+            command.head,
+            command.tail,
+            inputDirectory,
+            separateStdErr = true
+          )
+      case None =>
+          Failure(new IllegalArgumentException("the path holds characters cmd would interpret"))
 
-    ExternalCommand.run(command, inputDirectory, true) match
+    result match
       case Success(output) =>
           processParserOutput(output, inputFilePath)
 
@@ -310,6 +326,7 @@ class PhpParser private (
           // the message is the generator's stderr
           rememberFailure(inputFilePath, s"generator run failed: ${exception.getMessage}")
           None
+  end parseFile
 
   private def processParserOutput(output: Seq[String], filename: String): Option[PhpFile] =
     val maybeJson =

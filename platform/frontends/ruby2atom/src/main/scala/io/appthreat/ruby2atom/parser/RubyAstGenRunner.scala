@@ -91,6 +91,12 @@ object RubyAstGenRunner:
     * be set with `-Drbastgen.path=...` or `System.setProperty`, the environment variable by the
     * caller's shell. Blank values are ignored so that `RBASTGEN_PATH=` behaves like unset.
     */
+  /** The generator's arguments for the project at `in`, written to `out`: each one reaches it as it
+    * is, as no shell runs it, so the exclusion pattern needs no quoting.
+    */
+  def generatorArgs(in: String, out: String, exclude: String): Seq[String] =
+      Seq("-i", in, "-o", out) ++ (if exclude.isEmpty then Nil else Seq("-e", exclude))
+
   def resolveProgram(
     property: Option[String] = Option(System.getProperty(ProgramProperty)),
     environment: Option[String] = sys.env.get(ProgramEnvVar)
@@ -102,10 +108,7 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  /** Quoted for the shell `ExternalCommand` runs the generator through; a bare program name still
-    * resolves through `PATH` when quoted.
-    */
-  private def rbastgen: String = s"\"${RubyAstGenRunner.resolveProgram()}\""
+  private def rbastgen: String = RubyAstGenRunner.resolveProgram()
 
   override def fileFilter(file: String, out: File): Boolean =
       file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match
@@ -119,15 +122,20 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
   override def runAstGenNative(in: String, out: File, exclude: String, include: String)(implicit
     metaData: AstGenProgramMetaData
   ): AstGenRunnerResult =
-    val command     = s"$rbastgen -i $in -o ${out.pathAsString}"
-    val excludeArgs = if exclude.isEmpty then "" else s" -e '$exclude'"
-    ExternalCommand.run(s"$command$excludeArgs", in, true) match
-      case Success(result) =>
-          val collected = collectResult(out)
-          logRunSummary(out)
-          collected
-      case Failure(f) =>
-          DefaultAstGenRunnerResult()
+      ExternalCommand.runProgram(
+        rbastgen,
+        RubyAstGenRunner.generatorArgs(in, out.pathAsString, exclude),
+        in,
+        separateStdErr = true,
+        excluded = Seq(Paths.get(in))
+      ) match
+        case Success(result) =>
+            val collected = collectResult(out)
+            logRunSummary(out)
+            collected
+        case Failure(f) =>
+            logger.debug(s"rbastgen did not run: ${f.getMessage}")
+            DefaultAstGenRunnerResult()
 
   /** Surfaces the generator's own accounting once per run, from the manifest it writes
     * (ruby_ast_gen 2.x). A generator that parses nothing still exits 0, so "0 parsed" is the only
@@ -166,7 +174,12 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
     */
   private lazy val astGenVersion: String =
       ExternalCommand
-          .run(s"$rbastgen --version", config.inputPath)
+          .runProgram(
+            rbastgen,
+            Seq("--version"),
+            config.inputPath,
+            excluded = Seq(Paths.get(config.inputPath))
+          )
           .toOption
           .flatMap(_.headOption)
           .map(_.trim)

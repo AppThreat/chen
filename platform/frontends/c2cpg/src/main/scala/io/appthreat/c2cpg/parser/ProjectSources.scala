@@ -3,6 +3,7 @@ package io.appthreat.c2cpg.parser
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
 import io.appthreat.x2cpg.SourceFiles
+import io.appthreat.x2cpg.utils.ExecutableLookup
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 
 import java.nio.file.{Files, Path, Paths}
@@ -295,18 +296,22 @@ object ProjectSources:
 
   private def normalized(file: String): Path = Paths.get(file).toAbsolutePath.normalize
 
-  /** The settings of a file of `language` compiled with `flags` (none: the configured ones). */
+  /** The settings of a file of `language` compiled with `flags` (none: the configured ones). The
+    * compiler `flags` name is looked up in the directories `pathEnvironment` lists, the host's
+    * `PATH` by default.
+    */
   def settings(
     config: Config,
     language: SourceLanguage,
     flags: Option[CompileFlags],
-    cacheDir: Option[Path]
+    cacheDir: Option[Path],
+    pathEnvironment: String = ExecutableLookup.currentPath()
   ): UnitSettings =
     val cpp = language == SourceLanguage.Cpp
     val identity: Option[CompilerIdentity] = flags match
       case Some(f) =>
           f.compiler.filter(_ => RunnableFamilies.contains(f.family))
-              .flatMap(trustedExecutable(_, config)).map(exe =>
+              .flatMap(trustedExecutable(_, config, pathEnvironment)).map(exe =>
                   CompilerIdentity(exe, f.family, language, f.targetOptions)
               )
       case None if config.includePathsAutoDiscovery => hostCompiler(config, language)
@@ -377,28 +382,57 @@ object ProjectSources:
     */
   private val RunnableFamilies = Set(CompilerFamily.Gcc, CompilerFamily.Clang)
 
-  /** The compiler a compile command names, when it may be run: a command found on the `PATH`, or an
-    * absolute path to an executable, outside the project. A compilation database can come with the
-    * code it describes, so a compiler inside the project tree, or named by a relative path that
-    * resolves into it, is never run (its table stands in). Only the options that change which
-    * macros are predefined are passed to it (see [[CompileCommand.parseArguments]]).
+  /** The compiler a compile command names, when it may be run: a command found in one of the `PATH`
+    * directories, or an absolute path to a file in one of them, outside the project. A relative
+    * path, any other absolute path, or anything inside the project tree is never run (its table
+    * stands in). A compilation database can come with the code it describes, and that code is not
+    * confined to the input path: the rest of a checkout whose subdirectory is scanned can be named
+    * by an absolute path too. Only absolute `PATH` entries count, as a relative one depends on the
+    * working directory. Only the options that change which macros are predefined are passed to it
+    * (see [[CompileCommand.parseArguments]]).
     */
-  private def trustedExecutable(compiler: String, config: Config): Option[String] =
-    val root = Try(Paths.get(config.inputPath).toRealPath()).getOrElse(
-      Paths.get(config.inputPath).toAbsolutePath.normalize
-    )
-    val named = Try(Paths.get(compiler)).toOption
+  private[parser] def trustedExecutable(
+    compiler: String,
+    config: Config,
+    pathEnvironment: String = ExecutableLookup.currentPath()
+  ): Option[String] =
+    val inputPath = Paths.get(config.inputPath).toAbsolutePath.normalize
+    // real paths are compared: the project may be reached through a symbolic link
+    val root     = Try(inputPath.toRealPath()).getOrElse(inputPath)
+    val pathDirs = ExecutableLookup.absolutePathDirectories(pathEnvironment)
+    val named    = Try(Paths.get(compiler)).toOption
     val candidates: Seq[Path] = named match
-      case Some(p) if p.isAbsolute => Seq(p)
+      case Some(p) if p.isAbsolute =>
+          // `..` segments are folded before the file system is asked, so the lookup cannot pass
+          // through directories the compiler path merely names
+          val normalized = p.normalize
+          Option(normalized.getParent).filter(isPathDirectory(_, pathDirs)).map(_ =>
+              normalized
+          ).toSeq
       case Some(p) if p.getNameCount == 1 && !compiler.contains('/') && !compiler.contains('\\') =>
           val suffixes = if scala.util.Properties.isWin then Seq("", ".exe") else Seq("")
-          sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator).toSeq.filter(_.nonEmpty)
-              .flatMap(dir => suffixes.map(sfx => Paths.get(dir).resolve(compiler + sfx)))
+          pathDirs.flatMap(dir => suffixes.map(sfx => dir.resolve(compiler + sfx)))
       case _ => Nil
-    candidates.find(p => Files.isRegularFile(p) && Files.isExecutable(p))
-        .flatMap(p => Try(p.toRealPath()).toOption)
-        .filterNot(_.startsWith(root))
-        .map(_.toString)
+    candidates.filter(p => Files.isRegularFile(p) && Files.isExecutable(p))
+        .flatMap(p => Try(p.toRealPath()).toOption.map(p -> _))
+        .find((p, real) => !real.startsWith(root) && !p.startsWith(inputPath))
+        .map(_._2.toString)
+  end trustedExecutable
+
+  /** Whether `dir` is one of the `PATH` directories `pathDirs`: the same path, or the same
+    * directory reached through a symbolic link (the same device and inode).
+    */
+  private def isPathDirectory(dir: Path, pathDirs: Seq[Path]): Boolean =
+    def key(p: Path) = if scala.util.Properties.isWin then p.toString.toLowerCase else p.toString
+    pathDirs.exists(p => key(p) == key(dir)) || Files.isDirectory(dir) && inodeKnown(dir) &&
+    pathDirs.exists(p => Try(Files.isDirectory(p) && Files.isSameFile(p, dir)).getOrElse(false))
+
+  /** False for a file system that reports inode 0, where every file would look the same. */
+  private def inodeKnown(path: Path): Boolean =
+      Try(Files.getAttribute(path, "unix:ino")).toOption match
+        case Some(ino: java.lang.Long) => ino.longValue != 0L
+        case Some(_)                   => true
+        case None                      => true
 
   /** The C++ standard a unit without a compile command is parsed as, unless one is configured. */
   val DefaultCppStandard = "gnu++17"
@@ -415,8 +449,15 @@ object ProjectSources:
               .filter(s => s.startsWith("c++") || s.startsWith("gnu++"))
           Seq(s"-std=${configured.getOrElse(DefaultCppStandard)}")
     if IncludeAutoDiscovery.gccAvailable() then
-      Some(CompilerIdentity("gcc", CompilerFamily.Gcc, language, std))
+      IncludeAutoDiscovery.gccExecutable().map(CompilerIdentity(
+        _,
+        CompilerFamily.Gcc,
+        language,
+        std
+      ))
     else if IncludeAutoDiscovery.clangAvailable() then
-      Some(CompilerIdentity("clang", CompilerFamily.Clang, language, std))
+      IncludeAutoDiscovery.clangExecutable().map(
+        CompilerIdentity(_, CompilerFamily.Clang, language, std)
+      )
     else None
 end ProjectSources

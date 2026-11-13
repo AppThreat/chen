@@ -355,9 +355,16 @@ object EdgaRunner:
               .filter(s => s.startsWith("c++") || s.startsWith("gnu++"))
           Seq(s"-std=${configured.getOrElse("c++17")}")
     if IncludeAutoDiscovery.gccAvailable() then
-      Some(CompilerIdentity("gcc", CompilerFamily.Gcc, language, std))
+      IncludeAutoDiscovery.gccExecutable().map(CompilerIdentity(
+        _,
+        CompilerFamily.Gcc,
+        language,
+        std
+      ))
     else if IncludeAutoDiscovery.clangAvailable() then
-      Some(CompilerIdentity("clang", CompilerFamily.Clang, language, std))
+      IncludeAutoDiscovery.clangExecutable().map(
+        CompilerIdentity(_, CompilerFamily.Clang, language, std)
+      )
     else None
 
   /** glibc's `_Float128` is a type of the compiler's own from GCC 7 (G++ 13) on, and a typedef of

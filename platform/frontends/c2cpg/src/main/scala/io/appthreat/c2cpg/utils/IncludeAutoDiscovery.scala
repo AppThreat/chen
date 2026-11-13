@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.utils
 
 import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.parser.FileDefaults
+import io.appthreat.x2cpg.utils.ExecutableLookup
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Path, Paths}
@@ -15,17 +16,40 @@ object IncludeAutoDiscovery:
 
   private val IS_WIN = scala.util.Properties.isWin
 
-  val GCC_VERSION_COMMAND = "gcc --version"
-  private val GCC_CPP_INCLUDE_COMMAND =
-      if IS_WIN then "gcc -xc++ -E -v . -o nul" else "gcc -xc++ -E -v /dev/null -o /dev/null"
-  private val GCC_C_INCLUDE_COMMAND =
-      if IS_WIN then "gcc -xc -E -v . -o nul" else "gcc -xc -E -v /dev/null -o /dev/null"
+  private val VersionArgs = Seq("--version")
 
-  val CLANG_VERSION_COMMAND = "clang --version"
-  private val CLANG_CPP_INCLUDE_COMMAND =
-      if IS_WIN then "clang -xc++ -E -v . -o nul" else "clang -xc++ -E -v /dev/null -o /dev/null"
-  private val CLANG_C_INCLUDE_COMMAND =
-      if IS_WIN then "clang -xc -E -v . -o nul" else "clang -xc -E -v /dev/null -o /dev/null"
+  /** The arguments that print a compiler's include search path for `language` (`c`, `c++`). */
+  private def includeArgs(language: String): Seq[String] =
+      if IS_WIN then Seq(s"-x$language", "-E", "-v", ".", "-o", "nul")
+      else Seq(s"-x$language", "-E", "-v", "/dev/null", "-o", "/dev/null")
+
+  /** The absolute path of the host compiler `name` (`gcc`, `clang`), from the absolute `PATH`
+    * directories only (see [[ExecutableLookup]]): a relative entry, or on Windows the working
+    * directory, could otherwise supply a program of that name.
+    */
+  def hostCompilerPath(
+    name: String,
+    pathEnvironment: String = ExecutableLookup.currentPath()
+  ): Option[Path] = ExecutableLookup.find(name, Nil, pathEnvironment)
+
+  private lazy val gccPath: Option[Path]   = hostCompilerPath("gcc")
+  private lazy val clangPath: Option[Path] = hostCompilerPath("clang")
+
+  /** The host's GCC, as [[hostCompilerPath]] finds it. */
+  def gccExecutable(): Option[String] = gccPath.map(_.toString)
+
+  /** The host's Clang, as [[hostCompilerPath]] finds it. */
+  def clangExecutable(): Option[String] = clangPath.map(_.toString)
+
+  private def runCompiler(compiler: Option[Path], args: Seq[String], probe: Boolean) =
+      compiler match
+        case Some(exe) =>
+            ExternalCommand.run(
+              ExecutableLookup.commandLine(exe, args),
+              ExecutableLookup.environment(),
+              acceptWindowsExitOne = !probe && gccAvailable()
+            )
+        case None => Failure(new RuntimeException("not found in the PATH directories"))
 
   private var isGccAvailable: Option[Boolean]      = None
   private var systemIncludePathsC_GCC: Set[Path]   = Set.empty
@@ -36,7 +60,7 @@ object IncludeAutoDiscovery:
   private var systemIncludePathsCPP_Clang: Set[Path] = Set.empty
 
   private def checkForGcc(): Boolean =
-      ExternalCommand.run(GCC_VERSION_COMMAND) match
+      runCompiler(gccPath, VersionArgs, probe = true) match
         case Success(result) =>
             logger.debug(s"GCC is available: ${result.mkString(System.lineSeparator())}")
             true
@@ -67,17 +91,18 @@ object IncludeAutoDiscovery:
         .map(p => Paths.get(p).toAbsolutePath)
         .toSet
 
-  private def discoverPathsGCC(command: String): Set[Path] = ExternalCommand.run(command) match
-    case Success(output) => extractPaths(output)
-    case Failure(exception) =>
-        logger.warn(
-          s"Unable to discover system include paths with GCC. Running '$command' failed.",
-          exception
-        )
-        Set.empty
+  private def discoverPathsGCC(language: String): Set[Path] =
+      runCompiler(gccPath, includeArgs(language), probe = false) match
+        case Success(output) => extractPaths(output)
+        case Failure(exception) =>
+            logger.warn(
+              s"Unable to discover system include paths with GCC for $language.",
+              exception
+            )
+            Set.empty
 
   private def checkForClang(): Boolean =
-      ExternalCommand.run(CLANG_VERSION_COMMAND) match
+      runCompiler(clangPath, VersionArgs, probe = true) match
         case Success(result) =>
             logger.debug(s"Clang is available: ${result.mkString(System.lineSeparator())}")
             true
@@ -95,21 +120,22 @@ object IncludeAutoDiscovery:
         isClangAvailable = Option(checkForClang())
         isClangAvailable.get
 
-  private def discoverPathsClang(command: String): Set[Path] = ExternalCommand.run(command) match
-    case Success(output) => extractPaths(output)
-    case Failure(exception) =>
-        logger.warn(
-          s"Unable to discover system include paths with Clang. Running '$command' failed.",
-          exception
-        )
-        Set.empty
+  private def discoverPathsClang(language: String): Set[Path] =
+      runCompiler(clangPath, includeArgs(language), probe = false) match
+        case Success(output) => extractPaths(output)
+        case Failure(exception) =>
+            logger.warn(
+              s"Unable to discover system include paths with Clang for $language.",
+              exception
+            )
+            Set.empty
 
   def discoverIncludePathsC_GCC(config: Config): Set[Path] =
       if config.includePathsAutoDiscovery && systemIncludePathsC_GCC.nonEmpty then
         systemIncludePathsC_GCC
       else if config.includePathsAutoDiscovery && systemIncludePathsC_GCC.isEmpty && gccAvailable()
       then
-        val includePathsC = discoverPathsGCC(GCC_C_INCLUDE_COMMAND)
+        val includePathsC = discoverPathsGCC("c")
         if includePathsC.nonEmpty then
           logger.debug(
             s"Using the following GCC C system include paths:${includePathsC
@@ -125,7 +151,7 @@ object IncludeAutoDiscovery:
         systemIncludePathsCPP_GCC
       else if config.includePathsAutoDiscovery && systemIncludePathsCPP_GCC.isEmpty && gccAvailable()
       then
-        val includePathsCPP = discoverPathsGCC(GCC_CPP_INCLUDE_COMMAND)
+        val includePathsCPP = discoverPathsGCC("c++")
         if includePathsCPP.nonEmpty then
           logger.debug(
             s"Using the following GCC CPP system include paths:${includePathsCPP
@@ -142,7 +168,7 @@ object IncludeAutoDiscovery:
       else if config.includePathsAutoDiscovery && systemIncludePathsC_Clang
             .isEmpty && isClangAvailableCheck()
       then
-        val includePathsC = discoverPathsClang(CLANG_C_INCLUDE_COMMAND)
+        val includePathsC = discoverPathsClang("c")
         if includePathsC.nonEmpty then
           logger.debug(
             s"Using the following Clang C system include paths:${includePathsC
@@ -159,7 +185,7 @@ object IncludeAutoDiscovery:
       else if config.includePathsAutoDiscovery && systemIncludePathsCPP_Clang
             .isEmpty && isClangAvailableCheck()
       then
-        val includePathsCPP = discoverPathsClang(CLANG_CPP_INCLUDE_COMMAND)
+        val includePathsCPP = discoverPathsClang("c++")
         if includePathsCPP.nonEmpty then
           logger.debug(
             s"Using the following Clang CPP system include paths:${includePathsCPP
