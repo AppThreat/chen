@@ -100,7 +100,13 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
               dir.path
             )
             PredefinedMacros.clearProcessCache()
-            val settings = ProjectSources.settings(Config(), SourceLanguage.Cpp, Some(flags), None)
+            val settings = ProjectSources.settings(
+              Config(),
+              SourceLanguage.Cpp,
+              Some(flags),
+              None,
+              pathEnvironment = dir.pathAsString
+            )
             settings.includePaths shouldBe Seq(
               dir.path.resolve("inc"),
               Paths.get("/sys"),
@@ -120,12 +126,94 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
             val config = Config().withInputPath(dir.pathAsString)
             PredefinedMacros.clearProcessCache()
             val before = PredefinedMacros.compilerRuns.get()
-            Seq(cc, "./fake-gcc", "tools/../fake-gcc").foreach { compiler =>
-              val flags    = CompileCommand.parseArguments(Seq(compiler, "-c", "a.c"), dir.path)
-              val settings = ProjectSources.settings(config, SourceLanguage.C, Some(flags), None)
+            // not even when the PATH lists the project directory
+            Seq(cc, "./fake-gcc", "tools/../fake-gcc", "fake-gcc").foreach { compiler =>
+              val flags = CompileCommand.parseArguments(Seq(compiler, "-c", "a.c"), dir.path)
+              val settings = ProjectSources.settings(
+                config,
+                SourceLanguage.C,
+                Some(flags),
+                None,
+                pathEnvironment = dir.pathAsString
+              )
               settings.definedSymbols should not contain key("__FAKECC__")
             }
             PredefinedMacros.compilerRuns.get() shouldBe before
+          }
+      }
+  }
+
+  "a database compiler outside the project" should {
+      def withDirs(test: (File, File, File) => Unit): Unit =
+          File.usingTemporaryDirectory("tools") { tools =>
+              File.usingTemporaryDirectory("other") { other =>
+                  File.usingTemporaryDirectory("project") { project =>
+                      test(tools, other, project)
+                  }
+              }
+          }
+
+      "be run only from a directory the PATH lists" in {
+          assume(!scala.util.Properties.isWin)
+          withDirs { (tools, other, project) =>
+            val config  = Config().withInputPath(project.pathAsString)
+            val onPath  = fakeCompiler(tools)
+            val offPath = fakeCompiler(other)
+            val path    = tools.pathAsString
+            ProjectSources.trustedExecutable(onPath, config, path) shouldBe
+                Some(tools.path.toRealPath().resolve("fake-gcc").toString)
+            ProjectSources.trustedExecutable("fake-gcc", config, path) shouldBe
+                Some(tools.path.toRealPath().resolve("fake-gcc").toString)
+            ProjectSources.trustedExecutable(offPath, config, path) shouldBe None
+            ProjectSources.trustedExecutable(offPath, config, "") shouldBe None
+            ProjectSources.trustedExecutable(onPath, config, "") shouldBe None
+
+            PredefinedMacros.clearProcessCache()
+            val before = PredefinedMacros.compilerRuns.get()
+            val flags  = CompileCommand.parseArguments(Seq(offPath, "-c", "a.c"), project.path)
+            ProjectSources.settings(config, SourceLanguage.C, Some(flags), None, path)
+                .definedSymbols should not contain key("__FAKECC__")
+            PredefinedMacros.compilerRuns.get() shouldBe before
+          }
+      }
+
+      "not reach another directory through `..` segments" in {
+          assume(!scala.util.Properties.isWin)
+          withDirs { (tools, other, project) =>
+            val config = Config().withInputPath(project.pathAsString)
+            fakeCompiler(other)
+            val through = s"${tools.pathAsString}/../${other.name}/fake-gcc"
+            ProjectSources.trustedExecutable(through, config, tools.pathAsString) shouldBe None
+            val intoProject = s"${tools.pathAsString}/../${project.name}/fake-gcc"
+            fakeCompiler(project)
+            ProjectSources.trustedExecutable(intoProject, config, tools.pathAsString) shouldBe None
+          }
+      }
+
+      "not be looked up in a relative PATH entry" in {
+          assume(!scala.util.Properties.isWin)
+          withDirs { (tools, _, project) =>
+            val config   = Config().withInputPath(project.pathAsString)
+            val relative = Paths.get("").toAbsolutePath.relativize(tools.path).toString
+            fakeCompiler(tools)
+            ProjectSources.trustedExecutable("fake-gcc", config, relative) shouldBe None
+            ProjectSources.trustedExecutable(
+              tools.path.resolve("fake-gcc").toString,
+              config,
+              relative
+            ) shouldBe None
+          }
+      }
+
+      "be found in a PATH directory reached through a symbolic link" in {
+          assume(!scala.util.Properties.isWin)
+          withDirs { (tools, other, project) =>
+            val config = Config().withInputPath(project.pathAsString)
+            val cc     = fakeCompiler(tools)
+            val link   = other.path.resolve("bin")
+            java.nio.file.Files.createSymbolicLink(link, tools.path)
+            ProjectSources.trustedExecutable(cc, config, link.toString) shouldBe
+                Some(tools.path.toRealPath().resolve("fake-gcc").toString)
           }
       }
   }
