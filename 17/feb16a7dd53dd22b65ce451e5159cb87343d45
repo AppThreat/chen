@@ -1,0 +1,21 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyAstGenRunner.scala
+  s_8376465eb88a0d::t_fb5ef8bd2797f2 94-99,111,125-138,177-182
+platform/frontends/ruby2atom/src/test/scala/io/appthreat/ruby2atom/parsing/AstGenProgramTests.scala
+  s_8376465eb88a0d::t_ce935158035bc1 42-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "17feb16a7dd53dd22b65ce451e5159cb87343d45",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
