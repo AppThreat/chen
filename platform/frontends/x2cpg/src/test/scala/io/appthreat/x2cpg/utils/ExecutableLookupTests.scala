@@ -104,9 +104,9 @@ class ExecutableLookupTests extends AnyWordSpec with Matchers:
       "be started through cmd by its absolute path only when it is a batch file" in {
           val dir = Paths.get("").toAbsolutePath
           ExecutableLookup.commandLine(dir.resolve("mvn.cmd"), Seq("-B"), windows = true) shouldBe
-              Seq("cmd", "/c", dir.resolve("mvn.cmd").toString, "-B")
+              Seq("cmd", "/d", "/c", "call", dir.resolve("mvn.cmd").toString, "-B")
           ExecutableLookup.commandLine(dir.resolve("gradle.BAT"), Nil, windows = true) shouldBe
-              Seq("cmd", "/c", dir.resolve("gradle.BAT").toString)
+              Seq("cmd", "/d", "/c", "call", dir.resolve("gradle.BAT").toString)
           ExecutableLookup.commandLine(dir.resolve("gcc.exe"), Seq("-v"), windows = true) shouldBe
               Seq(dir.resolve("gcc.exe").toString, "-v")
           ExecutableLookup.commandLine(dir.resolve("mvn.cmd"), Nil, windows = false) shouldBe
@@ -114,6 +114,89 @@ class ExecutableLookupTests extends AnyWordSpec with Matchers:
           ExecutableLookup.environment(windows = true) shouldBe
               Map("NoDefaultCurrentDirectoryInExePath" -> "1")
           ExecutableLookup.environment(windows = false) shouldBe empty
+      }
+  }
+  "a command" should {
+      "not start a batch file with an argument cmd would interpret" in {
+          withDirs { (tools, project) =>
+            tool(tools, "astgen.cmd")
+            val path = tools.pathAsString
+            ExecutableLookup.command(
+              "astgen",
+              Seq("-o", "out dir"),
+              Seq(project.path),
+              path,
+              true
+            ) shouldBe
+                Right(Seq(
+                  "cmd",
+                  "/d",
+                  "/c",
+                  "call",
+                  tools.path.resolve("astgen.cmd").toString,
+                  "-o",
+                  "out dir"
+                ))
+            Seq("a&b", "a|b", "a>b", "a<b", "a^b", "%PATH%", "!x!", "a\"b", "a\nb").foreach { arg =>
+                ExecutableLookup.command("astgen", Seq("-o", arg), Seq(project.path), path, true)
+                    .isLeft shouldBe true
+            }
+            // the same arguments are no concern without cmd
+            tool(tools, "astgen.exe")
+            ExecutableLookup.command("astgen", Seq("a&b"), Seq(project.path), path, true) shouldBe
+                Right(Seq(tools.path.resolve("astgen.exe").toString, "a&b"))
+          }
+      }
+
+      "take a program path as written, outside the scan root" in {
+          assume(!scala.util.Properties.isWin)
+          withDirs { (tools, project) =>
+            val outside = tool(tools, "rbastgen")
+            val inside  = tool(project, "rbastgen")
+            ExecutableLookup.command(
+              outside.pathAsString,
+              Seq("-i", "x"),
+              Seq(project.path),
+              ""
+            ) shouldBe
+                Right(Seq(outside.pathAsString, "-i", "x"))
+            ExecutableLookup.command(inside.pathAsString, Nil, Seq(project.path), "").isLeft shouldBe
+                true
+            ExecutableLookup.command("rbastgen", Nil, Seq(project.path), project.pathAsString)
+                .isLeft shouldBe true
+            ExecutableLookup.command("missing-tool", Nil, Nil, tools.pathAsString).isLeft shouldBe
+                true
+          }
+      }
+  }
+
+  "a program started without a shell" should {
+      "receive every argument as it is" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("tools") { tools =>
+              File.usingTemporaryDirectory("work $(touch marker1)") { work =>
+                val echo = tools / "printargs"
+                echo.writeText("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n")
+                echo.toJava.setExecutable(true)
+                val args = Seq(
+                  "x';touch marker2;'",
+                  "$(touch marker3)",
+                  "`touch marker4`",
+                  "a; touch marker5",
+                  "a && touch marker6",
+                  "*",
+                  "with space"
+                )
+                ExternalCommand.runProgram(echo.pathAsString, args, work.pathAsString).get shouldBe
+                    args
+                work.list.map(_.name).toSeq shouldBe empty
+                (1 to 6).foreach(i => (tools / s"marker$i").exists shouldBe false)
+              }
+          }
+      }
+
+      "fail without running anything when it is not found" in {
+          ExternalCommand.runProgram("no-such-tool-anywhere", Nil, ".").isFailure shouldBe true
       }
   }
 end ExecutableLookupTests

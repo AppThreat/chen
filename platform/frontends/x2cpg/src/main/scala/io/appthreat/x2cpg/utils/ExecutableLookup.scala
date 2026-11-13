@@ -35,6 +35,24 @@ object ExecutableLookup:
       pathEnvironment.split(java.io.File.pathSeparator).toSeq.filter(_.nonEmpty)
           .flatMap(d => Try(Paths.get(d)).toOption).filter(_.isAbsolute).map(_.normalize)
 
+  /** Characters `cmd.exe` interprets on a command line even inside quotes, or that end it. */
+  val BatchUnsafeChars: Set[Char] = Set('"', '%', '!', '^', '&', '|', '<', '>', '\r', '\n')
+
+  private def isBareName(name: String): Boolean =
+      name.nonEmpty && !name.contains('/') && !name.contains('\\') && name != "." && name != ".."
+
+  private def isBatchFile(executable: Path): Boolean =
+    val lower = executable.getFileName.toString.toLowerCase
+    lower.endsWith(".cmd") || lower.endsWith(".bat")
+
+  /** Whether `candidate` is outside every directory of `excluded`, by its path and its real path.
+    */
+  private def isOutside(candidate: Path, excluded: Seq[Path]): Boolean =
+    val outside = excluded.map(_.toAbsolutePath.normalize)
+    val real    = Try(candidate.toRealPath()).toOption
+    real.isDefined && !outside.exists(candidate.startsWith) &&
+    !outside.map(p => Try(p.toRealPath()).getOrElse(p)).exists(p => real.exists(_.startsWith(p)))
+
   /** The absolute path of the tool `name` in the absolute `PATH` directories, outside `excluded`.
     * `name` must be a bare file name; anything with a directory part is not looked up.
     */
@@ -44,35 +62,66 @@ object ExecutableLookup:
     pathEnvironment: String = currentPath(),
     windows: Boolean = scala.util.Properties.isWin
   ): Option[Path] =
-      if name.isEmpty || name.contains('/') || name.contains('\\') || name == "." || name == ".."
-      then None
+      if !isBareName(name) then None
       else
-        val outside     = excluded.map(_.toAbsolutePath.normalize)
-        val realOutside = outside.map(p => Try(p.toRealPath()).getOrElse(p))
-        val names       = if windows then WindowsSuffixes.map(name + _) else Seq(name)
+        val names = if windows then WindowsSuffixes.map(name + _) else Seq(name)
         absolutePathDirectories(pathEnvironment).iterator
             .flatMap(dir => names.map(dir.resolve))
             .find { candidate =>
                 Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate)) &&
-                !outside.exists(candidate.startsWith) &&
-                Try(candidate.toRealPath()).toOption.exists(real =>
-                    !realOutside.exists(real.startsWith)
-                )
+                isOutside(candidate, excluded)
             }
 
-  /** The arguments that start the tool at `executable` with `args`: `cmd /c` and the absolute path
-    * for a Windows batch file, which `CreateProcess` does not start by itself, otherwise the path
-    * itself. No shell parses `args` on other hosts.
+  /** The argument vector that starts `program` with `args`, or why it cannot be started.
+    *
+    * A bare name is looked up with [[find]]. A path is taken as the operator wrote it, made
+    * absolute against this process's working directory (on Windows also with `.exe`, `.cmd` or
+    * `.bat` appended), and must not lie under `excluded` either. On Windows a batch file is not
+    * started with an argument holding a character of [[BatchUnsafeChars]], as `cmd.exe` would
+    * interpret it.
+    */
+  def command(
+    program: String,
+    args: Seq[String],
+    excluded: Seq[Path] = Nil,
+    pathEnvironment: String = currentPath(),
+    windows: Boolean = scala.util.Properties.isWin
+  ): Either[String, Seq[String]] =
+    val executable =
+        if isBareName(program) then find(program, excluded, pathEnvironment, windows)
+        else
+          Try(Paths.get(program).toAbsolutePath.normalize).toOption.flatMap { path =>
+            val names =
+                if windows then path +: WindowsSuffixes.map(sfx => Paths.get(s"$path$sfx"))
+                else Seq(path)
+            names.find(Files.isRegularFile(_))
+          }.filter(isOutside(_, excluded))
+    executable match
+      case None => Left(s"'$program' was not found, or lies inside the scanned project")
+      case Some(exe) if windows && isBatchFile(exe) =>
+          args.find(_.exists(BatchUnsafeChars.contains)) match
+            case Some(arg) =>
+                Left(
+                  s"$exe is a batch file, and the argument '$arg' holds a character cmd.exe " +
+                      "would interpret"
+                )
+            case None => Right(commandLine(exe, args, windows))
+      case Some(exe) => Right(commandLine(exe, args, windows))
+  end command
+
+  /** The arguments that start the tool at `executable` with `args`. A Windows batch file, which
+    * `CreateProcess` does not start by itself, goes through `cmd /d /c call` with its absolute
+    * path: `/d` skips the AutoRun commands, and `call` keeps `cmd` from removing the quotes around
+    * a path with spaces. Anything else is started directly, and no shell parses `args`.
     */
   def commandLine(
     executable: Path,
     args: Seq[String],
     windows: Boolean = scala.util.Properties.isWin
   ): Seq[String] =
-    val lower = executable.getFileName.toString.toLowerCase
-    if windows && (lower.endsWith(".cmd") || lower.endsWith(".bat")) then
-      Seq("cmd", "/c", executable.toString) ++ args
-    else executable.toString +: args
+      if windows && isBatchFile(executable) then
+        Seq("cmd", "/d", "/c", "call", executable.toString) ++ args
+      else executable.toString +: args
 
   /** The environment additions for a process started through [[commandLine]] on this host. */
   def environment(windows: Boolean = scala.util.Properties.isWin): Map[String, String] =

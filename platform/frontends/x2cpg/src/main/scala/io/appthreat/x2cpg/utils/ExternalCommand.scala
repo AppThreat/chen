@@ -67,6 +67,39 @@ object ExternalCommand:
       case _ =>
           Failure(new RuntimeException(stdErrOutput.asScala.mkString(System.lineSeparator())))
 
+  /** Runs `program` with `args` in `cwd`, with no shell: each argument reaches the program as it
+    * is, whatever characters it holds. The program is resolved with [[ExecutableLookup.command]],
+    * so a bare name comes from an absolute `PATH` directory and nothing under `excluded` is run.
+    * The result is as [[run]]'s: the output lines, or a failure whose message is the error output
+    * (all output unless `separateStdErr`).
+    */
+  def runProgram(
+    program: String,
+    args: Seq[String],
+    cwd: String,
+    extraEnv: Map[String, String] = Map.empty,
+    separateStdErr: Boolean = false,
+    excluded: Seq[Path] = Nil
+  ): Try[Seq[String]] =
+      ExecutableLookup.command(program, args, excluded) match
+        case Left(reason) => Failure(new IllegalArgumentException(reason))
+        case Right(command) =>
+            val stdOutOutput = new ConcurrentLinkedQueue[String]
+            val stdErrOutput =
+                if separateStdErr then new ConcurrentLinkedQueue[String] else stdOutOutput
+            val processLogger = ProcessLogger(stdOutOutput.add, stdErrOutput.add)
+            Try(
+              Process(command, new java.io.File(cwd), withHostEnv(extraEnv).toList*)
+                  .!(processLogger)
+            ) match
+              case Success(0) => Success(stdOutOutput.asScala.toSeq)
+              case Success(_) =>
+                  Failure(
+                    new RuntimeException(stdErrOutput.asScala.mkString(System.lineSeparator()))
+                  )
+              case Failure(e) => Failure(e)
+  end runProgram
+
   private val COMMAND_AND: String = " && "
 
   def toOSCommand(command: String): String = if IS_WIN then command + ".cmd" else command
