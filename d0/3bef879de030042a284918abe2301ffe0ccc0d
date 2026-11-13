@@ -1,0 +1,23 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/ExecutableLookup.scala
+  s_8376465eb88a0d::t_dba28b9f0d49f1 38-55,65,67,72,75-115,122-124
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/ExternalCommand.scala
+  s_8376465eb88a0d::t_035e354303d961 70-102
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/ExecutableLookupTests.scala
+  s_8376465eb88a0d::t_b398a97b19beba 107,109,119-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d03bef879de030042a284918abe2301ffe0ccc0d",
+  "prompts": {},
+  "sessions": {
+    "s_8376465eb88a0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b944f10-f38a-4491-8809-d36fec51aaa5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
