@@ -52,7 +52,11 @@ object Delombok:
     val listed = entries.map(e => Try(Paths.get(e).toAbsolutePath.toString).getOrElse(e)).toSet
     (entries ++ lombokJar.filterNot(listed.contains)).mkString(separator)
 
-  private def delombokToTempDirCommand(tempDir: File, analysisJavaHome: Option[String]) =
+  /** The `java` to run and its arguments, or None when there is no class path to fork with. */
+  private[util] def delombokToTempDirCommand(
+    tempDir: File,
+    analysisJavaHome: Option[String]
+  ): Option[(String, Seq[String])] =
     val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
     val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match
       case Success(file) =>
@@ -66,31 +70,47 @@ object Delombok:
             s"Failed to create classpath file for delombok execution. Results may be missing on Windows systems"
           )
           forkClasspath
-    if classPathArg.nonEmpty then
-      s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
-    else ""
+    Option.when(classPathArg.nonEmpty)(
+      javaPath -> Seq(
+        "-cp",
+        classPathArg,
+        "lombok.launch.Main",
+        "delombok",
+        ".",
+        "-d",
+        tempDir.canonicalPath
+      )
+    )
+  end delombokToTempDirCommand
 
+  /** Runs delombok over `projectDir` with no shell. A `java` named without a path comes from an
+    * absolute `PATH` directory outside the project (see [[ExternalCommand.runProgram]]).
+    */
   def run(projectDir: String, analysisJavaHome: Option[String]): String =
       Try(File.newTemporaryDirectory(prefix = "delombok").deleteOnExit()) match
         case Success(tempDir) =>
-            val externalCommand = delombokToTempDirCommand(tempDir, analysisJavaHome)
-            if externalCommand.nonEmpty then
-              ExternalCommand.run(
-                externalCommand,
-                cwd = projectDir
-              ) match
-                case Success(_) =>
-                    tempDir.path.toAbsolutePath.toString
+            delombokToTempDirCommand(tempDir, analysisJavaHome) match
+              case Some((java, args)) =>
+                  ExternalCommand.runProgram(
+                    java,
+                    args,
+                    cwd = projectDir,
+                    excluded = Seq(Paths.get(projectDir))
+                  ) match
+                    case Success(_) =>
+                        tempDir.path.toAbsolutePath.toString
 
-                case Failure(t) =>
-                    logger.debug(s"Executing delombok failed", t)
-                    logger.debug(
-                      "Creating AST with original source instead. Some methods and type information will be missing."
-                    )
-                    projectDir
-            else
-              logger.debug("No java with lombok to fork: creating AST with the original source.")
-              projectDir
+                    case Failure(t) =>
+                        logger.debug(s"Executing delombok failed", t)
+                        logger.debug(
+                          "Creating AST with original source instead. Some methods and type information will be missing."
+                        )
+                        projectDir
+              case None =>
+                  logger.debug(
+                    "No java with lombok to fork: creating AST with the original source."
+                  )
+                  projectDir
 
         case Failure(e) =>
             logger.debug(
