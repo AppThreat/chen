@@ -60,4 +60,30 @@ class AstGenRunnerEnvTests extends AnyWordSpec with Matchers:
           finally System.clearProperty("jssrc2cpg.test.astgenCmd")
       }
   }
+  "astgen's arguments" should {
+      "reach it as they are, with no shell" in {
+          assume(!scala.util.Properties.isWin)
+          better.files.File.usingTemporaryDirectory("astgen") { tools =>
+              better.files.File.usingTemporaryDirectory("project $(touch marker1)") { project =>
+                val fake = tools / "astgen"
+                fake.writeText("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n")
+                fake.toJava.setExecutable(true)
+                val out    = tools / "astgen-out; touch marker2"
+                val runner = new AstGenRunner(Config().withInputPath(project.pathAsString))
+                val args   = runner.astGenArgs("ts", out)
+                args.takeRight(2) shouldBe Seq("-o", out.pathAsString)
+                runner.runAstGen(project, args, (fake.pathAsString, Seq("--prefix"))).get shouldBe
+                    "--prefix" +: args
+                project.list.map(_.name).toSeq shouldBe empty
+                tools.list.map(_.name).filter(_.startsWith("marker")).toSeq shouldBe empty
+              }
+          }
+      }
+
+      "split a test command into the program and its leading arguments" in {
+          System.setProperty("jssrc2cpg.test.astgenCmd", "node   /somewhere/astgen.js")
+          try AstGenRunner.astGenProgram shouldBe ("node", Seq("/somewhere/astgen.js"))
+          finally System.clearProperty("jssrc2cpg.test.astgenCmd")
+      }
+  }
 end AstGenRunnerEnvTests

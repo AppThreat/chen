@@ -109,13 +109,21 @@ object AstGenRunner:
           .filter(_.nonEmpty)
           .orElse(sys.env.get("JSSRC2CPG_TEST_ASTGEN_CMD").map(_.trim).filter(_.nonEmpty))
           .getOrElse("astgen")
+
+  /** [[astGenCommand]] split at whitespace into the program and the arguments that come before
+    * astgen's own (`node /path/to/astgen.js`). No shell reads it, so a path in it cannot hold
+    * spaces.
+    */
+  private[utils] def astGenProgram: (String, Seq[String]) =
+    val words = astGenCommand.split("\\s+").toSeq.filter(_.nonEmpty)
+    (words.headOption.getOrElse("astgen"), words.drop(1))
 end AstGenRunner
 
 class AstGenRunner(config: Config):
 
   import AstGenRunner.*
 
-  private val executableArgs = if !config.tsTypes then " --no-tsTypes" else ""
+  private val executableArgs = if !config.tsTypes then Seq("--no-tsTypes") else Nil
   private val typeArgs       = if config.flow then "flow" else "ts"
 
   /** The environment astgen is started with, beyond the JVM's own: ASTGEN_TYPES when the
@@ -180,16 +188,30 @@ class AstGenRunner(config: Config):
 
   private def vueFiles(in: File, out: File): Try[Seq[String]] =
     val files = SourceFiles.determine(in.pathAsString, Set(".vue"))
-    if files.nonEmpty then
-      ExternalCommand.run(s"$astGenCommand$executableArgs -t vue -o $out", in.toString(), astGenEnv)
+    if files.nonEmpty then runAstGen(in, astGenArgs("vue", out))
     else Success(Seq.empty)
 
   private def jsFiles(in: File, out: File): Try[Seq[String]] =
-      ExternalCommand.run(
-        s"$astGenCommand$executableArgs -t $typeArgs -o $out",
-        in.toString(),
-        astGenEnv
-      )
+      runAstGen(in, astGenArgs(typeArgs, out))
+
+  /** astgen's arguments for sources of `kind` written to `out`, one per element. */
+  private[utils] def astGenArgs(kind: String, out: File): Seq[String] =
+      executableArgs ++ Seq("-t", kind, "-o", out.pathAsString)
+
+  /** Runs astgen (`command`, by default [[astGenProgram]]) with `args` in `in`, with no shell. */
+  private[utils] def runAstGen(
+    in: File,
+    args: Seq[String],
+    command: (String, Seq[String]) = astGenProgram
+  ): Try[Seq[String]] =
+    val (program, prefix) = command
+    ExternalCommand.runProgram(
+      program,
+      prefix ++ args,
+      in.toString(),
+      astGenEnv,
+      excluded = Seq(Paths.get(config.inputPath))
+    )
 
   private def runAstGenNative(in: File, out: File): Try[Seq[String]] =
       for
@@ -202,7 +224,12 @@ class AstGenRunner(config: Config):
     */
   private lazy val astGenVersion: String =
       ExternalCommand
-          .run(s"$astGenCommand --version", config.inputPath)
+          .runProgram(
+            astGenProgram._1,
+            astGenProgram._2 :+ "--version",
+            config.inputPath,
+            excluded = Seq(Paths.get(config.inputPath))
+          )
           .toOption
           .flatMap(_.headOption)
           .map(_.trim)
