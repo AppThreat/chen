@@ -39,6 +39,54 @@ class AstGenProgramTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "the generator's arguments" should {
+
+      "reach it as they are, with no shell" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("rbastgen") { tools =>
+              File.usingTemporaryDirectory("project $(touch marker1)") { project =>
+                val record = tools / "args.txt"
+                val fake   = tools / "rbastgen"
+                fake.writeText(
+                  s"""#!/bin/sh
+                     |for a in "$$@"; do printf '%s\\n' "$$a"; done > '${record.pathAsString}'
+                     |""".stripMargin
+                )
+                fake.toJava.setExecutable(true)
+                val out      = (tools / "out;touch marker2").createDirectories()
+                val exclude  = "x';touch marker3;'"
+                val previous = Option(System.getProperty(RubyAstGenRunner.ProgramProperty))
+                System.setProperty(RubyAstGenRunner.ProgramProperty, fake.pathAsString)
+                try
+                  given io.appthreat.x2cpg.astgen.AstGenRunner.AstGenProgramMetaData =
+                      io.appthreat.x2cpg.astgen.AstGenRunner.AstGenProgramMetaData(
+                        "rbastgen",
+                        "ruby",
+                        false,
+                        getClass.getProtectionDomain.getCodeSource.getLocation
+                      )
+                  new RubyAstGenRunner(Config().withInputPath(project.pathAsString))
+                      .runAstGenNative(project.pathAsString, out, exclude, "")
+                finally
+                  previous match
+                    case Some(p) => System.setProperty(RubyAstGenRunner.ProgramProperty, p)
+                    case None    => System.clearProperty(RubyAstGenRunner.ProgramProperty)
+                record.lines.toSeq shouldBe
+                    RubyAstGenRunner.generatorArgs(project.pathAsString, out.pathAsString, exclude)
+                record.lines.last shouldBe exclude
+                project.list.map(_.name).toSeq shouldBe empty
+                Seq(tools, out).foreach(d =>
+                    d.list.map(_.name).filter(_.startsWith("marker")).toSeq shouldBe empty
+                )
+              }
+          }
+      }
+
+      "leave out the exclusion when there is none" in {
+          RubyAstGenRunner.generatorArgs("in", "out", "") shouldBe Seq("-i", "in", "-o", "out")
+      }
+  }
+
   "the generator's side-records" should {
 
       "not enter the AST path when they sit in the output directory" in {
