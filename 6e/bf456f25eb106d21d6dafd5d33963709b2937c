@@ -1,0 +1,27 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/MethodFlowSummary.scala
+  s_f4248adf62ddd8::t_208fbd3524a854 62-73
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/FlowSummaryComputerTests.scala
+  s_f4248adf62ddd8::t_ebb0e2b84927c9 3
+  s_f4248adf62ddd8::t_bc920fd7b05df5 89-131,134-135
+  s_f4248adf62ddd8::t_b1d5e13eece37f 132-133,136-138
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryComputer.scala
+  s_f4248adf62ddd8::t_208fbd3524a854 54-58,60-65,73,76,78,80,110-114,117-118,120,128
+  s_f4248adf62ddd8::t_1c3562d6d1153f 66-67,82,108-109
+  s_f4248adf62ddd8::t_b1d5e13eece37f 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6ebf456f25eb106d21d6dafd5d33963709b2937c",
+  "prompts": {},
+  "sessions": {
+    "s_f4248adf62ddd8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "25bbb232-7e05-4fd5-84a8-3e20a9f11228",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
