@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/dataflow/MethodFlowSummaryTests.scala
+  s_f4248adf62ddd8::t_99c6f35f6aa20a 26-37,76-82
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/MethodFlowSummary.scala
+  s_f4248adf62ddd8::t_82a221304b83f8 229-231,233,279,288
+  s_f4248adf62ddd8::t_ea8e06b136b96d 271,278,286-287,289
+  s_f4248adf62ddd8::t_44545343a7fcd1 272-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "20a2f4ecc951ff2c3ec31573250b7ca44a765269",
+  "prompts": {},
+  "sessions": {
+    "s_f4248adf62ddd8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "25bbb232-7e05-4fd5-84a8-3e20a9f11228",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
