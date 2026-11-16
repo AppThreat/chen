@@ -51,25 +51,35 @@ object FlowSummaryComputer:
     cpg: Cpg,
     semantics: Semantics = Semantics.empty
   ): Map[String, MethodFlowSummary] =
-    // one summary per function: a C/C++ prototype is a METHOD of the same full name with an
-    // empty body, and the definition speaks for it
+    // One graph node and one summary per full name, because summaries are looked up by name. A
+    // C/C++ prototype is a METHOD of the same full name with an empty body, and the definition
+    // speaks for it. C `static` functions in different files also share a full name (the call
+    // linker keeps them apart, a name lookup cannot), so the summary of such a name joins the
+    // summaries of all its bodies.
     val byFullName = cpg.method.internal.l.groupBy(_.fullName)
-    val methods = byFullName.values.toList.map(ms => ms.find(hasBody).getOrElse(ms.head))
-        .sortBy(_.fullName)
-    val cache = mutable.Map.empty[String, MethodFlowSummary]
+    val bodiesOf: Map[String, List[Method]] = byFullName.view.mapValues { ms =>
+        ms.filter(hasBody) match
+          case Nil    => List(ms.head)
+          case bodies => bodies
+    }.toMap
+    val representative: Map[String, Method] = bodiesOf.view.mapValues(_.head).toMap
+    val methods                             = representative.values.toList.sortBy(_.fullName)
+    val cache                               = mutable.Map.empty[String, MethodFlowSummary]
     def lookup(name: String): Option[MethodFlowSummary] = cache.get(name)
 
     def summaryOf(m: Method): MethodFlowSummary =
         semantics.forMethod(m.fullName) match
           case Some(semantic) => MethodFlowSummary.fromSemantic(m, semantic)
-          case None           => MethodFlowSummary.of(m, lookup, semantics)
+          case None =>
+              bodiesOf(m.fullName).map(MethodFlowSummary.of(_, lookup, semantics)).reduce(_.join(_))
 
+    val callees    = calleesOf(bodiesOf, representative)
     val nodes      = methods.map(_.asInstanceOf[Node])
-    val components = nodes.stronglyConnectedComponents(calleesOf(byFullName.keySet))
+    val components = nodes.stronglyConnectedComponents(callees)
 
-    calleeFirstOrder(components, byFullName.keySet).foreach { component =>
+    calleeFirstOrder(components, callees).foreach { component =>
       val componentMethods = component.toSeq.collect { case m: Method => m }
-      val recursive        = component.size > 1 || componentMethods.exists(isSelfRecursive)
+      val recursive = component.size > 1 || componentMethods.exists(m => callees(m).contains(m))
       if !recursive then
         componentMethods.foreach(m => cache(m.fullName) = summaryOf(m))
       else
@@ -95,32 +105,32 @@ object FlowSummaryComputer:
   private def hasBody(m: Method): Boolean =
       m.astChildren.isBlock.exists(b => b.lineNumber.isDefined || b.astChildren.nonEmpty)
 
-  /** Successor function over the call graph restricted to the internal methods we summarise. */
-  private def calleesOf(internalNames: Set[String])(node: Node): Iterator[Node] =
+  /** Successor function over the call graph of the methods we summarise: the calls in every body of
+    * a name lead to the representative of each callee's name.
+    */
+  private def calleesOf(
+    bodiesOf: Map[String, List[Method]],
+    representative: Map[String, Method]
+  )(node: Node): Iterator[Node] =
       node match
         case m: Method =>
-            m.call
+            bodiesOf.getOrElse(m.fullName, List(m)).iterator
+                .flatMap(_.call)
                 .flatMap(_.out(EdgeTypes.CALL).asScala.collect { case c: Method => c })
-                .filter(c => internalNames.contains(c.fullName))
-                .iterator
+                .flatMap(c => representative.get(c.fullName))
         case _ => Iterator.empty
-
-  private def isSelfRecursive(method: Method): Boolean =
-      method.call.flatMap(_.out(EdgeTypes.CALL).asScala.collect { case c: Method => c })
-          .exists(_.fullName == method.fullName)
 
   /** Orders the strongly connected components so that callees come before callers, by topologically
     * sorting the (acyclic) condensation and reversing it.
     */
   private def calleeFirstOrder(
     components: Seq[Set[Node]],
-    internalNames: Set[String]
+    callees: Node => Iterator[Node]
   ): Seq[Set[Node]] =
     val componentOfNode = mutable.HashMap.empty[Long, Int]
     components.zipWithIndex.foreach { case (component, index) =>
         component.foreach(node => componentOfNode(node.id()) = index)
     }
-    val callees    = calleesOf(internalNames)
     val size       = components.size
     val successors = Array.fill(size)(mutable.Set.empty[Int])
     val inDegree   = Array.fill(size)(0)

@@ -59,6 +59,18 @@ case class MethodFlowSummary(
       paramOutFromInternal.contains(outIndex) ||
           paramToParamOut.values.exists(_.contains(outIndex))
 
+  /** The facts of either summary: what a call may do when it can reach either of two bodies. */
+  def join(other: MethodFlowSummary): MethodFlowSummary =
+      MethodFlowSummary(
+        methodFullName,
+        paramToReturn ++ other.paramToReturn,
+        (paramToParamOut.keySet ++ other.paramToParamOut.keySet).map { in =>
+            in -> (reachedParamOuts(in) ++ other.reachedParamOuts(in))
+        }.toMap,
+        returnFromInternal || other.returnFromInternal,
+        paramOutFromInternal ++ other.paramOutFromInternal
+      )
+
   /** Encode the context-independent facts as a compact, single-line string suitable for a CPG tag
     * value (`flow-summary`). The `methodFullName` is not encoded - it is the identity of the tagged
     * method node and is supplied again on decode. Sections are `;`-separated; within `o`, parameter
@@ -226,8 +238,11 @@ object MethodFlowSummary:
     // source inside the body) rather than by a parameter.
     val unionParamReach = mutable.HashSet.empty[Long]
 
+    // The method's own nodes, so the walks below can drop edges that leave it with a set lookup.
+    val ownIds: Set[Long] = method.ast.id.toSet
+
     params.foreach { param =>
-      val reached = forwardReach(param, lookup, semantics)
+      val reached = forwardReach(param, ownIds, lookup, semantics)
       unionParamReach ++= reached
       if reached.exists(returnBoundaryIds.contains) then toReturn += param.index
       reached.foreach { rid =>
@@ -265,17 +280,25 @@ object MethodFlowSummary:
 
   /** Ids of all nodes reachable from `start` over outgoing `REACHING_DEF` edges (the intra-method
     * data-dependence graph), extended with callee-summary jumps at call sites. BFS over node ids.
+    *
+    * Only edges to the method's own nodes (`ownIds`) are followed. Some `REACHING_DEF` edges join
+    * two functions (a write of a C global and its reads elsewhere, a member written by one member
+    * function and read by another); they say what another function may see when it runs, not what
+    * this one computes, and following them would walk much of the program from every parameter.
     */
   private def forwardReach(
-    start: StoredNode,
+    start: MethodParameterIn,
+    ownIds: Set[Long],
     lookup: SummaryLookup,
     semantics: Semantics
   ): mutable.Set[Long] =
     val visited = mutable.HashSet[Long](start.id)
     val queue   = mutable.ArrayDeque[StoredNode](start)
     while queue.nonEmpty do
-      val n         = queue.removeHead()
-      val intraNext = n.out(EdgeTypes.REACHING_DEF).asScala.collect { case s: StoredNode => s }
+      val n = queue.removeHead()
+      val intraNext = n.out(EdgeTypes.REACHING_DEF).asScala.collect {
+          case s: StoredNode if ownIds.contains(s.id) => s
+      }
       (intraNext ++ calleeJumps(n, lookup, semantics)).foreach { next =>
           if !visited.contains(next.id) then
             visited += next.id

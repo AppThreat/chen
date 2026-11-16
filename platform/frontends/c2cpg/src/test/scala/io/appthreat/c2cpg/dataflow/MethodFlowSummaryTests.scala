@@ -23,6 +23,18 @@ class MethodFlowSummaryTests extends DataFlowCodeToCpgSuite:
       |  int x = 42;
       |  return x;        // nothing reaches return
       |}
+      |
+      |int g;
+      |int g2;
+      |
+      |void copy(void) {
+      |  g2 = g;
+      |}
+      |
+      |int relay(int p0) {
+      |  g = p0;
+      |  return g2;       // nothing runs between the two statements, so p0 does not reach return
+      |}
       |""".stripMargin)
 
   /** Ground truth from the classic engine: parameter indices whose value reaches a RETURN statement
@@ -61,4 +73,11 @@ class MethodFlowSummaryTests extends DataFlowCodeToCpgSuite:
       // permissive default for an opaque callee - never correct it.
       MethodFlowSummary.of(cpg.method.name("noflow").head).paramToReturn shouldBe empty
       MethodFlowSummary.of(cpg.method.name("flow").head).paramToReturn shouldBe Set(1)
+
+    "stay inside the method when globals link functions" in:
+      // The global def-use edges link `g = p0` to the read of `g` in `copy`, and `copy`'s write
+      // of `g2` to the read of `g2` in `relay`. Those edges describe what another function may see
+      // when it runs; a summary of `relay` alone must not route `p0` through `copy`, which `relay`
+      // never calls.
+      MethodFlowSummary.of(cpg.method.name("relay").head).paramToReturn shouldBe empty
 end MethodFlowSummaryTests
