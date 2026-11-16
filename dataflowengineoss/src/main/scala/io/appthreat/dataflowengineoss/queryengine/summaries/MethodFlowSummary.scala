@@ -59,6 +59,18 @@ case class MethodFlowSummary(
       paramOutFromInternal.contains(outIndex) ||
           paramToParamOut.values.exists(_.contains(outIndex))
 
+  /** The facts of either summary: what a call may do when it can reach either of two bodies. */
+  def join(other: MethodFlowSummary): MethodFlowSummary =
+      MethodFlowSummary(
+        methodFullName,
+        paramToReturn ++ other.paramToReturn,
+        (paramToParamOut.keySet ++ other.paramToParamOut.keySet).map { in =>
+            in -> (reachedParamOuts(in) ++ other.reachedParamOuts(in))
+        }.toMap,
+        returnFromInternal || other.returnFromInternal,
+        paramOutFromInternal ++ other.paramOutFromInternal
+      )
+
   /** Encode the context-independent facts as a compact, single-line string suitable for a CPG tag
     * value (`flow-summary`). The `methodFullName` is not encoded - it is the identity of the tagged
     * method node and is supplied again on decode. Sections are `;`-separated; within `o`, parameter
