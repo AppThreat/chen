@@ -1,0 +1,62 @@
+platform/frontends/c2cpg/src/test/resources/profiles/apr/apr_idiom.c
+  h_0926447d100ad2 1-27
+platform/frontends/c2cpg/src/test/resources/profiles/apr/apr_pools.h
+  h_0926447d100ad2 1-8
+platform/frontends/c2cpg/src/test/resources/profiles/cpython/cpython_idiom.c
+  h_0926447d100ad2 1-21
+platform/frontends/c2cpg/src/test/resources/profiles/cpython/object.h
+  h_0926447d100ad2 1-7
+platform/frontends/c2cpg/src/test/resources/profiles/cpython/pymem.h
+  h_0926447d100ad2 1-3
+platform/frontends/c2cpg/src/test/resources/profiles/glib/glib.h
+  h_0926447d100ad2 1-3
+platform/frontends/c2cpg/src/test/resources/profiles/glib/glib_idiom.c
+  h_0926447d100ad2 1-24
+platform/frontends/c2cpg/src/test/resources/profiles/glib/gmem.h
+  h_0926447d100ad2 1-6
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/gfp.h
+  h_0926447d100ad2 1-2
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/kref.h
+  h_0926447d100ad2 1-6
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/mm.h
+  h_0926447d100ad2 1-3
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/slab.h
+  h_0926447d100ad2 1-7
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux_idiom.c
+  h_0926447d100ad2 1-44
+platform/frontends/c2cpg/src/test/resources/profiles/nginx/nginx_idiom.c
+  h_0926447d100ad2 1-32
+platform/frontends/c2cpg/src/test/resources/profiles/nginx/ngx_core.h
+  h_0926447d100ad2 1-2
+platform/frontends/c2cpg/src/test/resources/profiles/nginx/ngx_palloc.h
+  h_0926447d100ad2 1-11
+platform/frontends/c2cpg/src/test/resources/profiles/none/no_profile_headers.c
+  h_0926447d100ad2 1-6
+platform/frontends/c2cpg/src/test/resources/profiles/php/php_idiom.c
+  h_0926447d100ad2 1-15
+platform/frontends/c2cpg/src/test/resources/profiles/php/zend_alloc.h
+  h_0926447d100ad2 1-3
+platform/frontends/c2cpg/src/test/resources/profiles/php/zend_string.h
+  h_0926447d100ad2 1-4
+platform/frontends/c2cpg/src/test/resources/profiles/postgresql/postgres.h
+  h_0926447d100ad2 1-2
+platform/frontends/c2cpg/src/test/resources/profiles/postgresql/postgresql_idiom.c
+  h_0926447d100ad2 1-41
+platform/frontends/c2cpg/src/test/resources/profiles/postgresql/utils/memutils.h
+  h_0926447d100ad2 1-8
+platform/frontends/c2cpg/src/test/resources/profiles/postgresql/utils/palloc.h
+  h_0926447d100ad2 1-11
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  h_0926447d100ad2 4-5,43-102,445-514
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e1580f98b458a26db00c16872e9e3da40783f44",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
