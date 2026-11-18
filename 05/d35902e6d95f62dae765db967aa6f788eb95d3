@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ReadValueArithmeticTests.scala
+  h_0926447d100ad2 161-163,169-178,309-310
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgResolvedFactsTests.scala
+  h_0926447d100ad2 65-69,75-81,87-94,515-517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "05d35902e6d95f62dae765db967aa6f788eb95d3",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
