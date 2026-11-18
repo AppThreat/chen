@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/slab.h
+  s_27d4393771aff4::t_7296410b5db12d 7
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  s_27d4393771aff4::t_afb6176eb1ff38 268,336-340
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fc74f04a3fd9db1cec655fadaad1075b516f4f3a",
+  "prompts": {},
+  "sessions": {
+    "s_27d4393771aff4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d943dc4-1d41-4fb9-96be-7259233cd6b0",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
