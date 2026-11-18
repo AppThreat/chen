@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  h_0926447d100ad2 599-659,940-957
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySemanticsPassTests.scala
+  h_0926447d100ad2 246-274,387-395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c06ab4e02d61fbab90274307c9d58a690a99c21b",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
