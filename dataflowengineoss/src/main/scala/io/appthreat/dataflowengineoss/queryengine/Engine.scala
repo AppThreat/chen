@@ -13,6 +13,7 @@ import io.shiftleft.semanticcpg.utils.ArgumentBinding
 import overflowdb.Edge
 
 import java.util.concurrent.*
+import java.util.concurrent.atomic.LongAdder
 import org.slf4j.LoggerFactory
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
@@ -373,9 +374,11 @@ object QueryEngineStatistics extends Enumeration:
 
   val PATH_CACHE_HITS, PATH_CACHE_MISSES = Value
 
-  private val statistics = new ConcurrentHashMap[QueryEngineStatistic, Long]()
-
-  reset()
+  // One LongAdder per key, allocated up front. TaskSolver counts on every step of its recursion,
+  // so this must not take a lock: a virtual thread that parks here carries the whole recursion,
+  // and resuming such a deep continuation crashes Windows native images (oracle/graal#12764).
+  private val statistics: Map[QueryEngineStatistic, LongAdder] =
+      QueryEngineStatistics.values.toSeq.map(v => v -> new LongAdder()).toMap
 
   /** Adds the given value to the associated value to the given [[QueryEngineStatistics]] key.
     * @param key
@@ -384,16 +387,16 @@ object QueryEngineStatistics extends Enumeration:
     *   the value to add to the statistic. Can be negative.
     */
   def incrementBy(key: QueryEngineStatistic, value: Long): Unit =
-      statistics.put(key, statistics.getOrDefault(key, 0L) + value)
+      statistics(key).add(value)
 
   /** The results of the measured statistics.
     * @return
     *   a map of each [[QueryEngineStatistic]] and the associated value measurement.
     */
-  def results(): Map[QueryEngineStatistic, Long] = statistics.asScala.toMap
+  def results(): Map[QueryEngineStatistic, Long] = statistics.map((k, v) => k -> v.sum())
 
   /** Sets all the tracked values back to 0.
     */
   def reset(): Unit =
-      QueryEngineStatistics.values.map((_, 0L)).foreach { case (v, t) => statistics.put(v, t) }
+      statistics.values.foreach(_.reset())
 end QueryEngineStatistics
