@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/vmalloc.h
+  h_0926447d100ad2 1-2
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux_idiom.c
+  h_0926447d100ad2 1-2,7,31-34
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  h_0926447d100ad2 260-265,315,324-325,467
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  h_0926447d100ad2 731,747-753
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56ae8f1016a0bac4fc734629377f0bd7bf5f41dd",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
