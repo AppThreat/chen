@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  h_0926447d100ad2 1-202
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemApiVocab.scala
+  h_0926447d100ad2 16-21,37-61,124-141,162-168,174-273,275-280,282,308-314,317-335,344-346,384-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "35ef9badf550ab0e9e12c49036d81549a43b0bb7",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
