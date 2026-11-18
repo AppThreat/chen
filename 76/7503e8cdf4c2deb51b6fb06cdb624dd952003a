@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/resources/cleanup/scope_cleanup_forms.c
+  s_7318da1b9edd46::t_a3f0b215e0f9be 1-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "767503e8cdf4c2deb51b6fb06cdb624dd952003a",
+  "prompts": {},
+  "sessions": {
+    "s_7318da1b9edd46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4cd02e-10f8-411b-a4d1-40ff6af5049b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
