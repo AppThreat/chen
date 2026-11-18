@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppScopeExits.scala
+  h_0926447d100ad2 3,12-13,25-29,31-33,40-53,67-138,140-164,192-194,196-213,215-222,224-271,283,442-443
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  h_0926447d100ad2 73-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47050191dd83c76a38d5da7a02299a2bafe7112d",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
