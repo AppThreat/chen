@@ -1,0 +1,22 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/Engine.scala
+  s_8950c336d0c2f0::t_6b378a6373854f 16
+  s_8950c336d0c2f0::t_cbb084824a731b 377-381,390,396,401
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/QueryEngineStatisticsTests.scala
+  s_8950c336d0c2f0::t_220cf470d8810a 1-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8b6563d52aa44dad6b118c7e8dd3ed89fdae18c",
+  "prompts": {},
+  "sessions": {
+    "s_8950c336d0c2f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfedab78-c7b7-4b32-9628-25f43b85122b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
