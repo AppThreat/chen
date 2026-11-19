@@ -1,0 +1,19 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  s_4d0a36fc9d7809::t_4a5a1c83c19386 1656-1663,1689-1690,1748-1751,1755-1759,1761,1766-1768
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26fd28911afcc9e69f5263762d528aa61c6a029a",
+  "prompts": {},
+  "sessions": {
+    "s_4d0a36fc9d7809": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "539011cf-a214-4b55-997c-dcd750a6c350",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
