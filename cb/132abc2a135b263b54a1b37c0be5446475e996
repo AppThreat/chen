@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  h_0926447d100ad2 9,55
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/Defines.scala
+  h_0926447d100ad2 34-39
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/IncludeRecordPass.scala
+  h_0926447d100ad2 1-60
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/IncludeRecordTests.scala
+  h_0926447d100ad2 1-49
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  h_0926447d100ad2 11,76-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cb132abc2a135b263b54a1b37c0be5446475e996",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
