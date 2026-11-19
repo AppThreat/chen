@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemoryApiPassTests.scala
+  s_000e4234adb03e::t_f5a912f1d5bb9a 114-167,299-327
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemoryApiPass.scala
+  s_000e4234adb03e::t_b24403aceb3a98 53-56,302-308,366-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76460c06a860ffad36481fb65b0d317b6ab2b719",
+  "prompts": {},
+  "sessions": {
+    "s_000e4234adb03e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "02037648-4bba-493b-a180-b7ddf3261a96",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
