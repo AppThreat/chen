@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux/device.h
+  h_0926447d100ad2 1-5
+platform/frontends/c2cpg/src/test/resources/profiles/linux/linux_idiom.c
+  h_0926447d100ad2 7,47-50
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  h_0926447d100ad2 319-320,379,398-403,538-547
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  h_0926447d100ad2 770,811-822
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f829093f198dc6f5d90ff412d0f235a63b9b5f6f",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
