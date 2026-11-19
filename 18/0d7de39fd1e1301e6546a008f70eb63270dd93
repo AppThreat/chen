@@ -1,0 +1,14 @@
+docs/v4/api.md
+  h_0926447d100ad2 179,181-182,266-270,273-277,285,287-289,294,296-298,571-585,604,610-611,624-629
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "180d7de39fd1e1301e6546a008f70eb63270dd93",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
