@@ -1,0 +1,14 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgIncludeRecordTests.scala
+  h_0926447d100ad2 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0aa10e2c2038052fde0b71260b7f94060bbf8c6d",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
