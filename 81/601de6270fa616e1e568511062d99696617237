@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/IncludeRecordPass.scala
+  s_7318da1b9edd46::t_414325e17ee602 38-40,43-49,53-59
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/IncludeRecordTests.scala
+  s_7318da1b9edd46::t_71d1def3c0e003 28-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81601de6270fa616e1e568511062d99696617237",
+  "prompts": {},
+  "sessions": {
+    "s_7318da1b9edd46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4cd02e-10f8-411b-a4d1-40ff6af5049b",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
