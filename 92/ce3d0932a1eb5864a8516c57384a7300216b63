@@ -1,0 +1,18 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemoryApiInferenceTests.scala
+  h_0926447d100ad2 210-211,218-220,417-418
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemorySemanticsPassTests.scala
+  h_0926447d100ad2 678-682,686-690
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  h_0926447d100ad2 657-660,664-682,684-693,695-755,758-759,763-765,768-769,775-790,801,807-808,811-813,820-841,848-862,866-871,874-877,886-930,935-938,946-1011,1024-1056,1111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "92ce3d0932a1eb5864a8516c57384a7300216b63",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
