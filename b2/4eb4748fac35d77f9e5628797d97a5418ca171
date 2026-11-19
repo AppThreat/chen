@@ -1,0 +1,16 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/WrongDeallocationRuleTests.scala
+  h_0926447d100ad2 596-597,599,605-611
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  h_0926447d100ad2 21,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b24eb4748fac35d77f9e5628797d97a5418ca171",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
