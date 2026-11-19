@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemoryProfileSelectionTests.scala
+  s_fdf9a24d9025d9::t_cf29e7b51d21c6 149,361
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/MemApiVocabProfileTests.scala
+  s_fdf9a24d9025d9::t_cf29e7b51d21c6 79,147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "994e37036553a5b4436909536c85b7f424310e10",
+  "prompts": {},
+  "sessions": {
+    "s_fdf9a24d9025d9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_36b61c0f-1be7-4af7-80de-484ef3a453fe",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
