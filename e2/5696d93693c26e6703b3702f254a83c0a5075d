@@ -1,0 +1,18 @@
+platform/frontends/x2cpg/src/main/resources/memory-apis.json
+  h_0926447d100ad2 28-34,327-332,339,343-358,362-367,380,384,387-392
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  h_0926447d100ad2 1663,3079-3082
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySafetyFindingPass.scala
+  h_0926447d100ad2 281-282,314-315,317-319,6912-6913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e25696d93693c26e6703b3702f254a83c0a5075d",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
