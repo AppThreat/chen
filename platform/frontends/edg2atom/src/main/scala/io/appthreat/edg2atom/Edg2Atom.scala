@@ -8,6 +8,7 @@ import io.appthreat.c2cpg.passes.{
     AstCreationPass,
     ConstantTagPass,
     DeclarationAttributesPass,
+    IncludeRecordPass,
     ReferenceKindPass,
     TypeDeclNodePass
 }
@@ -72,6 +73,8 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
               edg.map(_ -> FrontendTagPass.Edg).toMap ++ cdt.map(_ -> FrontendTagPass.Cdt)
         new DuplicateDefinitionPass(cpg).createAndApply()
         new FrontendTagPass(cpg, frontendOf).createAndApply()
+        // after FrontendTagPass, so the includes tags land on the FILE nodes it already wrote
+        new IncludeRecordPass(cpg).createAndApply()
         TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
         new TypeDeclNodePass(cpg, CGlobal.lastMembers, CGlobal.lastTypedefs)(using
           config.schemaValidation

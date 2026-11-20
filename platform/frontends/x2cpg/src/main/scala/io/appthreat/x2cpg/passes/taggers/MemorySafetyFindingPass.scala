@@ -90,7 +90,27 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .map { case (node, rule) => (node, "medium", rule) }
     ruleIntegerArithmeticLength(record)
     ruleResignAcrossGuard(record)
-    ruleAllocationState(record)
+    // a store into eternal storage of a block the scope's cleanup goes on to release, the
+    // use of a block a region reset (or a destroy that may not have reached it) left maybe
+    // freed, the use of a block a reference release freed, and a release of an already spent
+    // reference: all report below their rule's own confidence, as the weaker claims
+    val (storedThenReleasedSites, resetUseSites, releaseMarks) = ruleAllocationState(record)
+    mediumConfidence ++= storedThenReleasedSites.map(node => (node, "medium", RuleUseAfterFree))
+    mediumConfidence ++= resetUseSites
+        .filter(node =>
+            findings.getOrElse(node, mutable.LinkedHashSet.empty).contains(
+              RuleUseAfterFree
+            )
+        )
+        .map(node => (node, "medium", RuleUseAfterFree))
+    releaseMarks.foreach { case (node, level) =>
+        val rules = findings.getOrElse(node, mutable.LinkedHashSet.empty)
+        if rules.contains(RuleDoubleFree) then
+          // a second release below zero is the refcount double free: always the medium claim
+          mediumConfidence += ((node, "medium", RuleDoubleFree))
+        else if rules.contains(RuleUseAfterFree) && level == "medium" then
+          mediumConfidence += ((node, "medium", RuleUseAfterFree))
+    }
     UndefinedOperationRules.divisionByZero(atom, record)
     UndefinedOperationRules.undefinedShift(atom, e => ranges.of(e).map(r => (r.lo, r.hi)), record)
     UndefinedOperationRules.crossObjectPointerDifference(atom, record)
@@ -125,6 +145,14 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     val lowConfidence = mutable.ListBuffer.empty[(StoredNode, String, String)]
     val nullResult    = ruleNullDereference(record)
     lowConfidence ++= nullResult.hypothesis.map(n => (n, "low", RuleNullDeref))
+    // the use after a BORROWED release: the method dropped a reference whose ownership it
+    // does not know, so the object is only maybe gone - the weakest use-after-free claim
+    lowConfidence ++= releaseMarks.collect {
+        case (node, "low")
+            if findings.getOrElse(node, mutable.LinkedHashSet.empty).contains(RuleUseAfterFree) &&
+                !mediumConfidence.exists { (n, _, r) => n == node && r == RuleUseAfterFree } =>
+            (node, "low", RuleUseAfterFree)
+    }
     mediumConfidence ++= nullResult.allocProduced.map(n => (n, "medium", RuleNullDeref))
     lowConfidence ++= ContainerInvalidationRules
         .containerInvalidation(atom, record)
@@ -278,8 +306,8 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     *
     *   - **MS-ALLOC-001** (CWE-415): a free of a pointer that is `freed` (must-freed, every path)
     *     or `maybe-freed` (freed on some path reaching it - the conditional-double-free shape). A
-    *     double CLOSE of a `file`-family handle is CWE-1341 (**MS-ALLOC-004**), the same state fact
-    *     over a different family.
+    *     double CLOSE of a `file`-stream or `fd`-descriptor handle is CWE-1341 (**MS-ALLOC-004**),
+    *     the same state fact over those families.
     *   - **MS-ALLOC-002** (CWE-416): a use of a `freed`/`maybe-freed` pointer - through a memory
     *     call's arguments, another call's arguments, or an index/field access base.
     *   - **MS-ALLOC-003** (CWE-401): the `alloc-leak` fact on an exit node - an allocation still
@@ -288,7 +316,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * A pointer that is `null` (the free-and-reset idiom), `escaped`, or untracked is silent: the
     * pass says `escaped` when it genuinely does not know, and a rule must not turn on that silence.
     */
-  private def ruleAllocationState(record: (StoredNode, String) => Unit): Unit =
+  private def ruleAllocationState(
+    record: (StoredNode, String) => Unit
+  ): (List[StoredNode], List[StoredNode], List[(StoredNode, String)]) =
+    // the stores into eternal storage whose kept block the scope's cleanup released: they
+    // report below the rule's own confidence, as a use waiting to happen rather than one made
+    val storedThenReleased = mutable.ListBuffer.empty[StoredNode]
     atom.tag
         .name(AllocationStatePass.TagState)
         .l
@@ -298,28 +331,46 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               case "freed" | "maybe-freed" | AllocationStatePass.ValueSummaryFreed =>
                   // the SAME fact means two things by site: a free of an already-freed
                   // pointer is a double-free, any other use is a use-after-free
-                  val enclosing = node._astIn.collectFirst { case c: Call => c }
+                  val release = enclosingReleaseCall(node)
+                  val releaseCall = release.map(_._1).orElse(
+                    node._astIn.collectFirst { case c: Call => c }
+                  )
                   // a summary-freed value names the call that freed it: the ENCLOSING
                   // call is the free even though it carries no inventory tag of its own
                   val isFreeSite = state == AllocationStatePass.ValueSummaryFreed ||
-                      enclosing.exists(c =>
+                      release.exists { (c, pos) =>
                           tagValues(c, MemoryApiPass.TagFree).nonEmpty ||
-                              tagValues(c, MemoryApiPass.TagRealloc).nonEmpty ||
-                              freesInvocationArgument(node, c)
-                      )
+                          tagValues(c, MemoryApiPass.TagRealloc).nonEmpty ||
+                          tagValues(c, MemoryApiPass.TagRelease).nonEmpty ||
+                          calleeReleasesPositions(c).contains(pos) ||
+                          freesInvocationArgument(node, c)
+                      }
                   if isFreeSite then
-                    val family = enclosing.flatMap(c =>
+                    val family = releaseCall.flatMap(c =>
                         tagValues(c, MemoryApiPass.TagFree).headOption
                     )
+                    // a second close of a `file` stream or an `fd` descriptor is CWE-1341; every
+                    // other family's double release is the plain double free
                     val rule =
-                        if family.contains("file") then RuleDoubleClose else RuleDoubleFree
+                        if family.exists(Set("file", "fd").contains)
+                        then RuleDoubleClose
+                        else RuleDoubleFree
                     record(node, rule)
                     // the suite marks the first release too ("the bad sink frees data as well"):
                     // the release that makes the second one a double free is a site of the same
-                    // finding
-                    if rule == RuleDoubleFree then
-                      firstReleaseBefore(node, enclosing).foreach(record(_, rule))
+                    // finding. The compiler-placed cleanup call is the one exception: the
+                    // hand-written release before it freed what was then a live block, and the
+                    // report belongs to the cleanup call alone
+                    val compilerPlaced = releaseCall.exists(c =>
+                        tagValues(c, io.appthreat.x2cpg.Defines.LifetimeEndTag).nonEmpty
+                    )
+                    if rule == RuleDoubleFree && !compilerPlaced then
+                      firstReleaseBefore(node, releaseCall).foreach(record(_, rule))
                   else record(node, RuleUseAfterFree)
+                  end if
+              case AllocationStatePass.ValueStoredThenReleased =>
+                  record(node, RuleUseAfterFree)
+                  storedThenReleased += node
               case _ => ()
         }
     atom.tag
@@ -343,7 +394,64 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
         .l
         .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
         .foreach(node => record(node, RuleMismatchedFree))
+    // the uses whose block's freedom came from a region reset (or from a destroy that may not
+    // have reached it): the state pass marked them, and they report below the rule's own
+    // confidence - the block is only maybe gone, not certainly gone
+    val resetUses = atom.tag
+        .name(AllocationStatePass.TagResetUse)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l)
+        .distinct.toList
+    // the uses whose block's freedom came from a reference release, and the second releases of
+    // an already spent reference: the state pass valued each with the confidence the finding
+    // reports at - a release that reached zero at `medium`, the borrowed kind at `low`
+    val releaseMarks = atom.tag
+        .name(AllocationStatePass.TagReleaseUse)
+        .l
+        .flatMap(t => t._taggedByIn.collectAll[StoredNode].l.map(n => (n, t.value)))
+        .distinct
+    (storedThenReleased.toList, resetUses, releaseMarks.toList)
   end ruleAllocationState
+
+  /** The call a state-tagged node serves, past the address-of and the casts a cleanup call's
+    * argument is wrapped in: the pointee identifier inside `freep(&buf)` is an argument of the
+    * release itself, not of the `&`. Returns the call and the position the wrapped expression
+    * occupies there.
+    */
+  private def enclosingReleaseCall(node: StoredNode): Option[(Call, Int)] =
+    var child: StoredNode = node
+    var cursor            = node._astIn.nextOption()
+    var result            = Option.empty[(Call, Int)]
+    while result.isEmpty && cursor.isDefined do
+      cursor.get match
+        case c: Call
+            if c.name == "<operator>.addressOf" || c.name == "<operator>.cast" =>
+            child = c
+            cursor = c._astIn.nextOption()
+        case c: Call =>
+            result = c.argument.l.find(_.id == child.id).map(a => (c, a.argumentIndex))
+        case _ => cursor = None
+    result
+
+  /** The parameter positions the call's callee releases: the ONE body the call's own CALL edge
+    * resolves (its own conclusion, even when it concludes nothing), or the agreement between the
+    * same-named defined bodies. A cleanup function the inventory never saw carries no call-site
+    * free tag; its effect summary is where its release is written.
+    */
+  private def calleeReleasesPositions(c: Call): Set[Int] =
+    val values: Set[String] =
+        c._callOut.collectAll[Method].l.distinct match
+          case List(only) => only.tag.name(AllocationStatePass.TagEffect).value.l.toSet
+          case _ =>
+              atom.method.nameExact(c.name).l.filterNot(_.isExternal)
+                  .map(_.tag.name(AllocationStatePass.TagEffect).value.l.toSet).distinct match
+                case List(one) => one
+                case _         => Set.empty[String]
+    values.flatMap(v =>
+        if v.startsWith("effect:frees-param:") || v.startsWith("effect:freep-param:") then
+          v.substring(v.lastIndexOf(':') + 1).toIntOption
+        else None
+    )
 
   /** The nearest release of the same variable before a double free's argument, in the same method:
     * the free call whose argument is the pointer the second release sees freed.
@@ -909,6 +1017,31 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
           }
     )
 
+  /** A variable of this frame: a parameter or a non-static local. A global or a `static` can change
+    * between two reads in any call, so only a frame variable can carry the same value from one read
+    * to the next.
+    */
+  private def isFrameVariable(i: Identifier): Boolean =
+      i.method.parameter.nameExact(i.name).nonEmpty ||
+          i.method.local.nameExact(i.name).exists(l =>
+              !l.tag.nameExact(io.appthreat.x2cpg.Defines.StorageClassTag).value.l
+                  .contains(io.appthreat.x2cpg.Defines.StorageClassStatic)
+          )
+
+  /** The writes that reach a read: assignments to the variable, and its parameter. A call that
+    * merely reads it (`malloc(sizeof(*m) + n)`) is no definition of it.
+    */
+  private def ownDefs(i: Identifier): Set[Long] =
+      OverlayFacts.reachingDefsIn(i).collect {
+          case d: Identifier
+              if d.name == i.name && d._astIn.collectFirst { case c: Call => c }.exists(c =>
+                  OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists(
+                    _.id == d.id
+                  )
+              ) => d.id()
+          case p: MethodParameterIn if p.name == i.name => p.id()
+      }.toSet
+
   /** The length is the very value the destination's capacity was made from: a variable-length
     * array's bound (`char buf[n]; strncpy(buf, src, n)`), or the size an allocation was given - the
     * room it added for a flexible member (`malloc(sizeof(*m) + n); memcpy(m->data, src, n)`). The
@@ -917,44 +1050,125 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     * declaration, the allocation's operand and the length reached by the same stores.
     */
   private def lengthIsCapacity(dst: Expression, lenArg: Expression): Boolean =
-    def frameVariable(i: Identifier): Boolean =
-        i.method.parameter.nameExact(i.name).nonEmpty ||
-            i.method.local.nameExact(i.name).exists(l =>
-                !l.tag.nameExact(io.appthreat.x2cpg.Defines.StorageClassTag).value.l
-                    .contains(io.appthreat.x2cpg.Defines.StorageClassStatic)
-            )
-    // the writes that reach a read: assignments to the variable, and its parameter. A call that
-    // merely reads it (`malloc(sizeof(*m) + n)`) is no definition of it
-    def ownDefs(i: Identifier): Set[Long] =
-        OverlayFacts.reachingDefsIn(i).collect {
-            case d: Identifier
-                if d.name == i.name && d._astIn.collectFirst { case c: Call => c }.exists(c =>
-                    OverlayFacts.isAssignmentOperator(c.name) && c.argumentOption(1).exists(
-                      _.id == d.id
+      lenArg match
+        case len: Identifier if isFrameVariable(len) =>
+            dst.tag.name(ExtentPass.TagExtent).value.l.headOption.exists {
+                case v if v.startsWith(s"${ExtentPass.ValueVla}:") =>
+                    len.name == v.stripPrefix(s"${ExtentPass.ValueVla}:").trim &&
+                    ownDefs(len).forall(id =>
+                        Option(atom.graph.node(id)).exists(_.isInstanceOf[MethodParameterIn])
                     )
-                ) => d.id()
-            case p: MethodParameterIn if p.name == i.name => p.id()
-        }.toSet
-    lenArg match
-      case len: Identifier if frameVariable(len) =>
-          dst.tag.name(ExtentPass.TagExtent).value.l.headOption.exists {
-              case v if v.startsWith(s"${ExtentPass.ValueVla}:") =>
-                  len.name == v.stripPrefix(s"${ExtentPass.ValueVla}:").trim &&
-                  ownDefs(len).forall(id =>
-                      Option(atom.graph.node(id)).exists(_.isInstanceOf[MethodParameterIn])
-                  )
-              // a flexible member's room, written through the member itself (the general
-              // allocation's own question - a pointer that moved, a length rewritten - is
-              // selfSizedDestination's)
-              case v if v.startsWith(s"${ExtentPass.ValueAlloc}:") && isFlexibleMemberAccess(dst) =>
-                  v.stripPrefix(s"${ExtentPass.ValueAlloc}:").toLongOption
-                      .flatMap(id => Option(atom.graph.node(id)))
-                      .collect { case size: Identifier => size }
-                      .exists(size => size.name == len.name && ownDefs(size) == ownDefs(len))
-              case _ => false
-          }
-      case _ => false
+                // a flexible member's room, written through the member itself (the general
+                // allocation's own question - a pointer that moved, a length rewritten - is
+                // selfSizedDestination's)
+                case v
+                    if v.startsWith(s"${ExtentPass.ValueAlloc}:") && isFlexibleMemberAccess(dst) =>
+                    v.stripPrefix(s"${ExtentPass.ValueAlloc}:").toLongOption
+                        .flatMap(id => Option(atom.graph.node(id)))
+                        .collect { case size: Identifier => size }
+                        .exists(size => size.name == len.name && ownDefs(size) == ownDefs(len))
+                case _ => false
+            }
+        case _ => false
   end lengthIsCapacity
+
+  /** The index is the very variable the base's allocation added a positive constant to: `buf =
+    * malloc(len + 1); buf[len] = 0` is the terminator write the room was allocated for, and the
+    * index cannot leave the buffer. The extent's evidence is the allocation's own size expression,
+    * which must be that variable plus one positive literal (a cast of the variable strips), and the
+    * index must name the same value: the same variable by name, or a one-definition copy of it in
+    * either direction, carrying the same definitions at the write as at the allocation so nothing
+    * rewrote it between. The size counts bytes, so the buffer's elements must be bytes too (`int *a
+    * \= malloc(n + 1); a[n]` writes four bytes per step), and the variable must not change any
+    * other way an assignment's definitions miss: an increment, a compound assignment or a callee
+    * handed its address. An index of the variable plus any other constant, or an unrelated
+    * variable, keeps its own question; the overflow of `n + k` stays the integer rule's.
+    */
+  private def indexIsAllocationVariablePlusRoom(
+    idx: Expression,
+    base: Expression,
+    extent: String
+  ): Boolean =
+    val ByteTypes = Set(
+      "char",
+      "signed char",
+      "unsigned char",
+      "uint8_t",
+      "int8_t",
+      "u8",
+      "s8",
+      "gchar",
+      "guchar",
+      "guint8",
+      "gint8",
+      "Byte",
+      "byte",
+      "void"
+    )
+    def elementType(t: String): String =
+        t.trim.stripSuffix("*").stripSuffix("[]").replaceAll("""\bconst\b|\bvolatile\b""", "").trim
+    val byteElements = ByteTypes.contains(elementType(typeOfExpr(base)))
+    // changed by something no plain assignment records: `n++`, `n += k`, `bump(&n)`
+    def changedOtherwise(v: Identifier): Boolean =
+        v.method.call.l.exists { c =>
+          val updates = c.name match
+            case "<operator>.preIncrement" | "<operator>.postIncrement" |
+                "<operator>.preDecrement" | "<operator>.postDecrement" |
+                "<operator>.addressOf" => true
+            case n => n.startsWith("<operator>.assignment") && n != "<operator>.assignment"
+          updates && c.argumentOption(1).exists(a =>
+              stripCasts(a) match
+                case i: Identifier => i.name == v.name
+                case _             => false
+          )
+        }
+    // the right-hand sides of the plain assignments that define `i`: a copy is `n = len`, never a
+    // compound update
+    def plainAssignRhss(i: Identifier): List[Expression] =
+        OverlayFacts.reachingDefsIn(i)
+            .collect { case d: Identifier if d.name == i.name => d }
+            .flatMap(d =>
+                d._astIn.collectFirst {
+                    case a: Call
+                        if a.name == "<operator>.assignment" &&
+                            a.argumentOption(1).exists(_.id == d.id) => a
+                }
+            )
+            .flatMap(_.argumentOption(2).toList)
+    // the index names the measured value: the same variable, unchanged between the two reads, or
+    // a copy of it that was taken once and never rewritten
+    def namesMeasuredValue(index: Expression, sized: Identifier): Boolean =
+        stripCasts(index) match
+          case i: Identifier if !isFrameVariable(i) => false
+          case i: Identifier =>
+              (i.name == sized.name && ownDefs(i) == ownDefs(sized)) ||
+              List(i -> sized, sized -> i).exists { case (from, to) =>
+                  plainAssignRhss(to) match
+                    case List(src: Identifier) =>
+                        src.name == from.name && ownDefs(src) == ownDefs(from)
+                    case _ => false
+              }
+          case _ => false
+    extent.stripPrefix(ExtentPass.ValueAlloc + ":").toLongOption
+        .flatMap(id => Option(atom.graph.node(id)))
+        .collect { case size: Expression => size }
+        .exists { size =>
+            stripCasts(size) match
+              case add: Call if add.name == "<operator>.addition" =>
+                  val operands  = add.argument.l.collect { case e: Expression => e }
+                  val literals  = operands.flatMap(IndexRange.literal)
+                  val variables = operands.filterNot(IndexRange.literal(_).isDefined)
+                  (literals.toList, variables) match
+                    case (List(k), List(v)) =>
+                        k >= 1 && byteElements && (stripCasts(v) match
+                          case sized: Identifier if isFrameVariable(sized) =>
+                              namesMeasuredValue(idx, sized) && !changedOtherwise(sized)
+                          case _ => false
+                        )
+                    case _ => false
+              case _ => false
+        }
+  end indexIsAllocationVariablePlusRoom
 
   private def isFlexibleMemberAccess(e: Expression): Boolean = e match
     case c: Call if isFieldAccess(c) =>
@@ -2029,8 +2243,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     *     that some caller leaves unbounded ([[callersBoundIndex]]), on a base whose extent is a
     *     known capacity (`const:N` / `alloc:`), with no upper bound - from a guard, from the
     *     access's own short-circuit expression, from its range by construction ([[IndexRange]]: a
-    *     byte read cannot reach index 256), or from an enum sized by its own count sentinel. A
-    *     lower bound does not excuse it: `i >= 0` still lets i run past the end.
+    *     byte read cannot reach index 256), from an enum sized by its own count sentinel, or from
+    *     the extent's own size expression (`malloc(len + 1)` bounds `buf[len]`). A lower bound does
+    *     not excuse it: `i >= 0` still lets i run past the end.
     *   - **half-bounded signed index** (the CVE-2026-75146 shape): the author bounded the index
     *     ABOVE (`cur_seq_no < n_fragments`) but not below, and the index is a signed value read out
     *     of a struct - someone else set it, it can be negative, and the comparison that is there
@@ -2130,11 +2345,21 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
               val enumFits = range.isEmpty && capacity.exists(n =>
                   enumIndexFits(typeOfExpr(idx), n, declaredArrayText(base))
               )
+              // the allocation's own size expression holds this index plus a positive constant
+              // (`malloc(len + 1); buf[len]`): the write the room was sized for, in bounds at
+              // both ends, since the value the allocation measured is the value written
+              val withinAllocationRoom = indexIsAllocationVariablePlusRoom(idx, base, extent)
               val boundedAbove = tags.contains(GuardPass.TagAbove) ||
                   tags.contains(GuardPass.TagByExtent) || inExpression._1 ||
-                  capacity.exists(n => range.exists(_.hi < n)) || enumFits
+                  capacity.exists(n => range.exists(_.hi < n)) || enumFits ||
+                  withinAllocationRoom
+              // the room bounds a signed variable from above only (`n = -1` sizes `malloc(0)`);
+              // a cast of an unsigned length (`buf[(int)len]`) holds the length's own value
+              val roomVariableUnsigned =
+                  !signedIndex || signednessOf(stripCasts(idx)).contains(false)
               val boundedBelow = tags.contains(GuardPass.TagBelow) || inExpression._2 ||
-                  range.exists(_.nonNegative) || enumFits
+                  range.exists(_.nonNegative) || enumFits ||
+                  (withinAllocationRoom && roomVariableUnsigned)
               // a caller-param index is the attacker's only when some caller passes it an
               // attacker value that caller did not bound on the side this method leaves open
               // (asfdec_o's `asf_deinterleave(s, pkt, i)` from a stream loop, mxfdec's enum
@@ -5293,10 +5518,16 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
     *
     *   - **CWE-590** - a free of storage that is not the heap's: the argument holds this frame's
     *     storage (the state pass's `stack-addr` fact, or an array/static LOCAL directly - the
-    *     `storage-class=static` tag c2cpg writes), or is a string literal.
+    *     `storage-class=static` tag c2cpg writes), is a string literal, or is a block a REGION
+    *     handed out (the region-only allocation call the pointer's definitions reach - the pool or
+    *     context owns the block, and its destroy releases it).
     *   - **CWE-761** - a free of a pointer not at the start of its buffer: the argument is pointer
     *     arithmetic (`p + 4`, `p += n`), or an identifier whose definition is such arithmetic on a
-    *     tracked allocation.
+    *     tracked allocation. The arithmetic must sit over a block this method watched appear - a
+    *     call tagged `mem-alloc`, a call the semantics conclusions named an allocator, or a walk
+    *     forward through such a pointer. A pointer moved back from a parameter, or from a value
+    *     whose definitions reach only parameters, is how a header-prefixed allocator frees its own
+    *     block, and is not reported.
     *
     * and **MS-ALLOC-007 (CWE-762)** - the release does not match the acquisition: a cross-family
     * release (`new` released by `free`, `malloc` released by `delete`), or inside the C++ family an
@@ -5312,6 +5543,160 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
       case c: Call if c.name == "<operator>.cast" =>
           c.argument.l.collectFirst { case x: Call => x }.flatMap(allocCallOf)
       case _ => None
+
+    /** A REGION allocation the heap's families do not cover: the block belongs to the pool or
+      * context that handed it out, and the region's destroy is its release - no heap free. A call
+      * that also carries an allocation family, the region-full fallback, keeps the heap's release
+      * on its fallback arm and is not this storage. The cast a typed spelling wraps the call in
+      * reads through.
+      */
+    def regionOnlyAlloc(x: Expression): Boolean = x match
+      case c: Call if c.name == "<operator>.cast" =>
+          castOperand(c).exists(regionOnlyAlloc)
+      case rc: Call =>
+          tagValues(rc, MemoryApiPass.TagRegion).exists(_.startsWith("alloc:")) &&
+          tagValues(rc, MemoryApiPass.TagAlloc).isEmpty &&
+          tagValues(rc, MemoryApiPass.TagRealloc).isEmpty
+      case _ => false
+
+    // the definitions that give an identifier its value at a read: the parameter itself, or the
+    // identifier a plain assignment, a compound assignment or an increment writes
+    // (the method node itself stands for the value at entry, which the parameter already says;
+    // an update's own call node stands for the identifier it writes)
+    def definitionsOf(i: Identifier): List[StoredNode] =
+        OverlayFacts.reachingDefsIn(i, maxHops = 1).flatMap {
+            case p: MethodParameterIn if p.name == i.name => List(p)
+            case d: Identifier if d.name == i.name        => List(d)
+            case c: Call
+                if OverlayFacts.isAssignmentOperator(c.name) || PointerSteps.contains(c.name) =>
+                c.argumentOption(1).collect { case x: Identifier if x.name == i.name => x }.toList
+            // a call the pointer was handed to only read it: the read passes the value through
+            case c: Call => OverlayFacts.handedTo(c, i.name)
+            case _       => Nil
+        }.distinctBy(_.id)
+    // the call that writes a defining identifier, with the identifier as its target
+    def writerOf(d: Identifier): Option[Call] =
+        d._astIn.collectFirst {
+            case w: Call
+                if (OverlayFacts.isAssignmentOperator(w.name) || PointerSteps.contains(w.name)) &&
+                    w.argumentOption(1).exists(_.id == d.id) => w
+        }
+    // the value before an in-place update (`p += 4`, `p--`): the definitions reaching the target
+    // identifier the update reads
+    def priorOf(d: Identifier): List[StoredNode] = definitionsOf(d)
+
+    /** Whether a pointer's value comes from the method's parameters alone: through casts, copies,
+      * pointer arithmetic and in-place moves, every definition ends at a parameter. The block a
+      * header-prefixed allocator handed the caller is such a value, and moving it back is that
+      * contract's own release. A field, a call's result or a global is not a parameter.
+      */
+    // the pointer a `p + n` / `p - n` moves: the operand the front end tagged as the pointer,
+    // or else every operand that is not a literal
+    def pointerOperandsOf(c: Call): List[Expression] =
+        OverlayFacts.pointerOperandOf(c).map(List(_)).getOrElse(
+          c.argument.l.collect { case x: Expression => x }
+              .filterNot(x => IndexRange.literal(x).isDefined)
+        )
+
+    def onlyFromParameters(e: Expression): Boolean =
+      val visiting = mutable.HashSet.empty[Long]
+      def ofNode(n: StoredNode, depth: Int): Boolean = n match
+        case _: MethodParameterIn => true
+        case d: Identifier =>
+            if depth <= 0 then false
+            else if !visiting.add(d.id) then true
+            else
+              writerOf(d) match
+                case Some(w) if w.name == "<operator>.assignment" =>
+                    w.argumentOption(2).exists(r => ofExpr(r, depth - 1))
+                case _ =>
+                    // an in-place move keeps the origin of the value it moves, and a read the
+                    // data flow counts as a definition (the operand of `p == NULL`) passes the
+                    // value through unchanged
+                    val prior = priorOf(d)
+                    prior.nonEmpty && prior.forall(ofNode(_, depth - 1))
+        case _ => false
+      def ofExpr(e: Expression, depth: Int): Boolean = e match
+        case c: Call if c.name == "<operator>.cast" => castOperand(c).exists(ofExpr(_, depth))
+        case c: Call if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+            val pointers = pointerOperandsOf(c)
+            pointers.nonEmpty && pointers.forall(ofExpr(_, depth))
+        case i: Identifier =>
+            val defs = definitionsOf(i)
+            defs.nonEmpty && defs.forall(ofNode(_, depth))
+        case _ => false
+      ofExpr(e, 8)
+    end onlyFromParameters
+
+    /** The constant distance in elements a pointer sits past the start of a block this method
+      * allocated, when every definition agrees on one: `p = malloc(n); p += 4` is 4, and `free(p -
+      * 4)` releases at distance 0, the block's own start.
+      */
+    def distanceFromAllocation(e: Expression): Option[Long] =
+      // each definition is worked out once; one still being worked out is a loop's back edge,
+      // whose distance cannot be one constant
+      val known    = mutable.HashMap.empty[Long, Option[Long]]
+      val visiting = mutable.HashSet.empty[Long]
+      def agree(values: List[Option[Long]]): Option[Long] =
+          if values.nonEmpty && values.forall(_.isDefined) && values.flatten.distinct.size == 1
+          then values.head
+          else None
+      def ofNode(n: StoredNode, depth: Int): Option[Long] = n match
+        case d: Identifier if known.contains(d.id) => known(d.id)
+        case d: Identifier if depth > 0 && visiting.add(d.id) =>
+            val result = distanceOfDefinition(d, depth)
+            visiting -= d.id
+            known.update(d.id, result)
+            result
+        case _ => None
+      def distanceOfDefinition(d: Identifier, depth: Int): Option[Long] =
+        lazy val prior = agree(priorOf(d).map(ofNode(_, depth - 1)))
+        writerOf(d).fold(prior) { w =>
+            w.name match
+              case "<operator>.assignment" => w.argumentOption(2).flatMap(ofExpr(_, depth - 1))
+              case "<operator>.assignmentPlus" =>
+                  w.argumentOption(2).flatMap(IndexRange.literal).flatMap(k =>
+                      prior.map(_ + k.toLong)
+                  )
+              case "<operator>.assignmentMinus" =>
+                  w.argumentOption(2).flatMap(IndexRange.literal).flatMap(k =>
+                      prior.map(_ - k.toLong)
+                  )
+              case "<operator>.preIncrement" | "<operator>.postIncrement" => prior.map(_ + 1)
+              case "<operator>.preDecrement" | "<operator>.postDecrement" => prior.map(_ - 1)
+              case _                                                      => None
+        }
+      def ofExpr(e: Expression, depth: Int): Option[Long] =
+          if allocCallOf(e).isDefined then Some(0L)
+          else
+            e match
+              case c: Call if c.name == "<operator>.cast" =>
+                  castOperand(c).flatMap(ofExpr(_, depth))
+              case c: Call
+                  if c.name == "<operator>.addition" || c.name == "<operator>.subtraction" =>
+                  val operands = c.argument.l.collect { case x: Expression => x }
+                  val literal  = operands.flatMap(IndexRange.literal(_))
+                  val pointer  = operands.filterNot(x => IndexRange.literal(x).isDefined)
+                  (pointer, literal) match
+                    case (List(ptr), List(k)) =>
+                        ofExpr(ptr, depth).map(d =>
+                            if c.name == "<operator>.addition" then d + k.toLong else d - k.toLong
+                        )
+                    case _ => None
+              case i: Identifier => agree(definitionsOf(i).map(ofNode(_, depth)))
+              case _             => None
+      ofExpr(e, 8)
+    end distanceFromAllocation
+
+    /** A release of pointer arithmetic is a release of an offset pointer unless it moves a
+      * parameter's value back (the header-prefixed allocator's own release) or lands exactly on the
+      * start of the block it moves from.
+      */
+    def offsetReleaseOf(arith: Call): Boolean =
+      val pointers = pointerOperandsOf(arith)
+      val movesParameterBack = arith.name == "<operator>.subtraction" && pointers.nonEmpty &&
+          pointers.forall(onlyFromParameters)
+      !movesParameterBack && !distanceFromAllocation(arith).contains(0L)
 
     atom.call.l.foreach { c =>
       // a realloc releases its input as surely as a free does (C11 7.22.3.5p2): what free must
@@ -5372,6 +5757,7 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                             c => c.argument.l.collect { case e: Expression => e }.lastOption
                           ) => true
                       case x =>
+                          regionOnlyAlloc(x) ||
                           allocThroughCasts(x).exists(a =>
                               tagValues(a, MemoryApiPass.TagAlloc).contains("stack")
                           )
@@ -5395,6 +5781,9 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       case lit: Literal => lit.code.startsWith("\"")
                       case _            => false
                   }
+                  // a region allocation's pointer is storage the heap's free must not see: the
+                  // pool or context owns the block, and the region's destroy releases it
+                  val namesRegionMemory = onlyNonHeap && defRhss.exists(regionOnlyAlloc)
                   // CWE-761: a pointer the program WALKED (a loop whose condition reads
                   // through it and whose update advances it) is no longer provably at its
                   // block's start
@@ -5411,23 +5800,32 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                           case _             => false
                       }
                     }
+                  // the walk advances the released variable itself (the same declaration, not a
+                  // same-named variable of another block) and comes before the release
+                  val freedVariable = i._refOut.l.headOption.map(_.id)
+                  def sameVariable(t: Identifier): Boolean =
+                      t.name == i.name &&
+                          freedVariable.forall(v => t._refOut.l.headOption.forall(_.id == v))
                   val walkIncrements = i.method.ast.isCall.l.filter { inc =>
                       Set("<operator>.postIncrement", "<operator>.preIncrement").contains(
                         inc.name
                       ) && inc.argumentOption(1).exists {
-                          case t: Identifier => t.name == i.name
+                          case t: Identifier => sameVariable(t)
                           case _             => false
-                      } && enclosingLoopOf(inc).exists(loop =>
+                      } && inc.lineNumber.exists(_.toInt <= freeLine) &&
+                      enclosingLoopOf(inc).exists(loop =>
                           loop.condition.exists(cond =>
                               cond.ast.isIdentifier.l.exists(_.name == i.name)
                           ) && !reboundAfter(loop)
                       )
                   }
-                  val walkedThenFreed = walkIncrements.nonEmpty
+                  // a walk over a caller's pointer starts wherever the caller's contract says, and
+                  // the release after it is that contract's business, not this rule's
+                  val walkedThenFreed = walkIncrements.nonEmpty && !onlyFromParameters(i)
                   // the state pass's frame-storage fact (q = &x; free(q))
                   if (i.tag.name(AllocationStatePass.TagState).value.l.contains("stack-addr") &&
                         (defRhss.isEmpty || onlyNonHeap)) ||
-                    namesDeclaredArray || namesStackAlloc || namesLiteral
+                    namesDeclaredArray || namesStackAlloc || namesLiteral || namesRegionMemory
                   then record(i, RuleNonHeapFree)
                   // reported where the suite marks it: the walk's increment, the statement that moves
                   // the pointer off the block's start
@@ -5464,7 +5862,12 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                                   )
                           case _ => false
                       }
-                  if defsAreOffsetArith then record(i, RuleOffsetFree)
+                  // an in-place move off the block (`p += 4; free(p)`) is the same release, and a
+                  // move back onto its start (`p += 4; p -= 4`) is not one
+                  val distance = distanceFromAllocation(i)
+                  if (defsAreOffsetArith && !distance.contains(0L)) ||
+                    distance.exists(_ != 0L)
+                  then record(i, RuleOffsetFree)
                   // CWE-762: family or form mismatch against the allocation that produced the
                   // pointer
                   val allocation = OverlayFacts
@@ -5483,13 +5886,15 @@ class MemorySafetyFindingPass(atom: Cpg, externalConfig: Option[String] = None)
                       // memory), not a family mismatch: alloca's block is the frame's
                       tagValues(alloc, MemoryApiPass.TagAlloc).headOption.filterNot(_ == "stack")
                           .foreach { acquired =>
-                              if freeFamilies.exists(_ != acquired) || arrayFormMismatch(alloc, c)
+                              // a release that accepts several families (kvfree) matches
+                              // a block of any of them
+                              if !freeFamilies.contains(acquired) || arrayFormMismatch(alloc, c)
                               then record(i, RuleMismatchedFree)
                           }
                   }
               case arith: Call
                   if arith.name == "<operator>.addition" || arith.name == "<operator>.subtraction" =>
-                  record(arith, RuleOffsetFree)
+                  if offsetReleaseOf(arith) then record(arith, RuleOffsetFree)
               case _ => ()
         }
       end if
@@ -6503,8 +6908,16 @@ object MemorySafetyFindingPass:
 
   /** The deallocation of the wrong thing, and the uncontrolled allocation size.
     */
-  final val RuleNonHeapFree              = "MS-ALLOC-005"
-  final val RuleOffsetFree               = "MS-ALLOC-006"
+  final val RuleNonHeapFree = "MS-ALLOC-005"
+  final val RuleOffsetFree  = "MS-ALLOC-006"
+
+  /** The operators that move a pointer in place. */
+  private val PointerSteps = Set(
+    "<operator>.preIncrement",
+    "<operator>.postIncrement",
+    "<operator>.preDecrement",
+    "<operator>.postDecrement"
+  )
   final val RuleMismatchedFree           = "MS-ALLOC-007"
   final val RuleUncontrolledSize         = "MS-ALLOC-008"
   final val RuleUncontrolledSizeOverflow = "MS-ALLOC-009"
@@ -6785,7 +7198,8 @@ object MemorySafetyFindingPass:
       kind = "double-close",
       severity = "high",
       confidence = "high",
-      message = "a file handle already closed on some path reaching this point is closed again"
+      message = "a file stream or descriptor already closed on some path reaching this point is " +
+          "closed again"
     ),
     MemorySafetyRule(
       id = RuleNullDeref,

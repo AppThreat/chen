@@ -346,6 +346,122 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
         |""".stripMargin,
         "findings.c"
       )
+      .moreCode(
+        """
+        |#include <stdlib.h>
+        |#include <string.h>
+        |
+        |/* The terminator write: the allocation added a constant's room to the very
+        |   length the write indexes, so the store of the NUL lands inside the
+        |   buffer the room was sized for. */
+        |
+        |void good_terminator_write(const char *userInput)
+        |{
+        |    size_t len = strlen(userInput);
+        |    char *buf = (char *)malloc(len + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    buf[len] = 0;
+        |    free(buf);
+        |}
+        |
+        |/* the index written through a cast of the same variable */
+        |void good_terminator_cast_index(const char *userInput)
+        |{
+        |    size_t len = strlen(userInput);
+        |    char *buf = (char *)malloc(len + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    buf[(int)len] = 0;
+        |    free(buf);
+        |}
+        |
+        |/* the size expression through a copy of the variable, the index the original */
+        |void good_terminator_copy_size(const char *userInput)
+        |{
+        |    size_t len = strlen(userInput);
+        |    size_t n = len;
+        |    char *buf = (char *)malloc(n + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    buf[len] = 0;
+        |    free(buf);
+        |}
+        |
+        |/* the index through a copy of the variable, the size expression the original */
+        |void good_terminator_copy_index(const char *userInput)
+        |{
+        |    size_t len = strlen(userInput);
+        |    size_t idx = len;
+        |    char *buf = (char *)malloc(len + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    buf[idx] = 0;
+        |    free(buf);
+        |}
+        |
+        |/* the same write inside a loop */
+        |void good_terminator_loop(const char * const *lines, unsigned long count)
+        |{
+        |    unsigned long i;
+        |    for (i = 0; i < count; i++)
+        |    {
+        |        size_t len = strlen(lines[i]);
+        |        char *buf = (char *)malloc(len + 1);
+        |        if (buf == NULL) return;
+        |        memcpy(buf, lines[i], len);
+        |        buf[len] = 0;
+        |        free(buf);
+        |    }
+        |}
+        |
+        |/* the same write reached over a goto error path */
+        |int good_terminator_goto_error_path(const char *userInput, int fail)
+        |{
+        |    size_t len = strlen(userInput);
+        |    char *buf = (char *)malloc(len + 1);
+        |    int rc;
+        |    if (buf == NULL) return -1;
+        |    memcpy(buf, userInput, len);
+        |    buf[len] = 0;
+        |    if (fail)
+        |    {
+        |        rc = -1;
+        |        goto out;
+        |    }
+        |    rc = (int)buf[0];
+        |out:
+        |    free(buf);
+        |    return rc;
+        |}
+        |
+        |/* the bad twins: writes the room does not cover */
+        |
+        |/* an index the allocation never measured */
+        |void bad_terminator_unrelated_index(const char *userInput, size_t m)
+        |{
+        |    size_t len = strlen(userInput);
+        |    char *buf = (char *)malloc(len + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    buf[m] = 0;
+        |    free(buf);
+        |}
+        |
+        |/* the measured variable, rewritten between the allocation and the write */
+        |void bad_terminator_len_rewritten(const char *userInput, size_t extra)
+        |{
+        |    size_t len = strlen(userInput);
+        |    char *buf = (char *)malloc(len + 1);
+        |    if (buf == NULL) return;
+        |    memcpy(buf, userInput, len);
+        |    len += extra;
+        |    buf[len] = 0;
+        |    free(buf);
+        |}
+        |""".stripMargin,
+        "terminator.c"
+      )
 
   new MemoryApiPass(cpg).createAndApply()
   new ExtentPass(cpg).createAndApply()
@@ -520,6 +636,32 @@ class MemorySafetyFindingPassTests extends DataFlowCodeToCpgSuite:
 
       "stay silent on an unsigned field index: it cannot go negative" in {
           indexFindings("unsigned_index") shouldBe empty
+      }
+
+      "stay silent on the terminator write the allocation sized room for" in {
+          indexFindings("good_terminator_write") shouldBe empty
+      }
+
+      "stay silent when the index is a cast of the length the allocation sized room for" in {
+          indexFindings("good_terminator_cast_index") shouldBe empty
+      }
+
+      "stay silent when the size expression and the index spell the length differently" in {
+          indexFindings("good_terminator_copy_size") shouldBe empty
+          indexFindings("good_terminator_copy_index") shouldBe empty
+      }
+
+      "stay silent on the terminator write in a loop and over a goto error path" in {
+          indexFindings("good_terminator_loop") shouldBe empty
+          indexFindings("good_terminator_goto_error_path") shouldBe empty
+      }
+
+      "keep reporting an index the allocation never measured" in {
+          indexFindings("bad_terminator_unrelated_index") shouldBe Set("MS-BOUND-004")
+      }
+
+      "keep reporting when the measured length is rewritten before the write" in {
+          indexFindings("bad_terminator_len_rewritten") shouldBe Set("MS-BOUND-004")
       }
   }
 

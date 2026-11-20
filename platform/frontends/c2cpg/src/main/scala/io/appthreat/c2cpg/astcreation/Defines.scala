@@ -31,8 +31,19 @@ object Defines:
   /** On an `#include`'s IMPORT node: the file the include resolved to (absolute). */
   val IncludeResolvedPathTag = "include-resolved-path"
 
+  /** On the FILE node of a translation unit's primary source file: one tag per header the unit
+    * includes, valued with the header's basename. The memory API vocabulary reads it to decide
+    * which library's profile the unit's calls follow.
+    */
+  val IncludesTag = "includes"
+
   /** On an `#include`'s IMPORT node: `true` when it names a system header (`<...>`). */
   val IncludeSystemTag = "include-system"
+
+  /** On an `#include`'s IMPORT node: `true` when the include sits in a conditional branch the
+    * preprocessor did not take, so the unit never read the header.
+    */
+  val IncludeInactiveTag = "include-inactive"
 
   /** On a call to a function declared only in another file (a header): that file (absolute). */
   val CalleeDeclaredInTag = "callee-declared-in"

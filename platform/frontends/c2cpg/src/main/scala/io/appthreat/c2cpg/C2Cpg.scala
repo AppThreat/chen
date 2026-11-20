@@ -6,6 +6,7 @@ import io.appthreat.c2cpg.passes.{
     ConfigFileCreationPass,
     ConstantTagPass,
     DeclarationAttributesPass,
+    IncludeRecordPass,
     PreprocessorPass,
     ReferenceKindPass,
     TypeDeclNodePass
@@ -51,6 +52,7 @@ class C2Cpg extends X2CpgFrontend[Config]:
           new AstCreationPass(cpg, censusConfig, projectSources = sources).createAndApply()
 
         if !config.onlyAstCache then
+          new IncludeRecordPass(cpg).createAndApply()
           new ConfigFileCreationPass(cpg).createAndApply()
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)

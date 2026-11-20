@@ -34,7 +34,21 @@ import scala.collection.mutable
   *     and un-escaped: the returned expression, the RETURN node for a bare `return;`, or the
   *     METHOD_RETURN for the implicit end. Once per allocation, at the earliest such exit - every
   *     early return looks like a leak, and only the first one carries the fact the later ones
-  *     restate.
+  *     restate. A block a REGION owns never carries one: the region's destroy is its release,
+  *     wherever the region's handle is held.
+  *   - `alloc-reset-use` valued `1`, beside the `alloc-state` fact of a use whose block's freedom
+  *     came from a region reset (or from a destroy that may not have reached it): the mark that
+  *     reports the use-after-free below the rule's own confidence.
+  *   - `alloc-release-use` valued `medium` or `low`, beside the `alloc-state` fact of a use whose
+  *     block's freedom came from a reference release - the count reached zero (`medium`), or the
+  *     release dropped a borrowed reference (`low`). A second release of an already spent reference
+  *     carries `medium` on its own `alloc-state` fact the same way.
+  *
+  * The reference roles travel as [[MemoryApiPass]]'s `mem-release` / `mem-acquire` tags: a release
+  * drops the object's owned-reference count by one, an acquire raises it. A new allocation owns one
+  * reference, so only a release that reaches zero frees; a release of a reference whose ownership
+  * this method does not know - a parameter, a field read, an unsummarised call's result
+  *   - leaves the object maybe freed, marked borrowed.
   */
 class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
@@ -62,6 +76,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     case MemoryApiPass.TagAlloc   => cur.copy(alloc = cur.alloc + t.value)
                     case MemoryApiPass.TagFree    => cur.copy(free = cur.free + t.value)
                     case MemoryApiPass.TagRealloc => cur.copy(realloc = cur.realloc + t.value)
+                    case MemoryApiPass.TagRegion =>
+                        cur.copy(region = regionInfoOf(t.value).orElse(cur.region))
+                    case MemoryApiPass.TagRelease =>
+                        rolePosition(t.value).map(i =>
+                            cur.copy(release = cur.release + i, isMemoryCall = true)
+                        ).getOrElse(cur.copy(isMemoryCall = true))
+                    case MemoryApiPass.TagAcquire =>
+                        rolePosition(t.value).map(i =>
+                            cur.copy(acquire = cur.acquire + i, isMemoryCall = true)
+                        ).getOrElse(cur.copy(isMemoryCall = true))
+                    case MemoryApiPass.TagRetains =>
+                        rolePosition(t.value).map(i =>
+                            cur.copy(retains = cur.retains + i, isMemoryCall = true)
+                        ).getOrElse(cur.copy(isMemoryCall = true))
+                    case MemoryApiPass.TagCleanup =>
+                        cur.copy(cleanup = true, isMemoryCall = true)
+                    case MemoryApiPass.TagSteal =>
+                        rolePosition(t.value).map(i =>
+                            cur.copy(steal = cur.steal + i, isMemoryCall = true)
+                        ).getOrElse(cur.copy(isMemoryCall = true))
                     case MemoryApiPass.TagNullableReturn =>
                         cur.copy(nullable = true, isMemoryCall = true)
                     case _ => cur.copy(isMemoryCall = true)
@@ -106,7 +140,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // before any method is analysed, so every call site can read them. `frees-param:<i>` - the
     // method releases parameter i (unconditionally: a free under a guard frees on SOME path, and
     // a summary that says "always" would turn every conditional-free wrapper into a false double
-    // free). `allocates-return` - every value it returns is a fresh allocation. `escapes-param:
+    // free - a guard of NULL tests of the freed parameter itself is the one exception, because
+    // it releases the block exactly when there is one). `allocates-return` - every value it
+    // returns is a fresh allocation. `escapes-param:
     // <i>` - parameter i is stored into storage that outlives the call, or handed to a callee
     // nothing concludes about. `derefs-param:<i>` - parameter i is read through (a field/index/
     // indirection dereference, or handed to a call at a position that reads through it) on every
@@ -118,13 +154,30 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     val derefsByMethod  = derefsParamsOf(definedMethods, roles)
     val readsByMethod   = readsParamsByName(definedMethods)
     definedMethods.foreach { m =>
-      val effects = methodEffects(m, roles) ++ derefsByMethod
-          .getOrElse(m.name, Set.empty)
-          .map(i => s"effect:derefs-param:$i")
+        effectsByMethod.update(
+          m.id(),
+          methodEffects(m, roles) ++ derefsByMethod
+              .getOrElse(m.name, Set.empty)
+              .map(i => s"effect:derefs-param:$i")
+        )
+    }
+    // the conclusions that read another method's settled effects, after every body's own are
+    // in the tables: what a scope-cleanup hand-off does to the value a return carries out
+    definedMethods.foreach { m =>
+      val own = effectsByMethod.getOrElse(m.id(), Set.empty)
+      val adjusted = cleanupHandoffEffects(m, roles, effectsByName, effectsByMethod) match
+        case extra if extra.nonEmpty =>
+            // the released variable's value must not be described as a fresh allocation:
+            // the caller receives the dangling block, not an owned one
+            own ++ extra - "effect:allocates-return" - "effect:allocates-null-return"
+        case _ => own
+      effectsByMethod.update(m.id(), adjusted)
+    }
+    definedMethods.foreach { m =>
       readsByMethod.getOrElse(m.name, Set.empty).foreach { i =>
           effectRows += ((m, TagReadsEffect, s"reads-param:$i"))
       }
-      effectsByMethod.update(m.id(), effects)
+      val effects = effectsByMethod.getOrElse(m.id(), Set.empty)
       if effects.nonEmpty then
         effects.foreach(e => effectRows += ((m, TagEffect, e)))
         // a name shared by several defined methods must not carry either one's effects: a
@@ -599,10 +652,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     * finding at every call site, so each is concluded only on evidence that holds on all paths:
     *
     *   - `frees-param:<i>` - a free of parameter i (or of `*p` for a pointer-to-pointer parameter)
-    *     that no condition controls (no incoming CDG edge). A free under an `if`, in a loop, or
-    *     behind an FFmpeg-style `goto fail` label frees on SOME path only. A wrapper that also
-    *     resets the caller's pointer (`free(*pp); *pp = NULL;`) is a freep: it leaves the caller
-    *     null, not dangling, so it carries no summary rather than a false double free.
+    *     that no condition controls (no incoming CDG edge), or whose only controlling conditions
+    *     are NULL tests of the freed parameter itself (for a freep, of its pointee): whenever the
+    *     argument names a block, the free runs, so the guard reads as unconditional. A free under
+    *     any other condition frees on SOME path only. A wrapper that also resets the caller's
+    *     pointer (`free(*pp); *pp = NULL;`) is a freep: it leaves the caller null, not dangling, so
+    *     it carries no summary rather than a false double free.
     *   - `allocates-return` - EVERY value return is, through casts or a local's definition, an
     *     allocation (a NULL literal return is allowed: it is the failure path). A function that
     *     returns a cached pointer on one path and a fresh one on another does not own its result.
@@ -615,53 +670,41 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     def unwrapCasts(e: Expression): Expression = e match
       case c: Call if c.name == "<operator>.cast" => castOperand(c).map(unwrapCasts).getOrElse(c)
       case other                                  => other
-    // the parameter a freed/stored expression names: `p`, or `*pp` for a caller's `&x`
+    // the parameter a freed/stored expression names: `p`, or `*pp` for a caller's `&x`. The
+    // cast a typed spelling needs (`free(*(void **)p)`) is read through
     def paramOf(e: Expression): Option[Int] = unwrapCasts(e) match
       case i: Identifier => paramIndex.get(i.name)
       case c: Call if c.name == "<operator>.indirection" =>
-          c.argumentOption(1).collect { case i: Identifier => i }.flatMap(i =>
+          c.argumentOption(1).map(unwrapCasts).collect { case i: Identifier => i }.flatMap(i =>
               paramIndex.get(i.name)
           )
       case _ => None
+    // the expression's root identifier still holds the value the parameter received
+    def holdsArgumentOf(e: Expression): Boolean = unwrapCasts(e) match
+      case i: Identifier => OverlayFacts.holdsParameterValue(i)
+      case c: Call if c.name == "<operator>.indirection" =>
+          c.argumentOption(1).map(unwrapCasts).collect { case i: Identifier => i }
+              .forall(OverlayFacts.holdsParameterValue)
+      case _ => true
     val calls = method.ast.collectAll[Call].l
     // `*pp = NULL` - the parameters whose pointee the method resets
     val nulledThrough = calls.collect {
         case a if a.name == "<operator>.assignment" && a.argumentOption(2).exists(isNullLiteral) =>
-            a.argumentOption(1).collect {
+            a.argumentOption(1).map(unwrapCasts).collect {
                 case d: Call if d.name == "<operator>.indirection" => d
-            }.flatMap(_.argumentOption(1)).collect { case i: Identifier => i.name }
+            }.flatMap(_.argumentOption(1).map(unwrapCasts)).collect { case i: Identifier => i.name }
     }.flatten.toSet
-    // the pointee a freed expression reads through (`free(*pp)`): its parameter
-    def viaPointeeOf(freed: Expression): Option[String] = freed match
+    // the pointee a freed expression reads through (`free(*pp)`, casts included): its parameter
+    def viaPointeeOf(freed: Expression): Option[String] = unwrapCasts(freed) match
       case d: Call if d.name == "<operator>.indirection" =>
-          d.argumentOption(1).collect { case i: Identifier => i.name }
+          d.argumentOption(1).map(unwrapCasts).collect { case i: Identifier => i.name }
       case _ => None
-    // a free whose only controlling conditions are null checks of the freed pointer itself - the
-    // `if (data == NULL) exit(-1);` that precedes it, or `if (p) free(p)` - releases the block
-    // whenever there is one to release: the summary reads it as unconditional
-    def onlyNullChecksOf(c: Call): Boolean =
-        argAt(c.argument.l, 1).map(unwrapCasts).collect { case i: Identifier => i.name }.exists {
-            n =>
-              val conds = c._cdgIn.l
-              conds.nonEmpty && conds.forall {
-                  case cmp: Call
-                      if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
-                      val args = cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }
-                      args.exists { case i: Identifier => i.name == n; case _ => false } &&
-                      args.exists(isNullLiteral)
-                  case cmp: Call if cmp.name == "<operator>.logicalNot" =>
-                      cmp.argument.l.collect { case e: Expression => unwrapCasts(e) }.exists {
-                          case i: Identifier => i.name == n
-                          case _             => false
-                      }
-                  case i: Identifier => i.name == n
-                  case _             => false
-              }
-        }
     calls.foreach {
         case c
-            if roleOf(c).free.nonEmpty && c._cdgIn.isEmpty =>
-            argAt(c.argument.l, 1).map(unwrapCasts).foreach { freed =>
+            if roleOf(c).free.nonEmpty && (c._cdgIn.isEmpty || onlyNullChecksOf(c)) =>
+            // the freed identifier must still hold the argument: `p = p->next; free(p)`
+            // releases another block under the parameter's name
+            argAt(c.argument.l, 1).map(unwrapCasts).filter(holdsArgumentOf).foreach { freed =>
               val via = viaPointeeOf(freed)
               if !via.exists(nulledThrough.contains) then
                 paramOf(freed).foreach(idx => effects += s"effect:frees-param:$idx")
@@ -672,11 +715,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 paramOf(freed).foreach(idx => effects += s"effect:freep-param:$idx")
             }
         case c if roleOf(c).free.nonEmpty =>
-            // a free a condition controls (an error path, a goto-fail label) releases the
-            // block on SOME path: no frees-param summary (a false double free at every
-            // caller), but the ownership MAY leave - a caller that treats the hand-off as
-            // a borrow would report the error-path return as a leak of a block the callee
-            // already released
+            // a free a condition other than the freed parameter's own NULL tests controls
+            // (an error path, a flag, a goto-fail label) releases the block on SOME path:
+            // no frees-param summary (a false double free at every caller), but the
+            // ownership MAY leave - a caller that treats the hand-off as a borrow would
+            // report the error-path return as a leak of a block the callee already released
             // the one condition is a file-static flag (`if (badStatic) free(data)`): the free
             // happens whenever a caller has stored a nonzero constant into the flag before the
             // call - a summary the call site settles
@@ -726,7 +769,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           defs.nonEmpty && defs.forall(d => isAllocation(d) || isNullLiteral(d))
       case _ => false
     val valueReturns = method.ast.collectAll[Return].l
-        .flatMap(_.astChildren.collectFirst { case e: Expression => e })
+        .flatMap(seeThroughReturnValue)
         .filterNot(isNullLiteral)
     // The ANCHOR. `flowsFromAllocation` accepts the NULL-literal fallback, which is right
     // for the failure path - but on its own it concludes "allocates" for `return i` where i is
@@ -788,7 +831,52 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => false
     }
     if returnsFreed then effects += "effect:returns-freed"
-    if returnsPointer && anchored && valueReturns.nonEmpty &&
+    // A steal: a pointer-to-pointer parameter whose pointee the body reads, whose slot the body
+    // then empties, and whose read value every value return hands back - `void *steal(void **pp)
+    // { void *p = *pp; *pp = NULL; return p; }`. The caller's own block moves to the call's
+    // result and the slot is left empty: nothing is released, so no free summary describes it.
+    // The returned identifier's definition walk is bounded: a real tree's definition chains run
+    // hundreds of locals deep, and an unbounded walk over them overflows the stack - past the
+    // bound the walk says nothing and the method concludes no steal. A steal cannot exist
+    // without the slot's NULL store, so a method that never stores NULL through a parameter's
+    // pointee skips the walk entirely: its per-hop definition reads are graph-scale, and
+    // pointer-returning methods without the store are the overwhelming majority
+    val stealDefs = mutable.LongMap.empty[List[Expression]]
+    def stolenParamOf(e: Expression, depth: Int): Option[Int] = unwrapCasts(e) match
+      case d: Call if d.name == "<operator>.indirection" =>
+          d.argumentOption(1).map(unwrapCasts).collect { case i: Identifier => i }
+              .flatMap(i => paramIndex.get(i.name))
+      case i: Identifier if depth > 0 =>
+          val defs = stealDefs.getOrElseUpdate(
+            i.id(),
+            OverlayFacts
+                .reachingDefsIn(i)
+                .collect { case d: Identifier => d }
+                .flatMap(_._astIn.collectFirst {
+                    case a: Call if a.name == "<operator>.assignment" => a
+                })
+                .flatMap(_.argumentOption(2).toList)
+          )
+          val idxs = defs.flatMap(d => stolenParamOf(d, depth - 1).toList)
+          Option.when(defs.nonEmpty && idxs.size == defs.size && idxs.distinct.size == 1)(
+            idxs.head
+          )
+      case _ => None
+    val stealParams: Set[Int] =
+        if nulledThrough.isEmpty then Set.empty
+        else
+          val idxs = valueReturns.flatMap(e => stolenParamOf(e, MaxStealChainDepth).toList)
+          if valueReturns.nonEmpty && idxs.size == valueReturns.size then
+            idxs.distinct.filter(i =>
+                method.parameter.l.find(_.index == i).exists(p =>
+                    OverlayFacts.isPointer(p.typeFullName) && nulledThrough.contains(p.name)
+                )
+            ).toSet
+          else Set.empty
+    stealParams.foreach(i => effects += s"effect:steals-param:$i")
+    // the stolen block is the caller's own: a steal never allocates its result, whatever its
+    // returns flow from
+    if stealParams.isEmpty && returnsPointer && anchored && valueReturns.nonEmpty &&
       valueReturns.forall(flowsFromAllocation)
     then
       effects += "effect:allocates-return"
@@ -813,6 +901,131 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     end if
     effects.toSet
   end methodEffects
+
+  /** The effect summary in force at a call site: the ONE body the call's own CALL edge resolves
+    * (its own conclusion, even an empty one), or the name-level agreement when no edge resolves.
+    */
+  private def callEffects(
+    call: Call,
+    effectsByName: mutable.HashMap[String, Set[String]],
+    effectsByMethod: mutable.LongMap[Set[String]]
+  ): Set[String] =
+    // a declared steal (a profile's `steal` role) is the same effect a body concludes
+    val declared = call.tag.nameExact(MemoryApiPass.TagSteal).value.l
+        .flatMap(_.toIntOption).map(i => s"effect:steals-param:$i").toSet ++
+        // and a declared cleanup function releases through the address it is handed
+        Option.when(call.tag.nameExact(MemoryApiPass.TagCleanup).nonEmpty)("effect:freep-param:1")
+    declared ++ (call._callOut.collectAll[Method].l.distinct match
+      case List(only) => effectsByMethod.getOrElse(only.id(), Set.empty)
+      case _          => effectsByName.getOrElse(call.name, Set.empty)
+    )
+
+  /** The compiler-placed scope-cleanup calls of `method` that release the variable they are handed:
+    * the call carries the lifetime-end tag, and the release it makes is its own inventory role or
+    * its callee's effect summary - frees-param or freep-param at the position the variable's
+    * address occupies. Returns the call and the variable it releases.
+    */
+  private def releasingCleanupCalls(
+    method: Method,
+    roles: mutable.LongMap[RoleInfo],
+    effectsByName: mutable.HashMap[String, Set[String]],
+    effectsByMethod: mutable.LongMap[Set[String]]
+  ): List[(Call, String)] =
+      method.ast.collectAll[Call].l.flatMap { call =>
+          if call.tag.name(io.appthreat.x2cpg.Defines.LifetimeEndTag).l.isEmpty then Nil
+          else
+            call.argument.l.collect { case a: Call if a.name == "<operator>.addressOf" => a }
+                .flatMap { addr =>
+                    addr.argumentOption(1).map(unwrapCast).collect { case i: Identifier => i }
+                        .flatMap { v =>
+                          val pos = addr.argumentIndex
+                          val releases = roles.getOrElse(call.id(), RoleInfoNone).free.nonEmpty ||
+                              callEffects(call, effectsByName, effectsByMethod).exists(e =>
+                                  e == s"effect:frees-param:$pos" ||
+                                      e == s"effect:freep-param:$pos"
+                              )
+                          Option.when(releases)(call -> v.name)
+                        }
+                }
+      }
+
+  /** What a scope-cleanup hand-off adds to a method's own effect conclusions: a value return of a
+    * local the compiler-placed cleanup releases hands the caller a dangling pointer, so the method
+    * carries returns-freed. The variable must still hold its block where the return reads it - a
+    * NULL reset or a steal moved the block out before the cleanup, which then releases nothing -
+    * and every non-NULL return must be that variable.
+    */
+  private def cleanupHandoffEffects(
+    method: Method,
+    roles: mutable.LongMap[RoleInfo],
+    effectsByName: mutable.HashMap[String, Set[String]],
+    effectsByMethod: mutable.LongMap[Set[String]]
+  ): Set[String] =
+    val releases = releasingCleanupCalls(method, roles, effectsByName, effectsByMethod)
+    if releases.isEmpty then return Set.empty
+    // the compiler places the cleanup call between the value's store and the return, on the
+    // return's own line, so the order that decides is the AST's, not the line's
+    val orderOf = method.ast.l.zipWithIndex.map((n, i) => n.id() -> i).toMap
+    def orderIsBefore(a: AstNode, b: AstNode): Boolean =
+        (orderOf.get(a.id()), orderOf.get(b.id())) match
+          case (Some(i), Some(j)) => i < j
+          case _                  => false
+    def everyDefIsNull(i: Identifier): Boolean =
+      val defs = OverlayFacts
+          .reachingDefsIn(i)
+          .collect { case d: Identifier => d }
+          .flatMap(_._astIn.collectFirst {
+              case a: Call if a.name == "<operator>.assignment" => a
+          })
+          .flatMap(_.argumentOption(2).toList)
+      defs.nonEmpty && defs.forall(isNullLiteral)
+    def stolenBefore(name: String, ret: Return): Boolean =
+        method.ast.collectAll[Call].l.exists { call =>
+            orderIsBefore(call, ret) && call.argument.l.exists { arg =>
+              val pointee = addressOfOperand(unwrapCast(arg))
+              pointee.exists(p => trackedNameOf(p).contains(name)) &&
+              callEffects(call, effectsByName, effectsByMethod).contains(
+                s"effect:steals-param:${arg.argumentIndex}"
+              )
+            }
+        }
+    val returns = method.ast.collectAll[Return].l
+        .flatMap(r => seeThroughReturnValue(r).map(e => (r, e)))
+        .filterNot((_, e) => isNullLiteral(e))
+    val concluded = returns.nonEmpty && returns.forall { (ret, e) =>
+        unwrapCast(e) match
+          case i: Identifier =>
+              method.local.nameExact(i.name).nonEmpty &&
+              releases.exists((call, name) => name == i.name && orderIsBefore(call, ret)) &&
+              !everyDefIsNull(i) && !stolenBefore(i.name, ret)
+          case _ => false
+    }
+    Option.when(concluded)("effect:returns-freed").toSet
+  end cleanupHandoffEffects
+
+  /** The stores of a cleanup variable into storage that outlives its scope, pending the state at
+    * the release of that variable: the claim settles the way the leak facts do, joined over every
+    * worklist visit of the release and read after the drain. Each path carries the stores it made
+    * ([[Tracked.pendingStores]]), so a release settles only the stores that reached it.
+    */
+  private final class StoreClaims:
+    val stores = mutable.LinkedHashMap.empty[(String, Long), Call]
+    val states = mutable.LinkedHashMap.empty[(String, Long), AllocState]
+
+    def register(name: String, store: Call): Unit =
+        stores.getOrElseUpdate((name, store.id()), store)
+
+    def settle(name: String, t: Tracked): Unit =
+        stores.keysIterator.filter(k => k._1 == name && t.pendingStores.contains(k._2)).foreach {
+            key =>
+                states.updateWith(key) {
+                    case Some(prev) => Some(joinStates(prev, t.state))
+                    case None       => Some(t.state)
+                }
+        }
+
+    def settledFacts: List[(Call, AllocState)] =
+        stores.toList.flatMap { (key, store) => states.get(key).map(state => (store, state)) }
 
   private def analyseMethod(
     method: Method,
@@ -841,6 +1054,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // which the frontend's parallel parse reorders (MS-ESC-001 sites would flip per file
     // between identical runs).
     val escFacts = mutable.LinkedHashMap.empty[(Long, String), (StoredNode, Map[String, Tracked])]
+    // the stores of a released-by-cleanup variable into storage that outlives the scope, settled
+    // from the state at the release and read after the drain like the escapes
+    val storeClaims        = new StoreClaims
     val overwriteLeakLines = mutable.HashMap.empty[String, Set[Int]]
     def recordAndNote(node: StoredNode, tag: String, value: String): Unit =
       node match
@@ -874,7 +1090,13 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           r.nullable,
           r.isMemoryCall,
           r.alloc.nonEmpty || r.realloc.nonEmpty,
-          r.dstPositions ++ r.srcPositions ++ r.readPositions
+          r.dstPositions ++ r.srcPositions ++ r.readPositions,
+          r.region,
+          r.release,
+          r.acquire,
+          r.retains,
+          r.steal,
+          r.cleanup
         )
       )
     }
@@ -929,6 +1151,54 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     val arrayLocals = frameLocals.filter(l =>
         OverlayFacts.arrayExtent(l.typeFullName).isDefined || l.typeFullName.trim.endsWith("[]")
     )
+    // the base variables one of whose count fields this method stores into: `o->refs = 2` (or a
+    // store of a value the transfer cannot read) says the object carries more references than the
+    // method's own count - one release of it reaches no zero the method can vouch for. A count
+    // is an INTEGER the frame stores into its own field: a store into a pointer-typed field (the
+    // object's name, its buffer) says nothing about the reference count
+    val countStores: Set[String] =
+        method.ast.isCall.nameExact("<operator>.assignment").flatMap { a =>
+            for
+              lhsNode <- a.argumentOption(1)
+              lhs     <- trackedNameOf(lhsNode)
+              if isFieldName(lhs)
+              if !isPointerNode(lhsNode)
+              rhs = a.argumentOption(2)
+              blocked = rhs.flatMap(IndexRange.literal) match
+                case Some(one) => one != 1
+                case None      => true
+              if blocked
+            yield countBaseOf(lhs)
+        }.toSet
+    // the count fields the frame's own arithmetic counts in: the fields the release callees
+    // drop, mapped through each call's release position (the callee's decrement names its
+    // parameter's field, the caller's argument at that position names the object), and the
+    // fields this frame itself decrements under a zero test - the release spelled inline.
+    // An increment or decrement of any other field of the object counts nothing
+    val countFields: Set[(String, String)] =
+      val mapped = method.ast.collectAll[Call].l
+          .filter(c => roles.getOrElse(c.id(), RoleInfoNone).release.nonEmpty)
+          .flatMap { c =>
+              c._callOut.collectAll[Method].l.distinct match
+                case List(only) =>
+                    val paramAt = only.parameter.l.map(p => p.name -> p.index).toMap
+                    decrementedCountFields(only).flatMap { (paramName, field) =>
+                        paramAt.get(paramName).flatMap { pos =>
+                            argAt(c.argument.l, pos).flatMap(releasedObjectName)
+                                .map(base => (base, field))
+                        }
+                    }
+                case _ => Nil
+          }
+      val inline = method.ast.collectAll[Call].l.flatMap { c =>
+          c.name match
+            case "<operator>.postDecrement" | "<operator>.preDecrement" =>
+                c.argumentOption(1).flatMap(countedPairOf)
+                    .filter(pair => zeroGatedOn(c, pair))
+            case _ => None
+      }
+      (mapped ++ inline).toSet
+    end countFields
     val ctx = MethodContext(
       locals = frameLocals.map(_.name).toSet,
       arrayLocals = arrayLocals.map(_.name).toSet,
@@ -950,7 +1220,11 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       stringReturn = !isFileScope &&
           Option(method.methodReturn.typeFullName).exists { t =>
               !t.trim.endsWith("&") && !t.trim.endsWith("*") && isCppStringType(t)
-          }
+          },
+      cleanupReleased = releasingCleanupCalls(method, roles, effectsByName, effectsByMethod)
+          .map(_._2).toSet,
+      countStores = countStores,
+      countFields = countFields
     )
     val hasAddressOfLocal = callFacts.values.exists(cf =>
         cf.name == "<operator>.addressOf" && argAt(cf.args, 1)
@@ -976,15 +1250,56 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     )
     if !callFacts.values.exists(cf =>
           cf.allocFamilies.nonEmpty || cf.freeFamilies.nonEmpty ||
-              cf.reallocFamilies.nonEmpty || cf.nullable
+              cf.reallocFamilies.nonEmpty || cf.nullable || cf.region.isDefined ||
+              cf.releasePositions.nonEmpty || cf.acquirePositions.nonEmpty ||
+              cf.retainPositions.nonEmpty || cf.stealPositions.nonEmpty || cf.cleanup
       ) && !ctx.arrayLocals.nonEmpty && !hasAddressOfLocal && !callsASummarisedCallee &&
       !returnsLiteralAddress && !assignsNullToPointer &&
       !(ctx.refReturn && ctx.locals.nonEmpty)
     then
       return
     val inStates = mutable.HashMap.empty[Long, Map[String, Tracked]]
-    val queued   = mutable.LinkedHashSet.empty[CfgNode]
     val visits   = mutable.LongMap.empty[Int]
+    // the worklist runs in reverse postorder: a node where paths meet is taken only after every
+    // forward path into it delivered its state, so no fact is recorded from a visit that saw one
+    // branch of an `if` and not yet the other. The depth-first walk takes successors in the same
+    // content order the worklist enqueues them in, so the order is stable run to run
+    val rpoIndex = mutable.LongMap.empty[Int]
+    locally {
+        def contentKey(n: CfgNode): (Int, Int, String, String) =
+            (
+              n.propertiesMap.get("LINE_NUMBER") match
+                case i: Integer => i.intValue
+                case _          => Int.MaxValue
+              ,
+              n.propertiesMap.get("COLUMN_NUMBER") match
+                case i: Integer => i.intValue
+                case _          => Int.MaxValue
+              ,
+              String.valueOf(n.propertiesMap.get("CODE")),
+              n.label
+            )
+        val post    = mutable.ArrayBuffer.empty[CfgNode]
+        val entered = mutable.HashSet.empty[Long]
+        val stack   = mutable.Stack.empty[(CfgNode, Iterator[CfgNode])]
+        def succs(n: CfgNode): Iterator[CfgNode] =
+            n._cfgOut.iterator.collect { case s: CfgNode => s }.toList.sortBy(contentKey).iterator
+        entered += method.id()
+        stack.push((method, succs(method)))
+        while stack.nonEmpty do
+          val (n, it) = stack.top
+          if it.hasNext then
+            val next = it.next()
+            if entered.add(next.id()) then stack.push((next, succs(next)))
+          else
+            stack.pop()
+            post += n
+        post.reverseIterator.zipWithIndex.foreach((n, i) => rpoIndex.update(n.id(), i))
+    }
+    val queuedNodes = mutable.LongMap.empty[CfgNode]
+    val queued      = mutable.TreeSet.empty[(Int, Long)]
+    def queueKey(node: CfgNode): (Int, Long) =
+        (rpoIndex.getOrElse(node.id(), Int.MaxValue), node.id())
 
     def enqueue(node: CfgNode, in: Map[String, Tracked]): Unit =
       // guard narrowing is not monotone through loop back-edges (a revived pointer can be
@@ -998,7 +1313,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
       if inStates.get(node.id()).forall(_ != merged) then
         inStates(node.id()) = merged
         visits.update(node.id(), seen + 1)
-        queued += node
+        queuedNodes.update(node.id(), node)
+        queued += queueKey(node)
 
     // a tracked site that hands out OWNERSHIP: an allocator (or realloc), or a call whose
     // summary says it allocates its return. Only these may come back as `allocated`
@@ -1007,6 +1323,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             cf.isAllocCall ||
                 effectsByName.get(cf.name).exists(_.contains("effect:allocates-return"))
         )
+
+    // the call sites whose summary names a region: the blocks they hand out live inside the
+    // named container and die with it, so no frame exit reports them as leaks, however the
+    // pointer travels inside the frame. The per-path region key can be joined away when one
+    // branch drew from the container and another left the variable at its NULL init; the
+    // site's own summary is the stable fact
+    val regionAllocSites: Set[Long] =
+        callFacts.iterator.collect { case (id, cf) if cf.region.isDefined => id }.toSet
 
     // a realloc site's input variable: the block a successful realloc consumed
     def reallocInputOf(site: Long): Option[String] =
@@ -1023,19 +1347,22 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
 
     enqueue(method, Map.empty)
     while queued.nonEmpty do
-      val node = queued.head
-      queued.remove(node)
-      val in = inStates.getOrElse(node.id(), Map.empty)
+      val key = queued.head
+      queued -= key
+      val node = queuedNodes(key._2)
+      val in   = inStates.getOrElse(node.id(), Map.empty)
       val out = transfer(
         node,
         in,
         callFacts,
+        regionAllocSites,
         effectsByName,
         effectsByMethod,
         fpTargets,
         leakFacts,
         escFacts,
         nullUseFacts,
+        storeClaims,
         ctx,
         recordAndNote
       )
@@ -1114,6 +1441,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case _ => ()
     }
 
+    // the stores whose kept block the scope's cleanup released: the fact the rule reads at the
+    // store, once the release's settled state says the variable still held the block there (a
+    // NULL reset or a steal means the release freed nothing the store keeps)
+    storeClaims.settledFacts.foreach { case (store, settled) =>
+        if settled == StAllocated || settled == StEscaped then
+          record(store, TagState, ValueStoredThenReleased)
+    }
+
     // one leak fact per allocation: the earliest exit where it settled as still live
     val settledLeaks = leakFacts.toList.collect { case ((site, _, name), (exit, StAllocated)) =>
         (site, exit, name)
@@ -1165,12 +1500,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     node: CfgNode,
     in: Map[String, Tracked],
     callFacts: mutable.LongMap[CallFacts],
+    regionAllocSites: Set[Long],
     effectsByName: mutable.HashMap[String, Set[String]],
     effectsByMethod: mutable.LongMap[Set[String]],
     fpTargets: Map[String, Long],
     leakFacts: mutable.LinkedHashMap[(Long, Long, String), (StoredNode, AllocState)],
     escFacts: mutable.LinkedHashMap[(Long, String), (StoredNode, Map[String, Tracked])],
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    storeClaims: StoreClaims,
     ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
@@ -1183,7 +1520,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // this frame's handler, not out of it.
             if effectsByName.get(c.name).exists(_.contains(EffectMayThrow)) && !insideTry(c) then
               in.foreach { case (name, t) =>
-                  if !isFieldName(name) && !ctx.staticLocals.contains(name) then
+                  if !isFieldName(name) && !ctx.staticLocals.contains(name) &&
+                    t.region.isEmpty && !regionAllocSites.contains(t.site)
+                  then
                     noteLeak(leakFacts, (t.site, c.id(), name), (c, t.state))
               }
             callFacts.get(c.id()) match
@@ -1192,12 +1531,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     c,
                     cf,
                     callFacts,
+                    regionAllocSites,
                     effectsByName,
                     effectsByMethod,
                     fpTargets,
                     in,
                     escFacts,
                     nullUseFacts,
+                    storeClaims,
                     ctx,
                     record
                   )
@@ -1206,11 +1547,27 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             var out = in
             // a returned tracked pointer transfers ownership: it escapes, it does not leak
             r.astChildren.collect { case e: Expression => e }.foreach { e =>
+              // reading the block out of the frame is a use of it, however the return spells
+              // the expression: no statement-level call sits under a bare `return b[0];`, so
+              // the use facts the call sites record are walked here instead
+              useFactsIn(e, 3, in, None, record)
               // A stack address that leaves the frame - returned directly (&x, a decayed
               // array), through a local that holds one, or a C++ reference return binding the
               // local itself. Read the incoming state: the escape-marking below would erase it.
               val viaTracked = trackedNameOf(e).flatMap(in.get).exists(_.state == StStackAddr)
-              trackedNameOf(e).foreach { name =>
+              // a pointer into the block returned past its start (`return h + 1;`, the
+              // header-prefixed allocator's hand-out) hands the block over all the same
+              def returnedBase(x: Expression): Option[String] = unwrapCast(x) match
+                case arith: Call
+                    if arith.name == "<operator>.addition" || arith.name == "<operator>.subtraction" =>
+                    OverlayFacts.pointerOperandOf(arith).orElse(
+                      arith.argument.l.collect { case o: Expression => o }
+                          .filterNot(o => IndexRange.literal(o).isDefined) match
+                        case List(only) => Some(only)
+                        case _          => None
+                    ).flatMap(returnedBase)
+                case other => trackedNameOf(other)
+              returnedBase(e).foreach { name =>
                   out.get(name).foreach { t =>
                     out = withGroup(out, name, t.aliases, StEscaped)
                     out = out.updated(name, t.copy(state = StEscaped))
@@ -1225,13 +1582,15 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               }
             }
             out.foreach { case (name, t) =>
-                if !ctx.staticLocals.contains(name) && !isFieldName(name)
+                if !ctx.staticLocals.contains(name) && !isFieldName(name) && t.region.isEmpty &&
+                  !regionAllocSites.contains(t.site)
                 then noteLeak(leakFacts, (t.site, r.id, name), (r, t.state))
             }
             out
         case mr: MethodReturn =>
             in.foreach { case (name, t) =>
-                if !ctx.staticLocals.contains(name) && !isFieldName(name)
+                if !ctx.staticLocals.contains(name) && !isFieldName(name) && t.region.isEmpty &&
+                  !regionAllocSites.contains(t.site)
                 then noteLeak(leakFacts, (t.site, mr.id, name), (mr, t.state))
             }
             in
@@ -1426,6 +1785,60 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def handsBackItself(rhs: AstNode, lhs: String): Boolean =
       rhs.ast.isIdentifier.l.exists(_.name == lhs)
 
+  /** The freed/maybe-freed facts a use of a tracked block produces, through a bounded walk of the
+    * expression: an index or field access over the tracked base, and the operator expressions
+    * around it. The CFG does not always deliver nested expressions as their own nodes, so the walk
+    * recurses through operator arguments; a return's expressions are walked the same way, since
+    * reading a block out of the frame is a use of it however the statement spells it. The null-use
+    * facts are recorded where `nullUseFacts` says so - a return's null question stays where it was.
+    */
+  private def useFactsIn(
+    arg: AstNode,
+    depth: Int,
+    useState: Map[String, Tracked],
+    nullUseFacts: Option[mutable.ListBuffer[(Long, StoredNode, String, String)]],
+    record: (StoredNode, String, String) => Unit
+  ): Unit = arg match
+    case query: Call
+        if query.name.startsWith("<operator>.sizeOf") ||
+            query.name.startsWith("<operator>.alignOf") => ()
+    case access: Call if isAccessThroughPointer(access) =>
+        access.argumentOption(1).foreach { base =>
+          trackedNameOf(base).foreach { name =>
+              useState.get(name).foreach { t =>
+                if t.state == StFreed || t.state == StMaybeFreed then
+                  record(base, TagState, stateName(t.state))
+                  recordFreedomMarks(base, t, record)
+                nullUseFacts.foreach(nf => noteNullUse(nf, base, name, t))
+              }
+          }
+          // a read through a NESTED path (`o->ref.refcount`) whose first hop is itself
+          // untracked is still a use of the container the hop hangs from
+          base match
+            case bc: Call
+                if depth > 0 && isAccessThroughPointer(bc) &&
+                    trackedNameOf(bc).exists(n => useState.get(n).isEmpty) =>
+                useFactsIn(bc, depth - 1, useState, nullUseFacts, record)
+            case _ => ()
+        }
+    case inner: Call if depth > 0 && isOperatorCall(inner.name) =>
+        inner.argument.l.foreach(a => useFactsIn(a, depth - 1, useState, nullUseFacts, record))
+    case _ => ()
+
+  /** The freedom marks a use of a freed or maybe-freed block carries beside its `alloc-state`
+    * value: the confidence the use-after-free finding reports at when the block's freedom came from
+    * a reference release - the borrowed kind (`low`), a region reset (`medium`, the region mark),
+    * or a release that reached zero (`medium`). One mark per use, the weakest claim first.
+    */
+  private def recordFreedomMarks(
+    use: StoredNode,
+    t: Tracked,
+    record: (StoredNode, String, String) => Unit
+  ): Unit =
+      if t.borrowed then record(use, TagReleaseUse, "low")
+      else if t.resetByRegion then record(use, TagResetUse, "1")
+      else if t.freedByRelease then record(use, TagReleaseUse, "medium")
+
   private def noteNullUse(
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
     use: StoredNode,
@@ -1557,12 +1970,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     c: Call,
     cf: CallFacts,
     callFacts: mutable.LongMap[CallFacts],
+    regionAllocSites: Set[Long],
     effectsByName: mutable.HashMap[String, Set[String]],
     effectsByMethod: mutable.LongMap[Set[String]],
     fpTargets: Map[String, Long],
     in: Map[String, Tracked],
     escFacts: mutable.LinkedHashMap[(Long, String), (StoredNode, Map[String, Tracked])],
     nullUseFacts: mutable.ListBuffer[(Long, StoredNode, String, String)],
+    storeClaims: StoreClaims,
     ctx: MethodContext,
     record: (StoredNode, String, String) => Unit
   ): Map[String, Tracked] =
@@ -1570,16 +1985,96 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     // uses read the state AS OF THIS NODE's entry - a free must not see its own effect
     val useState = in
 
+    // a pointer moved in place (`node++`, `p += n`) points at another object: the fields
+    // tracked through it (`node->name`) are that object's, not the ones this frame freed
+    c match
+      case step: Call
+          if PointerStepOps.contains(step.name) ||
+              (step.name.startsWith("<operator>.assignment") && step.name != "<operator>.assignment") =>
+          step.argumentOption(1).collect { case i: Identifier => i.name }.foreach(base =>
+              out = dropFieldsOf(out, base)
+          )
+      case _ => ()
+    // a call handed a struct's address (`kfifo_get(&fifo, &attn_data)`, a macro that copies a
+    // new element into it) may rewrite every member: the fields tracked through it are no
+    // longer the blocks this frame saw there
+    c.argument.l.foreach { arg =>
+        addressOfOperand(unwrapCastOperand(arg)).map(unwrapCast).collect { case i: Identifier =>
+            i.name
+        }.foreach(base => out = dropFieldsOf(out, base))
+    }
+
+    // The region handle an argument names, as that expression's own variable key: the
+    // identifier past the casts, the address-of an out-pointer, and a field path's own key
+    // (`&s->directory` names the directory array's region, never the fat array's). A copy of
+    // the handle is a different key that matches nothing, and regions match by the same
+    // expression's key only. A plain variable's key also carries the writes that gave it its
+    // value, so a handle rebound between the allocation and the destroy (`pool = b`) names
+    // another region.
+    def regionNameOf(e: Expression): Option[String] =
+      val handle = unwrapCast(e)
+      OverlayFacts.variableKey(handle).map { key =>
+          handle match
+            // a local or a parameter; a global's writes sit in other methods
+            case i: Identifier if i._refOut.exists {
+                    case l: Local             => !l.method.name.l.contains("<global>")
+                    case _: MethodParameterIn => true
+                    case _                    => false
+                } =>
+                OverlayFacts.writesReaching(i).toList.sorted.mkString(s"$key@", ",", "")
+            case _ => key
+      }
+
+    // The region a call draws from: the argument its entry names, or the named global context.
+    def regionKeyOf(site: Call): Option[String] =
+        callFacts.get(site.id()).flatMap(_.region).flatMap {
+            case RegionInfo("allocate", Some(idx), _) =>
+                argAt(site.argument.l, idx).flatMap(regionNameOf)
+            case RegionInfo("allocate", None, Some(global)) => Some(s"v:$global")
+            case _                                          => None
+        }
+
+    // The region lifecycle's effect on the blocks: a destroy releases every block the method
+    // took from the same region handle (a block the call ALSO took from the heap - the
+    // region-full fallback - is only maybe released, its other arm outliving the region), and a
+    // reset leaves every one of them maybe released. The blocks carry their region's name from
+    // the allocation, so the move finds them wherever they sit.
+    def moveRegionBlocks(
+      state: Map[String, Tracked],
+      key: String,
+      freed: Boolean
+    ): Map[String, Tracked] =
+        state.view.mapValues { t =>
+            if t.region.contains(key) then
+              // a block the SAME call also took from the plain heap - the region-full
+              // fallback's malloc arm - is only maybe released here: its other arm outlives
+              // the region. A family label a pool allocator's own entry gave it (aprpool,
+              // pgmem) names the region's memory, not the heap's
+              val alsoHeap = callFacts.get(t.site).exists(f => f.allocFamilies.contains("heap"))
+              if freed && !alsoHeap then t.copy(state = StFreed)
+              else t.copy(state = StMaybeFreed, resetByRegion = true)
+            else t
+        }.toMap
+
     // 1. free: the freed pointer's state becomes the fact. A freep-style free takes the ADDRESS
-    //    and nulls the slot; a plain free leaves the pointer dangling.
-    if cf.freeFamilies.nonEmpty then
+    //    and nulls the slot; a plain free leaves the pointer dangling. A macro invocation that
+    //    spells the free (`ngx_free(p)` over `free(p)`) and its expansion's own free-tagged call
+    //    are ONE free event: the invocation stands down and the expansion's call runs the free,
+    //    so a project's own free macro is not read as two releases of the same block
+    val freeSpelledByMacro =
+        c.dispatchType == io.shiftleft.codepropertygraph.generated.DispatchTypes.INLINED &&
+            c.ast.isCall.l.exists(fc => fc.tag.name(MemoryApiPass.TagFree).nonEmpty)
+    if cf.freeFamilies.nonEmpty && !freeSpelledByMacro then
       argAt(cf.args, 1).foreach { freed =>
+        // a release of the region handle itself - the destroy whose summary or body frees it -
+        // takes every block the method took from that region with it
+        regionNameOf(freed).foreach(key => out = moveRegionBlocks(out, key, freed = true))
         val viaAddress = addressOfOperand(freed)
         // a field nothing here assigned is still a block the struct owns: its first free is the
         // fact a second one is checked against (`free(b->p); free(b->p);`)
         val freedName = viaAddress.orElse(Some(freed)).flatMap(trackedNameOf)
         val known = freedName.flatMap(useState.get).orElse(
-          freedName.filter(isFieldName).map(_ => Tracked(StAllocated, 0L))
+          freedName.filter(isFieldName).map(_ => Tracked(StAllocated, 0L, refs = 1))
         )
         known.foreach { t =>
             // a nullable NON-allocation (a strchr result) is not ownership: freeing it says
@@ -1587,11 +2082,15 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             if t.state != StNullable then
               if t.state == StFreed || t.state == StMaybeFreed then
                 record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
+                // a free after a borrowed release or a region reset claims what that left
+                // behind: only maybe gone, at the same lowered confidence as a use
+                recordFreedomMarks(viaAddress.getOrElse(freed), t, record)
               // CWE-590: the freed pointer holds this frame's storage - the fact the
               // non-heap-free rule reads; ownership language never applies to it
               if t.state == StStackAddr then
                 record(viaAddress.getOrElse(freed), TagState, stateName(t.state))
               val name = freedName.get
+              if viaAddress.isDefined then storeClaims.settle(name, t)
               out = out.updated(
                 name,
                 if viaAddress.isDefined then t.copy(state = StNullReset)
@@ -1612,7 +2111,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               if t.state == StFreed || t.state == StMaybeFreed then
                 record(viaAddress.getOrElse(arg), TagState, stateName(t.state))
           }
-          if viaAddress.isDefined then out = out.updated(name, Tracked(StAllocated, c.id))
+          if viaAddress.isDefined then
+            out = out.updated(name, Tracked(StAllocated, c.id, refs = 1))
           // `tmp = realloc(p, n); if (!tmp) { free(p); ... } p = tmp;` - a failed realloc leaves
           // its input untouched, so p stays live until the result is stored back over it. Only
           // `p = realloc(p, n)` consumes p here (the assignment below stores the fresh block)
@@ -1622,7 +2122,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // whose only handle the assignment has just overwritten with that NULL (C11
             // 7.22.3.5p4). The block is lost on the failure path
             if assignedTarget(c).contains(name) && useState.get(name).exists(t =>
-                  t.state == StAllocated && !t.aliases.exists(useState.contains)
+                  t.state == StAllocated && t.region.isEmpty &&
+                      !t.aliases.exists(useState.contains)
               )
             then record(c, TagLeak, s"leak:$name")
             out = withGroup(out, name, out.get(name).map(_.aliases).getOrElse(Set.empty), StFreed)
@@ -1630,6 +2131,155 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
         }
       }
     end if
+
+    // 2b. the declared region lifecycle: a destroy tears every block the method took from the
+    //     same region handle down, a reset leaves them maybe torn down - the same move a
+    //     release of the handle makes, keyed by the argument the role names
+    cf.region.foreach {
+        case RegionInfo("destroy", Some(idx), _) =>
+            argAt(cf.args, idx).flatMap(regionNameOf).foreach(key =>
+                out = moveRegionBlocks(out, key, freed = true)
+            )
+        case RegionInfo("reset", Some(idx), _) =>
+            argAt(cf.args, idx).flatMap(regionNameOf).foreach(key =>
+                out = moveRegionBlocks(out, key, freed = false)
+            )
+        case _ => ()
+    }
+
+    // 2c. the reference roles: a release drops the object's owned-reference count by one, an
+    //     acquire raises it. A new allocation carries one reference from its own site, so only a
+    //     release that reaches zero frees - marked, so a use after it reports below the rule's own
+    //     confidence. A release of a reference whose ownership this method does not know - a
+    //     parameter, a field read, an unsummarised call's result - leaves the object maybe freed,
+    //     and the release was the borrowed kind.
+    def dropReference(
+      name: String,
+      factNode: StoredNode,
+      borrowUnknown: Boolean = true,
+      freeAtZero: Boolean = true
+    ): Unit =
+      val base = countBaseOf(name)
+      useState.get(name) match
+        // a slot that holds nothing releases nothing
+        case Some(t) if isNullState(t.state) => ()
+        case Some(t) if t.state == StFreed || t.state == StMaybeFreed =>
+            if t.refs > 0 then out = out.updated(name, t.copy(refs = t.refs - 1))
+            else if t.state == StFreed && !t.borrowed then
+              // a release below zero: on every path the reference was already spent. The
+              // fact sits on the release's own argument, which is how the rule tells the
+              // double release from a use of the freed object. A borrowed release, or one
+              // only some paths spent, counts references this frame never knew
+              record(factNode, TagState, stateName(t.state))
+              record(factNode, TagReleaseUse, "medium")
+        case Some(t) if t.state == StAllocated =>
+            // the references the method owns: the allocation itself carried one from
+            // its own site, every acquire added one more
+            if t.refs > 1 then out = out.updated(name, t.copy(refs = t.refs - 1))
+            else if ctx.countStores.contains(base) then
+              // a store into the object's count field (`o->refs = 2`) is a number this
+              // frame wrote: one release cannot know the field reached zero. The method's
+              // own reference is spent and the block survives under the count the store
+              // left - no longer a block this frame can free or leak
+              out = withGroup(out, name, t.aliases, StEscaped)
+              out = out.updated(name, t.copy(state = StEscaped, refs = 0))
+            else if freeAtZero then
+              // the count reaches zero: the block is gone the way a free leaves it
+              out = withGroup(out, name, t.aliases, StFreed)
+              out = out.updated(
+                name,
+                t.copy(state = StFreed, refs = 0, freedByRelease = true)
+              )
+            else
+              // the zero-gated decrement spelled inline: its zero arm's own release or
+              // free models the release's effect, so the arithmetic only spends the count
+              out = out.updated(name, t.copy(refs = 0))
+        case Some(t) if t.refs > 0 =>
+            // a reference the method acquired on an object whose base ownership it does
+            // not know: dropping it nets the method back out, the base's own doubt stays
+            val left = t.refs - 1
+            out =
+                if left <= 0 && t.state == StNullable then out - name
+                else out.updated(name, t.copy(refs = math.max(left, 0)))
+        // a block whose count the paths disagreed on: this frame no longer claims to know it
+        case Some(t) if t.countUnknown                         => ()
+        case Some(t) if t.state == StNullable && borrowUnknown =>
+            // a value that is not ownership: the release dropped a borrowed reference
+            out = out.updated(name, Tracked(StMaybeFreed, c.id, borrowed = true))
+        // StEscaped and StStackAddr release nothing this frame can vouch for; the frame's
+        // own arithmetic on an object it does not track counts nothing either
+        case _ if borrowUnknown =>
+            // unknown ownership: the method dropped a reference it cannot account for,
+            // so the object is maybe freed and the release was the borrowed kind
+            out = out.updated(name, Tracked(StMaybeFreed, c.id, borrowed = true))
+        case _ => ()
+      end match
+    end dropReference
+
+    def takeReference(name: String, factNode: StoredNode): Unit =
+      out.get(name) match
+        case Some(t) =>
+            // acquiring a reference of a block the state says is gone is itself a use
+            // of it; the fact reads the state as any call's argument would
+            if t.state == StFreed || t.state == StMaybeFreed then
+              record(factNode, TagState, stateName(t.state))
+              if t.borrowed then record(factNode, TagReleaseUse, "low")
+              else if t.freedByRelease then record(factNode, TagReleaseUse, "medium")
+            out = out.updated(name, t.copy(refs = t.refs + 1))
+        case None =>
+            // the method now owns one reference of an object whose base ownership it does
+            // not know. Tracked so the matching release nets out - never as an allocation:
+            // a reference taken and never dropped is the caller's business, and no exit
+            // reports it as a leak
+            out = out.updated(name, Tracked(StNullable, c.id, refs = 1))
+      end match
+
+    cf.releasePositions.foreach { idx =>
+        argAt(cf.args, idx).foreach { arg =>
+            releasedObjectName(arg).foreach(name => dropReference(name, arg))
+        }
+    }
+
+    cf.acquirePositions.foreach { idx =>
+        argAt(cf.args, idx).foreach { arg =>
+            releasedObjectName(arg).foreach(name => takeReference(name, arg))
+        }
+    }
+
+    // 2d. the frame's own count arithmetic: an increment of a tracked count field is an
+    //     acquire (+1), a decrement is a release (-1), at the statement itself - the same
+    //     statement shapes the release inference reads. The decrement under a zero test is
+    //     the release spelled inline: its zero-reach frees, which the zero arm's own release
+    //     or free models, so the arithmetic here only moves the count.
+    def countArithmeticOf(c: Call): Option[((String, String), Boolean, Expression)] =
+      val op = c.name match
+        case "<operator>.postIncrement" | "<operator>.preIncrement" =>
+            Some((c.argumentOption(1), false))
+        case "<operator>.postDecrement" | "<operator>.preDecrement" =>
+            Some((c.argumentOption(1), true))
+        case "<operator>.assignmentPlus" | "<operator>.assignmentMinus" =>
+            c.argumentOption(2).flatMap(IndexRange.literal)
+                .filter(_ == 1).map(_ => c.argumentOption(1))
+                .map(opt => (opt, c.name == "<operator>.assignmentMinus"))
+        case _ => None
+      op.flatMap { (operand, drop) =>
+          for
+            node <- operand
+            pair <- countedPairOf(node)
+            if ctx.countFields.contains(pair)
+          yield (pair, drop, node)
+      }
+
+    countArithmeticOf(c).foreach { case (pair, drop, operand) =>
+        if drop then
+          dropReference(
+            pair._1,
+            operand,
+            borrowUnknown = false,
+            freeAtZero = !zeroGatedOn(c, pair)
+          )
+        else takeReference(pair._1, operand)
+    }
 
     // 3. assignment: fresh allocation, copy-in, NULL reset, or loss of provenance
     if cf.name == "<operator>.assignment" then
@@ -1668,8 +2318,10 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                 // overwriting a live allocation loses the only handle: the overwrite IS the leak
                 // (a fresh allocation on the rhs loses the old block exactly as any other
                 // rebinding does; a realloc consumed the old block and produced this; and an
-                // aliased block still has its other handles)
-                if t.state == StAllocated && !rhsIsReallocOfLhs &&
+                // aliased block still has its other handles). A block the region owns is not
+                // lost - the region keeps it however the handle is rebound
+                if t.state == StAllocated && t.region.isEmpty &&
+                  !regionAllocSites.contains(t.site) && !rhsIsReallocOfLhs &&
                   !t.aliases.exists(out.contains) && !rhsReadsLhs
                 then record(c, TagLeak, s"leak:$lhs")
             }
@@ -1678,7 +2330,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             // an int-typed destination of a HEAP-family call holds its error code, not the
             // block: `ret = av_reallocp(&p, n)` allocates into p and returns 0/AVERROR. Tracking
             // ret as the allocation would report a phantom leak at every exit. The handle
-            // families (file, socket) do return an int that IS the resource, and stay tracked
+            // family (fd) does return an int that IS the resource, and stays tracked
             val lhsIsErrorCode = argAt(cf.args, 1).exists { l =>
               val t = l.property("TYPE_FULL_NAME") match
                 case s: String => s.trim
@@ -1728,9 +2380,26 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         Tracked(
                           StAllocated,
                           rhsCall.id,
-                          nullable = cf.exists(_.nullable)
+                          nullable = cf.exists(_.nullable),
+                          region = regionKeyOf(rhsCall),
+                          refs = 1
                         )
                     )
+              case rhsCall: Call
+                  if callFacts.get(rhsCall.id()).exists(_.region.exists(_.role == "allocate")) =>
+                  // a REGION allocation the heap's families do not cover: owned memory whose
+                  // region is the argument the entry named (or the named global), so the
+                  // region's destroy and reset decide its fate and no exit reports it as a leak
+                  out = out.updated(
+                    lhs,
+                    Tracked(
+                      StAllocated,
+                      rhsCall.id,
+                      nullable = callFacts.get(rhsCall.id()).exists(_.nullable),
+                      region = regionKeyOf(rhsCall),
+                      refs = 1
+                    )
+                  )
               case rhsCall: Call
                   if (rhsCall._callOut.collectAll[Method].l.distinct match
                     case List(only) => effectsByMethod.get(only.id())
@@ -1746,7 +2415,7 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                   // allocation - a wrapper the body-shape inference could not conclude.
                   // An allocating wrapper's nullability is not stated by the summary, so the
                   // pointer is tracked as allocation-live only
-                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id))
+                  out = out.updated(lhs, Tracked(StAllocated, rhsCall.id, refs = 1))
               case rhsCall: Call
                   if callFacts.get(rhsCall.id()).exists(_.nullable) =>
                   // a non-allocation nullable return (strchr, av_dict_get): not ownership,
@@ -1767,8 +2436,23 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                                 Tracked(
                                   StAllocated,
                                   ic.id,
-                                  nullable = icf.exists(_.nullable)
+                                  nullable = icf.exists(_.nullable),
+                                  region = regionKeyOf(ic),
+                                  refs = 1
                                 )
+                            )
+                        case ic: Call
+                            if callFacts.get(ic.id())
+                                .exists(_.region.exists(_.role == "allocate")) =>
+                            // the region allocation through its cast
+                            Some(
+                              Tracked(
+                                StAllocated,
+                                ic.id,
+                                nullable = callFacts.get(ic.id()).exists(_.nullable),
+                                region = regionKeyOf(ic),
+                                refs = 1
+                              )
                             )
                         case ic: Call if callFacts.get(ic.id()).exists(_.nullable) =>
                             Some(Tracked(StNullable, ic.id, nullable = true))
@@ -1846,6 +2530,19 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                           case Some((_, prev)) => Some((c, joinPoints(prev, in)))
                           case None            => Some((c, in))
                       }
+                      // the destination outlives this frame and the stored variable's
+                      // scope-cleanup release is still to come: whether the store keeps a block
+                      // the release then frees is what the release's state settles
+                      val storedName = rhs match
+                        case rc: Call if rc.name == "<operator>.cast" =>
+                            castOperand(rc).flatMap(trackedNameOf)
+                        case _ => trackedNameOf(rhs)
+                      storedName.filter(ctx.cleanupReleased.contains).foreach { name =>
+                        storeClaims.register(name, c)
+                        out.get(name).foreach(t =>
+                            out = out.updated(name, t.copy(pendingStores = t.pendingStores + c.id))
+                        )
+                      }
                   case _ => ()
             }
         case (None, Some(rhs)) =>
@@ -1860,10 +2557,18 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               case _ => trackedNameOf(rhs)
             if !stringDst then
               rhsTracked.foreach { name =>
-                  out.get(name).foreach { t =>
-                    out = withGroup(out, name, t.aliases, StEscaped)
-                    out = out.updated(name, t.copy(state = StEscaped))
-                  }
+                out.get(name).foreach { t =>
+                  out = withGroup(out, name, t.aliases, StEscaped)
+                  out = out.updated(name, t.copy(state = StEscaped))
+                }
+                // the destination outlives this frame and the variable's scope-cleanup
+                // release is still to come: whether the store keeps a block the release then
+                // frees is what the release's state settles
+                if ctx.cleanupReleased.contains(name) then
+                  storeClaims.register(name, c)
+                  out.get(name).foreach(t =>
+                      out = out.updated(name, t.copy(pendingStores = t.pendingStores + c.id))
+                  )
               }
             // ... and the field itself is tracked from here: a fresh block, a reset, or unknown
             fieldLhs.foreach { f =>
@@ -1872,8 +2577,25 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                     castOperand(rc).collect { case ic: Call => ic }
                 case rc: Call => Some(rc)
                 case _        => None
+              val regionOnly = alloc.find(a =>
+                  callFacts.get(a.id()).exists(_.region.exists(_.role == "allocate"))
+              )
               if alloc.exists(a => callFacts.get(a.id()).exists(_.isAllocCall)) then
-                out = out.updated(f, Tracked(StAllocated, alloc.get.id))
+                out = out.updated(
+                  f,
+                  Tracked(StAllocated, alloc.get.id, region = regionKeyOf(alloc.get), refs = 1)
+                )
+              else if regionOnly.isDefined then
+                out = out.updated(
+                  f,
+                  Tracked(
+                    StAllocated,
+                    regionOnly.get.id,
+                    nullable = callFacts.get(regionOnly.get.id()).exists(_.nullable),
+                    region = regionKeyOf(regionOnly.get),
+                    refs = 1
+                  )
+                )
               else if isNullLiteral(rhs) then out = out.updated(f, Tracked(StNullReset, 0L))
               else out = out - f
             }
@@ -1900,24 +2622,8 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
     //    statement before the assignment gives it a value
     val compileTimeQuery = c.name.startsWith("<operator>.sizeOf") ||
         c.name.startsWith("<operator>.alignOf")
-    def usesThroughPointer(arg: AstNode, depth: Int): Unit = arg match
-      case query: Call
-          if query.name.startsWith("<operator>.sizeOf") ||
-              query.name.startsWith("<operator>.alignOf") => ()
-      case access: Call if isAccessThroughPointer(access) =>
-          access.argumentOption(1).foreach { base =>
-              trackedNameOf(base).foreach { name =>
-                  useState.get(name).foreach { t =>
-                    if t.state == StFreed || t.state == StMaybeFreed then
-                      record(base, TagState, stateName(t.state))
-                    noteNullUse(nullUseFacts, base, name, t)
-                  }
-              }
-          }
-      case inner: Call if depth > 0 && isOperatorCall(inner.name) =>
-          inner.argument.l.foreach(a => usesThroughPointer(a, depth - 1))
-      case _ => ()
-    if !compileTimeQuery then cf.args.foreach(arg => usesThroughPointer(arg, 3))
+    if !compileTimeQuery then
+      cf.args.foreach(arg => useFactsIn(arg, 3, useState, Some(nullUseFacts), record))
     // a C++ construction (`new T(args)`) is an operator call whose arguments are handed to
     // the constructor: a tracked fd or pointer argument is owned by the new object from here
     // on. It falls through to the generic argument escape below - leaving it tracked-live
@@ -1943,9 +2649,47 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             useState.get(name).foreach { t =>
               if t.state == StFreed || t.state == StMaybeFreed then
                 record(use, TagState, stateName(t.state))
+                recordFreedomMarks(use, t, record)
               if !nullSafeUseSite then noteNullUse(nullUseFacts, use, name, t)
             }
         }
+      }
+      // a declared cleanup function frees the block its argument's slot holds: a second
+      // release of a block already freed there is the double free at the cleanup call
+      if cf.cleanup then
+        argAt(cf.args, 1).foreach { arg =>
+            addressOfOperand(unwrapCastOperand(arg)).foreach { operand =>
+                trackedNameOf(operand).foreach { name =>
+                    useState.get(name).foreach { t =>
+                      if t.state == StFreed || t.state == StMaybeFreed then
+                        record(operand, TagState, ValueSummaryFreed)
+                      out = out.updated(name, t.copy(state = StNullReset))
+                      storeClaims.settle(name, t)
+                    }
+                }
+            }
+        }
+      // a declared steal empties the slot it is handed the address of and moves the block to
+      // its result, as the body-inferred steal does
+      cf.args.filter(a => cf.stealPositions.contains(a.argumentIndex)).foreach { arg =>
+          addressOfOperand(unwrapCastOperand(arg)).foreach { operand =>
+              trackedNameOf(operand).foreach { name =>
+                  useState.get(name).foreach(t =>
+                      out = out.updated(name, t.copy(state = StNullReset))
+                  )
+              }
+          }
+      }
+      // a call that takes over an argument's resource (`fdopen`'s descriptor) hands it to
+      // what it returns: the variable no longer owns it, so its exits leak nothing
+      cf.args.filter(a => cf.retainPositions.contains(a.argumentIndex)).foreach { arg =>
+          trackedNameOf(arg).foreach { name =>
+              out.get(name).foreach { t =>
+                  if t.state == StAllocated then
+                    out = withGroup(out, name, t.aliases, StEscaped)
+                    out = out.updated(name, t.copy(state = StEscaped))
+              }
+          }
       }
     else
       // 6. any other call escapes its tracked pointer arguments: an addressOf argument escapes
@@ -2017,9 +2761,14 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                         )
                     case _ => false
                   )
+              // handing the variable's ADDRESS is not a use of the block it held: the callee is
+              // given the slot, and may well fill it (`getSafeInfoString(s, n, &tmp)` stores a
+              // fresh string into the slot whose previous block the last iteration freed)
               if (t.state == StFreed || t.state == StMaybeFreed) && !summaryFreesThis &&
-                !calleeIgnores
-              then record(operand, TagState, stateName(t.state))
+                !calleeIgnores && viaAddress.isEmpty
+              then
+                record(operand, TagState, stateName(t.state))
+                recordFreedomMarks(operand, t, record)
               if viaAddress.isEmpty && summaryDerefsArgs.contains(arg.argumentIndex) then
                 noteNullUse(nullUseFacts, operand, name, t)
               if !borrowed then
@@ -2032,6 +2781,23 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
           case i: Identifier => out = dropFieldsOf(out, i.name)
           case _             => ()
       }
+      // a callee whose body assigns a global this frame tracks (`server.aof_manifest =
+      // ...` in the loader the caller runs after freeing the old manifest) leaves that global
+      // holding whatever the callee stored: no longer a block this frame knows
+      c._callOut.collectAll[Method].l.distinct match
+        case List(only) if !only.isExternal && only.block.astChildren.nonEmpty =>
+            val frameNames =
+                (c.method.local.name.l ++ c.method.parameter.name.l).toSet
+            val assigned = only.ast.isCall.l.filter(a =>
+                OverlayFacts.isAssignmentOperator(a.name)
+            ).flatMap(_.argumentOption(1).map(_.code.replaceAll("\\s+", ""))).toSet
+            out.keys.filter(n => isFieldName(n) || !frameNames.contains(n))
+                .filterNot(n => frameNames.contains(countBaseOf(n)))
+                .filter(assigned.contains)
+                .foreach { n =>
+                    out.get(n).foreach(t => out = out.updated(n, t.copy(state = StEscaped)))
+                }
+        case _ => ()
       // ... and the callee's effect summary, AFTER the generic escape: a call to a method
       // that unconditionally frees one of its parameters frees the matching argument HERE - an
       // interprocedural free as a tag lookup, the existing double-free fact carrying the report.
@@ -2065,6 +2831,9 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               val idx = e.stripPrefix("effect:frees-param:").toInt
               argAt(cf.args, idx).foreach { arg =>
                 val operand = addressOfOperand(arg).getOrElse(arg)
+                // an inferred destroy called with a REGION handle tears the blocks the method
+                // took from that region down, the same way a declared destroy does
+                regionNameOf(arg).foreach(key => out = moveRegionBlocks(out, key, freed = true))
                 trackedNameOf(operand).foreach { name =>
                     useState.get(name).foreach { t =>
                       if t.state == StFreed || t.state == StMaybeFreed then
@@ -2099,9 +2868,12 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                           case _ => ()
                         end match
                       end if
-                      if t.state != StNullable then
+                      // a slot that holds no block (NULL, or reset to it) frees nothing when the
+                      // callee releases through it: the slot stays empty rather than dangling
+                      if t.state != StNullable && !isNullState(t.state) then
                         out = withGroup(out, name, t.aliases, StFreed)
                         out = out.updated(name, t.copy(state = StFreed))
+                      storeClaims.settle(name, t)
                     }
                 }
               }
@@ -2117,8 +2889,24 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
                       // the caller's variable holds NULL from here, not a dangling
                       // pointer
                       out = out.updated(name, t.copy(state = StNullReset))
+                      storeClaims.settle(name, t)
                     }
                 }
+              }
+          case e if e.startsWith("effect:steals-param:") =>
+              val idx = e.stripPrefix("effect:steals-param:").toInt
+              argAt(cf.args, idx).foreach { arg =>
+                  // the argument's address, through the cast a typed spelling wraps it in
+                  addressOfOperand(unwrapCastOperand(arg)).foreach { operand =>
+                      trackedNameOf(operand).foreach { name =>
+                          useState.get(name).foreach { t =>
+                              // the block moves to the call's result and the slot is left empty:
+                              // nothing is released here, so no double-free fact, and the caller's
+                              // variable is spent exactly as a resetting freep leaves it
+                              out = out.updated(name, t.copy(state = StNullReset))
+                          }
+                      }
+                  }
               }
           case _ => ()
       }
@@ -2330,6 +3118,21 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   private def isSwitch(cs: ControlStructure): Boolean =
       cs.parserTypeName.toLowerCase.contains("switch")
 
+  /** The region the joined entry answers to. Equal regions join to themselves. When the sides
+    * disagree, the side with no live block (a null init, a freed or spent slot) yields to the
+    * region the other side drew from: the only block the join can carry is that one. Two sides that
+    * each hold a live block from different regions join to none.
+    */
+  private def joinRegions(ta: Tracked, tb: Tracked): Option[String] =
+      if ta.region == tb.region then ta.region
+      else
+        def spent(t: Tracked): Boolean =
+            t.state == StNull || t.state == StNullReset || t.state == StFreed
+        (ta.region, tb.region) match
+          case (r, None) if spent(tb) => r
+          case (None, r) if spent(ta) => r
+          case _                      => None
+
   private def joinPoints(
     a: Map[String, Tracked],
     b: Map[String, Tracked]
@@ -2344,17 +3147,50 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
             a.get(name) match
               case Some(ta) if ta == tb => ()
               case Some(ta)             =>
+                  // the owned-reference count: a side that holds no block says nothing about
+                  // it, so the other side's count stands. Two live paths that disagree (an
+                  // acquire on one branch, a loop's back edge) leave a count this frame cannot
+                  // know, and the block becomes the pass's unknown: no use after it, second
+                  // release or leak is claimed from a guess at the count
+                  val (refs, countUnknown) =
+                      if isNullState(ta.state) then (tb.refs, false)
+                      else if isNullState(tb.state) then (ta.refs, false)
+                      else if ta.refs != tb.refs && ta.state == StAllocated && tb.state == StAllocated
+                      then (0, true)
+                      else (math.max(ta.refs, tb.refs), false)
                   // the site is the SMALLER id, whatever the fold order: an order-dependent
                   // merge let the worklist oscillate between (Allocated, s1) and
-                  // (Allocated, s2) around allocation loops and never terminate
+                  // (Allocated, s2) around allocation loops and never terminate. A side that
+                  // holds no block (the NULL init, site 0) says nothing about where the block
+                  // came from: the live side's site stands, so a region site's block keeps the
+                  // exemption its site gives it
+                  val site =
+                      if isNullState(ta.state) && !isNullState(tb.state) then tb.site
+                      else if isNullState(tb.state) && !isNullState(ta.state) then ta.site
+                      else math.min(ta.site, tb.site)
                   merged = merged.updated(
                     name,
                     Tracked(
-                      joinStates(ta.state, tb.state),
-                      math.min(ta.site, tb.site),
+                      if countUnknown then StEscaped else joinStates(ta.state, tb.state),
+                      site,
                       nullable = ta.nullable || tb.nullable,
                       checked = ta.checked && tb.checked,
-                      aliases = ta.aliases.intersect(tb.aliases)
+                      aliases = ta.aliases.intersect(tb.aliases),
+                      // a block one path drew from region A and another from region B is
+                      // under no single region's rule; the reset claim joins like nullable.
+                      // A side that holds NO block at all (the null init, an already spent
+                      // or freed slot) takes the other side's region: the live block the
+                      // join keeps is the drawn one, and dropping its region here is what
+                      // leaked the `p = NULL; ... if (c) p = region_get(...)` shape at the
+                      // frame exit
+                      region = joinRegions(ta, tb),
+                      resetByRegion = ta.resetByRegion || tb.resetByRegion,
+                      // the borrowed and release marks join like the reset claim
+                      refs = refs,
+                      borrowed = ta.borrowed || tb.borrowed,
+                      freedByRelease = ta.freedByRelease || tb.freedByRelease,
+                      pendingStores = ta.pendingStores ++ tb.pendingStores,
+                      countUnknown = countUnknown || ta.countUnknown || tb.countUnknown
                     )
                   )
               case None => merged = merged.updated(name, tb)
@@ -2518,6 +3354,101 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
   /** A tracked field path: its block is owned by the struct, so it never leaks from the frame. */
   private def isFieldName(name: String): Boolean = name.contains("->") || name.contains(".")
 
+  /** The variable a tracked field path hangs from: `it->refs` and `it.obj` name `it`. */
+  private def countBaseOf(name: String): String =
+      Seq(name.indexOf("->"), name.indexOf('.')).filter(_ >= 0).minOption match
+        case Some(sep) if sep > 0 => name.substring(0, sep)
+        case _                    => name
+
+  /** The (object, count field) pair a count-arithmetic operand names: `r->refs` hangs the count
+    * field `refs` from `r`, through the casts a typed spelling wraps it in.
+    */
+  private def countedPairOf(e: AstNode): Option[(String, String)] =
+      trackedNameOf(e).flatMap { name =>
+          if !isFieldName(name) then None
+          else
+            val base  = countBaseOf(name)
+            val field = name.substring(base.length).stripPrefix("->").stripPrefix(".")
+            Option.when(field.nonEmpty)((base, field))
+      }
+
+  /** The object a release or acquire argument names: the pointer itself (through casts), or the
+    * CONTAINER a count field's address names - `kref_put(&o->ref, release)` drops a reference of
+    * the object the field hangs from, not of the field.
+    */
+  private def releasedObjectName(e: Expression): Option[String] =
+      unwrapCast(e) match
+        case c: Call if c.name == "<operator>.addressOf" =>
+            c.argumentOption(1).map(unwrapCast).flatMap {
+                case i: Identifier => Some(i.name)
+                case f: Call
+                    if f.name == "<operator>.indirectFieldAccess" ||
+                        f.name == "<operator>.fieldAccess" =>
+                    f.argumentOption(1).collect { case i: Identifier => i.name }
+                case _ => None
+            }
+        case other => trackedNameOf(other)
+
+  /** The fields of its parameter the method itself decrements by one: the count fields the release
+    * inference reads - the prefix and postfix decrement, the compound subtract of one, and the
+    * assignment of a subtraction by one.
+    */
+  private def decrementedCountFields(m: Method): Set[(String, String)] =
+      m.ast.collectAll[Call].l.flatMap { c =>
+          c.name match
+            case "<operator>.postDecrement" | "<operator>.preDecrement" =>
+                c.argumentOption(1).flatMap(countedPairOf)
+            case "<operator>.assignmentMinus" =>
+                for
+                  k    <- c.argumentOption(2).flatMap(IndexRange.literal) if k == 1
+                  pair <- c.argumentOption(1).flatMap(countedPairOf)
+                yield pair
+            case "<operator>.assignment" =>
+                (c.argumentOption(1), c.argumentOption(2)) match
+                  case (Some(lhs), Some(rhs: Call)) if rhs.name == "<operator>.subtraction" =>
+                      val operands = rhs.argument.l.collect { case e: Expression => e }
+                      val one      = operands.exists(x => IndexRange.literal(x).exists(_ == 1))
+                      for
+                        pair <- countedPairOf(lhs) if one
+                        if operands.flatMap(countedPairOf).contains(pair)
+                      yield pair
+                  case _ => None
+            case _ => None
+      }.toSet
+
+  /** The count pair an operand of a zero test names: the field read itself, or its own decrement
+    * (`if (--r->refs == 0)` tests the field through the decrement).
+    */
+  private def countOperandOf(e: Expression): Option[(String, String)] =
+      countedPairOf(e).orElse {
+          e match
+            case c: Call
+                if Set(
+                  "<operator>.postDecrement",
+                  "<operator>.preDecrement",
+                  "<operator>.postIncrement",
+                  "<operator>.preIncrement"
+                ).contains(c.name) =>
+                c.argumentOption(1).flatMap(countedPairOf)
+            case _ => None
+      }
+
+  /** Every condition controlling the statement is a zero test of the count pair - directly or
+    * through its own decrement - with the zero or the one count: the release spelled inline.
+    */
+  private def zeroGatedOn(c: Call, pair: (String, String)): Boolean =
+    val conds = c._cdgIn.l.collect { case e: Expression => e }
+    conds.nonEmpty && conds.forall { cond =>
+        (cond +: cond.ast.collectAll[Expression].l).exists {
+            case cmp: Call
+                if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+                val operands = cmp.argument.l.collect { case e: Expression => e }
+                operands.flatMap(countOperandOf).contains(pair) &&
+                operands.exists(x => IndexRange.literal(x).exists(v => v == 0 || v == 1))
+            case _ => false
+        }
+    }
+
   /** Forget every field tracked through `base`: rebinding it, or handing it (or its address) to a
     * callee that may rewrite its members, makes their states stale.
     */
@@ -2582,6 +3513,29 @@ class AllocationStatePass(atom: Cpg) extends CpgPass(atom):
               case _             => false
           }
       }
+
+  /** The value a return really hands out, seen through the compiler-generated `<return-value>`
+    * local a return whose scope runs cleanups stores its value in before they run: the walk the
+    * effect summaries make must judge the variable the return names, not the temporary that carried
+    * it past the cleanup calls. The store sits in the same compiler-generated block as the return,
+    * before it (the reaching-def layer leaves a return's own expression unwired).
+    */
+  private def seeThroughReturnValue(ret: Return): Option[Expression] =
+      ret.astChildren.collectFirst { case e: Expression => e }.map(unwrapCast) match
+        case Some(i: Identifier) if i.name == ReturnValueName =>
+            val stores = (ret.astParent match
+              case b: Block => b.astChildren.l
+              case _        => i.method.ast.isCall.nameExact("<operator>.assignment").l
+            ).collect {
+                case a: Call
+                    if a.name == "<operator>.assignment" && a.argumentOption(1).exists {
+                        case t: Identifier => t.name == ReturnValueName
+                        case _             => false
+                    } =>
+                    a
+            }
+            stores.lastOption.flatMap(_.argumentOption(2)).orElse(Some(i))
+        case other => other
 
   private val ReturnValueName = "<return-value>"
 
@@ -2885,7 +3839,32 @@ object AllocationStatePass:
   /** `nullable` - the tracked value came from a call whose result may be NULL (every allocation, or
     * the inventory's `nullable-return` role); `checked` - a guard has since narrowed it non-null on
     * every path that reaches here.
+    *
+    * `region` - the REGION the block belongs to, when the allocation drew from one: the variable
+    * key the allocation's region argument spelled - the local or parameter's name, a field path's
+    * own key, or the global a context-less allocator reads. The region's destroy releases the block
+    * wherever it is, and no exit reports it as a leak. Regions match by that one key only - a copy
+    * of the handle is a different key and matches nothing. `resetByRegion` - the block's freedom
+    * came from a region reset (or from a destroy that may not have reached it, the region-full
+    * fallback's heap arm): the use after it is the weaker claim, marked so it reports below the
+    * use-after-free rule's own confidence.
+    *
+    * `refs` - the references of the object THIS method owns: a new allocation is one, an acquire
+    * adds one, a release drops one. Zero says the method owns none - either it never did (the
+    * release was the borrowed kind) or its last one just reached zero. `borrowed` - a release of a
+    * reference whose ownership the method does not know (a parameter, a field read, an unsummarised
+    * call's result) touched the object: the object is maybe freed, and a use after it is the
+    * weakest claim. `freedByRelease` - the block's freedom came from a release that reached zero,
+    * so the use after it reports below the rule's own confidence, one level above the borrowed
+    * kind.
     */
+  private val PointerStepOps = Set(
+    "<operator>.preIncrement",
+    "<operator>.postIncrement",
+    "<operator>.preDecrement",
+    "<operator>.postDecrement"
+  )
+
   final case class Tracked(
     state: AllocState,
     site: Long,
@@ -2893,8 +3872,45 @@ object AllocationStatePass:
     checked: Boolean = false,
     // the other variables holding the SAME block (`q = p`): a free through one frees them all.
     // A must-alias set - the join intersects it
-    aliases: Set[String] = Set.empty
+    aliases: Set[String] = Set.empty,
+    region: Option[String] = None,
+    resetByRegion: Boolean = false,
+    refs: Int = 0,
+    borrowed: Boolean = false,
+    freedByRelease: Boolean = false,
+    // the stores into storage that outlives the scope this path made of the variable while a
+    // scope cleanup was still to release it: the release settles these and no others
+    pendingStores: Set[Long] = Set.empty,
+    // the paths into a join disagreed on the owned-reference count: the block is the pass's
+    // unknown, and no release of it is read as reaching zero or going below it
+    countUnknown: Boolean = false
   )
+
+  /** The encoded `mem-region` value of one call, parsed: the role and where it names the region
+    * (the argument index, or the global a context-less allocator reads).
+    */
+  final case class RegionInfo(role: String, arg: Option[Int], context: Option[String])
+
+  /** Decodes the values [[MemoryApiPass.TagRegion]] carries: `alloc:<i>`, `alloc:ctx:<global>`,
+    * `create`, `create:<i>`, `destroy:<i>` and `reset:<i>`.
+    */
+  private def regionInfoOf(value: String): Option[RegionInfo] =
+      value.split(":", 3) match
+        case Array("alloc", idx) =>
+            idx.toIntOption.filter(_ >= 1).map(i => RegionInfo("allocate", Some(i), None))
+        case Array("alloc", "ctx", name) => Some(RegionInfo("allocate", None, Some(name)))
+        case Array("create")             => Some(RegionInfo("create", None, None))
+        case Array("create", idx) =>
+            idx.toIntOption.filter(_ >= 1).map(i => RegionInfo("create", Some(i), None))
+        case Array("destroy", idx) =>
+            idx.toIntOption.filter(_ >= 1).map(i => RegionInfo("destroy", Some(i), None))
+        case Array("reset", idx) =>
+            idx.toIntOption.filter(_ >= 1).map(i => RegionInfo("reset", Some(i), None))
+        case _ => None
+
+  /** The 1-based argument index a `mem-release` / `mem-acquire` tag value carries. */
+  private def rolePosition(value: String): Option[Int] =
+      value.toIntOption.filter(_ >= 1)
 
   /** everything the transfer needs about one call, read once per method */
   final case class CallFacts(
@@ -2906,7 +3922,13 @@ object AllocationStatePass:
     nullable: Boolean,
     isMemoryCall: Boolean,
     isAllocCall: Boolean,
-    readsThrough: Set[Int]
+    readsThrough: Set[Int],
+    region: Option[RegionInfo] = None,
+    releasePositions: Set[Int] = Set.empty,
+    acquirePositions: Set[Int] = Set.empty,
+    retainPositions: Set[Int] = Set.empty,
+    stealPositions: Set[Int] = Set.empty,
+    cleanup: Boolean = false
   )
 
   /** the families a call carries per role, from the inventory tags */
@@ -2918,7 +3940,13 @@ object AllocationStatePass:
     isMemoryCall: Boolean,
     dstPositions: Set[Int] = Set.empty,
     srcPositions: Set[Int] = Set.empty,
-    readPositions: Set[Int] = Set.empty
+    readPositions: Set[Int] = Set.empty,
+    region: Option[RegionInfo] = None,
+    release: Set[Int] = Set.empty,
+    acquire: Set[Int] = Set.empty,
+    retains: Set[Int] = Set.empty,
+    steal: Set[Int] = Set.empty,
+    cleanup: Boolean = false
   )
   val RoleInfoNone: RoleInfo =
       RoleInfo(Set.empty, Set.empty, Set.empty, nullable = false, isMemoryCall = false)
@@ -2926,6 +3954,19 @@ object AllocationStatePass:
   final val TagState   = "alloc-state"
   final val TagLeak    = "alloc-leak"
   final val TagNullUse = "null-use"
+
+  /** A use of a block whose freedom came from a region reset (or from a destroy that may not have
+    * reached it): the fact that demotes the use-after-free finding below the rule's own confidence,
+    * beside the `alloc-state` value the use carries.
+    */
+  final val TagResetUse = "alloc-reset-use"
+
+  /** A use of a block whose freedom came from a REFERENCE release - the count reached zero
+    * (`medium`), or the release dropped a borrowed reference (`low`) - or a second release of an
+    * already spent reference (`medium` on the double-free fact): beside the `alloc-state` value,
+    * the confidence the finding reports at, one level under what a free's own facts carry.
+    */
+  final val TagReleaseUse = "alloc-release-use"
 
   /** Builtins that read nothing through a pointer argument and keep nothing: queries the compiler
     * answers (`__builtin_object_size`, `__builtin_constant_p`) and a cache hint.
@@ -3008,13 +4049,31 @@ object AllocationStatePass:
     refReturn: Boolean,
     // a by-value C++ string return copies the characters out of the frame - a
     // char[] or char* that flows to it is a copy, not an escape (std::string owns its buffer)
-    stringReturn: Boolean
+    stringReturn: Boolean,
+    // the variables the compiler-placed cleanup calls of this method release: a store of one of
+    // them into storage that outlives the scope keeps a block the release then frees
+    cleanupReleased: Set[String] = Set.empty,
+    // the variables one of whose INTEGER-typed count fields the method stores into
+    // (`o->refs = 2`, or a non-literal store): the block's count is a number this frame wrote,
+    // so a release of it cannot know the field reached zero - the method's own reference is
+    // spent and the block survives under the count the store left, outside this frame's free
+    // and leak questions
+    countStores: Set[String] = Set.empty,
+    // the (object, count field) pairs the frame's own arithmetic counts in: an increment of
+    // one of these is an acquire, a decrement is a release, at the statement itself
+    countFields: Set[(String, String)] = Set.empty
   )
 
   /** the `alloc-state` value a summary-free records: the ENCLOSING call is the free - a wrapper
     * whose body-shape the inventory never saw, named by its effect summary
     */
   val ValueSummaryFreed = "freed-by-summary"
+
+  /** the `alloc-state` value a store into storage that outlives the variable's scope carries when
+    * the scope's cleanup release frees the block the store kept: the finding site is the store, at
+    * a lower confidence than a use already made
+    */
+  val ValueStoredThenReleased = "stored-then-released"
 
   /** the `null-use` kinds: an unchecked use of a may-be-null value, an unchecked use of an
     * ALLOCATION's own result (the CWE-690 shape), and a use under a guard that proved the pointer
@@ -3023,6 +4082,69 @@ object AllocationStatePass:
   val NullUnchecked      = "unchecked"
   val NullUncheckedAlloc = "unchecked-alloc"
   val NullDefinite       = "null"
+
+  /** A free whose only controlling conditions are null tests of the freed pointer itself - the `if
+    * (data == NULL) exit(-1);` that precedes it, or `if (p) free(p)` - releases the block whenever
+    * there is one to release: a summary reads it as unconditional. For a free through the pointee
+    * (`free(*pp)`), a null test OF THE POINTEE (`*pp == NULL`, `!*pp`, `if (*pp)`) is the same
+    * guarantee: the freed value is the pointee, and the guard releases it exactly when it names a
+    * block. The body inference concludes the same about a destroy function's own release of its
+    * argument.
+    */
+  private[taggers] def onlyNullChecksOf(c: Call): Boolean =
+    def unwrap(e: Expression): Expression = e match
+      case x: Call if x.name == "<operator>.cast" =>
+          x.argumentOption(2).orElse(x.argumentOption(1)).map(unwrap).getOrElse(x)
+      case other => other
+    def nullLiteral(e: AstNode): Boolean =
+        isNullLiteral(e, op => op.argumentOption(2).orElse(op.argumentOption(1)))
+    // the freed value after casts: its name, marked whether the free reads it through an
+    // indirection (the pointee `*pp`, not the slot pp)
+    def freedOf(e: Expression): Option[(String, Boolean)] = unwrap(e) match
+      case i: Identifier => Some((i.name, false))
+      case d: Call if d.name == "<operator>.indirection" =>
+          d.argumentOption(1).collect { case i: Identifier => i.name }.map((_, true))
+      case _ => None
+    // a condition operand names the freed value: the identifier itself, or for a free through
+    // the pointee the same indirection of it
+    def names(e: Expression, n: String, throughPointee: Boolean): Boolean = unwrap(e) match
+      case i: Identifier => !throughPointee && i.name == n
+      case d: Call if d.name == "<operator>.indirection" =>
+          throughPointee && d.argumentOption(1).exists {
+              case i: Identifier => i.name == n
+              case _             => false
+          }
+      case _ => false
+    // whether the value is non-NULL when the condition holds (Some(true)) or when it fails
+    def nonNullWhen(cond: Expression, n: String, throughPointee: Boolean): Option[Boolean] =
+        cond match
+          case cmp: Call
+              if cmp.name == "<operator>.equals" || cmp.name == "<operator>.notEquals" =>
+              val args = cmp.argument.l.collect { case e: Expression => unwrap(e) }
+              Option.when(args.exists(names(_, n, throughPointee)) && args.exists(nullLiteral))(
+                cmp.name == "<operator>.notEquals"
+              )
+          case cmp: Call if cmp.name == "<operator>.logicalNot" =>
+              Option.when(
+                cmp.argument.l.collect { case e: Expression => unwrap(e) }
+                    .exists(names(_, n, throughPointee))
+              )(false)
+          case other => Option.when(names(other, n, throughPointee))(true)
+    c.argument.l.find(_.argumentIndex == 1).flatMap(freedOf).exists { (n, throughPointee) =>
+      val conds = c._cdgIn.l
+      // the free runs on the side of each test where the value is not NULL: `if (!p) return;`
+      // guards it, `if (p != NULL) return;` makes it a free of NULL only
+      conds.nonEmpty && conds.forall {
+          case cond: Expression =>
+              nonNullWhen(unwrap(cond), n, throughPointee).exists { nonNullWhenTrue =>
+                  cond._astIn.collectFirst { case cs: ControlStructure => cs }.exists { cs =>
+                      cs.whenTrue.ast.id.toSet.contains(c.id) == nonNullWhenTrue
+                  }
+              }
+          case _ => false
+      }
+    }
+  end onlyNullChecksOf
 
   /** A NULL as the frontend may have left it: a literal (possibly macro-expanded with parens and
     * casts), an unexpanded macro invocation, or an identifier. Shared with the null-deref rule.
@@ -3046,8 +4168,10 @@ object AllocationStatePass:
     case i: Identifier => i.name == "NULL" || i.name == "nullptr"
     case _             => false
 
-  /** allocation families whose handle IS an integer (a descriptor), unlike a heap block */
-  private val IntHandleFamilies = Set("file", "socket")
+  /** allocation families whose handle IS an integer (a descriptor: the `fd` family), unlike a heap
+    * block or a `FILE *` stream
+    */
+  private val IntHandleFamilies = Set("fd")
 
   /** worklist visit cap per CFG node. States settle within a handful of revisits on real code; a
     * cap as tight as 8 makes the settle point itself depend on the order the frontend's parallel
@@ -3063,10 +4187,24 @@ object AllocationStatePass:
     */
   private val MaxDerefsRounds = 3
 
+  /** definition-walk depth for the steal's returned identifier: the return names the value through
+    * the locals it passed through (`p = *pp; q = p; return q;`), and a real tree's chains run
+    * hundreds of locals deep, where an unbounded walk overflows the stack. Eight is far deeper than
+    * any steal spelled for a reader (`p = *pp; return p;` is one hop); past it the walk says
+    * nothing and the method concludes no steal.
+    */
+  private val MaxStealChainDepth = 8
+
   private val MemoryRoles = Set(
     MemoryApiPass.TagAlloc,
     MemoryApiPass.TagFree,
     MemoryApiPass.TagRealloc,
+    MemoryApiPass.TagRegion,
+    MemoryApiPass.TagRelease,
+    MemoryApiPass.TagAcquire,
+    MemoryApiPass.TagRetains,
+    MemoryApiPass.TagSteal,
+    MemoryApiPass.TagCleanup,
     MemoryApiPass.TagNullableReturn,
     MemoryApiPass.TagNonRetaining,
     MemoryApiPass.UmbrellaTag

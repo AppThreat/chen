@@ -71,7 +71,10 @@ object AstCreationPass:
   //     them
   // 14: a macro invocation's call carries its definition whatever the macro is named (NULL
   //     kept a bare name before)
-  private val AstFormatVersion = "c2cpg-ast-14"
+  // 15: the GCC cleanup attribute on a local emits the call of its function at every scope exit
+  // 16: an include in a branch the preprocessor skipped is tagged inactive, and a cleanup call's
+  //     argument refers to the variable its declarator declared
+  private val AstFormatVersion = "c2cpg-ast-16"
 
   /** Everything outside a file that shapes its AST and is known up front: the frontend's output
     * format, the parser options (function bodies, inactive code, comments, image locations, trivial

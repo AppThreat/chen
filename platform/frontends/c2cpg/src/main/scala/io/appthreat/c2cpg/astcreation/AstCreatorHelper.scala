@@ -733,6 +733,8 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode):
           tagNode(importNode, Defines.IncludeResolvedPathTag, path)
       }
       if include.isSystemInclude then tagNode(importNode, Defines.IncludeSystemTag, "true")
+      // an include in a branch the preprocessor skipped (`#if 0`, `#ifdef _WIN32` elsewhere)
+      if !include.isActive then tagNode(importNode, Defines.IncludeInactiveTag, "true")
       Ast(importNode)
     }
 

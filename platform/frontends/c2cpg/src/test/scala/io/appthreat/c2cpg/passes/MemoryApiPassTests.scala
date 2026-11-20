@@ -1,5 +1,6 @@
 package io.appthreat.c2cpg.passes
 
+import io.appthreat.c2cpg.Config
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
 import io.appthreat.x2cpg.passes.taggers.{MemApiVocab, MemoryApiPass}
 import io.shiftleft.codepropertygraph.Cpg
@@ -45,6 +46,124 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
             n.asInstanceOf[io.shiftleft.codepropertygraph.generated.nodes.StoredNode].tag.name.l.toSet
 
   private def call(name: String): Call = cpg.call.name(name).head
+
+  // The declared region vocabulary, the way a project's in-house config names its pools and
+  // contexts: argument-indexed pools, a context-less allocator reading a global, and the
+  // lifecycle roles.
+  private val regionConfig =
+      """{"version": 1, "apis": [
+        |  {"name": "palloc", "len": 1, "alloc": "pgmem",
+        |   "region": {"role": "allocate", "context": "CurrentMemoryContext"}},
+        |  {"name": "pfree", "free": "pgmem"},
+        |  {"name": "apr_palloc", "len": 2, "alloc": "aprpool",
+        |   "region": {"role": "allocate", "arg": 1}},
+        |  {"name": "apr_pool_create", "region": {"role": "create", "arg": 1}},
+        |  {"name": "apr_pool_clear", "region": {"role": "reset", "arg": 1}},
+        |  {"name": "apr_pool_destroy", "region": {"role": "destroy", "arg": 1}}
+        |]}""".stripMargin
+
+  private val regionCpg: Cpg = code(
+    """
+    |#include <stdlib.h>
+    |
+    |void *palloc(unsigned long size);
+    |void pfree(void *p);
+    |extern void *CurrentMemoryContext;
+    |typedef struct apr_pool_t apr_pool_t;
+    |void *apr_palloc(apr_pool_t *pool, unsigned long size);
+    |void apr_pool_create(apr_pool_t **pool, apr_pool_t *parent);
+    |void apr_pool_clear(apr_pool_t *pool);
+    |void apr_pool_destroy(apr_pool_t *pool);
+    |
+    |void *take_from_pool(apr_pool_t *pool)
+    |{
+    |    return apr_palloc(pool, 16);
+    |}
+    |
+    |void make_pool(apr_pool_t **out, apr_pool_t *parent)
+    |{
+    |    apr_pool_create(out, parent);
+    |}
+    |
+    |void recycle_pool(apr_pool_t *pool)
+    |{
+    |    apr_pool_clear(pool);
+    |}
+    |
+    |void drop_pool(apr_pool_t *pool)
+    |{
+    |    apr_pool_destroy(pool);
+    |}
+    |
+    |void *take_from_context(void)
+    |{
+    |    return palloc(16);
+    |}
+    |
+    |void give_back(void *p)
+    |{
+    |    pfree(p);
+    |}
+    |""".stripMargin,
+    "regions.c"
+  )
+  new MemoryApiPass(regionCpg, Some(regionConfig)).createAndApply()
+
+  private def regionCall(name: String): Call = regionCpg.call.name(name).head
+
+  // The declared reference roles, the way a project's in-house config names its reference-counted
+  // pair, beside a release the analysed tree's own body concludes.
+  private val refConfig =
+      """{"version": 1, "apis": [
+        |  {"name": "obj_keep", "acquire": 1},
+        |  {"name": "obj_drop", "release": 1}
+        |]}""".stripMargin
+
+  private val refConfigCpg: Cpg = code(
+    """
+    |void obj_keep(void *o);
+    |void obj_drop(void *o);
+    |
+    |void keep_once(void *o)
+    |{
+    |    obj_keep(o);
+    |}
+    |
+    |void drop_once(void *o)
+    |{
+    |    obj_drop(o);
+    |}
+    |""".stripMargin,
+    "ref_roles.c"
+  )
+  new MemoryApiPass(refConfigCpg, Some(refConfig)).createAndApply()
+
+  private val inferredRefCpg: Cpg = code(
+    """
+    |#include <stdlib.h>
+    |
+    |typedef struct gref { int refs; } gref_t;
+    |void gref_unref(gref_t *o)
+    |{
+    |    if (--o->refs == 0) {
+    |        free(o);
+    |    }
+    |}
+    |void gref_ref(gref_t *o)
+    |{
+    |    o->refs++;
+    |}
+    |void balanced_ok(gref_t *o)
+    |{
+    |    gref_ref(o);
+    |    gref_unref(o);
+    |}
+    |""".stripMargin,
+    "ref_inferred.c"
+  )
+  new MemoryApiPass(inferredRefCpg).createAndApply()
+
+  private def refCall(name: String): Call = refConfigCpg.call.name(name).head
 
   "MemoryApiPass" should {
 
@@ -143,6 +262,111 @@ class MemoryApiPassTests extends CCodeToCpgSuite:
           )
           call("memcpy").tag.name.l should not contain "memory-safety"
           call("memcpy").argument(1).tag.name.l should contain("memory-safety")
+      }
+  }
+
+  "the declared region roles" should {
+
+      "tag a region allocation with its region argument" in {
+          val aprPalloc = regionCall("apr_palloc")
+          aprPalloc.tag.name("mem-region").value.l shouldBe List("alloc:1")
+          // the allocation family the entry declares travels beside the region
+          aprPalloc.tag.name("mem-alloc").value.l shouldBe List("aprpool")
+          aprPalloc.tag.name.l should contain("memory-safety")
+      }
+
+      "tag a create with the out-pointer that receives the region" in {
+          regionCall("apr_pool_create").tag.name("mem-region").value.l shouldBe List("create:1")
+      }
+
+      "tag a reset and a destroy with the region they empty" in {
+          regionCall("apr_pool_clear").tag.name("mem-region").value.l shouldBe List("reset:1")
+          regionCall("apr_pool_destroy").tag.name("mem-region").value.l shouldBe List("destroy:1")
+      }
+
+      "tag a context-less allocation with the global it draws from" in {
+          val palloc = regionCall("palloc")
+          palloc.tag.name("mem-region").value.l shouldBe List("alloc:ctx:CurrentMemoryContext")
+          palloc.tag.name("mem-alloc").value.l shouldBe List("pgmem")
+      }
+
+      "leave a release without a region role untagged" in {
+          regionCall("pfree").tag.name.l should not contain "mem-region"
+          regionCall("pfree").tag.name("mem-free").value.l shouldBe List("pgmem")
+      }
+  }
+
+  "the declared reference roles" should {
+
+      "tag the object a declared acquire takes a reference of" in {
+          val keep = refCall("obj_keep")
+          keep.tag.name("mem-acquire").value.l shouldBe List("1")
+          keep.tag.name.l should contain("memory-safety")
+          keep.tag.name.l should not contain "mem-release"
+      }
+
+      "tag the object a declared release drops a reference of" in {
+          val drop = refCall("obj_drop")
+          drop.tag.name("mem-release").value.l shouldBe List("1")
+          drop.tag.name.l should contain("memory-safety")
+          drop.tag.name.l should not contain "mem-free"
+      }
+
+      "tag the call sites of a body-concluded release like a declared one" in {
+          inferredRefCpg.call.name("gref_unref").tag.name("mem-release").value.l shouldBe List(
+            "1"
+          )
+      }
+
+      "tag the call sites of a grow fact as the acquire" in {
+          inferredRefCpg.call.name("gref_ref").tag.name("mem-acquire").value.l shouldBe List(
+            "1"
+          )
+      }
+  }
+
+  "a profile entry's region roles" should {
+
+      "not fire for a file that includes none of the profile's headers" in {
+          val withoutHeader = code(
+            """
+            |void *apr_palloc(void *pool, unsigned long size);
+            |
+            |void *no_header_take(void *pool)
+            |{
+            |    return apr_palloc(pool, 16);
+            |}
+            |""".stripMargin,
+            "no_apr_header.c"
+          )
+          new MemoryApiPass(withoutHeader).createAndApply()
+          withoutHeader.call.name("apr_palloc").tag.name.l should not contain "mem-region"
+          withoutHeader.call.name("apr_palloc").tag.name.l should not contain "mem-alloc"
+      }
+
+      "fire for the file that includes the profile's header" in {
+          val headersDir = better.files.File(
+            java.nio.file.Paths
+                .get(getClass.getClassLoader.getResource("profiles/apr/apr_pools.h").toURI)
+                .getParent
+          )
+          val withHeader = code(
+            """
+            |#include <apr_pools.h>
+            |
+            |void *header_take(apr_pool_t *pool)
+            |{
+            |    return apr_palloc(pool, 16);
+            |}
+            |""".stripMargin,
+            "with_apr_header.c"
+          ).withConfig(
+            Config(includeComments = true).withIncludePaths(Set(headersDir.pathAsString))
+          )
+          new MemoryApiPass(withHeader).createAndApply()
+          withHeader.call.name("apr_palloc").tag.name("mem-region").value.l shouldBe List(
+            "alloc:1"
+          )
       }
   }
 

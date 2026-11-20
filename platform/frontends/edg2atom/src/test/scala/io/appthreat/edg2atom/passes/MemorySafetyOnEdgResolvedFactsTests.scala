@@ -62,16 +62,33 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
       |    copy_len(buf, user, 8);
       |}
       |
-      |void bad_walk_then_free(char *data) {
+      |void bad_walk_then_free(const char *userInput) {
+      |    char *data = (char *)malloc(64);
+      |    if (data == NULL) exit(-1);
+      |    strncpy(data, userInput, 63);
+      |    data[63] = 0;
       |    for (; *data != '\0'; data++) {
       |        if (*data == 'x') break;
       |    }
       |    free(data);
       |}
-      |void good_walk_a_copy(char *data) {
-      |    char *cursor = data;
+      |void good_walk_a_copy(const char *userInput) {
+      |    char *data = (char *)malloc(64);
+      |    char *cursor;
+      |    if (data == NULL) exit(-1);
+      |    strncpy(data, userInput, 63);
+      |    data[63] = 0;
+      |    cursor = data;
       |    for (; *cursor != '\0'; cursor++) {
       |        if (*cursor == 'x') break;
+      |    }
+      |    free(data);
+      |}
+      |/* a walk over a pointer no allocation in this frame produced: where the
+      |   walk started is the caller's contract, and the release keeps out of it */
+      |void silent_walk_then_free(char *data) {
+      |    for (; *data != '\0'; data++) {
+      |        if (*data == 'x') break;
       |    }
       |    free(data);
       |}
@@ -494,6 +511,9 @@ class MemorySafetyOnEdgResolvedFactsTests extends Code2CpgFixture(() => new EdgR
                 .collectAll[Call].l
             walks.map(_.code) shouldBe List("data++")
             findingsIn("good_walk_a_copy") should not contain "MS-ALLOC-006"
+        }
+        "stay silent when the walk is over a pointer no allocation in this frame produced" in {
+            findingsIn("silent_walk_then_free") should not contain "MS-ALLOC-006"
         }
     }
 

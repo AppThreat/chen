@@ -107,25 +107,25 @@ class EdgShortNameAttributionTests extends AnyWordSpec with Matchers:
     * The stub is compiled, not scripted: the runner's command line carries parentheses (a
     * `--define_macro` value such as `_Noreturn=__attribute__((noreturn))`) that a batch file's
     * `for` loop breaks on, and a script that misreads it exits 0 with an output file of no bytes,
-    * which the runner reads as no export. A compiled program receives each argument as one word,
-    * as edga does. The compiler is `gcc`, `clang` or `cc`, and on Windows, where none of those may
-    * be installed, the .NET Framework's `csc`.
+    * which the runner reads as no export. A compiled program receives each argument as one word, as
+    * edga does. The compiler is `gcc`, `clang` or `cc`, and on Windows, where none of those may be
+    * installed, the .NET Framework's `csc`.
     */
   private def withStubEdga(dir: File)(test: File => Unit): Unit =
-    File.usingTemporaryDirectory("edg2atom-edga-stub") { stubDir =>
-      (stubDir / "edga-stub-unit.json").write(cannedUnit(dir))
-      val stub = compileStub(stubDir)
-      assume(
-        stub.isDefined,
-        "no compiler for the edga stub: the suite builds one from C, or from C# on Windows"
-      )
-      val saved = sys.props.get("edga.path")
-      sys.props("edga.path") = stub.get.pathAsString
-      try test(stubDir)
-      finally saved match
-          case Some(p) => sys.props("edga.path") = p
-          case None    => sys.props.remove("edga.path")
-    }
+      File.usingTemporaryDirectory("edg2atom-edga-stub") { stubDir =>
+        (stubDir / "edga-stub-unit.json").write(cannedUnit(dir))
+        val stub = compileStub(stubDir)
+        assume(
+          stub.isDefined,
+          "no compiler for the edga stub: the suite builds one from C, or from C# on Windows"
+        )
+        val saved = sys.props.get("edga.path")
+        sys.props("edga.path") = stub.get.pathAsString
+        try test(stubDir)
+        finally saved match
+              case Some(p) => sys.props("edga.path") = p
+              case None    => sys.props.remove("edga.path")
+      }
   end withStubEdga
 
   /** The stub, compiled from C, or from C# where Windows has no C compiler on the `PATH`. */
@@ -156,22 +156,22 @@ class EdgShortNameAttributionTests extends AnyWordSpec with Matchers:
     "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe"
   ).find(p => new java.io.File(p).isFile)
 
-  /** Runs `command` to completion, true when it exits 0: whether the compiler is there and took
-    * the invocation.
+  /** Runs `command` to completion, true when it exits 0: whether the compiler is there and took the
+    * invocation.
     */
   private def runs(command: Seq[String]): Boolean =
-    try
-      val process = new ProcessBuilder(command*).redirectErrorStream(true).start()
-      process.getInputStream.readAllBytes()
-      if process.waitFor(2, TimeUnit.MINUTES) then process.exitValue() == 0
-      else
-        process.destroyForcibly()
-        false
-    catch case _: Exception => false
+      try
+        val process = new ProcessBuilder(command*).redirectErrorStream(true).start()
+        process.getInputStream.readAllBytes()
+        if process.waitFor(2, TimeUnit.MINUTES) then process.exitValue() == 0
+        else
+          process.destroyForcibly()
+          false
+      catch case _: Exception => false
 
-  /** The stub's evidence that the runner's command line reached it whole: its log names the file
-    * to write behind `--edga-out` and the unit last, each as the single argument the runner sent.
-    * A stub that parsed none of the line leaves the output file empty, which the runner reads as no
+  /** The stub's evidence that the runner's command line reached it whole: its log names the file to
+    * write behind `--edga-out` and the unit last, each as the single argument the runner sent. A
+    * stub that parsed none of the line leaves the output file empty, which the runner reads as no
     * export, and nothing lands in the graph.
     */
   private def checkStubLog(log: File): Unit =
@@ -179,38 +179,37 @@ class EdgShortNameAttributionTests extends AnyWordSpec with Matchers:
     val args = log.lineIterator.toSeq
     args should contain("== invocation ==")
     withClue("the stub found no --edga-out argument in the runner's command line: ") {
-      val i = args.indexOf("--edga-out")
-      i should be > 0
-      args(i + 1) should endWith(".json")
+        val i = args.indexOf("--edga-out")
+        i should be > 0
+        args(i + 1) should endWith(".json")
     }
     args should contain("--edga-root")
     args.filter(_.endsWith("main.c")) should not be empty
     args should not contain "no --edga-out"
     args should not contain "no unit file"
-  end checkStubLog
 
   "a project header the exporter's root check misses" should {
       "still be written, named by its real path in the project" in {
           project(main, header) { dir =>
               withStubEdga(dir) { stubDir =>
-                  graph(dir) { cpg =>
-                    val h = cpg.method.nameExact("h").filter(_.block.astChildren.nonEmpty).l
-                    h.size shouldBe 1
-                    h.head.filename shouldBe "proj_hdr.h"
-                    // the unit itself is unaffected
-                    cpg.method.nameExact("main").filter(_.block.astChildren.nonEmpty).size shouldBe 1
-                  }
-                  checkStubLog(stubDir / "edga-stub-argv.log")
+                graph(dir) { cpg =>
+                  val h = cpg.method.nameExact("h").filter(_.block.astChildren.nonEmpty).l
+                  h.size shouldBe 1
+                  h.head.filename shouldBe "proj_hdr.h"
+                  // the unit itself is unaffected
+                  cpg.method.nameExact("main").filter(_.block.astChildren.nonEmpty).size shouldBe 1
+                }
+                checkStubLog(stubDir / "edga-stub-argv.log")
               }
           }
       }
   }
 
-  /** The stub, in C. It finds the canned unit and its log next to itself, answers
-    * `--edga-version`, and copies the unit over the file the argument behind `--edga-out` names.
+  /** The stub, in C. It finds the canned unit and its log next to itself, answers `--edga-version`,
+    * and copies the unit over the file the argument behind `--edga-out` names.
     */
   private val StubSource: String =
-    """#include <stdio.h>
+      """#include <stdio.h>
       |#include <stdlib.h>
       |#include <string.h>
       |
@@ -276,7 +275,7 @@ class EdgShortNameAttributionTests extends AnyWordSpec with Matchers:
 
   /** The same stub, in C#, for the hosts where no C compiler is installed. */
   private val StubSourceCSharp: String =
-    """// The same stand-in, compiled by csc where no C compiler is installed.
+      """// The same stand-in, compiled by csc where no C compiler is installed.
       |using System;
       |using System.IO;
       |using System.Reflection;
