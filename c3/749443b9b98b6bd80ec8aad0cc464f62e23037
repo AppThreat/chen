@@ -1,0 +1,33 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/types/TemplateTypeTests.scala
+  s_30893fc78161a5::t_55da263fdee347 90-100
+  s_30893fc78161a5::t_6035d1f927c16a 5
+  s_30893fc78161a5::t_dd2a3b19bbeeb9 101-103
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplatesLambdasTests.scala
+  s_30893fc78161a5::t_08e3acb503941a 79-82
+  s_30893fc78161a5::t_1dd7bb5e4c0512 5
+  s_30893fc78161a5::t_021724dd099166 83
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplateTagsTests.scala
+  s_30893fc78161a5::t_4865e0dfc58602 193-196,198-212,214-237,239,246-278,280-281
+  s_30893fc78161a5::t_0fb909c71cf498 238,279
+  s_30893fc78161a5::t_db8ebc221ee925 240-245
+  s_30893fc78161a5::t_d0a41935abeb09 1-98,102-172,174-180,182-184,186-192,282
+  s_30893fc78161a5::t_1a3c640a3b190c 173,181,185
+  s_30893fc78161a5::t_b760a1c5165f18 197,213
+  s_30893fc78161a5::t_dafd18e13766c1 99-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c3749443b9b98b6bd80ec8aad0cc464f62e23037",
+  "prompts": {},
+  "sessions": {
+    "s_30893fc78161a5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
