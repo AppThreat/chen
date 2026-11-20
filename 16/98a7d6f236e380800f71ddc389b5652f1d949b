@@ -1,0 +1,21 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  s_30893fc78161a5::t_8340654589c20b 105-106,230-232,235-248,302-307,320-323,384-386
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplateTagsTests.scala
+  s_30893fc78161a5::t_8340654589c20b 37-45,47-53,55-65,67-72,74-77,79-87,89-93,98-109,111-120,122-131,133-139,141-158,160-164,169-174,176-179,182-186,188-191,196-197,212-213,235-246,248-259,263-265,270-271,274-275,278-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1698a7d6f236e380800f71ddc389b5652f1d949b",
+  "prompts": {},
+  "sessions": {
+    "s_30893fc78161a5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
