@@ -1,0 +1,77 @@
+platform/frontends/c2cpg/src/test/resources/toolchains/clang-cl-mode/compile_commands.json
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/ccache/cached_build.c
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-7
+platform/frontends/c2cpg/src/test/resources/toolchains/empp/wasm_entry.cpp
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/tcc/compile_commands.json
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/armclang/cortex_m_irq.c
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-14
+platform/frontends/c2cpg/src/test/resources/toolchains/emcc/compile_commands.json
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/armclang/compile_commands.json
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/clang-cl-mode/msvc_mode.cpp
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-11
+platform/frontends/c2cpg/src/test/resources/toolchains/arm-none-eabi-gcc/compile_commands.json
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/emcc/wasm_entry.c
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/tcc/small_kernel.c
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/iccarm/compile_commands.json
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/ccache/compile_commands.json
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/cl430/msp430_blink.c
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/cl430/compile_commands.json
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cpp/compile_commands.json
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/arm-none-eabi-gcc/bare_metal_delay.c
+  s_8f0d9416003c6b::t_77c99134efc2b7 1-11
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cc/compile_commands.json
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/icx/simd_dot.c
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-10
+platform/frontends/c2cpg/src/test/resources/toolchains/armcl/ti_arm_task.c
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-9
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cpp/clang_guarded.cpp
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/armcl/compile_commands.json
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/empp/compile_commands.json
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/iccarm/arm_irq.c
+  s_8f0d9416003c6b::t_871cbc7e59b5e8 1-13
+platform/frontends/c2cpg/src/test/resources/toolchains/nvcc/compile_commands.json
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cc/clang_guarded.c
+  s_8f0d9416003c6b::t_c7a13fb2d12ac7 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/icpx/compile_commands.json
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/icx/compile_commands.json
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/nvcc/vec_add.cu
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-7
+platform/frontends/c2cpg/src/test/resources/toolchains/icpx/simd_dot.cpp
+  s_8f0d9416003c6b::t_6490430afd9b4f 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9e083aa9b772da7b068afcae4b514ea2a9881e5",
+  "prompts": {},
+  "sessions": {
+    "s_8f0d9416003c6b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
