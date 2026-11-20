@@ -1,0 +1,22 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_c36833595a851f::t_d5243f1f775abf 229-235,251
+  s_c36833595a851f::t_bd5d6dc7fbf0df 218-228,236,239-241
+  s_c36833595a851f::t_a3041e131c969c 56-64
+  s_c36833595a851f::t_296882b47d499a 306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "56aec2e413cd96c4209171caf0bb0fe32ab5b1d2",
+  "prompts": {},
+  "sessions": {
+    "s_c36833595a851f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-19915eba-3dbc-4f53-a095-3ecefe5cb1c3-actor_1_3",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
