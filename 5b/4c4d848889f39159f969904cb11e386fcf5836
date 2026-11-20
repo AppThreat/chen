@@ -1,0 +1,22 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/parser/EdgaRunner.scala
+  s_8f0d9416003c6b::t_859684cae36e15 116
+  s_8f0d9416003c6b::t_bd50423d7d564b 180-186
+  s_8f0d9416003c6b::t_4f9620dc3700ca 405-416,418-458
+  s_8f0d9416003c6b::t_13bd40ad3a9fb8 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5b4c4d848889f39159f969904cb11e386fcf5836",
+  "prompts": {},
+  "sessions": {
+    "s_8f0d9416003c6b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
