@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/AllocationStatePassTests.scala
+  s_870276876982bd::t_8353cf4009f2f8 1553-1663,1676-1741,2446-2471
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/AllocationStatePass.scala
+  s_870276876982bd::t_672a40a2aced6b 1255-1262,1285,1430,1451,1461,1500-1501,1507-1508,1888,2200-2201,2934-2948,2975-2981
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/MemorySemanticsPass.scala
+  s_870276876982bd::t_c669468b484274 1251-1263,1265-1273,1340-1342,1344,1364-1368,1520-1525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3aa9e0bfcce7f65221f9eb9535e59fb902e99fee",
+  "prompts": {},
+  "sessions": {
+    "s_870276876982bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c678bfd8-2aba-4f7e-aa22-0bbbaf027e71",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
