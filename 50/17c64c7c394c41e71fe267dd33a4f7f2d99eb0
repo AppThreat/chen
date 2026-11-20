@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/PredefinedMacrosTests.scala
+  s_8f0d9416003c6b::t_b8e1fac0656821 395-399,404,410-415
+  s_8f0d9416003c6b::t_8ef8081972c7b4 416
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5017c64c7c394c41e71fe267dd33a4f7f2d99eb0",
+  "prompts": {},
+  "sessions": {
+    "s_8f0d9416003c6b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
