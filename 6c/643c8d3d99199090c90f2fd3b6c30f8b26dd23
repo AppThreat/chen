@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/HeaderFromOwnerTests.scala
+  s_c36833595a851f::t_72de4cfa539b96 206-220,222-243,247-256,258
+  s_c36833595a851f::t_d5243f1f775abf 244-246,257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6c643c8d3d99199090c90f2fd3b6c30f8b26dd23",
+  "prompts": {},
+  "sessions": {
+    "s_c36833595a851f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-19915eba-3dbc-4f53-a095-3ecefe5cb1c3-actor_1_3",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
