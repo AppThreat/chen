@@ -1,0 +1,27 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/HeaderFromOwnerTests.scala
+  s_2f44090c55bfc0::t_498b2e78ef786b 11-12,31-34,36-37,45-49,51,63-66,90-92,119-121,142-149,162,185-192
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CdtParser.scala
+  s_2f44090c55bfc0::t_498b2e78ef786b 226-232
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/HeaderFromOwner.scala
+  s_2f44090c55bfc0::t_498b2e78ef786b 4-13,58-60,73-80,82-83,88-94,99-100,106-117,141-150,153-168
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_2f44090c55bfc0::t_498b2e78ef786b 256-261,267
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_2f44090c55bfc0::t_498b2e78ef786b 6-10,256-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e7d3b5a2f7adfd929d07719b78050f9b533fcb3",
+  "prompts": {},
+  "sessions": {
+    "s_2f44090c55bfc0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_3",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
