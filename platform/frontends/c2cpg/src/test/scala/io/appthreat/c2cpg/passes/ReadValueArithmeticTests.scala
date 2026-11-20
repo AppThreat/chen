@@ -158,8 +158,20 @@ class ReadValueArithmeticTests extends DataFlowCodeToCpgSuite:
       |    data = dataBuf;
       |    free(data);
       |}
-      |void bad_free_after_walk(char *data)
+      |/* a walk over a pointer no allocation in this frame produced: where the
+      |   walk started is the caller's contract, and the release keeps out of it */
+      |void silent_walk_then_free(char *data)
       |{
+      |    for (; *data != '\0'; data++)
+      |        ;
+      |    free(data);
+      |}
+      |void bad_free_after_walk_over_allocation(const char *userInput)
+      |{
+      |    char *data = (char *)malloc(64);
+      |    if (data == NULL) return;
+      |    strncpy(data, userInput, 63);
+      |    data[63] = 0;
       |    for (; *data != '\0'; data++)
       |        ;
       |    free(data);
@@ -294,8 +306,8 @@ class ReadValueArithmeticTests extends DataFlowCodeToCpgSuite:
       "report the walk that moved the freed pointer, at both ends" in {
           check(
             "MS-ALLOC-006",
-            Seq("bad_free_after_walk"),
-            Seq("good_free_of_cursor")
+            Seq("bad_free_after_walk_over_allocation"),
+            Seq("good_free_of_cursor", "silent_walk_then_free")
           )
       }
       "bound a loop write by its own loop's test, not another loop's" in {

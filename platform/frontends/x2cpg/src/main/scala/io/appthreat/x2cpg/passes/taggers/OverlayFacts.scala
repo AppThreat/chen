@@ -277,6 +277,86 @@ private[taggers] object OverlayFacts:
   def isAssignmentOperator(name: String): Boolean =
       name.startsWith("<operator>.assignment") || name.startsWith("<operators>.assignment")
 
+  /** Whether an identifier still holds the value its method received in the parameter of the same
+    * name: every definition reaching it is the parameter (or the method's entry), directly or
+    * through reads the data flow counts as definitions (the operand of `p == NULL`). `p = p->next;
+    * free(p)` releases another block under the parameter's name, and so does a free after `p += 4`
+    * or `p--`.
+    */
+  def holdsParameterValue(i: Identifier): Boolean =
+    val visiting = mutable.HashSet.empty[Long]
+    def holds(n: StoredNode, depth: Int): Boolean = n match
+      case p: MethodParameterIn => p.name == i.name
+      case _: Method            => true
+      case d: Identifier if d.name == i.name =>
+          if !visiting.add(d.id) then true
+          else if depth <= 0 then false
+          else
+            val written = d._astIn.collectFirst { case w: Call => w }.exists(w =>
+                (isAssignmentOperator(w.name) || PointerUpdates.contains(w.name)) &&
+                    w.argumentOption(1).exists(_.id == d.id)
+            )
+            !written && reachingDefsIn(d, maxHops = 1).forall(holds(_, depth - 1))
+      // a call the variable was handed to reads it (the data flow lists the call as a
+      // definition of its pointer arguments): the value passes through
+      case c: Call if !isAssignmentOperator(c.name) && !PointerUpdates.contains(c.name) =>
+          val operands = handedTo(c, i.name)
+          operands.nonEmpty && operands.forall(holds(_, depth - 1))
+      case _ => false
+    reachingDefsIn(i, maxHops = 1).forall(holds(_, 8))
+  end holdsParameterValue
+
+  /** The writes that give an identifier its value at a read: the parameter, the method's entry, or
+    * the identifiers assignments and in-place updates write, followed through the reads the data
+    * flow also counts as definitions (the operand of `p == NULL`). Two reads of one variable with
+    * the same writes read the same value.
+    */
+  def writesReaching(i: Identifier): Set[Long] =
+    val visiting = mutable.HashSet.empty[Long]
+    val found    = mutable.LinkedHashSet.empty[Long]
+    def walk(n: StoredNode, depth: Int): Unit = n match
+      case p: MethodParameterIn => found += p.id
+      case m: Method            => found += m.id
+      case w: Call if isAssignmentOperator(w.name) || PointerUpdates.contains(w.name) =>
+          found += w.id
+      case c: Call =>
+          // a call the variable was handed to: the value it read passes through
+          val operands = handedTo(c, i.name)
+          if operands.isEmpty || depth <= 0 then found += c.id
+          else operands.foreach(walk(_, depth - 1))
+      case d: Identifier if d.name == i.name && visiting.add(d.id) =>
+          val writer = d._astIn.collectFirst { case w: Call => w }.filter(w =>
+              (isAssignmentOperator(w.name) || PointerUpdates.contains(w.name)) &&
+                  w.argumentOption(1).exists(_.id == d.id)
+          )
+          writer match
+            case Some(w) => found += w.id
+            case None if depth > 0 =>
+                reachingDefsIn(d, maxHops = 1).foreach(walk(_, depth - 1))
+            case None => found += d.id
+      case _ => ()
+    reachingDefsIn(i, maxHops = 1).foreach(walk(_, 8))
+    found.toSet
+  end writesReaching
+
+  /** The identifiers of `name` a call reads among its arguments (casts and an address-of stripped),
+    * as the data-flow definitions they stand for.
+    */
+  def handedTo(c: Call, name: String): List[Identifier] =
+    def root(e: AstNode): Option[Identifier] = e match
+      case i: Identifier => Option.when(i.name == name)(i)
+      case x: Call if x.name == "<operator>.cast" || x.name == "<operator>.addressOf" =>
+          x.argument.l.lastOption.flatMap(root)
+      case _ => None
+    c.argument.l.flatMap(root)
+
+  private val PointerUpdates = Set(
+    "<operator>.preIncrement",
+    "<operator>.postIncrement",
+    "<operator>.preDecrement",
+    "<operator>.postDecrement"
+  )
+
   /** Pointer arithmetic, as the frontend tagged it
     * ([[io.appthreat.x2cpg.Defines.PointerArithmeticTag]]): the kind (`add`, `sub`, `diff`) and the
     * argument index of the pointer operand (1 for `diff`).

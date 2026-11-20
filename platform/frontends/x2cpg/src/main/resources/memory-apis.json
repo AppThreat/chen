@@ -25,6 +25,13 @@
     "the two would turn a checked fd into a null-deref finding. Neither does mmap, which fails with ",
     "MAP_FAILED ((void *) -1), not NULL: its correct check is no null guard. The pass emits `nullable-return` on the ",
     "call for MS-NULL-001: a dereference of the result with no narrowing guard between call and use.",
+    "Descriptor families: every int descriptor is one `fd` family - open, openat, creat, socket, ",
+    "accept, accept4, dup and dup2 hand out the same kind of handle, and close releases it; ",
+    "closesocket (declared in winsock2.h) is that release's Windows spelling, the one Winsock ",
+    "entry beside the POSIX names. `FILE *` and `DIR` streams keep the `file` family (fopen, ",
+    "fdopen, freopen, tmpfile, opendir; released by fclose and closedir), so close() of a stream ",
+    "and fclose of a descriptor are family mismatches while close() of a socket is a correct ",
+    "pairing - a separate socket family reported exactly that pairing as a mismatch.",
     "The str*-search family reads through its HAYSTACK, which is argument 1 (`src: 1`), not the ",
     "needle/char, so passing a pointer to be searched counts as a read-through; `strlen` is a ",
     "reader of the same shape. These are the entries that decide whether handing a possibly-null ",
@@ -35,7 +42,8 @@
     "destination size the compiler worked out, and some move their other arguments: each has its own",
     "entry, with `api` naming the API its tags are valued with and `objectSize` that argument.",
     "`untrustedPrefixes` names the input functions of verification benchmarks by prefix: SV-COMP's `__VERIFIER_nondet_int` and CBMC's `nondet_*` return any value - the program's input - so their results are untrusted like getenv's.",
-    "The readers that fill a caller's buffer (read, recv, fgets, fread, ...) declare it as `dst` beside `untrustedRead`: the bytes they write are bounded by their length argument, which the destination must hold (CBMC's library models assert `w_ok(buf, n)`)."
+    "The readers that fill a caller's buffer (read, recv, fgets, fread, ...) declare it as `dst` beside `untrustedRead`: the bytes they write are bounded by their length argument, which the destination must hold (CBMC's library models assert `w_ok(buf, n)`).",
+    "Profiles: a library profile declares the memory management of a translation unit that includes one of its headers, matched by basename. Entries use the shape above plus roles nothing in an analysed tree can confirm, because the declarations sit in headers outside the input: `release`, `acquire`, `steal` and `retains` (1-based parameter indices; `retains` names the argument whose resource the result takes over, as fdopen takes its descriptor), `cleanup` (the call frees the pointee of a pointer-to-pointer argument), `region` (`{\"role\": \"create\"}` when the call's result is a new region, `{\"role\": \"create\", \"arg\": <index>}` when the created region is stored through an out-pointer argument, `{\"role\": \"allocate\", \"arg\": <index>}` when the region is an argument, `{\"role\": \"allocate\", \"context\": \"<global>\"}` when it is a named global, `{\"role\": \"reset\" | \"destroy\", \"arg\": <index>}` for calls that empty or tear down their region argument), and `source`, naming the header or documentation page that states the behaviour. Families say which releases are interchangeable: the kernel's `slab`, `vmalloc` and `kvmalloc` families are released by kfree, vfree and kvfree respectively, and kvfree's `free` lists all three because it accepts each, and each pool, context or request library gets a family of its own (`pgmem`, `aprpool`, `ngxpool`, `pymem`, `zendmm`); glib's allocators and nginx's malloc wrappers sit on the heap family because their frees are free() on the platforms in question, g_free since GLib 2.46 and ngx_free by its define. A malformed role drops its entry with a note on stderr."
   ],
   "untrustedPrefixes": [
     "__VERIFIER_nondet_",
@@ -309,6 +317,7 @@
     {
       "name": "fdopen",
       "alloc": "file",
+      "retains": 1,
       "nullableReturn": true
     },
     {
@@ -317,20 +326,46 @@
       "nullableReturn": true
     },
     {
+      "name": "tmpfile",
+      "alloc": "file",
+      "nullableReturn": true,
+      "source": "stdio's tmpfile(3), POSIX and Linux man-pages: creates a temporary file opened for update, removed on close; returns NULL when no file could be created"
+    },
+    {
       "name": "fclose",
       "free": "file"
     },
     {
       "name": "open",
-      "alloc": "file"
+      "alloc": "fd"
     },
     {
       "name": "openat",
-      "alloc": "file"
+      "alloc": "fd"
+    },
+    {
+      "name": "creat",
+      "alloc": "fd",
+      "source": "creat(2), POSIX and Linux man-pages: equivalent to open(path, O_WRONLY | O_CREAT | O_TRUNC, mode); returns a descriptor or -1"
+    },
+    {
+      "name": "dup",
+      "alloc": "fd",
+      "source": "dup(2), POSIX and Linux man-pages: returns a new descriptor referring to the same open file description as oldfd, or -1"
+    },
+    {
+      "name": "dup2",
+      "alloc": "fd",
+      "source": "dup2(2), POSIX and Linux man-pages: makes oldfd's copy on newfd and returns newfd, or -1"
     },
     {
       "name": "close",
-      "free": "file"
+      "free": "fd"
+    },
+    {
+      "name": "closesocket",
+      "free": "fd",
+      "source": "closesocket is declared in winsock2.h (Winsock2, https://learn.microsoft.com/windows/win32/api/winsock2/nf-winsock2-closesocket): closes a socket descriptor, the Windows spelling of close"
     },
     {
       "name": "opendir",
@@ -343,12 +378,18 @@
     },
     {
       "name": "socket",
-      "alloc": "socket"
+      "alloc": "fd"
     },
     {
       "name": "accept",
-      "alloc": "socket",
+      "alloc": "fd",
       "untrustedRead": 2
+    },
+    {
+      "name": "accept4",
+      "alloc": "fd",
+      "untrustedRead": 2,
+      "source": "accept4(2), Linux man-pages: accept with a flags argument; returns a descriptor or -1 and fills the peer address buffer like accept"
     },
     {
       "name": "read",
@@ -700,6 +741,322 @@
       "name": "putws",
       "nonRetaining": true,
       "readsFrom": 1
+    }
+  ],
+  "profiles": [
+    {
+      "name": "glib",
+      "headers": ["glib.h", "gmem.h", "glib-object.h", "gio/gio.h", "gtk/gtk.h"],
+      "entries": [
+        {
+          "name": "g_new0",
+          "alloc": "heap",
+          "count": 2,
+          "source": "glib/gmem.h (g_new0); https://docs.gtk.org/glib/func.new0.html: allocates n_structs zeroed elements of struct_type, so the size is the product of the element size and argument 2"
+        },
+        {
+          "name": "g_free",
+          "free": "heap",
+          "source": "glib/gmem.h (g_free); https://docs.gtk.org/glib/memory.html: since GLib 2.46 g_malloc is hardcoded to the system malloc implementation, so g_free is free() on every platform GLib supports"
+        },
+        {
+          "name": "g_steal_pointer",
+          "steal": 1,
+          "source": "glib/gmem.h (g_steal_pointer); https://docs.gtk.org/glib/func.steal_pointer.html: sets pp to NULL, returning the value that was there before"
+        },
+        {
+          "name": "g_autoptr_cleanup_generic_gfree",
+          "cleanup": true,
+          "source": "glib/glib-autocleanups.h (g_autoptr_cleanup_generic_gfree): the cleanup g_autofree attaches, which calls g_free on the pointer its argument points to"
+        }
+      ]
+    },
+    {
+      "name": "linux",
+      "headers": ["linux/slab.h", "linux/kref.h", "linux/gfp.h", "linux/vmalloc.h", "linux/device.h"],
+      "entries": [
+        {
+          "name": "kmalloc",
+          "len": 1,
+          "alloc": "slab",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kmalloc); https://docs.kernel.org/core-api/mm-api.html: the normal way to allocate from the slab allocator, returns NULL when the request fails"
+        },
+        {
+          "name": "kzalloc",
+          "len": 1,
+          "alloc": "slab",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kzalloc); https://docs.kernel.org/core-api/mm-api.html: allocates from the slab allocator like kmalloc and the memory is set to zero"
+        },
+        {
+          "name": "vmalloc",
+          "len": 1,
+          "alloc": "vmalloc",
+          "nullableReturn": true,
+          "source": "linux/vmalloc.h (vmalloc); https://docs.kernel.org/core-api/mm-api.html: allocates virtually contiguous memory of the requested size, returns NULL when the request cannot be satisfied"
+        },
+        {
+          "name": "kcalloc",
+          "count": 1,
+          "len": 2,
+          "alloc": "slab",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kcalloc); https://docs.kernel.org/core-api/mm-api.html: allocates memory for an array of argument 1 elements of argument 2 bytes from the slab allocator, set to zero"
+        },
+        {
+          "name": "kmalloc_array",
+          "count": 1,
+          "len": 2,
+          "alloc": "slab",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kmalloc_array); https://docs.kernel.org/core-api/mm-api.html: allocates memory for an array of argument 1 elements of argument 2 bytes from the slab allocator"
+        },
+        {
+          "name": "kvmalloc",
+          "len": 1,
+          "alloc": "kvmalloc",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kvmalloc); https://docs.kernel.org/core-api/mm-api.html: tries kmalloc and falls back to vmalloc, so the memory must be freed with kvfree"
+        },
+        {
+          "name": "kvzalloc",
+          "len": 1,
+          "alloc": "kvmalloc",
+          "nullableReturn": true,
+          "source": "linux/slab.h (kvzalloc); https://docs.kernel.org/core-api/mm-api.html: kvmalloc with the memory set to zero, freed with kvfree"
+        },
+        {
+          "name": "kfree",
+          "free": "slab",
+          "source": "linux/slab.h (kfree); https://docs.kernel.org/core-api/mm-api.html: frees memory allocated with kmalloc; it must not be given vmalloc memory"
+        },
+        {
+          "name": "vfree",
+          "free": "vmalloc",
+          "source": "linux/vmalloc.h (vfree); https://docs.kernel.org/core-api/mm-api.html: releases memory allocated by vmalloc"
+        },
+        {
+          "name": "kvfree",
+          "free": ["slab", "vmalloc", "kvmalloc"],
+          "source": "linux/slab.h (kvfree declaration); mm/slub.c kvfree() kerneldoc: frees memory allocated by any of vmalloc(), kmalloc() or kvmalloc()"
+        },
+        {
+          "name": "devm_kzalloc",
+          "len": 2,
+          "nullableReturn": true,
+          "region": {
+            "role": "allocate",
+            "arg": 1
+          },
+          "source": "linux/device.h (devm_kzalloc); https://docs.kernel.org/driver-api/driver-model/devres.html and devm_kzalloc(9): managed kzalloc whose memory is freed automatically on driver detach, owned by the dev argument 1"
+        },
+        {
+          "name": "devm_kcalloc",
+          "count": 2,
+          "len": 3,
+          "nullableReturn": true,
+          "region": {
+            "role": "allocate",
+            "arg": 1
+          },
+          "source": "linux/device.h (devm_kcalloc); https://docs.kernel.org/driver-api/driver-model/devres.html: managed array allocation owned by the dev argument 1, counting argument 2 elements of the size in argument 3"
+        },
+        {
+          "name": "kref_put",
+          "release": 1,
+          "source": "linux/kref.h (kref_put); https://docs.kernel.org/core-api/kref.html: decrements the refcount of argument 1 and calls the release callback, which is argument 2, when it reaches zero"
+        }
+      ]
+    },
+    {
+      "name": "postgresql",
+      "headers": ["postgres.h", "utils/palloc.h", "utils/memutils.h"],
+      "entries": [
+        {
+          "name": "palloc",
+          "len": 1,
+          "alloc": "pgmem",
+          "region": {
+            "role": "allocate",
+            "context": "CurrentMemoryContext"
+          },
+          "source": "postgres.h and utils/palloc.h (palloc, CurrentMemoryContext); https://www.postgresql.org/docs/current/spi-memory.html: allocates from the current memory context, the CurrentMemoryContext global"
+        },
+        {
+          "name": "palloc0",
+          "len": 1,
+          "alloc": "pgmem",
+          "region": {
+            "role": "allocate",
+            "context": "CurrentMemoryContext"
+          },
+          "source": "utils/palloc.h (palloc0); https://www.postgresql.org/docs/current/spi-memory.html: allocates zeroed memory from the current memory context"
+        },
+        {
+          "name": "pfree",
+          "free": "pgmem",
+          "source": "utils/palloc.h (pfree); src/backend/utils/mmgr/README (https://github.com/postgres/postgres/blob/master/src/backend/utils/mmgr/README): frees memory allocated with palloc"
+        },
+        {
+          "name": "MemoryContextReset",
+          "region": {
+            "role": "reset",
+            "arg": 1
+          },
+          "source": "utils/memutils.h (MemoryContextReset); src/backend/utils/mmgr/README: reset frees all memory allocated in the context, the context itself stays valid"
+        },
+        {
+          "name": "MemoryContextDelete",
+          "region": {
+            "role": "destroy",
+            "arg": 1
+          },
+          "source": "utils/memutils.h (MemoryContextDelete); src/backend/utils/mmgr/README: delete frees the context's memory and destroys the context itself and its children"
+        },
+        {
+          "name": "AllocSetContextCreate",
+          "region": {
+            "role": "create"
+          },
+          "source": "utils/memutils.h (AllocSetContextCreate); src/backend/utils/mmgr/README: creates a new allocator-set context, the call's result is the new region"
+        }
+      ]
+    },
+    {
+      "name": "apr",
+      "headers": ["apr_pools.h", "httpd.h"],
+      "entries": [
+        {
+          "name": "apr_palloc",
+          "len": 2,
+          "alloc": "aprpool",
+          "region": {
+            "role": "allocate",
+            "arg": 1
+          },
+          "source": "apr_pools.h (apr_palloc); https://apr.apache.org/docs/apr/trunk/group__apr__pools.html: allocates size bytes from pool p, the pool is argument 1"
+        },
+        {
+          "name": "apr_pool_create",
+          "region": {
+            "role": "create",
+            "arg": 1
+          },
+          "source": "apr_pools.h (apr_pool_create); https://apr.apache.org/docs/apr/trunk/group__apr__pools.html: creates a new pool and hands it out through the first argument, an out-pointer, returning a status code"
+        },
+        {
+          "name": "apr_pool_clear",
+          "region": {
+            "role": "reset",
+            "arg": 1
+          },
+          "source": "apr_pools.h (apr_pool_clear); https://apr.apache.org/docs/apr/trunk/group__apr__pools.html: frees all memory in the pool, keeping the pool itself for reuse"
+        },
+        {
+          "name": "apr_pool_destroy",
+          "region": {
+            "role": "destroy",
+            "arg": 1
+          },
+          "source": "apr_pools.h (apr_pool_destroy); https://apr.apache.org/docs/apr/trunk/group__apr__pools.html: destroys the pool and everything allocated from it"
+        }
+      ]
+    },
+    {
+      "name": "nginx",
+      "headers": ["ngx_core.h", "ngx_palloc.h"],
+      "entries": [
+        {
+          "name": "ngx_alloc",
+          "len": 1,
+          "alloc": "heap",
+          "nullableReturn": true,
+          "source": "src/os/unix/ngx_alloc.h (ngx_alloc); nginx development guide https://nginx.org/en/docs/dev/development_guide.html: wrapper around malloc() with logging, returns NULL when malloc fails"
+        },
+        {
+          "name": "ngx_free",
+          "free": "heap",
+          "source": "src/os/unix/ngx_alloc.h (ngx_free is defined as free); nginx development guide: wrapper around free() for memory ngx_alloc returned"
+        },
+        {
+          "name": "ngx_palloc",
+          "len": 2,
+          "alloc": "ngxpool",
+          "nullableReturn": true,
+          "region": {
+            "role": "allocate",
+            "arg": 1
+          },
+          "source": "src/core/ngx_palloc.h (ngx_palloc); nginx development guide: allocates aligned memory from the pool given as argument 1"
+        },
+        {
+          "name": "ngx_create_pool",
+          "nullableReturn": true,
+          "region": {
+            "role": "create"
+          },
+          "source": "src/core/ngx_palloc.h (ngx_create_pool); nginx development guide: creates a pool with the specified block size"
+        },
+        {
+          "name": "ngx_destroy_pool",
+          "region": {
+            "role": "destroy",
+            "arg": 1
+          },
+          "source": "src/core/ngx_palloc.h (ngx_destroy_pool); nginx development guide: frees all pool memory, including the pool object itself"
+        }
+      ]
+    },
+    {
+      "name": "cpython",
+      "headers": ["Python.h", "object.h", "pymem.h"],
+      "entries": [
+        {
+          "name": "PyMem_Malloc",
+          "len": 1,
+          "alloc": "pymem",
+          "nullableReturn": true,
+          "source": "Include/pymem.h (PyMem_Malloc); https://docs.python.org/3/c-api/memory.html: allocates n bytes from the pymem domain and returns NULL on error; the result must be freed with PyMem_Free"
+        },
+        {
+          "name": "PyMem_Free",
+          "free": "pymem",
+          "source": "Include/pymem.h (PyMem_Free); https://docs.python.org/3/c-api/memory.html: frees memory allocated by PyMem_Malloc"
+        },
+        {
+          "name": "Py_DECREF",
+          "release": 1,
+          "source": "Include/object.h (Py_DECREF); https://docs.python.org/3/c-api/refcounting.html: decrements the reference count of the object given as argument 1 and calls its deallocator when it reaches zero"
+        },
+        {
+          "name": "Py_INCREF",
+          "acquire": 1,
+          "source": "Include/object.h (Py_INCREF); https://docs.python.org/3/c-api/refcounting.html: increments the reference count of the object given as argument 1"
+        }
+      ]
+    },
+    {
+      "name": "php",
+      "headers": ["php.h", "zend.h", "zend_API.h", "zend_alloc.h", "zend_string.h"],
+      "entries": [
+        {
+          "name": "emalloc",
+          "len": 1,
+          "alloc": "zendmm",
+          "source": "Zend/zend_alloc.h (emalloc); https://www.phpinternalsbook.com/php7/memory_management/zend_memory_manager.html: allocates from the request heap the Zend memory manager owns, the memory is released back to it at request end"
+        },
+        {
+          "name": "efree",
+          "free": "zendmm",
+          "source": "Zend/zend_alloc.h (efree); https://www.phpinternalsbook.com/php7/memory_management/zend_memory_manager.html: frees a block emalloc allocated from the Zend memory manager's request heap"
+        },
+        {
+          "name": "zend_string_release",
+          "release": 1,
+          "source": "Zend/zend_string.h (zend_string_release); https://www.phpinternalsbook.com/php7/internal_types/strings/zend_strings.html: decrements the string's refcount and frees it when the count drops to zero"
+        }
+      ]
     }
   ]
 }

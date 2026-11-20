@@ -1,5 +1,6 @@
 package io.appthreat.edg2atom.astcreation
 
+import io.appthreat.c2cpg.Config
 import io.appthreat.edg2atom.testfixtures.EdgCodeToCpgSuite
 import io.shiftleft.semanticcpg.language.*
 
@@ -124,6 +125,41 @@ class ModernStatementShapesTests extends EdgCodeToCpgSuite(".cpp"):
       "not end the visit of the unit" in {
           requireEdga()
           cpg.method.nameExact("first").l should not be empty
+      }
+  }
+  "a C++26 expansion statement" should {
+      val cpg = code(
+        """int sink(int);
+          |int over_list() {
+          |  int total = 0;
+          |  template for (int base = 10; constexpr int v : {1, 2, 3}) {
+          |    total += sink(base + v);
+          |  }
+          |  return total;
+          |}
+          |""".stripMargin
+      ).withConfig(Config().withCppStandard("c++26"))
+
+      // an edga before EDG's expansion statements rejects the statement or leaves it UNKNOWN,
+      // without its calls
+      def requireExpansion(): Unit =
+        requireEdga()
+        assume(
+          cpg.method.nameExact("over_list").call.nameExact("sink").nonEmpty,
+          "this edga does not write expansion statements"
+        )
+
+      "hold the body once per element, with the element bound to the loop variable" in {
+          requireExpansion()
+          cpg.method.nameExact("over_list").call.nameExact("sink").size shouldBe 3
+          cpg.method.nameExact("over_list").local.nameExact("v").size shouldBe 3
+      }
+
+      "declare the init-statement's variable once, ahead of the elements" in {
+          requireExpansion()
+          cpg.method.nameExact("over_list").local.nameExact("base").size shouldBe 1
+          cpg.method.nameExact("over_list").ast.isIdentifier.nameExact("base").refsTo.size should
+              be > 0
       }
   }
 end ModernStatementShapesTests

@@ -62,7 +62,9 @@ class EdgaRunnerTests extends AnyWordSpec with Matchers:
           EdgaRunner.cStandardOption(null) shouldBe "--c17"
           EdgaRunner.cppStandardOption("gnu++2a") shouldBe "--c++20"
           EdgaRunner.cppStandardOption("c++14") shouldBe "--c++14"
-          EdgaRunner.cppStandardOption("c++latest") shouldBe "--c++23"
+          EdgaRunner.cppStandardOption("c++23") shouldBe "--c++23"
+          EdgaRunner.cppStandardOption("gnu++2c") shouldBe "--c++26"
+          EdgaRunner.cppStandardOption("c++latest") shouldBe "--c++26"
           EdgaRunner.cppStandardOption("") shouldBe "--c++17"
       }
       "map MSVC's own standards to the front end's Microsoft modes" in {

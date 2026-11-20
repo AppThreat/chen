@@ -120,6 +120,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           tagLayout(node, declarator)
           vlaBound(declarator).foreach(tagNode(node, X2CpgDefines.VlaSizeTag, _))
           scope.addToScope(name, (node, tpe))
+          localsByDeclarator.put(declarator, (node, tpe))
           localAst(declaration, node)
       case _ =>
           val tpe = registerType(
@@ -134,6 +135,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode):
           val node = localNode(declarator, name, s"$codeTpe $name", tpe)
           tagLayout(node, declarator)
           scope.addToScope(name, (node, tpe))
+          localsByDeclarator.put(declarator, (node, tpe))
           registerArrayTypedef(declarator, tpe)
           localAst(declaration, node)
     end match

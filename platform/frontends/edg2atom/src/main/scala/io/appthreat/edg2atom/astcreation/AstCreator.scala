@@ -847,6 +847,9 @@ class AstCreator(
         case "try_block"                 => tryAst(s)
         case "range_based_for"           => rangeForAst(s)
         case "stmt_expr_result"          => s.field("expr").map(expressionAst).getOrElse(Ast())
+        // C++26 `template for`, which the front end expands into one block per element; an edga
+        // that does not write the expansion leaves it UNKNOWN
+        case "expansion_statement" if s.field("expanded").isDefined => expansionAst(s)
         // an edga before 0.2 writes an asm statement without its operands: UNKNOWN, as before
         case "asm" if s.field("text").isDefined => asmAst(s)
         case _                                  => Ast(unknownNode(s, code(s)))
@@ -1087,6 +1090,17 @@ class AstCreator(
       case inits =>
           val block = blockNode(s, "<selection-init>", registerType("void"))
           blockAst(block, (inits :+ statement).toList)
+
+  /** A `template for`: its init-statement, then the per-element blocks, in a block that scopes the
+    * init-statement's declarations.
+    */
+  private def expansionAst(s: Value): Ast =
+    val block = blockNode(s, "<expansion>", registerType("void"))
+    scope.pushNewScope(block)
+    val children = s.field("init").toSeq.flatMap(statementAsts) ++
+        s.field("expanded").toSeq.map(statementAst)
+    scope.popScope()
+    blockAst(block, children.toList)
 
   private def ifAst(s: Value): Ast =
     val cond    = conditionAst(s)

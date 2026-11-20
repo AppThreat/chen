@@ -252,12 +252,13 @@ object EdgaRunner:
         case _                                              => "--ms_c++17"
     else
       std match
-        case "++98" | "++03"                                => "--c++03"
-        case "++11" | "++0x"                                => "--c++11"
-        case "++14" | "++1y"                                => "--c++14"
-        case "++20" | "++2a"                                => "--c++20"
-        case "++23" | "++2b" | "++26" | "++2c" | "++latest" => "--c++23"
-        case _                                              => "--c++17"
+        case "++98" | "++03"              => "--c++03"
+        case "++11" | "++0x"              => "--c++11"
+        case "++14" | "++1y"              => "--c++14"
+        case "++20" | "++2a"              => "--c++20"
+        case "++23" | "++2b"              => "--c++23"
+        case "++26" | "++2c" | "++latest" => "--c++26"
+        case _                            => "--c++17"
   end cppStandardOption
 
   /** Whether a directory holds a header a system directory also has (`time.h`): as an include
