@@ -1,0 +1,20 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_30893fc78161a5::t_f9779c4deb5f27 144-146,149-157
+  s_30893fc78161a5::t_149b8899658567 141-143,147-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d9345e597a14432d07a6b56b6e0173be79b5990",
+  "prompts": {},
+  "sessions": {
+    "s_30893fc78161a5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
