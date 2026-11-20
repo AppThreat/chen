@@ -1,0 +1,29 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/ToolchainTableTests.scala
+  s_1bde68c479e8ea::t_b50b7dfa8df31e 69
+  s_1bde68c479e8ea::t_7abfd43b22a88c 85-89
+  s_1bde68c479e8ea::t_2cdf145c9a8ab8 63-68,70-80,83-84
+  s_1bde68c479e8ea::t_757180fbdd65e8 90
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/PredefinedMacrosTests.scala
+  s_1bde68c479e8ea::t_7abfd43b22a88c 107-109,113-117
+  s_1bde68c479e8ea::t_ca3917da8006b5 322-352
+  s_1bde68c479e8ea::t_3d1e63fa9c8649 111
+  s_1bde68c479e8ea::t_d8e9b993f8762c 91-106,110,112,118-120
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/CompileCommandTests.scala
+  s_1bde68c479e8ea::t_f15b0b0a5514cd 244,248-251,258-259,261-262,280-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "44ab368f5932794a663e21d73df1eadd90aedae5",
+  "prompts": {},
+  "sessions": {
+    "s_1bde68c479e8ea": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-19915eba-3dbc-4f53-a095-3ecefe5cb1c3-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
