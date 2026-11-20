@@ -1,0 +1,30 @@
+platform/frontends/c2cpg/src/main/resources/toolchains.json
+  s_8f0d9416003c6b::t_982003659500fc 1-197
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CompileCommands.scala
+  s_8f0d9416003c6b::t_d67da6bc6cc18e 241-243,245-247
+  s_8f0d9416003c6b::t_6985e96ce1e123 215
+  s_8f0d9416003c6b::t_a8d23309de4d7d 244,248
+  s_8f0d9416003c6b::t_bfbc67ebf836ac 14-16,19
+  s_8f0d9416003c6b::t_d0280cf3869e5a 43-47
+  s_8f0d9416003c6b::t_4cdda5590071bf 295-300,305,309-313,325-326
+  s_8f0d9416003c6b::t_40e6120c1a7b3b 482
+  s_8f0d9416003c6b::t_bbb10ac364189e 173-175,177-181,186-188,205,207,210-213,225
+  s_8f0d9416003c6b::t_3f565df19cc779 356-481,483-523
+  s_8f0d9416003c6b::t_b3c7ddaa0ab0e4 524
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a73e848c15ad6a1df032ea744da72926bf82d24",
+  "prompts": {},
+  "sessions": {
+    "s_8f0d9416003c6b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
