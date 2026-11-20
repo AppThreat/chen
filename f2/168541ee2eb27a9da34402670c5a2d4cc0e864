@@ -1,0 +1,56 @@
+platform/frontends/c2cpg/src/main/resources/predefined-macros/iccarm-arm.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-17
+platform/frontends/c2cpg/src/main/resources/predefined-macros/tinycc-linux-x86_64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-42
+platform/frontends/c2cpg/src/main/resources/predefined-macros/emscripten-wasm32.txt
+  s_8f0d9416003c6b::t_4dffcf91466494 1-444
+platform/frontends/c2cpg/tools/predefined-macros/generate.sh
+  s_8f0d9416003c6b::t_2a861640b80bae 280-284,288-300,304-311
+  s_8f0d9416003c6b::t_20cc21b2779ad6 11-14,19-20,22-29,34,38-40,83-99,130-203,205,208-279,285-286,301-303
+  s_8f0d9416003c6b::t_89068a24385c4e 204
+  s_8f0d9416003c6b::t_ee05ff42d58705 206-207
+  s_8f0d9416003c6b::t_01bf35f6530aa4 287
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-arm64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-469
+platform/frontends/c2cpg/src/main/resources/predefined-macros/armclang-arm-none-eabi.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-472
+platform/frontends/c2cpg/src/main/resources/predefined-macros/gcc-arm-none-eabi.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-495
+platform/frontends/c2cpg/src/main/resources/predefined-macros/ti-msp430.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-14
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/PredefinedMacros.scala
+  s_8f0d9416003c6b::t_84cee98c4e83b6 325-326,332-334,336-343
+  s_8f0d9416003c6b::t_92e6bf3f4bad23 60-61,64,67-73
+  s_8f0d9416003c6b::t_58fca5a1cf0270 106
+  s_8f0d9416003c6b::t_2f6eb73777302d 203-214,224-242,249,255-277,287-293,298
+  s_8f0d9416003c6b::t_2cd44d4d7be9ab 101-105,108-109
+platform/frontends/c2cpg/src/main/resources/predefined-macros/tinycc-linux-aarch64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-43
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-x64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-456
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-x86_64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-491
+platform/frontends/c2cpg/src/main/resources/predefined-macros/ti-arm.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-15
+platform/frontends/c2cpg/src/main/resources/predefined-macros/nvcc-own.txt
+  s_8f0d9416003c6b::t_89068a24385c4e 14
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-13,15-21
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-aarch64.txt
+  s_8f0d9416003c6b::t_4e1d30ae23d022 1-504
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f2168541ee2eb27a9da34402670c5a2d4cc0e864",
+  "prompts": {},
+  "sessions": {
+    "s_8f0d9416003c6b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
