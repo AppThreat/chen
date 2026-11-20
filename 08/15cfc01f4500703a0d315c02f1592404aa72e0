@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/test/resources/templates/tmplbox.hpp
+  s_30893fc78161a5::t_70a42f05ef983c 1-120
+platform/frontends/c2cpg/src/test/resources/templates/boxes_str.cpp
+  s_30893fc78161a5::t_30fc03e91c4632 1-59
+platform/frontends/c2cpg/src/test/resources/templates/boxes_int.cpp
+  s_30893fc78161a5::t_5c741e04aec927 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0815cfc01f4500703a0d315c02f1592404aa72e0",
+  "prompts": {},
+  "sessions": {
+    "s_30893fc78161a5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-cb218136-b565-4fde-8248-07cf9457667c-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
