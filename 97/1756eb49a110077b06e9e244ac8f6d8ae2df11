@@ -1,0 +1,40 @@
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-arm64.txt
+  s_1bde68c479e8ea::t_833fbae4872b48 10,25,60,258,286-287,416,418,423,430-433,454,469
+platform/frontends/c2cpg/src/main/resources/predefined-macros/armclang-arm-none-eabi.txt
+  s_1bde68c479e8ea::t_833fbae4872b48 10,238,266-267,396,399,404,411-414,445,467
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-x64.txt
+  s_1bde68c479e8ea::t_833fbae4872b48 10,24,226,259-260,393,395,400,408-411,433,448
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-x86_64.txt
+  s_1bde68c479e8ea::t_833fbae4872b48 10,231,265-266,400,402,406,414-417,449,471
+platform/frontends/c2cpg/src/main/resources/toolchains.json
+  s_1bde68c479e8ea::t_c77dd786529e68 35,37,52,54,63,65,67,73,75,80-81,83-84,86-89,95,97,107,109,119,121,130,132,142,144,146,152,155,165,168,170,176,178
+  s_1bde68c479e8ea::t_35f0f1ea46026a 36,53,64,74,82,85,96,108,120,131,143,153-154,166-167,177
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CompileCommands.scala
+  s_1bde68c479e8ea::t_f67b07b0d70820 508,527-536
+  s_1bde68c479e8ea::t_7abfd43b22a88c 412-413,504-507,510-511,523-524
+  s_1bde68c479e8ea::t_c5ccd05385d43a 414,416
+  s_1bde68c479e8ea::t_6ca93aed3e1eab 445
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/PredefinedMacros.scala
+  s_1bde68c479e8ea::t_aaa7316229f0c9 301-305,325,332-334
+  s_1bde68c479e8ea::t_7abfd43b22a88c 319
+  s_1bde68c479e8ea::t_25361bdb92d043 321-324,326-328
+  s_1bde68c479e8ea::t_06ad254a9aae33 330
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-aarch64.txt
+  s_1bde68c479e8ea::t_833fbae4872b48 10,38,263,292-293,422,424,429,436-439,470,492
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "971756eb49a110077b06e9e244ac8f6d8ae2df11",
+  "prompts": {},
+  "sessions": {
+    "s_1bde68c479e8ea": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-19915eba-3dbc-4f53-a095-3ecefe5cb1c3-actor_1_2",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
