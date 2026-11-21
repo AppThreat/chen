@@ -1,0 +1,24 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/parse/UnitSettingsReporter.scala
+  s_8788a01b4477b0::t_055cb1bc576074 82-86
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/UnitSettingsRecordTests.scala
+  s_8788a01b4477b0::t_1f28658b1dfbd5 175-184
+  s_8788a01b4477b0::t_bf55d652854bff 51-53
+docs/v4/frontends.md
+  s_8788a01b4477b0::t_71c10bfc066da1 113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5b012165b7d220b1f05fdd43a1e70e424a35ec2f",
+  "prompts": {},
+  "sessions": {
+    "s_8788a01b4477b0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c41334aa-2343-4dc4-8b07-1cbbaab93edf",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
