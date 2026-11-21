@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/worker/CdtWorker.scala
+  s_517e6bbe18bf56::t_e9799dab74c32e 483
+  s_517e6bbe18bf56::t_8c9525f4360d17 473-477
+  s_517e6bbe18bf56::t_728992922935d7 435
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_517e6bbe18bf56::t_359ddcf21ff2b0 502-506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73368a87b74e86d146bae4b679722d68b23a9877",
+  "prompts": {},
+  "sessions": {
+    "s_517e6bbe18bf56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
