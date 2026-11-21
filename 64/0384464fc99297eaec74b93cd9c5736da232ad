@@ -1,0 +1,38 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_a63ca1a933e39e::t_26b5eb336d7688 470-478
+  s_a63ca1a933e39e::t_066c9f9514cdec 412-414
+  s_a63ca1a933e39e::t_2c9f717051c468 335,339-340
+  s_a63ca1a933e39e::t_2678358365c660 136-142
+  s_a63ca1a933e39e::t_dfaef976671763 251-255
+  s_a63ca1a933e39e::t_627c84270aae68 529-530
+  s_a63ca1a933e39e::t_9cbf61a1dc70b1 34,40-42
+  s_a63ca1a933e39e::t_f27251941173a4 351-356,379-411,415-416,420-422
+  s_a63ca1a933e39e::t_c8f30d8319df13 440-442
+  s_a63ca1a933e39e::t_52420822658cc2 6-11,35-39,357-378,417-419,423,438-439
+  s_a63ca1a933e39e::t_c84cc233777832 256,443
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/UnitSettingsRecordTests.scala
+  s_a63ca1a933e39e::t_52420822658cc2 10-12,24-25
+  s_a63ca1a933e39e::t_7cb22bd03d150d 121
+  s_a63ca1a933e39e::t_505ddc6570a9d6 33
+  s_a63ca1a933e39e::t_4c6f37a6128501 104
+  s_a63ca1a933e39e::t_7740a078956f5d 50
+  s_a63ca1a933e39e::t_f5c7e3b9770541 1-9,13-23,26-32,34-35,48-49,51-103,105-120,122-140,142-172
+  s_a63ca1a933e39e::t_74783c24a20698 141
+  s_a63ca1a933e39e::t_5d39836af1a9d3 36-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "640384464fc99297eaec74b93cd9c5736da232ad",
+  "prompts": {},
+  "sessions": {
+    "s_a63ca1a933e39e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_3_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
