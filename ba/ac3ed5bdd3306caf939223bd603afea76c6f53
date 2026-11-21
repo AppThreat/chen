@@ -1,0 +1,26 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_517e6bbe18bf56::t_180829dd889c6d 43-46
+  s_517e6bbe18bf56::t_5552e21c04e9dc 183-187
+  s_517e6bbe18bf56::t_8e7762b2e1f1e3 96-97
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_517e6bbe18bf56::t_5defe1e004c0b5 358
+  s_517e6bbe18bf56::t_9eef1f5e1f3922 150-152,154-161,166,169,176,183,191,195,211,231-233,246-249,261,269-272,275,284-288
+  s_517e6bbe18bf56::t_2300ca6cade5b1 355-357
+  s_517e6bbe18bf56::t_dd3447940c3536 359-361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "baac3ed5bdd3306caf939223bd603afea76c6f53",
+  "prompts": {},
+  "sessions": {
+    "s_517e6bbe18bf56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
