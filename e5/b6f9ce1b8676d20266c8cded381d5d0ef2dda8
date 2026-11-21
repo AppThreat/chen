@@ -1,0 +1,20 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextCopiesTests.scala
+  s_06442807478409::t_a39ad033a1e562 199-201,209-218,222-231,239-247
+  s_06442807478409::t_473604b82d9220 196-198,202-208,219-221,232-238,248-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e5b6f9ce1b8676d20266c8cded381d5d0ef2dda8",
+  "prompts": {},
+  "sessions": {
+    "s_06442807478409": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_3_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
