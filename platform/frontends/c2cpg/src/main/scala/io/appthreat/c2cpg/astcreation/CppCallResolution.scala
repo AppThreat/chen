@@ -9,6 +9,8 @@ import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.{
     CPPClosureType,
     CPPImplicitFunction,
+    ICPPDeferredClassInstance,
+    ICPPInstanceCache,
     ICPPInternalBinding
 }
 
@@ -99,7 +101,10 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
     Ast.storeInDiffGraph(ast, diffGraph)
     storedNodes.addAll(ast.nodes)
 
-  /** Writes the tags of the stored nodes; a node no stored AST holds was dropped. */
+  /** Writes the tags of the stored nodes; a node no stored AST holds was dropped. The dependent
+    * calls take their callee list here too: the instances they reach exist only once the whole unit
+    * has been walked and every binding resolved.
+    */
   protected def flushTags(): Unit =
     pendingTags.foreach { (node, tags) =>
         if storedNodes.contains(node) then
@@ -109,6 +114,12 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
           }
     }
     pendingTags.clear()
+    dependentCalls.foreach { (call, cdtCall) =>
+        if storedNodes.contains(call) then
+          val callees = dependentCallees(cdtCall)
+          if callees.nonEmpty then call.dynamicTypeHintFullName(callees)
+    }
+    dependentCalls.clear()
     storedNodes.clear()
 
   private def isUnderProject(node: IASTNode): Boolean =
@@ -187,6 +198,179 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
         methodSignature(callee)
       )
 
+  /** The arguments a template instance was written with, in order, as the `template-args` of a call
+    * to it: its own when it is an instance of a function template, else those of the class template
+    * instance it is a member of. A type argument is written as the frontend writes types, a
+    * non-type argument by its value. None when the callee is no instance of a template.
+    */
+  protected def templateArguments(callee: ICPPFunction): Option[String] =
+    def argsOf(binding: IBinding): Option[Seq[ICPPTemplateArgument]] = binding match
+      case instance: ICPPTemplateInstance =>
+          CdtQuery(instance.getTemplateArguments).toOption.map(_.toSeq.filter(_ != null))
+      case _ => None
+    val args = argsOf(callee).orElse(callee match
+      case method: ICPPMethod => CdtQuery(method.getOwner).toOption.flatMap(argsOf)
+      case _                  => None
+    )
+    args.filter(_.nonEmpty).map(_.map { arg =>
+        if arg.isTypeValue then
+          CdtQuery(cleanType(safeGetType(arg.getTypeValue))).getOrElse(Defines.anyTypeName)
+        else
+          CdtQuery(Option(arg.getNonTypeValue).map(_.toString).getOrElse("")).getOrElse("")
+    }.mkString(","))
+
+  /** The calls written in template code whose callee depends on a template parameter, by the CALL
+    * node each produced: the METHODs they reach exist per instance, and the unit's instances are
+    * only known once the whole unit has been walked, so [[flushTags]] fills the callee list.
+    */
+  private val dependentCalls =
+      mutable.LinkedHashMap.empty[NewCall, ICPPASTFunctionCallExpression]
+
+  /** Registers a call whose callee depends on a template parameter for the callee list at
+    * [[flushTags]]. A call copied into a macro expansion is dropped with its original, like every
+    * other node the expansion replaced.
+    */
+  protected def registerDependentCall(
+    call: NewCall,
+    cdtCall: ICPPASTFunctionCallExpression
+  ): Unit = dependentCalls.put(call, cdtCall)
+
+  /** Whether the callee of a member call depends on a template parameter: the object it is called
+    * on is a template parameter, or an instance of a class template the pattern has not built yet.
+    */
+  protected def calleeDependsOnTemplateParameter(fieldRef: ICPPASTFieldReference): Boolean =
+      Option(fieldRef.getFieldOwnerType).exists { ownerType =>
+          CdtQuery(unwrappedType(ownerType)).toOption.exists {
+              case _: ICPPTemplateTypeParameter | _: ICPPDeferredClassInstance => true
+              case _                                                           => false
+          }
+      }
+
+  /** The METHOD full names a dependent call reaches across the instances the unit built. For every
+    * instance of the template the call is written in, the object it is called on takes that
+    * instance's argument, and the METHOD the call names there is the callee it reaches. An instance
+    * the unit never built contributes nothing, and so does a callee the graph holds no METHOD for.
+    * The list is sorted, and each name once.
+    */
+  private def dependentCallees(call: ICPPASTFunctionCallExpression): List[String] =
+      CdtQuery {
+          val functionNameExpr = call.getFunctionNameExpression
+          for
+            fieldRef <-
+                Option(functionNameExpr).collect { case f: ICPPASTFieldReference => f }.toList
+            memberName = fieldRef.getFieldName.toString
+            ownerType <- Option(fieldRef.getFieldOwnerType).toList
+            template  <- enclosingTemplateOf(call).toList
+            instance  <- instancesOf(template)
+            classType <- realisedOwnerType(ownerType, instance.getTemplateParameterMap).toList
+            callee    <- memberCallees(classType, memberName, call, argumentCountOf(call))
+            linked    <- graphFunction(callee).toList
+          yield methodFullNameOf(linked)
+      }.toOption.getOrElse(Nil).distinct.sorted
+  end dependentCallees
+
+  /** The number of arguments a call passes. */
+  private def argumentCountOf(call: IASTFunctionCallExpression): Int =
+      Option(call.getArguments).map(_.length).getOrElse(0)
+
+  /** The template the node is written in: the function template the node's enclosing function
+    * definition declares, or the class template that declares it as a member. A node outside both
+    * has no template, and its calls depend on nothing.
+    */
+  private def enclosingTemplateOf(node: IASTNode): Option[IBinding] =
+    @tailrec def enclosing(current: IASTNode): Option[IBinding] =
+        if current == null then None
+        else
+          current match
+            case definition: IASTFunctionDefinition =>
+                CdtQuery(definition.getDeclarator.getName.resolveBinding).toOption.flatMap {
+                    case template: ICPPFunctionTemplate => Some(template)
+                    case method: ICPPMethod =>
+                        CdtQuery(method.getOwner).toOption.collect {
+                            case cls: ICPPClassTemplate => cls
+                        }
+                    case _ => None
+                }
+            case _ => enclosing(current.getParent)
+    enclosing(node)
+
+  /** The instances the unit built for a template, in the order CDT created them. */
+  private def instancesOf(template: IBinding): List[ICPPTemplateInstance] =
+      template match
+        case cache: ICPPInstanceCache =>
+            CdtQuery(cache.getAllInstances).toOption.map(_.toList.filter(_ != null)).getOrElse(Nil)
+        case _ => Nil
+
+  /** The class the dependent call's object has once an instance's arguments are substituted in: the
+    * parameter's bound type, or the instance of the class template the pattern spelled the object
+    * with. None when the substitution leaves a parameter in (the unit built no such instance).
+    */
+  private def realisedOwnerType(
+    ownerType: IType,
+    map: ICPPTemplateParameterMap
+  ): Option[ICPPClassType] =
+      unwrappedType(ownerType) match
+        case parameter: ICPPTemplateTypeParameter =>
+            CdtQuery(map.getArgument(parameter)).toOption
+                .flatMap(arg => Option(arg))
+                .flatMap(arg => Option(arg.getTypeValue))
+                .collect { case cls: ICPPClassType => cls }
+        case deferred: ICPPDeferredClassInstance =>
+            val patternArgs = Option(deferred.getTemplateArguments).map(_.toList).getOrElse(Nil)
+            val args        = patternArgs.flatMap(substitutedArg(_, map))
+            if args.size != patternArgs.size then None
+            else
+              deferred.getSpecializedBinding match
+                case cache: ICPPInstanceCache =>
+                    CdtQuery(cache.getInstance(args.toArray)).toOption
+                        .flatMap(instance => Option(instance))
+                        .collect { case cls: ICPPClassType => cls }
+                case _ => None
+        case _ => None
+  end realisedOwnerType
+
+  /** The argument an instance binds for one argument the pattern wrote: a template parameter
+    * becomes the type the instance bound it to, everything else stays as written. None when the
+    * parameter is not among the instance's arguments.
+    */
+  private def substitutedArg(
+    arg: ICPPTemplateArgument,
+    map: ICPPTemplateParameterMap
+  ): Option[ICPPTemplateArgument] =
+      if arg.isTypeValue then
+        arg.getTypeValue match
+          case parameter: ICPPTemplateTypeParameter =>
+              CdtQuery(map.getArgument(parameter)).toOption.flatMap(a => Option(a))
+          case _ => Some(arg)
+      else Some(arg)
+
+  /** The methods of `cls` the call names: the same name, and as many declared parameters as the
+    * call passes arguments (a member's own object is not among them). Inherited methods count.
+    */
+  private def memberCallees(
+    cls: ICPPClassType,
+    memberName: String,
+    point: IASTNode,
+    argumentCount: Int
+  ): List[ICPPFunction] =
+    val methods = cls match
+      case spec: ICPPClassSpecialization => CdtQuery(spec.getMethods(point)).toOption
+      case _                             => CdtQuery(cls.getMethods).toOption
+    methods.map(_.toList).getOrElse(Nil).collect { case f: ICPPFunction => f }
+        .filter { m =>
+            m.getName == memberName &&
+            CdtQuery(m.getParameters).toOption.exists(_.length == argumentCount)
+        }
+
+  /** The type without the references, qualifiers and typedefs its spelling carries. */
+  @tailrec
+  private def unwrappedType(tpe: IType): IType = tpe match
+    case null                 => null
+    case r: ICPPReferenceType => unwrappedType(r.getType)
+    case q: IQualifierType    => unwrappedType(q.getType)
+    case td: ITypedef         => unwrappedType(td.getType)
+    case other                => other
+
   private def dispatchOf(function: ICPPFunction): String = function match
     case m: ICPPMethod if m.isVirtual || m.isPureVirtual => DispatchTypes.DYNAMIC_DISPATCH
     case _                                               => DispatchTypes.STATIC_DISPATCH
@@ -217,11 +401,10 @@ trait CppCallResolution(implicit withSchemaValidation: ValidationMode):
       Some(methodSignature(linked)),
       Some(typeFullName)
     )
-    templateInstanceSignature(callee, linked).foreach(tagCall(
-      call,
-      X2CpgDefines.TemplateInstanceTag,
-      _
-    ))
+    templateInstanceSignature(callee, linked).foreach { signature =>
+      tagCall(call, X2CpgDefines.TemplateInstanceTag, signature)
+      templateArguments(callee).foreach(tagCall(call, X2CpgDefines.TemplateArgsTag, _))
+    }
     tagCalleeHeader(call, callee)
     val ast = receiver match
       case Some(self) =>

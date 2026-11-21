@@ -1,0 +1,208 @@
+{
+  "drivers": [
+    {
+      "name": "ccache",
+      "matches": ["name:ccache"],
+      "wrapper": true,
+      "notes": "Compiler wrappers are stripped from the command before the driver is read; the compiler behind the wrapper decides the family."
+    },
+    {
+      "name": "sccache",
+      "matches": ["name:sccache"],
+      "wrapper": true
+    },
+    {
+      "name": "distcc",
+      "matches": ["name:distcc"],
+      "wrapper": true
+    },
+    {
+      "name": "icecc",
+      "matches": ["name:icecc"],
+      "wrapper": true
+    },
+    {
+      "name": "buildcache",
+      "matches": ["name:buildcache"],
+      "wrapper": true
+    },
+    {
+      "name": "clang MSVC driver mode",
+      "matches": ["driverMode:cl"],
+      "family": "Msvc",
+      "fallbackTable": "clangcl-windows",
+      "edgDialect": "microsoft",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "notes": "clang --driver-mode=cl reads an MSVC command line and predefines MSVC's macros and clang's own; its table keeps clang's identity, which the MSVC tables leave out. Not run for its macros: the family is not one the settings ask."
+    },
+    {
+      "name": "MSVC",
+      "matches": ["name:cl", "name:clang-cl", "suffix:-cl"],
+      "family": "Msvc",
+      "fallbackTable": "msvc-windows",
+      "edgDialect": "host",
+      "notes": "cl.exe has no option that lists its predefined macros, so the table always stands in."
+    },
+    {
+      "name": "armclang",
+      "matches": ["contains:armclang"],
+      "family": "Clang",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "armclang-arm-none-eabi",
+      "edgDialect": "clang",
+      "notes": "Arm Compiler for Embedded: a clang that predefines __ARMCC_VERSION. Its table is selected by the --target triple armclang's builds carry (arm-arm-none-eabi)."
+    },
+    {
+      "name": "Clang",
+      "matches": ["contains:clang"],
+      "family": "Clang",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "clang",
+      "edgDialect": "host"
+    },
+    {
+      "name": "arm-none-eabi-gcc",
+      "matches": ["name:arm-none-eabi-gcc", "name:arm-none-eabi-g++"],
+      "family": "Gcc",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "gcc-arm-none-eabi",
+      "edgDialect": "host",
+      "notes": "A bare-metal GCC cross compiler: the driver names its target, and the table is selected by the -m options the command carries (-mthumb, -mcpu=cortex-m or -march=armv4 to armv7)."
+    },
+    {
+      "name": "GCC",
+      "matches": ["contains:gcc", "contains:g++", "name:cc", "name:c++", "suffix:-cc", "suffix:-c++"],
+      "family": "Gcc",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "gcc",
+      "edgDialect": "host"
+    },
+    {
+      "name": "nvcc",
+      "matches": ["name:nvcc"],
+      "family": "Nvcc",
+      "cppByExtension": [".cu"],
+      "probe": {
+        "args": ["-E", "-Xcompiler", "-dM", "-x", "c++"]
+      },
+      "hostOption": "-ccbin",
+      "fallbackTable": "nvcc-own",
+      "edgDialect": "host",
+      "notes": "A .cu unit is preprocessed as C++ with the host compiler's macros (named by -ccbin, GCC when none) plus nvcc's own; device code is not parsed. The table holds nvcc's own macros and is merged over the host family's."
+    },
+    {
+      "name": "icx",
+      "matches": ["name:icx", "prefix:icx-"],
+      "family": "IntelLlvm",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "intel-llvm",
+      "edgDialect": "clang",
+      "notes": "The LLVM-based Intel C compiler: a clang that predefines __INTEL_LLVM_COMPILER."
+    },
+    {
+      "name": "icpx",
+      "matches": ["name:icpx", "prefix:icpx-"],
+      "family": "IntelLlvm",
+      "alwaysCpp": true,
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "intel-llvm",
+      "edgDialect": "clang",
+      "notes": "The LLVM-based Intel C++ compiler compiles every file as C++."
+    },
+    {
+      "name": "emcc",
+      "matches": ["name:emcc"],
+      "family": "Emscripten",
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E"]
+      },
+      "fallbackTable": "emscripten-wasm32",
+      "edgDialect": "clang",
+      "notes": "Emscripten compiles for wasm32-unknown-emscripten with clang's macros plus the driver's own."
+    },
+    {
+      "name": "em++",
+      "matches": ["name:em++"],
+      "family": "Emscripten",
+      "alwaysCpp": true,
+      "probe": {
+        "args": ["-x", "<lang>", "-dM", "-E"]
+      },
+      "fallbackTable": "emscripten-wasm32",
+      "edgDialect": "clang"
+    },
+    {
+      "name": "zig cc",
+      "matches": ["name:zig cc"],
+      "family": "Clang",
+      "probe": {
+        "prefixArgs": ["cc"],
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "clang",
+      "edgDialect": "clang",
+      "notes": "zig cc is a two-word driver: the command names zig and the cc subcommand. It embeds clang, and the probe runs through the subcommand."
+    },
+    {
+      "name": "zig c++",
+      "matches": ["name:zig c++"],
+      "family": "Clang",
+      "alwaysCpp": true,
+      "probe": {
+        "prefixArgs": ["c++"],
+        "args": ["-x", "<lang>", "-dM", "-E", "-v"]
+      },
+      "fallbackTable": "clang",
+      "edgDialect": "clang"
+    },
+    {
+      "name": "tcc",
+      "matches": ["name:tcc"],
+      "family": "TinyC",
+      "probe": {
+        "args": ["-E", "-dM"]
+      },
+      "fallbackTable": "tinycc",
+      "edgDialect": "none",
+      "notes": "TinyCC predefines only its own and the standard's macros; the front end is run in its default dialect, with no compiler emulation option."
+    },
+    {
+      "name": "iccarm",
+      "matches": ["name:iccarm"],
+      "family": "Iar",
+      "fallbackTable": "iccarm-arm",
+      "edgDialect": "none",
+      "notes": "IAR's Arm compiler. No option that lists its macros is documented, so the table stands in, and the front end is run in its default dialect."
+    },
+    {
+      "name": "armcl",
+      "matches": ["name:armcl"],
+      "family": "TiArm",
+      "fallbackTable": "ti-arm",
+      "edgDialect": "none",
+      "notes": "TI's Arm compiler. The table comes from TI's documentation, and the front end is run in its default dialect."
+    },
+    {
+      "name": "cl430",
+      "matches": ["name:cl430"],
+      "family": "TiMsp430",
+      "fallbackTable": "ti-msp430",
+      "edgDialect": "none",
+      "notes": "TI's MSP430 compiler. The table comes from TI's documentation, and the front end is run in its default dialect."
+    }
+  ]
+}

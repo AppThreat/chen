@@ -37,7 +37,13 @@ final case class Config(
   // a JSON compilation database, or a directory holding compile_commands.json; empty = none
   compileCommands: String = "",
   // with a compilation database, parse only its translation units (no other headers)
-  compileCommandsOnly: Boolean = false
+  compileCommandsOnly: Boolean = false,
+  // with a compilation database that compiles one file more than once: `first` (the default)
+  // analyses the first entry's build context, `all` analyses every distinct one
+  buildContexts: String = "first",
+  // opt-in: parse each translation unit in a worker process of its own, so a unit that hangs or
+  // exhausts the heap costs itself alone (see passes.AstCreationPass and worker.CdtWorker)
+  cIsolate: Boolean = false
 ) extends X2CpgConfig[Config]:
   def withIncludeFiles(includeFiles: Set[String]): Config =
       this.copy(includeFiles = includeFiles).withInheritedFields(this)
@@ -85,6 +91,15 @@ final case class Config(
       this.copy(compileCommands = value).withInheritedFields(this)
   def withCompileCommandsOnly(value: Boolean): Config =
       this.copy(compileCommandsOnly = value).withInheritedFields(this)
+  def withBuildContexts(value: String): Config =
+      this.copy(buildContexts = value).withInheritedFields(this)
+  def withCIsolate(value: Boolean): Config =
+      this.copy(cIsolate = value).withInheritedFields(this)
+
+  /** Whether every distinct build context of a file the database compiles more than once is
+    * analysed, instead of the first entry's alone.
+    */
+  def buildContextsAll: Boolean = buildContexts.trim.equalsIgnoreCase("all")
 end Config
 
 private object Frontend:
@@ -156,6 +171,20 @@ private object Frontend:
       opt[Unit]("compile-commands-only")
           .text("with --compile-commands, parse only the database's translation units")
           .action((_, c) => c.withCompileCommandsOnly(true)),
+      opt[String]("c-build-contexts")
+          .text(
+            "with a compilation database that compiles one file more than once: analyse the first entry's build context (first, the default) or every distinct one (all)"
+          )
+          .validate(v =>
+              if Set("first", "all").contains(v.trim.toLowerCase) then success
+              else failure(s"unknown --c-build-contexts `$v`; expected first or all")
+          )
+          .action((v, c) => c.withBuildContexts(v)),
+      opt[Unit]("c-isolate")
+          .text(
+            "parse each translation unit in a worker process of its own; a unit whose worker exits, hangs or runs out of memory is reported with the reason and retried once in a fresh worker"
+          )
+          .action((_, c) => c.withCIsolate(true)),
       opt[Unit]("no-ast-cache")
           .text("Disables AST caching to disk (enabled by default).")
           .action((_, c) => c.withAstCache(false)),

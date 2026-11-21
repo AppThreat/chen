@@ -126,5 +126,10 @@ object EdgAstCreationPass:
   /** How long the front end may take on one translation unit. */
   val TimeoutSeconds: Long = 600
 
-  /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. */
-  val AstFormatVersion = "edg2atom-ast-3"
+  /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. The exporter's
+    * version line does not move when its output gains data (template identity and prototype bodies
+    * do), so this version is what keeps a cache fed by the older exporter from replaying. The
+    * template tags on each instance and prototype METHOD are part of the built AST and carry this
+    * version with them.
+    */
+  val AstFormatVersion = "edg2atom-ast-5"

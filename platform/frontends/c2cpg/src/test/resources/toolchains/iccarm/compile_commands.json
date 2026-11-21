@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "arm_irq.c", "arguments": ["iccarm", "--c11", "-c", "arm_irq.c"]}
+]

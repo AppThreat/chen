@@ -6,6 +6,8 @@ import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.parser.{FileDefaults, ProjectSources}
 import io.appthreat.c2cpg.passes.{
     AstCreationPass,
+    BuildContextDuplicatesPass,
+    BuildContextPass,
     ConstantTagPass,
     DeclarationAttributesPass,
     IncludeRecordPass,
@@ -13,7 +15,12 @@ import io.appthreat.c2cpg.passes.{
     TypeDeclNodePass
 }
 import io.appthreat.edg2atom.parser.EdgaRunner
-import io.appthreat.edg2atom.passes.{DuplicateDefinitionPass, EdgAstCreationPass, FrontendTagPass}
+import io.appthreat.edg2atom.passes.{
+    DuplicateDefinitionPass,
+    EdgAstCreationPass,
+    EdgBuildContextCopiesPass,
+    FrontendTagPass
+}
 import io.appthreat.x2cpg.SourceFiles
 import io.appthreat.x2cpg.X2Cpg.withNewEmptyCpg
 import io.appthreat.x2cpg.X2CpgFrontend
@@ -71,10 +78,15 @@ class Edg2Atom(fallbackToCdt: Boolean = false) extends X2CpgFrontend[Config]:
                   else (Nil, Set.empty[String])
               recordFailures(pass, rescued, relative)
               edg.map(_ -> FrontendTagPass.Edg).toMap ++ cdt.map(_ -> FrontendTagPass.Cdt)
+        // the copies of a file's extra build contexts, before the pass that keeps one
+        // definition where several units or contexts wrote it
+        new EdgBuildContextCopiesPass(cpg, config, sources, runner).createAndApply()
+        new BuildContextDuplicatesPass(cpg, config.buildContextsAll).createAndApply()
         new DuplicateDefinitionPass(cpg).createAndApply()
         new FrontendTagPass(cpg, frontendOf).createAndApply()
         // after FrontendTagPass, so the includes tags land on the FILE nodes it already wrote
         new IncludeRecordPass(cpg).createAndApply()
+        new BuildContextPass(cpg, config, sources).createAndApply()
         TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
         new TypeDeclNodePass(cpg, CGlobal.lastMembers, CGlobal.lastTypedefs)(using
           config.schemaValidation

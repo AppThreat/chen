@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.passes.types
 
 import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
@@ -83,6 +84,33 @@ class TemplateTypeTests extends CCodeToCpgSuite(fileSuffix = FileDefaults.CPP_EX
               y.name shouldBe "y"
               y.fullName shouldBe "y:void(ANY,ANY)"
               y.signature shouldBe "void(T,U)"
+          }
+      }
+
+      "mark a function template's method as a template pattern, defined or declared only" in {
+          val cpg = code("""
+       |template<class T, class U>
+       |void x(T a, U b) {};
+       |
+       |template<class T, class U>
+       |void y(T a, U b);
+       |""".stripMargin)
+          inside(cpg.method.nameNot("<global>").internal.l) { case List(x, y) =>
+              x.tag.nameExact(X2CpgDefines.TemplatePatternTag).value.l shouldBe List("true")
+              y.tag.nameExact(X2CpgDefines.TemplatePatternTag).value.l shouldBe List("true")
+          }
+      }
+
+      "mark a member function template's method as a template pattern" in {
+          val cpg = code("""
+       |struct Wrap {
+       |    template<typename T>
+       |    void wrap(T item) { (void)item; }
+       |};
+       |""".stripMargin)
+          inside(cpg.method.nameNot("<global>").internal.l) { case List(wrap) =>
+              wrap.fullName shouldBe "Wrap.wrap:void(ANY)"
+              wrap.tag.nameExact(X2CpgDefines.TemplatePatternTag).value.l shouldBe List("true")
           }
       }
 

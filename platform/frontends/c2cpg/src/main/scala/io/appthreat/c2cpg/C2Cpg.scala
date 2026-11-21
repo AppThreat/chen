@@ -3,6 +3,9 @@ package io.appthreat.c2cpg
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.passes.{
     AstCreationPass,
+    BuildContextCopiesPass,
+    BuildContextDuplicatesPass,
+    BuildContextPass,
     ConfigFileCreationPass,
     ConstantTagPass,
     DeclarationAttributesPass,
@@ -52,7 +55,10 @@ class C2Cpg extends X2CpgFrontend[Config]:
           new AstCreationPass(cpg, censusConfig, projectSources = sources).createAndApply()
 
         if !config.onlyAstCache then
+          new BuildContextCopiesPass(cpg, censusConfig, sources).createAndApply()
+          new BuildContextDuplicatesPass(cpg, censusConfig.buildContextsAll).createAndApply()
           new IncludeRecordPass(cpg).createAndApply()
+          new BuildContextPass(cpg, censusConfig, sources).createAndApply()
           new ConfigFileCreationPass(cpg).createAndApply()
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)

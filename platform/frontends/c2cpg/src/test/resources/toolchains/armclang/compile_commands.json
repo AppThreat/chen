@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "cortex_m_irq.c", "arguments": ["armclang", "--target=arm-arm-none-eabi", "-mcpu=cortex-m4", "-O2", "-c", "cortex_m_irq.c"]}
+]

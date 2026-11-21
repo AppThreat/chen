@@ -2,6 +2,7 @@ package io.appthreat.c2cpg.querying.cppeval
 
 import io.appthreat.c2cpg.parser.FileDefaults
 import io.appthreat.c2cpg.testfixtures.CCodeToCpgSuite
+import io.appthreat.x2cpg.Defines as X2CpgDefines
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.NoResolve
 
@@ -74,6 +75,11 @@ class CppTemplatesLambdasTests extends CCodeToCpgSuite(fileSuffix = FileDefaults
 
       "give print_vector a void return type" in {
           cpg.method.nameExact("print_vector").methodReturn.typeFullName.head shouldBe "void"
+      }
+
+      "mark print_vector's method as a template pattern" in {
+          cpg.method.nameExact("print_vector").head.tag
+              .nameExact(X2CpgDefines.TemplatePatternTag).value.l shouldBe List("true")
       }
   }
 

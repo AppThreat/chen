@@ -9,9 +9,11 @@ import io.appthreat.c2cpg.parser.{
     PredefinedMacros,
     ProjectSources,
     SourceLanguage,
+    Toolchains,
     UnitSettings
 }
 import io.appthreat.c2cpg.utils.IncludeAutoDiscovery
+import io.appthreat.x2cpg.parse.{ParseReporter, ParseUnitRecord, UnitSettingsReporter}
 import org.slf4j.LoggerFactory
 
 import java.io.File
@@ -74,23 +76,36 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
           // short name a Windows temporary directory carries, which the exporter's own
           // canonicalisation keeps) reads the unit as someone else's, and its bodies are not
           // exported. The file to write keeps its own name: the exporter only writes there.
-          val command = (Seq(exe) ++ arguments(file) ++ Seq(
+          val relative          = ParseReporter.relativeTo(config.inputPath, file.toString)
+          val frontEndArguments = arguments(file)
+          val command = (Seq(exe) ++ frontEndArguments ++ Seq(
             "--edga-root",
             root.toString,
             "--edga-out",
             out.toString,
             AstCreator.realPath(file).toString
           )).asJava
+          // the report keeps the command line exactly as it runs, temporary document file
+          // included, whatever the export makes of it
+          if UnitSettingsReporter.isEnabled then
+            UnitSettingsReporter.recordCommandLine(relative, command.asScala.toSeq)
           val process = new ProcessBuilder(command)
               .redirectErrorStream(true)
               .redirectOutput(ProcessBuilder.Redirect.DISCARD)
               .start()
-          if !process.waitFor(timeoutSeconds, TimeUnit.SECONDS) then
-            process.destroyForcibly()
-            logger.warn(s"edga timed out on $file")
-            None
-          else if Files.size(out) == 0 then None
-          else Some(EdgaUnit.parseBytes(Files.readAllBytes(out)))
+          val exported =
+              if !process.waitFor(timeoutSeconds, TimeUnit.SECONDS) then
+                process.destroyForcibly()
+                logger.warn(s"edga timed out on $file")
+                None
+              else if Files.size(out) == 0 then None
+              else Some(EdgaUnit.parseBytes(Files.readAllBytes(out)))
+          // a unit the export read is the edg frontend's: the settings record the shared settings
+          // code made for it under the c frontend goes, so the report names the unit once. A unit
+          // the export cannot read keeps it, for the CDT fallback parses the unit with those
+          // settings.
+          if exported.isDefined then UnitSettingsReporter.drop(ParseReporter.Frontend.C, relative)
+          exported
         catch
           case e: Exception =>
               logger.warn(s"edga failed on $file: ${e.getMessage}")
@@ -112,7 +127,7 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
     )
     val facts   = identity.flatMap(PredefinedMacros.ofCompiler(_, None))
     val macros  = facts.map(_.macros).getOrElse(settings.definedSymbols)
-    val dialect = EdgaRunner.dialectOptions(macros, cpp)
+    val dialect = EdgaRunner.dialectOptions(macros, cpp, entryOf(file))
     // the type-trait builtins (`__is_same(T, U)` and the rest), which C++ standard libraries use
     // without a feature check: every compiler the macros come from has them, but the front end
     // enables them only above the GNU 4.2.1 clang reports
@@ -167,6 +182,44 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
             settings.macroFiles.flatMap(f =>
                 Seq("--preinclude_macros", AstCreator.realPath(f).toString)
             )
+    // the parse report's units section for the unit: how the front end is set up to parse it, and
+    // where its macros came from; exportUnit adds the exact command line when the export runs
+    if UnitSettingsReporter.isEnabled then
+      val unit      = file.toAbsolutePath.normalize
+      val unitFlags = sources.database.flatMap(_.commandFor(unit)).map(_.flags)
+      val macrosSource = facts match
+        case Some(_) =>
+            // the compiler the settings carry when they named one; the host's otherwise
+            if settings.compiler.isDefined then settings.macroSource
+            else UnitSettingsReporter.MacroSource.Host
+        case None => settings.macroSource
+      UnitSettingsReporter.record(
+        ParseUnitRecord(
+          frontend = ParseReporter.Frontend.Edg,
+          file = ParseReporter.relativeTo(config.inputPath, file.toString),
+          driver = unitFlags.flatMap(_.compiler).getOrElse(""),
+          entry = unitFlags
+              .map(f => f.entry.getOrElse(UnitSettingsReporter.MacroSource.Unknown))
+              .getOrElse(""),
+          macroSource = macrosSource,
+          language = if cpp then UnitSettingsReporter.Language.Cpp
+          else UnitSettingsReporter.Language.C,
+          standard = settings.standard.getOrElse(""),
+          macroFingerprint = UnitSettingsReporter.macroFingerprint(macros),
+          // the search order the front end is given: the project's include roots, then the ones
+          // inferred for it, then the rest as system directories
+          includeDirectories =
+              (projectIncludes ++ inferred ++ (otherIncludes ++ systemDirs).distinct)
+                  .map(_.toString),
+          forcedIncludes = (settings.includeFiles ++ settings.macroFiles).map(f =>
+              AstCreator.realPath(f).toString
+          ),
+          ownedHeaders = sources.headersOwnedBy(unit).map(header =>
+              ParseReporter.relativeTo(config.inputPath, header.toString)
+          )
+        )
+      )
+    end if
     // a compiler macro the front end also defines keeps the front end's value, which describes what
     // it implements, without an error for the attempted redefinition
     Seq("--clear_flag=use_predefined_macro_file", "--diag_suppress=46") ++ dialect ++
@@ -175,6 +228,13 @@ final class EdgaRunner(config: Config, sources: ProjectSources):
         includes ++ userDefines ++ libcxx ++ EdgaRunner.float128Shim(this.identity, macros, cpp) ++
         EdgaRunner.c23VaStartShim(standard) ++ forced
   end arguments
+
+  /** The driver table entry the unit's compile command matched, whose dialect the front end is
+    * given. A unit outside the database, a header among them, is read by its macros alone.
+    */
+  private def entryOf(file: Path): Option[Toolchains.Entry] =
+      sources.database.flatMap(_.commandFor(file)).map(_.flags).flatMap(_.entry)
+          .flatMap(Toolchains.entryNamed)
 
   private def macroFile(macros: Map[String, String]): Path =
     val text = macros.toSeq.sorted.filterNot((k, v) =>
@@ -394,20 +454,58 @@ object EdgaRunner:
 
   /** The front end's emulation of the compiler the macros came from. */
   def dialectOptions(macros: Map[String, String], cpp: Boolean): Seq[String] =
-    def version(keys: String*): Option[Int] =
-      val parts = keys.map(k => macros.get(k).flatMap(_.trim.toIntOption))
-      Option.when(parts.headOption.flatten.isDefined)(
-        parts.zip(Seq(10000, 100, 1)).map((p, w) => p.getOrElse(0) * w).sum
+    val clang = clangVersion(macros)
+    val gnu   = gnuVersion(macros)
+    val msvc  = macros.get("_MSC_VER").flatMap(_.trim.toIntOption)
+    if clang.isDefined then clangOptions(clang.get)
+    else if gnu.isDefined then gnuOptions(gnu.get, cpp)
+    else if msvc.isDefined then microsoftOptions(msvc.get)
+    else Seq.empty
+
+  private def clangVersion(macros: Map[String, String]): Option[Int] =
+      versionOf(
+        macros,
+        Seq("__clang_major__", "__clang_minor__", "__clang_patchlevel__")
       )
-    val gnu = version("__GNUC__", "__GNUC_MINOR__", "__GNUC_PATCHLEVEL__")
-    version("__clang_major__", "__clang_minor__", "__clang_patchlevel__") match
-      // the GNU version clang reports (4.2.1) is not its feature level: the front end sets the one
-      // that matches its clang emulation
-      case Some(clang) => Seq("--clang", s"--clang_version=$clang")
-      case None =>
-          (gnu, macros.get("_MSC_VER").flatMap(_.trim.toIntOption)) match
-            case (Some(g), _) => Seq(if cpp then "--g++" else "--gcc", s"--gnu_version=$g")
-            // MSVC, from the macros its family's table gives
-            case (None, Some(msvc)) => Seq("--microsoft", s"--microsoft_version=$msvc")
-            case _                  => Seq.empty
+
+  private def gnuVersion(macros: Map[String, String]): Option[Int] =
+      versionOf(macros, Seq("__GNUC__", "__GNUC_MINOR__", "__GNUC_PATCHLEVEL__"))
+
+  private def versionOf(macros: Map[String, String], keys: Seq[String]): Option[Int] =
+    val parts = keys.map(k => macros.get(k).flatMap(_.trim.toIntOption))
+    Option.when(parts.headOption.flatten.isDefined)(
+      parts.zip(Seq(10000, 100, 1)).map((p, w) => p.getOrElse(0) * w).sum
+    )
+
+  private def clangOptions(version: Int): Seq[String] = Seq("--clang", s"--clang_version=$version")
+
+  private def gnuOptions(version: Int, cpp: Boolean): Seq[String] =
+      Seq(if cpp then "--g++" else "--gcc", s"--gnu_version=$version")
+
+  private def microsoftOptions(version: Int): Seq[String] =
+      Seq("--microsoft", s"--microsoft_version=$version")
+
+  /** The dialect the driver table's entry gives the front end for the unit's compiler: clang
+    * emulation for the clang-based toolchains, the front end's default for the compilers it has no
+    * emulation of, and the macros' own reading where the entry leaves the dialect to them. The GNU
+    * version clang reports (4.2.1) is not its feature level: the front end sets the one that
+    * matches its clang emulation.
+    */
+  def dialectOptions(
+    macros: Map[String, String],
+    cpp: Boolean,
+    entry: Option[Toolchains.Entry]
+  ): Seq[String] =
+      entry.flatMap { e =>
+          e.edgDialect match
+            case Toolchains.EdgDialect.Host => None
+            case Toolchains.EdgDialect.Gnu =>
+                Some(gnuVersion(macros).map(gnuOptions(_, cpp)).getOrElse(Seq.empty))
+            case Toolchains.EdgDialect.Clang =>
+                Some(clangVersion(macros).map(clangOptions).getOrElse(Seq("--clang")))
+            case Toolchains.EdgDialect.Microsoft =>
+                Some(macros.get("_MSC_VER").flatMap(_.trim.toIntOption).map(microsoftOptions)
+                    .getOrElse(Seq("--microsoft")))
+            case Toolchains.EdgDialect.None => Some(Seq.empty)
+      }.getOrElse(dialectOptions(macros, cpp))
 end EdgaRunner

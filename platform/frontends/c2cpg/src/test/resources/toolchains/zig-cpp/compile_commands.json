@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "clang_guarded.cpp", "arguments": ["zig", "c++", "-O2", "-c", "clang_guarded.cpp"]}
+]
