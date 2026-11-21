@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  s_8788a01b4477b0::t_a3d2a2f6097cd8 132-133,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b2e46b1bac9c0f7d1b147be178b7717a83ec91c5",
+  "prompts": {},
+  "sessions": {
+    "s_8788a01b4477b0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c41334aa-2343-4dc4-8b07-1cbbaab93edf",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
