@@ -466,12 +466,12 @@ object Toolchains:
     )
 
   /** The file name a driver word is recognised by: the base name, without its Windows suffix,
-    * lowercased.
+    * lowercased. Read as text rather than as a Path, since a command word need not be a valid path
+    * on the host (`-IC:/inc` is not one on Windows).
     */
   private def nameOf(driver: String): String =
-      Paths.get(driver.replace('\\', '/')).getFileName match
-        case null => ""
-        case p    => p.toString.toLowerCase.stripSuffix(".exe")
+    val slashed = driver.replace('\\', '/').stripSuffix("/")
+    slashed.substring(slashed.lastIndexOf('/') + 1).toLowerCase.stripSuffix(".exe")
 
   private def matches(
     matcher: Matcher,
@@ -482,7 +482,7 @@ object Toolchains:
         case Matcher.Name(value) =>
             driver.exists(_ == value) ||
             // a two-word driver ("zig cc"): the joined first two arguments of the command
-            nameOf(arguments.take(2).mkString(" ")) == value
+            (arguments.size >= 2 && s"${nameOf(arguments.head)} ${arguments(1).toLowerCase}" == value)
         case Matcher.Contains(value) => driver.exists(_.contains(value))
         case Matcher.Prefix(value)   => driver.exists(_.startsWith(value))
         case Matcher.Suffix(value)   => driver.exists(_.endsWith(value))

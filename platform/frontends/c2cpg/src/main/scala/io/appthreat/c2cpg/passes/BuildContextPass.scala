@@ -80,10 +80,13 @@ object BuildContextPass:
           config.macroFiles.toSeq.map(path).sorted.map(p => s"macro-file=$p")
     )
 
-  /** The driver's file name, without the directory it was found in or a Windows suffix. */
+  /** The driver's file name, without the directory it was found in or a Windows suffix. Read as
+    * text so that a driver word that is not a valid path on the host still has a name.
+    */
   private def driverName(driver: String): String =
-      Option(Paths.get(driver.replace('\\', '/')).getFileName).map(_.toString)
-          .getOrElse(driver).stripSuffix(".exe")
+    val slashed = driver.replace('\\', '/')
+    val name    = slashed.substring(slashed.lastIndexOf('/') + 1)
+    (if name.isEmpty then driver else name).stripSuffix(".exe")
 
   /** A path as the fingerprint reads it: relative to `root` when it lies under it, with `/` as the
     * separator either way.
