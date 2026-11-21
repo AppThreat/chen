@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextWarmCacheTests.scala
+  s_41c0f02203fe20::t_d3c15b62af9bbc 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ed318e49b264623fb0a89f7728c9085b5388aa4b",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
