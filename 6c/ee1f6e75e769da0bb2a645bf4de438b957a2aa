@@ -1,0 +1,27 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/TemplateTagTests.scala
+  s_7b96758d810d17::t_1ae0687dad20b6 109
+  s_7b96758d810d17::t_6b9ecacd1304c6 148,151-172
+  s_7b96758d810d17::t_81b8317eafe8d7 1-67,71-74,76-77,79-80,82-83,89-108,110-125,127-147,149-150,173-175,251-265,273,277-279
+  s_7b96758d810d17::t_d7a8927d977b5d 266,272,274-276
+  s_7b96758d810d17::t_040879301b81b7 267-271
+  s_7b96758d810d17::t_3aef54119bc8b7 126
+  s_7b96758d810d17::t_6488b9177c4591 210-212
+  s_7b96758d810d17::t_5bab8134552ba1 176-209,213-250
+  s_7b96758d810d17::t_673505e5fd2a9f 68-70,75,78,81,84-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6cee1f6e75e769da0bb2a645bf4de438b957a2aa",
+  "prompts": {},
+  "sessions": {
+    "s_7b96758d810d17": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
