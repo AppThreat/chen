@@ -138,6 +138,32 @@ object Defines:
     */
   val TemplateInstanceTag = "template-instance"
 
+  /** On the METHOD of a template definition: the generic pattern every instance of the template
+    * comes from. A call that reaches one of the instances carries the instance's arguments in
+    * `template-args`, and the METHOD of an instance names its template in `template`.
+    */
+  val TemplatePatternTag = "template-pattern"
+
+  /** On a METHOD generated from a template instance: the template it came from, by its qualified
+    * name as METHOD full names spell it (`Box.get`) and without a signature, so every instance of
+    * one template carries the same value.
+    */
+  val TemplateTag = "template"
+
+  /** The arguments a template instance was written with, in order and comma-separated, as the front
+    * end spells types (`short` for `clampAdd<short>`): on an instance METHOD, and on a CALL to an
+    * instance where the front end links the call to the template's own METHOD instead (the call
+    * then also carries the instance's signature in `template-instance`).
+    */
+  val TemplateArgsTag = "template-args"
+
+  /** On a FILE node of a C/C++ front end: the build context the file was read in. A translation
+    * unit's value is the fingerprint of its compile command (everything that changes what the unit
+    * preprocessed and parsed as). A header's value names the unit whose parse it was read with and
+    * that unit's fingerprint, `<owner relative path>:<fingerprint>`, so a reader sees both.
+    */
+  val BuildContextTag = "build-context"
+
   /** On a C++ `<operator>.new` or `<operator>.delete` CALL: which form it is. `new` is `scalar`,
     * `array` (`new T[n]`) or `placement` (`new (buf) T`); `delete` is `scalar` or `array`
     * (`delete[]`).

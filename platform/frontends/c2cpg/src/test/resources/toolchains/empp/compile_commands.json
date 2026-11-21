@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "wasm_entry.cpp", "arguments": ["em++", "-O2", "-c", "wasm_entry.cpp"]}
+]

@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "msvc_mode.cpp", "arguments": ["clang", "--driver-mode=cl", "/O2", "/c", "msvc_mode.cpp"]}
+]

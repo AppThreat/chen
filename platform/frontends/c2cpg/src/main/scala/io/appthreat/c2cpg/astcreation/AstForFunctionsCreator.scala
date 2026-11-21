@@ -15,6 +15,7 @@ import org.eclipse.cdt.core.dom.ast.cpp.{
     ICPPASTInitCapture,
     ICPPASTInitializerList,
     ICPPASTLambdaExpression,
+    ICPPASTTemplateDeclaration,
     ICPPConstructor,
     ICPPMethod
 }
@@ -252,6 +253,19 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
   /** The attributes already on each METHOD (by full name), so none is tagged twice. */
   private val methodAttributes = mutable.HashMap.empty[String, mutable.HashSet[String]]
 
+  /** Whether the function is written under a template declaration that declares parameters: the
+    * generic pattern the graph holds for every instance of the template. An explicit specialisation
+    * (`template<>`) declares none, so it is a concrete function, not a pattern.
+    */
+  private def isTemplatePattern(node: IASTNode): Boolean =
+    @tailrec def under(current: IASTNode): Boolean =
+        if current == null then false
+        else
+          current match
+            case t: ICPPASTTemplateDeclaration => t.getTemplateParameters.length > 0
+            case _                             => under(current.getParent)
+    under(node.getParent)
+
   /** The declared attributes of the function a direct call resolves to, on the CALL: when the
     * declaration sits in a header outside the analysed input no METHOD is built from it (it is an
     * included node of every translation unit), and the call is where its semantics survive.
@@ -322,6 +336,8 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
               ),
               function
             )
+            if isTemplatePattern(funcDecl) then
+              tagNode(methodNode_, X2CpgDefines.TemplatePatternTag, "true")
             declarationStubs(fullname) = methodNode_
             scope.pushNewScope(methodNode_)
 
@@ -408,6 +424,8 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode):
       Seq(funcDef.getDeclarator, funcDef.getDeclSpecifier),
       binding
     )
+    if isTemplatePattern(funcDef) then
+      tagNode(methodNode_, X2CpgDefines.TemplatePatternTag, "true")
     methodAstParentStack.push(methodNode_)
     scope.pushNewScope(methodNode_)
 

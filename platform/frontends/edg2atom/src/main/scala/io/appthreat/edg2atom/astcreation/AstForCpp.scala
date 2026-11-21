@@ -135,6 +135,54 @@ trait AstForCpp(implicit withSchemaValidation: ValidationMode):
     (call, ast)
   end linkedCallAst
 
+  // ---- templates ----------------------------------------------------------------------------
+
+  /** The tags a routine generated from a template carries. An instance names the template it came
+    * from and the arguments it was written with (its own, or those of the class instance it is a
+    * member of, which the front end leaves it without). A prototype, the body of a template nothing
+    * in the unit instantiated, is the pattern its instances come from. The template is spelled the
+    * way the frontend spells METHOD names: the template's qualified name with its scopes joined and
+    * its operator functions renamed, the name part of the METHOD full name the prototype carries
+    * when a unit of the project exports it.
+    */
+  protected def templateTags(r: Value, method: NewMethod): Unit =
+      if r.flag("templateInstance") then
+        r.field("template").flatMap(_.string("qualifiedName")).foreach { qualified =>
+            tagNode(method, X2CpgDefines.TemplateTag, cppQualifiedName(dotted(qualified)))
+        }
+        templateArgsOf(r).foreach(args => tagNode(method, X2CpgDefines.TemplateArgsTag, args))
+      else if r.flag("prototype") then
+        tagNode(method, X2CpgDefines.TemplatePatternTag, "true")
+
+  /** The arguments a template instance was written with, in order, each as the front end writes it:
+    * a type by its name, a non-type by its value, a template by its name.
+    */
+  private def templateArgsOf(r: Value): Option[String] =
+    val own = r.list("templateArgs")
+    val listed =
+        if own.nonEmpty then own
+        else
+          r.long("class").flatMap(unit.types.get).map(_.list("templateArgs")).getOrElse(
+            Seq.empty
+          )
+    Option.when(listed.nonEmpty)(
+      listed
+          .map(arg =>
+              arg.long("type").map(types(_)).orElse(arg.string("value"))
+                  .orElse(arg.string("name").orElse(arg.string("qualifiedName"))).getOrElse("")
+          )
+          .mkString(",")
+    )
+
+  /** The class template a prototype is a member of: the template its class is the pattern of. A
+    * prototype outside a class has none, and the calls written in it reach nothing the instances
+    * hold.
+    */
+  protected def prototypeClassTemplateOf(r: Value): Option[Long] =
+      Option.when(r.flag("prototype")) {
+          r.long("class").flatMap(unit.types.get).flatMap(_.field("template")).flatMap(_.long("id"))
+      }.flatten
+
   // ---- overloaded operators -----------------------------------------------------------------
 
   private val UnaryOperators: Map[String, String] = Map(

@@ -540,9 +540,71 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
             Some(""),
             Some(typeOf(e))
           )
+          // a call written in a template's pattern whose callee the document does not carry
+          // resolves to a different METHOD per instance: name the ones it reaches here
+          val callees = dependentCallees(e, operands)
+          if callees.nonEmpty then call.dynamicTypeHintFullName(callees)
           val receiver = operands.headOption.map(expressionAst).getOrElse(Ast())
           callAst(call, operands.drop(1).map(expressionAst), receiver = Some(receiver))
+    end match
   end callExpressionAst
+
+  /** The METHOD full names a dependent call reaches in the unit's instances. A call written in the
+    * prototype of a class template member names a member of that class, which takes the prototype's
+    * place in every instance of the class the unit built; the METHOD of that member in each
+    * instance is the callee the call reaches there. The list is sorted, each name once. A call
+    * outside a member prototype, and one whose callee names nothing the instances hold, reaches
+    * nothing and keeps its unresolved shape without a list.
+    */
+  private def dependentCallees(e: Value, operands: Seq[Value]): Seq[String] =
+      (
+        enclosingPrototypeClassTemplate,
+        calleeNameOf(e, operands)
+      ) match
+        case (Some(classTemplate), Some(memberName)) =>
+            instancesOfClassTemplate
+                .getOrElse(classTemplate, Seq.empty)
+                .flatMap(instance => definedMembers.getOrElse((instance, memberName), Seq.empty))
+                .map(methodFullNameOf)
+                .distinct
+                .sorted
+        case _ => Seq.empty
+  end dependentCallees
+
+  /** The unit's class template instances, by the id of the template each came from. Built once per
+    * unit: every dependent call in every prototype reads it.
+    */
+  private lazy val instancesOfClassTemplate: Map[Long, Seq[Long]] =
+      unit.types.values.toSeq
+          .filter(_.flag("templateInstance"))
+          .flatMap(t => t.field("template").flatMap(_.long("id")).map(_ -> t("id").num.toLong))
+          .groupMap(_._1)(_._2)
+
+  /** The routines with a body the unit defines as members of a class, by the class and the member's
+    * name: the callees a dependent call can reach in an instance.
+    */
+  private lazy val definedMembers: Map[(Long, String), Seq[Value]] =
+      unit.routines
+          .filter(r => r.field("body").isDefined && !r.flag("implicit"))
+          .flatMap(r => for c <- r.long("class"); n <- r.string("name") yield (c, n) -> r)
+          .groupMap(_._1)(_._2)
+
+  /** The name the callee of an unresolved call is written with. The front end names it on the call
+    * (`p.size()`), or on the routine its callee expression resolved to and the document does not
+    * carry (the prototype instantiation), or leaves it only in the source text of the dependent
+    * expression (`this->get()` written `get()`), which is read as an identifier. A call through a
+    * value (a function pointer, a functor) names no member.
+    */
+  private def calleeNameOf(e: Value, operands: Seq[Value]): Option[String] =
+      e.string("name")
+          .orElse(operands.headOption.filter(_.kind == "routine").flatMap(_.string("name")))
+          .orElse(
+            operands.headOption
+                .filter(o => o.kind == "constant" && o.string("ck").contains("template_param"))
+                .map(code)
+                .filter(_.matches("[A-Za-z_][A-Za-z0-9_]*"))
+          )
+  end calleeNameOf
 
   /** A call to `r`. A member call has its object as argument 0 (and receiver, when the call
     * dispatches dynamically); a member function called without `this->` has no object.

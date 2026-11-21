@@ -37,6 +37,14 @@ class ExternalParseCache(cacheDir: String, kind: String):
         logger.warn(s"Failed to create cache directory $entriesDir: ${e.getMessage}")
     }
 
+  /** Whether this cache can restore or store anything right now: it has a directory it may create
+    * and its kind is not switched off (`--cache none`, `--cache no-astgen`, `--no-ast-cache`,
+    * `chen.cache.disabled*`). A caller asks this before it does the work that only a cache key
+    * needs (a project fingerprint, a parser version probe), since [[restore]] and [[store]] do
+    * nothing when it is false.
+    */
+  def isUsable: Boolean = enabled
+
   private def entriesDir: Path = Paths.get(cacheDir, kind)
 
   private def entryDir(fingerprint: String): Path = entriesDir.resolve(fingerprint)

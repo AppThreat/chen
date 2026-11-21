@@ -66,6 +66,15 @@ class AstCreator(
   /** The full names of the METHODs being built, innermost first. */
   private var methodStack: List[String] = Nil
 
+  /** The class template each prototype being built is a member of, innermost first: what a call
+    * written in the prototype, whose callee the document does not carry, reaches in the unit's
+    * instances of that class.
+    */
+  private var prototypeClassTemplates: List[Long] = Nil
+
+  protected def enclosingPrototypeClassTemplate: Option[Long] =
+      prototypeClassTemplates.headOption
+
   private var currentPath = filename
 
   /** The file whose AST is being built, by the front end's id: what tells a declaration in another
@@ -392,6 +401,8 @@ class AstCreator(
     }
     scope.pushNewScope(method)
     methodStack = fullName :: methodStack
+    val savedPrototypeClassTemplates = prototypeClassTemplates
+    prototypeClassTemplates = prototypeClassTemplateOf(r).toList ++ prototypeClassTemplates
     // `f(void)`: the CDT frontend writes the empty parameter list as one `void` parameter
     val voidParam = Option.when(
       !unit.isCpp && r.list("params").isEmpty && r.flag("prototyped")
@@ -447,8 +458,10 @@ class AstCreator(
           case None => Ast(NewBlock().code("<empty>").typeFullName(registerType("<empty>")))
     }
     methodStack = methodStack.drop(1)
+    prototypeClassTemplates = savedPrototypeClassTemplates
     scope.popScope()
     attributeTags(r, method)
+    templateTags(r, method)
     r.string("asmName").foreach(tagNode(method, X2CpgDefines.AsmNameTag, _))
     Some(methodAst(method, params, bodyAst, methodReturn, modifiersOf(r)))
   end routineAst

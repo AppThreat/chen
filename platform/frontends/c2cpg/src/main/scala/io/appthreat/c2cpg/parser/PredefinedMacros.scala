@@ -57,13 +57,20 @@ object PredefinedMacros:
   def clearProcessCache(): Unit = processCache.clear()
 
   /** The facts `identity` reports, from the process cache, the disk cache or by running it. None
-    * when it cannot be run.
+    * when it cannot be run: the MSVC family, whose `cl.exe` has no macro-dump option, and the
+    * toolchains whose drivers the settings never ask for (their table stands in).
     */
   def ofCompiler(identity: CompilerIdentity, cacheDir: Option[Path]): Option[CompilerFacts] =
-      if identity.family == CompilerFamily.Msvc then None
-      else
+      if RunnableFamilies.contains(identity.family) then
         val key = identityKey(identity)
         processCache.computeIfAbsent(key, _ => lookup(identity, key, cacheDir))
+      else None
+
+  /** The compilers asked for their macros: the GCC and Clang drivers, which answer `-dM -E`. A
+    * command of any other family is not run (its table stands in), so a compilation database cannot
+    * have an arbitrary program started.
+    */
+  private val RunnableFamilies = Set(CompilerFamily.Gcc, CompilerFamily.Clang)
 
   private def identityKey(identity: CompilerIdentity): String =
       (identity.executable +: identity.language.toString +: identity.options).mkString("\u0000")
@@ -91,8 +98,15 @@ object PredefinedMacros:
     val lang = identity.language match
       case SourceLanguage.C   => "c"
       case SourceLanguage.Cpp => "c++"
+    // the probe the driver table spells for the compiler: the GCC and Clang drivers are asked
+    // exactly as they always were, a two-word driver through its subcommand
+    val probe = Toolchains
+        .entryForFamily(identity.family)
+        .flatMap(_.probe)
+        .getOrElse(Toolchains.Probe(args = Seq("-x", "<lang>", "-dM", "-E", "-v")))
     val command =
-        (identity.executable +: identity.options) ++ Seq("-x", lang, "-dM", "-E", "-v", "-")
+        (Seq(identity.executable) ++ probe.prefixArgs ++ identity.options ++
+            probe.args.map(arg => if arg == "<lang>" then lang else arg)) :+ "-"
     exec(command) match
       case Some((0, out, err)) =>
           Some(CompilerFacts(parseDefines(out.linesIterator), searchPath(err.linesIterator.toSeq)))
@@ -100,6 +114,7 @@ object PredefinedMacros:
           logger.debug(s"'${command.mkString(" ")}' exited with $code: ${err.take(500)}")
           None
       case None => None
+  end run
 
   /** Runs `command` with an empty standard input: its exit code, standard output and error. */
   private def exec(command: Seq[String]): Option[(Int, String, String)] =
@@ -186,8 +201,18 @@ object PredefinedMacros:
       MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))
           .take(16).map("%02x".format(_)).mkString
 
-  /** A table of predefined macros for a compiler family and target. */
-  final case class Table(name: String, family: CompilerFamily, os: String, arch: String)
+  /** A table of predefined macros for a compiler family and target. A table that names the target
+    * triples or the command options it belongs to is selected by those, ahead of the host's
+    * platform (armclang's triple, the bare-metal ARM options, clang's MSVC driver mode).
+    */
+  final case class Table(
+    name: String,
+    family: CompilerFamily,
+    os: String,
+    arch: String,
+    triples: Seq[String] = Nil,
+    optionPrefixes: Seq[String] = Nil
+  )
 
   val tables: Seq[Table] = Seq(
     Table("gcc-linux-x86_64", CompilerFamily.Gcc, "linux", "x86_64"),
@@ -197,15 +222,89 @@ object PredefinedMacros:
     Table("clang-macos-arm64", CompilerFamily.Clang, "macos", "aarch64"),
     Table("clang-macos-x86_64", CompilerFamily.Clang, "macos", "x86_64"),
     Table("msvc-windows-x64", CompilerFamily.Msvc, "windows", "x86_64"),
-    Table("msvc-windows-arm64", CompilerFamily.Msvc, "windows", "aarch64")
+    Table("msvc-windows-arm64", CompilerFamily.Msvc, "windows", "aarch64"),
+    Table(
+      "clangcl-windows-x64",
+      CompilerFamily.Msvc,
+      "windows",
+      "x86_64",
+      optionPrefixes = Seq("--driver-mode=cl")
+    ),
+    Table(
+      "clangcl-windows-arm64",
+      CompilerFamily.Msvc,
+      "windows",
+      "aarch64",
+      optionPrefixes = Seq("--driver-mode=cl")
+    ),
+    Table(
+      "gcc-arm-none-eabi",
+      CompilerFamily.Gcc,
+      "none",
+      "arm",
+      optionPrefixes = Seq(
+        "-mthumb",
+        "-mcpu=cortex-m",
+        "-mcpu=cortex-r",
+        "-march=armv4",
+        "-march=armv5",
+        "-march=armv6",
+        "-march=armv7"
+      )
+    ),
+    Table(
+      "armclang-arm-none-eabi",
+      CompilerFamily.Clang,
+      "none",
+      "arm",
+      triples = Seq("arm-arm-none-eabi")
+    ),
+    Table("tinycc-linux-x86_64", CompilerFamily.TinyC, "linux", "x86_64"),
+    Table("tinycc-linux-aarch64", CompilerFamily.TinyC, "linux", "aarch64"),
+    Table("emscripten-wasm32", CompilerFamily.Emscripten, "emscripten", "wasm32"),
+    Table("intel-llvm-linux-x86_64", CompilerFamily.IntelLlvm, "linux", "x86_64"),
+    Table("intel-llvm-linux-aarch64", CompilerFamily.IntelLlvm, "linux", "aarch64"),
+    Table("iccarm-arm", CompilerFamily.Iar, "none", "arm"),
+    Table("ti-arm", CompilerFamily.TiArm, "none", "arm"),
+    Table("ti-msp430", CompilerFamily.TiMsp430, "none", "msp430"),
+    Table("nvcc-own", CompilerFamily.Nvcc, "any", "any")
   )
 
   private val tableCache = new ConcurrentHashMap[(String, SourceLanguage), Map[String, String]]()
 
   /** The table for `family` on the target a `--target=` option names (the host's when none), for
     * `language`. A compiler of unknown family on Windows is taken for MSVC, elsewhere for GCC.
+    * nvcc's macros are the host compiler's table with nvcc's own merged over it.
     */
   def fallback(
+    family: CompilerFamily,
+    language: SourceLanguage,
+    options: Seq[String]
+  ): Map[String, String] =
+    family match
+      case CompilerFamily.Nvcc =>
+          val host = Toolchains.hostFamilyOf(options).getOrElse {
+              val target =
+                  options.collectFirst {
+                      case o if o.startsWith("--target=") =>
+                          o.stripPrefix("--target=")
+                  }
+              val os = target.map(t => platformOfTriple(t)._1).getOrElse(hostPlatform._1)
+              if os == "windows" then CompilerFamily.Msvc else CompilerFamily.Gcc
+          }
+          select(host, language, options) ++ select(family, language, options)
+      case f => select(f, language, options)
+    end match
+  end fallback
+
+  /** The table of one family for `language`, selected by the options the command carries, then by
+    * the target triple, then by the target's or the host's platform. Among the tables the options
+    * select (clang's MSVC mode against the bare-metal ARM options), the target's architecture
+    * decides; the stem the driver table's family entry names (`fallbackTable`) narrows what the
+    * platform finds fall back to, so the tables of another toolchain sharing the family are only
+    * reached through their own options or triples.
+    */
+  private def select(
     family: CompilerFamily,
     language: SourceLanguage,
     options: Seq[String]
@@ -217,12 +316,25 @@ object PredefinedMacros:
       case CompilerFamily.Unknown =>
           if os == "windows" then CompilerFamily.Msvc else CompilerFamily.Gcc
       case f => f
+    val stem       = Toolchains.entryForFamily(wanted).flatMap(_.fallbackTable)
     val candidates = tables.filter(_.family == wanted)
-    val table = candidates.find(t => t.os == os && t.arch == arch)
-        .orElse(candidates.find(_.arch == arch))
-        .orElse(candidates.headOption)
+    val byOption = candidates.filter(t =>
+        t.optionPrefixes.nonEmpty &&
+            options.exists(o => t.optionPrefixes.exists(o.startsWith))
+    )
+    val byStem = candidates.filter(t => stem.forall(t.name.startsWith))
+    val table = byOption.find(t => t.os == os && t.arch == arch)
+        .orElse(byOption.find(_.arch == arch))
+        .orElse(byOption.headOption)
+        .orElse(candidates.find(t =>
+            target.exists(triple => t.triples.contains(triple.toLowerCase))
+        ))
+        .orElse(byStem.find(t => t.os == os && t.arch == arch))
+        .orElse(byStem.find(_.arch == arch))
+        .orElse(byStem.headOption)
     table.map(t => tableCache.computeIfAbsent((t.name, language), _ => loadTable(t, language)))
         .getOrElse(Map.empty)
+  end select
 
   private def platformOfTriple(triple: String): (String, String) =
     val t = triple.toLowerCase
@@ -249,15 +361,25 @@ object PredefinedMacros:
     (os, arch)
 
   /** The modes a table line can name, active for its compiler and `language` (the names the EDG
-    * front end's tables use).
+    * front end's tables use). The clang-based toolchains carry clang's modes; the ones with tables
+    * of their own spell their family.
     */
   private def activeModes(family: CompilerFamily, language: SourceLanguage): Set[String] =
     val cpp  = language == SourceLanguage.Cpp
     val base = Set("all") ++ (if cpp then Set("cpp") else Set.empty)
     base ++ (family match
-      case CompilerFamily.Gcc => Set("gnu", "gnu_or_clang") + (if cpp then "gpp" else "gcc")
-      case CompilerFamily.Clang =>
+      case CompilerFamily.Gcc | CompilerFamily.Nvcc =>
+          Set("gnu", "gnu_or_clang") + (if cpp then "gpp" else "gcc")
+      case CompilerFamily.Clang | CompilerFamily.IntelLlvm | CompilerFamily.Emscripten =>
           Set("clang", "gnu_or_clang") + (if cpp then "clang_cpp" else "clang_c")
+      case CompilerFamily.TinyC =>
+          Set("tinycc") + (if cpp then "tinycc_cpp" else "tinycc_c")
+      case CompilerFamily.Iar =>
+          Set("iar") + (if cpp then "iar_cpp" else "iar_c")
+      case CompilerFamily.TiArm =>
+          Set("ti_arm") + (if cpp then "ti_arm_cpp" else "ti_arm_c")
+      case CompilerFamily.TiMsp430 =>
+          Set("ti_msp430") + (if cpp then "ti_msp430_cpp" else "ti_msp430_c")
       case _ => Set("microsoft") + (if cpp then "microsoft_cpp" else "microsoft_c")
     )
 

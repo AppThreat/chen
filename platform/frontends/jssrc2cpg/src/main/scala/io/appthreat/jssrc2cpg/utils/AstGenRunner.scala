@@ -213,14 +213,15 @@ class AstGenRunner(config: Config):
       excluded = Seq(Paths.get(config.inputPath))
     )
 
-  private def runAstGenNative(in: File, out: File): Try[Seq[String]] =
+  private[utils] def runAstGenNative(in: File, out: File): Try[Seq[String]] =
       for
         jsResult  <- jsFiles(in, out)
         vueResult <- vueFiles(in, out)
       yield jsResult ++ vueResult
 
   /** Best-effort astgen version, folded into the cache fingerprint so an astgen upgrade invalidates
-    * cached output. Falls back to "unknown" if the version cannot be determined.
+    * cached output. Falls back to "unknown" if the version cannot be determined. Only read when a
+    * fingerprint is needed, which is only when the parse cache is in use.
     */
   private lazy val astGenVersion: String =
       ExternalCommand
@@ -237,7 +238,8 @@ class AstGenRunner(config: Config):
 
   /** What, besides the sources, decides astgen's output: a change in any of these must not restore
     * a cached parse. A type map written by the native binary differs from one written by TypeScript
-    * 6.
+    * 6. The other `ASTGEN_*` variables astgen inherits (its ignore lists, the switches that bring
+    * test files, minified files and node_modules bundles in) change which files it parses.
     */
   private[utils] def astGenFingerprintInputs: Seq[String] =
       Seq(
@@ -245,11 +247,49 @@ class AstGenRunner(config: Config):
         s"tsTypes=${config.tsTypes}",
         s"flow=${config.flow}",
         s"astgen-types=${config.effectiveAstGenTypes()}"
-      )
+      ) ++ inheritedAstGenSettings
 
-  /** Identity of everything (besides the sources) that affects astgen's output. */
-  private def astGenFingerprint: String =
-      CpgCacheStore.projectFingerprint(config.inputPath, astGenFingerprintInputs)
+  private def inheritedAstGenSettings: Seq[String] =
+      sys.env.toSeq
+          .filter((name, _) => name.startsWith("ASTGEN_") && name != "ASTGEN_TYPES")
+          .sortBy(_._1)
+          .map((name, value) => s"$name=$value")
+
+  /** True when astgen reads the files under node_modules as sources (it parses their bundles when
+    * asked to, or when its ignore list leaves node_modules out), so their content decides its
+    * output and a size and time are not enough to describe them.
+    */
+  private def nodeModulesAreSources: Boolean =
+      sys.env.get("ASTGEN_INCLUDE_NODE_MODULES_BUNDLES").contains("true") ||
+          sys.env.get("ASTGEN_IGNORE_DIRS").exists(dirs =>
+              dirs.nonEmpty && !dirs.toLowerCase.contains("node_modules")
+          )
+
+  /** Identity of everything (besides the sources) that affects astgen's output, over the input tree
+    * as astgen sees it:
+    *
+    * Version control metadata is never read, so it is left out. Files under `node_modules` are
+    * described by path, size and modification time and not read: astgen resolves types through
+    * them, so a different package version must change the key, and it does, because npm writes the
+    * files with the install time and pnpm links them from a store path that holds the version. A
+    * reinstall of the very same versions changes the key too, which is a cache miss and never a
+    * stale hit.
+    *
+    * Files the configuration ignores (`CHEN_JS_IGNORE_DIRS` and the like arrive as
+    * `ignoredFilesRegex`) are also described by metadata only and not left out. chen applies that
+    * ignore list after astgen has run, to the files astgen wrote, and astgen itself knows nothing
+    * of it: a TypeScript program takes in every file a tsconfig lists and every file an import
+    * reaches, ignored by chen or not, so an ignored file can change the type maps of one that is
+    * kept. A size and a time are enough to notice an edit, and an ignored build output directory
+    * can be large.
+    */
+  private[utils] def astGenFingerprint: String =
+      CpgCacheStore.projectFingerprint(
+        config.inputPath,
+        astGenFingerprintInputs,
+        metadataOnlyDirNames = if nodeModulesAreSources then Set.empty else Set("node_modules"),
+        metadataOnlyPath = path => isIgnoredByUserConfig(path.toString)
+      )
 
   def execute(out: File): AstGenRunnerResult =
     val in = File(config.inputPath)
@@ -267,12 +307,18 @@ class AstGenRunner(config: Config):
         else
           val cache =
               new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
-          val fp = astGenFingerprint
-          if cache.restore(fp, out.path) then Success(Seq.empty)
+          // With the cache off nothing is restored or stored, so neither the fingerprint walk nor
+          // the `astgen --version` call it needs is worth running. A run that collects the parse
+          // report does not restore, but it still stores, so its key is computed: the entry it
+          // writes serves the next run that does not report.
+          if !cache.isUsable then runAstGenNative(in, out)
           else
-            runAstGenNative(in, out).map { res =>
-              cache.store(fp, out.path); res
-            }
+            val fp = astGenFingerprint
+            if cache.restore(fp, out.path) then Success(Seq.empty)
+            else
+              runAstGenNative(in, out).map { res =>
+                cache.store(fp, out.path); res
+              }
     def written =
         filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out).map((
           in.toString(),

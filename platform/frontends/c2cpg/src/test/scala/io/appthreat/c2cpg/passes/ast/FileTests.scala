@@ -48,7 +48,8 @@ class FileTests extends CCodeToCpgSuite:
   }
 
   "should allow traversing to namespaces" in {
-      val List(ns1, ns2, ns3) = cpg.file.namespaceBlock.l
+      // in file-name order: which pass created a FILE node decides the traversal order
+      val List(ns1, ns2, ns3) = cpg.file.namespaceBlock.l.sortBy(_.filename)
       ns1.filename shouldBe "<includes>"
       ns1.fullName shouldBe "<includes>:<global>"
       ns2.filename shouldBe "<unknown>"

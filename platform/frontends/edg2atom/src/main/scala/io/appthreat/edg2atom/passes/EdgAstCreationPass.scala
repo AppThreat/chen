@@ -67,7 +67,9 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
       diffGraph,
       file,
       cacheKey = AstCreationPass.fileCacheKey(file),
-      fingerprint = fingerprint(path, file),
+      // the store ignores the fingerprint when it is off, and building it reads the macro,
+      // include and owner files and every project header the unit includes
+      fingerprint = if cacheStore.isUsable then fingerprint(path, file) else "",
       registerUsedTypes = types => types.foreach(CGlobal.usedTypes.putIfAbsent(_, true)),
       createAst =
         attempted = true
@@ -126,5 +128,10 @@ object EdgAstCreationPass:
   /** How long the front end may take on one translation unit. */
   val TimeoutSeconds: Long = 600
 
-  /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. */
-  val AstFormatVersion = "edg2atom-ast-3"
+  /** Changes when the ASTs this frontend builds change, so cached ones are rebuilt. The exporter's
+    * version line does not move when its output gains data (template identity and prototype bodies
+    * do), so this version is what keeps a cache fed by the older exporter from replaying. The
+    * template tags on each instance and prototype METHOD are part of the built AST and carry this
+    * version with them.
+    */
+  val AstFormatVersion = "edg2atom-ast-5"

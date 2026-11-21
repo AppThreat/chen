@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "bare_metal_delay.c", "arguments": ["arm-none-eabi-gcc", "-mcpu=cortex-m4", "-mthumb", "-O2", "-c", "bare_metal_delay.c"]}
+]

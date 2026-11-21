@@ -489,6 +489,9 @@ trait AstForExpressionsCreator(implicit withSchemaValidation: ValidationMode):
             Some(signature),
             Some(X2CpgDefines.Any)
           )
+          // a callee that depends on a template parameter reaches a different METHOD per instance
+          if calleeDependsOnTemplateParameter(fieldRefExpr) then
+            registerDependentCall(callCpgNode, call)
 
           createCallAst(callCpgNode, args, base = Some(instanceAst), receiver = Some(instanceAst))
       case idExpr: CPPASTIdExpression =>

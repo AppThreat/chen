@@ -3,6 +3,9 @@ package io.appthreat.c2cpg
 import io.appthreat.c2cpg.datastructures.CGlobal
 import io.appthreat.c2cpg.passes.{
     AstCreationPass,
+    BuildContextCopiesPass,
+    BuildContextDuplicatesPass,
+    BuildContextPass,
     ConfigFileCreationPass,
     ConstantTagPass,
     DeclarationAttributesPass,
@@ -52,7 +55,10 @@ class C2Cpg extends X2CpgFrontend[Config]:
           new AstCreationPass(cpg, censusConfig, projectSources = sources).createAndApply()
 
         if !config.onlyAstCache then
+          new BuildContextCopiesPass(cpg, censusConfig, sources).createAndApply()
+          new BuildContextDuplicatesPass(cpg, censusConfig.buildContextsAll).createAndApply()
           new IncludeRecordPass(cpg).createAndApply()
+          new BuildContextPass(cpg, censusConfig, sources).createAndApply()
           new ConfigFileCreationPass(cpg).createAndApply()
           TypeNodePass.withRegisteredTypes(CGlobal.typesSeen(), cpg).createAndApply()
           new TypeDeclNodePass(cpg, CGlobal.lastMembers)(using config.schemaValidation)
@@ -82,21 +88,26 @@ class C2Cpg extends X2CpgFrontend[Config]:
             resolveCacheDir(config.inputPath, config.cacheDir),
             config.onlyAstCache
           )
-          val fragments =
-              files.toSeq.map(f =>
-                  store.fragmentFor(
-                    AstCreationPass.fileCacheKey(f),
-                    AstCreationPass.fileFingerprint(config, sources, f)
-                  )
-              )
-          if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse
+          // A store that is off (`--cache none`, `--no-ast-cache`) answers every lookup with
+          // nothing, so the fingerprints, which read macro, include and owner files, are not built.
+          if !store.isUsable then false
           else
-            new FragmentSplicePass(
-              cpg,
-              fragments.flatten,
-              ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
-            ).createAndApply()
-            true
+            val fragments =
+                files.toSeq.map(f =>
+                    store.fragmentFor(
+                      AstCreationPass.fileCacheKey(f),
+                      AstCreationPass.fileFingerprint(config, sources, f)
+                    )
+                )
+            if fragments.exists(_.isEmpty) then
+              false // not fully cached: fall back to a normal parse
+            else
+              new FragmentSplicePass(
+                cpg,
+                fragments.flatten,
+                ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
+              ).createAndApply()
+              true
         end if
 
   /** `--macro-census` alone: write the report and a reviewable `--macro-files` header, no CPG. */

@@ -116,7 +116,7 @@ class CdtParser(
     case SourceLanguage.Cpp => GPPLanguage.getDefault
     case SourceLanguage.C   => GCCLanguage.getDefault
 
-  private def parseInternal(file: Path): ParseResult =
+  private def parseInternal(file: Path, report: Boolean): ParseResult =
     val realPath = File(file)
     if realPath.isRegularFile then // handling potentially broken symlinks
       val settings = sources.settingsFor(realPath.path)
@@ -146,10 +146,11 @@ class CdtParser(
               log
             )
         val problems = CPPVisitor.getProblems(translationUnit)
-        if config.logProblems then logProblems(problems.toList)
-        if config.logPreprocessor then logPreprocessorStatements(translationUnit)
+        if report then
+          if config.logProblems then logProblems(problems.toList)
+          if config.logPreprocessor then logPreprocessorStatements(translationUnit)
         val preprocessorProblems = translationUnit.getPreprocessorProblemsCount
-        if problems.nonEmpty || preprocessorProblems > 0 then
+        if report && (problems.nonEmpty || preprocessorProblems > 0) then
           // The unit is in the graph with problem nodes where CDT gave up: partial, not lost
           ParseReporter.record(
             ParseReporter.Frontend.C,
@@ -198,7 +199,7 @@ class CdtParser(
       parse(file).map(t => preprocessorStatements(t)).getOrElse(Iterable.empty)
 
   def parse(file: Path): Option[IASTTranslationUnit] =
-    val parseResult = CdtLogging.captured(parseInternal(file))
+    val parseResult = CdtLogging.captured(parseInternal(file, report = true))
     parseResult match
       case ParseResult(Some(t), c, p, _) =>
           Option(t)
@@ -215,6 +216,20 @@ class CdtParser(
             maybeThrowable.map(parseFailureMessage).getOrElse("Unknown parse error!")
           )
           None
+
+  /** Parses `file` without logging its problems or recording its outcome, for a parse the caller
+    * reads on behalf of another file: a header whose AST is built from this unit's parse. The unit
+    * reports itself when the AST pass parses it as a translation unit of its own, so a second
+    * record would only repeat it. Returns None on failure.
+    */
+  def parseQuietly(file: Path): Option[IASTTranslationUnit] =
+      CdtLogging.captured(parseInternal(file, report = false)) match
+        case ParseResult(Some(t), _, _, _) => Option(t)
+        case ParseResult(_, _, _, maybeThrowable) =>
+            logger.debug(
+              s"Failed to parse '$file': ${maybeThrowable.map(extractParseException).getOrElse("Unknown parse error!")}"
+            )
+            None
 
   /** The record's version of [[extractParseException]] without its stack-trace fallback: a report
     * holds the parser's error text or the exception's class and message, never a stack trace.

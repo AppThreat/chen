@@ -88,6 +88,36 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
             None
           ) shouldBe None
       }
+
+      "give no facts when the probe command itself fails, and the table stands in" in {
+          assume(!scala.util.Properties.isWin)
+          File.usingTemporaryDirectory("predef-probe-fail") { dir =>
+            // a stand-in compiler that answers --version but fails the macro-dump probe: the
+            // shape of a driver whose probe spelling does not fit it (a two-word driver asked
+            // without its subcommand)
+            val script = dir / "fake-driver"
+            script.writeText(
+              """#!/bin/sh
+                |if [ "$1" = "--version" ]; then echo "fakecc 1.0"; exit 0; fi
+                |exit 3
+                |""".stripMargin
+            )
+            script.toJava.setExecutable(true)
+            PredefinedMacros.clearProcessCache()
+            val before = PredefinedMacros.compilerRuns.get()
+            val identity =
+                CompilerIdentity(script.pathAsString, CompilerFamily.Clang, SourceLanguage.C, Nil)
+            PredefinedMacros.ofCompiler(identity, Some(dir.path)) shouldBe None
+            PredefinedMacros.compilerRuns.get() - before shouldBe 1
+            // the unit's macros then come from the family's table, never from an empty set
+            val table = PredefinedMacros.fallback(
+              CompilerFamily.Clang,
+              SourceLanguage.C,
+              Seq("--target=aarch64-unknown-linux-gnu")
+            )
+            (table should contain).key("__clang_major__")
+          }
+      }
   }
 
   "a database compiler's search path" should {
@@ -289,6 +319,37 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
           msvc should not contain key("__clang__")
           msvc should not contain key("__GNUC__")
       }
+
+      "pick clang's MSVC-mode table by the target's architecture, not the first one" in {
+          val x64 = PredefinedMacros.fallback(
+            CompilerFamily.Msvc,
+            SourceLanguage.C,
+            Seq("--driver-mode=cl", "--target=x86_64-pc-windows-msvc")
+          )
+          (x64 should contain).key("__clang__")
+          (x64 should contain).key("__x86_64__")
+          x64 should not contain key("__aarch64__")
+          val arm64 = PredefinedMacros.fallback(
+            CompilerFamily.Msvc,
+            SourceLanguage.C,
+            Seq("--driver-mode=cl", "--target=aarch64-pc-windows-msvc")
+          )
+          (arm64 should contain).key("__clang__")
+          (arm64 should contain).key("__aarch64__")
+          arm64 should not contain key("__x86_64__")
+      }
+
+      "give a bare-metal GCC command its own table whatever the host is" in {
+          val bareMetal = PredefinedMacros.fallback(
+            CompilerFamily.Gcc,
+            SourceLanguage.C,
+            Seq("-mcpu=cortex-m4", "-mthumb")
+          )
+          (bareMetal should contain).key("__arm__")
+          (bareMetal should contain).key("__thumb2__")
+          bareMetal should not contain key("__x86_64__")
+          bareMetal should not contain key("__aarch64__")
+      }
   }
 
   "unit settings" should {
@@ -336,6 +397,273 @@ class PredefinedMacrosTests extends AnyWordSpec with Matchers:
               )
           settings.definedSymbols should contain("__cplusplus" -> "202002L")
           settings.definedSymbols should contain("export" -> "")
+      }
+  }
+
+  "a GCC, a Clang and an MSVC database entry" should {
+      val dir = Paths.get("/work/proj/build")
+
+      // the pinned targets make the fallback table the same on every host, so the key sets
+      // below hold wherever the test runs
+      def settingsOf(arguments: Seq[String], language: SourceLanguage): UnitSettings =
+          ProjectSources.settings(
+            Config(),
+            language,
+            Some(CompileCommand.parseArguments(arguments, dir)),
+            None
+          )
+
+      "give exactly today's settings for a GCC entry" in {
+          val arguments = Seq(
+            "/opt/missing/bin/gcc",
+            "--target=x86_64-linux-gnu",
+            "-DFROM_DB=3",
+            "-c",
+            "a.c"
+          )
+          val settings = settingsOf(arguments, SourceLanguage.C)
+          settings.language shouldBe SourceLanguage.C
+          settings.compiler shouldBe None
+          settings.standard shouldBe None
+          settings.includeFiles shouldBe Nil
+          settings.macroFiles shouldBe Nil
+          settings.includePaths shouldBe Nil
+          settings.definedSymbols.keySet shouldBe
+              expectedFallbackKeys("gcc-linux-x86_64", gccCModeNames) + "FROM_DB"
+          settings.definedSymbols.get("__GNUC__").map(_.toInt).getOrElse(0) should be >= 13
+          settings.definedSymbols should not contain key("__declspec")
+      }
+
+      "give exactly today's settings for a Clang entry" in {
+          val arguments = Seq(
+            "/opt/missing/bin/clang",
+            "--target=x86_64-unknown-linux-gnu",
+            "-std=gnu11",
+            "-c",
+            "a.c"
+          )
+          val settings = settingsOf(arguments, SourceLanguage.C)
+          settings.language shouldBe SourceLanguage.C
+          settings.compiler shouldBe None
+          settings.standard shouldBe Some("gnu11")
+          settings.includePaths shouldBe Nil
+          settings.definedSymbols.keySet shouldBe
+              expectedFallbackKeys("clang-linux-x86_64", clangCModeNames)
+          settings.definedSymbols should not contain key("__declspec")
+      }
+
+      "give exactly today's settings for an MSVC entry" in {
+          // cl.exe is never run and carries no target option, so the fallback reads the host's
+          // platform; the expectation picks the table by the host's architecture, from the
+          // resource itself
+          val arguments = Seq("cl.exe", "/std:c++17", "/TP", "/DFROM_DB=3", "/c", "a.cpp")
+          val settings  = settingsOf(arguments, SourceLanguage.Cpp)
+          settings.language shouldBe SourceLanguage.Cpp
+          settings.compiler shouldBe None
+          settings.standard shouldBe Some("c++17")
+          settings.definedSymbols.keySet shouldBe
+              expectedFallbackKeys(msvcHostTable, msvcCppModeNames) + "FROM_DB"
+          (settings.definedSymbols should contain).key("_MSC_VER")
+          (settings.definedSymbols should contain).key("__declspec")
+      }
+  }
+
+  // the host's architecture decides which of two tables a target-less command falls back to
+  private val msvcHostTable =
+      if System.getProperty("os.arch", "").toLowerCase.startsWith("aarch64") ||
+        System.getProperty("os.arch", "").toLowerCase.startsWith("arm")
+      then "msvc-windows-arm64"
+      else "msvc-windows-x64"
+
+  // the modes the EDG-format tables carry for one language of one compiler family
+  private val gccCModeNames    = Set("all", "gnu", "gcc", "gnu_or_clang")
+  private val clangCModeNames  = Set("all", "clang", "clang_c", "gnu_or_clang")
+  private val msvcCppModeNames = Set("all", "cpp", "microsoft", "microsoft_cpp")
+
+  /** The macro names the named table defines for those modes, read from the resource itself so the
+    * expectation does not go through the code it checks.
+    */
+  private def expectedFallbackKeys(tableName: String, modes: Set[String]): Set[String] =
+    val stream = getClass.getResourceAsStream(s"/predefined-macros/$tableName.txt")
+    val source = scala.io.Source.fromInputStream(stream, "UTF-8")
+    val names =
+        try
+            source
+                .getLines()
+                .map(_.trim)
+                .filter(l => l.nonEmpty && !l.startsWith("#"))
+                .flatMap { line =>
+                    line.split("\\s+", 4).toList match
+                      case modeList :: _ :: name :: _ =>
+                          val active = modeList.split(',').exists { m =>
+                              if m.startsWith("!") then !modes.contains(m.drop(1))
+                              else modes.contains(m)
+                          }
+                          Option.when(active)(name)
+                      case _ => None
+                }
+                .toSet
+        finally source.close()
+    UnitSettings.FeatureTests.keySet ++ names ++
+        (if modes.contains("microsoft") then DefaultDefines.DEFAULT_CALL_CONVENTIONS.keySet
+         else Set.empty) ++
+        (if modes.contains("cpp") then Set("export", "__cplusplus") else Set("_Noreturn"))
+  end expectedFallbackKeys
+
+  "the toolchain fixtures" should {
+      def fixtureDir(name: String): Path = Paths.get(
+        getClass.getClassLoader.getResource(s"toolchains/$name").toURI
+      )
+
+      def settingsFor(name: String): (Path, UnitSettings) =
+        val dir  = fixtureDir(name)
+        val path = dir.resolve(fixtureSource(name))
+        val config =
+            Config().withInputPath(dir.toString).withCompileCommands(dir.resolve(
+              CompileDatabase.FileName
+            ).toString)
+        (path, new ProjectSources(config).settingsFor(path))
+
+      def fixtureSource(name: String): String = Map(
+        "nvcc"              -> "vec_add.cu",
+        "icx"               -> "simd_dot.c",
+        "icpx"              -> "simd_dot.cpp",
+        "emcc"              -> "wasm_entry.c",
+        "empp"              -> "wasm_entry.cpp",
+        "zig-cc"            -> "clang_guarded.c",
+        "zig-cpp"           -> "clang_guarded.cpp",
+        "tcc"               -> "small_kernel.c",
+        "armclang"          -> "cortex_m_irq.c",
+        "iccarm"            -> "arm_irq.c",
+        "armcl"             -> "ti_arm_task.c",
+        "cl430"             -> "msp430_blink.c",
+        "clang-cl-mode"     -> "msvc_mode.cpp",
+        "arm-none-eabi-gcc" -> "bare_metal_delay.c",
+        "ccache"            -> "cached_build.c"
+      )(name)
+
+      /** The macros each fixture's #error guard tests, per driver. */
+      def identifyingMacros(name: String): Set[String] = Map(
+        "nvcc"              -> Set("__CUDACC__", "__NVCC__", "__GNUC__"),
+        "icx"               -> Set("__INTEL_LLVM_COMPILER", "__clang__"),
+        "icpx"              -> Set("__INTEL_LLVM_COMPILER", "__clang__", "__cplusplus"),
+        "emcc"              -> Set("__EMSCRIPTEN__", "__clang__"),
+        "empp"              -> Set("__EMSCRIPTEN__", "__clang__", "__cplusplus"),
+        "zig-cc"            -> Set("__clang__"),
+        "zig-cpp"           -> Set("__clang__", "__cplusplus"),
+        "tcc"               -> Set("__TINYC__"),
+        "armclang"          -> Set("__ARMCC_VERSION", "__clang__"),
+        "iccarm"            -> Set("__ICCARM__"),
+        "armcl"             -> Set("__TI_ARM__", "__TI_COMPILER_VERSION__"),
+        "cl430"             -> Set("__MSP430__", "__TI_COMPILER_VERSION__"),
+        "clang-cl-mode"     -> Set("_MSC_VER", "__clang__"),
+        "arm-none-eabi-gcc" -> Set("__GNUC__", "__arm__"),
+        "ccache"            -> Set("__GNUC__")
+      )(name)
+
+      /** Drivers a database never runs for its macros: their table stands in, so no compiler
+        * process is started however the PATH is set.
+        */
+      def tableOnlyDrivers: Set[String] =
+          Set(
+            "nvcc",
+            "icx",
+            "icpx",
+            "emcc",
+            "empp",
+            "tcc",
+            "iccarm",
+            "armcl",
+            "cl430",
+            "clang-cl-mode"
+          )
+
+      "define each compiler's identifying macros, from its table" in {
+          assume(!scala.util.Properties.isWin)
+          Seq(
+            "nvcc",
+            "icx",
+            "icpx",
+            "emcc",
+            "empp",
+            "zig-cc",
+            "zig-cpp",
+            "tcc",
+            "armclang",
+            "iccarm",
+            "armcl",
+            "cl430",
+            "clang-cl-mode",
+            "arm-none-eabi-gcc",
+            "ccache"
+          ).foreach { name =>
+              withClue(s"$name: ") {
+                  val (_, settings) = settingsFor(name)
+                  (settings.definedSymbols.keySet should contain).allElementsOf(
+                    identifyingMacros(name)
+                  )
+              }
+          }
+      }
+
+      "never run a compiler for the drivers only their table can describe" in {
+          assume(!scala.util.Properties.isWin)
+          PredefinedMacros.clearProcessCache()
+          val before = PredefinedMacros.compilerRuns.get()
+          tableOnlyDrivers.foreach { name =>
+              withClue(s"$name: ") {
+                  val (_, settings) = settingsFor(name)
+                  settings.compiler shouldBe None
+              }
+          }
+          PredefinedMacros.compilerRuns.get() shouldBe before
+      }
+
+      "preprocess without reaching their #error, as CDT reads them" in {
+          assume(!scala.util.Properties.isWin)
+          Seq(
+            "nvcc",
+            "icx",
+            "icpx",
+            "emcc",
+            "empp",
+            "zig-cc",
+            "zig-cpp",
+            "tcc",
+            "armclang",
+            "iccarm",
+            "armcl",
+            "cl430",
+            "clang-cl-mode",
+            "arm-none-eabi-gcc",
+            "ccache"
+          ).foreach { name =>
+              withClue(s"$name: ") {
+                  val dir    = fixtureDir(name)
+                  val path   = dir.resolve(fixtureSource(name))
+                  val db     = dir.resolve(CompileDatabase.FileName)
+                  val config = Config().withInputPath(dir.toString).withCompileCommands(db.toString)
+                  val parser = new CdtParser(config, new HeaderFileFinder(dir.toString))
+                  val unit   = parser.parse(path).get
+                  val problems = unit.getPreprocessorProblems
+                  problems.map(_.getMessage) shouldBe empty
+              }
+          }
+      }
+  }
+
+  "a driver the table does not know" should {
+      "keep the host-family fallback and carry the fact that it is unknown" in {
+          val dir   = Paths.get("/work/proj/build")
+          val flags = CompileCommand.parseArguments(Seq("mycustomcc", "-c", "a.c"), dir)
+          // the fact the parse report will read: the table has no entry for this driver
+          flags.family shouldBe CompilerFamily.Unknown
+          val settings = ProjectSources.settings(Config(), SourceLanguage.C, Some(flags), None)
+          // today's host fallback stands in, not a toolchain table
+          settings.compiler shouldBe None
+          (settings.definedSymbols should contain).key("__STDC_VERSION__")
+          settings.definedSymbols should not contain key("__CUDACC__")
+          settings.definedSymbols should not contain key("__INTEL_LLVM_COMPILER")
       }
   }
 end PredefinedMacrosTests

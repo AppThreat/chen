@@ -87,6 +87,12 @@ class AstCacheStore(
   private def enableAstCache: Boolean =
       enableAstCacheParam && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Ast)
 
+  /** Whether this store reads or writes entries right now. When it does not, [[process]] ignores
+    * its `fingerprint`, so a caller whose fingerprint costs something (it reads other files) asks
+    * this first and passes an empty one.
+    */
+  def isUsable: Boolean = enableAstCache
+
   if enableAstCache then
     Try(Files.createDirectories(Paths.get(cacheDir))).failed.foreach { e =>
         logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}")

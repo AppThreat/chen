@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "ti_arm_task.c", "arguments": ["armcl", "--c99", "-c", "ti_arm_task.c"]}
+]

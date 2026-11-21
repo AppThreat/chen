@@ -1,0 +1,3 @@
+[
+  {"directory": ".", "file": "simd_dot.cpp", "arguments": ["icpx", "-O2", "-c", "simd_dot.cpp"]}
+]
