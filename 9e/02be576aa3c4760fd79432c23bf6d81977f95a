@@ -1,0 +1,25 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_7b96758d810d17::t_344e40d865f010 549,553-557,560-581,591-598
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/TemplateTagTests.scala
+  s_7b96758d810d17::t_fe883be06e999d 69-72
+  s_7b96758d810d17::t_344e40d865f010 32-34,88-90,232-249,255
+  s_7b96758d810d17::t_bc412f3eee1f99 201,208
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForCpp.scala
+  s_7b96758d810d17::t_344e40d865f010 142-146,149-158,164-167,169-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9e02be576aa3c4760fd79432c23bf6d81977f95a",
+  "prompts": {},
+  "sessions": {
+    "s_7b96758d810d17": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
