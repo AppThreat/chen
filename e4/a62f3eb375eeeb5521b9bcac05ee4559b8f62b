@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_8a4433d1784041::t_00cc8b41409381 359-376,383-406,425-444,452-458,465,499-500,504-515,541-551,607,611-613,621,636,639,642,660
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/worker/CdtWorker.scala
+  s_8a4433d1784041::t_b13ea9b24c3ca9 21-33,57-59,152-153,256-308,315,323-324,329,337-365,367,379,383,387-389,431-438,440-443,447-479,519-520,523-525,529,532-533,538-539,543,548,552-558,563-576,583-584,588-605,607,617,620,626,630-631,636-641,670-672,676-685,688,712-717
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/worker/CdtWorkerTests.scala
+  s_8a4433d1784041::t_a9a5c01ffe97ea 223-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4a62f3eb375eeeb5521b9bcac05ee4559b8f62b",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
