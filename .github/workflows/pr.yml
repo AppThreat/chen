@@ -166,7 +166,6 @@ jobs:
         with:
           name: ${{ steps.tree.outputs.name }}
           path: tested-tree.txt
-          retention-days: 14
 
   # The jssrc2cpg suite against atom-parsetools main with parsa, so what the next atom-parsetools
   # release ships (native type maps by default, the manifest's types record) is tested here before
