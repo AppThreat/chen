@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextTests.scala
+  s_41c0f02203fe20::t_5578f9c6cd1fad 172-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0bb810c61cc49c5be8308a18944adfdb86fdc686",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
