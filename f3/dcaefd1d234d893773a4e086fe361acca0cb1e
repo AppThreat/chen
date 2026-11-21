@@ -1,0 +1,25 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  s_41c0f02203fe20::t_0c6c6ab3b94c13 9
+  s_41c0f02203fe20::t_4a33f4f2677dcf 79
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextTests.scala
+  s_41c0f02203fe20::t_d955d3f87e34ef 144-156
+  s_41c0f02203fe20::t_0ee9b9a7e7b2f8 16-17
+  s_41c0f02203fe20::t_ebe32e4b1e174e 37-42
+  s_41c0f02203fe20::t_6e2d8851b5b6b2 67-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3dcaefd1d234d893773a4e086fe361acca0cb1e",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
