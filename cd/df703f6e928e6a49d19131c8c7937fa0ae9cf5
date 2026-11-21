@@ -1,0 +1,26 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/worker/CdtWorkerTests.scala
+  s_517e6bbe18bf56::t_cd71ebc550d055 252-337
+  s_517e6bbe18bf56::t_092fcad7abe695 182-183,189-191
+  s_517e6bbe18bf56::t_420d580a8e461a 27-38,57,68-69,84,97-100,105-106
+  s_517e6bbe18bf56::t_5ab6f2b86c053e 118,139,160,211,227,240
+platform/frontends/c2cpg/src/test/resources/worker/preprocessor-problem/unresolved-include.c
+  s_517e6bbe18bf56::t_ad4caf5fbd39c5 1-3
+platform/frontends/c2cpg/src/test/resources/worker/preprocessor-problem/plain-counter.c
+  s_517e6bbe18bf56::t_2c54f07e8361fb 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cddf703f6e928e6a49d19131c8c7937fa0ae9cf5",
+  "prompts": {},
+  "sessions": {
+    "s_517e6bbe18bf56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
