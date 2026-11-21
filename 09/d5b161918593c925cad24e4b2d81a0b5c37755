@@ -1,0 +1,25 @@
+.github/actions/edga/action.yml
+  s_8a4433d1784041::t_bf2c04293b912e 9
+README.md
+  s_8a4433d1784041::t_bf2c04293b912e 66
+docs/README.md
+  s_8a4433d1784041::t_bf2c04293b912e 64
+docs/v4/frontends.md
+  s_8a4433d1784041::t_bf2c04293b912e 311-312,462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09d5b161918593c925cad24e4b2d81a0b5c37755",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
