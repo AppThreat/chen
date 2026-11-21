@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/FileTests.scala
+  s_41c0f02203fe20::t_58bf541cbf320d 51-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a7155be694687709d328aaacd0b1b1e26eb971ad",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
