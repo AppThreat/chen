@@ -67,7 +67,9 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
       diffGraph,
       file,
       cacheKey = AstCreationPass.fileCacheKey(file),
-      fingerprint = fingerprint(path, file),
+      // the store ignores the fingerprint when it is off, and building it reads the macro,
+      // include and owner files and every project header the unit includes
+      fingerprint = if cacheStore.isUsable then fingerprint(path, file) else "",
       registerUsedTypes = types => types.foreach(CGlobal.usedTypes.putIfAbsent(_, true)),
       createAst =
         attempted = true

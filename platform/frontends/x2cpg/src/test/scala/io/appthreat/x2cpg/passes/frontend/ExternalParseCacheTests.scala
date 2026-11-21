@@ -36,6 +36,18 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           cache.restore("fp-2", other) shouldBe false
       }
 
+      "say whether it can be used, so a caller can skip the work a key needs" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-usable").toString
+          try
+            CacheControl.enable(CacheControl.Astgen)
+            new ExternalParseCache(cacheDir, CacheControl.Astgen).isUsable shouldBe true
+            // no directory to keep entries in
+            new ExternalParseCache("", CacheControl.Astgen).isUsable shouldBe false
+            CacheControl.disable(CacheControl.Astgen)
+            new ExternalParseCache(cacheDir, CacheControl.Astgen).isUsable shouldBe false
+          finally CacheControl.enable(CacheControl.Astgen)
+      }
+
       "neither store nor restore when its cache kind is disabled" in {
           val cacheDir = Files.createTempDirectory("parse-cache-disabled").toString
           try

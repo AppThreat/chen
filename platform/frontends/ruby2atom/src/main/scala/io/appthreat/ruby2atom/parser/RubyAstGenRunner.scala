@@ -97,6 +97,15 @@ object RubyAstGenRunner:
   def generatorArgs(in: String, out: String, exclude: String): Seq[String] =
       Seq("-i", in, "-o", out) ++ (if exclude.isEmpty then Nil else Seq("-e", exclude))
 
+  /** The exclude pattern as Java reads it, or nothing for an empty pattern or one Java cannot
+    * compile. Ruby's `^` and `$` always match at line boundaries, so the pattern is compiled in
+    * multiline mode.
+    */
+  def excludePattern(exclude: String): Option[java.util.regex.Pattern] =
+      if exclude.isEmpty then None
+      else
+        Try(java.util.regex.Pattern.compile(exclude, java.util.regex.Pattern.MULTILINE)).toOption
+
   def resolveProgram(
     property: Option[String] = Option(System.getProperty(ProgramProperty)),
     environment: Option[String] = sys.env.get(ProgramEnvVar)
@@ -185,12 +194,27 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
           .map(_.trim)
           .getOrElse("unknown")
 
-  /** Identity of everything (besides the sources) that affects rbastgen's output. */
-  private def astGenFingerprint(excludeRegex: String): String =
-      CpgCacheStore.projectFingerprint(
-        config.inputPath,
-        Seq(s"rbastgen-version=$astGenVersion", s"exclude=$excludeRegex")
-      )
+  /** Identity of everything (besides the sources) that affects rbastgen's output, over the input
+    * tree as rbastgen sees it.
+    *
+    * Version control metadata is never read, so it is left out, and so is every file the exclude
+    * pattern covers: rbastgen (ruby_ast_gen) parses each Ruby file on its own, with no lookup into
+    * other files, and tests a file's path against the pattern before it opens the file, so an
+    * excluded file cannot change what it writes. The pattern itself is part of the key. It is
+    * matched against the path relative to the input with `/` separators, as rbastgen matches it,
+    * and a pattern Java cannot compile leaves nothing out, which only costs time.
+    */
+  private[ruby2atom] def astGenFingerprint(excludeRegex: String): String =
+    val input   = Paths.get(config.inputPath)
+    val pattern = RubyAstGenRunner.excludePattern(excludeRegex)
+    CpgCacheStore.projectFingerprint(
+      config.inputPath,
+      Seq(s"rbastgen-version=$astGenVersion", s"exclude=$excludeRegex"),
+      skipPath = path =>
+          pattern.exists(
+            _.matcher(input.relativize(path).toString.replace('\\', '/')).find()
+          )
+    )
 
   override def execute(out: File): AstGenRunnerResult =
     implicit val metaData: AstGenProgramMetaData = config.astGenMetaData
@@ -209,17 +233,23 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
         else
           ""
 
-    // Cache the (expensive) rbastgen output keyed by a cheap project fingerprint.
+    // Cache the (expensive) rbastgen output keyed by a cheap project fingerprint. With the cache
+    // off nothing is restored or stored, so neither the fingerprint walk nor the `rbastgen
+    // --version` call it needs is worth running. A run that collects the parse report does not
+    // restore, but it still stores, so its key is computed: the entry it writes serves the next
+    // run that does not report.
     val cache =
         new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
-    val fp = astGenFingerprint(combineIgnoreRegex)
     val result =
-        if cache.restore(fp, out.path) then
-          collectResult(out)
+        if !cache.isUsable then runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
         else
-          val res = runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
-          if res.parsedFiles.nonEmpty then cache.store(fp, out.path)
-          res
+          val fp = astGenFingerprint(combineIgnoreRegex)
+          if cache.restore(fp, out.path) then
+            collectResult(out)
+          else
+            val res = runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
+            if res.parsedFiles.nonEmpty then cache.store(fp, out.path)
+            res
     recordGeneratorFailures(out)
     result
   end execute
