@@ -1,0 +1,19 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/worker/CdtWorkerTests.scala
+  s_517e6bbe18bf56::t_2bb1f62e8fc95d 28,267-268,326-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f0ad870b3e010eb08efdad83b5844e7a9a570c06",
+  "prompts": {},
+  "sessions": {
+    "s_517e6bbe18bf56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
