@@ -1,0 +1,23 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextCopiesPass.scala
+  s_8a4433d1784041::t_2ead2807eb2e0b 15,31-38,73-84,108,112,115-121,128-129,132-133,141-153,189-267,283,288-291,306-309,312-357,360,362-363,365-369,371-380,382-388
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextDuplicatesPass.scala
+  s_8a4433d1784041::t_fe6df13ea6ac4c 4,13-20,39-51,67-70
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextCopiesTests.scala
+  s_8a4433d1784041::t_d5c26f9f1b7d98 175-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "195f2c5268b55af1a2a23c294cdba58a99f33dc2",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
