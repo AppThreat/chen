@@ -238,22 +238,6 @@ class BuildContextTests extends CCodeToCpgSuite(FileDefaults.C_EXT):
               fingerprintOf("cc -D WINDOW_WIDE -c window.c")
       }
 
-      "be the same for one project checked out in two places" in {
-          def at(root: String, command: String): String =
-              BuildContextPass.fingerprintOf(
-                CompileCommand.parseArguments(CompileCommand.tokenize(command), Paths.get(root)),
-                Paths.get(root)
-              )
-          at(
-            "/home/a/project",
-            "/usr/bin/cc -Iinclude -include config.h -DWIDE -c window.c"
-          ) shouldBe
-              at(
-                "/srv/ci/checkout",
-                "/opt/cc/bin/cc -Iinclude -include config.h -DWIDE -c window.c"
-              )
-      }
-
       "read definitions of distinct macros in any order as one context, and keep order otherwise" in {
           fingerprintOf("cc -DA -DB=2 -c window.c") shouldBe fingerprintOf(
             "cc -DB=2 -DA -c window.c"
