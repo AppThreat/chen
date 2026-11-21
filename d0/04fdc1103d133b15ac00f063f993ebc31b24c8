@@ -1,0 +1,32 @@
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/min-max.c
+  s_517e6bbe18bf56::t_f1d07d3f8076d1 1-7
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/worker/CdtWorkerTests.scala
+  s_517e6bbe18bf56::t_7f4ccf9be7b82f 1-6,8,10-45,47-84,86-220
+  s_517e6bbe18bf56::t_f2974119029595 85
+  s_517e6bbe18bf56::t_cdd49d0a38b627 7,9
+  s_517e6bbe18bf56::t_ee6eb75b8f635d 46
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/static-counter.c
+  s_517e6bbe18bf56::t_2b424c9fa2cb97 1-7
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/swap-values.c
+  s_517e6bbe18bf56::t_63a487e1df5ccc 1-15
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/pair.h
+  s_517e6bbe18bf56::t_3ad6ed4d678640 1-13
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/bit-mask.c
+  s_517e6bbe18bf56::t_59cd09963eb752 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d004fdc1103d133b15ac00f063f993ebc31b24c8",
+  "prompts": {},
+  "sessions": {
+    "s_517e6bbe18bf56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
