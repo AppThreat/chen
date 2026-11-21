@@ -1,0 +1,25 @@
+docs/v4/frontends.md
+  s_8a4433d1784041::t_640dda1eeb5f4f 333-334,339-340
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_8a4433d1784041::t_640dda1eeb5f4f 147-149,153-156
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplateTagsTests.scala
+  s_8a4433d1784041::t_f0b4a1c85d306a 10,98,104-106,113-115,122,126,141,145,149,153,263,269,273
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  s_8a4433d1784041::t_585f6360e28266 201-221,406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "077104711b63994f45390635b3339c676766e962",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
