@@ -61,7 +61,7 @@ With it you can:
 | Language | Frontend | Versions and notes | Needs |
 |---|---|---|---|
 | C and C++ | [c2cpg](https://github.com/AppThreat/chen/tree/main/platform/frontends/c2cpg) (Eclipse CDT) | C up to C23 and C++ up to C++23, C++20 modules, headers and preprocessed `.i` files; compilation databases | nothing; a GCC or Clang driver improves macro accuracy |
-| C and C++ | [edg2atom](https://github.com/AppThreat/chen/tree/main/platform/frontends/edg2atom) (EDG) | the same languages through the EDG front end, with overloads, templates and conversions resolved | [edga](https://github.com/AppThreat/edga) 0.2.0 |
+| C and C++ | [edg2atom](https://github.com/AppThreat/chen/tree/main/platform/frontends/edg2atom) (EDG) | the same languages through the EDG front end, with overloads, templates and conversions resolved | [edga](https://github.com/AppThreat/edga) 0.4.0 |
 | Java | javasrc2cpg | Java 8 to 26 syntax; Lombok; sources read in the build's declared encoding | |
 | JVM bytecode and Android | jimple2cpg | JARs, class files, APKs and split bundles (`.apkm`, `.apks`, `.xapk`) | a JDK; the Android SDK for APKs |
 | JavaScript and TypeScript | jssrc2cpg | JavaScript, TypeScript and Flow, Vue, Svelte and Astro components | `astgen` from [atom-parsetools](https://github.com/AppThreat/atom-parsetools) 1.x or 2.x |
