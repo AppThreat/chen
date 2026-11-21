@@ -1,0 +1,25 @@
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextWarmCacheTests.scala
+  s_41c0f02203fe20::t_603770766d1a77 14-16,55-68,70-85
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextTests.scala
+  s_41c0f02203fe20::t_603770766d1a77 71-72,93-98,116-140
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextTests.scala
+  s_41c0f02203fe20::t_603770766d1a77 67-68,108-109
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextPass.scala
+  s_41c0f02203fe20::t_603770766d1a77 4-11,72-74,79-80,100-111,121,135-139,142-143,145-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfd84421107f611120c47e5f22527c60fe900fee",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
