@@ -1,0 +1,26 @@
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/window.h
+  s_41c0f02203fe20::t_fa764ec618d6a6 1-8
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_41c0f02203fe20::t_dfa456bed73baa 158-164
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextTests.scala
+  s_41c0f02203fe20::t_e87d9ad823955b 1-7,9-19,21-53,58-62,64-67,69-75,77-80,83-84,86-88,90,92-93,95,101-112,130-148
+  s_41c0f02203fe20::t_6e2e647df117b2 8,20,54-57,63,68,76,81-82,85,89,91,94,96-100,113-129
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/window.c
+  s_41c0f02203fe20::t_220d09672a0377 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7b88572fcc11e907bb87a935fc682512c57822e1",
+  "prompts": {},
+  "sessions": {
+    "s_41c0f02203fe20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-dff6c13c-9cf7-4f2d-8356-c89990ebe677-actor_5_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
