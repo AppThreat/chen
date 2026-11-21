@@ -1,0 +1,33 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgBuildContextCopiesPass.scala
+  s_06442807478409::t_720f855c4cfcf9 20-22,26-29,47-48,62-65,72-76,80-81,127,131-132,137-144,147-150,155-178
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CompileCommands.scala
+  s_06442807478409::t_720f855c4cfcf9 545-546,556-558,562
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextCopiesTests.scala
+  s_06442807478409::t_720f855c4cfcf9 15-21,56-63,67-69,73-74,99-100,122,135,148,159,169
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextCopiesTests.scala
+  s_06442807478409::t_720f855c4cfcf9 19-25,63-78,104-105,130-137,145-150,158-161,172-177
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_06442807478409::t_720f855c4cfcf9 149-152,163-166,170,181-184,187-194,197-198,257-258
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextDuplicatesPass.scala
+  s_06442807478409::t_720f855c4cfcf9 11-16,21-30,32-37,39-48,50-56,61,63-66
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/DuplicateDatabaseEntriesTests.scala
+  s_06442807478409::t_720f855c4cfcf9 7-9,31-36,42-50
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextCopiesPass.scala
+  s_06442807478409::t_720f855c4cfcf9 38-42,49-51,56-57,68-69,102-104,117-118,127-128,137-139,146-160,164-166,168-171,173-174,185-186,191-194,201-205,209-210,218-233,238-239,244-251,254-257,262-285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8c91382e6d6c7e9e65c302a434350acc11d5dcf",
+  "prompts": {},
+  "sessions": {
+    "s_06442807478409": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-1b53fdee-8a8b-41e4-b826-1c38c8523973-actor_3_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
