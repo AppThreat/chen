@@ -1,0 +1,297 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextCopiesTests.scala
+  s_8a4433d1784041::t_159f733883cedc 67-78,139-140,152-153,163-165,179-181,183-279,286,292-293
+  s_8a4433d1784041::t_080ac3cc49df5d 83-84
+  s_8a4433d1784041::t_230549c346ce4b 1-66,79-82,85-138,141-151,154-162,166-178,182,280-285,287-291,294
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/UnitSettingsRecordTests.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 176-178
+  s_8a4433d1784041::t_f3596b27e4c0d3 1-175,179-185
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/worker/CdtWorkerTests.scala
+  s_8a4433d1784041::t_a9a5c01ffe97ea 131-133,152-154,173-175,182-184,186,188,192-193,202-207,219-221,223-283,296-297,310-312,330,332-334,385,390-398
+  s_8a4433d1784041::t_0aaa959a356acb 1-130,134-151,155-172,176-181,185,187,189-191,194-201,208-218,222,284-295,298-309,313-329,331,335-384,386-389,399
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextDuplicatesPass.scala
+  s_8a4433d1784041::t_fe6df13ea6ac4c 4-70,78
+  s_8a4433d1784041::t_e22d270c4db72a 1-3,71-77,79-85
+docs/v4/frontends.md
+  s_8a4433d1784041::t_f71d995fb9a4ee 176-189
+  s_8a4433d1784041::t_640dda1eeb5f4f 347-354
+  s_8a4433d1784041::t_dc1ad64fba510a 169-174,194-197
+  s_8a4433d1784041::t_f0785ad7ae4649 99-133,163-168,175,190-193,198-200,227-296,327-330,338-346,355-361
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_8a4433d1784041::t_fb7dcd47b598d1 558,565-590,597
+  s_8a4433d1784041::t_60d9eba3780a01 591
+  s_8a4433d1784041::t_c4c26a979f9ad3 543-546,549,552-557,559-564,592-596,598-608
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextTests.scala
+  s_8a4433d1784041::t_0eeb9f67c04018 82,90,96,105,111,133,148-149,155-264,271,275,277
+  s_8a4433d1784041::t_a2c480ba4bfaf8 1-81,83-89,91-95,97-104,106-110,112-132,134-147,150-154,265-270,272-274,276,278-279
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextCopiesPass.scala
+  s_8a4433d1784041::t_2ead2807eb2e0b 12,15-388
+  s_8a4433d1784041::t_42ce0bae030fc4 1-11,13-14,389
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_8a4433d1784041::t_640dda1eeb5f4f 147-149
+  s_8a4433d1784041::t_3f827dd8f6dbbc 153-156
+  s_8a4433d1784041::t_002060ba7daae2 141-146,150-152,157-166
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/BuildContextPass.scala
+  s_8a4433d1784041::t_8bcd0037b7d306 40-182
+  s_8a4433d1784041::t_fc7451679c731f 1-39,183-188
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/HeaderFromOwner.scala
+  s_8a4433d1784041::t_14d780d624b414 36,39,59-73,75-79,84-107,109-112,116,118-125,135,158,175,179,197,203,214,247
+  s_8a4433d1784041::t_123a98c00a13fa 37,41-42,45-53,74
+  s_8a4433d1784041::t_61790d47649d1d 126
+  s_8a4433d1784041::t_3f827dd8f6dbbc 43-44,55-57,80-83,117,209
+  s_8a4433d1784041::t_a4901a1dbf85ab 108,113-115
+  s_8a4433d1784041::t_35d8fb8f21cdeb 1-35,38,40,54,58,127-134,136-157,159-174,176-178,180-196,198-202,204-208,210-213,215-246,248-251
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplateTagsTests.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 9-13,104-106
+  s_8a4433d1784041::t_f0b4a1c85d306a 98,113-273
+  s_8a4433d1784041::t_2f291715c990f9 1-8,14-97,99-103,107-112,274-279
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_8a4433d1784041::t_250f3c5c26f4af 142,351,439,443-455
+  s_8a4433d1784041::t_b2a06c63d752c8 195
+  s_8a4433d1784041::t_c70ef914b6bb08 4,7-12,19,36-44,138-141,143-144,149-194,196-200,257-259,261-264,311-350,352-354,395,399-400,411-438,440-442,470-475,502-510,561-562
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/parse/UnitSettingsReporter.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 82-83
+  s_8a4433d1784041::t_bd788fe8f4fe4f 1-81,84-197
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/HeaderFromOwnerPrecheckTests.scala
+  s_8a4433d1784041::t_870a448d01f589 1-80,86-89
+  s_8a4433d1784041::t_3f827dd8f6dbbc 81-85
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextTests.scala
+  s_8a4433d1784041::t_38ae4b6d961d77 92-93
+  s_8a4433d1784041::t_b2a69a4394f41b 1-91,94-186
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  s_8a4433d1784041::t_585f6360e28266 107,205-373,404-406
+  s_8a4433d1784041::t_3f827dd8f6dbbc 201-204
+  s_8a4433d1784041::t_c371fc58a5de39 12-13,104-106,117-122,407
+build.sbt
+  s_8a4433d1784041::t_3458fd0bc3b5b5 3
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextCopiesTests.scala
+  s_8a4433d1784041::t_39868e5db820d6 83-84
+  s_8a4433d1784041::t_d5c26f9f1b7d98 44,53,58,60,64,75,85,102,133,146,154-155,166,172-173,175-306,316,322,327-328,366,383-384
+  s_8a4433d1784041::t_185bf876911ec3 1-43,45-52,54-57,59,61-63,65-74,76-82,86-101,103-132,134-145,147-153,156-165,167-171,174,307-315,317-321,323-326,329-365,367-382,385
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/worker/CdtWorker.scala
+  s_8a4433d1784041::t_b13ea9b24c3ca9 13,21-717
+  s_8a4433d1784041::t_02139811f58251 1-12,14-20,718-724
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgBuildContextCopiesPass.scala
+  s_8a4433d1784041::t_5bea6ead6b3c44 24-132
+  s_8a4433d1784041::t_43dffb53bfa14b 1-23,133
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/Edg2Atom.scala
+  s_8a4433d1784041::t_da095a9f9bc68e 9-10,18-23,81-84
+  s_8a4433d1784041::t_6cc418c0792591 89
+platform/frontends/c2cpg/src/main/resources/predefined-macros/armclang-arm-none-eabi.txt
+  s_8788a01b4477b0::t_b2e84e0c74e349 1-478
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-arm64.txt
+  s_8788a01b4477b0::t_4efd9308253eae 1-477
+platform/frontends/c2cpg/src/main/resources/predefined-macros/clangcl-windows-x64.txt
+  s_8788a01b4477b0::t_395d1ae9080853 1-463
+platform/frontends/c2cpg/src/main/resources/predefined-macros/emscripten-wasm32.txt
+  s_8788a01b4477b0::t_b16d6ea747643a 1-444
+platform/frontends/c2cpg/src/main/resources/predefined-macros/gcc-arm-none-eabi.txt
+  s_8788a01b4477b0::t_5e175bc7fe52e5 1-495
+platform/frontends/c2cpg/src/main/resources/predefined-macros/iccarm-arm.txt
+  s_8788a01b4477b0::t_d4ff6a66ccf6c4 1-17
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-aarch64.txt
+  s_8788a01b4477b0::t_1a4084c865e27b 1-511
+platform/frontends/c2cpg/src/main/resources/predefined-macros/intel-llvm-linux-x86_64.txt
+  s_8788a01b4477b0::t_33ea594b989c5f 1-497
+platform/frontends/c2cpg/src/main/resources/predefined-macros/nvcc-own.txt
+  s_8788a01b4477b0::t_02baa6e27e7c94 1-21
+platform/frontends/c2cpg/src/main/resources/predefined-macros/ti-arm.txt
+  s_8788a01b4477b0::t_0d0c3f3837cb09 1-15
+platform/frontends/c2cpg/src/main/resources/predefined-macros/ti-msp430.txt
+  s_8788a01b4477b0::t_57fea05ed6012d 1-14
+platform/frontends/c2cpg/src/main/resources/predefined-macros/tinycc-linux-aarch64.txt
+  s_8788a01b4477b0::t_1dd04f81b50593 1-43
+platform/frontends/c2cpg/src/main/resources/predefined-macros/tinycc-linux-x86_64.txt
+  s_8788a01b4477b0::t_5e4070d99a40fe 1-42
+platform/frontends/c2cpg/src/main/resources/toolchains.json
+  s_8788a01b4477b0::t_3485abe8e2aaad 1-208
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  s_8788a01b4477b0::t_1c7efe6f2f2c2c 6-8,58-59,61
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/Main.scala
+  s_8788a01b4477b0::t_03bf4ecdba8105 40-46,94-102,174-187
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForExpressionsCreator.scala
+  s_8788a01b4477b0::t_e31b6b21d51170 492-494
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/AstForFunctionsCreator.scala
+  s_8788a01b4477b0::t_d0af192d66db4a 18,256-268,339-340,427-428
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CdtParser.scala
+  s_8788a01b4477b0::t_e3cc5f4f221bae 119,149-151,153,202,220-233
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/CompileCommands.scala
+  s_8788a01b4477b0::t_7adbb0035c73f3 14-16,19,43-47,173-175,177-181,186-188,205,207,210-213,215,225,241-248,295-300,305,309-315,327-328,358-538,545-550,556-563
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/PredefinedMacros.scala
+  s_8788a01b4477b0::t_5d51f5de0caa1f 60-61,64,67-73,101-106,108-109,117,204-215,225-270,277,283-310,319,321-334,337,364-365,371-373,375-382
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  s_8a4433d1784041::t_c902475a0ae354 5-11,13-15,18,23,25,43,59-67,95-98,134-136,139-142,153-157,159-173,175-186,191,194,201,206-231,234-236,243-247,250,267,269,271-327,344-692
+platform/frontends/c2cpg/src/test/resources/contexts/duplicate-entry/selected-body.c
+  s_8788a01b4477b0::t_2cbd5a74f43065 1-20
+platform/frontends/c2cpg/src/test/resources/contexts/self-contained-header/lib.h
+  s_8788a01b4477b0::t_2b5f298ac2617f 1-8
+platform/frontends/c2cpg/src/test/resources/contexts/self-contained-header/plain.h
+  s_8788a01b4477b0::t_69872a6ee8dad3 1-3
+platform/frontends/c2cpg/src/test/resources/contexts/self-contained-header/unit.c
+  s_8788a01b4477b0::t_2dab4b5f172fc2 1-9
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/frame.c
+  s_8788a01b4477b0::t_18eb0a86da2201 1-3
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/orphan.h
+  s_8788a01b4477b0::t_84a10da59f9517 1-4
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/window.c
+  s_8788a01b4477b0::t_42f85dfd07b6cd 1-3
+platform/frontends/c2cpg/src/test/resources/contexts/two-includers/window.h
+  s_8788a01b4477b0::t_bc096b5dd1ab3d 1-8
+platform/frontends/c2cpg/src/test/resources/contexts/two-targets/target-scale.c
+  s_8788a01b4477b0::t_0c9fbbfb49d64d 1-15
+platform/frontends/c2cpg/src/test/resources/contexts/typedef-before-include/impl.h
+  s_8788a01b4477b0::t_69f656e0f8a19d 1
+platform/frontends/c2cpg/src/test/resources/contexts/typedef-before-include/unit.c
+  s_8788a01b4477b0::t_31184070486f53 1-8
+platform/frontends/c2cpg/src/test/resources/contexts/typedef-declared-after-include/unit.c
+  s_8788a01b4477b0::t_4afa08bcfd42c1 1-9
+platform/frontends/c2cpg/src/test/resources/contexts/typedef-declared-after-include/widget.h
+  s_8788a01b4477b0::t_6d1ade9abf604f 1
+platform/frontends/c2cpg/src/test/resources/contexts/x-macro-def/ops.c
+  s_8788a01b4477b0::t_0444a0e0aa4235 1-16
+platform/frontends/c2cpg/src/test/resources/contexts/x-macro-def/ops.def
+  s_8788a01b4477b0::t_de7c2985ae0ca9 1-2
+platform/frontends/c2cpg/src/test/resources/contexts/x-macro-header/ops.c
+  s_8788a01b4477b0::t_597f489a598015 1-16
+platform/frontends/c2cpg/src/test/resources/contexts/x-macro-header/ops.h
+  s_8788a01b4477b0::t_673e9bbeaa9c2f 1-2
+platform/frontends/c2cpg/src/test/resources/contexts/x-macro-inline/ops.c
+  s_8788a01b4477b0::t_4a980d1033cbd8 1-17
+platform/frontends/c2cpg/src/test/resources/templates/boxes_int.cpp
+  s_8788a01b4477b0::t_04244f928b9016 1-92
+platform/frontends/c2cpg/src/test/resources/templates/boxes_str.cpp
+  s_8788a01b4477b0::t_19a6930a107a70 1-56
+platform/frontends/c2cpg/src/test/resources/templates/tmplbox.hpp
+  s_8788a01b4477b0::t_c9cc94a32e60be 1-102
+platform/frontends/c2cpg/src/test/resources/toolchains/arm-none-eabi-gcc/bare_metal_delay.c
+  s_8788a01b4477b0::t_9ae5940001eda0 1-11
+platform/frontends/c2cpg/src/test/resources/toolchains/arm-none-eabi-gcc/compile_commands.json
+  s_8788a01b4477b0::t_53295c32362051 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/armcl/compile_commands.json
+  s_8788a01b4477b0::t_a64524ce9a2732 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/armcl/ti_arm_task.c
+  s_8788a01b4477b0::t_627825665c7ad4 1-9
+platform/frontends/c2cpg/src/test/resources/toolchains/armclang/compile_commands.json
+  s_8788a01b4477b0::t_35aebf6efa0fcc 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/armclang/cortex_m_irq.c
+  s_8788a01b4477b0::t_f52c149ada0de3 1-14
+platform/frontends/c2cpg/src/test/resources/toolchains/ccache/cached_build.c
+  s_8788a01b4477b0::t_2279ecdc31412f 1-7
+platform/frontends/c2cpg/src/test/resources/toolchains/ccache/compile_commands.json
+  s_8788a01b4477b0::t_aff5ffd1fa02f3 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/cl430/compile_commands.json
+  s_8788a01b4477b0::t_9bb949ae86da24 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/cl430/msp430_blink.c
+  s_8788a01b4477b0::t_d9e31c0114d392 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/clang-cl-mode/compile_commands.json
+  s_8788a01b4477b0::t_5c3e0730b27c7e 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/clang-cl-mode/msvc_mode.cpp
+  s_8788a01b4477b0::t_fedd6356b6dcdc 1-11
+platform/frontends/c2cpg/src/test/resources/toolchains/emcc/compile_commands.json
+  s_8788a01b4477b0::t_3d3e5b6bea100f 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/emcc/wasm_entry.c
+  s_8788a01b4477b0::t_9b59ef18ee370c 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/empp/compile_commands.json
+  s_8788a01b4477b0::t_14516967db6c44 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/empp/wasm_entry.cpp
+  s_8788a01b4477b0::t_7a699951a03660 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/iccarm/arm_irq.c
+  s_8788a01b4477b0::t_e4ca2629515a6e 1-13
+platform/frontends/c2cpg/src/test/resources/toolchains/iccarm/compile_commands.json
+  s_8788a01b4477b0::t_9042a973db4653 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/icpx/compile_commands.json
+  s_8788a01b4477b0::t_673d56a4293d7b 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/icpx/simd_dot.cpp
+  s_8788a01b4477b0::t_1531531dbebbdd 1-13
+platform/frontends/c2cpg/src/test/resources/toolchains/icx/compile_commands.json
+  s_8788a01b4477b0::t_bce65ab0011ca9 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/icx/simd_dot.c
+  s_8788a01b4477b0::t_f7eefc92dee52e 1-10
+platform/frontends/c2cpg/src/test/resources/toolchains/nvcc/compile_commands.json
+  s_8788a01b4477b0::t_3e7fadaab1cd88 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/nvcc/vec_add.cu
+  s_8788a01b4477b0::t_7b017df95aaff3 1-7
+platform/frontends/c2cpg/src/test/resources/toolchains/tcc/compile_commands.json
+  s_8788a01b4477b0::t_fca469109c0b19 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/tcc/small_kernel.c
+  s_8788a01b4477b0::t_5c4c38ba6e2f0d 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cc/clang_guarded.c
+  s_8788a01b4477b0::t_97a2341226ec2b 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cc/compile_commands.json
+  s_8788a01b4477b0::t_6bd3d6b3c7319b 1-3
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cpp/clang_guarded.cpp
+  s_8788a01b4477b0::t_5148a0ba3eda63 1-6
+platform/frontends/c2cpg/src/test/resources/toolchains/zig-cpp/compile_commands.json
+  s_8788a01b4477b0::t_dd5a562b25470e 1-3
+platform/frontends/c2cpg/src/test/resources/worker/preprocessor-problem/plain-counter.c
+  s_8788a01b4477b0::t_9c8ed8271c4f6d 1
+platform/frontends/c2cpg/src/test/resources/worker/preprocessor-problem/unresolved-include.c
+  s_8788a01b4477b0::t_876b7856a7b60e 1-3
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/bit-mask.c
+  s_8788a01b4477b0::t_7aee4744215f61 1-8
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/min-max.c
+  s_8788a01b4477b0::t_6852ecbf4913b2 1-7
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/pair.h
+  s_8788a01b4477b0::t_dda132d0484204 1-13
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/static-counter.c
+  s_8788a01b4477b0::t_61d910cf3831dc 1-7
+platform/frontends/c2cpg/src/test/resources/worker/separate-units/swap-values.c
+  s_8788a01b4477b0::t_bb786e82b3821b 1-15
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/CompileCommandTests.scala
+  s_8788a01b4477b0::t_d858429f735bc8 203-314
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/DuplicateDatabaseEntriesTests.scala
+  s_8788a01b4477b0::t_33b21727309e9f 1-54
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/PredefinedMacrosTests.scala
+  s_8788a01b4477b0::t_a9ceb566d01180 91-120,322-352,402-668
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/BuildContextWarmCacheTests.scala
+  s_8788a01b4477b0::t_198d261aa37edd 1-86
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/FileTests.scala
+  s_8788a01b4477b0::t_2061bd7dac2668 51-52
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/ast/HeaderFromOwnerTests.scala
+  s_8788a01b4477b0::t_934fa10d9b0687 1-258
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/passes/types/TemplateTypeTests.scala
+  s_8788a01b4477b0::t_f5a6d73c7084c5 5,90-116
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplatesLambdasTests.scala
+  s_8788a01b4477b0::t_1010b8b690a000 5,79-83
+platform/frontends/c2cpg/tools/predefined-macros/generate.sh
+  s_8788a01b4477b0::t_83d4511a1a2a43 11-14,19-20,22-29,34,38-40,83-99,130-311
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  s_8788a01b4477b0::t_c9054bb795a20e 69-77,404-405,461,464
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForCpp.scala
+  s_8788a01b4477b0::t_9793536d7a09e2 138-185
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/parser/EdgaRunner.scala
+  s_8788a01b4477b0::t_23b9321d62c846 12,16,79-81,88-91,96-108,130,185-222,232-238,457-468,470-510
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  s_8788a01b4477b0::t_15ed0956273e3a 129-135
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/TemplateTagTests.scala
+  s_8788a01b4477b0::t_d949ab3d0e85a4 1-283
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/EdgaUnitRecordTests.scala
+  s_8788a01b4477b0::t_f0def56103c883 1-104
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/parser/ToolchainTableTests.scala
+  s_8788a01b4477b0::t_4ae655dac9b32f 1-118
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/parse/UnitSettingsReporterTests.scala
+  s_8788a01b4477b0::t_3f469c0d13092b 1-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c32fae6339a0cc3a8d8be17289fe05b501997b4",
+  "prompts": {},
+  "sessions": {
+    "s_8788a01b4477b0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c41334aa-2343-4dc4-8b07-1cbbaab93edf",
+        "model": "unknown"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
