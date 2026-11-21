@@ -21,6 +21,7 @@ import overflowdb.BatchedUpdate.DiffGraphBuilder
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
 import java.security.MessageDigest
+import scala.util.Try
 
 /** The build-context fingerprint: what the parts of a unit's compile command that change the unit
   * as a program hash to. Two commands give the same fingerprint when they compile a unit to the
@@ -145,7 +146,10 @@ class BuildContextPass(cpg: Cpg, config: Config, sources: ProjectSources) extend
     * untagged.
     */
   private def contextOf(root: Path, name: String): Option[String] =
-    val path     = Paths.get(name)
+      // `<unknown>` is not a valid path on Windows, where Paths.get throws for it.
+      Try(Paths.get(name)).toOption.flatMap(path => contextOf(root, name, path))
+
+  private def contextOf(root: Path, name: String, path: Path): Option[String] =
     val absolute = if path.isAbsolute then path else root.resolve(path)
     if !Files.isRegularFile(absolute) then None
     else if FileDefaults.isHeaderFile(name) then
