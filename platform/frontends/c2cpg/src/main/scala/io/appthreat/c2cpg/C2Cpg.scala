@@ -88,21 +88,26 @@ class C2Cpg extends X2CpgFrontend[Config]:
             resolveCacheDir(config.inputPath, config.cacheDir),
             config.onlyAstCache
           )
-          val fragments =
-              files.toSeq.map(f =>
-                  store.fragmentFor(
-                    AstCreationPass.fileCacheKey(f),
-                    AstCreationPass.fileFingerprint(config, sources, f)
-                  )
-              )
-          if fragments.exists(_.isEmpty) then false // not fully cached: fall back to a normal parse
+          // A store that is off (`--cache none`, `--no-ast-cache`) answers every lookup with
+          // nothing, so the fingerprints, which read macro, include and owner files, are not built.
+          if !store.isUsable then false
           else
-            new FragmentSplicePass(
-              cpg,
-              fragments.flatten,
-              ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
-            ).createAndApply()
-            true
+            val fragments =
+                files.toSeq.map(f =>
+                    store.fragmentFor(
+                      AstCreationPass.fileCacheKey(f),
+                      AstCreationPass.fileFingerprint(config, sources, f)
+                    )
+                )
+            if fragments.exists(_.isEmpty) then
+              false // not fully cached: fall back to a normal parse
+            else
+              new FragmentSplicePass(
+                cpg,
+                fragments.flatten,
+                ts => ts.foreach(CGlobal.usedTypes.putIfAbsent(_, true))
+              ).createAndApply()
+              true
         end if
 
   /** `--macro-census` alone: write the report and a reviewable `--macro-files` header, no CPG. */

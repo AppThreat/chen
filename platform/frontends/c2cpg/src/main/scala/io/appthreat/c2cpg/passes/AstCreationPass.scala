@@ -468,7 +468,12 @@ class AstCreationPass(
             diffGraph,
             filename,
             cacheKey = AstCreationPass.fileCacheKey(filename),
-            fingerprint = AstCreationPass.fileFingerprint(config, sources, filename),
+            // the store ignores the fingerprint when it is off, and building it reads the macro,
+            // include and owner files
+            fingerprint =
+                if cacheStore.isUsable then
+                  AstCreationPass.fileFingerprint(config, sources, filename)
+                else "",
             registerUsedTypes = registerUsedTypes,
             createAst = createAst(filename)
           )
