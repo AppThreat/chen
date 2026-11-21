@@ -1,0 +1,19 @@
+docs/v4/frontends.md
+  s_e6dfd4b0f04eb8::t_3794ed86ca078e 99-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "864b18df1cb73dad21397357f368e43596a08b21",
+  "prompts": {},
+  "sessions": {
+    "s_e6dfd4b0f04eb8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_dwf-dwfrun-045e7d81-3ecf-44a8-85dc-43b649bad715-actor_1_1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
