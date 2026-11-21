@@ -1,0 +1,31 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/parse/UnitSettingsReporter.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 82-83
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/HeaderFromOwner.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 43-44,55-57,80-83,117
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/querying/cppeval/CppTemplateTagsTests.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 9-13,104-106
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/astcreation/CppCallResolution.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 201-204
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/HeaderFromOwnerPrecheckTests.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 81-85
+platform/frontends/c2cpg/src/test/scala/io/appthreat/c2cpg/parser/UnitSettingsRecordTests.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 176-178
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/Defines.scala
+  s_8a4433d1784041::t_3f827dd8f6dbbc 153-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "383ad087acec3da26bd0f28bdbb29e94cef31078",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
