@@ -1,0 +1,29 @@
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/node.golden
+  s_8a4433d1784041::t_be558d009cf5fd 61,63
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/svelte.golden
+  s_8a4433d1784041::t_be558d009cf5fd 28
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/angular.golden
+  s_8a4433d1784041::t_11dd9f03f4e3fa 287-384
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/react.golden
+  s_8a4433d1784041::t_e2bec0bbaddec7 31-32
+platform/frontends/jssrc2cpg/src/test/resources/js-tagger-snapshots/vue.golden
+  s_8a4433d1784041::t_e4b23c335b94f3 25-27
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DependencyBoundary.scala
+  s_8a4433d1784041::t_67e9e92055a6f5 116-118,186-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c2f5caf1277bc446396d18d141a7e794bcc335b8",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
