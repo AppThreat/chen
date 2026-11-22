@@ -1,0 +1,46 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/worker/CdtWorker.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 431-432,613-614,652-662
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCache.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 50-54,60-62,68,127,130,134-135,141-145
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/PredefinedMacros.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 188-189
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCacheTests.scala
+  s_7afdebcf182184::t_fde8906632d9dc 177-180,185-186,247-249,267-272
+  s_7afdebcf182184::t_eb4e48ee8f1c60 214-218
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryStore.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 115-117,131
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryStoreTests.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 18,53-54
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/CpgCacheStore.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 9-17,235-237,244,251,300
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyStubsTests.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 158-159
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStoreTests.scala
+  s_7afdebcf182184::t_7b0176db864f1d 337-339
+  s_7afdebcf182184::t_fde8906632d9dc 53-60,64-70,86-89,103-106,153-156,211-214,293-295,326-328
+  s_7afdebcf182184::t_040dc510c0af27 271-275
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/AtomicWritesTests.scala
+  s_7afdebcf182184::t_fde8906632d9dc 25-27,50,64,89-90,129,140-141,159,171-173
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/AtomicWrites.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 14-18,43-51,58-67,71-74,77-78,81-92,94-97,103-106,109-115,123-126
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 210-219
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  s_7afdebcf182184::t_56a1b8b3c2fa29 74-75,111,121,273-274,285-293,296-302,328-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0dde375b4293fe886133613571dadc64411be70f",
+  "prompts": {},
+  "sessions": {
+    "s_7afdebcf182184": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_c8af1a80-6dae-48aa-9140-0ea5633e29af",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
