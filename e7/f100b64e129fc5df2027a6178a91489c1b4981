@@ -1,0 +1,14 @@
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyAstGenRunner.scala
+  h_0926447d100ad2 15,291-293,297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e7f100b64e129fc5df2027a6178a91489c1b4981",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
