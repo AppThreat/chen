@@ -57,6 +57,12 @@ object DependencyBoundary:
     */
   private val SourceTags = Seq(INPUT)
 
+  /** The continuations of a Promise. Chained on a package call's result (`axios.get(u).then(f)`)
+    * they resolve to the package through their receiver, but what they are handed is a callback,
+    * not data for the package: the call before them is the sink.
+    */
+  private val PromiseContinuations = Set("then", "catch", "finally")
+
   /** Tags the calls into packages and returns the package of each one found through inheritance, by
     * call id.
     */
@@ -69,7 +75,10 @@ object DependencyBoundary:
     val inheritance = Inheritance(ctx)
     val inherited   = mutable.HashMap.empty[Long, String]
     ctx.cpg.call
-        .filterNot(c => c.name.startsWith("<operator>") || sunk.contains(c.id()))
+        .filterNot(c =>
+            c.name.startsWith("<operator>") || PromiseContinuations.contains(c.name) ||
+                sunk.contains(c.id())
+        )
         .filter(c =>
             c._callOut.collectAll[Method].forall(_.isExternal) &&
                 ctx.tagger.targetsOf(c).forall(_.isExternal)

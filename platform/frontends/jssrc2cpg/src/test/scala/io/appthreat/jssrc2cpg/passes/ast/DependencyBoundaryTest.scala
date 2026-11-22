@@ -175,6 +175,20 @@ class DependencyBoundaryTest extends DataFlowCodeToCpgSuite:
           tags should contain("pkg:npm/axios@1.7.2")
       }
 
+      "leave a Promise continuation on a package call's result untagged" in {
+          val cpg = tagged(code(
+            """
+            |import axios from 'axios';
+            |export function fetchIt(u: string, done: any) {
+            |  axios.get(u).then((r) => done(r.data)).catch(done).finally(done);
+            |}
+            |""".stripMargin,
+            "chain.ts"
+          ))
+          tagsOf(cpg, "get").flatten should contain("http-client")
+          Seq("then", "catch", "finally").foreach(name => tagsOf(cpg, name).flatten shouldBe empty)
+      }
+
       "not tag a call into a Node built-in" in {
           val cpg = tagged(code(
             """
