@@ -1,0 +1,19 @@
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/EdgBuildContextCopiesTests.scala
+  s_8a4433d1784041::t_58f81b0a034132 183-185,189-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d08d0956454bcab459d54fd4b11c8a3e4a8ffa3c",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
