@@ -1,0 +1,44 @@
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/DependencyBoundaryTest.scala
+  s_8a4433d1784041::t_c6185ac28a426b 1-239
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsSupport.scala
+  s_8a4433d1784041::t_d5c86cbbd2059d 396-449
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/JsFrameworkRecognizersTest.scala
+  s_8a4433d1784041::t_95378d8e695905 794-797
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/PackageAttribution.scala
+  s_8a4433d1784041::t_020eb0962bbece 70-78,96,134
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/EasyTagsPass.scala
+  s_8a4433d1784041::t_d2819d6415a3be 524,1628-1650
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/PackageAttributionTest.scala
+  s_8a4433d1784041::t_70de447fee1dde 66-71,98-101,128-133,158-160
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/JsRecognizers.scala
+  s_8a4433d1784041::t_0b82aba1bf94a5 160-162
+platform/frontends/jssrc2cpg/src/test/scala/io/appthreat/jssrc2cpg/passes/ast/ExpressOrmSinkTagsTest.scala
+  s_8a4433d1784041::t_0372e0a2c1e979 170-171,174-175
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/js/DependencyBoundary.scala
+  s_bfee7a8c225703::t_a3162c92ec7e25 20-58,62,101
+  s_bfee7a8c225703::t_1d6e7fc6a0a538 1-19,59-61,63-100,102-228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cbc0263db32c6579f8239a339cf7f6d671906b38",
+  "prompts": {},
+  "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_bfee7a8c225703": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_e0074f6e-98b0-4637-ad62-697b1d499329",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
