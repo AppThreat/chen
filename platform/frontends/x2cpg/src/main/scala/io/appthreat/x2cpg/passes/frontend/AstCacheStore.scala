@@ -3,11 +3,12 @@ package io.appthreat.x2cpg.passes.frontend
 import io.appthreat.x2cpg.{AstCache, AstFragment}
 import io.appthreat.x2cpg.AstCache.AstBitcode
 import io.appthreat.x2cpg.parse.ParseReporter
+import io.appthreat.x2cpg.utils.AtomicWrites
 import org.slf4j.{Logger, LoggerFactory}
 import overflowdb.BatchedUpdate.DiffGraphBuilder
 import upickle.default.*
 
-import java.nio.file.{Files, Paths, StandardCopyOption}
+import java.nio.file.{Files, LinkOption, Path, Paths}
 import java.security.MessageDigest
 import scala.util.Try
 
@@ -59,12 +60,27 @@ end AstCacheStore
   *   directory holding the `<hash>.ast` cache files
   * @param onlyAstCache
   *   when true, parse and populate the cache but do not write into the CPG (cache warming)
+  * @param useFragmentCache
+  *   when true, cache `<hash>.frag` fragments instead of `<hash>.ast` bitcode
+  * @param trustedCacheDir
+  *   true only when `cacheDir` was configured explicitly by the user. A directory at a default
+  *   position under the analysed input may be committed as a symbolic link by the input's own
+  *   checkout, so such a position is checked (see [[AtomicWrites.checkCacheDirectory]]) and the
+  *   cache is switched off when the position is a link; the user's own configured directory is
+  *   taken as the user chose it.
+  * @param cacheDirAnchor
+  *   the analysed input root, when the caller knows it. With it, every component of the cache
+  *   directory's path below that root is checked whether or not it exists yet, so a linked `.chen`
+  *   is caught even when its target already holds cache entries. Ignored when `trustedCacheDir` is
+  *   true; without an anchor the check starts at the deepest existing component.
   */
 class AstCacheStore(
   enableAstCacheParam: Boolean,
   cacheDir: String,
   onlyAstCache: Boolean,
-  useFragmentCache: Boolean = false
+  useFragmentCache: Boolean = false,
+  trustedCacheDir: Boolean = false,
+  cacheDirAnchor: Option[String] = None
 ):
 
   import AstCacheStore.{CacheKey, ParsedUnit}
@@ -81,11 +97,21 @@ class AstCacheStore(
           Files.isDirectory(parent)
       }.getOrElse(false)
 
+  /** Why the cache directory position was refused, when it was: a component of its path is a
+    * symbolic link (so entries would be written where the link points), or a component exists and
+    * is not a directory. With an anchor, every component below it is checked, existing or not;
+    * without one, the walk starts at the deepest existing component. Only checked for a directory
+    * at a default position; a user-configured directory is trusted.
+    */
+  private val cacheDirRefusal: Option[String] =
+      AtomicWrites.cacheDirRefusal(Paths.get(cacheDir), trustedCacheDir, cacheDirAnchor)
+
   /** Caching is on only if requested by the frontend, not globally disabled via [[CacheControl]],
-    * and the cache directory's parent exists.
+    * the cache directory's parent exists, and the directory's position was not refused.
     */
   private def enableAstCache: Boolean =
-      enableAstCacheParam && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Ast)
+      enableAstCacheParam && cacheDirParentExists && cacheDirRefusal.isEmpty &&
+          CacheControl.isEnabled(CacheControl.Ast)
 
   /** Whether this store reads or writes entries right now. When it does not, [[process]] ignores
     * its `fingerprint`, so a caller whose fingerprint costs something (it reads other files) asks
@@ -93,10 +119,18 @@ class AstCacheStore(
     */
   def isUsable: Boolean = enableAstCache
 
-  if enableAstCache then
-    Try(Files.createDirectories(Paths.get(cacheDir))).failed.foreach { e =>
-        logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}")
+  if enableAstCacheParam && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Ast) then
+    cacheDirRefusal.foreach { reason =>
+        logger.warn(
+          s"Switching the AST cache off for this run: $reason, so cache directory $cacheDir is not used"
+        )
     }
+
+  if enableAstCache then
+    Try(Files.createDirectories(Paths.get(cacheDir))).fold(
+      e => logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}"),
+      dir => AtomicWrites.sweepStale(dir)
+    )
 
   /** Cache-aware processing of a single part.
     *
@@ -230,41 +264,49 @@ class AstCacheStore(
   private def readable(partHash: Option[String]): Option[String] =
       if ParseReporter.isEnabled then None else partHash
 
+  /** The entry's bytes, or `None` when no usable entry exists. An entry that is a symbolic link (or
+    * anything but a regular file) is a miss: its target, wherever the link points, is never read.
+    */
+  private def entryBytes(cacheFile: Path): Option[Array[Byte]] =
+    val bytes = AtomicWrites.readRegular(cacheFile)
+    if bytes.isEmpty && Files.exists(cacheFile, LinkOption.NOFOLLOW_LINKS) then
+      logger.debug(s"Cache entry $cacheFile is not a readable regular file; treating it as a miss")
+    bytes
+
   private def loadFromCache(partHash: Option[String]): Option[AstBitcode] =
       readable(partHash).flatMap { hash =>
         val cacheFile = Paths.get(cacheDir, s"$hash.ast")
-        if !Files.exists(cacheFile) then None
-        else
-          try
-            val bitcode = readBinary[AstBitcode](Files.readAllBytes(cacheFile))
-            // Discard and recompute caches written by an incompatible build rather than risking a
-            // corrupt graph.
-            if AstCache.isCompatible(bitcode) then Some(bitcode)
-            else
-              Try(Files.deleteIfExists(cacheFile))
-              None
-          catch
-            case e: Exception =>
-                logger.warn(
-                  s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
-                )
-                Try(Files.deleteIfExists(cacheFile))
-                None
+        entryBytes(cacheFile) match
+          case None => None
+          case Some(entry) =>
+              try
+                val bitcode = readBinary[AstBitcode](entry)
+                // Discard and recompute caches written by an incompatible build rather than risking a
+                // corrupt graph.
+                if AstCache.isCompatible(bitcode) then Some(bitcode)
+                else
+                  Try(Files.deleteIfExists(cacheFile))
+                  None
+              catch
+                case e: Exception =>
+                    logger.warn(
+                      s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
+                    )
+                    Try(Files.deleteIfExists(cacheFile))
+                    None
       }
 
   private def saveToCache(bitcode: AstBitcode, hash: String): Unit =
     val finalPath = Paths.get(cacheDir, s"$hash.ast")
-    val tmpPath   = Paths.get(cacheDir, s"$hash.ast.tmp")
     try
       val bytes = writeBinary(bitcode)
-      // Write to a temp file and atomically move into place so concurrent readers never see a
-      // partially written cache entry.
-      Files.write(tmpPath, bytes)
-      Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
+      // Write through an unpredictable temporary that is renamed into place, so concurrent readers
+      // never see a partially written entry and a link committed at the entry's name is replaced
+      // rather than written through.
+      AtomicWrites.bytes(finalPath, bytes)
     catch
       case e: Exception =>
           logger.warn(s"Failed to save AST cache for hash $hash: ${e.getMessage}")
-          Try(Files.deleteIfExists(tmpPath))
 
   /** The cached fragment bytes for a part, or `None` if caching is off, the key is unavailable, or
     * no fragment is on disk. Used by a warm-restore build path to decide whether a whole project
@@ -277,20 +319,17 @@ class AstCacheStore(
 
   private def loadFragmentBytes(partHash: Option[String]): Option[Array[Byte]] =
       readable(partHash).flatMap { hash =>
-        val cacheFile = Paths.get(cacheDir, s"$hash.frag")
-        if !Files.exists(cacheFile) then None
-        else Try(Files.readAllBytes(cacheFile)).toOption
+          entryBytes(Paths.get(cacheDir, s"$hash.frag"))
       }
 
   private def saveFragmentBytes(bytes: Array[Byte], hash: String): Unit =
     val finalPath = Paths.get(cacheDir, s"$hash.frag")
-    val tmpPath   = Paths.get(cacheDir, s"$hash.frag.tmp")
     try
-      Files.write(tmpPath, bytes)
-      Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
+      // Same unpredictable-temporary rename as the classic entries: never open a name a checkout
+      // could have pre-created as a link.
+      AtomicWrites.bytes(finalPath, bytes)
     catch
       case e: Exception =>
           logger.warn(s"Failed to save fragment cache for hash $hash: ${e.getMessage}")
-          Try(Files.deleteIfExists(tmpPath))
 
 end AstCacheStore

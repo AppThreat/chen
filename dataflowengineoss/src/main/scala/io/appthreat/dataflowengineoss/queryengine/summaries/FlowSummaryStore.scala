@@ -2,6 +2,7 @@ package io.appthreat.dataflowengineoss.queryengine.summaries
 
 import io.appthreat.dataflowengineoss.semanticsloader.Semantics
 import io.appthreat.x2cpg.passes.frontend.CacheControl
+import io.appthreat.x2cpg.utils.AtomicWrites
 import io.circe.parser.decode
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Encoder}
@@ -9,7 +10,7 @@ import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.language.*
 import org.slf4j.LoggerFactory
 
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+import java.nio.file.{Files, LinkOption, Path, Paths}
 import java.security.MessageDigest
 import scala.util.Try
 
@@ -75,7 +76,13 @@ object FlowSummaryStore:
         case Left(err)   => Left(err.getMessage)
 end FlowSummaryStore
 
-/** Reads and writes summary sets keyed on a fingerprint, under `cacheDir`. */
+/** Reads and writes summary sets keyed on a fingerprint, under `cacheDir`.
+  *
+  * The directory is the one holding the user-named slices file, so it is trusted as a position the
+  * user chose; the files inside it are still written so that a symbolic link at an entry's name
+  * cannot redirect them, and read so that a linked entry is a miss rather than a read of wherever
+  * the link points.
+  */
 class FlowSummaryStore(cacheDir: String):
 
   private val logger = LoggerFactory.getLogger(classOf[FlowSummaryStore])
@@ -96,26 +103,31 @@ class FlowSummaryStore(cacheDir: String):
   private def cacheFile(fingerprint: String): Path =
       Paths.get(cacheDir, s"flowsummary-$fingerprint.json")
 
-  /** Restore the summary set stored under `fingerprint`, if present and readable. */
+  /** Restore the summary set stored under `fingerprint`, if present and readable. An entry that is
+    * a symbolic link is a miss: its target is never read.
+    */
   def restore(fingerprint: String): Option[Map[String, MethodFlowSummary]] =
       if !enabled then None
       else
         val cached = cacheFile(fingerprint)
-        if !Files.exists(cached) then None
+        if !Files.isRegularFile(cached, LinkOption.NOFOLLOW_LINKS) then
+          if Files.exists(cached, LinkOption.NOFOLLOW_LINKS) then
+            logger.debug(
+              s"Summary cache entry $cached is not a regular file; treating it as a miss"
+            )
+          None
         else
-          Try(Files.readString(cached)).toOption
-              .flatMap(json => FlowSummaryStore.deserialize(json).toOption)
+          AtomicWrites.readRegular(cached)
+              .flatMap(bytes => FlowSummaryStore.deserialize(String(bytes, "UTF-8")).toOption)
 
-  /** Store `summaries` under `fingerprint`, replacing any existing entry atomically. */
+  /** Store `summaries` under `fingerprint`, replacing any existing entry atomically through an
+    * unpredictable temporary in the same directory, so a link committed at either name is replaced
+    * rather than written through.
+    */
   def store(fingerprint: String, summaries: Map[String, MethodFlowSummary]): Unit =
       if enabled then
-        val finalPath = cacheFile(fingerprint)
-        val tmpPath   = Paths.get(cacheDir, s"flowsummary-$fingerprint.json.tmp")
-        Try {
-            Files.writeString(tmpPath, FlowSummaryStore.serialize(summaries))
-            Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
-        }.failed.foreach { e =>
-          logger.warn(s"Failed to store summary cache: ${e.getMessage}")
-          Try(Files.deleteIfExists(tmpPath))
-        }
+        Try(AtomicWrites.text(cacheFile(fingerprint), FlowSummaryStore.serialize(summaries)))
+            .failed.foreach { e =>
+                logger.warn(s"Failed to store summary cache: ${e.getMessage}")
+            }
 end FlowSummaryStore

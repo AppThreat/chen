@@ -12,12 +12,13 @@ import io.appthreat.x2cpg.parse.{
     UnitSettingsReporter
 }
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
+import io.appthreat.x2cpg.utils.{AtomicWrites, FileUtil}
 import org.slf4j.LoggerFactory
 import upickle.default.*
 
 import java.io.{BufferedReader, BufferedWriter, InputStreamReader, OutputStreamWriter}
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+import java.nio.file.{Files, Path, Paths}
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import java.util.concurrent.{
     AbstractExecutorService,
@@ -150,7 +151,8 @@ object CdtWorker:
   /** One unit the parent asks a worker to parse: the file, the cache fingerprint the parent
     * computed for it (so the entry the worker writes is the entry the parent looks for), the file
     * the reply goes to, the directory and codec the entry is written under (the run's AST cache
-    * when the run caches, a directory of the run's own otherwise), and the run's settings.
+    * when the run caches, a directory of the run's own otherwise), whether that directory was
+    * configured by the user (see [[AstCacheStore]]), and the run's settings.
     */
   case class Job(
     file: String,
@@ -158,6 +160,7 @@ object CdtWorker:
     replyFile: String,
     cacheDir: String,
     fragments: Boolean,
+    trustedCacheDir: Boolean = false,
     settings: WorkerConfig
   ) derives ReadWriter
 
@@ -339,7 +342,7 @@ object CdtWorker:
       val config = WorkerConfig.toConfig(job.settings)
       val projectSources =
           sources.getOrElseUpdate(write(job.settings), new ProjectSources(config))
-      Files.write(startedMarker(job.replyFile), Array.emptyByteArray)
+      AtomicWrites.bytes(startedMarker(job.replyFile), Array.emptyByteArray)
       failure match
         case Some("exit") =>
             System.exit(1)
@@ -400,7 +403,11 @@ object CdtWorker:
       enableAstCacheParam = true,
       job.cacheDir,
       onlyAstCache = false,
-      useFragmentCache = job.fragments
+      useFragmentCache = job.fragments,
+      trustedCacheDir = job.trustedCacheDir,
+      // the anchor the parent judged the position against: the project's input path, which the
+      // settings carry; without trust the worker checks the same components the parent did
+      cacheDirAnchor = if job.trustedCacheDir then None else Some(config.inputPath)
     )
     val staging = new overflowdb.BatchedUpdate.DiffGraphBuilder
     val produced = store.process(
@@ -420,10 +427,15 @@ object CdtWorker:
       Reply("failed", reason, collectedFailures, collectedUnits)
   end answer
 
-  private def writeReply(job: Job, reply: Reply): Unit =
-    val tmp = Paths.get(s"${job.replyFile}.tmp")
-    Files.write(tmp, write(reply).getBytes(StandardCharsets.UTF_8))
-    Files.move(tmp, Paths.get(job.replyFile), StandardCopyOption.REPLACE_EXISTING)
+  /** Writes the reply through an unpredictable temporary renamed onto the reply file, so a link
+    * placed at that name is replaced rather than written through. The reply directory is this run's
+    * own, but one writer pattern covers every fixed name the worker touches.
+    */
+  private[worker] def writeReply(job: Job, reply: Reply): Unit =
+      AtomicWrites.bytes(
+        Paths.get(job.replyFile),
+        write(reply).getBytes(StandardCharsets.UTF_8)
+      )
 end CdtWorker
 
 /** The parent's side of the worker mode: a small pool of long-lived worker processes, each running
@@ -528,6 +540,7 @@ end CdtWorkerPool
 class CdtWorkerPool(
   exchangeDir: String,
   fragments: Boolean,
+  trustedCacheDir: Boolean,
   settings: CdtWorker.WorkerConfig,
   unitBudget: FiniteDuration,
   startupBudget: FiniteDuration
@@ -576,14 +589,15 @@ class CdtWorkerPool(
             attempt
     finally capacity.release()
 
-  /** Destroys every worker and the reply files. */
+  /** Destroys every worker and the reply files. The reply directory is deleted without following
+    * links, so a link planted inside it is removed as a link and its target is left alone.
+    */
   def close(): Unit =
     closed = true
     idle.clear()
     live.forEach(destroy)
     Try(Runtime.getRuntime.removeShutdownHook(shutdownHook))
-    Try:
-      Files.walk(replyDir).sorted(java.util.Comparator.reverseOrder[Path]()).forEach(Files.delete)
+    FileUtil.delete(replyDir, swallowIoExceptions = true)
 
   /** The options of this process a worker takes as well: the thread stack size, which deep
     * expressions need in the parser as much in a worker as here.
@@ -596,11 +610,13 @@ class CdtWorkerPool(
   /** An argument file holding the class path, so the command line stays short whatever the class
     * path's length (Windows refuses command lines over 32,767 characters). Inside quotes a
     * backslash escapes the next character, so every backslash and quote of the path is escaped.
+    * Written through an unpredictable temporary renamed onto the fixed name, like every other fixed
+    * name in this directory.
     */
   private lazy val classpathArgFile: Path =
     val quoted = classpathFor(getClass).replace("\\", "\\\\").replace("\"", "\\\"")
     val file   = replyDir.resolve("worker-classpath.args")
-    Files.writeString(file, s"""-cp\n"$quoted"\n""", StandardCharsets.UTF_8)
+    AtomicWrites.text(file, s"""-cp\n"$quoted"\n""")
     file
 
   private def startWorker(): Worker =
@@ -633,8 +649,17 @@ class CdtWorkerPool(
 
   private def dispatch(worker: Worker, file: Path, fingerprint: String): (Attempt, Boolean) =
     val replyFile = replyDir.resolve(s"reply-${replyCount.incrementAndGet()}.json").toString
-    val job       = Job(file.toString, fingerprint, replyFile, exchangeDir, fragments, settings)
-    val marker    = startedMarker(replyFile)
+    val job =
+        Job(
+          file.toString,
+          fingerprint,
+          replyFile,
+          exchangeDir,
+          fragments,
+          trustedCacheDir,
+          settings
+        )
+    val marker = startedMarker(replyFile)
     // the worker's start and its reading of the project have their own deadline; the unit's
     // budget runs from the moment the worker says the unit's own work began
     val startDeadline      = System.currentTimeMillis() + startupBudget.toMillis

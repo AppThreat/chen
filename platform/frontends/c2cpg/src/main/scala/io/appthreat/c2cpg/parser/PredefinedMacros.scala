@@ -1,5 +1,6 @@
 package io.appthreat.c2cpg.parser
 
+import io.appthreat.x2cpg.utils.AtomicWrites
 import org.slf4j.LoggerFactory
 
 import java.io.InputStream
@@ -75,6 +76,11 @@ object PredefinedMacros:
   private def identityKey(identity: CompilerIdentity): String =
       (identity.executable +: identity.language.toString +: identity.options).mkString("\u0000")
 
+  /** The directory under a cache directory the macro files live in, so a caller that checks the
+    * cache's position can check the position it actually writes to.
+    */
+  val CacheSubdir: String = "compilers"
+
   private def lookup(
     identity: CompilerIdentity,
     key: String,
@@ -82,7 +88,7 @@ object PredefinedMacros:
   ): Option[CompilerFacts] =
       version(identity.executable).flatMap { versionText =>
         val digest = sha256(key + "\u0000" + versionText)
-        val cached = cacheDir.map(_.resolve("compilers").resolve(s"$digest.macros"))
+        val cached = cacheDir.map(_.resolve(CacheSubdir).resolve(s"$digest.macros"))
         cached.flatMap(read).orElse {
             val facts = run(identity)
             for f <- facts; file <- cached do write(file, f)
@@ -172,29 +178,27 @@ object PredefinedMacros:
           .map(_.stripSuffix(" (framework directory)"))
           .flatMap(p => Try(Paths.get(p).toAbsolutePath.normalize).toOption)
 
+  /** Reads a cached macro file. A link at the cache name is a miss: the target, wherever the link
+    * points, is never read. The write beside this goes through [[AtomicWrites]] too.
+    */
   private def read(file: Path): Option[CompilerFacts] =
-      Try {
-          val lines = Files.readAllLines(file, StandardCharsets.UTF_8).toArray(Array.empty[String])
-          val (includes, defines) = lines.partition(_.startsWith("include "))
-          CompilerFacts(
-            parseDefines(defines.iterator),
-            includes.map(l => Paths.get(l.stripPrefix("include "))).toSeq
-          )
-      }.toOption
+      AtomicWrites.readRegular(file).flatMap { bytes =>
+          Try {
+              val lines               = String(bytes, StandardCharsets.UTF_8).linesIterator.toArray
+              val (includes, defines) = lines.partition(_.startsWith("include "))
+              CompilerFacts(
+                parseDefines(defines.iterator),
+                includes.map(l => Paths.get(l.stripPrefix("include "))).toSeq
+              )
+          }.toOption
+      }
 
   private def write(file: Path, facts: CompilerFacts): Unit =
       Try {
           Files.createDirectories(file.getParent)
           val text = facts.systemIncludePaths.map(p => s"include $p") ++
               facts.macros.toSeq.sortBy(_._1).map((k, v) => s"#define $k $v")
-          val tmp = Files.createTempFile(file.getParent, file.getFileName.toString, ".tmp")
-          Files.writeString(tmp, text.mkString("\n") + "\n")
-          Files.move(
-            tmp,
-            file,
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-            java.nio.file.StandardCopyOption.ATOMIC_MOVE
-          )
+          AtomicWrites.text(file, text.mkString("\n") + "\n")
       }.failed.foreach(e => logger.debug(s"Cannot cache compiler macros in $file", e))
 
   private def sha256(text: String): String =

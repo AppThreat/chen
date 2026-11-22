@@ -306,7 +306,11 @@ class AstGenRunner(config: Config):
             runAstGenNative(in, out)
         else
           val cache =
-              new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
+              new ExternalParseCache(
+                resolveCacheDir(config.inputPath, ""),
+                CacheControl.Astgen,
+                cacheDirAnchor = Some(config.inputPath)
+              )
           // With the cache off nothing is restored or stored, so neither the fingerprint walk nor
           // the `astgen --version` call it needs is worth running. A run that collects the parse
           // report does not restore, but it still stores, so its key is computed: the entry it

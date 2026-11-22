@@ -10,6 +10,7 @@ import io.appthreat.dataflowengineoss.queryengine.summaries.{
 import io.appthreat.pythonparser.ast
 import io.appthreat.x2cpg.X2Cpg
 import io.appthreat.x2cpg.passes.frontend.CacheControl
+import io.appthreat.x2cpg.utils.AtomicWrites
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies, PropertyNames}
 import io.shiftleft.codepropertygraph.generated.nodes.*
@@ -776,10 +777,16 @@ object PythonDependencyStubs:
         }.toMap
 
     // AstCacheStore self-disables when the cache directory's parent does not exist, so the
-    // `.chen/pydeps` root has to be materialised before the store is constructed. The cache is
+    // `.chen/pydeps` root has to be materialised before the store is constructed, and the cache is
     // enabled for BOTH modes: a venv is immutable between installs, so full-mode fragments are
-    // exactly as reusable as signature fragments (the fingerprint keeps them disjoint).
-    if cacheDir.nonEmpty then Files.createDirectories(Paths.get(cacheDir).getParent)
+    // exactly as reusable as signature fragments (the fingerprint keeps them disjoint). The root
+    // is only created after the same anchored link check the store runs passes, so a committed
+    // `.chen` link never has a directory created through it: the stubs then run uncached, on the
+    // assumption that a position the store refuses is a position nothing may write.
+    if cacheDir.nonEmpty then
+      val cacheRoot = Paths.get(cacheDir).getParent
+      if AtomicWrites.checkCacheDirectory(cacheRoot, inputPath).isEmpty then
+        Files.createDirectories(cacheRoot)
     val codeToCpg = new CodeToCpg(
       target,
       providers,

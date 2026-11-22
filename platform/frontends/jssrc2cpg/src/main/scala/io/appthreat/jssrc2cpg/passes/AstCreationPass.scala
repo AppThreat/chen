@@ -44,7 +44,8 @@ class AstCreationPass(cpg: Cpg, astGenRunnerResult: AstGenRunnerResult, config: 
       new AstCacheStore(
         CacheControl.useFragments,
         resolveCacheDir(config.inputPath, ""),
-        onlyAstCache = false
+        onlyAstCache = false,
+        cacheDirAnchor = Some(config.inputPath)
       )
 
   override def generateParts(): Array[(String, String)] = astGenRunnerResult.parsedFiles.toArray

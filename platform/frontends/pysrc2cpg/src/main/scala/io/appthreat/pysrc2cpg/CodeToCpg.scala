@@ -24,7 +24,8 @@ class CodeToCpg(
   strictParse: Boolean = false,
   moduleNames: Map[String, String] = Map.empty,
   transformAst: PythonDependencyStubs.Transform = identity,
-  extraCacheFingerprint: String = ""
+  extraCacheFingerprint: String = "",
+  trustedCacheDir: Boolean = false
 ) extends ConcurrentWriterCpgPass[InputProvider](cpg):
   import CodeToCpg.logger
 
@@ -32,7 +33,10 @@ class CodeToCpg(
       new AstCacheStore(
         enableAstCache && !strictParse,
         resolveCacheDir(inputPath, cacheDir),
-        onlyAstCache = false
+        onlyAstCache = false,
+        trustedCacheDir = trustedCacheDir,
+        // an untrusted cache position is always under the analysed input this pass was built for
+        cacheDirAnchor = if trustedCacheDir then None else Some(inputPath)
       )
 
   // The cached fragment carries the full-name shape it was built with; without this,
