@@ -180,25 +180,28 @@ class EdgBuildContextCopiesTests extends AnyWordSpec with Matchers:
       }
   }
 
-  /** A graph of the project `files` spell, with the given setting. */
+  /** A graph of the project `files` spell, with the given setting. Cancels the test where edga is
+    * not installed, as every other test here does.
+    */
   private def projectGraph(files: Map[String, String], buildContexts: String)(
     check: Cpg => Unit
   ): Unit =
-      File.usingTemporaryDirectory("edgbctxproject") { root =>
-        files.foreach((name, text) => (root / name).write(text))
-        val out = File.newTemporaryFile("edgbctxproject", ".bin")
-        out.deleteOnExit()
-        val cpg = new Edg2Atom().createCpg(
-          Config()
-              .withInputPath(root.pathAsString)
-              .withOutputPath(out.pathAsString)
-              .withCompileCommands(root.pathAsString)
-              .withFunctionBodies(true)
-              .withBuildContexts(buildContexts)
-        ).get
-        try check(cpg)
-        finally cpg.close()
-      }
+    assume(EdgaRunner.locate().isDefined, "edga is not installed")
+    File.usingTemporaryDirectory("edgbctxproject") { root =>
+      files.foreach((name, text) => (root / name).write(text))
+      val out = File.newTemporaryFile("edgbctxproject", ".bin")
+      out.deleteOnExit()
+      val cpg = new Edg2Atom().createCpg(
+        Config()
+            .withInputPath(root.pathAsString)
+            .withOutputPath(out.pathAsString)
+            .withCompileCommands(root.pathAsString)
+            .withFunctionBodies(true)
+            .withBuildContexts(buildContexts)
+      ).get
+      try check(cpg)
+      finally cpg.close()
+    }
 
   "a function defined in both arms of a conditional, with all" should {
 
