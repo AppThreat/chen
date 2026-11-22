@@ -1,0 +1,20 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryStore.scala
+  h_0926447d100ad2 5,13,79-85,106-108,113-116,121-124,127-130
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryStoreTests.scala
+  h_0926447d100ad2 1-98
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/CpgCacheStore.scala
+  h_0926447d100ad2 3,9,200-209,220-226,228-236,246-248,253-256,269-272,276-277
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/CpgCacheStoreTests.scala
+  h_0926447d100ad2 8,10,15-25,280-335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "53f77d70e5273fad916d75018c4c4398c46fb22e",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
