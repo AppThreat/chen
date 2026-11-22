@@ -20,17 +20,34 @@ object AtomicWrites:
 
   /** Write `content` to `target` through an unpredictable temporary that is renamed onto it. */
   def bytes(target: Path, content: Array[Byte]): Unit =
-      throughTemporary(target)(Files.write(_, content))
+      replace(target)(Files.write(_, content))
 
   /** Write `content` as text to `target` through an unpredictable temporary renamed onto it. */
   def text(target: Path, content: String): Unit =
-      throughTemporary(target)(Files.writeString(_, content))
+      replace(target)(Files.writeString(_, content))
 
   /** Copy `source` to `target` through an unpredictable temporary renamed onto it, for stores that
     * build their content as a file elsewhere first.
     */
   def copy(source: Path, target: Path): Unit =
-      throughTemporary(target)(Files.copy(source, _, StandardCopyOption.REPLACE_EXISTING))
+      replace(target)(Files.copy(source, _, StandardCopyOption.REPLACE_EXISTING))
+
+  /** Write `target` with content the caller streams itself: `fill` writes into a fresh
+    * unpredictable temporary beside `target`, and the completed temporary is renamed onto it with
+    * the same replace semantics as the other methods, the temporary removed when anything fails.
+    * The naming and the rename stay here, so a caller only produces content; one that has it in
+    * memory or as a file uses `bytes`, `text` or `copy` instead.
+    */
+  def replace(target: Path)(fill: Path => Unit): Unit =
+      val parent = requireParent(target)
+      val tmp    = Files.createTempFile(parent, "." + target.getFileName, ".tmp")
+      try
+        fill(tmp)
+        moveIntoPlace(tmp, target)
+      catch
+        case e: Throwable =>
+            Try(Files.deleteIfExists(tmp))
+            throw e
 
   /** Build the directory `target` through an unpredictable temporary: `fill` populates the
     * temporary, whatever already sits at the final name is removed (a link there is removed as a
@@ -81,20 +98,6 @@ object AtomicWrites:
               else s"$c exists and is not a directory"
           )
   end checkCacheDirectory
-
-  /** Runs `fill` on a fresh unpredictable temporary beside `target`, then renames it onto
-    * `target`, removing the temporary when anything fails.
-    */
-  private def throughTemporary(target: Path)(fill: Path => Unit): Unit =
-      val parent = requireParent(target)
-      val tmp    = Files.createTempFile(parent, "." + target.getFileName, ".tmp")
-      try
-        fill(tmp)
-        moveIntoPlace(tmp, target)
-      catch
-        case e: Throwable =>
-            Try(Files.deleteIfExists(tmp))
-            throw e
 
   /** A rename on the same file system replaces whatever sits at the final name, a link included.
     * Where the file system refuses atomic renames the same replacement is done non-atomically.

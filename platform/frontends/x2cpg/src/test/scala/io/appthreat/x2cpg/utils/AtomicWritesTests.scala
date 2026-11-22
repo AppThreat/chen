@@ -103,6 +103,49 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
       }
   }
 
+  "AtomicWrites.replace" should {
+
+      "write the content a fill callback streams into the temporary" in {
+          val dir    = Files.createTempDirectory("atomic-replace")
+          val target = dir.resolve("streamed.json")
+
+          AtomicWrites.replace(target) { tmp => Files.writeString(tmp, "STREAMED") }
+
+          Files.readString(target) shouldBe "STREAMED"
+          leftoverTemporaries(dir) shouldBe empty
+      }
+
+      "replace a symbolic link at the final name instead of writing through it" in {
+          val dir     = Files.createTempDirectory("atomic-replace-link")
+          val outside = Files.createTempDirectory("atomic-replace-target")
+          val victim  = outside.resolve("victim.json")
+          Files.writeString(victim, "PRECIOUS")
+          val target = dir.resolve("streamed.json")
+          symlink(target, victim)
+
+          AtomicWrites.replace(target) { tmp => Files.writeString(tmp, "STREAMED") }
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isRegularFile(target, NoFollow: _*) shouldBe true
+          Files.readString(target) shouldBe "STREAMED"
+          leftoverTemporaries(dir) shouldBe empty
+      }
+
+      "remove the temporary and leave the target alone when the fill throws" in {
+          val dir    = Files.createTempDirectory("atomic-replace-fail")
+          val target = dir.resolve("streamed.json")
+          Files.writeString(target, "OLD")
+
+          a[RuntimeException] should be thrownBy AtomicWrites.replace(target) { tmp =>
+              Files.writeString(tmp, "PARTIAL")
+              throw new RuntimeException("the stream broke")
+          }
+
+          Files.readString(target) shouldBe "OLD"
+          leftoverTemporaries(dir) shouldBe empty
+      }
+  }
+
   "AtomicWrites.directory" should {
 
       "replace a final entry that is a symbolic link to a directory, leaving the target empty" in {
