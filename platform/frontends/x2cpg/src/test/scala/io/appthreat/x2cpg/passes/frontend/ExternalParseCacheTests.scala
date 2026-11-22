@@ -3,9 +3,21 @@ package io.appthreat.x2cpg.passes.frontend
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.nio.file.{Files, Path}
+import java.nio.file.{FileSystemException, Files, LinkOption, Path, Paths}
+import scala.jdk.CollectionConverters.*
 
 class ExternalParseCacheTests extends AnyWordSpec with Matchers:
+
+  /** Creates a symbolic link at `link` pointing at `target`, skipping the test where the platform
+    * refuses to create one.
+    */
+  private def symlink(link: Path, target: Path): Unit =
+      try Files.createSymbolicLink(link, target)
+      catch
+        case e: UnsupportedOperationException =>
+            assume(false, s"this platform cannot create symbolic links: ${e.getMessage}")
+        case e: FileSystemException =>
+            assume(false, s"this platform refused to create a symbolic link: ${e.getMessage}")
 
   private def outDirWith(files: (String, String)*): Path =
     val dir = Files.createTempDirectory("parse-out")
@@ -70,6 +82,109 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           finally System.clearProperty("chen.parse.report")
           // the entry the report run stored serves the next run without the report
           cache.restore("fp", Files.createTempDirectory("parse-restored-5")) shouldBe true
+      }
+
+      "replace a symbolic link at the entry directory's name instead of storing through it" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-entry-link")
+          val outside  = Files.createTempDirectory("parse-cache-entry-target")
+          CacheControl.enable(CacheControl.Astgen)
+          val cache = new ExternalParseCache(cacheDir.toString, CacheControl.Astgen)
+          val entry = cacheDir.resolve(CacheControl.Astgen).resolve("fp-1")
+          Files.createDirectories(entry.getParent)
+          symlink(entry, outside)
+
+          cache.store("fp-1", outDirWith("a.json" -> "AAA"))
+
+          Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) shouldBe true
+          Files.readString(entry.resolve("a.json")) shouldBe "AAA"
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+      }
+
+      "treat an entry directory that is a symbolic link as a miss on restore" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-entry-miss")
+          val outside  = Files.createTempDirectory("parse-cache-entry-miss-target")
+          Files.writeString(outside.resolve("a.json"), "SECRET")
+          CacheControl.enable(CacheControl.Astgen)
+          val cache = new ExternalParseCache(cacheDir.toString, CacheControl.Astgen)
+          val entry = cacheDir.resolve(CacheControl.Astgen).resolve("fp-1")
+          Files.createDirectories(entry.getParent)
+          symlink(entry, outside)
+
+          val restored = Files.createTempDirectory("parse-restored-link")
+          cache.restore("fp-1", restored) shouldBe false
+          Files.readString(outside.resolve("a.json")) shouldBe "SECRET"
+          val stream = Files.list(restored)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+      }
+
+      "not copy a symbolic link out of the parsed output, nor read its target, when storing" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-link-out")
+          val outside  = Files.createTempDirectory("parse-cache-link-out-target")
+          Files.writeString(outside.resolve("secret.json"), "SECRET")
+          CacheControl.enable(CacheControl.Astgen)
+          val produced = outDirWith("a.json" -> "AAA")
+          symlink(produced.resolve("alias.json"), outside.resolve("secret.json"))
+          // a link to a directory must not be descended into either
+          val linkedDir = Files.createTempDirectory("parse-cache-link-out-dir")
+          Files.writeString(linkedDir.resolve("deep.json"), "DEEP")
+          symlink(produced.resolve("linkeddir"), linkedDir)
+
+          new ExternalParseCache(cacheDir.toString, CacheControl.Astgen).store("fp-1", produced)
+
+          val entry = cacheDir.resolve(CacheControl.Astgen).resolve("fp-1")
+          Files.exists(entry.resolve("alias.json")) shouldBe false
+          Files.exists(entry.resolve("linkeddir")) shouldBe false
+          Files.readString(entry.resolve("a.json")) shouldBe "AAA"
+      }
+
+      "not copy a symbolic link out of a stored entry, nor read its target, when restoring" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-link-in").toString
+          CacheControl.enable(CacheControl.Astgen)
+          val cache = new ExternalParseCache(cacheDir, CacheControl.Astgen)
+          cache.store("fp-1", outDirWith("a.json" -> "AAA"))
+
+          // a committed link inside the stored entry, pointing outside the tree
+          val outside = Files.createTempDirectory("parse-cache-link-in-target")
+          Files.writeString(outside.resolve("secret.json"), "SECRET")
+          val entry = Paths.get(cacheDir, CacheControl.Astgen, "fp-1")
+          symlink(entry.resolve("alias.json"), outside.resolve("secret.json"))
+          val linkedDir = Files.createTempDirectory("parse-cache-link-in-dir")
+          Files.writeString(linkedDir.resolve("deep.json"), "DEEP")
+          symlink(entry.resolve("linkeddir"), linkedDir)
+
+          val restored = Files.createTempDirectory("parse-restored-link-in")
+          cache.restore("fp-1", restored) shouldBe true
+          Files.readString(restored.resolve("a.json")) shouldBe "AAA"
+          Files.exists(restored.resolve("alias.json")) shouldBe false
+          Files.exists(restored.resolve("linkeddir")) shouldBe false
+          Files.readString(outside.resolve("secret.json")) shouldBe "SECRET"
+          Files.readString(linkedDir.resolve("deep.json")) shouldBe "DEEP"
+      }
+
+      "be switched off when the cache directory position is a link, and still be used when the user configured it" in {
+          val input   = Files.createTempDirectory("parse-cache-chen")
+          val outside = Files.createTempDirectory("parse-cache-chen-target")
+          val chen    = input.resolve(".chen")
+          symlink(chen, outside)
+          CacheControl.enable(CacheControl.Astgen)
+
+          val refused = new ExternalParseCache(chen.toString, CacheControl.Astgen)
+          refused.isUsable shouldBe false
+          refused.store("fp-1", outDirWith("a.json" -> "AAA"))
+          refused.restore("fp-1", Files.createTempDirectory("parse-restored-refused")) shouldBe false
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+
+          val trusted = new ExternalParseCache(chen.toString, CacheControl.Astgen, trustedCacheDir = true)
+          trusted.isUsable shouldBe true
+          trusted.store("fp-1", outDirWith("a.json" -> "AAA"))
+          val restored = Files.createTempDirectory("parse-restored-trusted")
+          trusted.restore("fp-1", restored) shouldBe true
+          Files.readString(restored.resolve("a.json")) shouldBe "AAA"
       }
   }
 end ExternalParseCacheTests
