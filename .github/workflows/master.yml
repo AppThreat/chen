@@ -84,7 +84,8 @@ jobs:
         run: |
           bash ./platform/frontends/php2atom/install.sh
           npm install -g @appthreat/atom-parsetools
-      - run: sbt --server "scalafmtCheck; +testFull"
+      # the same server heap cap as pr.yml's tests, so the forked test JVMs have room
+      - run: sbt ${{ runner.os == 'Linux' && '-J-Xmx8G' || '' }} --server "scalafmtCheck; +testFull"
         if: steps.queue.outputs.tested != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

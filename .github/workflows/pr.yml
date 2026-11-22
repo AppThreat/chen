@@ -145,8 +145,11 @@ jobs:
         if: env.REUSED != 'true'
       - name: Compile and run tests
         if: env.REUSED != 'true'
+        # .sbtopts asks for a 16 GB server heap, the whole of a Linux runner's memory, and the forked
+        # test JVM takes up to a quarter more (the runner lost contact mid-test); a -J option given
+        # here comes after .sbtopts and wins
         run: |
-          sbt --server "scalafmtCheck; clean; +testFull"
+          sbt ${{ runner.os == 'Linux' && '-J-Xmx8G' || '' }} --server "scalafmtCheck; clean; +testFull"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
