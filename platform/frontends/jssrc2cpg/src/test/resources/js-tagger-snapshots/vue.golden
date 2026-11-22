@@ -22,6 +22,9 @@ framework-input=	store.js:4	CALL	location.hash
 framework-input=	store.js:4	CALL	this.note
 framework-output=	Profile.vue:8	CALL	document.body.innerHTML = html.value + id.value
 framework-output=	store.js:4	CALL	document.write(this.note)
+library-call=	Profile.vue:6	CALL	ref('')
+library-call=	Profile.vue:7	CALL	watch(id, (value) => { html.value = value; })
+library-call=	store.js:2	CALL	defineStore('cart', {   state: () => ({ note: '' }),   actions: { load() { this.note = location.hash; }, render() { document.write(this.note); } } })
 via:Profile.vue#4=	Profile.vue:10	IDENTIFIER	id
 via:Profile.vue#4=	Profile.vue:5	CALL	computed(() => route.params.id)
 via:Profile.vue#4=	Profile.vue:5	IDENTIFIER	route

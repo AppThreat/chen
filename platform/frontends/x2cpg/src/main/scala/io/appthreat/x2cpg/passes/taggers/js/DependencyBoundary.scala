@@ -113,6 +113,9 @@ object DependencyBoundary:
 
     private val lineages = mutable.HashMap.empty[String, List[TypeDecl]]
 
+    // what a file exports under a name, looked up once per file and name however many calls ask
+    private val exported = mutable.HashMap.empty[(String, String), Option[TypeDecl]]
+
     // the last segment of a heritage name: `Model` of `sequelize.js::program:Model`
     private def simpleName(name: String): String =
         name.split("[:.]").lastOption.getOrElse(name)
@@ -180,6 +183,9 @@ object DependencyBoundary:
       * which the frontend lowers to `exports.Name = Local`.
       */
     private def exportedClass(file: String, name: String): Option[TypeDecl] =
+        exported.getOrElseUpdate((file, name), findExportedClass(file, name))
+
+    private def findExportedClass(file: String, name: String): Option[TypeDecl] =
       val local = cpg.method.nameExact(":program").filenameExact(file).ast.isCall
           .nameExact(Operators.assignment).l.flatMap { a =>
               a.argument.l.sortBy(_.argumentIndex) match

@@ -28,6 +28,8 @@ framework-output=	App.jsx:15	CALL	html + shout
 framework-output=	App.jsx:15	CALL	{{ __html: html + shout }}
 framework-output=	App.jsx:15	TEMPLATE_DOM	dangerouslySetInnerHTML={{ __html: html + shout }}
 framework-output=	guards.js:3	CALL	location.assign(url)
+library-call=	App.jsx:5	CALL	useState('')
+library-call=	App.jsx:8	CALL	useEffect(() => {     window.addEventListener('message', (e) => setHtml(e.data));   }, [])
 predicate=	guards.js:2	CALL	ALLOWED.includes(p)
 redirect=	App.jsx:13	CALL	window.location = next
 redirect=	guards.js:3	CALL	location.assign(url)
