@@ -167,9 +167,12 @@ class ExpressOrmSinkTagsTest extends DataFlowCodeToCpgSuite:
             "guard.ts"
           ))
 
+          // `jwt.sign` of express-jwt is a call into that package, so it is a library call of the
+          // package (DependencyBoundary), not of jsonwebtoken's credential API
           cpg.call.where(_.tag.name("library-call")).code.l.sorted shouldBe List(
             "crypt.hash(password, 10)",
-            "issue({ id: user.id }, 'k')"
+            "issue({ id: user.id }, 'k')",
+            "jwt.sign(opts)"
           )
       }
 

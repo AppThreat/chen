@@ -25,6 +25,7 @@ framework-output=	src/routes/+server.js:10	CALL	redirect(302, next + old)
 framework-route=	src/routes/+server.js:5	METHOD	async function GET({ url, request }) {   const q = url.searchParams.get('q');   const next = page.url.searchParams.get('next');   const old = legacy.url.searchParams.get('old');   if (q) return json({ q });   redirect(302, next + old); }
 http=	src/routes/+server.js:5	METHOD_PARAMETER_IN	this
 http=	src/routes/+server.js:5	METHOD_PARAMETER_IN	{ url, request }
+library-call=	src/routes/+server.js:9	CALL	json({ q })
 redirect=	src/lib/nav.js:5	CALL	goto(u)
 redirect=	src/routes/+server.js:10	CALL	redirect(302, next + old)
 sanitizer=	src/routes/+server.js:9	CALL	json({ q })

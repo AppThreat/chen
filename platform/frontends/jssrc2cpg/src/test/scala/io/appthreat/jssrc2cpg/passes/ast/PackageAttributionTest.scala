@@ -63,7 +63,12 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           val cpg0 = expressServer.moreCode(bom("pkg:npm/express@4.17.1"), "bom.json")
           resolvedAsExpressResponse(cpg0)
           val cpg = tagged(cpg0)
-          purlsOf(cpg) shouldBe Seq("send" -> "pkg:npm/express@4.17.1")
+          // `express()` and `app.get` are calls into the package too, sunk by DependencyBoundary
+          purlsOf(cpg) shouldBe Seq(
+            "express" -> "pkg:npm/express@4.17.1",
+            "get"     -> "pkg:npm/express@4.17.1",
+            "send"    -> "pkg:npm/express@4.17.1"
+          )
       }
 
       "attribute a member read made a sink through its base, like a call receiver" in {
@@ -90,8 +95,10 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
               }
           }.sorted
           purls shouldBe Seq(
-            "resource.create"      -> "pkg:npm/finale-rest@1.3.0",
-            "resource.create.send" -> "pkg:npm/finale-rest@1.3.0"
+            "finale.resource(server, { mode" -> "pkg:npm/finale-rest@1.3.0",
+            "resource.create"                -> "pkg:npm/finale-rest@1.3.0",
+            "resource.create.send"           -> "pkg:npm/finale-rest@1.3.0",
+            "resource.create.send.before((r" -> "pkg:npm/finale-rest@1.3.0"
           )
       }
 
@@ -118,8 +125,12 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
           )
           resolvedAsExpressResponse(cpg0)
           purlsOf(tagged(cpg0)) shouldBe Seq(
-            "send" -> "pkg:npm/express@4.16.4",
-            "send" -> "pkg:npm/express@4.18.2"
+            "express" -> "pkg:npm/express@4.16.4",
+            "express" -> "pkg:npm/express@4.18.2",
+            "get"     -> "pkg:npm/express@4.16.4",
+            "get"     -> "pkg:npm/express@4.18.2",
+            "send"    -> "pkg:npm/express@4.16.4",
+            "send"    -> "pkg:npm/express@4.18.2"
           )
       }
 
@@ -144,7 +155,9 @@ class PackageAttributionTest extends DataFlowCodeToCpgSuite:
             "bom.json"
           ))
           purlsOf(cpg) shouldBe Seq(
-            "bypassSecurityTrustHtml" -> "pkg:npm/%40angular/platform-browser@20.3.0?arch=any"
+            "bypassSecurityTrustHtml" -> "pkg:npm/%40angular/platform-browser@20.3.0?arch=any",
+            "inject"                  -> "pkg:npm/%40angular/core@20.3.0",
+            "inject"                  -> "pkg:npm/%40angular/core@20.3.0"
           )
       }
 

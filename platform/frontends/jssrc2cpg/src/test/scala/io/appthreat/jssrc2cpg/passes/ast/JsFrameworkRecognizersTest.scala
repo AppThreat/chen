@@ -791,7 +791,10 @@ class JsFrameworkRecognizersTest extends DataFlowCodeToCpgSuite:
           cpg.tag.name("pkg:npm/.*").call.map(c =>
               s"${c.name} ${c.tag.name("pkg:npm/.*").name.head}"
           ).l shouldBe
-              List("bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0")
+              List(
+                "bypassSecurityTrustHtml pkg:npm/%40angular/platform-browser@20.3.0",
+                "get pkg:npm/axios@1.7.9"
+              )
           // a request is attributed on its URL, the sink
           cpg.tag.name("pkg:npm/.*").identifier.map(i =>
               s"${i.inCall.code.head} ${i.tag.name("pkg:npm/.*").name.head}"

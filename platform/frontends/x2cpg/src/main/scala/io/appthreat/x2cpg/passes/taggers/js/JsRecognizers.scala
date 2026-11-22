@@ -157,7 +157,9 @@ object JsRecognizers:
     val typeOf =
         if AngularRecognizer.applies(ctx) then AngularRecognizer.injectedTypes(ctx)
         else (_: io.shiftleft.codepropertygraph.generated.nodes.Expression) => None
-    PackageAttribution.run(ctx, typeOf)
+    // Calls into a package that no recognizer made a sink, so the purls below reach them too.
+    val inherited = DependencyBoundary.run(ctx, typeOf)
+    PackageAttribution.run(ctx, typeOf, inherited)
   end run
 
   def isJavaScript(cpg: Cpg): Boolean =
