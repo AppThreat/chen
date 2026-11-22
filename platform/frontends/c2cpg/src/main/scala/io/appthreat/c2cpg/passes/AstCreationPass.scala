@@ -16,6 +16,7 @@ import io.appthreat.x2cpg.parse.{ParseReporter, UnitSettingsReporter}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import io.appthreat.x2cpg.passes.frontend.CacheControl
+import io.appthreat.x2cpg.utils.FileUtil
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.StreamingCpgPass
 import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
@@ -405,6 +406,13 @@ class AstCreationPass(
   /** The directory of this run's own that [[exchangeDir]] created, removed when the pass ends. */
   @volatile private var runExchangeDir: Option[Path] = None
 
+  /** Whether the workers may take the exchange directory's position as given: it is the user's
+    * configured cache directory when the run caches, and otherwise a directory this run itself
+    * created, so only a default cache position inside the analysed input is untrusted.
+    */
+  private lazy val trustedExchangeDir: Boolean =
+      if cacheOn then config.cacheDir != null && config.cacheDir.nonEmpty else true
+
   private val cacheStore = new AstCacheStore(
     config.enableAstCache,
     resolveCacheDir(config.inputPath, config.cacheDir),
@@ -439,6 +447,7 @@ class AstCreationPass(
     new CdtWorkerPool(
       exchangeDir,
       fragments,
+      trustedExchangeDir,
       CdtWorker.WorkerConfig.from(config),
       unitBudget,
       (unitBudget * 2).max(5.minutes)
@@ -451,12 +460,9 @@ class AstCreationPass(
         case e: Exception => println(s"Error shutting down parse executor: ${e.getMessage}")
       finally
         if workersStarted then workers.close()
-        runExchangeDir.foreach(dir =>
-            Try(
-              Files.walk(dir).sorted(java.util.Comparator.reverseOrder[Path]())
-                  .forEach(Files.delete)
-            )
-        )
+        // deleted without following links, so a link planted in the exchange directory goes as a
+        // link and its target is left alone
+        runExchangeDir.foreach(FileUtil.delete(_, swallowIoExceptions = true))
         super.finish()
 
   override def generateParts(): Array[String] = sources.files
