@@ -1,0 +1,16 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/AtomicWrites.scala
+  h_0926447d100ad2 23,27,33-50
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/AtomicWritesTests.scala
+  h_0926447d100ad2 106-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "310db72ea4bf953574c287eab53e0360d86eea22",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
