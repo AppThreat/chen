@@ -308,7 +308,7 @@ explains the trade-off.
   databases, external paths and the AST cache. There is no separate command line; atom exposes it
   as `--c-frontend edg` or `edg-fallback`.
 - **Finding edga.** The system property `edga.path`, then the `EDGA_PATH` environment variable,
-  then `edga` (`edga.exe` on Windows) on the `PATH`. chen 4.0.4 is tested with
+  then `edga` (`edga.exe` on Windows) on the `PATH`. chen 4.0.5 is tested with
   [edga 0.4.0](https://github.com/AppThreat/edga/releases/tag/v0.4.0), which has binaries for
   Linux (glibc and musl), macOS and Windows. Without edga, `createCpg` throws
   `IllegalStateException`, unless `fallbackToCdt` is set, in which case c2cpg parses the project.
