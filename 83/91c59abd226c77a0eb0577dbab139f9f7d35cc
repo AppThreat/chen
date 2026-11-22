@@ -1,0 +1,58 @@
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/CodeToCpg.scala
+  h_0926447d100ad2 37-39
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/AtomicWritesTests.scala
+  h_0926447d100ad2 228-280
+platform/frontends/pysrc2cpg/src/test/scala/io/appthreat/pysrc2cpg/PythonDependencyStubsTests.scala
+  h_0926447d100ad2 95-105,153-171
+platform/frontends/ruby2atom/src/main/scala/io/appthreat/ruby2atom/parser/RubyAstGenRunner.scala
+  h_0926447d100ad2 242-246
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/CpgCacheStore.scala
+  h_0926447d100ad2 208-210,212-216,228-229,233-239
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  h_0926447d100ad2 387-389,391,420-421
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/PythonDependencyStubs.scala
+  h_0926447d100ad2 13,780,782-789
+dataflowengineoss/src/test/scala/io/appthreat/dataflowengineoss/queryengine/summaries/FlowSummaryStoreTests.scala
+  h_0926447d100ad2 80-96
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/CpgCacheStoreTests.scala
+  h_0926447d100ad2 313-318,320,322-335
+  h_0926447d100ad2 319,321
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/utils/AstGenRunner.scala
+  h_0926447d100ad2 309-313
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCacheTests.scala
+  h_0926447d100ad2 214-253,255-266
+  h_0926447d100ad2 254
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/worker/CdtWorker.scala
+  h_0926447d100ad2 407-410
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/PredefinedMacros.scala
+  h_0926447d100ad2 78-82,90
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCache.scala
+  h_0926447d100ad2 28-31,33-38,52-54,58-62
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/parser/ProjectSources.scala
+  h_0926447d100ad2 13,203-208,210-216
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  h_0926447d100ad2 90-91
+platform/frontends/jssrc2cpg/src/main/scala/io/appthreat/jssrc2cpg/passes/AstCreationPass.scala
+  h_0926447d100ad2 47-48
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/AstCreationPass.scala
+  h_0926447d100ad2 30-31
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/AtomicWrites.scala
+  h_0926447d100ad2 5,69-98,105-107,116,119-133
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  h_0926447d100ad2 71-75,82-83,100-103,108-114
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  h_0926447d100ad2 42-43
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStoreTests.scala
+  h_0926447d100ad2 126-148,177-203,235-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8391c59abd226c77a0eb0577dbab139f9f7d35cc",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
