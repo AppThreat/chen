@@ -521,24 +521,7 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
     }
 
     // HTTP client calls
-    val httpClientPackages = Seq(
-      "got",
-      "axios",
-      "undici",
-      "ky",
-      "node-fetch",
-      "cross-fetch",
-      "superagent",
-      "needle",
-      "isomorphic-fetch",
-      "unfetch",
-      "wretch",
-      "request",
-      "cacheable-lookup",
-      "cacheable-request",
-      "http2-wrapper",
-      "responselike"
-    )
+    val httpClientPackages = EasyTagsPass.HttpClientPackages
 
     httpClientPackages.foreach { pkg =>
       val pkgTag = s"pkg:npm/$pkg@.*"
@@ -1641,4 +1624,27 @@ class EasyTagsPass(atom: Cpg) extends CpgPass(atom):
 
   private def containsRegex(str: String): Boolean =
       str.exists(RE_CHARS.contains)
+end EasyTagsPass
+
+object EasyTagsPass:
+
+  /** The npm packages that send HTTP requests: a call into one is an `http-client` sink. */
+  private[taggers] val HttpClientPackages: Seq[String] = Seq(
+    "got",
+    "axios",
+    "undici",
+    "ky",
+    "node-fetch",
+    "cross-fetch",
+    "superagent",
+    "needle",
+    "isomorphic-fetch",
+    "unfetch",
+    "wretch",
+    "request",
+    "cacheable-lookup",
+    "cacheable-request",
+    "http2-wrapper",
+    "responselike"
+  )
 end EasyTagsPass

@@ -67,7 +67,15 @@ object PackageAttribution:
     "timers"         -> Nil
   )
 
-  def run(ctx: JsContext, typeOf: Expression => Option[JsTypeRef]): Unit =
+  /** `inherited` names the package of each call [[DependencyBoundary]] resolved through a class the
+    * project derives from a package class, by call id: no binding or resolved name carries that
+    * package, so it is the one thing this step cannot find itself.
+    */
+  def run(
+    ctx: JsContext,
+    typeOf: Expression => Option[JsTypeRef],
+    inherited: Map[Long, String] = Map.empty
+  ): Unit =
     // A sink call is attributed itself; a request sink is the part of the URL that decides the
     // target (`q` in `axios.get(q)`), attributed to the request it is passed to. A member read
     // made a sink is attributed through its base. A sink tagged by an earlier pass counts too:
@@ -85,7 +93,7 @@ object PackageAttribution:
             case c: Call if c.name == Operators.fieldAccess =>
                 fieldBase(c).map(base => packageOfBase(ctx, base, typeOf) -> c)
             case c: Call if !c.name.startsWith("<operator>") =>
-                Some(packageOf(ctx, c, typeOf) -> c)
+                Some(packageOf(ctx, c, typeOf).orElse(inherited.get(c.id())) -> c)
             case _ => None
         }
     // The purl is the SBOM's: a package the SBOM has no component for (a path alias, a workspace
@@ -123,7 +131,7 @@ object PackageAttribution:
   private def builtinOf(pkg: String): Option[String] =
       Some(pkg.stripPrefix("node:")).filter(NodeBuiltins.contains)
 
-  private def packageOf(
+  private[js] def packageOf(
     ctx: JsContext,
     call: Call,
     typeOf: Expression => Option[JsTypeRef]
