@@ -68,13 +68,19 @@ end AstCacheStore
   *   checkout, so such a position is checked (see [[AtomicWrites.checkCacheDirectory]]) and the
   *   cache is switched off when the position is a link; the user's own configured directory is
   *   taken as the user chose it.
+  * @param cacheDirAnchor
+  *   the analysed input root, when the caller knows it. With it, every component of the cache
+  *   directory's path below that root is checked whether or not it exists yet, so a linked `.chen`
+  *   is caught even when its target already holds cache entries. Ignored when `trustedCacheDir`
+  *   is true; without an anchor the check starts at the deepest existing component.
   */
 class AstCacheStore(
   enableAstCacheParam: Boolean,
   cacheDir: String,
   onlyAstCache: Boolean,
   useFragmentCache: Boolean = false,
-  trustedCacheDir: Boolean = false
+  trustedCacheDir: Boolean = false,
+  cacheDirAnchor: Option[String] = None
 ):
 
   import AstCacheStore.{CacheKey, ParsedUnit}
@@ -91,14 +97,21 @@ class AstCacheStore(
           Files.isDirectory(parent)
       }.getOrElse(false)
 
-  /** Why the cache directory position was refused, when it was: a component of its path, from the
-    * deepest existing one down, is a symbolic link (so entries would be written where the link
-    * points), or the final component exists and is not a directory. Only checked for a directory
+  /** Why the cache directory position was refused, when it was: a component of its path is a
+    * symbolic link (so entries would be written where the link points), or a component exists and
+    * is not a directory. With an anchor, every component below it is checked, existing or not;
+    * without one, the walk starts at the deepest existing component. Only checked for a directory
     * at a default position; a user-configured directory is trusted.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
-      else Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption.flatten
+      else
+        cacheDirAnchor
+            .map(anchor =>
+              Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
+            )
+            .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
+            .flatten
 
   /** Caching is on only if requested by the frontend, not globally disabled via [[CacheControl]],
     * the cache directory's parent exists, and the directory's position was not refused.

@@ -123,6 +123,29 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           parses shouldBe 1 // the linked entry was not read; the part was parsed again
           Files.readAllBytes(secret).length shouldBe 0
       }
+
+      "never open the old predictable temporary name, a link there included" in {
+          val cache   = Files.createTempDirectory("ast-store-oldtmp")
+          val outside = Files.createTempDirectory("ast-store-oldtmp-target")
+          val victim  = outside.resolve("victim.txt")
+          Files.writeString(victim, "PRECIOUS")
+          val store = new AstCacheStore(true, cache.toString, onlyAstCache = false)
+          val cold  = new DiffGraphBuilder
+          store.process(cold, "file1", Some(cacheKey), "", _ => (), parsed("1"))
+          // the temporary name earlier chen versions wrote at, committed as a link: a write to
+          // it would truncate the victim
+          val oldTmp = cache.resolve(entryStem(cache, ".ast") + ".ast.tmp")
+          symlink(oldTmp, victim)
+          Files.delete(cache.resolve(entryStem(cache, ".ast") + ".ast"))
+
+          val warm = new DiffGraphBuilder
+          store.process(warm, "file1", Some(cacheKey), "", _ => (), parsed("2"))
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
+          Files.isRegularFile(cache.resolve(entryStem(cache, ".ast") + ".ast"), LinkOption.NOFOLLOW_LINKS) shouldBe
+              true
+      }
   }
 
   "AstCacheStore in fragment mode" should {
@@ -150,6 +173,33 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
           Files.readAllBytes(victim).length shouldBe 0
           Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) shouldBe true
+      }
+
+      "never open the old predictable fragment temporary name, a link there included" in {
+          val cache   = Files.createTempDirectory("ast-frag-oldtmp")
+          val outside = Files.createTempDirectory("ast-frag-oldtmp-target")
+          val victim  = outside.resolve("victim.txt")
+          Files.writeString(victim, "PRECIOUS")
+          val store =
+              new AstCacheStore(
+                true,
+                cache.toString,
+                onlyAstCache = false,
+                useFragmentCache = true
+              )
+          val cold = new DiffGraphBuilder
+          store.process(cold, "file1", Some(cacheKey), "", _ => (), parsed("1"))
+          val oldTmp = cache.resolve(entryStem(cache, ".frag") + ".frag.tmp")
+          symlink(oldTmp, victim)
+          Files.delete(cache.resolve(entryStem(cache, ".frag") + ".frag"))
+
+          val warm = new DiffGraphBuilder
+          store.process(warm, "file1", Some(cacheKey), "", _ => (), parsed("2"))
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
+          Files.isRegularFile(cache.resolve(entryStem(cache, ".frag") + ".frag"), LinkOption.NOFOLLOW_LINKS) shouldBe
+              true
       }
   }
 
@@ -179,6 +229,34 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           parses shouldBe 1
           val stream = Files.list(outside)
           try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+      }
+
+      "be unusable when anchored at an input whose `.chen` link already holds entries" in {
+          val input   = Files.createTempDirectory("ast-store-anchored")
+          val outside = Files.createTempDirectory("ast-store-anchored-target")
+          // an earlier run through the link left real entries in the target, so the directory
+          // `<input>/.chen` exists (through the link) and the deepest-existing walk alone starts
+          // below the link
+          Files.writeString(outside.resolve("deadbeef.ast"), "STALE")
+          val chen = input.resolve(".chen")
+          symlink(chen, outside)
+
+          val store =
+              new AstCacheStore(
+                true,
+                chen.toString,
+                onlyAstCache = false,
+                cacheDirAnchor = Some(input.toString)
+              )
+          store.isUsable shouldBe false
+
+          val diff = new DiffGraphBuilder
+          store.process(diff, "file1", Some(cacheKey), "", _ => (), parsed("1"))
+          Files.readString(outside.resolve("deadbeef.ast")) shouldBe "STALE"
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
+              List("deadbeef.ast")
           finally stream.close()
       }
 

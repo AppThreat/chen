@@ -310,6 +310,29 @@ class CpgCacheStoreTests extends AnyWordSpec with Matchers:
           Files.readString(secret) shouldBe "SECRET"
       }
 
+      "never open the old predictable temporary name, a link there included" in {
+          val cacheDir = Files.createTempDirectory("cpg-cache-oldtmp")
+          val outside  = Files.createTempDirectory("cpg-cache-oldtmp-target")
+          val victim   = outside.resolve("victim.atom")
+          Files.writeString(victim, "PRECIOUS")
+          // the temporary name earlier chen versions wrote at, committed as a link: the old
+          // store opened that predictable name, its copy replacing the link rather than writing
+          // through it and its move then reading back from that name onto the entry; the store
+          // now never opens it
+          val oldTmp = cacheDir.resolve("cpg-fp-1.atom.tmp")
+          symlink(oldTmp, victim)
+          val builtAtom = Files.createTempFile("built", ".atom")
+          Files.writeString(builtAtom, "BUILT")
+
+          CacheControl.enable(CacheControl.Cpg)
+          new CpgCacheStore(cacheDir.toString).store("fp-1", builtAtom.toString)
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
+          Files.isRegularFile(cacheDir.resolve("cpg-fp-1.atom"), LinkOption.NOFOLLOW_LINKS) shouldBe
+              true
+      }
+
       "be switched off when the cache directory position is a link, and still be used when the user configured it" in {
           val input   = Files.createTempDirectory("cpg-cache-chen")
           val outside = Files.createTempDirectory("cpg-cache-chen-target")

@@ -205,8 +205,15 @@ end CpgCacheStore
   *   checkout, so such a position is checked (see [[AtomicWrites.checkCacheDirectory]]) and the
   *   cache is switched off when the position is a link; the user's own configured directory is
   *   taken as the user chose it.
+  * @param cacheDirAnchor
+  *   the analysed input root, when the caller knows it; see [[AstCacheStore]]. Ignored when
+  *   `trustedCacheDir` is true.
   */
-class CpgCacheStore(cacheDir: String, trustedCacheDir: Boolean = false):
+class CpgCacheStore(
+  cacheDir: String,
+  trustedCacheDir: Boolean = false,
+  cacheDirAnchor: Option[String] = None
+):
 
   private val logger = LoggerFactory.getLogger(classOf[CpgCacheStore])
 
@@ -218,11 +225,18 @@ class CpgCacheStore(cacheDir: String, trustedCacheDir: Boolean = false):
       }.getOrElse(false)
 
   /** Why the cache directory position was refused, when it was; see [[AstCacheStore]] for the
-    * rule. Only a default position is checked.
+    * rule (the anchor, when given, widens the walk to every component below the input root).
+    * Only a default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
-      else Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption.flatten
+      else
+        cacheDirAnchor
+            .map(anchor =>
+              Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
+            )
+            .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
+            .flatten
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&

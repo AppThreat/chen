@@ -77,6 +77,23 @@ class FlowSummaryStoreTests extends AnyWordSpec with Matchers with BeforeAndAfte
           Files.readString(secret) shouldBe "[]"
       }
 
+      "never open the old predictable temporary name, a link there included" in {
+          val cacheDir = Files.createTempDirectory("flowsummary-oldtmp")
+          val outside  = Files.createTempDirectory("flowsummary-oldtmp-target")
+          val victim   = outside.resolve("victim.json")
+          Files.writeString(victim, "PRECIOUS")
+          // the temporary name earlier chen versions wrote at, committed as a link beside the
+          // slices file: a write to it would truncate the victim
+          val oldTmp = cacheDir.resolve("flowsummary-fp-1.json.tmp")
+          symlink(oldTmp, victim)
+
+          new FlowSummaryStore(cacheDir.toString).store("fp-1", summaries)
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
+          Files.isRegularFile(entry(cacheDir, "fp-1"), LinkOption.NOFOLLOW_LINKS) shouldBe true
+      }
+
       "store and restore a summary set over a plain directory" in {
           val cacheDir = Files.createTempDirectory("flowsummary-plain")
           val store    = new FlowSummaryStore(cacheDir.toString)

@@ -34,7 +34,9 @@ class CodeToCpg(
         enableAstCache && !strictParse,
         resolveCacheDir(inputPath, cacheDir),
         onlyAstCache = false,
-        trustedCacheDir = trustedCacheDir
+        trustedCacheDir = trustedCacheDir,
+        // an untrusted cache position is always under the analysed input this pass was built for
+        cacheDirAnchor = if trustedCacheDir then None else Some(inputPath)
       )
 
   // The cached fragment carries the full-name shape it was built with; without this,

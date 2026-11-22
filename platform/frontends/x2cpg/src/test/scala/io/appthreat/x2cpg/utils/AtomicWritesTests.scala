@@ -225,4 +225,57 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           AtomicWrites.checkCacheDirectory(cacheDir) shouldBe Some(s"$cacheDir is a symbolic link")
       }
   }
+
+  "AtomicWrites.checkCacheDirectory with an anchor" should {
+
+      "refuse a linked component even when the link's target already holds the deeper path" in {
+          val input   = Files.createTempDirectory("check-anchored-input")
+          val outside = Files.createTempDirectory("check-anchored-target")
+          // the deepest component exists (through the link), which is what hid the link before
+          Files.createDirectories(outside.resolve("astgen"))
+          val chen = input.resolve(".chen")
+          symlink(chen, outside)
+
+          AtomicWrites.checkCacheDirectory(input.resolve(".chen").resolve("astgen"), input) shouldBe
+              Some(s"$chen is a symbolic link")
+      }
+
+      "check every component below the anchor, existing or not" in {
+          val input = Files.createTempDirectory("check-anchored-all")
+          // nothing below the anchor exists yet, and none of it offends
+          AtomicWrites.checkCacheDirectory(
+            input.resolve(".chen").resolve("pydeps").resolve("pkg-1"),
+            input
+          ) shouldBe None
+
+          // a regular file anywhere below the anchor offends, however deep
+          Files.createDirectories(input.resolve(".chen").resolve("pydeps"))
+          Files.writeString(input.resolve(".chen").resolve("pydeps").resolve("pkg-1"), "occupied")
+          AtomicWrites.checkCacheDirectory(
+            input.resolve(".chen").resolve("pydeps").resolve("pkg-1"),
+            input
+          ) shouldBe Some(
+            s"${input.resolve(".chen").resolve("pydeps").resolve("pkg-1")} exists and is not a directory"
+          )
+      }
+
+      "not check the anchor or anything above it" in {
+          // the anchor itself is a link the user spelled; only what a checkout commits below it
+          // is the run's to judge
+          val input   = Files.createTempDirectory("check-anchored-real")
+          val spelled = Files.createTempDirectory("check-anchored-spelled")
+          val alias   = spelled.resolve("input")
+          symlink(alias, input)
+
+          AtomicWrites.checkCacheDirectory(alias.resolve(".chen"), alias) shouldBe None
+      }
+
+      "fall back to the unanchored walk for a directory not below the anchor" in {
+          val anchor = Files.createTempDirectory("check-anchored-elsewhere")
+          val own    = Files.createTempDirectory("check-anchored-own")
+          // a directory of the run's own, beside the anchor: the deepest existing component is
+          // the directory itself, no link in sight
+          AtomicWrites.checkCacheDirectory(own.resolve(".chen"), anchor) shouldBe None
+      }
+  }
 end AtomicWritesTests

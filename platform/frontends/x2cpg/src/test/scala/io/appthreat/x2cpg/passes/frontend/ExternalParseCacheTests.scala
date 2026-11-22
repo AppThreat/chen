@@ -211,5 +211,58 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
               List(CacheControl.Astgen)
           finally chenStream.close()
       }
+
+      "be switched off when a linked .chen's target already holds the kind directory" in {
+          // `.chen` committed as a link, and the directory it points at already containing
+          // `astgen/`: the entry directory then exists (through the link), which is what hid
+          // the link from a walk that starts at the deepest existing component
+          val input   = Files.createTempDirectory("parse-cache-anchored")
+          val outside = Files.createTempDirectory("parse-cache-anchored-target")
+          val kindDir = Files.createDirectories(outside.resolve(CacheControl.Astgen))
+          Files.writeString(kindDir.resolve("left.json"), "LEFT")
+          val chen = input.resolve(".chen")
+          symlink(chen, outside)
+          CacheControl.enable(CacheControl.Astgen)
+
+          val cache =
+              new ExternalParseCache(
+                chen.toString,
+                CacheControl.Astgen,
+                cacheDirAnchor = Some(input.toString)
+              )
+          cache.isUsable shouldBe false
+
+          // a run without the cache completes: storing is a no-op and restoring answers a miss
+          cache.store("fp-1", outDirWith("a.json" -> "AAA"))
+          cache.restore("fp-1", Files.createTempDirectory("parse-restored-anchored")) shouldBe false
+
+          Files.readString(kindDir.resolve("left.json")) shouldBe "LEFT"
+          val stream = Files.list(kindDir)
+          try stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe List("left.json")
+          finally stream.close()
+      }
+
+      "never open the old predictable entry temporary name, a link there included" in {
+          val cacheDir = Files.createTempDirectory("parse-cache-oldtmp")
+          val entries  = Files.createDirectories(cacheDir.resolve(CacheControl.Astgen))
+          val outside  = Files.createTempDirectory("parse-cache-oldtmp-target")
+          Files.writeString(outside.resolve("left.json"), "PRECIOUS")
+          // the entry temporary name earlier chen versions filled, committed as a link to a
+          // directory: the old store opened that predictable name, its cleanup removing and
+          // recreating whatever sat there (a walk does not follow a link at its start, so the
+          // link went, not its target), and its tree copy read through links in both
+          // directions; the store now never opens the name
+          val oldTmp = entries.resolve("fp-1.tmp")
+          symlink(oldTmp, outside)
+          CacheControl.enable(CacheControl.Astgen)
+
+          new ExternalParseCache(cacheDir.toString, CacheControl.Astgen).store("fp-1", outDirWith(
+            "a.json" -> "AAA"
+          ))
+
+          Files.readString(outside.resolve("left.json")) shouldBe "PRECIOUS"
+          Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
+          Files.isRegularFile(entries.resolve("fp-1").resolve("a.json")) shouldBe true
+      }
   }
 end ExternalParseCacheTests

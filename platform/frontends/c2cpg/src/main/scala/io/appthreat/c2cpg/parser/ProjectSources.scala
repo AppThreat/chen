@@ -10,7 +10,7 @@ import io.appthreat.x2cpg.parse.{
     ParseUnitRecord,
     UnitSettingsReporter
 }
-import io.appthreat.x2cpg.utils.ExecutableLookup
+import io.appthreat.x2cpg.utils.{AtomicWrites, ExecutableLookup}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
 
 import java.nio.file.{Files, Path, Paths}
@@ -200,10 +200,20 @@ final class ProjectSources(val config: Config):
 
   lazy val headerFileFinder: HeaderFileFinder = new HeaderFileFinder(config.inputPath)
 
+  /** The disk cache for the predefined macros, under the run's cache directory. A position at the
+    * default place under the analysed input is checked with the input root as the anchor, over the
+    * `compilers` subdirectory the macro files live in: a committed link anywhere on that path
+    * (`.chen` itself, or `compilers` inside a real one) turns the disk cache off for the run, so
+    * nothing is created or written through it. A user-configured directory is taken as chosen.
+    */
   private val cacheDir: Option[Path] =
-      Option.when(config.enableAstCache)(
-        Paths.get(resolveCacheDir(config.inputPath, config.cacheDir))
-      )
+      val dir           = Paths.get(resolveCacheDir(config.inputPath, config.cacheDir))
+      val userConfigured = config.cacheDir != null && config.cacheDir.nonEmpty
+      val positionUsable = userConfigured ||
+          AtomicWrites
+              .checkCacheDirectory(dir.resolve(PredefinedMacros.CacheSubdir), Paths.get(config.inputPath))
+              .isEmpty
+      Option.when(config.enableAstCache && positionUsable)(dir)
 
   /** Every file that may be parsed, before a database narrows the set. */
   private lazy val candidates: Array[String] =

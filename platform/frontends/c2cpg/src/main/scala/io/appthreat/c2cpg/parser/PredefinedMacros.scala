@@ -75,6 +75,11 @@ object PredefinedMacros:
   private def identityKey(identity: CompilerIdentity): String =
       (identity.executable +: identity.language.toString +: identity.options).mkString("\u0000")
 
+  /** The directory under a cache directory the macro files live in, so a caller that checks the
+    * cache's position can check the position it actually writes to.
+    */
+  val CacheSubdir: String = "compilers"
+
   private def lookup(
     identity: CompilerIdentity,
     key: String,
@@ -82,7 +87,7 @@ object PredefinedMacros:
   ): Option[CompilerFacts] =
       version(identity.executable).flatMap { versionText =>
         val digest = sha256(key + "\u0000" + versionText)
-        val cached = cacheDir.map(_.resolve("compilers").resolve(s"$digest.macros"))
+        val cached = cacheDir.map(_.resolve(CacheSubdir).resolve(s"$digest.macros"))
         cached.flatMap(read).orElse {
             val facts = run(identity)
             for f <- facts; file <- cached do write(file, f)

@@ -25,8 +25,17 @@ import scala.util.{Try, Using}
   *   checkout, so such a position is checked (see [[AtomicWrites.checkCacheDirectory]]) and the
   *   cache is switched off when the position is a link; the user's own configured directory is
   *   taken as the user chose it.
+  * @param cacheDirAnchor
+  *   the analysed input root, when the caller knows it; see [[AstCacheStore]]. With it, one walk
+  *   over the entry directory's path covers the cache directory and the kind directory below it,
+  *   whether or not either exists. Ignored when `trustedCacheDir` is true.
   */
-class ExternalParseCache(cacheDir: String, kind: String, trustedCacheDir: Boolean = false):
+class ExternalParseCache(
+  cacheDir: String,
+  kind: String,
+  trustedCacheDir: Boolean = false,
+  cacheDirAnchor: Option[String] = None
+):
 
   private val logger = LoggerFactory.getLogger(classOf[ExternalParseCache])
 
@@ -40,13 +49,17 @@ class ExternalParseCache(cacheDir: String, kind: String, trustedCacheDir: Boolea
   /** Why the cache's entry directory position was refused, when it was; see [[AstCacheStore]] for
     * the rule. The check runs on the entry directory `<cacheDir>/<kind>` itself, the position
     * whose predictable names this store reads and writes: a checkout can commit a real cache
-    * directory with the kind subdirectory as a link, and the walk from the deepest existing
-    * component down still covers the cache directory above it, so a linked cache directory keeps
-    * being refused. Only a default position is checked.
+    * directory with the kind subdirectory as a link, and with an anchor the walk covers the cache
+    * directory above it, existing or not, so a linked `.chen` is refused even when its target
+    * already holds the kind directory. Only a default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
-      else Try(AtomicWrites.checkCacheDirectory(entriesDir)).toOption.flatten
+      else
+        cacheDirAnchor
+            .map(anchor => Try(AtomicWrites.checkCacheDirectory(entriesDir, Paths.get(anchor))).toOption)
+            .getOrElse(Try(AtomicWrites.checkCacheDirectory(entriesDir)).toOption)
+            .flatten
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&

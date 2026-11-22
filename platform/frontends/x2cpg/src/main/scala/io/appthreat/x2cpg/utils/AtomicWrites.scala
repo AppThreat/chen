@@ -2,6 +2,7 @@ package io.appthreat.x2cpg.utils
 
 import java.nio.file.{AtomicMoveNotSupportedException, Files, LinkOption, Path, StandardCopyOption}
 import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /** Writes cache and working files so that a symbolic link committed at a predictable name cannot
@@ -65,18 +66,45 @@ object AtomicWrites:
             Try(FileUtil.delete(tmp, swallowIoExceptions = true))
             throw e
 
-  /** Why `dir` must not be used as a cache directory, or `None` when it may be. A component of
-    * its path is a symbolic link (entries written below it would land where the link points), or
-    * the final component exists and is not a directory.
+  /** Why `dir` must not be used as a cache directory, or `None` when it may be, judged against an
+    * `anchor` the caller trusts: the analysed input root, the directory the run was pointed at.
+    * Every component of `dir` strictly below the anchor is checked without following links,
+    * whether or not it exists yet, so a linked `.chen` is caught even when the directory the link
+    * points at already holds the next component, and a link swapped in above a directory an
+    * earlier safe run left behind is caught too.
+    *
+    * The anchor and everything above it, the part of the path the user spelled rather than a
+    * checkout committed, is not checked. A `dir` that does not lie below the anchor (a directory
+    * of the run's own, in a temporary place) falls back to the unanchored walk below.
+    */
+  def checkCacheDirectory(dir: Path, anchor: Path): Option[String] =
+      val root   = anchor.toAbsolutePath.normalize
+      val target = dir.toAbsolutePath.normalize
+      val below  = root.relativize(target)
+      if below.toString.isEmpty || below.startsWith("..") then checkCacheDirectory(dir)
+      else
+        val walk = mutable.ListBuffer.empty[Path]
+        var cur  = root
+        below.iterator().asScala.foreach { name =>
+            cur = cur.resolve(name)
+            walk += cur
+        }
+        walk.find(offends).map(reason)
+  end checkCacheDirectory
+
+  /** Why `dir` must not be used as a cache directory, or `None` when it may be, when the caller
+    * has no anchor to judge the position against. A component of its path is a symbolic link
+    * (entries written below it would land where the link points), or the final component exists
+    * and is not a directory.
     *
     * The walk starts at the deepest component that already exists and checks every component down
     * to `dir` without following links, so a link anywhere on the remaining path is caught before
     * anything is created through it. A link above the deepest existing component, the part of the
     * path that was spelled by the user rather than committed by a checkout (the analysed input
     * itself, or a temporary directory behind a system link, as `/tmp` on macOS), is not part of
-    * the check: the walk deliberately goes no further up than it must. Callers use this for
-    * directories at a default position under the analysed input, which a checkout controls; a
-    * directory the user explicitly configured is the user's own choice and is not checked.
+    * the check: the walk deliberately goes no further up than it must. This leaves a linked
+    * directory whose target already holds the deeper components unexamined, which is why a caller
+    * that knows the analysed input root passes it as the anchor above.
     */
   def checkCacheDirectory(dir: Path): Option[String] =
       val below = mutable.ListBuffer.empty[Path]
@@ -85,19 +113,23 @@ object AtomicWrites:
           below.prepend(cur)
           cur = cur.getParent
       val components = if cur == null then below.toList else cur :: below.toList
-      components
-          .find(c =>
-              Files.isSymbolicLink(c) ||
-              (Files.exists(c, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(
-                c,
-                LinkOption.NOFOLLOW_LINKS
-              ))
-          )
-          .map(c =>
-              if Files.isSymbolicLink(c) then s"$c is a symbolic link"
-              else s"$c exists and is not a directory"
-          )
+      components.find(offends).map(reason)
   end checkCacheDirectory
+
+  /** A component offends when it is a symbolic link (wherever it points), or exists and is not a
+    * directory; a component that does not exist yet is fine, it will be created below the
+    * components already checked.
+    */
+  private def offends(component: Path): Boolean =
+      Files.isSymbolicLink(component) ||
+      (Files.exists(component, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(
+        component,
+        LinkOption.NOFOLLOW_LINKS
+      ))
+
+  private def reason(component: Path): String =
+      if Files.isSymbolicLink(component) then s"$component is a symbolic link"
+      else s"$component exists and is not a directory"
 
   /** A rename on the same file system replaces whatever sits at the final name, a link included.
     * Where the file system refuses atomic renames the same replacement is done non-atomically.

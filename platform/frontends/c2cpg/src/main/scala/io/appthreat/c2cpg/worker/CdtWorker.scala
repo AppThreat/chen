@@ -404,7 +404,10 @@ object CdtWorker:
       job.cacheDir,
       onlyAstCache = false,
       useFragmentCache = job.fragments,
-      trustedCacheDir = job.trustedCacheDir
+      trustedCacheDir = job.trustedCacheDir,
+      // the anchor the parent judged the position against: the project's input path, which the
+      // settings carry; without trust the worker checks the same components the parent did
+      cacheDirAnchor = if job.trustedCacheDir then None else Some(config.inputPath)
     )
     val staging = new overflowdb.BatchedUpdate.DiffGraphBuilder
     val produced = store.process(

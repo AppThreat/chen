@@ -39,7 +39,8 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
     config.enableAstCache,
     AstCacheStore.resolveCacheDir(config.inputPath, config.cacheDir),
     config.onlyAstCache,
-    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
+    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty,
+    cacheDirAnchor = Some(config.inputPath)
   )
 
   /** Translation units edga could not export, for a caller that parses them another way. */

@@ -384,12 +384,11 @@ class AstCreationPass(
   private val fragments = isolate || CacheControl.useFragments
 
   /** Whether this run reads and writes the project's AST cache: what the store decides from the
-    * same settings.
+    * same settings, its position check included. A refused position (a linked `.chen`) therefore
+    * also sends the isolated run's exchange directory to a directory of the run's own, so every
+    * unit still crosses the worker boundary and nothing is written through the link.
     */
-  private lazy val cacheOn: Boolean =
-      config.enableAstCache && CacheControl.isEnabled(CacheControl.Ast) &&
-          Option(Paths.get(resolveCacheDir(config.inputPath, config.cacheDir)).getParent)
-              .exists(Files.isDirectory(_))
+  private lazy val cacheOn: Boolean = cacheStore.isUsable
 
   /** Where workers write the entries the run loads: the project's AST cache when the run caches, so
     * the entries serve later runs too, and otherwise a directory of this run's own, removed at the
@@ -418,7 +417,8 @@ class AstCreationPass(
     resolveCacheDir(config.inputPath, config.cacheDir),
     config.onlyAstCache,
     fragments,
-    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
+    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty,
+    cacheDirAnchor = Some(config.inputPath)
   )
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)

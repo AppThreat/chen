@@ -92,6 +92,17 @@ class PythonDependencyStubsTests extends PySrc2CpgFixture(withOssDataflow = true
     )
   end writeFakeVenv
 
+  /** Creates a symbolic link at `link` pointing at `target`, skipping the test where the platform
+    * refuses to create one.
+    */
+  private def symlink(link: Path, target: Path): Unit =
+      try Files.createSymbolicLink(link, target)
+      catch
+        case e: UnsupportedOperationException =>
+            assume(false, s"this platform cannot create symbolic links: ${e.getMessage}")
+        case e: java.nio.file.FileSystemException =>
+            assume(false, s"this platform refused to create a symbolic link: ${e.getMessage}")
+
   private val userApp =
       """
         |from flask import Flask, render_template_string, passthrough
@@ -138,6 +149,25 @@ class PythonDependencyStubsTests extends PySrc2CpgFixture(withOssDataflow = true
     "not ingest distributions the project does not import" in:
       stubsCpg.method.fullNameExact("boto3.client").l shouldBe empty
       stubsCpg.typeDecl.fullName(".*boto3.*").l shouldBe empty
+
+    "parse the stubs uncached when a committed .chen link points outside, creating nothing through it" in {
+        val outside = Files.createTempDirectory("pydeps-chen-target")
+        val cpg = code(userApp, "app.py")
+            .withPythonDeps(PythonDepsMode.Stubs)
+            .withProjectSetup { dir =>
+                writeFakeVenv(dir)
+                symlink(dir.toPath.resolve(".chen"), outside)
+            }
+        try
+          // the run completes and the stubs enter the graph, parsed without a cache
+          cpg.method.fullNameExact("flask.app.Flask.route").l should not be empty
+          // the workspace the fixture builds is its own and is deleted with the run; the link's
+          // target is not, so an empty target says nothing was ever created through the link
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+        finally cpg.close()
+    }
 
     "create both re-export spellings exactly once" in:
       // `from flask import Flask` joins `flask.Flask` (the real

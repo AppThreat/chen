@@ -239,7 +239,11 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
     // restore, but it still stores, so its key is computed: the entry it writes serves the next
     // run that does not report.
     val cache =
-        new ExternalParseCache(resolveCacheDir(config.inputPath, ""), CacheControl.Astgen)
+        new ExternalParseCache(
+          resolveCacheDir(config.inputPath, ""),
+          CacheControl.Astgen,
+          cacheDirAnchor = Some(config.inputPath)
+        )
     val result =
         if !cache.isUsable then runAstGenNative(config.inputPath, out, combineIgnoreRegex, "")
         else
