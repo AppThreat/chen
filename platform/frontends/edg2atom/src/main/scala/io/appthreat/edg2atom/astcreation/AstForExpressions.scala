@@ -425,12 +425,7 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
       case "subscript" =>
           // the pointer or array is the base, written first
           val ordered = if e.flag("pointerSecond") then operands.reverse else operands
-          val base    = ordered.headOption.map(visible)
-          val name =
-              if base.exists(b => b.long("t").exists(types.isArray)) then
-                Operators.indirectIndexAccess
-              else Operators.indirectIndexAccess
-          operatorAst(e, name, ordered)
+          operatorAst(e, Operators.indirectIndexAccess, ordered)
       case "cast" | "lvalue_cast" | "ref_cast" | "base_class_cast" | "derived_class_cast" =>
           val call = callNode(
             e,
