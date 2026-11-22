@@ -1,0 +1,32 @@
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/C2Cpg.scala
+  h_0926447d100ad2 89-90
+platform/frontends/c2cpg/src/main/scala/io/appthreat/c2cpg/passes/AstCreationPass.scala
+  h_0926447d100ad2 412-413
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/passes/EdgAstCreationPass.scala
+  h_0926447d100ad2 41-42
+platform/frontends/php2atom/src/main/scala/io/appthreat/php2atom/passes/AstCreationPass.scala
+  h_0926447d100ad2 29-30
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/CodeToCpg.scala
+  h_0926447d100ad2 27-28,36-37
+platform/frontends/pysrc2cpg/src/main/scala/io/appthreat/pysrc2cpg/Py2Cpg.scala
+  h_0926447d100ad2 68-71
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStore.scala
+  h_0926447d100ad2 6,11,63-70,76-77,94-102,104,107-108,116-122,260-270,273-290,297-300,316-318,324-326
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/AtomicWrites.scala
+  h_0926447d100ad2 1-113
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/AstCacheStoreTests.scala
+  h_0926447d100ad2 1-246
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/utils/AtomicWritesTests.scala
+  h_0926447d100ad2 1-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "caa993fea19adabf82f062da290d31c979eb024d",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
