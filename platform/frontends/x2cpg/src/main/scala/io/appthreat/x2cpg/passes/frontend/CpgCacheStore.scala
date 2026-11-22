@@ -1,11 +1,12 @@
 package io.appthreat.x2cpg.passes.frontend
 
+import io.appthreat.x2cpg.utils.AtomicWrites
 import org.slf4j.LoggerFactory
 
 import java.io.OutputStream
 import java.io.IOException
 import java.nio.file.attribute.BasicFileAttributes
-import java.nio.file.{FileVisitResult, Files, Path, Paths, SimpleFileVisitor, StandardCopyOption}
+import java.nio.file.{FileVisitResult, Files, LinkOption, Path, Paths, SimpleFileVisitor, StandardCopyOption}
 import java.security.{DigestInputStream, MessageDigest}
 import scala.util.{Try, Using}
 
@@ -196,8 +197,16 @@ object CpgCacheStore:
 
 end CpgCacheStore
 
-/** Stores and restores whole `.atom` graphs keyed on a project fingerprint. */
-class CpgCacheStore(cacheDir: String):
+/** Stores and restores whole `.atom` graphs keyed on a project fingerprint.
+  *
+  * @param trustedCacheDir
+  *   true only when `cacheDir` was configured explicitly by the user. A directory at a default
+  *   position under the analysed input may be committed as a symbolic link by the input's own
+  *   checkout, so such a position is checked (see [[AtomicWrites.checkCacheDirectory]]) and the
+  *   cache is switched off when the position is a link; the user's own configured directory is
+  *   taken as the user chose it.
+  */
+class CpgCacheStore(cacheDir: String, trustedCacheDir: Boolean = false):
 
   private val logger = LoggerFactory.getLogger(classOf[CpgCacheStore])
 
@@ -208,8 +217,23 @@ class CpgCacheStore(cacheDir: String):
           Files.isDirectory(Option(Paths.get(cacheDir).getParent).getOrElse(Paths.get(".")))
       }.getOrElse(false)
 
+  /** Why the cache directory position was refused, when it was; see [[AstCacheStore]] for the
+    * rule. Only a default position is checked.
+    */
+  private val cacheDirRefusal: Option[String] =
+      if trustedCacheDir then None
+      else Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption.flatten
+
   private def enabled: Boolean =
-      cacheDir.nonEmpty && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Cpg)
+      cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
+      CacheControl.isEnabled(CacheControl.Cpg)
+
+  if cacheDir.nonEmpty && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Cpg) then
+    cacheDirRefusal.foreach { reason =>
+        logger.warn(
+          s"Switching the whole-CPG cache off for this run: $reason, so cache directory $cacheDir is not used"
+        )
+    }
 
   if enabled then
     Try(Files.createDirectories(Paths.get(cacheDir))).failed.foreach { e =>
@@ -219,12 +243,17 @@ class CpgCacheStore(cacheDir: String):
   private def cacheFile(fingerprint: String): Path =
       Paths.get(cacheDir, s"cpg-$fingerprint.atom")
 
-  /** Restore a cached CPG for `fingerprint` into `outputPath`, returning true on a hit. */
+  /** Restore a cached CPG for `fingerprint` into `outputPath`, returning true on a hit. An entry
+    * that is a symbolic link is a miss: its target is never read.
+    */
   def restore(fingerprint: String, outputPath: String): Boolean =
       if !enabled then false
       else
         val cached = cacheFile(fingerprint)
-        if !Files.exists(cached) then false
+        if !Files.isRegularFile(cached, LinkOption.NOFOLLOW_LINKS) then
+          if Files.exists(cached, LinkOption.NOFOLLOW_LINKS) then
+            logger.debug(s"CPG cache entry $cached is not a regular file; treating it as a miss")
+          false
         else
           Try {
               val out = Paths.get(outputPath)
@@ -237,19 +266,16 @@ class CpgCacheStore(cacheDir: String):
             _ => true
           )
 
-  /** Store the freshly built `.atom` at `atomPath` under `fingerprint`. */
+  /** Store the freshly built `.atom` at `atomPath` under `fingerprint`, through an unpredictable
+    * temporary renamed onto the entry, so a link committed at the entry's name is replaced rather
+    * than written through.
+    */
   def store(fingerprint: String, atomPath: String): Unit =
       if enabled then
         val source = Paths.get(atomPath)
-        if Files.exists(source) then
-          val finalPath = cacheFile(fingerprint)
-          val tmpPath   = Paths.get(cacheDir, s"cpg-$fingerprint.atom.tmp")
-          Try {
-              Files.copy(source, tmpPath, StandardCopyOption.REPLACE_EXISTING)
-              Files.move(tmpPath, finalPath, StandardCopyOption.REPLACE_EXISTING)
-          }.failed.foreach { e =>
+        if Files.isRegularFile(source) then
+          Try(AtomicWrites.copy(source, cacheFile(fingerprint))).failed.foreach { e =>
             logger.warn(s"Failed to store CPG cache: ${e.getMessage}")
-            Try(Files.deleteIfExists(tmpPath))
           }
 
 end CpgCacheStore

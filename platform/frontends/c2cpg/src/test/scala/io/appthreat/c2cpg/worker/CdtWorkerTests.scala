@@ -12,8 +12,9 @@ import io.appthreat.x2cpg.parse.{
 }
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.semanticcpg.language.*
+import upickle.default.*
 
-import java.nio.file.Paths
+import java.nio.file.{FileSystemException, Files, LinkOption, Path, Paths}
 import scala.jdk.CollectionConverters.*
 
 /** The opt-in worker mode: with `--c-isolate`, every unit is parsed by a worker process that hands
@@ -110,6 +111,17 @@ class CdtWorkerTests extends CCodeToCpgSuite(FileDefaults.C_EXT):
 
   private def failureRecordsFor(records: List[ParseFailureRecord], file: String) =
       records.filter(_.file.endsWith(file))
+
+  /** Creates a symbolic link at `link` pointing at `target`, skipping the test where the platform
+    * refuses to create one.
+    */
+  private def symlink(link: Path, target: Path): Unit =
+      try Files.createSymbolicLink(link, target)
+      catch
+        case e: UnsupportedOperationException =>
+            assume(false, s"this platform cannot create symbolic links: ${e.getMessage}")
+        case e: FileSystemException =>
+            assume(false, s"this platform refused to create a symbolic link: ${e.getMessage}")
 
   "a unit whose worker exits" should {
 
@@ -252,6 +264,33 @@ class CdtWorkerTests extends CCodeToCpgSuite(FileDefaults.C_EXT):
                   isolated.close()
               }
           }
+      }
+  }
+
+  "a worker's reply file" should {
+
+      "replace a symbolic link at the reply's name instead of writing through it" in {
+          val replyDir = Files.createTempDirectory("c2worker-reply")
+          val outside  = Files.createTempDirectory("c2worker-reply-target")
+          val victim   = outside.resolve("victim.json")
+          Files.writeString(victim, "PRECIOUS")
+          val replyFile = replyDir.resolve("reply-1.json")
+          symlink(replyFile, victim)
+          // writeReply reads nothing but the reply file's path from the job
+          val job = CdtWorker.Job(
+            file = "unit.c",
+            fingerprint = "fp",
+            replyFile = replyFile.toString,
+            cacheDir = replyDir.toString,
+            fragments = true,
+            settings = null
+          )
+
+          CdtWorker.writeReply(job, CdtWorker.Reply("ok", "", Nil, Nil))
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isRegularFile(replyFile, LinkOption.NOFOLLOW_LINKS) shouldBe true
+          read[CdtWorker.Reply](Files.readString(replyFile)).status shouldBe "ok"
       }
   }
 

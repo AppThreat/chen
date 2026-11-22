@@ -38,7 +38,8 @@ class EdgAstCreationPass(cpg: Cpg, config: Config, sources: ProjectSources, runn
   private val cacheStore = new AstCacheStore(
     config.enableAstCache,
     AstCacheStore.resolveCacheDir(config.inputPath, config.cacheDir),
-    config.onlyAstCache
+    config.onlyAstCache,
+    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
   )
 
   /** Translation units edga could not export, for a caller that parses them another way. */

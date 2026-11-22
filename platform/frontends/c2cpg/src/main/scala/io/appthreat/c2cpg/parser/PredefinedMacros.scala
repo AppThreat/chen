@@ -4,7 +4,7 @@ import org.slf4j.LoggerFactory
 
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.{Files, LinkOption, Path, Paths}
 import java.security.MessageDigest
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
@@ -172,15 +172,21 @@ object PredefinedMacros:
           .map(_.stripSuffix(" (framework directory)"))
           .flatMap(p => Try(Paths.get(p).toAbsolutePath.normalize).toOption)
 
+  /** Reads a cached macro file. A link at the cache name is a miss: the target, wherever the link
+    * points, is never read. The write beside this already goes through an unpredictable temporary
+    * that is moved into place atomically.
+    */
   private def read(file: Path): Option[CompilerFacts] =
-      Try {
-          val lines = Files.readAllLines(file, StandardCharsets.UTF_8).toArray(Array.empty[String])
-          val (includes, defines) = lines.partition(_.startsWith("include "))
-          CompilerFacts(
-            parseDefines(defines.iterator),
-            includes.map(l => Paths.get(l.stripPrefix("include "))).toSeq
-          )
-      }.toOption
+      if !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) then None
+      else
+        Try {
+            val lines = Files.readAllLines(file, StandardCharsets.UTF_8).toArray(Array.empty[String])
+            val (includes, defines) = lines.partition(_.startsWith("include "))
+            CompilerFacts(
+              parseDefines(defines.iterator),
+              includes.map(l => Paths.get(l.stripPrefix("include "))).toSeq
+            )
+        }.toOption
 
   private def write(file: Path, facts: CompilerFacts): Unit =
       Try {

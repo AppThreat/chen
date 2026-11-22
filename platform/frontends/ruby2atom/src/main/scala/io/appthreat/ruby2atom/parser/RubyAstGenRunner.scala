@@ -12,7 +12,7 @@ import io.appthreat.x2cpg.astgen.AstGenRunnerBase
 import io.appthreat.x2cpg.parse.ParseReporter
 import io.appthreat.x2cpg.passes.frontend.{CacheControl, CpgCacheStore, ExternalParseCache}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.resolveCacheDir
-import io.appthreat.x2cpg.utils.{Environment, ExternalCommand}
+import io.appthreat.x2cpg.utils.{Environment, ExternalCommand, FileUtil}
 import org.slf4j.LoggerFactory
 
 import java.io.File.separator
@@ -288,15 +288,13 @@ class RubyAstGenRunner(config: Config) extends AstGenRunnerBase(config):
 
     def close(): Unit = {}
 
+  /** The generator's output directory of this run. Removed at the end without following symbolic
+    * links, so a link planted inside it goes as a link and its target is left alone.
+    */
   private case class TempDir(path: Path) extends ExecutionEnvironment:
 
     override def close(): Unit =
-      def cleanUpDir(f: Path): Unit =
-        if Files.isDirectory(f) then
-          Files.list(f).iterator.asScala.foreach(cleanUpDir)
-        Files.deleteIfExists(f)
-
-      cleanUpDir(path)
+        FileUtil.delete(path, swallowIoExceptions = true)
 
   private case class LocalDir(path: Path) extends ExecutionEnvironment
 end RubyAstGenRunner

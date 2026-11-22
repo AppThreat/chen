@@ -65,7 +65,10 @@ class Py2Cpg(
       inputPath,
       cacheDir = cacheDir,
       strictParse = strictParse,
-      moduleNames = moduleNames
+      moduleNames = moduleNames,
+      // a non-empty `cacheDir` is the value the run was configured with, its user's own choice;
+      // the default position under the input stays untrusted
+      trustedCacheDir = cacheDir != null && cacheDir.nonEmpty
     )
     codeToCpg.createAndApply()
     val parseErrors = codeToCpg.getParseErrors

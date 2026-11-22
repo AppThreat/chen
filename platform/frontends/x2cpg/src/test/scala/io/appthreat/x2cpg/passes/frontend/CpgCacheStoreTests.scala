@@ -5,11 +5,23 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.ByteBuffer
 import java.nio.file.StandardOpenOption.{CREATE_NEW, SPARSE, WRITE}
+import java.nio.file.{FileSystemException, Files, LinkOption, Path}
 import java.nio.file.attribute.FileTime
-import java.nio.file.{Files, Path}
+import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 class CpgCacheStoreTests extends AnyWordSpec with Matchers:
+
+  /** Creates a symbolic link at `link` pointing at `target`, skipping the test where the platform
+    * refuses to create one.
+    */
+  private def symlink(link: Path, target: Path): Unit =
+      try Files.createSymbolicLink(link, target)
+      catch
+        case e: UnsupportedOperationException =>
+            assume(false, s"this platform cannot create symbolic links: ${e.getMessage}")
+        case e: FileSystemException =>
+            assume(false, s"this platform refused to create a symbolic link: ${e.getMessage}")
 
   private def project(files: (String, String)*): Path =
     val dir = Files.createTempDirectory("cpg-cache-proj")
@@ -264,6 +276,62 @@ class CpgCacheStoreTests extends AnyWordSpec with Matchers:
             val out = Files.createTempFile("restored", ".atom")
             store.restore("fp", out.toString) shouldBe false
           finally CacheControl.enable(CacheControl.Cpg)
+      }
+
+      "replace a symbolic link at the entry's name instead of writing through it" in {
+          val cacheDir = Files.createTempDirectory("cpg-cache-link")
+          val outside  = Files.createTempDirectory("cpg-cache-link-target")
+          val victim   = outside.resolve("victim.atom")
+          Files.writeString(victim, "PRECIOUS")
+          val entry = cacheDir.resolve("cpg-fp-1.atom")
+          symlink(entry, victim)
+          val builtAtom = Files.createTempFile("built", ".atom")
+          Files.writeString(builtAtom, "BUILT")
+
+          CacheControl.enable(CacheControl.Cpg)
+          new CpgCacheStore(cacheDir.toString).store("fp-1", builtAtom.toString)
+
+          Files.readString(victim) shouldBe "PRECIOUS"
+          Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) shouldBe true
+          Files.readString(entry) shouldBe "BUILT"
+      }
+
+      "treat an entry that is a symbolic link as a miss on restore" in {
+          val cacheDir = Files.createTempDirectory("cpg-cache-link-miss")
+          val outside  = Files.createTempDirectory("cpg-cache-link-miss-target")
+          val secret   = outside.resolve("secret.atom")
+          Files.writeString(secret, "SECRET")
+          symlink(cacheDir.resolve("cpg-fp-1.atom"), secret)
+          val out = Files.createTempFile("restored", ".atom")
+
+          CacheControl.enable(CacheControl.Cpg)
+          new CpgCacheStore(cacheDir.toString).restore("fp-1", out.toString) shouldBe false
+          Files.readString(out) shouldBe "" // the link's target was not copied out
+          Files.readString(secret) shouldBe "SECRET"
+      }
+
+      "be switched off when the cache directory position is a link, and still be used when the user configured it" in {
+          val input   = Files.createTempDirectory("cpg-cache-chen")
+          val outside = Files.createTempDirectory("cpg-cache-chen-target")
+          val chen    = input.resolve(".chen")
+          symlink(chen, outside)
+          val builtAtom = Files.createTempFile("built", ".atom")
+          Files.writeString(builtAtom, "BUILT")
+          val out = Files.createTempFile("restored", ".atom")
+
+          CacheControl.enable(CacheControl.Cpg)
+          val refused = new CpgCacheStore(chen.toString)
+          refused.store("fp-1", builtAtom.toString)
+          refused.restore("fp-1", out.toString) shouldBe false
+          Files.readString(out) shouldBe ""
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+
+          val trusted = new CpgCacheStore(chen.toString, trustedCacheDir = true)
+          trusted.store("fp-1", builtAtom.toString)
+          trusted.restore("fp-1", out.toString) shouldBe true
+          Files.readString(out) shouldBe "BUILT"
       }
   }
 end CpgCacheStoreTests
