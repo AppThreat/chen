@@ -1,0 +1,18 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCache.scala
+  h_0926447d100ad2 40-45,49,58
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/utils/AtomicWrites.scala
+  h_0926447d100ad2 57-62
+platform/frontends/x2cpg/src/test/scala/io/appthreat/x2cpg/passes/frontend/ExternalParseCacheTests.scala
+  h_0926447d100ad2 189-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "44c5e213abc6adda0138f91bda9a691d66ed0330",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
