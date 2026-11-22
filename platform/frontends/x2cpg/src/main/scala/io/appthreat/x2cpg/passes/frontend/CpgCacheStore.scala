@@ -237,14 +237,7 @@ class CpgCacheStore(
     * default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
-      if trustedCacheDir then None
-      else
-        cacheDirAnchor
-            .map(anchor =>
-                Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
-            )
-            .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
-            .flatten
+      AtomicWrites.cacheDirRefusal(Paths.get(cacheDir), trustedCacheDir, cacheDirAnchor)
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
@@ -258,9 +251,10 @@ class CpgCacheStore(
     }
 
   if enabled then
-    Try(Files.createDirectories(Paths.get(cacheDir))).failed.foreach { e =>
-        logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}")
-    }
+    Try(Files.createDirectories(Paths.get(cacheDir))).fold(
+      e => logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}"),
+      dir => AtomicWrites.sweepStale(dir)
+    )
 
   private def cacheFile(fingerprint: String): Path =
       Paths.get(cacheDir, s"cpg-$fingerprint.atom")

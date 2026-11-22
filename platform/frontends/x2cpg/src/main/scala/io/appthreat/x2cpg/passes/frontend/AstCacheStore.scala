@@ -104,14 +104,7 @@ class AstCacheStore(
     * at a default position; a user-configured directory is trusted.
     */
   private val cacheDirRefusal: Option[String] =
-      if trustedCacheDir then None
-      else
-        cacheDirAnchor
-            .map(anchor =>
-                Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
-            )
-            .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
-            .flatten
+      AtomicWrites.cacheDirRefusal(Paths.get(cacheDir), trustedCacheDir, cacheDirAnchor)
 
   /** Caching is on only if requested by the frontend, not globally disabled via [[CacheControl]],
     * the cache directory's parent exists, and the directory's position was not refused.
@@ -134,9 +127,10 @@ class AstCacheStore(
     }
 
   if enableAstCache then
-    Try(Files.createDirectories(Paths.get(cacheDir))).failed.foreach { e =>
-        logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}")
-    }
+    Try(Files.createDirectories(Paths.get(cacheDir))).fold(
+      e => logger.warn(s"Failed to create cache directory $cacheDir: ${e.getMessage}"),
+      dir => AtomicWrites.sweepStale(dir)
+    )
 
   /** Cache-aware processing of a single part.
     *
@@ -273,33 +267,33 @@ class AstCacheStore(
   /** The entry's bytes, or `None` when no usable entry exists. An entry that is a symbolic link (or
     * anything but a regular file) is a miss: its target, wherever the link points, is never read.
     */
-  private def regularEntry(cacheFile: Path): Option[Path] =
-      if Files.isRegularFile(cacheFile, LinkOption.NOFOLLOW_LINKS) then Some(cacheFile)
-      else
-        if Files.exists(cacheFile, LinkOption.NOFOLLOW_LINKS) then
-          logger.debug(s"Cache entry $cacheFile is not a regular file; treating it as a miss")
-        None
+  private def entryBytes(cacheFile: Path): Option[Array[Byte]] =
+    val bytes = AtomicWrites.readRegular(cacheFile)
+    if bytes.isEmpty && Files.exists(cacheFile, LinkOption.NOFOLLOW_LINKS) then
+      logger.debug(s"Cache entry $cacheFile is not a readable regular file; treating it as a miss")
+    bytes
 
   private def loadFromCache(partHash: Option[String]): Option[AstBitcode] =
       readable(partHash).flatMap { hash =>
-          regularEntry(Paths.get(cacheDir, s"$hash.ast")) match
-            case None => None
-            case Some(cacheFile) =>
-                try
-                  val bitcode = readBinary[AstBitcode](Files.readAllBytes(cacheFile))
-                  // Discard and recompute caches written by an incompatible build rather than risking a
-                  // corrupt graph.
-                  if AstCache.isCompatible(bitcode) then Some(bitcode)
-                  else
+        val cacheFile = Paths.get(cacheDir, s"$hash.ast")
+        entryBytes(cacheFile) match
+          case None => None
+          case Some(entry) =>
+              try
+                val bitcode = readBinary[AstBitcode](entry)
+                // Discard and recompute caches written by an incompatible build rather than risking a
+                // corrupt graph.
+                if AstCache.isCompatible(bitcode) then Some(bitcode)
+                else
+                  Try(Files.deleteIfExists(cacheFile))
+                  None
+              catch
+                case e: Exception =>
+                    logger.warn(
+                      s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
+                    )
                     Try(Files.deleteIfExists(cacheFile))
                     None
-                catch
-                  case e: Exception =>
-                      logger.warn(
-                        s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
-                      )
-                      Try(Files.deleteIfExists(cacheFile))
-                      None
       }
 
   private def saveToCache(bitcode: AstBitcode, hash: String): Unit =
@@ -325,9 +319,7 @@ class AstCacheStore(
 
   private def loadFragmentBytes(partHash: Option[String]): Option[Array[Byte]] =
       readable(partHash).flatMap { hash =>
-          regularEntry(Paths.get(cacheDir, s"$hash.frag")).flatMap { cacheFile =>
-              Try(Files.readAllBytes(cacheFile)).toOption
-          }
+          entryBytes(Paths.get(cacheDir, s"$hash.frag"))
       }
 
   private def saveFragmentBytes(bytes: Array[Byte], hash: String): Unit =

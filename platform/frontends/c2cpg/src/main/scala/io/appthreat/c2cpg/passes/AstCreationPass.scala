@@ -16,14 +16,14 @@ import io.appthreat.x2cpg.parse.{ParseReporter, UnitSettingsReporter}
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore
 import io.appthreat.x2cpg.passes.frontend.AstCacheStore.{CacheKey, ParsedUnit, resolveCacheDir}
 import io.appthreat.x2cpg.passes.frontend.CacheControl
-import io.appthreat.x2cpg.utils.FileUtil
+import io.appthreat.x2cpg.utils.{AtomicWrites, FileUtil}
 import io.shiftleft.codepropertygraph.Cpg
 import io.shiftleft.passes.StreamingCpgPass
 import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
 import org.slf4j.LoggerFactory
 import upickle.default.readBinary
 
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.{Files, LinkOption, Path, Paths}
 import java.util.concurrent.*
 import scala.concurrent.duration.*
 import scala.util.Try
@@ -611,12 +611,15 @@ class AstCreationPass(
     }
     units.foreach(u => UnitSettingsReporter.record(CdtWorker.unitRecord(u)))
 
-  /** Whether the entry a worker's parse lands in is on disk. */
+  /** Whether the entry a worker's parse lands in is on disk, as a regular file. */
   private def hasEntry(cacheKey: Option[CacheKey], fingerprint: String): Boolean =
       AstCreationPass
           .entryHash(cacheKey, fingerprint, fragments)
           .exists(hash =>
-              Files.exists(Paths.get(exchangeDir, entryName(hash)))
+              Files.isRegularFile(
+                Paths.get(exchangeDir, entryName(hash)),
+                LinkOption.NOFOLLOW_LINKS
+              )
           )
 
   /** Loads the entry the worker wrote. The store takes it from here in an ordinary run; while the
@@ -631,27 +634,29 @@ class AstCreationPass(
   ): Boolean =
       AstCreationPass.entryHash(cacheKey, fingerprint, fragments).exists { hash =>
         val entryFile = Paths.get(exchangeDir, entryName(hash))
-        if !Files.exists(entryFile) then false
-        else
-          val staging = new DiffGraphBuilder
-          val loaded =
-              if fragments then
-                AstFragment.decodeIntoDiffGraph(Files.readAllBytes(entryFile), staging)
-              else
-                Try(readBinary[AstCache.AstBitcode](Files.readAllBytes(entryFile))).toOption
-                    .flatMap { bitcode =>
-                        if AstCache.isCompatible(bitcode) then
-                          AstCache.storeInDiffGraph(bitcode, staging)
-                          Some(bitcode.usedTypes)
-                        else None
-                    }
-          if !cacheOn then Try(Files.deleteIfExists(entryFile))
-          loaded.exists { usedTypes =>
-            registerUsedTypes(usedTypes)
-            if !config.onlyAstCache then diffGraph.absorb(staging)
-            true
-          }
-        end if
+        // a link at the entry's name is no entry: its target, wherever it points, is never read
+        AtomicWrites.readRegular(entryFile) match
+          case None => false
+          case Some(bytes) =>
+              val staging = new DiffGraphBuilder
+              val loaded =
+                  if fragments then
+                    AstFragment.decodeIntoDiffGraph(bytes, staging)
+                  else
+                    Try(readBinary[AstCache.AstBitcode](bytes)).toOption
+                        .flatMap { bitcode =>
+                            if AstCache.isCompatible(bitcode) then
+                              AstCache.storeInDiffGraph(bitcode, staging)
+                              Some(bitcode.usedTypes)
+                            else None
+                        }
+              if !cacheOn then Try(Files.deleteIfExists(entryFile))
+              loaded.exists { usedTypes =>
+                registerUsedTypes(usedTypes)
+                if !config.onlyAstCache then diffGraph.absorb(staging)
+                true
+              }
+        end match
       }
   end loadEntry
 

@@ -3,8 +3,10 @@ package io.appthreat.x2cpg.utils
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.nio.file.attribute.{FileTime, PosixFilePermission}
 import java.nio.file.{FileSystemException, Files, LinkOption, Path}
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 
 class AtomicWritesTests extends AnyWordSpec with Matchers:
 
@@ -280,4 +282,125 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           AtomicWrites.checkCacheDirectory(own.resolve(".chen"), anchor) shouldBe None
       }
   }
+  "AtomicWrites temporaries" should {
+
+      "give a written file the permissions a file created in place gets" in {
+          val dir = Files.createTempDirectory("atomic-perms")
+          assume(
+            Files.getFileStore(dir).supportsFileAttributeView("posix"),
+            "POSIX permissions only"
+          )
+          val reference = Files.createFile(dir.resolve("reference.txt"))
+          val target    = dir.resolve("entry.bin")
+          AtomicWrites.bytes(target, Array[Byte](1, 2, 3))
+          Files.getPosixFilePermissions(target) shouldBe Files.getPosixFilePermissions(reference)
+          // the umask of a test run leaves group or other read access on a plain new file, which
+          // a temporary made by Files.createTempFile would have taken away
+          Files.getPosixFilePermissions(reference).asScala.toSet should not be Set(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE
+          )
+      }
+
+      "give a built directory the permissions a directory created in place gets" in {
+          val dir = Files.createTempDirectory("atomic-dir-perms")
+          assume(
+            Files.getFileStore(dir).supportsFileAttributeView("posix"),
+            "POSIX permissions only"
+          )
+          val reference = Files.createDirectory(dir.resolve("reference"))
+          val target    = dir.resolve("entry")
+          AtomicWrites.directory(target)(tmp => Files.writeString(tmp.resolve("a.json"), "{}"))
+          Files.getPosixFilePermissions(target) shouldBe Files.getPosixFilePermissions(reference)
+      }
+
+      "write to a relative target name" in {
+          val name   = s"atomic-relative-${System.nanoTime()}.txt"
+          val target = Path.of(name)
+          try
+            AtomicWrites.text(target, "RELATIVE")
+            Files.readString(target) shouldBe "RELATIVE"
+          finally Files.deleteIfExists(target)
+      }
+  }
+
+  "AtomicWrites.readRegular" should {
+
+      "read a regular file" in {
+          val file = Files.createTempFile("atomic-read", ".bin")
+          Files.writeString(file, "BYTES")
+          AtomicWrites.readRegular(file).map(String(_, "UTF-8")) shouldBe Some("BYTES")
+      }
+
+      "not read through a symbolic link" in {
+          val dir    = Files.createTempDirectory("atomic-read-link")
+          val victim = Files.writeString(dir.resolve("victim.txt"), "SECRET")
+          val link   = dir.resolve("entry.ast")
+          symlink(link, victim)
+          AtomicWrites.readRegular(link) shouldBe None
+      }
+
+      "not read a directory or a missing file" in {
+          val dir = Files.createTempDirectory("atomic-read-dir")
+          AtomicWrites.readRegular(dir) shouldBe None
+          AtomicWrites.readRegular(dir.resolve("missing")) shouldBe None
+      }
+  }
+
+  "AtomicWrites.sweepStale" should {
+
+      "remove an old leftover temporary and keep a fresh one, an entry and a linked leftover's target" in {
+          val dir     = Files.createTempDirectory("atomic-sweep")
+          val outside = Files.createTempDirectory("atomic-sweep-target")
+          val victim  = Files.writeString(outside.resolve("victim.txt"), "PRECIOUS")
+          val old     = Files.writeString(dir.resolve(".abc.ast.x1.tmp"), "old")
+          val oldDir  = Files.createDirectory(dir.resolve(".fp.y2.tmp"))
+          Files.writeString(oldDir.resolve("a.json"), "{}")
+          val fresh = Files.writeString(dir.resolve(".abc.ast.z3.tmp"), "fresh")
+          val entry = Files.writeString(dir.resolve("abc.ast"), "entry")
+          val link  = dir.resolve(".link.w4.tmp")
+          symlink(link, victim)
+          val dayAndMore = FileTime.fromMillis(System.currentTimeMillis() - 25L * 60 * 60 * 1000)
+          Files.setLastModifiedTime(old, dayAndMore)
+          Files.setLastModifiedTime(oldDir, dayAndMore)
+          Files.setLastModifiedTime(entry, dayAndMore)
+          Try(
+            Files.getFileAttributeView(
+              link,
+              classOf[java.nio.file.attribute.BasicFileAttributeView],
+              LinkOption.NOFOLLOW_LINKS
+            ).setTimes(dayAndMore, null, null)
+          )
+
+          AtomicWrites.sweepStale(dir)
+
+          Files.exists(old, NoFollow*) shouldBe false
+          Files.exists(oldDir, NoFollow*) shouldBe false
+          Files.exists(fresh, NoFollow*) shouldBe true
+          Files.exists(entry, NoFollow*) shouldBe true
+          Files.readString(victim) shouldBe "PRECIOUS"
+      }
+  }
+
+  "AtomicWrites.cacheDirRefusal" should {
+
+      "take a trusted directory as given, even a linked one" in {
+          val dir    = Files.createTempDirectory("atomic-trust")
+          val target = Files.createDirectory(dir.resolve("real"))
+          val link   = dir.resolve(".chen")
+          symlink(link, target)
+          AtomicWrites.cacheDirRefusal(link, trusted = true, Some(dir.toString)) shouldBe None
+          AtomicWrites.cacheDirRefusal(link, trusted = false, Some(dir.toString)) should not be None
+      }
+
+      "refuse a position it cannot check" in {
+          val refusal = AtomicWrites.cacheDirRefusal(
+            Path.of("relative", ".chen"),
+            trusted = false,
+            Some("\u0000not a path")
+          )
+          refusal.exists(_.contains("could not be checked")) shouldBe true
+      }
+  }
+
 end AtomicWritesTests

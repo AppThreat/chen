@@ -117,8 +117,8 @@ class FlowSummaryStore(cacheDir: String):
             )
           None
         else
-          Try(Files.readString(cached)).toOption
-              .flatMap(json => FlowSummaryStore.deserialize(json).toOption)
+          AtomicWrites.readRegular(cached)
+              .flatMap(bytes => FlowSummaryStore.deserialize(String(bytes, "UTF-8")).toOption)
 
   /** Store `summaries` under `fingerprint`, replacing any existing entry atomically through an
     * unpredictable temporary in the same directory, so a link committed at either name is replaced

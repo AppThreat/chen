@@ -54,14 +54,7 @@ class ExternalParseCache(
     * the kind directory. Only a default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
-      if trustedCacheDir then None
-      else
-        cacheDirAnchor
-            .map(anchor =>
-                Try(AtomicWrites.checkCacheDirectory(entriesDir, Paths.get(anchor))).toOption
-            )
-            .getOrElse(Try(AtomicWrites.checkCacheDirectory(entriesDir)).toOption)
-            .flatten
+      AtomicWrites.cacheDirRefusal(entriesDir, trustedCacheDir, cacheDirAnchor)
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
@@ -75,9 +68,10 @@ class ExternalParseCache(
     }
 
   if enabled then
-    Try(Files.createDirectories(entriesDir)).failed.foreach { e =>
-        logger.warn(s"Failed to create cache directory $entriesDir: ${e.getMessage}")
-    }
+    Try(Files.createDirectories(entriesDir)).fold(
+      e => logger.warn(s"Failed to create cache directory $entriesDir: ${e.getMessage}"),
+      dir => AtomicWrites.sweepStale(dir)
+    )
 
   /** Whether this cache can restore or store anything right now: it has a directory it may create
     * and its kind is not switched off (`--cache none`, `--cache no-astgen`, `--no-ast-cache`,
