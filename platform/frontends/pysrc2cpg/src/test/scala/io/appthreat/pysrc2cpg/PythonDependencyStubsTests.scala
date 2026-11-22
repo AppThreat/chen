@@ -155,8 +155,8 @@ class PythonDependencyStubsTests extends PySrc2CpgFixture(withOssDataflow = true
         val cpg = code(userApp, "app.py")
             .withPythonDeps(PythonDepsMode.Stubs)
             .withProjectSetup { dir =>
-                writeFakeVenv(dir)
-                symlink(dir.toPath.resolve(".chen"), outside)
+              writeFakeVenv(dir)
+              symlink(dir.toPath.resolve(".chen"), outside)
             }
         try
           // the run completes and the stubs enter the graph, parsed without a cache

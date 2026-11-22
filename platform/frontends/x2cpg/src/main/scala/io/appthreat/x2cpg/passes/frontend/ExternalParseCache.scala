@@ -47,23 +47,25 @@ class ExternalParseCache(
       }.getOrElse(false)
 
   /** Why the cache's entry directory position was refused, when it was; see [[AstCacheStore]] for
-    * the rule. The check runs on the entry directory `<cacheDir>/<kind>` itself, the position
-    * whose predictable names this store reads and writes: a checkout can commit a real cache
-    * directory with the kind subdirectory as a link, and with an anchor the walk covers the cache
-    * directory above it, existing or not, so a linked `.chen` is refused even when its target
-    * already holds the kind directory. Only a default position is checked.
+    * the rule. The check runs on the entry directory `<cacheDir>/<kind>` itself, the position whose
+    * predictable names this store reads and writes: a checkout can commit a real cache directory
+    * with the kind subdirectory as a link, and with an anchor the walk covers the cache directory
+    * above it, existing or not, so a linked `.chen` is refused even when its target already holds
+    * the kind directory. Only a default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
       else
         cacheDirAnchor
-            .map(anchor => Try(AtomicWrites.checkCacheDirectory(entriesDir, Paths.get(anchor))).toOption)
+            .map(anchor =>
+                Try(AtomicWrites.checkCacheDirectory(entriesDir, Paths.get(anchor))).toOption
+            )
             .getOrElse(Try(AtomicWrites.checkCacheDirectory(entriesDir)).toOption)
             .flatten
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
-      CacheControl.isEnabled(kind)
+          CacheControl.isEnabled(kind)
 
   if cacheDir.nonEmpty && cacheDirParentExists && CacheControl.isEnabled(kind) then
     cacheDirRefusal.foreach { reason =>
@@ -122,25 +124,25 @@ class ExternalParseCache(
       if enabled && Files.isDirectory(outDir) then
         Try {
             AtomicWrites.directory(entryDir(fingerprint)) { tmp =>
-              copyTree(outDir, tmp)
+                copyTree(outDir, tmp)
             }
         }.failed.foreach { e =>
-          logger.warn(s"Failed to store $kind cache: ${e.getMessage}")
+            logger.warn(s"Failed to store $kind cache: ${e.getMessage}")
         }
 
   /** Copies one directory tree into another, both of them real directories. Regular files are
-    * copied and directories recreated; anything else, a symbolic link above all, is skipped, so
-    * the copy never reads through a link in either direction and never descends into a linked
+    * copied and directories recreated; anything else, a symbolic link above all, is skipped, so the
+    * copy never reads through a link in either direction and never descends into a linked
     * directory.
     */
   private def copyTree(from: Path, to: Path): Unit =
       Using.resource(Files.walk(from)) { stream =>
           stream.iterator().asScala.foreach { src =>
-              val dst = to.resolve(from.relativize(src))
-              if Files.isDirectory(src, LinkOption.NOFOLLOW_LINKS) then Files.createDirectories(dst)
-              else if Files.isRegularFile(src, LinkOption.NOFOLLOW_LINKS) then
-                Option(dst.getParent).foreach(Files.createDirectories(_))
-                Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING)
+            val dst = to.resolve(from.relativize(src))
+            if Files.isDirectory(src, LinkOption.NOFOLLOW_LINKS) then Files.createDirectories(dst)
+            else if Files.isRegularFile(src, LinkOption.NOFOLLOW_LINKS) then
+              Option(dst.getParent).foreach(Files.createDirectories(_))
+              Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING)
           }
       }
 

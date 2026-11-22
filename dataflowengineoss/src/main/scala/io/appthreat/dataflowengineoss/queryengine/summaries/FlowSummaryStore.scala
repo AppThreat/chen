@@ -112,7 +112,9 @@ class FlowSummaryStore(cacheDir: String):
         val cached = cacheFile(fingerprint)
         if !Files.isRegularFile(cached, LinkOption.NOFOLLOW_LINKS) then
           if Files.exists(cached, LinkOption.NOFOLLOW_LINKS) then
-            logger.debug(s"Summary cache entry $cached is not a regular file; treating it as a miss")
+            logger.debug(
+              s"Summary cache entry $cached is not a regular file; treating it as a miss"
+            )
           None
         else
           Try(Files.readString(cached)).toOption
@@ -126,6 +128,6 @@ class FlowSummaryStore(cacheDir: String):
       if enabled then
         Try(AtomicWrites.text(cacheFile(fingerprint), FlowSummaryStore.serialize(summaries)))
             .failed.foreach { e =>
-              logger.warn(s"Failed to store summary cache: ${e.getMessage}")
+                logger.warn(s"Failed to store summary cache: ${e.getMessage}")
             }
 end FlowSummaryStore

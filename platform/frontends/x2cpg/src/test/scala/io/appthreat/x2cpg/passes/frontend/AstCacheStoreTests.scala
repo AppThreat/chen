@@ -50,23 +50,24 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
   /** The hash of `key` as spelled on disk, from the entry a first run wrote. */
   private def entryStem(cacheDir: Path, suffix: String): String =
-      val stream = Files.list(cacheDir)
-      val names  = try stream.iterator().asScala.map(_.getFileName.toString).toList
-      finally stream.close()
-      names
-          .flatMap(n => if n.endsWith(suffix) then Some(n.stripSuffix(suffix)) else None)
-          .headOption
-          .getOrElse(fail(s"no $suffix entry was written"))
+    val stream = Files.list(cacheDir)
+    val names =
+        try stream.iterator().asScala.map(_.getFileName.toString).toList
+        finally stream.close()
+    names
+        .flatMap(n => if n.endsWith(suffix) then Some(n.stripSuffix(suffix)) else None)
+        .headOption
+        .getOrElse(fail(s"no $suffix entry was written"))
 
   /** Runs one part so the entry exists, then moves it aside and puts `linkTarget` at its name. */
   private def replaceEntryWithLink(cacheDir: Path, suffix: String, linkTarget: Path): Path =
-      val store = new AstCacheStore(true, cacheDir.toString, onlyAstCache = false)
-      val cold  = new DiffGraphBuilder
-      store.process(cold, "file1", Some(cacheKey), "", _ => (), parsed("1"))
-      val entry = cacheDir.resolve(entryStem(cacheDir, suffix) + suffix)
-      Files.delete(entry)
-      symlink(entry, linkTarget)
-      entry
+    val store = new AstCacheStore(true, cacheDir.toString, onlyAstCache = false)
+    val cold  = new DiffGraphBuilder
+    store.process(cold, "file1", Some(cacheKey), "", _ => (), parsed("1"))
+    val entry = cacheDir.resolve(entryStem(cacheDir, suffix) + suffix)
+    Files.delete(entry)
+    symlink(entry, linkTarget)
+    entry
 
   "AstCacheStore in classic mode" should {
 
@@ -82,7 +83,10 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           store.process(warm, "file1", Some(cacheKey), "", _ => (), parsed("2"))
 
           Files.readString(victim) shouldBe "PRECIOUS"
-          Files.isRegularFile(cache.resolve(entryStem(cache, ".ast") + ".ast"), LinkOption.NOFOLLOW_LINKS) shouldBe
+          Files.isRegularFile(
+            cache.resolve(entryStem(cache, ".ast") + ".ast"),
+            LinkOption.NOFOLLOW_LINKS
+          ) shouldBe
               true
       }
 
@@ -96,7 +100,10 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           store.process(warm, "file1", Some(cacheKey), "", _ => (), parsed("2"))
 
           Files.exists(nowhere) shouldBe false
-          Files.isRegularFile(cache.resolve(entryStem(cache, ".ast") + ".ast"), LinkOption.NOFOLLOW_LINKS) shouldBe
+          Files.isRegularFile(
+            cache.resolve(entryStem(cache, ".ast") + ".ast"),
+            LinkOption.NOFOLLOW_LINKS
+          ) shouldBe
               true
       }
 
@@ -143,7 +150,10 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
           Files.readString(victim) shouldBe "PRECIOUS"
           Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
-          Files.isRegularFile(cache.resolve(entryStem(cache, ".ast") + ".ast"), LinkOption.NOFOLLOW_LINKS) shouldBe
+          Files.isRegularFile(
+            cache.resolve(entryStem(cache, ".ast") + ".ast"),
+            LinkOption.NOFOLLOW_LINKS
+          ) shouldBe
               true
       }
   }
@@ -198,7 +208,10 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
           Files.readString(victim) shouldBe "PRECIOUS"
           Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened
-          Files.isRegularFile(cache.resolve(entryStem(cache, ".frag") + ".frag"), LinkOption.NOFOLLOW_LINKS) shouldBe
+          Files.isRegularFile(
+            cache.resolve(entryStem(cache, ".frag") + ".frag"),
+            LinkOption.NOFOLLOW_LINKS
+          ) shouldBe
               true
       }
   }
@@ -255,9 +268,11 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           store.process(diff, "file1", Some(cacheKey), "", _ => (), parsed("1"))
           Files.readString(outside.resolve("deadbeef.ast")) shouldBe "STALE"
           val stream = Files.list(outside)
-          try stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
-              List("deadbeef.ast")
-          finally stream.close()
+          try
+              stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
+                  List("deadbeef.ast")
+          finally
+              stream.close()
       }
 
       "still be used when the user configured that directory explicitly" in {
@@ -275,8 +290,9 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
           // the user named this position, so entries land where it points
           val stream = Files.list(outside)
-          val names  = try stream.iterator().asScala.map(_.getFileName.toString).toList
-          finally stream.close()
+          val names =
+              try stream.iterator().asScala.map(_.getFileName.toString).toList
+              finally stream.close()
           names.count(_.endsWith(".ast")) shouldBe 1
       }
   }
@@ -307,9 +323,9 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
           warmParses shouldBe 0
 
           def materialize(diff: DiffGraphBuilder): Cpg =
-              val g = Cpg.emptyCpg
-              BatchedUpdate.applyDiff(g.graph, diff)
-              g
+            val g = Cpg.emptyCpg
+            BatchedUpdate.applyDiff(g.graph, diff)
+            g
 
           val gUncached = materialize(uncached)
           val gCold     = materialize(cold)
@@ -318,7 +334,9 @@ class AstCacheStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEa
             DiffTool.compare(gUncached.graph, gCold.graph).asScala.toList shouldBe empty
             DiffTool.compare(gCold.graph, gWarm.graph).asScala.toList shouldBe empty
           finally
-            gUncached.close(); gCold.close(); gWarm.close()
+            gUncached.close()
+            gCold.close()
+            gWarm.close()
       }
   }
 end AstCacheStoreTests

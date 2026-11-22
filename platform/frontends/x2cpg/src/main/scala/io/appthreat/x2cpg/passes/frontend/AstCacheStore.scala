@@ -71,8 +71,8 @@ end AstCacheStore
   * @param cacheDirAnchor
   *   the analysed input root, when the caller knows it. With it, every component of the cache
   *   directory's path below that root is checked whether or not it exists yet, so a linked `.chen`
-  *   is caught even when its target already holds cache entries. Ignored when `trustedCacheDir`
-  *   is true; without an anchor the check starts at the deepest existing component.
+  *   is caught even when its target already holds cache entries. Ignored when `trustedCacheDir` is
+  *   true; without an anchor the check starts at the deepest existing component.
   */
 class AstCacheStore(
   enableAstCacheParam: Boolean,
@@ -108,7 +108,7 @@ class AstCacheStore(
       else
         cacheDirAnchor
             .map(anchor =>
-              Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
+                Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
             )
             .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
             .flatten
@@ -118,7 +118,7 @@ class AstCacheStore(
     */
   private def enableAstCache: Boolean =
       enableAstCacheParam && cacheDirParentExists && cacheDirRefusal.isEmpty &&
-      CacheControl.isEnabled(CacheControl.Ast)
+          CacheControl.isEnabled(CacheControl.Ast)
 
   /** Whether this store reads or writes entries right now. When it does not, [[process]] ignores
     * its `fingerprint`, so a caller whose fingerprint costs something (it reads other files) asks
@@ -270,9 +270,8 @@ class AstCacheStore(
   private def readable(partHash: Option[String]): Option[String] =
       if ParseReporter.isEnabled then None else partHash
 
-  /** The entry's bytes, or `None` when no usable entry exists. An entry that is a symbolic link
-    * (or anything but a regular file) is a miss: its target, wherever the link points, is never
-    * read.
+  /** The entry's bytes, or `None` when no usable entry exists. An entry that is a symbolic link (or
+    * anything but a regular file) is a miss: its target, wherever the link points, is never read.
     */
   private def regularEntry(cacheFile: Path): Option[Path] =
       if Files.isRegularFile(cacheFile, LinkOption.NOFOLLOW_LINKS) then Some(cacheFile)
@@ -283,24 +282,24 @@ class AstCacheStore(
 
   private def loadFromCache(partHash: Option[String]): Option[AstBitcode] =
       readable(partHash).flatMap { hash =>
-        regularEntry(Paths.get(cacheDir, s"$hash.ast")) match
-          case None => None
-          case Some(cacheFile) =>
-              try
-                val bitcode = readBinary[AstBitcode](Files.readAllBytes(cacheFile))
-                // Discard and recompute caches written by an incompatible build rather than risking a
-                // corrupt graph.
-                if AstCache.isCompatible(bitcode) then Some(bitcode)
-                else
-                  Try(Files.deleteIfExists(cacheFile))
-                  None
-              catch
-                case e: Exception =>
-                    logger.warn(
-                      s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
-                    )
+          regularEntry(Paths.get(cacheDir, s"$hash.ast")) match
+            case None => None
+            case Some(cacheFile) =>
+                try
+                  val bitcode = readBinary[AstBitcode](Files.readAllBytes(cacheFile))
+                  // Discard and recompute caches written by an incompatible build rather than risking a
+                  // corrupt graph.
+                  if AstCache.isCompatible(bitcode) then Some(bitcode)
+                  else
                     Try(Files.deleteIfExists(cacheFile))
                     None
+                catch
+                  case e: Exception =>
+                      logger.warn(
+                        s"Failed to load cache $hash: ${e.getClass.getSimpleName} - ${e.getMessage}"
+                      )
+                      Try(Files.deleteIfExists(cacheFile))
+                      None
       }
 
   private def saveToCache(bitcode: AstBitcode, hash: String): Unit =
@@ -326,9 +325,9 @@ class AstCacheStore(
 
   private def loadFragmentBytes(partHash: Option[String]): Option[Array[Byte]] =
       readable(partHash).flatMap { hash =>
-        regularEntry(Paths.get(cacheDir, s"$hash.frag")).flatMap { cacheFile =>
-          Try(Files.readAllBytes(cacheFile)).toOption
-        }
+          regularEntry(Paths.get(cacheDir, s"$hash.frag")).flatMap { cacheFile =>
+              Try(Files.readAllBytes(cacheFile)).toOption
+          }
       }
 
   private def saveFragmentBytes(bytes: Array[Byte], hash: String): Unit =

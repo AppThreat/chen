@@ -174,12 +174,16 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           val refused = new ExternalParseCache(chen.toString, CacheControl.Astgen)
           refused.isUsable shouldBe false
           refused.store("fp-1", outDirWith("a.json" -> "AAA"))
-          refused.restore("fp-1", Files.createTempDirectory("parse-restored-refused")) shouldBe false
+          refused.restore(
+            "fp-1",
+            Files.createTempDirectory("parse-restored-refused")
+          ) shouldBe false
           val stream = Files.list(outside)
           try stream.iterator().asScala.toList shouldBe empty
           finally stream.close()
 
-          val trusted = new ExternalParseCache(chen.toString, CacheControl.Astgen, trustedCacheDir = true)
+          val trusted =
+              new ExternalParseCache(chen.toString, CacheControl.Astgen, trustedCacheDir = true)
           trusted.isUsable shouldBe true
           trusted.store("fp-1", outDirWith("a.json" -> "AAA"))
           val restored = Files.createTempDirectory("parse-restored-trusted")
@@ -207,9 +211,11 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           try stream.iterator().asScala.toList shouldBe empty
           finally stream.close()
           val chenStream = Files.list(chen)
-          try chenStream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
-              List(CacheControl.Astgen)
-          finally chenStream.close()
+          try
+              chenStream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
+                  List(CacheControl.Astgen)
+          finally
+              chenStream.close()
       }
 
       "be switched off when a linked .chen's target already holds the kind directory" in {
@@ -238,7 +244,9 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
 
           Files.readString(kindDir.resolve("left.json")) shouldBe "LEFT"
           val stream = Files.list(kindDir)
-          try stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe List("left.json")
+          try stream.iterator().asScala.map(_.getFileName.toString).toList shouldBe List(
+                "left.json"
+              )
           finally stream.close()
       }
 
@@ -256,9 +264,12 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           symlink(oldTmp, outside)
           CacheControl.enable(CacheControl.Astgen)
 
-          new ExternalParseCache(cacheDir.toString, CacheControl.Astgen).store("fp-1", outDirWith(
-            "a.json" -> "AAA"
-          ))
+          new ExternalParseCache(cacheDir.toString, CacheControl.Astgen).store(
+            "fp-1",
+            outDirWith(
+              "a.json" -> "AAA"
+            )
+          )
 
           Files.readString(outside.resolve("left.json")) shouldBe "PRECIOUS"
           Files.isSymbolicLink(oldTmp) shouldBe true // the name was never opened

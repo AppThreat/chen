@@ -6,7 +6,15 @@ import org.slf4j.LoggerFactory
 import java.io.OutputStream
 import java.io.IOException
 import java.nio.file.attribute.BasicFileAttributes
-import java.nio.file.{FileVisitResult, Files, LinkOption, Path, Paths, SimpleFileVisitor, StandardCopyOption}
+import java.nio.file.{
+    FileVisitResult,
+    Files,
+    LinkOption,
+    Path,
+    Paths,
+    SimpleFileVisitor,
+    StandardCopyOption
+}
 import java.security.{DigestInputStream, MessageDigest}
 import scala.util.{Try, Using}
 
@@ -224,23 +232,23 @@ class CpgCacheStore(
           Files.isDirectory(Option(Paths.get(cacheDir).getParent).getOrElse(Paths.get(".")))
       }.getOrElse(false)
 
-  /** Why the cache directory position was refused, when it was; see [[AstCacheStore]] for the
-    * rule (the anchor, when given, widens the walk to every component below the input root).
-    * Only a default position is checked.
+  /** Why the cache directory position was refused, when it was; see [[AstCacheStore]] for the rule
+    * (the anchor, when given, widens the walk to every component below the input root). Only a
+    * default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
       else
         cacheDirAnchor
             .map(anchor =>
-              Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
+                Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir), Paths.get(anchor))).toOption
             )
             .getOrElse(Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption)
             .flatten
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
-      CacheControl.isEnabled(CacheControl.Cpg)
+          CacheControl.isEnabled(CacheControl.Cpg)
 
   if cacheDir.nonEmpty && cacheDirParentExists && CacheControl.isEnabled(CacheControl.Cpg) then
     cacheDirRefusal.foreach { reason =>
@@ -289,7 +297,7 @@ class CpgCacheStore(
         val source = Paths.get(atomPath)
         if Files.isRegularFile(source) then
           Try(AtomicWrites.copy(source, cacheFile(fingerprint))).failed.foreach { e =>
-            logger.warn(s"Failed to store CPG cache: ${e.getMessage}")
+              logger.warn(s"Failed to store CPG cache: ${e.getMessage}")
           }
 
 end CpgCacheStore

@@ -185,7 +185,8 @@ object PredefinedMacros:
       if !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) then None
       else
         Try {
-            val lines = Files.readAllLines(file, StandardCharsets.UTF_8).toArray(Array.empty[String])
+            val lines =
+                Files.readAllLines(file, StandardCharsets.UTF_8).toArray(Array.empty[String])
             val (includes, defines) = lines.partition(_.startsWith("include "))
             CompilerFacts(
               parseDefines(defines.iterator),

@@ -15,7 +15,7 @@ import scala.jdk.CollectionConverters.*
 class FlowSummaryStoreTests extends AnyWordSpec with Matchers with BeforeAndAfterEach:
 
   override def beforeEach(): Unit = CacheControl.enable(CacheControl.Summary)
-  override def afterEach(): Unit = CacheControl.enable(CacheControl.Summary)
+  override def afterEach(): Unit  = CacheControl.enable(CacheControl.Summary)
 
   /** Creates a symbolic link at `link` pointing at `target`, skipping the test where the platform
     * refuses to create one.
@@ -50,8 +50,8 @@ class FlowSummaryStoreTests extends AnyWordSpec with Matchers with BeforeAndAfte
           Files.isRegularFile(entry(cacheDir, "fp-1"), LinkOption.NOFOLLOW_LINKS) shouldBe true
           val stream = Files.list(cacheDir)
           try stream.iterator().asScala
-              .filter(_.getFileName.toString.endsWith(".tmp"))
-              .toList shouldBe empty
+                  .filter(_.getFileName.toString.endsWith(".tmp"))
+                  .toList shouldBe empty
           finally stream.close()
       }
 

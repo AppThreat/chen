@@ -207,13 +207,16 @@ final class ProjectSources(val config: Config):
     * nothing is created or written through it. A user-configured directory is taken as chosen.
     */
   private val cacheDir: Option[Path] =
-      val dir           = Paths.get(resolveCacheDir(config.inputPath, config.cacheDir))
-      val userConfigured = config.cacheDir != null && config.cacheDir.nonEmpty
-      val positionUsable = userConfigured ||
-          AtomicWrites
-              .checkCacheDirectory(dir.resolve(PredefinedMacros.CacheSubdir), Paths.get(config.inputPath))
-              .isEmpty
-      Option.when(config.enableAstCache && positionUsable)(dir)
+    val dir            = Paths.get(resolveCacheDir(config.inputPath, config.cacheDir))
+    val userConfigured = config.cacheDir != null && config.cacheDir.nonEmpty
+    val positionUsable = userConfigured ||
+        AtomicWrites
+            .checkCacheDirectory(
+              dir.resolve(PredefinedMacros.CacheSubdir),
+              Paths.get(config.inputPath)
+            )
+            .isEmpty
+    Option.when(config.enableAstCache && positionUsable)(dir)
 
   /** Every file that may be parsed, before a database narrows the set. */
   private lazy val candidates: Array[String] =

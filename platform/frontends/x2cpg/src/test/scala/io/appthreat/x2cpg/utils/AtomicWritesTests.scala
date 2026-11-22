@@ -22,9 +22,9 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
             assume(false, s"this platform refused to create a symbolic link: ${e.getMessage}")
 
   private def entries(dir: Path): List[Path] =
-      val stream = Files.list(dir)
-      try stream.iterator().asScala.toList
-      finally stream.close()
+    val stream = Files.list(dir)
+    try stream.iterator().asScala.toList
+    finally stream.close()
 
   /** The unpredictable temporaries all start with a dot and end in `.tmp`; none may survive a
     * completed write.
@@ -47,7 +47,7 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           AtomicWrites.bytes(target, "CONTENT".getBytes("UTF-8"))
 
           Files.readString(victim) shouldBe "PRECIOUS"
-          Files.isRegularFile(target, NoFollow: _*) shouldBe true
+          Files.isRegularFile(target, NoFollow*) shouldBe true
           Files.readString(target) shouldBe "CONTENT"
           leftoverTemporaries(dir) shouldBe empty
       }
@@ -61,7 +61,7 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           AtomicWrites.bytes(target, "CONTENT".getBytes("UTF-8"))
 
           Files.exists(nowhere) shouldBe false
-          Files.isRegularFile(target, NoFollow: _*) shouldBe true
+          Files.isRegularFile(target, NoFollow*) shouldBe true
       }
   }
 
@@ -86,8 +86,8 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
   "AtomicWrites.copy" should {
 
       "copy onto a final name that is a symbolic link without touching the link's target" in {
-          val dir     = Files.createTempDirectory("atomic-copy")
-          val source  = dir.resolve("built.atom")
+          val dir    = Files.createTempDirectory("atomic-copy")
+          val source = dir.resolve("built.atom")
           Files.writeString(source, "BUILT")
           val outside = Files.createTempDirectory("atomic-copy-target")
           val victim  = outside.resolve("victim.atom")
@@ -126,7 +126,7 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           AtomicWrites.replace(target) { tmp => Files.writeString(tmp, "STREAMED") }
 
           Files.readString(victim) shouldBe "PRECIOUS"
-          Files.isRegularFile(target, NoFollow: _*) shouldBe true
+          Files.isRegularFile(target, NoFollow*) shouldBe true
           Files.readString(target) shouldBe "STREAMED"
           leftoverTemporaries(dir) shouldBe empty
       }
@@ -137,8 +137,8 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           Files.writeString(target, "OLD")
 
           a[RuntimeException] should be thrownBy AtomicWrites.replace(target) { tmp =>
-              Files.writeString(tmp, "PARTIAL")
-              throw new RuntimeException("the stream broke")
+            Files.writeString(tmp, "PARTIAL")
+            throw new RuntimeException("the stream broke")
           }
 
           Files.readString(target) shouldBe "OLD"
@@ -156,7 +156,7 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
 
           AtomicWrites.directory(entry) { tmp => Files.writeString(tmp.resolve("a.json"), "A") }
 
-          Files.isDirectory(entry, NoFollow: _*) shouldBe true
+          Files.isDirectory(entry, NoFollow*) shouldBe true
           Files.readString(entry.resolve("a.json")) shouldBe "A"
           entries(outside) shouldBe empty
           leftoverTemporaries(dir) shouldBe empty
@@ -168,7 +168,9 @@ class AtomicWritesTests extends AnyWordSpec with Matchers:
           Files.createDirectories(entry)
           Files.writeString(entry.resolve("stale.json"), "STALE")
 
-          AtomicWrites.directory(entry) { tmp => Files.writeString(tmp.resolve("fresh.json"), "FRESH") }
+          AtomicWrites.directory(entry) { tmp =>
+              Files.writeString(tmp.resolve("fresh.json"), "FRESH")
+          }
 
           Files.readString(entry.resolve("fresh.json")) shouldBe "FRESH"
           Files.exists(entry.resolve("stale.json")) shouldBe false

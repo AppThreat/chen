@@ -428,8 +428,8 @@ object CdtWorker:
   end answer
 
   /** Writes the reply through an unpredictable temporary renamed onto the reply file, so a link
-    * placed at that name is replaced rather than written through. The reply directory is this
-    * run's own, but one writer pattern covers every fixed name the worker touches.
+    * placed at that name is replaced rather than written through. The reply directory is this run's
+    * own, but one writer pattern covers every fixed name the worker touches.
     */
   private[worker] def writeReply(job: Job, reply: Reply): Unit =
       AtomicWrites.bytes(
@@ -610,8 +610,8 @@ class CdtWorkerPool(
   /** An argument file holding the class path, so the command line stays short whatever the class
     * path's length (Windows refuses command lines over 32,767 characters). Inside quotes a
     * backslash escapes the next character, so every backslash and quote of the path is escaped.
-    * Written through an unpredictable temporary renamed onto the fixed name, like every other
-    * fixed name in this directory.
+    * Written through an unpredictable temporary renamed onto the fixed name, like every other fixed
+    * name in this directory.
     */
   private lazy val classpathArgFile: Path =
     val quoted = classpathFor(getClass).replace("\\", "\\\\").replace("\"", "\\\"")
@@ -649,9 +649,17 @@ class CdtWorkerPool(
 
   private def dispatch(worker: Worker, file: Path, fingerprint: String): (Attempt, Boolean) =
     val replyFile = replyDir.resolve(s"reply-${replyCount.incrementAndGet()}.json").toString
-    val job       =
-        Job(file.toString, fingerprint, replyFile, exchangeDir, fragments, trustedCacheDir, settings)
-    val marker    = startedMarker(replyFile)
+    val job =
+        Job(
+          file.toString,
+          fingerprint,
+          replyFile,
+          exchangeDir,
+          fragments,
+          trustedCacheDir,
+          settings
+        )
+    val marker = startedMarker(replyFile)
     // the worker's start and its reading of the project have their own deadline; the unit's
     // budget runs from the moment the worker says the unit's own work began
     val startDeadline      = System.currentTimeMillis() + startupBudget.toMillis
