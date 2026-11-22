@@ -86,7 +86,8 @@ class C2Cpg extends X2CpgFrontend[Config]:
           val store = new AstCacheStore(
             config.enableAstCache,
             resolveCacheDir(config.inputPath, config.cacheDir),
-            config.onlyAstCache
+            config.onlyAstCache,
+            trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
           )
           // A store that is off (`--cache none`, `--no-ast-cache`) answers every lookup with
           // nothing, so the fingerprints, which read macro, include and owner files, are not built.

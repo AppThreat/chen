@@ -409,7 +409,8 @@ class AstCreationPass(
     config.enableAstCache,
     resolveCacheDir(config.inputPath, config.cacheDir),
     config.onlyAstCache,
-    fragments
+    fragments,
+    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
   )
 
   private val parseExecutor = Executors.newFixedThreadPool(maxConcurrentParsers)

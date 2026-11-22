@@ -26,7 +26,8 @@ class AstCreationPass(config: Config, cpg: Cpg, parser: PhpParser)(implicit
   private val cacheStore = new AstCacheStore(
     config.enableAstCache,
     resolveCacheDir(config.inputPath, config.cacheDir),
-    onlyAstCache = false
+    onlyAstCache = false,
+    trustedCacheDir = config.cacheDir != null && config.cacheDir.nonEmpty
   )
 
   private val PhpSourceFileExtensions: Set[String] = Set(".php")
