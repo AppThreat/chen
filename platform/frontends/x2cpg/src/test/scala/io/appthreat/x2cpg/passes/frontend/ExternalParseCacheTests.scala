@@ -186,5 +186,30 @@ class ExternalParseCacheTests extends AnyWordSpec with Matchers:
           trusted.restore("fp-1", restored) shouldBe true
           Files.readString(restored.resolve("a.json")) shouldBe "AAA"
       }
+
+      "be switched off when the entry directory is a link inside a real cache directory" in {
+          // a real .chen with its kind subdirectory committed as a link: the plain directory
+          // above must not let the store read and write through the link
+          val input   = Files.createTempDirectory("parse-cache-entrydir")
+          val chen    = Files.createDirectories(input.resolve(".chen"))
+          val outside = Files.createTempDirectory("parse-cache-entrydir-target")
+          symlink(chen.resolve(CacheControl.Astgen), outside)
+          CacheControl.enable(CacheControl.Astgen)
+
+          val cache = new ExternalParseCache(chen.toString, CacheControl.Astgen)
+          cache.isUsable shouldBe false
+
+          // a run without the cache completes: storing is a no-op and restoring answers a miss
+          cache.store("fp-1", outDirWith("a.json" -> "AAA"))
+          cache.restore("fp-1", Files.createTempDirectory("parse-restored-entrydir")) shouldBe false
+
+          val stream = Files.list(outside)
+          try stream.iterator().asScala.toList shouldBe empty
+          finally stream.close()
+          val chenStream = Files.list(chen)
+          try chenStream.iterator().asScala.map(_.getFileName.toString).toList shouldBe
+              List(CacheControl.Astgen)
+          finally chenStream.close()
+      }
   }
 end ExternalParseCacheTests

@@ -54,9 +54,12 @@ object AtomicWrites:
     *
     * The walk starts at the deepest component that already exists and checks every component down
     * to `dir` without following links, so a link anywhere on the remaining path is caught before
-    * anything is created through it. Callers use this for directories at a default position under
-    * the analysed input, which a checkout controls; a directory the user explicitly configured is
-    * the user's own choice and is not checked.
+    * anything is created through it. A link above the deepest existing component, the part of the
+    * path that was spelled by the user rather than committed by a checkout (the analysed input
+    * itself, or a temporary directory behind a system link, as `/tmp` on macOS), is not part of
+    * the check: the walk deliberately goes no further up than it must. Callers use this for
+    * directories at a default position under the analysed input, which a checkout controls; a
+    * directory the user explicitly configured is the user's own choice and is not checked.
     */
   def checkCacheDirectory(dir: Path): Option[String] =
       val below = mutable.ListBuffer.empty[Path]

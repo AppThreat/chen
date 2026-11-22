@@ -37,12 +37,16 @@ class ExternalParseCache(cacheDir: String, kind: String, trustedCacheDir: Boolea
           Files.isDirectory(Option(Paths.get(cacheDir).getParent).getOrElse(Paths.get(".")))
       }.getOrElse(false)
 
-  /** Why the cache directory position was refused, when it was; see [[AstCacheStore]] for the
-    * rule. Only a default position is checked.
+  /** Why the cache's entry directory position was refused, when it was; see [[AstCacheStore]] for
+    * the rule. The check runs on the entry directory `<cacheDir>/<kind>` itself, the position
+    * whose predictable names this store reads and writes: a checkout can commit a real cache
+    * directory with the kind subdirectory as a link, and the walk from the deepest existing
+    * component down still covers the cache directory above it, so a linked cache directory keeps
+    * being refused. Only a default position is checked.
     */
   private val cacheDirRefusal: Option[String] =
       if trustedCacheDir then None
-      else Try(AtomicWrites.checkCacheDirectory(Paths.get(cacheDir))).toOption.flatten
+      else Try(AtomicWrites.checkCacheDirectory(entriesDir)).toOption.flatten
 
   private def enabled: Boolean =
       cacheDir.nonEmpty && cacheDirParentExists && cacheDirRefusal.isEmpty &&
@@ -51,7 +55,7 @@ class ExternalParseCache(cacheDir: String, kind: String, trustedCacheDir: Boolea
   if cacheDir.nonEmpty && cacheDirParentExists && CacheControl.isEnabled(kind) then
     cacheDirRefusal.foreach { reason =>
         logger.warn(
-          s"Switching the $kind cache off for this run: $reason, so cache directory $cacheDir is not used"
+          s"Switching the $kind cache off for this run: $reason, so cache directory $entriesDir is not used"
         )
     }
 
