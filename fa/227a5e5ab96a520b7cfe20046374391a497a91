@@ -1,0 +1,21 @@
+build.sbt
+  s_176e793652cadb::t_a8a99d445d3ea2 3
+docs/v4/frontends.md
+  s_176e793652cadb::t_3408482727e651 311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fa227a5e5ab96a520b7cfe20046374391a497a91",
+  "prompts": {},
+  "sessions": {
+    "s_176e793652cadb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_fd474a86-6a93-4254-931d-1cbc54ea0216",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
