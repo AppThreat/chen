@@ -13,6 +13,8 @@ import scala.collection.mutable
   */
 final class TypeNames(unit: EdgaUnit):
 
+  private val anonymous = new AnonymousRecordNames(unit, id => apply(id))
+
   private val cache = mutable.HashMap.empty[Long, String]
 
   def apply(id: Long): String =
@@ -26,12 +28,16 @@ final class TypeNames(unit: EdgaUnit):
     * char*`, `const int&`), as the CDT frontend writes return types.
     */
   def returnType(id: Option[Long]): String =
-      id.flatMap(unit.types.get).flatMap(_.string("name")).map { n =>
-          withoutInlineNamespaces(n).replace("struct ", "").replace("union ", "").replace(
-            "enum ",
-            ""
-          ).replace(" *", "*").replace(" &", "&").replace("::", ".").trim
+      id.flatMap(unit.types.get).flatMap(_.string("name")).filterNot(_.contains("<unnamed>")).map {
+          n =>
+              withoutInlineNamespaces(n).replace("struct ", "").replace("union ", "").replace(
+                "enum ",
+                ""
+              ).replace(" *", "*").replace(" &", "&").replace("::", ".").trim
       }.filter(_.nonEmpty).getOrElse(apply(id))
+
+  /** Whether the type is a record the program declares without a tag. */
+  def isAnonymousRecord(id: Long): Boolean = unit.types.get(id).exists(anonymous.isUnnamed)
 
   /** The type a typedef or a qualifier wraps, followed to the type itself. */
   def resolved(id: Long, depth: Int = 0): Option[Value] =
@@ -94,12 +100,17 @@ final class TypeNames(unit: EdgaUnit):
           s"${sub(t.long("returns"))}(${all.mkString(",")})"
       // a lambda's closure has no name the program can spell
       case "class" | "struct" | "union" if t.flag("closure") => X2CpgDefines.Any
+      case "class" | "struct" | "union" if anonymous.isUnnamed(t) =>
+          t.long("id").flatMap(anonymous.nameOf).getOrElse(X2CpgDefines.Any)
       case "class" | "struct" | "union" =>
           t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag")).map(dotted)
               .getOrElse(X2CpgDefines.Any)
+      // an enumeration without a tag is named by the typedef that declares it, as a record is
       case "integer" if t.flag("enum") =>
-          t.string("qualifiedName").filter(_.nonEmpty).orElse(t.string("tag").filter(_.nonEmpty))
-              .map(dotted).getOrElse(cleaned(t.string("name")))
+          t.string("qualifiedName").filter(q => q.nonEmpty && !q.endsWith("<unnamed>"))
+              .orElse(t.string("tag").filter(_.nonEmpty)).map(dotted)
+              .orElse(t.string("typedefName").filter(_.nonEmpty))
+              .getOrElse(cleaned(t.string("name")))
       case _ => cleaned(t.string("name"))
     end match
   end nameOf

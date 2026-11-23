@@ -181,9 +181,9 @@ class AstCreator(
             of     <- t.long("of")
             file   <- t.position.map(_.file) if foreign.contains(file)
           do
-            val record =
-                CGlobal.typedefRecord(registerType(types(typeId)), registerType(types(of)))
-            usedTypes.add(record)
+            val (named, target) = (registerType(types(typeId)), registerType(types(of)))
+            // the typedef that names a type declared without a tag is that type, not an alias
+            if named != target then usedTypes.add(CGlobal.typedefRecord(named, target))
     }
 
   /** The translation unit's own file, and the project headers that belong to it. */
@@ -683,24 +683,30 @@ class AstCreator(
   ): Option[Ast] =
     if isNamedEnum(t) then return Some(enumDeclAst(t, path))
     t.string("kind") match
+      // the typedef that names a record without a tag is the record: its TYPE_DECL has the name
+      case Some("typeref")
+          if t.long("of").exists(types.isAnonymousRecord) &&
+              registerType(types(t.long("id"))) == registerType(types(t.long("of"))) =>
+          None
       case Some("typeref") =>
           val name         = t.string("typedef").getOrElse("")
+          val fullName     = registerType(types(t.long("id")))
           val alias        = registerType(types(t.long("of")))
           val targetIsEnum = t.long("of").flatMap(unit.types.get).exists(isAnonymousEnum)
+          // the typedef that names an enumeration without a tag is that enumeration: it aliases
+          // nothing but itself
           val decl = typeDeclNode(
             t,
             name,
-            registerType(types(t.long("id"))),
+            fullName,
             path,
             if targetIsEnum then s"typedef enum $name" else s"typedef $name",
-            alias = Some(alias)
+            alias = Option.when(alias != fullName)(alias)
           )
-          // a typedef of a record without a tag carries the record's members, as the CDT
-          // frontend's typedef declaration does (`typedef struct { fe x; } ge;`), and so does a
-          // typedef of an enum without a tag (`typedef enum { A, B } count_t;`)
+          // a typedef of an enum without a tag carries its enumerators (`typedef enum { A, B }
+          // count_t;`); a record without a tag has a TYPE_DECL of its own, named after the first
+          // declarator of the declaration that holds it
           val carried = t.long("of").flatMap(unit.types.get).map {
-              case rec if isDefinedRecordOrTypedef(rec) && rec.string("tag").forall(_.isEmpty) =>
-                  recordMemberAsts(rec, path)
               case e if isAnonymousEnum(e) =>
                   val of = registerType(types(t.long("id")))
                   e.list("enumerators").map(en =>
@@ -1263,16 +1269,44 @@ class AstCreator(
         ).orElse(p)
 
   protected def lineEnd(node: Value): Option[Integer] =
-      node.field("end").flatMap(EdgaUnit.pos).orElse(rangeEnd(node)).map(p =>
-          Integer.valueOf(p.line)
-      )
+      endOf(node).map(p => Integer.valueOf(p.line))
 
   protected def columnEnd(node: Value): Option[Integer] =
-      node.field("end").flatMap(EdgaUnit.pos).orElse(rangeEnd(node))
-          .map(p => Integer.valueOf(p.column))
+      endOf(node).map(p => Integer.valueOf(p.column))
+
+  private def endOf(node: Value): Option[Pos] =
+      node.field("end").flatMap(EdgaUnit.pos).orElse(rangeEnd(node)).map(closingInvocation(node, _))
 
   private def rangeEnd(node: Value): Option[Pos] =
       node.field("range").flatMap(r => r.arr.lift(1)).flatMap(EdgaUnit.pos)
+
+  /** The top-level macro invocations of each file by where they start, to find the one an
+    * expression ends in.
+    */
+  private lazy val invocationsByStart: Map[Long, java.util.TreeMap[Long, Pos]] =
+      unit.invocations.values.filter(i => i.long("parent").forall(_ <= 0)).flatMap { i =>
+          for
+            s <- i.field("start").flatMap(EdgaUnit.pos)
+            e <- i.field("end").flatMap(EdgaUnit.pos)
+          yield (s, e)
+      }.groupBy(_._1.file).map { (file, spans) =>
+        val tree = new java.util.TreeMap[Long, Pos]()
+        spans.foreach((s, e) => tree.put(positionKey(s), e))
+        file -> tree
+      }
+
+  private def positionKey(p: Pos): Long = (p.line.toLong << 24) | p.column.toLong
+
+  /** An expression that ends in a macro invocation ends at the invocation's closing parenthesis:
+    * the front end puts the end of such an expression at the macro's name. A node a macro expanded
+    * keeps the end it has.
+    */
+  private def closingInvocation(node: Value, end: Pos): Pos =
+      if node.field("mi").isDefined then end
+      else
+        invocationsByStart.get(end.file).flatMap(tree =>
+            Option(tree.floorEntry(positionKey(end))).map(_.getValue)
+        ).filter(close => positionKey(end) <= positionKey(close)).getOrElse(end)
 
   /** The node's source text, from its start to its end in one file. */
   protected def code(node: Value): String =
@@ -1285,6 +1319,13 @@ class AstCreator(
           start <- node.position
           end   <- node.field("end").flatMap(EdgaUnit.pos)
         yield (start, end))
+        .map { (s, e) =>
+          val closed = closingInvocation(node, e)
+          // the text of several lines is cut before the end's own column (a statement's `;`),
+          // so the closing parenthesis is read through the column after it
+          if closed != e && closed.line > s.line then (s, closed.copy(column = closed.column + 1))
+          else (s, closed)
+        }
     range.filter((s, e) => s.file == e.file && node.field("mi").isEmpty).flatMap { (s, e) =>
         linesOf(s.file).flatMap(textBetween(_, s, e))
     }

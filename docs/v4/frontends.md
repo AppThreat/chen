@@ -308,8 +308,8 @@ explains the trade-off.
   databases, external paths and the AST cache. There is no separate command line; atom exposes it
   as `--c-frontend edg` or `edg-fallback`.
 - **Finding edga.** The system property `edga.path`, then the `EDGA_PATH` environment variable,
-  then `edga` (`edga.exe` on Windows) on the `PATH`. chen 4.0.5 is tested with
-  [edga 0.4.0](https://github.com/AppThreat/edga/releases/tag/v0.4.0), which has binaries for
+  then `edga` (`edga.exe` on Windows) on the `PATH`. chen 4.0.6 is tested with
+  [edga 0.4.1](https://github.com/AppThreat/edga/releases/tag/v0.4.1), which has binaries for
   Linux (glibc and musl), macOS and Windows. Without edga, `createCpg` throws
   `IllegalStateException`, unless `fallbackToCdt` is set, in which case c2cpg parses the project.
   With fallback, units edga cannot export, and the headers they own, are parsed by c2cpg, and the
@@ -459,7 +459,7 @@ The parser is still `rbastgen` from atom-parsetools, found through `rbastgen.pat
 | Frontend | Needs | Found through |
 |---|---|---|
 | c2cpg | nothing; a GCC or Clang driver improves macro accuracy | `PATH`, or the compilation database |
-| edg2atom | edga 0.4.0 | `edga.path`, `EDGA_PATH`, `PATH` |
+| edg2atom | edga 0.4.1 | `edga.path`, `EDGA_PATH`, `PATH` |
 | jssrc2cpg | `astgen` from atom-parsetools 1.x or 2.x | `PATH` |
 | php2atom | PHP and nikic/php-parser (bundled `php-parse`), or `phpastgen` | `--php-parser-bin`, `PHP_PARSER_BIN`, `PHP_ASTGEN_BIN` |
 | ruby2atom | `rbastgen` from atom-parsetools | `rbastgen.path`, `RBASTGEN_PATH`, `PATH` |
