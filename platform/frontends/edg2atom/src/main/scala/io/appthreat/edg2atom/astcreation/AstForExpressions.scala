@@ -123,6 +123,8 @@ trait AstForExpressions(implicit withSchemaValidation: ValidationMode):
         X2CpgDefines.VirtualCallTag,
         "true"
       ))
+    // an expansion's node has no text of its own to read its code from
+    if raw.field("mi").isDefined then ExpansionCode.fill(ast)
     ast
   end expressionAstOf
 
