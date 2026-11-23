@@ -459,7 +459,7 @@ The parser is still `rbastgen` from atom-parsetools, found through `rbastgen.pat
 | Frontend | Needs | Found through |
 |---|---|---|
 | c2cpg | nothing; a GCC or Clang driver improves macro accuracy | `PATH`, or the compilation database |
-| edg2atom | edga 0.4.0 | `edga.path`, `EDGA_PATH`, `PATH` |
+| edg2atom | edga 0.4.1 | `edga.path`, `EDGA_PATH`, `PATH` |
 | jssrc2cpg | `astgen` from atom-parsetools 1.x or 2.x | `PATH` |
 | php2atom | PHP and nikic/php-parser (bundled `php-parse`), or `phpastgen` | `--php-parser-bin`, `PHP_PARSER_BIN`, `PHP_ASTGEN_BIN` |
 | ruby2atom | `rbastgen` from atom-parsetools | `rbastgen.path`, `RBASTGEN_PATH`, `PATH` |
