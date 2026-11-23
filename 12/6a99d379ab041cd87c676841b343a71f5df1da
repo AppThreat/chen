@@ -18,6 +18,14 @@ platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/Ano
   "base_commit_sha": "126a99d379ab041cd87c676841b343a71f5df1da",
   "prompts": {},
   "sessions": {
+    "s_8a4433d1784041": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82bff-b756-4a5d-8551-a808005aa216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
     "s_8dea141d2102f2": {
       "agent_id": {
         "tool": "claude",
