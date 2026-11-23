@@ -1,0 +1,56 @@
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/TypeNames.scala
+  s_8dea141d2102f2::t_cc6191fc58d974 39-41
+  s_8dea141d2102f2::t_2c336063d76f80 15,31,103-104
+  s_8dea141d2102f2::t_3e8b54bc4ade99 32-36
+  s_8dea141d2102f2::t_174e633ad8839f 14,16
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstCreator.scala
+  s_8dea141d2102f2::t_cc6191fc58d974 686-690
+  s_8dea141d2102f2::t_0be5c2b38ba8ea 703-705
+  s_8dea141d2102f2::t_2e25914e7f36a3 1269,1272-1275,1280-1289,1293-1297,1300-1306
+  s_8dea141d2102f2::t_af2516081a1b06 1290-1292,1298-1299,1320-1324
+  s_8dea141d2102f2::t_f71375cbb7148c 1319,1325
+  s_8dea141d2102f2::t_d8b3f219525a86 1307
+  s_8dea141d2102f2::t_174e633ad8839f 54
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/passes/MemorySafetyOnEdgTypedefRecordTests.scala
+  s_8dea141d2102f2::t_04233bf5e7a173 1-23,25-44
+  s_8dea141d2102f2::t_cc6191fc58d974 24
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AnonymousRecordNames.scala
+  s_8dea141d2102f2::t_3e8b54bc4ade99 63-77,82-84,90-94,124-131
+  s_8dea141d2102f2::t_816669135a50b3 1-2,4-14,17-19,20-24,26-62,78-81,85-89,95-96,98-101,104-123,132-139,140
+  s_8dea141d2102f2::t_174e633ad8839f 3,15-16,25,97,102-103
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/AnonymousRecordNameTests.scala
+  s_8dea141d2102f2::t_04233bf5e7a173 1-21,31-34,36-55,57-69,72-86,106-156
+  s_8dea141d2102f2::t_3e8b54bc4ade99 22-30
+  s_8dea141d2102f2::t_cc6191fc58d974 35,56,70-71
+  s_8dea141d2102f2::t_1556bf994cfc7c 93-95,97-108
+  s_8dea141d2102f2::t_8a9d26f52d5463 87-88,92,96
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/AstForExpressions.scala
+  s_8dea141d2102f2::t_9b11e2e695c54a 126-127
+platform/frontends/edg2atom/src/main/scala/io/appthreat/edg2atom/astcreation/ExpansionCode.scala
+  s_8dea141d2102f2::t_af2516081a1b06 9-12,55-62,81-83,95-107,116-119,121-122,133-134,143,165,176
+  s_8dea141d2102f2::t_e7545cb5d61ba0 90-91,142,168,173,175
+  s_8dea141d2102f2::t_f71375cbb7148c 124,127
+  s_8dea141d2102f2::t_9b11e2e695c54a 1-8,13-54,63-80,84-89,92-94,108-115,120,123,125-126,128-132,135-141,144-164,166-167,169-172,174,177-178
+platform/frontends/edg2atom/src/test/scala/io/appthreat/edg2atom/astcreation/MacroExpansionCodeTests.scala
+  s_8dea141d2102f2::t_dd693ed82fba3e 16-17,25-26,49-53
+  s_8dea141d2102f2::t_af2516081a1b06 55
+  s_8dea141d2102f2::t_e7545cb5d61ba0 1-15,18-24,27-48,54,56-89,117
+  s_8dea141d2102f2::t_8a9d26f52d5463 109-111
+  s_8dea141d2102f2::t_78b4068ff20af5 90-108,112-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "08b4bfc5c837dd5318fad3a10bbf83c487a9d69d",
+  "prompts": {},
+  "sessions": {
+    "s_8dea141d2102f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e068eebe-ac6f-4afd-be4c-e00784ab099a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
