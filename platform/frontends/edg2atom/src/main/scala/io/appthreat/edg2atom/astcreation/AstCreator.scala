@@ -181,9 +181,9 @@ class AstCreator(
             of     <- t.long("of")
             file   <- t.position.map(_.file) if foreign.contains(file)
           do
-            val record =
-                CGlobal.typedefRecord(registerType(types(typeId)), registerType(types(of)))
-            usedTypes.add(record)
+            val (named, target) = (registerType(types(typeId)), registerType(types(of)))
+            // the typedef that names a type declared without a tag is that type, not an alias
+            if named != target then usedTypes.add(CGlobal.typedefRecord(named, target))
     }
 
   /** The translation unit's own file, and the project headers that belong to it. */
@@ -683,24 +683,30 @@ class AstCreator(
   ): Option[Ast] =
     if isNamedEnum(t) then return Some(enumDeclAst(t, path))
     t.string("kind") match
+      // the typedef that names a record without a tag is the record: its TYPE_DECL has the name
+      case Some("typeref")
+          if t.long("of").exists(types.isAnonymousRecord) &&
+              registerType(types(t.long("id"))) == registerType(types(t.long("of"))) =>
+          None
       case Some("typeref") =>
           val name         = t.string("typedef").getOrElse("")
+          val fullName     = registerType(types(t.long("id")))
           val alias        = registerType(types(t.long("of")))
           val targetIsEnum = t.long("of").flatMap(unit.types.get).exists(isAnonymousEnum)
+          // the typedef that names an enumeration without a tag is that enumeration: it aliases
+          // nothing but itself
           val decl = typeDeclNode(
             t,
             name,
-            registerType(types(t.long("id"))),
+            fullName,
             path,
             if targetIsEnum then s"typedef enum $name" else s"typedef $name",
-            alias = Some(alias)
+            alias = Option.when(alias != fullName)(alias)
           )
-          // a typedef of a record without a tag carries the record's members, as the CDT
-          // frontend's typedef declaration does (`typedef struct { fe x; } ge;`), and so does a
-          // typedef of an enum without a tag (`typedef enum { A, B } count_t;`)
+          // a typedef of an enum without a tag carries its enumerators (`typedef enum { A, B }
+          // count_t;`); a record without a tag has a TYPE_DECL of its own, named after the first
+          // declarator of the declaration that holds it
           val carried = t.long("of").flatMap(unit.types.get).map {
-              case rec if isDefinedRecordOrTypedef(rec) && rec.string("tag").forall(_.isEmpty) =>
-                  recordMemberAsts(rec, path)
               case e if isAnonymousEnum(e) =>
                   val of = registerType(types(t.long("id")))
                   e.list("enumerators").map(en =>
