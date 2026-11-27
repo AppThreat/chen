@@ -1,0 +1,21 @@
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/Java25SourceTests.scala
+  s_c708015f1facf9::t_fabc26b4f5b1d8 1-12,33-37,46-55
+  s_c708015f1facf9::t_4b7a247d3c3ada 13-32
+  s_c708015f1facf9::t_59b3e3c7ad80bd 38-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "27e79a30462416812941c788c918432b11589826",
+  "prompts": {},
+  "sessions": {
+    "s_c708015f1facf9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_522cb6c8-5246-4e6e-81a7-dfbc51bb2bf5",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
