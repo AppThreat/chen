@@ -1,0 +1,22 @@
+dataflowengineoss/src/main/scala/io/appthreat/dataflowengineoss/semantics/JavaFrameworkSemantics.scala
+  h_0926447d100ad2 97-98,105-112,135,200-207
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/JavaFrameworkTagsTest.scala
+  h_0926447d100ad2 616-617
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/dataflow/JacksonCarriersTests.scala
+  h_0926447d100ad2 54-56
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  h_0926447d100ad2 767-771,874-876,880-886,892-901,925-927,944-951
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/JavaFrameworks.scala
+  h_0926447d100ad2 91-93,101-102,104,106,186,222-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "68f0e2b614a81395d6829296b39e5788d74bb5bc",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
