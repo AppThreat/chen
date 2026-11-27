@@ -1,0 +1,52 @@
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/JavaFrameworks.scala
+  s_c708015f1facf9::t_449c62bf9ca765 121-136,141-144,154-157,163-170
+  s_c708015f1facf9::t_0a8cff9d5920c8 174-175,182-187
+  s_c708015f1facf9::t_d93e9d559b3f0f 91-111
+  s_c708015f1facf9::t_a63302069140cc 222-239,243-244
+  s_c708015f1facf9::t_562e6bae230ac1 316,318-330
+  s_c708015f1facf9::t_3c86225e51191b 188
+platform/frontends/x2cpg/src/main/scala/io/appthreat/x2cpg/passes/taggers/ChennaiTagsPass.scala
+  s_c708015f1facf9::t_fcb0b7a7e15de3 765-766,770-771
+  s_c708015f1facf9::t_9395877a0edc8b 1228-1244
+  s_c708015f1facf9::t_d8a0c3466834e9 833
+  s_c708015f1facf9::t_755accb500aeeb 873,875
+  s_c708015f1facf9::t_c9c7ce5f083d34 1292-1294
+  s_c708015f1facf9::t_e06a00099cff53 727-740
+  s_c708015f1facf9::t_7e5e375b78fc3f 926-928,931-939,941-954
+  s_c708015f1facf9::t_272ed55b08b45e 872,876-877,881-902
+  s_c708015f1facf9::t_be26d0b162c3d7 940
+  s_c708015f1facf9::t_bd8d89142b27f8 755-764,767-769,772-800
+  s_c708015f1facf9::t_5c7ea4dc555173 1299-1308,1310,1312
+  s_c708015f1facf9::t_fae4d8b776a0fc 508-532
+  s_c708015f1facf9::t_4b63e8b569a584 955
+platform/frontends/javasrc2cpg/src/test/scala/io/appthreat/javasrc2cpg/querying/JavaFrameworkTagsTest.scala
+  s_c708015f1facf9::t_e93b1151b42e0d 529
+  s_c708015f1facf9::t_d66a7327c10be9 591-610,612-661
+  s_c708015f1facf9::t_26896cedc8adb5 262
+  s_c708015f1facf9::t_bd37cb94248178 773-774
+  s_c708015f1facf9::t_3992fcd3405cd7 802
+  s_c708015f1facf9::t_ba18edb6fd0c4f 901-940,945,948-959,962-963,967-984
+  s_c708015f1facf9::t_cd21727d627b8f 277
+  s_c708015f1facf9::t_bc2535886b4c5a 482-528,530-543
+  s_c708015f1facf9::t_b2613f175819e7 611
+  s_c708015f1facf9::t_75a71c743f9dd3 941-944,964-966
+  s_c708015f1facf9::t_e281aad1714dd7 194-261,263-276,278-350
+  s_c708015f1facf9::t_8c256801b68e81 946-947,960-961
+  s_c708015f1facf9::t_989dbe26fee525 712-772,775-801,803-826
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ebfc292a6b39474c2b0d4e4848d49d66085f7b2a",
+  "prompts": {},
+  "sessions": {
+    "s_c708015f1facf9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_522cb6c8-5246-4e6e-81a7-dfbc51bb2bf5",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
