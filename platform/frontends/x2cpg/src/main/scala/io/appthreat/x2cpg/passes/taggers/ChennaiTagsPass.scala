@@ -9,6 +9,7 @@ import io.shiftleft.codepropertygraph.generated.EdgeTypes
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{
+    Annotation,
     Call,
     File,
     Identifier,
@@ -871,7 +872,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // A RoutingContext parameter is the web-facing input of any handler it appears in; so are
     // Quarkus' RoutingExchange wrapper and a Vert.x HttpServerRequest (core or Mutiny flavour).
     storeTag(
-      atom.parameter.typeFullName(".*(RoutingContext|RoutingExchange|HttpServerRequest).*"),
+      atom.parameter.typeFullName("(.*[.$])?(RoutingContext|RoutingExchange|HttpServerRequest)"),
       FRAMEWORK_INPUT,
       dstGraph
     )
@@ -940,6 +941,12 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .nameNot("<init>|<clinit>")
           .l
           .filter(m => m.parameter.filterNot(_.name == "this").nonEmpty)
+          // A `@GrpcService` class may still extend the generated `*ImplBase`; its methods return
+          // void and answer through a StreamObserver, which the arm above already covers.
+          .filterNot(m =>
+              m.methodReturn.typeFullName == "void" ||
+                  m.parameter.typeFullName(".*StreamObserver.*").nonEmpty
+          )
       mutinyServiceMethods.foreach { m =>
         storeTag(Iterator(m), JAVA_GRPC_TAG, dstGraph)
         storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
@@ -950,6 +957,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         )
         storeTag(Iterator(m.methodReturn), FRAMEWORK_OUTPUT, dstGraph)
       }
+    end if
 
     // ---- Databases ------------------------------------------------------------------------
     tagJavaDatabaseCalls(dstGraph)
@@ -1224,21 +1232,34 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       )
 
     // Jakarta Data and Quarkus Data repository writes. Neither API offers the EntityManager trio,
-    // so these names hang off their own import roots; `delete`/`update`/`save`/`insert` are more
-    // everyday still than `persist`, so a RESOLVED call must name a repository type (the declaring
-    // class of such a write is the user's `*Repository` interface), while an unresolved call keeps
-    // the bare name under the gate - the same two-arm shape the Spring template arm uses.
+    // so these names hang off their own import roots. `delete`/`update`/`save`/`insert` are
+    // everyday names, so the call must be declared by a data API type or by one of the project's
+    // repositories: an interface annotated `@Repository` or extending a data API type.
     if usesImports(db.dataImportRoots*) then
+      def isDataType(fullName: String): Boolean =
+          db.dataImportRoots.exists(root => fullName.startsWith(s"$root."))
+      val repositoryTypes = atom.typeDecl
+          .filter(t =>
+              t.annotation.name(db.dataRepositoryAnnotation).nonEmpty ||
+                  t.inheritsFromTypeFullName.exists(isDataType)
+          )
+          .fullName
+          .toSet
+      def declaringType(methodFullName: String): String =
+        val qualified = methodFullName.takeWhile(_ != ':')
+        qualified.substring(0, qualified.lastIndexOf('.').max(0))
       storeTag(
         atom.call
             .name(db.dataWriteCallNames.mkString("|"))
             .filterNot(_.name.startsWith("<operator"))
-            .filter(c =>
-                !c.methodFullName.contains(".") || c.methodFullName.contains("Repository")
-            ),
+            .filter { c =>
+              val owner = declaringType(c.methodFullName)
+              isDataType(owner) || repositoryTypes.contains(owner)
+            },
         "sql",
         dstGraph
       )
+    end if
 
     // @Query/@Select/... - the annotation's string member IS the statement.
     atom.method
@@ -1303,11 +1324,18 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             annotationFullName.startsWith(s"$root.")
         )
 
+    // `Prompt` and `ResourceTemplate` are common names, so they count only when the annotation
+    // resolves to the Quarkus MCP Server package.
+    def isMcpAnnotation(annotation: Annotation): Boolean =
+        if JavaFrameworks.Mcp.quarkusOnlyAnnotations.contains(annotation.name) then
+          annotation.fullName.startsWith(s"${JavaFrameworks.Mcp.quarkusImportRoot}.")
+        else notLangChain4jTool(annotation.fullName)
+
     val toolAnnotationsPattern = JavaFrameworks.Mcp.toolAnnotations.mkString("|")
     val toolMethods = atom.method
         .where(_.annotation.name(toolAnnotationsPattern))
         .l
-        .filter(m => m.annotation.name(toolAnnotationsPattern).fullName.forall(notLangChain4jTool))
+        .filter(m => m.annotation.name(toolAnnotationsPattern).forall(isMcpAnnotation))
     toolMethods.foreach { m =>
       storeTag(Iterator(m), "mcp-tool", dstGraph)
       storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)

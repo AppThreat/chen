@@ -223,13 +223,12 @@ object JavaFrameworks:
       * EntityManager trio: Jakarta Data repositories declare writes as
       * `insert`/`update`/`delete`/`save` (the `CrudRepository`/`BasicRepository` methods and the
       * matching lifecycle annotations), and Quarkus Data repositories expose
-      * `persist`/`persistAndFlush`/`delete`. `persist` therefore lives in both lists, gated by its
-      * own root here because `jakarta.data` has no `persist`. `delete`/`update`/`save`/`insert` are
-      * everyday names, so a RESOLVED call must additionally name a repository type (the declaring
-      * class of a Jakarta Data or Quarkus Data write is the user's `*Repository` interface);
-      * unresolved calls keep the bare name under the import gate.
+      * `persist`/`persistAndFlush`/`delete`. These are everyday names, so a call counts only when a
+      * data API type or a project repository (annotated [[dataRepositoryAnnotation]] or extending a
+      * data API type) declares it.
       */
-    val dataImportRoots: Seq[String] = Seq("jakarta.data", "io.quarkus.data")
+    val dataImportRoots: Seq[String]     = Seq("jakarta.data", "io.quarkus.data")
+    val dataRepositoryAnnotation: String = "Repository"
     val dataWriteCallNames: Seq[String] =
         Seq("insert", "update", "delete", "save", "persist", "persistAndFlush")
 
@@ -313,8 +312,11 @@ object JavaFrameworks:
   // ---------------------------------------------------------------------------------------------
 
   object Mcp:
+    /** The Quarkus MCP Server package. Declared before [[importRoots]], which reads it. */
+    val quarkusImportRoot: String = "io.quarkiverse.mcp.server"
+
     val importRoots: Seq[String] =
-        Seq("io.modelcontextprotocol", "org.springframework.ai.tool", "io.quarkiverse.mcp.server")
+        Seq("io.modelcontextprotocol", "org.springframework.ai.tool", quarkusImportRoot)
 
     /** The tool annotation (MCP java-sdk, Spring AI and Quarkus MCP Server spell it identically).
       * `Prompt` and `ResourceTemplate` are the Quarkus MCP Server variants a client drives with
@@ -323,12 +325,16 @@ object JavaFrameworks:
       */
     val toolAnnotations: Seq[String] = Seq("Tool", "McpTool", "Prompt", "ResourceTemplate")
 
+    /** Accepted only from the Quarkus MCP Server package, being common names elsewhere. */
+    val quarkusOnlyAnnotations: Set[String] = Set("Prompt", "ResourceTemplate")
+
     /** A `@Tool` method of LangChain4j (`dev.langchain4j.agent.tool.Tool`) is called by the model,
       * not by a remote MCP client, so it must not become an `mcp-tool` route. The annotation full
       * name carries the owning package, which is the only discriminator once a graph imports both
       * frameworks and both annotations share the simple name `Tool`.
       */
     val excludedToolImportRoots: Seq[String] = Seq("dev.langchain4j")
+  end Mcp
 
   // ---------------------------------------------------------------------------------------------
   // Cloud: AWS SDK v1/v2, Google Cloud, Azure; serverless function handlers.
