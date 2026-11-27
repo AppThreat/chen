@@ -88,6 +88,27 @@ object JavaFrameworks:
 
     val jaxRsImportRoots: Seq[String] = Seq("jakarta.ws.rs", "javax.ws.rs")
 
+    /** RESTEasy Reactive request-data parameter annotations (Quarkus REST): a parameter carrying one
+      * receives client data. A sibling of [[jaxRsParamAnnotations]] rather than part of it, because
+      * the owning package is `org.jboss.resteasy.reactive`, not `jakarta.ws.rs`.
+      */
+    val resteasyReactiveParamAnnotations: Seq[String] =
+        Seq("RestQuery", "RestPath", "RestForm", "RestHeader", "RestCookie", "RestMatrix")
+
+    val resteasyReactiveImportRoot: String = "org.jboss.resteasy.reactive"
+
+    /** Quarkus declarative reactive routes: `io.quarkus.vertx.web.Route` on a method (repeatable),
+      * `RouteBase` supplying a class-level path prefix, and `RouteFilter` marking a filter invoked on
+      * every request.
+      */
+    val quarkusRouteImportRoot: String = "io.quarkus.vertx.web"
+    val quarkusRouteAnnotations: Seq[String] = Seq("Route")
+    val quarkusRouteBaseAnnotation: String = "RouteBase"
+    val quarkusRouteFilterAnnotation: String = "RouteFilter"
+
+    /** Request-injection parameter annotations of a `@Route` method, from the same package. */
+    val quarkusRouteParamAnnotations: Seq[String] = Seq("Param", "Header", "Body")
+
     /** Micronaut method annotations (`@Get`, `@Post`, ...): bare names, gated on the `io.micronaut`
       * import root (an unprefixed `@Get` would collide with anything).
       */
@@ -97,11 +118,30 @@ object JavaFrameworks:
     val servletMethods: Seq[String] =
         Seq("doGet", "doPost", "doPut", "doDelete", "doHead", "doOptions", "doTrace", "service")
 
+    /** Import roots that open the router-DSL recognizer. `io.vertx.ext.web` is Vert.x 3/4/5 core,
+      * `io.vertx.reactivex.ext.web` the RxJava2 bindings of Vert.x 4, and `io.vertx.mutiny.ext.web`
+      * / `io.vertx.rxjava3.ext.web` the Mutiny and RxJava3 bindings Quarkus and Vert.x 5 use (a
+      * Quarkus bean registers routes on `@Observes io.vertx.mutiny.ext.web.Router`).
+      */
+    val routerImportRoots: Seq[String] =
+        Seq(
+          "io.vertx.ext.web",
+          "io.vertx.reactivex.ext.web",
+          "io.vertx.mutiny.ext.web",
+          "io.vertx.rxjava3.ext.web",
+          "io.javalin",
+          "spark.Spark",
+          "io.vertx.core.http"
+        )
+
     /** Call names that attach a handler to a route in the router DSLs. */
     val routerHandlerCallNames: Seq[String] =
         Seq("handler", "handlerFor", "addHandler", "blockingHandler")
 
-    /** Vert.x request/response accessors on the routing context. */
+    /** Vert.x request/response accessors on the routing context. `getBodyAsJson` is gone in Vert.x
+      * 5 (kept for Vert.x 4 code); there the body is read through `body()` returning `RequestBody`,
+      * whose `asString`/`asJsonObject`/`asJsonArray`/`asPojo` results are request data.
+      */
     val contextRequestCallNames: Seq[String] =
         Seq(
           "getParam",
@@ -111,20 +151,40 @@ object JavaFrameworks:
           "pathParams",
           "body",
           "getBodyAsJson",
+          "asString",
+          "asJsonObject",
+          "asJsonArray",
+          "asPojo",
           "request",
           "getHeader",
           "formDataAttributes",
           "fileUploads"
         )
+
+    /** `RequestBody.buffer` is request data too, but `buffer` is an everyday method name, so it is
+      * only accepted on a receiver the graph resolved to `io.vertx.ext.web.RequestBody` (the
+      * Mutiny/Rx bindings wrap it, and those wrappers keep the same simple name in the resolved
+      * full name).
+      */
+    val requestBodyBufferFullNamePrefixes: Seq[String] =
+        Seq("io.vertx.ext.web.RequestBody.buffer", "io.vertx.mutiny.ext.web.RequestBody.buffer")
   end Http
 
   // ---------------------------------------------------------------------------------------------
-  // gRPC services: generated `*ImplBase` overrides with a StreamObserver response parameter.
+  // gRPC services: generated `*ImplBase` overrides with a StreamObserver response parameter, and
+  // Quarkus Mutiny services (`@GrpcService` classes returning Uni/Multi, no StreamObserver).
   // ---------------------------------------------------------------------------------------------
 
   object Rpc:
     /** StreamObserver output methods - each sends a message to the client. */
     val observerOutputCalls: Seq[String] = Seq("onNext", "onError", "onCompleted")
+
+    /** Quarkus marks its Mutiny gRPC services with `io.quarkus.grpc.GrpcService`; the class
+      * implements the generated Mutiny interface, so each public service method takes the request
+      * message and returns the reply (wrapped in `Uni`/`Multi`).
+      */
+    val quarkusGrpcImportRoot: String = "io.quarkus.grpc"
+    val quarkusGrpcServiceAnnotation: String = "GrpcService"
 
   // ---------------------------------------------------------------------------------------------
   // Database: JDBC, Spring JdbcTemplate, JPA/Hibernate, MyBatis, MongoDB, Redis.
@@ -159,10 +219,29 @@ object JavaFrameworks:
     val jpaImportRoots: Seq[String] =
         Seq("jakarta.persistence", "javax.persistence", "org.hibernate", "org.springframework.orm")
 
-    /** Annotations whose string member IS a database statement. */
+    /** Repository write calls of Jakarta Data and Quarkus Data. Neither API spells the EntityManager
+      * trio: Jakarta Data repositories declare writes as `insert`/`update`/`delete`/`save` (the
+      * `CrudRepository`/`BasicRepository` methods and the matching lifecycle annotations), and
+      * Quarkus Data repositories expose `persist`/`persistAndFlush`/`delete`. `persist` therefore
+      * lives in both lists, gated by its own root here because `jakarta.data` has no `persist`.
+      * `delete`/`update`/`save`/`insert` are everyday names, so a RESOLVED call must additionally
+      * name a repository type (the declaring class of a Jakarta Data or Quarkus Data write is the
+      * user's `*Repository` interface); unresolved calls keep the bare name under the import gate.
+      */
+    val dataImportRoots: Seq[String] = Seq("jakarta.data", "io.quarkus.data")
+    val dataWriteCallNames: Seq[String] =
+        Seq("insert", "update", "delete", "save", "persist", "persistAndFlush")
+
+    /** Annotations whose string member IS a database statement. `HQL` and `SQL` are Hibernate's
+      * `org.hibernate.annotations.processing` statement annotations; `Query` covers both Spring
+      * Data's and Jakarta Data's. `Find` (Hibernate/Jakarta Data) carries no statement and is
+      * deliberately absent.
+      */
     val queryAnnotations: Seq[String] =
         Seq(
           "Query",
+          "HQL",
+          "SQL",
           "Select",
           "Insert",
           "Update",
@@ -234,10 +313,21 @@ object JavaFrameworks:
 
   object Mcp:
     val importRoots: Seq[String] =
-        Seq("io.modelcontextprotocol", "org.springframework.ai.tool")
+        Seq("io.modelcontextprotocol", "org.springframework.ai.tool", "io.quarkiverse.mcp.server")
 
-    /** The tool annotation (MCP java-sdk and Spring AI spell it identically). */
-    val toolAnnotations: Seq[String] = Seq("Tool", "McpTool")
+    /** The tool annotation (MCP java-sdk, Spring AI and Quarkus MCP Server spell it identically).
+      * `Prompt` and `ResourceTemplate` are the Quarkus MCP Server variants a client drives with
+      * argument values (through `@PromptArg`/`@ResourceTemplateArg`); a plain `Resource` exposes a
+      * fixed URI and takes no client-chosen input, so it is absent.
+      */
+    val toolAnnotations: Seq[String] = Seq("Tool", "McpTool", "Prompt", "ResourceTemplate")
+
+    /** A `@Tool` method of LangChain4j (`dev.langchain4j.agent.tool.Tool`) is called by the model,
+      * not by a remote MCP client, so it must not become an `mcp-tool` route. The annotation full
+      * name carries the owning package, which is the only discriminator once a graph imports both
+      * frameworks and both annotations share the simple name `Tool`.
+      */
+    val excludedToolImportRoots: Seq[String] = Seq("dev.langchain4j")
 
   // ---------------------------------------------------------------------------------------------
   // Cloud: AWS SDK v1/v2, Google Cloud, Azure; serverless function handlers.

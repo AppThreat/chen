@@ -505,6 +505,31 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .isLiteral
           .filter(l => looksLikeRouteValue(l.code))
 
+  /** Literals of named members of the named annotations on `method`, without the route-shaped
+    * whitelist of [[javaRouteLiterals]]: a `regex` member holds a regular expression, whose
+    * metacharacters that whitelist rejects. `.ast` is deliberate for the same reason as there - the
+    * walk is bounded by the annotation's own member assignment.
+    */
+  private def annotationMemberLiterals(
+    method: Method,
+    annotationNames: Seq[String],
+    memberNames: Seq[String]
+  ): List[Literal] =
+      method.annotation
+          .name(annotationNames.mkString("|"))
+          .parameterAssign
+          .where(_.parameter.code(s"^(${memberNames.mkString("|")})$$"))
+          .ast
+          .isLiteral
+          .l
+
+  /** The path Quarkus serves for a `@Route` method that declares neither `path` nor `regex`: the
+    * method name de-camel-cased and the segments joined with hyphens (`greetingsQueryParam` ->
+    * `greetings-query-param`), per `Route`'s documentation.
+    */
+  private def decamelised(name: String): String =
+      name.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase
+
   /** Route literals declared by the annotations on a handler's own TYPE - the class-level
     * `@RequestMapping("/api")` or JAX-RS `@Path("/api")` that every method route hangs off.
     *
@@ -699,6 +724,20 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       )
     end if
 
+    // RESTEasy Reactive's own request-data annotations (Quarkus REST). Siblings of the JAX-RS set
+    // rather than part of it, because `org.jboss.resteasy.reactive` is imported on its own; today
+    // such a parameter is only tagged because every parameter of a resource method is - the
+    // explicit list pins the intent independently of the whole-method rule.
+    if usesImports(http.resteasyReactiveImportRoot) then
+      storeTag(
+        atom.parameter.where(
+          _.annotation.name(http.resteasyReactiveParamAnnotations.mkString("|"))
+        ),
+        FRAMEWORK_INPUT,
+        dstGraph
+      )
+    end if
+
     // ---- Micronaut @Controller methods ---------------------------------------------------
     if usesImports(http.micronautImportRoots*) then
       atom.method
@@ -712,6 +751,52 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
                 .foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
             tagJavaHandlerMethod(handler, dstGraph, responseWriting = true)
           )
+
+    // ---- Quarkus declarative reactive routes (@Route) -------------------------------------
+    // `io.quarkus.vertx.web.Route` declares the handler method itself: the `path`/`regex` member is
+    // the route (the regex wins when both are set), `@Param`/`@Header`/`@Body` parameters are
+    // request data, and a non-void return IS the response body. `RouteBase(path = ...)` prefixes
+    // every method route of the class, composed the way the JAX-RS class `@Path` is.
+    if usesImports(http.quarkusRouteImportRoot) then
+      atom.method
+          .where(_.annotation.name(http.quarkusRouteAnnotations.mkString("|")))
+          .l
+          .foreach { handler =>
+            val pathLiterals =
+                annotationMemberLiterals(handler, http.quarkusRouteAnnotations, Seq("path"))
+            val routeLiterals =
+                // "If both path() and regex() are set the regular expression is used for matching"
+                // (Route's javadoc), so the regex shadows the path rather than joining it.
+                val regexLiterals =
+                    annotationMemberLiterals(handler, http.quarkusRouteAnnotations, Seq("regex"))
+                if regexLiterals.nonEmpty then regexLiterals else pathLiterals
+            routeLiterals.foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
+            val baseLiterals =
+                classRouteLiterals(handler, Seq(http.quarkusRouteBaseAnnotation)).l
+            tagComposedRoutes(handler, baseLiterals, routeLiterals, dstGraph)
+            // With neither member set, the served path is derived from the method name by
+            // de-camel-casing it and joining the segments with hyphens (Route's javadoc); there is
+            // no literal to tag, so the derived route is recorded as the handler's route-path.
+            if routeLiterals.isEmpty && baseLiterals.isEmpty then
+              Iterator(handler)
+                  .newTagNodePair(ROUTE_PATH, s"/${decamelised(handler.name)}")
+                  .store()(using dstGraph)
+            storeTag(
+              handler.parameter
+                  .where(_.annotation.name(http.quarkusRouteParamAnnotations.mkString("|"))),
+              FRAMEWORK_INPUT,
+              dstGraph
+            )
+            tagJavaHandlerMethod(handler, dstGraph, responseWriting = true)
+          }
+      // A @RouteFilter method runs on every request: a route with no path of its own. Its
+      // RoutingContext parameter is input through the type rule below.
+      storeTag(
+        atom.method.where(_.annotation.name(http.quarkusRouteFilterAnnotation)),
+        FRAMEWORK_ROUTE,
+        dstGraph
+      )
+    end if
 
     // ---- Servlets ------------------------------------------------------------------------
     // doGet/doPost/... overrides are recognised by shape: a servlet method has a request or
@@ -745,13 +830,7 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // argument, and ONLY in a project that imports a router DSL. A parameter type merely
     // named `*Router*` is not a gate: any project with its own MessageRouter class would have
     // every `map.get("/x")` tagged as a route otherwise.
-    val usesRouterDsl = usesImports(
-      "io.vertx.ext.web",
-      "io.vertx.reactivex.ext.web",
-      "io.javalin",
-      "spark.Spark",
-      "io.vertx.core.http"
-    )
+    val usesRouterDsl = usesImports(http.routerImportRoots*)
     val routerCalls =
         (if usesRouterDsl then
            atom.call
@@ -790,21 +869,37 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             .dedup
             .foreach(m => tagJavaHandlerMethod(m, dstGraph))
     }
-    // A RoutingContext parameter is the web-facing input of any handler it appears in.
+    // A RoutingContext parameter is the web-facing input of any handler it appears in; so are
+    // Quarkus' RoutingExchange wrapper and a Vert.x HttpServerRequest (core or Mutiny flavour).
     storeTag(
-      atom.parameter.typeFullName(".*(RoutingContext|io\\.vertx\\.ext\\.web\\.RoutingContext).*"),
-      FRAMEWORK_INPUT,
-      dstGraph
+        atom.parameter.typeFullName(".*(RoutingContext|RoutingExchange|HttpServerRequest).*"),
+        FRAMEWORK_INPUT,
+        dstGraph
     )
     // Request-data accessors on the routing context: the returned value is request data.
     storeTag(
-      atom.method.parameter
-          .typeFullName(".*RoutingContext.*")
-          .method
-          .call
-          .name(http.contextRequestCallNames.mkString("|")),
-      FRAMEWORK_INPUT,
-      dstGraph
+        atom.method.parameter
+            .typeFullName(".*RoutingContext.*")
+            .method
+            .call
+            .name(http.contextRequestCallNames.mkString("|")),
+        FRAMEWORK_INPUT,
+        dstGraph
+    )
+    // Vert.x 5's `rc.body()` returns a RequestBody whose `buffer()` is the raw request body, but
+    // `buffer` is an everyday method name: only a receiver the graph resolved to RequestBody
+    // qualifies, so a `ByteBuffer.buffer()` elsewhere in the same method stays untagged.
+    storeTag(
+        atom.call
+            .name("buffer")
+            .filterNot(_.name.startsWith("<operator"))
+            .filter(c =>
+                http.requestBodyBufferFullNamePrefixes.exists(p =>
+                    c.methodFullName.startsWith(p)
+                )
+            ),
+        FRAMEWORK_INPUT,
+        dstGraph
     )
 
     // ---- gRPC services -------------------------------------------------------------------
@@ -828,10 +923,35 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       }
     }
     storeTag(
-      grpcMethods.iterator.call.name(rpc.observerOutputCalls.mkString("|")),
-      FRAMEWORK_OUTPUT,
-      dstGraph
+        grpcMethods.iterator.call.name(rpc.observerOutputCalls.mkString("|")),
+        FRAMEWORK_OUTPUT,
+        dstGraph
     )
+
+    // ---- Quarkus Mutiny gRPC services -----------------------------------------------------
+    // `@GrpcService` marks a class implementing the generated Mutiny interface: a public service
+    // method takes the request message and returns the reply (wrapped in Uni/Multi) - no
+    // StreamObserver anywhere. The request parameter is the input boundary and the returned value
+    // the output, the same roles the observer plays above.
+    if usesImports(rpc.quarkusGrpcImportRoot) then
+      val mutinyServiceMethods = atom.method
+          .where(_.typeDecl.annotation.name(rpc.quarkusGrpcServiceAnnotation))
+          .where(_.modifier.modifierType("PUBLIC"))
+          .whereNot(_.modifier.modifierType("STATIC"))
+          .nameNot("<init>|<clinit>")
+          .l
+          .filter(m => m.parameter.filterNot(_.name == "this").nonEmpty)
+      mutinyServiceMethods.foreach { m =>
+          storeTag(Iterator(m), JAVA_GRPC_TAG, dstGraph)
+          storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+          storeTag(
+            m.parameter.filterNot(_.name == "this"),
+            FRAMEWORK_INPUT,
+            dstGraph
+          )
+          storeTag(Iterator(m.methodReturn), FRAMEWORK_OUTPUT, dstGraph)
+      }
+    end if
 
     // ---- Databases ------------------------------------------------------------------------
     tagJavaDatabaseCalls(dstGraph)
@@ -1105,6 +1225,23 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         dstGraph
       )
 
+    // Jakarta Data and Quarkus Data repository writes. Neither API offers the EntityManager trio,
+    // so these names hang off their own import roots; `delete`/`update`/`save`/`insert` are more
+    // everyday still than `persist`, so a RESOLVED call must name a repository type (the declaring
+    // class of such a write is the user's `*Repository` interface), while an unresolved call keeps
+    // the bare name under the gate - the same two-arm shape the Spring template arm uses.
+    if usesImports(db.dataImportRoots*) then
+      storeTag(
+        atom.call
+            .name(db.dataWriteCallNames.mkString("|"))
+            .filterNot(_.name.startsWith("<operator"))
+            .filter(c =>
+                !c.methodFullName.contains(".") || c.methodFullName.contains("Repository")
+            ),
+        "sql",
+        dstGraph
+      )
+
     // @Query/@Select/... - the annotation's string member IS the statement.
     atom.method
         .where(_.annotation.name(db.queryAnnotations.mkString("|")))
@@ -1152,14 +1289,27 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
 
   /** MCP server tools: a `@Tool`-annotated method is remotely invocable by an MCP client - the tool
     * equivalent of a route - and its parameters are client-facing input. An exchange parameter
-    * (McpServerFeatures) carries the live session.
+    * (McpServerFeatures) carries the live session. The MCP java-sdk, Spring AI and the Quarkus MCP
+    * Server spell the tool annotation identically; the Quarkus server's `@Prompt` and
+    * `@ResourceTemplate` methods are client-driven the same way.
     */
   private def tagJavaMcpTools(dstGraph: DiffGraphBuilder): Unit =
     if !usesImports(JavaFrameworks.Mcp.importRoots*) then return
 
+    // LangChain4j's `dev.langchain4j.agent.tool.Tool` shares the simple name with MCP's `@Tool`
+    // but is called by the model, not by a remote client. When a graph imports both frameworks,
+    // the annotation full name (which carries the owning package) keeps them apart; with only one
+    // framework imported the graph-wide gate above already does, by accident.
+    def notLangChain4jTool(annotationFullName: String): Boolean =
+        !JavaFrameworks.Mcp.excludedToolImportRoots.exists(root =>
+            annotationFullName.startsWith(s"$root.")
+        )
+
+    val toolAnnotationsPattern = JavaFrameworks.Mcp.toolAnnotations.mkString("|")
     val toolMethods = atom.method
-        .where(_.annotation.name(JavaFrameworks.Mcp.toolAnnotations.mkString("|")))
+        .where(_.annotation.name(toolAnnotationsPattern))
         .l
+        .filter(m => m.annotation.name(toolAnnotationsPattern).fullName.forall(notLangChain4jTool))
     toolMethods.foreach { m =>
       storeTag(Iterator(m), "mcp-tool", dstGraph)
       storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
