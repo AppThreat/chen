@@ -191,6 +191,163 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
           cpg.parameter.name("id").where(_.tag.name("framework-input")).l should not be empty
           cpg.parameter.name("q").where(_.tag.name("framework-input")).l should not be empty
       }
+
+      "tag RESTEasy Reactive parameter annotations on their own, annotated or not alongside them" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import jakarta.ws.rs.GET;
+            |import jakarta.ws.rs.Path;
+            |import jakarta.ws.rs.core.Context;
+            |import jakarta.ws.rs.core.UriInfo;
+            |import org.jboss.resteasy.reactive.RestQuery;
+            |
+            |@Path("/items")
+            |public class ItemResource {
+            |    @GET
+            |    public String find(@RestQuery String q, @Context UriInfo info) {
+            |        return q + info.getPath();
+            |    }
+            |}
+            |""".stripMargin,
+            "ItemResource.java"
+          ))
+
+          // The explicit vocabulary pins the @RestQuery parameter as request data independently of
+          // the whole-resource-method rule that tags every parameter of a handler.
+          cpg.parameter.name("q").where(_.tag.name("framework-input")).l should not be empty
+      }
+
+      "leave a RestQuery-lookalike alone without the resteasy-reactive import" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |public class LocalRest {
+            |    public String find(@RestQuery String q) { return q; }
+            |
+            |    @interface RestQuery {}
+            |}
+            |""".stripMargin,
+            "LocalRest.java"
+          ))
+
+          cpg.parameter.name("q").where(_.tag.name("framework-input")).l shouldBe empty
+      }
+  }
+
+  "Quarkus declarative reactive routes" should {
+
+      "tag @Route handlers, their path literal, injected parameters and derived paths" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.vertx.web.Route;
+            |import io.quarkus.vertx.web.Param;
+            |import io.vertx.ext.web.RoutingContext;
+            |
+            |public class MyRoutes {
+            |    @Route(path = "/hello", methods = Route.HttpMethod.GET)
+            |    String hello(@Param String name) {
+            |        return "hello " + name;
+            |    }
+            |
+            |    @Route(methods = Route.HttpMethod.GET)
+            |    void greetingsQueryParam(RoutingContext rc) {
+            |        rc.response().end("hi");
+            |    }
+            |
+            |    @Route(regex = "/numbers/.*")
+            |    void numbers(RoutingContext rc) {
+            |        rc.response().end("hi");
+            |    }
+            |}
+            |""".stripMargin,
+            "MyRoutes.java"
+          ))
+
+          cpg.literal
+              .codeExact("\"/hello\"")
+              .where(_.tag.name("framework-route"))
+              .l should not be empty
+          // A regex member is a route literal too, with its metacharacters intact.
+          cpg.literal
+              .codeExact("\"/numbers/.*\"")
+              .where(_.tag.name("framework-route"))
+              .l should not be empty
+          cpg.method.name("hello").where(_.tag.name("framework-route")).l should not be empty
+          cpg.parameter.name("name").where(_.tag.name("framework-input")).l should not be empty
+          cpg.parameter.name("rc").where(_.tag.name("framework-input")).l should not be empty
+          // Neither path nor regex: the served path is the de-camel-cased method name.
+          cpg.method.name("greetingsQueryParam")
+              .where(_.tag.nameExact("route-path").valueExact("/greetings-query-param"))
+              .l should not be empty
+      }
+
+      "compose a RouteBase class prefix onto the method path" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.vertx.web.Route;
+            |import io.quarkus.vertx.web.RouteBase;
+            |
+            |@RouteBase(path = "/api")
+            |public class BasedRoutes {
+            |    @Route(path = "/items")
+            |    String items() { return "[]"; }
+            |}
+            |""".stripMargin,
+            "BasedRoutes.java"
+          ))
+
+          cpg.method.name("items")
+              .where(_.tag.nameExact("route-path").valueExact("/api/items"))
+              .l should not be empty
+      }
+
+      "tag @RouteFilter methods as request handlers" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.vertx.web.RouteFilter;
+            |import io.vertx.ext.web.RoutingContext;
+            |
+            |public class Filters {
+            |    @RouteFilter(20)
+            |    void addHeader(RoutingContext rc) {
+            |        rc.response().putHeader("X-Filter", "1");
+            |    }
+            |}
+            |""".stripMargin,
+            "Filters.java"
+          ))
+
+          cpg.method.name("addHeader").where(_.tag.name("framework-route")).l should not be empty
+          cpg.parameter.name("rc").where(_.tag.name("framework-input")).l should not be empty
+      }
+
+      "leave a Route-lookalike alone without the io.quarkus.vertx.web import" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |public class TrainTimetable {
+            |    @Route(path = "/trains")
+            |    String next() { return "10:00"; }
+            |
+            |    @interface Route { String path(); }
+            |}
+            |""".stripMargin,
+            "TrainTimetable.java"
+          ))
+
+          cpg.method.name("next").where(_.tag.name("framework-route")).l shouldBe empty
+          cpg.literal.codeExact("\"/trains\"").where(_.tag.name("framework-route")).l shouldBe empty
+      }
   }
 
   "Servlets" should {
@@ -250,6 +407,30 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
               .l should not be empty
           cpg.method.name("handleItems").where(_.tag.name("framework-route")).l should not be empty
           cpg.parameter.name("ctx").where(_.tag.name("framework-input")).l should not be empty
+      }
+
+      "tag RoutingExchange and HttpServerRequest parameters but not lookalike type names" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.vertx.web.RoutingExchange;
+            |import io.vertx.core.http.HttpServerRequest;
+            |
+            |public class Handlers {
+            |    void exchange(RoutingExchange ex) { }
+            |    void raw(HttpServerRequest req) { }
+            |    void factory(MyHttpServerRequestFactory factory) { }
+            |}
+            |
+            |class MyHttpServerRequestFactory { }
+            |""".stripMargin,
+            "Handlers.java"
+          ))
+
+          cpg.parameter.name("ex").where(_.tag.name("framework-input")).l should not be empty
+          cpg.parameter.name("req").where(_.tag.name("framework-input")).l should not be empty
+          cpg.parameter.name("factory").where(_.tag.name("framework-input")).l shouldBe empty
       }
 
       "resolve an overloaded method-reference handler to nothing rather than to an arbitrary one" in {
@@ -322,6 +503,68 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
           // Tagging these made `process` a route and every parameter of it a taint SOURCE.
           cpg.method.name("process").where(_.tag.name("framework-route")).l shouldBe empty
       }
+
+      "tag routes registered on the Mutiny router alone (Vert.x 5 / Quarkus)" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.vertx.mutiny.ext.web.Router;
+            |import io.vertx.ext.web.RoutingContext;
+            |import jakarta.enterprise.context.ApplicationScoped;
+            |import jakarta.enterprise.event.Observes;
+            |
+            |@ApplicationScoped
+            |public class MutinyRoutes {
+            |    void init(@Observes Router router) {
+            |        router.get("/mutiny").handler(this::serve);
+            |    }
+            |
+            |    private void serve(RoutingContext rc) {
+            |        rc.response().end("ok");
+            |    }
+            |}
+            |""".stripMargin,
+            "MutinyRoutes.java"
+          ))
+
+          // The only router-flavoured import is the Mutiny binding; the core io.vertx.ext.web
+          // import appears solely for the RoutingContext handler parameter.
+          cpg.literal
+              .codeExact("\"/mutiny\"")
+              .where(_.tag.name("framework-route"))
+              .l should not be empty
+          cpg.method.name("serve").where(_.tag.name("framework-route")).l should not be empty
+      }
+
+      "tag the Vert.x 5 request body accessors as request data" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.vertx.ext.web.RoutingContext;
+            |
+            |public class BodyReader {
+            |    void read(RoutingContext rc) {
+            |        String s = rc.body().asString();
+            |        Object o = rc.body().asJsonObject();
+            |        Object a = rc.body().asJsonArray();
+            |        Object p = rc.body().asPojo(java.lang.Object.class);
+            |        Object b = rc.body().buffer();
+            |        rc.response().end(s);
+            |    }
+            |}
+            |""".stripMargin,
+            "BodyReader.java"
+          ))
+
+          Seq("asString", "asJsonObject", "asJsonArray", "asPojo").foreach { name =>
+              cpg.call.name(name).where(_.tag.name("framework-input")).l should not be empty
+          }
+          // `buffer` is an everyday method name: without a receiver the graph resolved to
+          // RequestBody, the call stays untagged rather than manufacturing request data.
+          cpg.call.name("buffer").where(_.tag.name("framework-input")).l shouldBe empty
+      }
   }
 
   "gRPC services" should {
@@ -367,6 +610,82 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
           ))
 
           cpg.method.name("publish").where(_.tag.name("grpc-service")).l shouldBe empty
+          cpg.parameter.name("payload").where(_.tag.name("framework-input")).l shouldBe empty
+      }
+
+      "tag Quarkus Mutiny gRPC services: request in, returned Uni out" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.grpc.GrpcService;
+            |import io.smallrye.mutiny.Uni;
+            |
+            |@GrpcService
+            |public class Greeter implements HelloGrpc {
+            |    @Override
+            |    public Uni<HelloReply> sayHello(HelloRequest request) {
+            |        return Uni.createFrom().item(HelloReply.newBuilder().setMessage(request.getName()).build());
+            |    }
+            |}
+            |""".stripMargin,
+            "Greeter.java"
+          ))
+
+          val sayHello = cpg.method.name("sayHello").l
+          sayHello.where(_.tag.name("grpc-service")).l should not be empty
+          sayHello.where(_.tag.name("framework-route")).l should not be empty
+          cpg.parameter.name("request").where(_.tag.name("framework-input")).l should not be empty
+          // The returned Uni wraps the reply message, so the return is the output boundary.
+          cpg.method.name("sayHello").methodReturn.where(_.tag.name("framework-output"))
+              .l should not be empty
+      }
+
+      "keep the StreamObserver arm working inside a Quarkus gRPC project" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkus.grpc.GrpcService;
+            |import io.grpc.stub.StreamObserver;
+            |
+            |@GrpcService
+            |public class LegacyGreeter extends GreeterGrpc.GreeterImplBase {
+            |    @Override
+            |    public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            |        responseObserver.onNext(HelloReply.newBuilder().setMessage(request.getName()).build());
+            |        responseObserver.onCompleted();
+            |    }
+            |}
+            |""".stripMargin,
+            "LegacyGreeter.java"
+          ))
+
+          val sayHello = cpg.method.name("sayHello")
+          sayHello.where(_.tag.name("grpc-service")).l should not be empty
+          cpg.parameter.name("request").where(_.tag.name("framework-input")).l should not be empty
+          cpg.parameter.name("responseObserver").where(_.tag.name("framework-output")).l should not be empty
+          // The Mutiny arm leaves observer-style methods to the arm above: the observer is the
+          // output, never input, and the void return is no response.
+          cpg.parameter.name("responseObserver").where(_.tag.name("framework-input")).l shouldBe empty
+          cpg.method.name("sayHello").methodReturn.where(_.tag.name("framework-output")).l shouldBe empty
+      }
+
+      "leave a GrpcService-lookalike alone without the io.quarkus.grpc import" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |public class LocalGreeter {
+            |    public String greet(String payload) { return payload; }
+            |
+            |    @interface GrpcService {}
+            |}
+            |""".stripMargin,
+            "LocalGreeter.java"
+          ))
+
+          cpg.method.name("greet").where(_.tag.name("grpc-service")).l shouldBe empty
           cpg.parameter.name("payload").where(_.tag.name("framework-input")).l shouldBe empty
       }
   }
@@ -418,6 +737,165 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
               .codeExact("\"SELECT u FROM User u WHERE u.name = :name\"")
               .where(_.tag.name("sql"))
               .l should not be empty
+      }
+
+      "tag Hibernate @HQL/@SQL and Jakarta Data @Query statements" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import jakarta.data.repository.CrudRepository;
+            |import jakarta.data.repository.Repository;
+            |import org.hibernate.annotations.processing.Find;
+            |import org.hibernate.annotations.processing.HQL;
+            |import org.hibernate.annotations.processing.SQL;
+            |
+            |@Repository
+            |public interface BookRepository extends CrudRepository<Book, Long> {
+            |    @HQL("where title = :title")
+            |    java.util.List<Book> byTitle(String title);
+            |
+            |    @SQL("SELECT * FROM books WHERE isbn = :isbn")
+            |    Book byIsbn(String isbn);
+            |
+            |    @Query("FROM Book WHERE author = :author")
+            |    java.util.List<Book> byAuthor(String author);
+            |
+            |    @Find
+            |    Book byPublisher(String publisher);
+            |}
+            |""".stripMargin,
+            "BookRepository.java"
+          ))
+
+          cpg.literal
+              .codeExact("\"where title = :title\"")
+              .where(_.tag.name("sql"))
+              .l should not be empty
+          cpg.literal
+              .codeExact("\"SELECT * FROM books WHERE isbn = :isbn\"")
+              .where(_.tag.name("sql"))
+              .l should not be empty
+          cpg.literal
+              .codeExact("\"FROM Book WHERE author = :author\"")
+              .where(_.tag.name("sql"))
+              .l should not be empty
+          // @Find derives its query from the parameter names; it declares no statement string.
+          cpg.literal
+              .codeExact("\"publisher\"")
+              .where(_.tag.name("sql"))
+              .l shouldBe empty
+      }
+
+      "tag Jakarta Data repository writes and leave non-repository saves alone" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import jakarta.data.repository.CrudRepository;
+            |import jakarta.data.repository.Repository;
+            |
+            |@Repository
+            |public interface PersonRepository extends CrudRepository<Person, Long> {
+            |}
+            |""".stripMargin,
+            "PersonRepository.java"
+          ).moreCode(
+            """
+            |package com.example;
+            |
+            |public class PersonService {
+            |    private final PersonRepository people;
+            |    private final Prefs prefs = new Prefs();
+            |
+            |    public PersonService(PersonRepository people) { this.people = people; }
+            |
+            |    public Person add(Person p) {
+            |        people.insert(p);
+            |        people.save(p);
+            |        prefs.save(p.toString());
+            |        return p;
+            |    }
+            |}
+            |
+            |class Prefs {
+            |    void save(String v) { }
+            |}
+            |""".stripMargin,
+            "PersonService.java"
+          ))
+
+          cpg.call.name("insert").where(_.tag.name("sql")).l should not be empty
+          cpg.call.name("save").where(_.tag.name("sql")).size shouldBe 1
+          // `save` on the project's own Prefs helper is not a database write.
+          cpg.call.name("save").where(_.methodFullName(".*Prefs.*")).where(_.tag.name("sql"))
+              .l shouldBe empty
+      }
+
+      "tag writes on a Jakarta Data repository whose name does not end in Repository" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import jakarta.data.repository.BasicRepository;
+            |import jakarta.data.repository.Repository;
+            |
+            |@Repository
+            |public interface Library extends BasicRepository<Book, Long> {
+            |}
+            |""".stripMargin,
+            "Library.java"
+          ).moreCode(
+            """
+            |package com.example;
+            |
+            |public class Catalogue {
+            |    private final Library library;
+            |    private final ReportRepository reports = new ReportRepository();
+            |
+            |    public Catalogue(Library library) { this.library = library; }
+            |
+            |    public void keep(Book b) {
+            |        library.save(b);
+            |        reports.save(b.toString());
+            |    }
+            |}
+            |
+            |class ReportRepository {
+            |    void save(String line) { }
+            |}
+            |""".stripMargin,
+            "Catalogue.java"
+          ))
+
+          cpg.call.name("save").where(_.tag.name("sql")).size shouldBe 1
+          // A project class merely named *Repository, with no data API behind it, is not one.
+          cpg.call.name("save").where(_.methodFullName(".*ReportRepository.*")).where(
+            _.tag.name("sql")
+          )
+              .l shouldBe empty
+      }
+
+      "leave repository-shaped calls alone without a data API import" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |public class Shelf {
+            |    private final java.util.List<String> items = new java.util.ArrayList<>();
+            |
+            |    public void manage(String x) {
+            |        items.add(x);
+            |        persist(x);
+            |    }
+            |
+            |    void persist(String x) { }
+            |}
+            |""".stripMargin,
+            "Shelf.java"
+          ))
+
+          cpg.call.name("persist").where(_.tag.name("sql")).l shouldBe empty
       }
   }
 
@@ -492,6 +970,123 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
 
           cpg.method.name("currentWeather").where(_.tag.name("mcp-tool")).l should not be empty
           cpg.parameter.name("city").where(_.tag.name("framework-input")).l should not be empty
+      }
+
+      "tag Quarkus MCP Server tools and prompts" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkiverse.mcp.server.Tool;
+            |import io.quarkiverse.mcp.server.ToolArg;
+            |import io.quarkiverse.mcp.server.Prompt;
+            |import io.quarkiverse.mcp.server.PromptArg;
+            |
+            |public class AcmeTools {
+            |    @Tool(description = "run a command")
+            |    String run(@ToolArg(description = "the command") String cmd) {
+            |        return cmd;
+            |    }
+            |
+            |    @Prompt(description = "greet someone")
+            |    String greet(@PromptArg String who) {
+            |        return "hello " + who;
+            |    }
+            |}
+            |""".stripMargin,
+            "AcmeTools.java"
+          ))
+
+          cpg.method.name("run").where(_.tag.name("mcp-tool")).l should not be empty
+          cpg.method.name("run").where(_.tag.name("framework-route")).l should not be empty
+          cpg.parameter.name("cmd").where(_.tag.name("framework-input")).l should not be empty
+          // A prompt get passes the client's argument values, so the method is client-driven too.
+          cpg.method.name("greet").where(_.tag.name("mcp-tool")).l should not be empty
+          cpg.parameter.name("who").where(_.tag.name("framework-input")).l should not be empty
+      }
+
+      "accept @Prompt only from the Quarkus MCP Server package" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.quarkiverse.mcp.server.Tool;
+            |
+            |public class Tools {
+            |    @Tool(description = "echo")
+            |    String echo(String value) { return value; }
+            |}
+            |""".stripMargin,
+            "Tools.java"
+          ).moreCode(
+            """
+            |package com.example.ui;
+            |
+            |public class Dialogs {
+            |    @interface Prompt { String value(); }
+            |
+            |    @Prompt("Name?")
+            |    String ask(String answer) { return answer; }
+            |}
+            |""".stripMargin,
+            "Dialogs.java"
+          ))
+
+          cpg.method.name("echo").where(_.tag.name("mcp-tool")).l should not be empty
+          // The gate is open graph-wide, but this `@Prompt` is the project's own annotation.
+          cpg.method.name("ask").where(_.tag.name("mcp-tool")).l shouldBe empty
+          cpg.parameter.name("answer").where(_.tag.name("framework-input")).l shouldBe empty
+      }
+
+      "not tag LangChain4j @Tool methods as MCP tools even when both frameworks are imported" in {
+          val cpg = tagged(code(
+            """
+            |package com.example;
+            |
+            |import io.modelcontextprotocol.server.McpSyncServerExchange;
+            |
+            |public class McpTypes {
+            |    public static String exchange(McpSyncServerExchange exchange) { return ""; }
+            |}
+            |""".stripMargin,
+            "McpTypes.java"
+          ).moreCode(
+            """
+            |package com.example;
+            |
+            |import dev.langchain4j.agent.tool.Tool;
+            |
+            |public class ModelTools {
+            |    @Tool("upper-case the text")
+            |    public String shout(String text) {
+            |        return text.toUpperCase();
+            |    }
+            |}
+            |""".stripMargin,
+            "ModelTools.java"
+          ).moreCode(
+            """
+            |package com.example;
+            |
+            |import io.modelcontextprotocol.server.McpSyncServerExchange;
+            |import io.quarkiverse.mcp.server.Tool;
+            |
+            |public class McpServer {
+            |    @Tool(description = "echo")
+            |    public String echo(McpSyncServerExchange exchange, String value) {
+            |        return value;
+            |    }
+            |}
+            |""".stripMargin,
+            "McpServer.java"
+          ))
+
+          // The graph-wide import gate is open (io.modelcontextprotocol is imported in McpSide),
+          // which by itself would tag BOTH `@Tool`s. The annotation's full name keeps them apart:
+          // the LangChain4j tool is invoked by the model, so it is no client-facing boundary.
+          cpg.method.name("shout").where(_.tag.name("mcp-tool")).l shouldBe empty
+          cpg.parameter.name("text").where(_.tag.name("framework-input")).l shouldBe empty
+          cpg.method.name("echo").where(_.tag.name("mcp-tool")).l should not be empty
       }
   }
 

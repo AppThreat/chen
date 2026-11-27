@@ -74,12 +74,65 @@ object JavaFrameworkSemantics:
     * the flow.
     */
   object Carriers:
-    val fullNames: Set[String] = Set(
+    /** Every `readValue` overload of `ObjectMapper`/`JsonMapper` whose source parameter can carry
+      * tainted data: a String, a `byte[]`, an `InputStream` or a `Reader`, paired with each value
+      * type form (`Class`, `TypeReference`, `JavaType`). `JsonMapper` inherits the methods but a
+      * graph qualifies the call by its declared receiver type, so both classes appear. The
+      * signatures follow the declared parameter types of `ObjectMapper.java` in each major
+      * (`com.fasterxml.jackson.*` 2.x, `tools.jackson.*` 3.x, where `TypeReference` moved to
+      * `tools.jackson.core.type`).
+      */
+    private def mapperReadValueOverloads(
+      mapperClasses: Seq[String],
+      typeReference: String,
+      javaType: String
+    ): Set[String] =
+      val sources = Seq(
+        "java.lang.String",
+        "byte[]",
+        "java.io.InputStream",
+        "java.io.Reader"
+      )
+      val valueTypeForms = Seq("java.lang.Class", typeReference, javaType)
+      (for c <- mapperClasses; s <- sources; v <- valueTypeForms
+      yield s"$c.readValue:java.lang.Object($s,$v)").toSet ++
+          mapperClasses.map(c => s"$c.readValue:java.lang.Object(java.lang.String)").toSet
+
+    /** `ObjectReader.readValue` binds the value type at reader construction, so the overloads take
+      * the source alone.
+      */
+    private def readerReadValueOverloads(readerClasses: Seq[String]): Set[String] =
+        readerClasses.map(c =>
+            s"$c.readValue:java.lang.Object(java.lang.String)"
+        ).toSet ++
+            readerClasses.flatMap(c =>
+                Seq("byte[]", "java.io.InputStream", "java.io.Reader").map(s =>
+                    s"$c.readValue:java.lang.Object($s)"
+                )
+            ).toSet
+
+    private val jackson2Carriers: Set[String] =
+        mapperReadValueOverloads(
+          Seq(
+            "com.fasterxml.jackson.databind.ObjectMapper",
+            "com.fasterxml.jackson.databind.json.JsonMapper"
+          ),
+          "com.fasterxml.jackson.core.type.TypeReference",
+          "com.fasterxml.jackson.databind.JavaType"
+        ) ++ readerReadValueOverloads(Seq("com.fasterxml.jackson.databind.ObjectReader"))
+
+    private val jackson3Carriers: Set[String] =
+        mapperReadValueOverloads(
+          Seq("tools.jackson.databind.ObjectMapper", "tools.jackson.databind.json.JsonMapper"),
+          "tools.jackson.core.type.TypeReference",
+          "tools.jackson.databind.JavaType"
+        ) ++ readerReadValueOverloads(Seq("tools.jackson.databind.ObjectReader"))
+
+    val fullNames: Set[String] = jackson2Carriers ++ jackson3Carriers ++ Set(
       // A deserialised object is its JSON: whatever tainted the input string taints the object.
-      "com.fasterxml.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.lang.String)",
-      "com.fasterxml.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.lang.String,java.lang.Class)",
       "com.google.gson.Gson.fromJson:java.lang.Object(java.lang.String,java.lang.Class)"
     )
+  end Carriers
 
   /** Request-data accessors of the servlet/Spring request objects.
     *
@@ -121,7 +174,12 @@ object JavaFrameworkSemantics:
       "queryParams",
       "pathParam",
       "getBodyAsJson",
-      "fileUploads"
+      "fileUploads",
+      // Vert.x 5 RequestBody readers (getBodyAsJson is gone there); `asString` and `buffer` are
+      // everyday names and stay confined to the resolved receiver set below.
+      "asJsonObject",
+      "asJsonArray",
+      "asPojo"
     )
 
     /** Receivers whose accessors return request data, for resolved calls. */
@@ -130,14 +188,23 @@ object JavaFrameworkSemantics:
       "jakarta.servlet.ServletRequest",
       "javax.servlet.http.HttpServletRequest",
       "javax.servlet.ServletRequest",
-      "io.vertx.ext.web.RoutingContext"
+      "io.vertx.ext.web.RoutingContext",
+      "io.vertx.ext.web.RequestBody"
     )
 
     /** The accessor names; on a RESOLVED receiver even the generic ones (`getAttribute`,
-      * `getRemoteAddr`, `body`) are request data, so they are only in this combined set.
+      * `getRemoteAddr`, `body`, `asString`, `buffer`) are request data, so they are only in this
+      * combined set.
       */
     val accessorNames: Set[String] =
-        callNames ++ Set("getAttribute", "getRemoteAddr", "getRemoteHost", "body")
+        callNames ++ Set(
+          "getAttribute",
+          "getRemoteAddr",
+          "getRemoteHost",
+          "body",
+          "asString",
+          "buffer"
+        )
 
     /** Every resolved-shape entry: `receiver.accessor` for each combination. Consumed as a REGEX
       * semantic with a `:.*` suffix, because a resolved call's methodFullName carries a

@@ -81,6 +81,43 @@ class LanguageScopedSemanticsTests extends AnyWordSpec with Matchers:
               }
           }
       }
+
+      "cover the Jackson 2 and Jackson 3 readValue overloads and ObjectReader" in {
+          val carriers = JavaFrameworkSemantics.allCarrierFullNames
+          (carriers should contain).allOf(
+            // Jackson 3: ObjectMapper and JsonMapper, every source form, every value-type form.
+            "tools.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.lang.String,java.lang.Class)",
+            "tools.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.lang.String)",
+            "tools.jackson.databind.ObjectMapper.readValue:java.lang.Object(byte[],java.lang.Class)",
+            "tools.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.io.InputStream,tools.jackson.core.type.TypeReference)",
+            "tools.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.io.Reader,tools.jackson.databind.JavaType)",
+            "tools.jackson.databind.json.JsonMapper.readValue:java.lang.Object(java.lang.String,java.lang.Class)",
+            // Jackson 2, including the JsonMapper receiver and its own TypeReference package.
+            "com.fasterxml.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.lang.String,java.lang.Class)",
+            "com.fasterxml.jackson.databind.ObjectMapper.readValue:java.lang.Object(java.io.Reader,com.fasterxml.jackson.core.type.TypeReference)",
+            "com.fasterxml.jackson.databind.json.JsonMapper.readValue:java.lang.Object(java.lang.String,java.lang.Class)",
+            // ObjectReader binds the value type, so the source comes alone.
+            "tools.jackson.databind.ObjectReader.readValue:java.lang.Object(java.lang.String)",
+            "com.fasterxml.jackson.databind.ObjectReader.readValue:java.lang.Object(java.io.Reader)"
+          )
+          carriers.count(_.startsWith("tools.jackson")) should be > 0
+          carriers.count(_.startsWith("com.fasterxml.jackson")) should be > 0
+      }
+
+      "scope the generic Vert.x 5 body accessor names to the resolved receiver" in {
+          val readers = JavaFrameworkSemantics.RequestReaders
+          readers.receiverFullNames should contain("io.vertx.ext.web.RequestBody")
+          (readers.fullNames should contain).allOf(
+            "io.vertx.ext.web.RequestBody.asString",
+            "io.vertx.ext.web.RequestBody.asJsonObject",
+            "io.vertx.ext.web.RequestBody.buffer"
+          )
+          // `asString` and `buffer` are everyday method names: they stay out of the bare-name
+          // list that applies to unresolved calls of any receiver.
+          readers.callNames should not contain "asString"
+          readers.callNames should not contain "buffer"
+          readers.callNames should contain("asJsonObject")
+      }
   }
 
   "flowsForLanguage" should {
