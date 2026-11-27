@@ -94,23 +94,22 @@ object JavaFrameworkSemantics:
         "java.io.Reader"
       )
       val valueTypeForms = Seq("java.lang.Class", typeReference, javaType)
-      (for c <- mapperClasses; s <- sources; v <- valueTypeForms yield
-        s"$c.readValue:java.lang.Object($s,$v)"
-      ).toSet ++
+      (for c <- mapperClasses; s <- sources; v <- valueTypeForms
+      yield s"$c.readValue:java.lang.Object($s,$v)").toSet ++
           mapperClasses.map(c => s"$c.readValue:java.lang.Object(java.lang.String)").toSet
 
     /** `ObjectReader.readValue` binds the value type at reader construction, so the overloads take
       * the source alone.
       */
     private def readerReadValueOverloads(readerClasses: Seq[String]): Set[String] =
-      readerClasses.map(c =>
-          s"$c.readValue:java.lang.Object(java.lang.String)"
-      ).toSet ++
-          readerClasses.flatMap(c =>
-              Seq("byte[]", "java.io.InputStream", "java.io.Reader").map(s =>
-                  s"$c.readValue:java.lang.Object($s)"
-              )
-          ).toSet
+        readerClasses.map(c =>
+            s"$c.readValue:java.lang.Object(java.lang.String)"
+        ).toSet ++
+            readerClasses.flatMap(c =>
+                Seq("byte[]", "java.io.InputStream", "java.io.Reader").map(s =>
+                    s"$c.readValue:java.lang.Object($s)"
+                )
+            ).toSet
 
     private val jackson2Carriers: Set[String] =
         mapperReadValueOverloads(
@@ -133,6 +132,7 @@ object JavaFrameworkSemantics:
       // A deserialised object is its JSON: whatever tainted the input string taints the object.
       "com.google.gson.Gson.fromJson:java.lang.Object(java.lang.String,java.lang.Class)"
     )
+  end Carriers
 
   /** Request-data accessors of the servlet/Spring request objects.
     *
@@ -197,14 +197,14 @@ object JavaFrameworkSemantics:
       * combined set.
       */
     val accessorNames: Set[String] =
-      callNames ++ Set(
-        "getAttribute",
-        "getRemoteAddr",
-        "getRemoteHost",
-        "body",
-        "asString",
-        "buffer"
-      )
+        callNames ++ Set(
+          "getAttribute",
+          "getRemoteAddr",
+          "getRemoteHost",
+          "body",
+          "asString",
+          "buffer"
+        )
 
     /** Every resolved-shape entry: `receiver.accessor` for each combination. Consumed as a REGEX
       * semantic with a `:.*` suffix, because a resolved call's methodFullName carries a

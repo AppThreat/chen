@@ -88,9 +88,9 @@ object JavaFrameworks:
 
     val jaxRsImportRoots: Seq[String] = Seq("jakarta.ws.rs", "javax.ws.rs")
 
-    /** RESTEasy Reactive request-data parameter annotations (Quarkus REST): a parameter carrying one
-      * receives client data. A sibling of [[jaxRsParamAnnotations]] rather than part of it, because
-      * the owning package is `org.jboss.resteasy.reactive`, not `jakarta.ws.rs`.
+    /** RESTEasy Reactive request-data parameter annotations (Quarkus REST): a parameter carrying
+      * one receives client data. A sibling of [[jaxRsParamAnnotations]] rather than part of it,
+      * because the owning package is `org.jboss.resteasy.reactive`, not `jakarta.ws.rs`.
       */
     val resteasyReactiveParamAnnotations: Seq[String] =
         Seq("RestQuery", "RestPath", "RestForm", "RestHeader", "RestCookie", "RestMatrix")
@@ -98,12 +98,12 @@ object JavaFrameworks:
     val resteasyReactiveImportRoot: String = "org.jboss.resteasy.reactive"
 
     /** Quarkus declarative reactive routes: `io.quarkus.vertx.web.Route` on a method (repeatable),
-      * `RouteBase` supplying a class-level path prefix, and `RouteFilter` marking a filter invoked on
-      * every request.
+      * `RouteBase` supplying a class-level path prefix, and `RouteFilter` marking a filter invoked
+      * on every request.
       */
-    val quarkusRouteImportRoot: String = "io.quarkus.vertx.web"
+    val quarkusRouteImportRoot: String       = "io.quarkus.vertx.web"
     val quarkusRouteAnnotations: Seq[String] = Seq("Route")
-    val quarkusRouteBaseAnnotation: String = "RouteBase"
+    val quarkusRouteBaseAnnotation: String   = "RouteBase"
     val quarkusRouteFilterAnnotation: String = "RouteFilter"
 
     /** Request-injection parameter annotations of a `@Route` method, from the same package. */
@@ -183,7 +183,7 @@ object JavaFrameworks:
       * implements the generated Mutiny interface, so each public service method takes the request
       * message and returns the reply (wrapped in `Uni`/`Multi`).
       */
-    val quarkusGrpcImportRoot: String = "io.quarkus.grpc"
+    val quarkusGrpcImportRoot: String        = "io.quarkus.grpc"
     val quarkusGrpcServiceAnnotation: String = "GrpcService"
 
   // ---------------------------------------------------------------------------------------------
@@ -219,14 +219,15 @@ object JavaFrameworks:
     val jpaImportRoots: Seq[String] =
         Seq("jakarta.persistence", "javax.persistence", "org.hibernate", "org.springframework.orm")
 
-    /** Repository write calls of Jakarta Data and Quarkus Data. Neither API spells the EntityManager
-      * trio: Jakarta Data repositories declare writes as `insert`/`update`/`delete`/`save` (the
-      * `CrudRepository`/`BasicRepository` methods and the matching lifecycle annotations), and
-      * Quarkus Data repositories expose `persist`/`persistAndFlush`/`delete`. `persist` therefore
-      * lives in both lists, gated by its own root here because `jakarta.data` has no `persist`.
-      * `delete`/`update`/`save`/`insert` are everyday names, so a RESOLVED call must additionally
-      * name a repository type (the declaring class of a Jakarta Data or Quarkus Data write is the
-      * user's `*Repository` interface); unresolved calls keep the bare name under the import gate.
+    /** Repository write calls of Jakarta Data and Quarkus Data. Neither API spells the
+      * EntityManager trio: Jakarta Data repositories declare writes as
+      * `insert`/`update`/`delete`/`save` (the `CrudRepository`/`BasicRepository` methods and the
+      * matching lifecycle annotations), and Quarkus Data repositories expose
+      * `persist`/`persistAndFlush`/`delete`. `persist` therefore lives in both lists, gated by its
+      * own root here because `jakarta.data` has no `persist`. `delete`/`update`/`save`/`insert` are
+      * everyday names, so a RESOLVED call must additionally name a repository type (the declaring
+      * class of a Jakarta Data or Quarkus Data write is the user's `*Repository` interface);
+      * unresolved calls keep the bare name under the import gate.
       */
     val dataImportRoots: Seq[String] = Seq("jakarta.data", "io.quarkus.data")
     val dataWriteCallNames: Seq[String] =

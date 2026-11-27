@@ -613,7 +613,8 @@ class JavaFrameworkTagsTest extends JavaSrcCode2CpgFixture:
           sayHello.where(_.tag.name("framework-route")).l should not be empty
           cpg.parameter.name("request").where(_.tag.name("framework-input")).l should not be empty
           // The returned Uni wraps the reply message, so the return is the output boundary.
-          cpg.method.name("sayHello").methodReturn.where(_.tag.name("framework-output")).l should not be empty
+          cpg.method.name("sayHello").methodReturn.where(_.tag.name("framework-output"))
+              .l should not be empty
       }
 
       "keep the StreamObserver arm working inside a Quarkus gRPC project" in {

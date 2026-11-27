@@ -51,10 +51,9 @@ class JacksonCarriersTests extends JavaDataflowFixture:
       |""".stripMargin
 
   private def flowCount(methodName: String): Int =
-      def src = cpg.method(methodName).parameter.name("q")
-      def snk = cpg.method(methodName).methodReturn.toReturn
-      snk.reachableByFlows(src).size
-  end flowCount
+    def src = cpg.method(methodName).parameter.name("q")
+    def snk = cpg.method(methodName).methodReturn.toReturn
+    snk.reachableByFlows(src).size
 
   behavior of "The Jackson carriers"
 

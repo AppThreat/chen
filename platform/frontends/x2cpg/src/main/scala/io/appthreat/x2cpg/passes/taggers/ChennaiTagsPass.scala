@@ -736,7 +736,6 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
         FRAMEWORK_INPUT,
         dstGraph
       )
-    end if
 
     // ---- Micronaut @Controller methods ---------------------------------------------------
     if usesImports(http.micronautImportRoots*) then
@@ -765,11 +764,11 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
             val pathLiterals =
                 annotationMemberLiterals(handler, http.quarkusRouteAnnotations, Seq("path"))
             val routeLiterals =
-                // "If both path() and regex() are set the regular expression is used for matching"
-                // (Route's javadoc), so the regex shadows the path rather than joining it.
-                val regexLiterals =
-                    annotationMemberLiterals(handler, http.quarkusRouteAnnotations, Seq("regex"))
-                if regexLiterals.nonEmpty then regexLiterals else pathLiterals
+              // "If both path() and regex() are set the regular expression is used for matching"
+              // (Route's javadoc), so the regex shadows the path rather than joining it.
+              val regexLiterals =
+                  annotationMemberLiterals(handler, http.quarkusRouteAnnotations, Seq("regex"))
+              if regexLiterals.nonEmpty then regexLiterals else pathLiterals
             routeLiterals.foreach(lit => storeTag(Iterator(lit), FRAMEWORK_ROUTE, dstGraph))
             val baseLiterals =
                 classRouteLiterals(handler, Seq(http.quarkusRouteBaseAnnotation)).l
@@ -872,34 +871,34 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
     // A RoutingContext parameter is the web-facing input of any handler it appears in; so are
     // Quarkus' RoutingExchange wrapper and a Vert.x HttpServerRequest (core or Mutiny flavour).
     storeTag(
-        atom.parameter.typeFullName(".*(RoutingContext|RoutingExchange|HttpServerRequest).*"),
-        FRAMEWORK_INPUT,
-        dstGraph
+      atom.parameter.typeFullName(".*(RoutingContext|RoutingExchange|HttpServerRequest).*"),
+      FRAMEWORK_INPUT,
+      dstGraph
     )
     // Request-data accessors on the routing context: the returned value is request data.
     storeTag(
-        atom.method.parameter
-            .typeFullName(".*RoutingContext.*")
-            .method
-            .call
-            .name(http.contextRequestCallNames.mkString("|")),
-        FRAMEWORK_INPUT,
-        dstGraph
+      atom.method.parameter
+          .typeFullName(".*RoutingContext.*")
+          .method
+          .call
+          .name(http.contextRequestCallNames.mkString("|")),
+      FRAMEWORK_INPUT,
+      dstGraph
     )
     // Vert.x 5's `rc.body()` returns a RequestBody whose `buffer()` is the raw request body, but
     // `buffer` is an everyday method name: only a receiver the graph resolved to RequestBody
     // qualifies, so a `ByteBuffer.buffer()` elsewhere in the same method stays untagged.
     storeTag(
-        atom.call
-            .name("buffer")
-            .filterNot(_.name.startsWith("<operator"))
-            .filter(c =>
-                http.requestBodyBufferFullNamePrefixes.exists(p =>
-                    c.methodFullName.startsWith(p)
-                )
-            ),
-        FRAMEWORK_INPUT,
-        dstGraph
+      atom.call
+          .name("buffer")
+          .filterNot(_.name.startsWith("<operator"))
+          .filter(c =>
+              http.requestBodyBufferFullNamePrefixes.exists(p =>
+                  c.methodFullName.startsWith(p)
+              )
+          ),
+      FRAMEWORK_INPUT,
+      dstGraph
     )
 
     // ---- gRPC services -------------------------------------------------------------------
@@ -923,9 +922,9 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
       }
     }
     storeTag(
-        grpcMethods.iterator.call.name(rpc.observerOutputCalls.mkString("|")),
-        FRAMEWORK_OUTPUT,
-        dstGraph
+      grpcMethods.iterator.call.name(rpc.observerOutputCalls.mkString("|")),
+      FRAMEWORK_OUTPUT,
+      dstGraph
     )
 
     // ---- Quarkus Mutiny gRPC services -----------------------------------------------------
@@ -942,16 +941,15 @@ class ChennaiTagsPass(atom: Cpg, externalConfig: Option[String] = None) extends 
           .l
           .filter(m => m.parameter.filterNot(_.name == "this").nonEmpty)
       mutinyServiceMethods.foreach { m =>
-          storeTag(Iterator(m), JAVA_GRPC_TAG, dstGraph)
-          storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
-          storeTag(
-            m.parameter.filterNot(_.name == "this"),
-            FRAMEWORK_INPUT,
-            dstGraph
-          )
-          storeTag(Iterator(m.methodReturn), FRAMEWORK_OUTPUT, dstGraph)
+        storeTag(Iterator(m), JAVA_GRPC_TAG, dstGraph)
+        storeTag(Iterator(m), FRAMEWORK_ROUTE, dstGraph)
+        storeTag(
+          m.parameter.filterNot(_.name == "this"),
+          FRAMEWORK_INPUT,
+          dstGraph
+        )
+        storeTag(Iterator(m.methodReturn), FRAMEWORK_OUTPUT, dstGraph)
       }
-    end if
 
     // ---- Databases ------------------------------------------------------------------------
     tagJavaDatabaseCalls(dstGraph)
