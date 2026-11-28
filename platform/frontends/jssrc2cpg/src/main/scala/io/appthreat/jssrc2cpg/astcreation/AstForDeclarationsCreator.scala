@@ -351,26 +351,53 @@ trait AstForDeclarationsCreator(implicit withSchemaValidation: ValidationMode):
       case head :: Nil => head
       case _           => blockAst(createBlockNode(declaration), declAsts)
 
+  private def isRequireCall(node: ujson.Obj): Boolean =
+      node.value.get("type").flatMap(_.strOpt).contains("CallExpression") &&
+          node.value.get("callee").flatMap(_.objOpt).exists(callee =>
+              callee.get("type").flatMap(_.strOpt).contains("Identifier") &&
+                  callee.get("name").flatMap(_.strOpt).contains(RequireKeyword)
+          )
+
+  private def requireCallStartingAt(node: Value, position: Int): Option[ujson.Obj] =
+      node match
+        case obj: ujson.Obj if pos(obj).contains(position) =>
+            if isRequireCall(obj) then Some(obj)
+            else obj.value.valuesIterator.flatMap(requireCallStartingAt(_, position)).nextOption()
+        case arr: ujson.Arr =>
+            arr.value.iterator.flatMap(requireCallStartingAt(_, position)).nextOption()
+        case _ => None
+
+  private def requireSpecifier(init: Value): Option[String] =
+      pos(init)
+          .flatMap(requireCallStartingAt(init, _))
+          .flatMap(_.value.get("arguments").flatMap(_.arrOpt).flatMap(_.headOption))
+          .flatMap { argument =>
+              createBabelNodeInfo(argument).node match
+                case StringLiteral => argument("value").strOpt
+                case TemplateLiteral if argument("expressions").arr.isEmpty =>
+                    argument("quasis").arr.headOption.flatMap(_("value")("cooked").strOpt)
+                case _ => None
+          }
+
   private def handleRequireCallForDependencies(
     declarator: BabelNodeInfo,
     lhs: Value,
     rhs: Value,
     call: Option[NewCall]
   ): Unit =
-    val rhsCode = code(rhs)
-    val groupId =
-        rhsCode.substring(rhsCode.indexOf(s"$RequireKeyword(") + 9, rhsCode.indexOf(")") - 1)
-    val nodeInfo = createBabelNodeInfo(lhs)
-    val names = nodeInfo.node match
-      case ArrayPattern  => nodeInfo.json("elements").arr.toList.map(code)
-      case ObjectPattern => nodeInfo.json("properties").arr.toList.map(code)
-      case _             => List(code(lhs))
-    names.foreach { name =>
-      val _dependencyNode = newDependencyNode(name, groupId, RequireKeyword)
-      diffGraph.addNode(_dependencyNode)
-      val importNode = createImportNodeAndAttachToCall(declarator, groupId, name, call)
-      diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
-    }
+      requireSpecifier(rhs).foreach { groupId =>
+        val nodeInfo = createBabelNodeInfo(lhs)
+        val names = nodeInfo.node match
+          case ArrayPattern  => nodeInfo.json("elements").arr.toList.map(code)
+          case ObjectPattern => nodeInfo.json("properties").arr.toList.map(code)
+          case _             => List(code(lhs))
+        names.foreach { name =>
+          val _dependencyNode = newDependencyNode(name, groupId, RequireKeyword)
+          diffGraph.addNode(_dependencyNode)
+          val importNode = createImportNodeAndAttachToCall(declarator, groupId, name, call)
+          diffGraph.addEdge(importNode, _dependencyNode, EdgeTypes.IMPORTS)
+        }
+      }
   end handleRequireCallForDependencies
 
   private def astForVariableDeclarator(

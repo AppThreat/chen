@@ -68,7 +68,7 @@ class ImportResolverPass(cpg: Cpg) extends XImportResolverPass(cpg):
     // TODO: At times there is an operation inside of a require, e.g. path.resolve(__dirname + "/../config/env/all.js")
     //  this tries to recover the string but does not perform string constant propagation
     val entity = if matcher.find() then matcher.group(1) else rawEntity
-    val resolvedPath = svelteKitAliasPath.getOrElse(
+    lazy val resolvedPath = svelteKitAliasPath.getOrElse(
       better.files
           .File(currentDir, entity.split(pathSep).head)
           .pathAsString

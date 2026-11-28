@@ -156,6 +156,39 @@ class DependencyAstCreationPassTest extends AbstractPassTest:
         depG.version shouldBe "require"
       }
 
+      "have the dependency of a require with a template literal" in AstFixture(
+        "const t = require(`depT`);"
+      ) { cpg =>
+        val List(depT) = cpg.dependency.l
+        depT.name shouldBe "t"
+        depT.dependencyGroupId shouldBe Option("depT")
+        depT.version shouldBe "require"
+      }
+
+      "have no dependency for a require of a template literal with an expression" in AstFixture(
+        "const t = require(`dep${n}`);"
+      ) { cpg =>
+          cpg.dependency.l shouldBe empty
+      }
+
+      "keep the file and have no dependency for a require of a one-letter identifier" in AstFixture(
+        """
+          |const x = "depX";
+          |const m = require(x);
+          |function used(a) { return a; }
+          |""".stripMargin
+      ) { cpg =>
+        cpg.method.nameExact("used").size shouldBe 1
+        cpg.dependency.l shouldBe empty
+      }
+
+      "have no dependency or import for a require of a call" in AstFixture(
+        """const lib = require(resolveFrom("depR"));"""
+      ) { cpg =>
+        cpg.dependency.l shouldBe empty
+        cpg.imports.l shouldBe empty
+      }
+
       "have correct dependencies (mixed)" in AstFixture("""
         |import {a} from "depA";
         |const b = require("depB");
